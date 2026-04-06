@@ -4,6 +4,9 @@ ui.py -- Pac-Man themed Tkinter GUI for the XAI demo.
 
 from __future__ import annotations
 
+from dataclasses import replace
+import json
+from pathlib import Path
 import tkinter as tk
 from tkinter import scrolledtext
 
@@ -11,7 +14,7 @@ from agent import HeuristicAgent
 from environment import GameState, MazeEnvironment, WALL, manhattan_distance
 from evidence_recorder import EvidenceRecorder
 from explanation_engine import ExplanationEngine
-from question_parser import QuestionParser
+from question_parser import ParsedQuestion, QuestionIntent, QuestionParser
 
 
 APP_BG = "#07111d"
@@ -40,6 +43,52 @@ STATUS_COLORS = {
 MONSTER_COLORS = ["#ff5c8a", "#4fd1c5", "#a78bfa", "#f97316", "#38bdf8", "#f43f5e"]
 STEP_DELAY_MS = 280
 
+ANSWER_LANGUAGE_OPTIONS = {
+    "Auto / 自动": "auto",
+    "中文": "zh",
+    "English": "en",
+    "中英双语": "both",
+}
+
+INTENT_LABELS = {
+    QuestionIntent.WHY_THIS_ACTION: "Why this action / 为什么这样走",
+    QuestionIntent.WHY_NOT_OTHER: "Why not another action / 为什么不选别的动作",
+    QuestionIntent.MONSTER_INFLUENCE: "Monster influence / 怪物影响",
+    QuestionIntent.PATH_REASON: "Path reason / 路径原因",
+    QuestionIntent.SAFETY_REASON: "Safety / 安全性",
+    QuestionIntent.GOAL_REASON: "Goal progress / 目标进度",
+    QuestionIntent.DOT_COLLECTION: "Dot collection / 吃豆策略",
+    QuestionIntent.GENERAL: "General / 总结",
+    QuestionIntent.IRRELEVANT: "Irrelevant / 无关问题",
+}
+
+VALIDATION_HELP = {
+    "E ⊆ S_t": "Used evidence comes from the full evidence set. / 实际使用证据来自当前总证据集合。",
+    "True_t(E)": "The selected evidence is true at this step. / 选中的证据在当前时刻为真。",
+    "Faithful_π(E, a_t)": "The evidence faithfully supports the chosen action. / 这些证据确实支持当前动作。",
+    "Contrastive_π(E, a_t, Δ_t)": "The evidence distinguishes this action from alternatives. / 这些证据能区分当前动作和替代动作。",
+    "Basis_{u,t}(E, Q)": "The evidence set satisfies the basis conditions. / 证据集合满足形式化基础条件。",
+    "Minimal(E)": "No smaller subset still satisfies the basis. / 再删掉证据就不满足定义。",
+    "x = R_u(E, Q)": "The answer matches the rendering function. / 最终回答等于渲染函数输出。",
+    "Readable_u(x)": "The answer is readable for the user. / 回答对用户是可读的。",
+    "Explain_u(Q, t, x)": "The final explanation definition holds. / 最终 explanation 定义成立。",
+}
+
+GUIDE_TEXT = (
+    "Workflow / 使用流程: train the RL model first, then run auto mode and ask questions during the live game.\n"
+    "Ask / 提问: type your own Chinese or English question. Asking will pause the game automatically.\n"
+    "Answer Language / 回答语言: choose 自动、中文、English or 中英双语.\n"
+    "Step / 步数: current decision step.\n"
+    "Phase / 阶段: collect dots first, then rush the exit.\n"
+    "Threat / 威胁: nearest monster and its distance.\n"
+    "Action / 动作: chosen move and immediate collision risk.\n"
+    "Confidence / 置信度: parser confidence from 0 to 1.\n"
+    "Validation / 验证: checks whether the answer really comes from current evidence and satisfies the formal explanation definition.\n"
+    "Question Log / 提问日志: every real user question is saved with its answer and validation result.\n"
+    "S_t: all evidence at time t.  E: evidence actually used.  x: final natural-language answer.\n"
+    "T / F / C: True, Faithful, Contrastive. / 真、忠实、可对比。"
+)
+
 
 class MazeGameUI:
     def __init__(
@@ -61,7 +110,10 @@ class MazeGameUI:
         self.auto_running = False
         self.after_id: str | None = None
         self.last_action = "RIGHT"
+        self.answer_language_label_var = tk.StringVar(value="Auto / 自动")
         self.cell_size = max(20, min(34, 760 // self.env.grid_size))
+        self.question_log_path = Path("artifacts/user_question_log.jsonl")
+        self.question_log_path.parent.mkdir(parents=True, exist_ok=True)
 
         self.root.title("Pac-Man XAI Demo")
         self.root.configure(bg=APP_BG)
@@ -80,12 +132,38 @@ class MazeGameUI:
         self.left_panel = tk.Frame(self.main, bg=APP_BG)
         self.left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 14))
 
-        self.right_panel = tk.Frame(self.main, bg=APP_BG)
-        self.right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self.right_shell = tk.Frame(self.main, bg=APP_BG)
+        self.right_shell.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        self.right_canvas = tk.Canvas(
+            self.right_shell,
+            bg=APP_BG,
+            highlightthickness=0,
+            bd=0,
+        )
+        self.right_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.right_scrollbar = tk.Scrollbar(
+            self.right_shell,
+            orient=tk.VERTICAL,
+            command=self.right_canvas.yview,
+        )
+        self.right_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.right_canvas.configure(yscrollcommand=self.right_scrollbar.set)
+
+        self.right_panel = tk.Frame(self.right_canvas, bg=APP_BG)
+        self._right_window_id = self.right_canvas.create_window(
+            (0, 0),
+            window=self.right_panel,
+            anchor="nw",
+        )
+        self.right_panel.bind("<Configure>", self._on_right_panel_configure)
+        self.right_canvas.bind("<Configure>", self._on_right_canvas_configure)
+        self.right_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
         title = tk.Label(
             self.left_panel,
-            text="Pac-Man Arena",
+            text="Pac-Man Arena / 吃豆人解释界面",
             bg=APP_BG,
             fg=TEXT_MAIN,
             font=("Segoe UI Semibold", 20),
@@ -95,7 +173,7 @@ class MazeGameUI:
 
         subtitle = tk.Label(
             self.left_panel,
-            text="Collect every dot, open the gate, and ask why the agent moved the way it did.",
+            text="After RL training, run auto mode. During playback you can pause at any time and ask your own question.",
             bg=APP_BG,
             fg=TEXT_MUTED,
             font=("Segoe UI", 10),
@@ -119,7 +197,7 @@ class MazeGameUI:
 
         self.legend_label = tk.Label(
             self.left_panel,
-            text="Yellow = Pac-Man, gold = dots, green = open exit, gray = locked exit, red haze = danger zone.",
+            text="Yellow=Pac-Man | Gold=dots | Green=open exit | Gray=locked exit | Red haze=danger zone",
             bg=APP_BG,
             fg=TEXT_MUTED,
             font=("Segoe UI", 10),
@@ -135,7 +213,7 @@ class MazeGameUI:
 
         hero_title = tk.Label(
             hero,
-            text="Decision HUD",
+            text="Ask, Answer, Validate / 提问、回答、验证",
             bg=PANEL_BG,
             fg=TEXT_MAIN,
             font=("Segoe UI Semibold", 18),
@@ -145,7 +223,7 @@ class MazeGameUI:
 
         hero_subtitle = tk.Label(
             hero,
-            text=f"NLP backend: {self.parser.backend}",
+            text=f"NLP backend: {self.parser.backend} | Auto mode uses the trained RL model when available.",
             bg=PANEL_BG,
             fg=TEXT_ACCENT,
             font=("Consolas", 10),
@@ -153,22 +231,27 @@ class MazeGameUI:
         )
         hero_subtitle.pack(fill=tk.X, pady=(4, 0))
 
-        controls_outer = self._make_card("Controls")
+        controls_outer = self._make_card("Controls / 控制")
         controls_outer.pack(fill=tk.X, pady=(0, 10))
         self.controls_card = controls_outer.content
         self._build_controls(self.controls_card)
 
-        status_outer = self._make_card("Live Status")
+        status_outer = self._make_card("Live Status / 当前状态")
         status_outer.pack(fill=tk.X, pady=(0, 10))
         self.status_card = status_outer.content
         self._build_status(self.status_card)
 
-        ask_outer = self._make_card("Ask Why")
+        ask_outer = self._make_card("Ask A Question / 自由提问")
         ask_outer.pack(fill=tk.X, pady=(0, 10))
         self.ask_card = ask_outer.content
         self._build_question_box(self.ask_card)
 
-        explanation_outer = self._make_card("Explanation Output")
+        guide_outer = self._make_card("Guide / 参数说明")
+        guide_outer.pack(fill=tk.X, pady=(0, 10))
+        self.guide_card = guide_outer.content
+        self._build_guide(self.guide_card)
+
+        explanation_outer = self._make_card("Answer / 回答")
         explanation_outer.pack(fill=tk.BOTH, expand=True)
         self.explanation_card = explanation_outer.content
         self._build_explanation_box(self.explanation_card)
@@ -196,16 +279,16 @@ class MazeGameUI:
         row2 = tk.Frame(parent, bg=CARD_BG)
         row2.pack(fill=tk.X)
 
-        self.btn_start = self._make_button(row1, "Start", self._on_start, "#2563eb")
+        self.btn_start = self._make_button(row1, "Start / 开始", self._on_start, "#2563eb")
         self.btn_start.pack(side=tk.LEFT, padx=(0, 6))
-        self.btn_pause = self._make_button(row1, "Pause", self._on_pause, "#f59e0b")
+        self.btn_pause = self._make_button(row1, "Pause / 暂停", self._on_pause, "#f59e0b")
         self.btn_pause.pack(side=tk.LEFT, padx=(0, 6))
-        self.btn_resume = self._make_button(row1, "Resume", self._on_resume, "#22c55e")
+        self.btn_resume = self._make_button(row1, "Resume / 继续", self._on_resume, "#22c55e")
         self.btn_resume.pack(side=tk.LEFT)
 
-        self.btn_step = self._make_button(row2, "Step", self._on_step, "#38bdf8")
+        self.btn_step = self._make_button(row2, "Step / 单步", self._on_step, "#38bdf8")
         self.btn_step.pack(side=tk.LEFT, padx=(0, 6))
-        self.btn_reset = self._make_button(row2, "Reset", self._on_reset, "#ef4444")
+        self.btn_reset = self._make_button(row2, "Reset / 重开", self._on_reset, "#ef4444")
         self.btn_reset.pack(side=tk.LEFT)
 
     def _make_button(self, parent: tk.Frame, text: str, command, fill: str) -> tk.Button:
@@ -225,23 +308,58 @@ class MazeGameUI:
             cursor="hand2",
         )
 
+    def _on_right_panel_configure(self, _event=None) -> None:
+        self.right_canvas.configure(scrollregion=self.right_canvas.bbox("all"))
+
+    def _on_right_canvas_configure(self, event) -> None:
+        self.right_canvas.itemconfigure(self._right_window_id, width=event.width)
+
+    def _on_mousewheel(self, event) -> None:
+        if not self.right_canvas.winfo_exists():
+            return
+        target = self.root.winfo_containing(event.x_root, event.y_root)
+        if target is None:
+            return
+        current = target
+        inside_right_panel = False
+        while current is not None:
+            if current == self.right_shell:
+                inside_right_panel = True
+                break
+            current = current.master
+        if inside_right_panel:
+            self.right_canvas.yview_scroll(int(-event.delta / 120), "units")
+
+    def _build_guide(self, parent: tk.Frame) -> None:
+        guide = tk.Label(
+            parent,
+            text=GUIDE_TEXT,
+            justify=tk.LEFT,
+            anchor="w",
+            bg=CARD_BG,
+            fg=TEXT_MUTED,
+            wraplength=460,
+            font=("Segoe UI", 9),
+        )
+        guide.pack(fill=tk.X)
+
     def _build_status(self, parent: tk.Frame) -> None:
         self.status_values: dict[str, tk.Label] = {}
         for key, title in [
-            ("step", "Step"),
-            ("state", "State"),
-            ("phase", "Phase"),
-            ("dots", "Dots"),
-            ("exit", "Exit"),
-            ("threat", "Threat"),
-            ("action", "Action"),
+            ("step", "Step / 步数"),
+            ("state", "State / 状态"),
+            ("phase", "Phase / 阶段"),
+            ("dots", "Dots / 豆子"),
+            ("exit", "Exit / 出口"),
+            ("threat", "Threat / 威胁"),
+            ("action", "Action / 动作"),
         ]:
             row = tk.Frame(parent, bg=CARD_BG)
             row.pack(fill=tk.X, pady=2)
             label = tk.Label(
                 row,
                 text=title,
-                width=9,
+                width=14,
                 anchor="w",
                 bg=CARD_BG,
                 fg=TEXT_MUTED,
@@ -261,7 +379,7 @@ class MazeGameUI:
 
         self.reason_value = tk.Label(
             parent,
-            text="Planner trace will appear here after the first move.",
+            text="Decision note / 决策说明 will appear here after the first move.",
             justify=tk.LEFT,
             anchor="w",
             bg=CARD_BG,
@@ -272,24 +390,112 @@ class MazeGameUI:
         self.reason_value.pack(fill=tk.X, pady=(8, 0))
 
     def _build_question_box(self, parent: tk.Frame) -> None:
-        self.q_entry = tk.Entry(
+        tip = tk.Label(
             parent,
+            text="Type your own question below. If the game is running, asking will pause it automatically.\n直接输入你的问题即可；如果游戏正在运行，提问时会自动暂停。",
+            bg=CARD_BG,
+            fg=TEXT_MUTED,
+            justify=tk.LEFT,
+            anchor="w",
+            wraplength=440,
+            font=("Segoe UI", 9),
+        )
+        tip.pack(fill=tk.X, pady=(0, 8))
+
+        input_label = tk.Label(
+            parent,
+            text="Question Input / 提问输入",
+            bg=CARD_BG,
+            fg=TEXT_MAIN,
+            font=("Segoe UI Semibold", 10),
+            anchor="w",
+        )
+        input_label.pack(fill=tk.X, pady=(2, 6))
+
+        lang_row = tk.Frame(parent, bg=CARD_BG)
+        lang_row.pack(fill=tk.X, pady=(0, 8))
+
+        lang_label = tk.Label(
+            lang_row,
+            text="Answer Language / 回答语言",
+            bg=CARD_BG,
+            fg=TEXT_MUTED,
+            font=("Segoe UI", 10),
+            anchor="w",
+        )
+        lang_label.pack(side=tk.LEFT)
+
+        self.answer_language_menu = tk.OptionMenu(
+            lang_row,
+            self.answer_language_label_var,
+            *ANSWER_LANGUAGE_OPTIONS.keys(),
+        )
+        self.answer_language_menu.config(
+            bg="#0a1424",
+            fg=TEXT_MAIN,
+            activebackground="#162235",
+            activeforeground=TEXT_MAIN,
+            relief=tk.FLAT,
+            highlightthickness=0,
+            bd=0,
+            font=("Segoe UI", 10),
+        )
+        self.answer_language_menu["menu"].config(
+            bg="#0a1424",
+            fg=TEXT_MAIN,
+            activebackground="#162235",
+            activeforeground=TEXT_MAIN,
+            font=("Segoe UI", 10),
+        )
+        self.answer_language_menu.pack(side=tk.RIGHT)
+
+        input_shell = tk.Frame(parent, bg=TEXT_ACCENT, padx=1, pady=1)
+        input_shell.pack(fill=tk.X, pady=(0, 8))
+
+        self.q_entry = tk.Text(
+            input_shell,
             bg="#0a1424",
             fg=TEXT_MAIN,
             insertbackground=TEXT_MAIN,
             relief=tk.FLAT,
             bd=0,
             font=("Segoe UI", 11),
+            height=3,
+            wrap=tk.WORD,
         )
-        self.q_entry.pack(fill=tk.X, pady=(0, 8), ipady=8)
-        self.q_entry.bind("<Return>", lambda _event: self._on_ask())
+        self.q_entry.pack(fill=tk.X, ipady=4)
+        self.q_entry.bind("<Control-Return>", lambda _event: self._on_ask())
 
-        self.btn_ask = self._make_button(parent, "Ask", self._on_ask, "#8b5cf6")
+        self.btn_ask = self._make_button(parent, "Ask / 提问", self._on_ask, "#8b5cf6")
         self.btn_ask.pack(anchor="w")
+
+        for row_items in [
+            ["Why not go right?", "为什么去吃那个豆子？"],
+            ["Is it safe here?", "怪物#2影响了这次决策吗？"],
+        ]:
+            examples_row = tk.Frame(parent, bg=CARD_BG)
+            examples_row.pack(fill=tk.X, pady=(8, 0))
+            for text in row_items:
+                button = tk.Button(
+                    examples_row,
+                    text=text,
+                    command=lambda value=text: self._use_example_question(value),
+                    bg="#0a1424",
+                    fg=TEXT_ACCENT,
+                    activebackground="#162235",
+                    activeforeground=TEXT_MAIN,
+                    relief=tk.FLAT,
+                    bd=0,
+                    padx=8,
+                    pady=6,
+                    font=("Segoe UI", 9),
+                    cursor="hand2",
+                )
+                button.pack(side=tk.LEFT, padx=(0, 6))
 
         hint = tk.Label(
             parent,
-            text='Try: "Why not go right?", "为什么去吃那个豆子？", "Is it safe here?"',
+            text="Examples above fill the input box. Press Ctrl+Enter or click Ask. / 点击示例会填入输入框；按 Ctrl+Enter 或点击 Ask 提问。",
             bg=CARD_BG,
             fg=TEXT_MUTED,
             justify=tk.LEFT,
@@ -325,8 +531,8 @@ class MazeGameUI:
             self.btn_pause.config(state=tk.NORMAL)
             self.btn_resume.config(state=tk.DISABLED)
             self.btn_step.config(state=tk.DISABLED)
-            self.q_entry.config(state=tk.DISABLED)
-            self.btn_ask.config(state=tk.DISABLED)
+            self.q_entry.config(state=tk.NORMAL)
+            self.btn_ask.config(state=tk.NORMAL)
             return
 
         self.btn_pause.config(state=tk.DISABLED)
@@ -337,14 +543,20 @@ class MazeGameUI:
             self.btn_resume.config(state=tk.DISABLED)
             self.btn_step.config(state=tk.DISABLED)
             self.q_entry.config(state=tk.NORMAL)
-            self.btn_ask.config(state=tk.NORMAL if has_evidence else tk.DISABLED)
+            self.btn_ask.config(state=tk.NORMAL)
             return
 
         self.btn_step.config(state=tk.NORMAL)
         self.btn_start.config(state=tk.NORMAL if ready else tk.DISABLED)
         self.btn_resume.config(state=tk.NORMAL if paused and has_evidence else tk.DISABLED)
-        self.q_entry.config(state=tk.NORMAL if has_evidence else tk.DISABLED)
-        self.btn_ask.config(state=tk.NORMAL if has_evidence else tk.DISABLED)
+        self.q_entry.config(state=tk.NORMAL)
+        self.btn_ask.config(state=tk.NORMAL)
+
+    def _use_example_question(self, text: str) -> None:
+        self.q_entry.config(state=tk.NORMAL)
+        self.q_entry.delete("1.0", tk.END)
+        self.q_entry.insert("1.0", text)
+        self.q_entry.focus_set()
 
     def _refresh_canvas_size(self) -> None:
         self.cell_size = max(20, min(34, 760 // self.env.grid_size))
@@ -614,7 +826,7 @@ class MazeGameUI:
         state = self.env.get_state()
         latest = self.recorder.get_latest()
 
-        phase = "Collect dots" if state["dots"] else "Exit sprint"
+        phase = "Collect dots / 吃豆阶段" if state["dots"] else "Exit sprint / 冲向出口"
         exit_state = "OPEN" if state["exit_open"] else "LOCKED"
         status_text = {
             GameState.READY: "READY",
@@ -640,7 +852,7 @@ class MazeGameUI:
         if latest is None:
             threat_text = "--"
             action_text = "--"
-            reasoning = "The planner trace will populate after the first step."
+            reasoning = "Decision note / 决策说明 will appear after the first step."
         else:
             chosen_risk = dict(latest.collision_risks).get(latest.chosen_action, 0.0)
             threat_text = (
@@ -721,7 +933,7 @@ class MazeGameUI:
         self._cancel_timer()
         self.env.reset()
         self.last_action = "RIGHT"
-        self.recorder._history.clear()
+        self.recorder.clear()
         self._clear_explanation()
         self._render()
         self._update_status()
@@ -734,35 +946,98 @@ class MazeGameUI:
         self._sync_controls()
 
         message = (
-            f"Pac-Man escaped in {self.env.step_count} steps."
+            f"Pac-Man escaped in {self.env.step_count} steps. / Pac-Man 在 {self.env.step_count} 步内逃脱。"
             if self.env.game_state == GameState.WON
-            else f"Pac-Man was caught at step {self.env.step_count}."
+            else f"Pac-Man was caught at step {self.env.step_count}. / Pac-Man 在第 {self.env.step_count} 步被抓住。"
         )
         self._append_explanation(f"\n{'=' * 56}\n{message}\n{'=' * 56}\n")
 
     def _on_ask(self) -> None:
-        question_text = self.q_entry.get().strip()
+        if self.auto_running:
+            self._on_pause()
+
+        question_text = self.q_entry.get("1.0", tk.END).strip()
         if not question_text:
             return
 
         latest = self.recorder.get_latest()
         if latest is None:
             self._append_explanation(
-                "No evidence yet. Take at least one step before asking a question.\n"
+                "No evidence yet. Take at least one step before asking a question.\n还没有可用证据，请先至少走一步再提问。\n"
             )
             return
 
         parsed = self.parser.parse(question_text)
-        result = self.engine.generate_explanation(latest, parsed)
+        mode = self._selected_answer_mode()
+        primary_result, secondary_result = self._generate_answer_results(latest, parsed, mode)
+        self._render_answer_output(question_text, parsed, primary_result, secondary_result)
+        self._log_question_event(latest, question_text, parsed, mode, primary_result, secondary_result)
 
+        self.q_entry.delete("1.0", tk.END)
+
+    def _generate_answer_results(
+        self,
+        evidence,
+        parsed: ParsedQuestion,
+        mode: str,
+    ) -> tuple[dict, dict | None]:
+        if mode == "auto":
+            return self.engine.generate_explanation(evidence, parsed), None
+        if mode == "zh":
+            return self.engine.generate_explanation(evidence, replace(parsed, language="zh")), None
+        if mode == "en":
+            return self.engine.generate_explanation(evidence, replace(parsed, language="en")), None
+
+        zh_result = self.engine.generate_explanation(evidence, replace(parsed, language="zh"))
+        en_result = self.engine.generate_explanation(evidence, replace(parsed, language="en"))
+        return zh_result, en_result
+
+    def _render_answer_output(
+        self,
+        question_text: str,
+        parsed: ParsedQuestion,
+        primary_result: dict,
+        secondary_result: dict | None,
+    ) -> None:
         self._clear_explanation()
-        self._append_explanation(f"Q: {question_text}\n")
+        self._append_explanation("Question / 提问\n")
+        self._append_explanation(f"{question_text}\n\n")
+
+        self._append_explanation("Answer / 回答\n")
+        self._append_explanation(f"{'-' * 56}\n")
         self._append_explanation(
-            f"Intent: {parsed.intent.value} | confidence={parsed.confidence:.3f} | backend={self.parser.backend}\n\n"
+            f"{self._answer_language_title(primary_result['language'])}\n{primary_result['explanation_text']['text']}\n"
+        )
+        if secondary_result is not None:
+            self._append_explanation(
+                f"\n{self._answer_language_title(secondary_result['language'])}\n"
+                f"{secondary_result['explanation_text']['text']}\n"
+            )
+
+        self._append_explanation("\nParsed Question / 问题解析\n")
+        self._append_explanation(f"{'-' * 56}\n")
+        self._append_explanation(
+            f"Intent / 类型: {INTENT_LABELS.get(parsed.intent, parsed.intent.value)}\n"
+            f"Confidence / 置信度: {parsed.confidence:.3f}  (0-1, higher means more certain / 越高表示解析越确定)\n"
+            f"Backend / 解析后端: {self.parser.backend}\n"
+            f"Question Log / 提问日志: {self.question_log_path}\n"
         )
 
-        layer1 = result["all_evidence"]
-        self._append_explanation(f"{'=' * 56}\n{layer1['label']}\n{'=' * 56}\n")
+        layer2 = primary_result["evidence_used"]
+        self._append_explanation(f"\nEvidence Used / 实际使用证据\n{'-' * 56}\n")
+        for factor in layer2["factors"]:
+            self._append_explanation(f"- {factor['name']}: {factor['description']}\n")
+
+        self._append_explanation(f"\nValidation / 形式化验证\n{'-' * 56}\n")
+        for key, value in primary_result["validation"].items():
+            marker = "OK" if value else "FAIL"
+            help_text = VALIDATION_HELP.get(key, "")
+            self._append_explanation(f"[{marker:4s}] {key}\n")
+            if help_text:
+                self._append_explanation(f"      {help_text}\n")
+
+        layer1 = primary_result["all_evidence"]
+        self._append_explanation(f"\nAll Evidence / 全部证据 (T=True, F=Faithful, C=Contrastive)\n{'-' * 56}\n")
         for factor in layer1["factors"]:
             marks = "".join(
                 [
@@ -771,23 +1046,60 @@ class MazeGameUI:
                     "C" if factor["is_contrastive"] else "-",
                 ]
             )
-            self._append_explanation(f"[{marks}] {factor['name']}\n  {factor['description']}\n")
+            self._append_explanation(f"[{marks}] {factor['name']}: {factor['description']}\n")
 
-        layer2 = result["evidence_used"]
-        self._append_explanation(f"\n{'=' * 56}\n{layer2['label']}\n{'=' * 56}\n")
-        for factor in layer2["factors"]:
-            self._append_explanation(f"* {factor['name']}\n  {factor['description']}\n")
+    @staticmethod
+    def _answer_language_title(language: str) -> str:
+        if language == "zh":
+            return "Chinese Answer / 中文回答"
+        if language == "en":
+            return "English Answer / 英文回答"
+        return "Answer / 回答"
 
-        layer3 = result["explanation_text"]
-        self._append_explanation(f"\n{'=' * 56}\n{layer3['label']}\n{'=' * 56}\n")
-        self._append_explanation(f"{layer3['text']}\n")
+    def _selected_answer_mode(self) -> str:
+        label = self.answer_language_label_var.get()
+        if label in ANSWER_LANGUAGE_OPTIONS:
+            return ANSWER_LANGUAGE_OPTIONS[label]
 
-        self._append_explanation(f"\n{'=' * 56}\nValidation\n{'=' * 56}\n")
-        for key, value in result["validation"].items():
-            marker = "OK" if value else "FAIL"
-            self._append_explanation(f"[{marker:4s}] {key}\n")
+        lowered = label.lower()
+        if "both" in lowered or "双语" in label:
+            return "both"
+        if "english" in lowered or label == "en":
+            return "en"
+        if "中文" in label or "chinese" in lowered or label == "zh":
+            return "zh"
+        return "auto"
 
-        self.q_entry.delete(0, tk.END)
+    def _log_question_event(
+        self,
+        evidence,
+        question_text: str,
+        parsed: ParsedQuestion,
+        mode: str,
+        primary_result: dict,
+        secondary_result: dict | None,
+    ) -> None:
+        payload = {
+            "step": evidence.step,
+            "player_pos": list(evidence.player_pos),
+            "chosen_action": evidence.chosen_action,
+            "question": question_text,
+            "intent": parsed.intent.value,
+            "confidence": parsed.confidence,
+            "parser_backend": self.parser.backend,
+            "answer_mode": mode,
+            "primary_language": primary_result.get("language"),
+            "primary_answer": primary_result["explanation_text"]["text"],
+            "primary_validation": primary_result["validation"],
+            "evidence_used": primary_result["evidence_used"]["factors"],
+        }
+        if secondary_result is not None:
+            payload["secondary_language"] = secondary_result.get("language")
+            payload["secondary_answer"] = secondary_result["explanation_text"]["text"]
+            payload["secondary_validation"] = secondary_result["validation"]
+
+        with self.question_log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
     def _append_explanation(self, text: str) -> None:
         self.exp_text.config(state=tk.NORMAL)

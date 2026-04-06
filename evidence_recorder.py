@@ -139,5 +139,8 @@ class EvidenceRecorder:
     def get_all(self) -> list[EvidenceRecord]:
         return list(self._history)
 
+    def clear(self) -> None:
+        self._history.clear()
+
     def __len__(self) -> int:
         return len(self._history)

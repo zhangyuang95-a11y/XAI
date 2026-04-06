@@ -1,55 +1,166 @@
-# Pac-Man XAI Demo
+# Pac-Man RL + XAI Demo
 
-一个带实时问答解释的 Pac-Man 风格迷宫演示。  
-Agent 先收集所有豆子，再冲向出口；过程中会持续规避怪物危险区，并支持中英文自由提问。
+Choose your language:
 
-## What Changed
+- [中文](#中文说明)
+- [English](#english)
 
-- 迷宫目标从“直接到出口”改成了“两阶段任务”
-  - 阶段 1：优先收集全部豆子
-  - 阶段 2：出口解锁后再冲向终点
-- Agent 现在使用多目标 A*
-  - 同时考虑最近可达豆子/出口
-  - 同时考虑怪物危险区与即时碰撞风险
-- 解释系统升级为更自然的中英双语输出
-  - 支持动作原因、替代动作、怪物影响、安全评估、目标进度、吃豆策略、局面总结
-- UI 改成 Pac-Man 视觉
-  - 豆子、锁定/开启出口、鬼怪造型、危险区高亮、右侧状态卡片
+---
 
-## Requirements
+## 中文说明
 
-- Python 3.11+
-- Tkinter
+这是一个 Pac-Man 风格的强化学习与可解释 AI 演示项目。项目同时提供：
 
-可选但推荐：
+- 一个可训练的 DQN 强化学习 agent
+- 一个作为对照基线的启发式 A* agent
+- 一个可以回答“为什么这样走”的解释系统
+- 一个可视化训练界面和游戏演示界面
 
-- `sentence-transformers`
-- `scikit-learn`
+### 项目特点
 
-说明：
+- `RLAgent`
+  - 使用 `train_rl.py` 训练出的 DQN 模型进行推理
+- `HeuristicAgent`
+  - 使用多目标 A* 作为无训练基线
+- 双语问答
+  - 支持中英文问题解析与解释生成
+- 可视化训练
+  - 支持训练曲线图
+  - 支持训练中的实时 Pac-Man 游戏窗口
+- XAI 输出
+  - 输出证据集合、使用证据和自然语言解释
 
-- `QuestionParser` 会优先使用 `sentence-transformers`
-- 如果缺少该依赖，会自动降级到 TF-IDF 或规则匹配，不会阻止程序启动
+### 强化学习部分包含什么
 
-## Run
+- 环境接口
+  - `reset_rl()`
+  - `step_rl(action) -> observation, reward, done, info`
+- observation 编码
+  - 墙体
+  - 可通行路径
+  - Pac-Man 位置
+  - 出口位置与开启状态
+  - 豆子分布
+  - 怪物分布
+  - 危险区域
+  - 进度与距离等标量特征
+- reward shaping
+  - 每步惩罚
+  - 非法动作惩罚
+  - 原地停留惩罚
+  - 无效拖延惩罚
+  - 随步数增加的时间压力惩罚
+  - 吃豆奖励
+  - 解锁出口奖励
+  - 靠近当前目标奖励
+  - 远离当前目标惩罚
+  - 靠近怪物惩罚
+  - 胜利奖励
+  - 快速通关额外奖励
+  - 失败惩罚
+  - 超时惩罚
+- 训练流程
+  - experience replay
+  - epsilon-greedy exploration
+  - target network
+  - checkpoint 保存
+  - 周期性 evaluation
+
+### 主要文件
+
+- `environment.py`
+  - 游戏环境
+  - RL 状态编码与 reward 逻辑
+- `agent.py`
+  - `HeuristicAgent`
+  - `RLAgent`
+  - `DQNNetwork`
+- `train_rl.py`
+  - DQN 训练入口
+- `training_game_viewer.py`
+  - 训练时的实时游戏窗口
+- `run.py`
+  - 游戏演示入口
+- `ui.py`
+  - Pac-Man 风格图形界面
+- `question_parser.py`
+  - 中英双语问题解析
+- `explanation_engine.py`
+  - 自然语言解释生成
+- `evidence_recorder.py`
+  - 证据记录与回放
+
+### 安装依赖
+
+```bash
+py -3 -m pip install torch numpy matplotlib sentence-transformers scikit-learn
+```
+
+### 训练模型
+
+默认训练 `3000` 个 episode，并保存最佳模型到 `models/dqn_pacman.pt`：
+
+```bash
+py -3 train_rl.py
+```
+
+训练时默认会同时显示：
+
+- 训练曲线
+- 训练过程中的实时游戏窗口
+
+同时还会持续保存：
+
+- `artifacts/training_progress.png`
+- `artifacts/training_metrics.csv`
+
+常用参数示例：
+
+```bash
+py -3 train_rl.py --episodes 3000 --grid-size 21 --num-monsters 8
+py -3 train_rl.py --episodes 500 --grid-size 15 --num-monsters 4
+py -3 train_rl.py --no-show-plot
+py -3 train_rl.py --no-show-game
+```
+
+训练日志会输出：
+
+- 当前 episode reward
+- 滚动平均 reward
+- 胜率
+- 平均步数
+- epsilon
+- loss
+- evaluation 结果
+
+### 运行演示
+
+自动模式：
 
 ```bash
 py -3 run.py
 ```
 
-## Controls
+规则如下：
 
-- `Start`: 自动运行
-- `Pause`: 暂停自动运行并允许提问
-- `Resume`: 继续自动运行
-- `Step`: 单步执行
-- `Reset`: 重新生成迷宫并重开
+- 如果 `models/dqn_pacman.pt` 存在，默认优先加载 RL 模型
+- 如果模型不存在，则回退到启发式 agent
 
-## Ask Questions
+显式运行 RL 模型：
 
-暂停后可以输入中文或英文问题。
+```bash
+py -3 run.py --agent rl --model-path models/dqn_pacman.pt
+```
 
-示例：
+显式运行启发式基线：
+
+```bash
+py -3 run.py --agent heuristic
+```
+
+### 可以问的问题
+
+暂停后可以继续提问，例如：
 
 - `Why not go right?`
 - `为什么去吃那个豆子？`
@@ -57,46 +168,193 @@ py -3 run.py
 - `Is it safe here?`
 - `出口什么时候打开？`
 
-## Explanation Output
-
-每次回答都会输出 3 层内容：
+解释系统会输出三层内容：
 
 1. `All Evidence (S_t)`
-   - 当前时刻可用的结构化证据
 2. `Evidence Used (E)`
-   - 真正用于生成回答的最小证据子集
 3. `Natural-Language Explanation (x)`
-   - 面向用户的自然语言解释
 
-同时还会附带 `validation`，用于显示 explanation 数学框架下的检查结果。
+### 使用说明
 
-## Core Modules
+- RL 模型训练时的 `grid_size` 应与运行时环境匹配
+- `run.py` 会优先读取 checkpoint 中记录的网格大小和怪物数量
+- `models/` 已加入 `.gitignore`
+- 开启实时游戏窗口会拖慢训练速度；长时间训练时可以使用 `--no-show-game`
+- 是否真正收敛应看评估 reward、胜率和平均步数是否稳定，而不是只看脚本是否跑完
+
+---
+
+## English
+
+This is a Pac-Man-style Reinforcement Learning and Explainable AI demo project. It includes:
+
+- a trainable DQN-based RL agent
+- a heuristic A* baseline agent
+- a natural-language explanation system
+- a visual training dashboard and live game viewer
+
+### Highlights
+
+- `RLAgent`
+  - runs inference with a DQN model trained by `train_rl.py`
+- `HeuristicAgent`
+  - serves as a no-training multi-objective A* baseline
+- Bilingual QA
+  - supports both Chinese and English question parsing and explanations
+- Visual training
+  - live metric plots
+  - live Pac-Man game window during training
+- XAI output
+  - evidence set, evidence used, and natural-language explanation
+
+### What The RL Pipeline Includes
+
+- environment API
+  - `reset_rl()`
+  - `step_rl(action) -> observation, reward, done, info`
+- observation encoding
+  - walls
+  - walkable paths
+  - Pac-Man position
+  - exit position and exit-open status
+  - dot distribution
+  - monster distribution
+  - danger zones
+  - scalar progress and distance features
+- reward shaping
+  - step penalty
+  - invalid-action penalty
+  - stay penalty
+  - stall penalty
+  - increasing time-pressure penalty
+  - dot reward
+  - exit unlock reward
+  - reward for moving toward the current objective
+  - penalty for moving away from the current objective
+  - monster proximity penalty
+  - win reward
+  - fast-finish bonus
+  - lose penalty
+  - timeout penalty
+- training loop
+  - experience replay
+  - epsilon-greedy exploration
+  - target network
+  - checkpoint saving
+  - periodic evaluation
+
+### Main Files
 
 - `environment.py`
-  - 生成迷宫、维护豆子/出口/怪物状态
+  - game environment
+  - RL state encoding and reward logic
 - `agent.py`
-  - 多目标 A* 决策器
-- `evidence_recorder.py`
-  - 记录每一步的结构化证据
-- `question_parser.py`
-  - 中英双语意图解析与语义匹配
-- `explanation_engine.py`
-  - 证据选择、最小化、自然语言生成
-- `ui.py`
-  - Pac-Man 风格 Tkinter 界面
+  - `HeuristicAgent`
+  - `RLAgent`
+  - `DQNNetwork`
+- `train_rl.py`
+  - DQN training entry point
+- `training_game_viewer.py`
+  - live training game window
 - `run.py`
-  - 程序入口
+  - demo entry point
+- `ui.py`
+  - Pac-Man-style GUI
+- `question_parser.py`
+  - bilingual question parsing
+- `explanation_engine.py`
+  - natural-language explanation generation
+- `evidence_recorder.py`
+  - evidence tracking and replay
 
-## Typical Flow
+### Install
 
-1. 启动程序
-2. Pac-Man 在迷宫中自动收豆并避开怪物
-3. 暂停后输入自然语言问题
-4. 系统解析意图
-5. 从最近一步证据中筛选 explanation basis
-6. 生成中英双语自然语言解释并显示在右侧面板
+```bash
+py -3 -m pip install torch numpy matplotlib sentence-transformers scikit-learn
+```
 
-## Notes
+### Train The Model
 
-- 当前解释基于最近一步记录的证据，而不是离线日志回放
-- 当语义模型依赖缺失时，问句解析仍可运行，但泛化能力会弱一些
+By default, training runs for `3000` episodes and saves the best checkpoint to `models/dqn_pacman.pt`:
+
+```bash
+py -3 train_rl.py
+```
+
+Training shows both of these by default:
+
+- the metric dashboard
+- the live Pac-Man training window
+
+It also keeps saving:
+
+- `artifacts/training_progress.png`
+- `artifacts/training_metrics.csv`
+
+Common examples:
+
+```bash
+py -3 train_rl.py --episodes 3000 --grid-size 21 --num-monsters 8
+py -3 train_rl.py --episodes 500 --grid-size 15 --num-monsters 4
+py -3 train_rl.py --no-show-plot
+py -3 train_rl.py --no-show-game
+```
+
+Training logs report:
+
+- current episode reward
+- rolling average reward
+- win rate
+- average steps
+- epsilon
+- loss
+- evaluation results
+
+### Run The Demo
+
+Auto mode:
+
+```bash
+py -3 run.py
+```
+
+Behavior:
+
+- if `models/dqn_pacman.pt` exists, the RL model is loaded first
+- otherwise the app falls back to the heuristic agent
+
+Run the RL model explicitly:
+
+```bash
+py -3 run.py --agent rl --model-path models/dqn_pacman.pt
+```
+
+Run the heuristic baseline explicitly:
+
+```bash
+py -3 run.py --agent heuristic
+```
+
+### Example Questions
+
+After pausing, you can ask questions such as:
+
+- `Why not go right?`
+- `为什么去吃那个豆子？`
+- `怪物#2影响了这次决策吗？`
+- `Is it safe here?`
+- `出口什么时候打开？`
+
+The explanation system still outputs three layers:
+
+1. `All Evidence (S_t)`
+2. `Evidence Used (E)`
+3. `Natural-Language Explanation (x)`
+
+### Notes
+
+- The RL checkpoint should match the runtime `grid_size`
+- `run.py` prefers the grid size and monster count stored in the checkpoint metadata
+- `models/` is already ignored by `.gitignore`
+- The live game window slows training down, so use `--no-show-game` for long experiments
+- Real convergence should be judged by evaluation reward, win rate, and average steps, not just by whether the script finished

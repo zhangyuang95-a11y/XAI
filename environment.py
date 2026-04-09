@@ -25,7 +25,7 @@ DIRECTIONS = {
 
 ACTION_NAMES = tuple(DIRECTIONS.keys())
 ACTION_TO_INDEX = {name: idx for idx, name in enumerate(ACTION_NAMES)}
-DEFAULT_REWARD_CONFIG = {
+LEGACY_REWARD_CONFIG = {
     "step": -0.08,
     "invalid_move": -0.55,
     "stay": -0.25,
@@ -43,6 +43,28 @@ DEFAULT_REWARD_CONFIG = {
     "danger_zone": -0.22,
     "time_pressure": -0.12,
 }
+STABLE_REWARD_CONFIG = {
+    "step": -0.08,
+    "invalid_move": -0.55,
+    "stay": -0.25,
+    "stall": -0.12,
+    "dot": 1.4,
+    "unlock_exit": 6.0,
+    "win": 32.0,
+    "win_speed_bonus": 18.0,
+    "lose": -30.0,
+    "timeout": -30.0,
+    "target_potential": 0.35,
+    "monster_closer": -0.14,
+    "monster_farther": 0.03,
+    "danger_zone": -0.15,
+    "time_pressure": -0.05,
+}
+REWARD_PRESETS = {
+    "legacy": LEGACY_REWARD_CONFIG,
+    "stable": STABLE_REWARD_CONFIG,
+}
+DEFAULT_REWARD_CONFIG = LEGACY_REWARD_CONFIG
 
 
 def manhattan_distance(pos1: tuple[int, int], pos2: tuple[int, int]) -> int:
@@ -59,21 +81,77 @@ def get_relative_direction(from_pos: tuple[int, int], to_pos: tuple[int, int]) -
     return f"{ns}-{ew}" if ns and ew else (ns or ew)
 
 
-def nearest_dot_position(state: dict) -> tuple[int, int] | None:
+def shortest_path_distances(
+    grid: list[list[int]],
+    start: tuple[int, int],
+) -> dict[tuple[int, int], int]:
+    if not grid or not grid[0]:
+        return {}
+
+    rows = len(grid)
+    cols = len(grid[0])
+    row, col = start
+    if not (0 <= row < rows and 0 <= col < cols) or grid[row][col] != PATH:
+        return {}
+
+    distances = {start: 0}
+    queue = deque([start])
+    while queue:
+        row, col = queue.popleft()
+        next_distance = distances[(row, col)] + 1
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nr, nc = row + dr, col + dc
+            if (
+                0 <= nr < rows
+                and 0 <= nc < cols
+                and grid[nr][nc] == PATH
+                and (nr, nc) not in distances
+            ):
+                distances[(nr, nc)] = next_distance
+                queue.append((nr, nc))
+    return distances
+
+
+def shortest_path_distance(
+    grid: list[list[int]],
+    start: tuple[int, int],
+    goal: tuple[int, int],
+) -> int | None:
+    return shortest_path_distances(grid, start).get(goal)
+
+
+def nearest_dot_position(
+    state: dict,
+    distances: dict[tuple[int, int], int] | None = None,
+) -> tuple[int, int] | None:
     player = state["player_pos"]
     dots = state.get("dots", frozenset())
     if not dots:
         return None
-    return min(dots, key=lambda dot: manhattan_distance(player, dot))
+    if distances is None:
+        distances = shortest_path_distances(state["grid"], player)
+    reachable = [dot for dot in dots if dot in distances]
+    if not reachable:
+        return None
+    return min(reachable, key=lambda dot: (distances[dot], manhattan_distance(player, dot)))
 
 
-def target_position_from_state(state: dict) -> tuple[int, int]:
-    nearest_dot = nearest_dot_position(state)
+def target_position_from_state(
+    state: dict,
+    distances: dict[tuple[int, int], int] | None = None,
+) -> tuple[int, int]:
+    nearest_dot = nearest_dot_position(state, distances=distances)
     return nearest_dot if nearest_dot is not None else state["exit_pos"]
 
 
-def objective_distance(state: dict) -> int:
-    return manhattan_distance(state["player_pos"], target_position_from_state(state))
+def objective_distance(
+    state: dict,
+    distances: dict[tuple[int, int], int] | None = None,
+) -> int:
+    if distances is None:
+        distances = shortest_path_distances(state["grid"], state["player_pos"])
+    target = target_position_from_state(state, distances=distances)
+    return distances.get(target, state["grid_size"] * state["grid_size"])
 
 
 def nearest_monster_distance(state: dict) -> int:
@@ -99,6 +177,43 @@ def available_actions_from_state(state: dict) -> list[str]:
 def valid_action_mask(state: dict) -> np.ndarray:
     allowed = set(available_actions_from_state(state))
     return np.array([action in allowed for action in ACTION_NAMES], dtype=np.bool_)
+
+
+def projected_player_position(state: dict, action_name: str) -> tuple[int, int] | None:
+    grid = state["grid"]
+    grid_size = state["grid_size"]
+    player = state["player_pos"]
+    dr, dc = DIRECTIONS[action_name]
+    nr, nc = player[0] + dr, player[1] + dc
+
+    if action_name == "STAY":
+        return player
+    if not (0 <= nr < grid_size and 0 <= nc < grid_size):
+        return None
+    if grid[nr][nc] != PATH:
+        return None
+    return nr, nc
+
+
+def shielded_action_mask(state: dict, minimum_monster_distance: int = 2) -> np.ndarray:
+    valid_mask = valid_action_mask(state)
+    monsters = state["monsters"]
+    shielded_mask = np.zeros_like(valid_mask)
+
+    for idx, action_name in enumerate(ACTION_NAMES):
+        if not valid_mask[idx]:
+            continue
+        next_pos = projected_player_position(state, action_name)
+        if next_pos is None:
+            continue
+        nearest_dist = min(
+            (manhattan_distance(next_pos, (mr, mc)) for _, mr, mc in monsters),
+            default=999,
+        )
+        if nearest_dist >= minimum_monster_distance:
+            shielded_mask[idx] = True
+
+    return shielded_mask if shielded_mask.any() else valid_mask
 
 
 def estimate_action_risks(state: dict, danger_radius: int = 3) -> dict[str, float]:
@@ -171,9 +286,10 @@ def encode_state_vector(state: dict, danger_radius: int = 3) -> np.ndarray:
     max_distance = max(1, size * 2)
     total_dots = max(1, state.get("total_dots", 1))
 
+    step_budget = max(1, int(state.get("max_steps", size * size * 2)))
     scalar_features = np.array(
         [
-            state.get("step_count", 0) / max(1, size * size * 4),
+            state.get("step_count", 0) / step_budget,
             state.get("collected_dots", 0) / total_dots,
             len(dots) / total_dots,
             1.0 if state.get("exit_open", False) else 0.0,
@@ -237,16 +353,20 @@ class GameState(enum.Enum):
 class MazeEnvironment:
     def __init__(
         self,
-        grid_size: int = 21,
-        num_monsters: int = 8,
+        grid_size: int = 15,
+        num_monsters: int = 4,
         seed: Optional[int] = None,
         max_steps: Optional[int] = None,
         reward_config: Optional[dict[str, float]] = None,
+        reward_preset: str = "legacy",
     ):
         self.grid_size = grid_size if grid_size % 2 == 1 else grid_size + 1
         self.num_monsters = num_monsters
-        self.max_steps = max_steps or self.grid_size * self.grid_size * 4
-        self.reward_config = {**DEFAULT_REWARD_CONFIG, **(reward_config or {})}
+        self.max_steps = max_steps or self.grid_size * self.grid_size * 2
+        if reward_preset not in REWARD_PRESETS:
+            raise ValueError(f"Unknown reward preset: {reward_preset}")
+        self.reward_preset = reward_preset
+        self.reward_config = {**REWARD_PRESETS[reward_preset], **(reward_config or {})}
         self.rng = random.Random(seed)
         self._init_game()
 
@@ -466,6 +586,8 @@ class MazeEnvironment:
         dot_collected: bool,
         exit_opened: bool,
     ) -> dict:
+        before_distances = shortest_path_distances(before_state["grid"], before_state["player_pos"])
+        after_distances = shortest_path_distances(after_state["grid"], after_state["player_pos"])
         return {
             "action": action,
             "valid_move": valid_move,
@@ -473,8 +595,8 @@ class MazeEnvironment:
             "exit_opened": exit_opened,
             "lost": False,
             "won": False,
-            "target_distance_before": objective_distance(before_state),
-            "target_distance_after": objective_distance(after_state),
+            "target_distance_before": objective_distance(before_state, distances=before_distances),
+            "target_distance_after": objective_distance(after_state, distances=after_distances),
             "nearest_monster_before": nearest_monster_distance(before_state),
             "nearest_monster_after": nearest_monster_distance(after_state),
             "used_stay": action == "STAY",
@@ -502,7 +624,12 @@ class MazeEnvironment:
             breakdown["stay"] = cfg["stay"]
 
         distance_delta = transition["target_distance_before"] - transition["target_distance_after"]
-        if distance_delta > 0:
+        potential_scale = cfg.get("target_potential")
+        if potential_scale is not None and distance_delta != 0:
+            delta_reward = potential_scale * distance_delta
+            reward += delta_reward
+            breakdown["target_progress" if delta_reward > 0 else "target_regress"] = delta_reward
+        elif distance_delta > 0:
             delta_reward = cfg["target_progress"] * distance_delta
             reward += delta_reward
             breakdown["target_progress"] = delta_reward
@@ -557,6 +684,7 @@ class MazeEnvironment:
             "exit_pos": self.exit,
             "monsters": [(monster.id, monster.row, monster.col) for monster in self.monsters],
             "step_count": self.step_count,
+            "max_steps": self.max_steps,
             "game_state": self.game_state,
             "start_pos": self.start,
             "dots": frozenset(self.dots),
@@ -574,7 +702,7 @@ if __name__ == "__main__":
     import sys
 
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    env = MazeEnvironment(grid_size=21, num_monsters=8, seed=42)
+    env = MazeEnvironment(grid_size=11, num_monsters=2, seed=42, reward_preset="stable")
     state = env.get_state()
     print(f"Grid: {state['grid_size']}x{state['grid_size']}, Dots: {state['total_dots']}, Monsters: {len(state['monsters'])}")
     print(f"Exit open: {state['exit_open']}")

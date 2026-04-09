@@ -4,13 +4,12 @@ ui.py -- Pac-Man themed Tkinter GUI for the XAI demo.
 
 from __future__ import annotations
 
-from dataclasses import replace
 import json
 from pathlib import Path
 import tkinter as tk
 from tkinter import scrolledtext
 
-from agent import HeuristicAgent
+from agent import RLAgent
 from environment import GameState, MazeEnvironment, WALL, manhattan_distance
 from evidence_recorder import EvidenceRecorder
 from explanation_engine import ExplanationEngine
@@ -95,7 +94,7 @@ class MazeGameUI:
         self,
         root: tk.Tk,
         env: MazeEnvironment,
-        agent: HeuristicAgent,
+        agent: RLAgent,
         recorder: EvidenceRecorder,
         parser: QuestionParser,
         engine: ExplanationEngine,
@@ -173,7 +172,7 @@ class MazeGameUI:
 
         subtitle = tk.Label(
             self.left_panel,
-            text="After RL training, run auto mode. During playback you can pause at any time and ask your own question.",
+            text="Run the fixed RL demo, then type your own question whenever you want an explanation.",
             bg=APP_BG,
             fg=TEXT_MUTED,
             font=("Segoe UI", 10),
@@ -223,7 +222,7 @@ class MazeGameUI:
 
         hero_subtitle = tk.Label(
             hero,
-            text=f"NLP backend: {self.parser.backend} | Auto mode uses the trained RL model when available.",
+            text=f"NLP backend: {self.parser.backend} | This demo always uses the fixed trained RL model.",
             bg=PANEL_BG,
             fg=TEXT_ACCENT,
             font=("Consolas", 10),
@@ -448,6 +447,7 @@ class MazeGameUI:
             font=("Segoe UI", 10),
         )
         self.answer_language_menu.pack(side=tk.RIGHT)
+        self.answer_language_menu.pack_forget()
 
         input_shell = tk.Frame(parent, bg=TEXT_ACCENT, padx=1, pady=1)
         input_shell.pack(fill=tk.X, pady=(0, 8))
@@ -475,6 +475,7 @@ class MazeGameUI:
         ]:
             examples_row = tk.Frame(parent, bg=CARD_BG)
             examples_row.pack(fill=tk.X, pady=(8, 0))
+            examples_row.pack_forget()
             for text in row_items:
                 button = tk.Button(
                     examples_row,
@@ -968,7 +969,7 @@ class MazeGameUI:
             return
 
         parsed = self.parser.parse(question_text)
-        mode = self._selected_answer_mode()
+        mode = "manual_input"
         primary_result, secondary_result = self._generate_answer_results(latest, parsed, mode)
         self._render_answer_output(question_text, parsed, primary_result, secondary_result)
         self._log_question_event(latest, question_text, parsed, mode, primary_result, secondary_result)
@@ -981,7 +982,7 @@ class MazeGameUI:
         parsed: ParsedQuestion,
         mode: str,
     ) -> tuple[dict, dict | None]:
-        if mode == "auto":
+        if mode in {"auto", "manual_input"}:
             return self.engine.generate_explanation(evidence, parsed), None
         if mode == "zh":
             return self.engine.generate_explanation(evidence, replace(parsed, language="zh")), None

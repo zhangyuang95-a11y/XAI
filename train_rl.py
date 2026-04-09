@@ -16,9 +16,16 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from agent import DQNNetwork, MODEL_VERSION, mask_invalid_q_values
-from environment import ACTION_NAMES, MazeEnvironment, valid_action_mask
+from agent import DQNNetwork, HeuristicAgent, MODEL_VERSION, mask_invalid_q_values
+from environment import ACTION_NAMES, MazeEnvironment, shielded_action_mask
 from training_game_viewer import TrainingGameViewer
+
+WARM_START_EPOCHS = 8
+BOOTSTRAP_HOLDOUT_FRACTION = 0.10
+EXPERT_GUIDANCE_EPISODES = 600
+EXPERT_ROLLOUT_START_PROB = 0.70
+BC_LOSS_START_WEIGHT = 0.50
+FIXED_TRAINING_SUMMARY = "11x11 maze, 2 monsters, 1500 episodes"
 
 
 @dataclass
@@ -39,6 +46,42 @@ class EvalStats:
     truncation_rate: float
 
 
+@dataclass
+class ImitationSample:
+    observation: np.ndarray
+    action_idx: int
+    valid_mask: np.ndarray
+
+
+@dataclass
+class WarmStartStats:
+    losses: list[float]
+    holdout_accuracy: float | None
+    train_samples: int
+    holdout_samples: int
+
+
+@dataclass
+class ImitationDataset:
+    observations: np.ndarray
+    actions: np.ndarray
+    valid_masks: np.ndarray
+
+    def __len__(self) -> int:
+        return int(self.actions.shape[0])
+
+    def sample(self, batch_size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        if len(self) == 0:
+            raise ValueError("Cannot sample from an empty imitation dataset")
+        sample_size = min(batch_size, len(self))
+        indices = np.random.choice(len(self), size=sample_size, replace=False)
+        return (
+            self.observations[indices],
+            self.actions[indices],
+            self.valid_masks[indices],
+        )
+
+
 class TrainingVisualizer:
     def __init__(
         self,
@@ -51,6 +94,23 @@ class TrainingVisualizer:
         self.metrics_path = metrics_path
         self.show_plot = show_plot
         self.refresh_every = max(1, refresh_every)
+        self.csv_fields = [
+            "kind",
+            "episode",
+            "reward",
+            "avg_reward",
+            "win_rate",
+            "avg_steps",
+            "loss",
+            "epsilon",
+            "truncation_rate",
+            "train_monsters",
+            "reward_preset",
+            "encoder",
+            "bootstrap_phase",
+            "eval_scope",
+            "eval_monsters",
+        ]
         self.train_episodes: list[int] = []
         self.train_rewards: list[float] = []
         self.train_avg_rewards: list[float] = []
@@ -88,21 +148,40 @@ class TrainingVisualizer:
 
     def _init_csv(self) -> None:
         with self.metrics_path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(
-                handle,
-                fieldnames=[
-                    "kind",
-                    "episode",
-                    "reward",
-                    "avg_reward",
-                    "win_rate",
-                    "avg_steps",
-                    "loss",
-                    "epsilon",
-                    "truncation_rate",
-                ],
-            )
+            writer = csv.DictWriter(handle, fieldnames=self.csv_fields)
             writer.writeheader()
+
+    def record_bootstrap_episode(
+        self,
+        episode: int,
+        reward: float,
+        avg_reward: float,
+        win_rate: float,
+        avg_steps: float,
+        train_monsters: int,
+        reward_preset: str,
+        encoder: str,
+        bootstrap_phase: str,
+    ) -> None:
+        self._append_csv(
+            {
+                "kind": "bootstrap",
+                "episode": episode,
+                "reward": reward,
+                "avg_reward": avg_reward,
+                "win_rate": win_rate,
+                "avg_steps": avg_steps,
+                "loss": "",
+                "epsilon": "",
+                "truncation_rate": "",
+                "train_monsters": train_monsters,
+                "reward_preset": reward_preset,
+                "encoder": encoder,
+                "bootstrap_phase": bootstrap_phase,
+                "eval_scope": "",
+                "eval_monsters": "",
+            }
+        )
 
     def record_train_episode(
         self,
@@ -113,6 +192,10 @@ class TrainingVisualizer:
         avg_steps: float,
         loss: float,
         epsilon: float,
+        train_monsters: int,
+        reward_preset: str,
+        encoder: str,
+        bootstrap_phase: str,
     ) -> None:
         self.train_episodes.append(episode)
         self.train_rewards.append(reward)
@@ -132,21 +215,36 @@ class TrainingVisualizer:
                 "loss": loss,
                 "epsilon": epsilon,
                 "truncation_rate": "",
+                "train_monsters": train_monsters,
+                "reward_preset": reward_preset,
+                "encoder": encoder,
+                "bootstrap_phase": bootstrap_phase,
+                "eval_scope": "",
+                "eval_monsters": "",
             }
         )
         if episode % self.refresh_every == 0:
             self.refresh()
 
-    def record_eval(self, episode: int, metrics: dict[str, float]) -> None:
-        self.eval_stats.append(
-            EvalStats(
-                episode=episode,
-                avg_reward=metrics["avg_reward"],
-                win_rate=metrics["win_rate"],
-                avg_steps=metrics["avg_steps"],
-                truncation_rate=metrics["truncation_rate"],
+    def record_eval(
+        self,
+        episode: int,
+        metrics: dict[str, float],
+        reward_preset: str,
+        encoder: str,
+        eval_scope: str,
+        eval_monsters: int,
+    ) -> None:
+        if eval_scope == "eval_final":
+            self.eval_stats.append(
+                EvalStats(
+                    episode=episode,
+                    avg_reward=metrics["avg_reward"],
+                    win_rate=metrics["win_rate"],
+                    avg_steps=metrics["avg_steps"],
+                    truncation_rate=metrics["truncation_rate"],
+                )
             )
-        )
         self._append_csv(
             {
                 "kind": "eval",
@@ -158,23 +256,19 @@ class TrainingVisualizer:
                 "loss": "",
                 "epsilon": "",
                 "truncation_rate": metrics["truncation_rate"],
+                "train_monsters": "",
+                "reward_preset": reward_preset,
+                "encoder": encoder,
+                "bootstrap_phase": "",
+                "eval_scope": eval_scope,
+                "eval_monsters": eval_monsters,
             }
         )
         self.refresh(force=True)
 
     def _append_csv(self, row: dict) -> None:
         with self.metrics_path.open("a", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=[
-                "kind",
-                "episode",
-                "reward",
-                "avg_reward",
-                "win_rate",
-                "avg_steps",
-                "loss",
-                "epsilon",
-                "truncation_rate",
-            ])
+            writer = csv.DictWriter(handle, fieldnames=self.csv_fields)
             writer.writerow(row)
 
     def refresh(self, force: bool = False) -> None:
@@ -279,49 +373,55 @@ class ReplayBuffer:
         return len(self.obs)
 
 
-def add_bool_flag(
-    parser: argparse.ArgumentParser,
-    name: str,
-    default: bool,
-    help_text: str,
-) -> None:
-    dest = name.replace("-", "_")
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(f"--{name}", dest=dest, action="store_true", help=help_text)
-    group.add_argument(f"--no-{name}", dest=dest, action="store_false", help=f"Disable {help_text.lower()}")
-    parser.set_defaults(**{dest: default})
-
-
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train a DQN Pac-Man agent.")
-    parser.add_argument("--episodes", type=int, default=3000)
-    parser.add_argument("--grid-size", type=int, default=21)
-    parser.add_argument("--num-monsters", type=int, default=8)
-    parser.add_argument("--max-steps", type=int, default=0, help="0 means grid_size*grid_size*4")
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--learning-rate", type=float, default=1e-3)
-    parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--buffer-size", type=int, default=50000)
-    parser.add_argument("--warmup-steps", type=int, default=1000)
-    parser.add_argument("--target-update", type=int, default=500)
-    parser.add_argument("--train-frequency", type=int, default=4)
-    parser.add_argument("--epsilon-start", type=float, default=1.0)
-    parser.add_argument("--epsilon-end", type=float, default=0.05)
-    parser.add_argument("--epsilon-decay", type=int, default=40000)
-    parser.add_argument("--hidden-dims", type=int, nargs="+", default=[512, 256, 128])
-    parser.add_argument("--eval-every", type=int, default=25)
-    parser.add_argument("--eval-episodes", type=int, default=8)
-    parser.add_argument("--log-every", type=int, default=10)
-    parser.add_argument("--save-path", type=str, default="models/dqn_pacman.pt")
-    parser.add_argument("--plot-path", type=str, default="artifacts/training_progress.png")
-    parser.add_argument("--metrics-path", type=str, default="artifacts/training_metrics.csv")
-    parser.add_argument("--plot-refresh-every", type=int, default=5)
-    parser.add_argument("--game-refresh-steps", type=int, default=1)
-    parser.add_argument("--device", type=str, default="auto")
-    add_bool_flag(parser, "show-plot", default=True, help_text="Show the live matplotlib dashboard.")
-    add_bool_flag(parser, "show-game", default=True, help_text="Show the live Pac-Man training window.")
+    parser = argparse.ArgumentParser(
+        description="Train the fixed Pac-Man RL configuration.",
+        epilog=f"Fixed configuration: {FIXED_TRAINING_SUMMARY}. No runtime options are exposed.",
+    )
     return parser
+
+
+def build_fixed_args() -> argparse.Namespace:
+    return argparse.Namespace(
+        episodes=1500,
+        grid_size=11,
+        num_monsters=2,
+        max_steps=0,
+        seed=42,
+        learning_rate=3e-4,
+        gamma=0.99,
+        batch_size=128,
+        buffer_size=100000,
+        warmup_steps=2000,
+        target_update=500,
+        train_frequency=4,
+        random_episode_fraction=0.0,
+        epsilon_start=0.35,
+        epsilon_end=0.02,
+        epsilon_decay=25000,
+        hidden_dims=[256, 128],
+        encoder="cnn",
+        reward_preset="stable",
+        bootstrap_episodes=80,
+        bootstrap_noise=0.05,
+        curriculum_monsters=[1, 2],
+        curriculum_boundaries=[300],
+        eval_every=50,
+        eval_episodes=8,
+        converge_win_rate=0.7,
+        converge_truncation_rate=0.1,
+        converge_consecutive_evals=2,
+        log_every=10,
+        save_path="models/dqn_pacman.pt",
+        plot_path="artifacts/training_progress.png",
+        metrics_path="artifacts/training_metrics.csv",
+        plot_refresh_every=5,
+        game_refresh_steps=1,
+        device="auto",
+        show_plot=True,
+        show_game=True,
+        stop_on_converge=True,
+    )
 
 
 def resolve_device(device_arg: str) -> torch.device:
@@ -335,6 +435,169 @@ def epsilon_by_step(global_step: int, start: float, end: float, decay: int) -> f
         return end
     progress = np.exp(-global_step / decay)
     return float(end + (start - end) * progress)
+
+
+def normalize_curriculum(args: argparse.Namespace) -> tuple[list[int], list[int]]:
+    monsters = [int(item) for item in args.curriculum_monsters]
+    boundaries = [int(item) for item in args.curriculum_boundaries]
+    if not monsters:
+        monsters = [args.num_monsters]
+    if len(boundaries) != max(0, len(monsters) - 1):
+        raise ValueError(
+            f"curriculum-boundaries must have exactly len(curriculum-monsters)-1 items: "
+            f"got monsters={monsters}, boundaries={boundaries}"
+        )
+    if any(boundary <= 0 for boundary in boundaries):
+        raise ValueError(f"curriculum-boundaries must be positive, got {boundaries}")
+    if any(right <= left for left, right in zip(boundaries, boundaries[1:])):
+        raise ValueError(f"curriculum-boundaries must be strictly increasing, got {boundaries}")
+    monsters[-1] = int(args.num_monsters)
+    return monsters, boundaries
+
+
+def curriculum_monsters_for_episode(
+    episode: int,
+    monsters: list[int],
+    boundaries: list[int],
+) -> int:
+    for stage_monsters, boundary in zip(monsters, boundaries):
+        if episode <= boundary:
+            return stage_monsters
+    return monsters[-1]
+
+
+def linear_schedule_by_episode(
+    episode: int,
+    total_episodes: int,
+    start: float,
+    end: float,
+) -> float:
+    if total_episodes <= 1:
+        return float(end)
+    if episode <= 1:
+        return float(start)
+    if episode >= total_episodes:
+        return float(end)
+    progress = (episode - 1) / float(total_episodes - 1)
+    return float(start + (end - start) * progress)
+
+
+def empty_imitation_dataset() -> ImitationDataset:
+    return ImitationDataset(
+        observations=np.empty((0, 0), dtype=np.float32),
+        actions=np.empty((0,), dtype=np.int64),
+        valid_masks=np.empty((0, len(ACTION_NAMES)), dtype=np.bool_),
+    )
+
+
+def build_imitation_dataset(
+    observations: np.ndarray,
+    actions: np.ndarray,
+    valid_masks: np.ndarray,
+) -> ImitationDataset:
+    return ImitationDataset(
+        observations=observations.astype(np.float32, copy=False),
+        actions=actions.astype(np.int64, copy=False),
+        valid_masks=valid_masks.astype(np.bool_, copy=False),
+    )
+
+
+def split_imitation_samples(
+    samples: list[ImitationSample],
+    holdout_fraction: float,
+    seed: int,
+) -> tuple[ImitationDataset, ImitationDataset]:
+    if not samples:
+        return empty_imitation_dataset(), empty_imitation_dataset()
+
+    observations = np.stack([item.observation for item in samples]).astype(np.float32, copy=False)
+    actions = np.array([item.action_idx for item in samples], dtype=np.int64)
+    valid_masks = np.stack([item.valid_mask for item in samples]).astype(np.bool_, copy=False)
+
+    holdout_fraction = min(0.5, max(0.0, holdout_fraction))
+    holdout_size = 0
+    if len(samples) > 1 and holdout_fraction > 0.0:
+        holdout_size = min(len(samples) - 1, max(1, int(round(len(samples) * holdout_fraction))))
+
+    if holdout_size == 0:
+        return (
+            build_imitation_dataset(observations, actions, valid_masks),
+            empty_imitation_dataset(),
+        )
+
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(len(samples))
+    holdout_indices = indices[:holdout_size]
+    train_indices = indices[holdout_size:]
+    return (
+        build_imitation_dataset(observations[train_indices], actions[train_indices], valid_masks[train_indices]),
+        build_imitation_dataset(observations[holdout_indices], actions[holdout_indices], valid_masks[holdout_indices]),
+    )
+
+
+def behavior_cloning_loss(
+    policy_net: DQNNetwork,
+    observations: np.ndarray,
+    actions: np.ndarray,
+    valid_masks: np.ndarray,
+    device: torch.device,
+) -> torch.Tensor:
+    obs_tensor = torch.as_tensor(observations, dtype=torch.float32, device=device)
+    actions_tensor = torch.as_tensor(actions, dtype=torch.int64, device=device)
+    valid_masks_tensor = torch.as_tensor(valid_masks, dtype=torch.bool, device=device)
+    logits = policy_net(obs_tensor)
+    masked_logits = mask_invalid_q_values(logits, valid_masks_tensor)
+    return F.cross_entropy(masked_logits, actions_tensor)
+
+
+def evaluate_imitation_accuracy(
+    policy_net: DQNNetwork,
+    dataset: ImitationDataset,
+    batch_size: int,
+    device: torch.device,
+) -> float | None:
+    if len(dataset) == 0:
+        return None
+
+    policy_net.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for start in range(0, len(dataset), batch_size):
+            end = start + batch_size
+            observations = dataset.observations[start:end]
+            actions = dataset.actions[start:end]
+            valid_masks = dataset.valid_masks[start:end]
+            obs_tensor = torch.as_tensor(observations, dtype=torch.float32, device=device)
+            valid_masks_tensor = torch.as_tensor(valid_masks, dtype=torch.bool, device=device)
+            logits = policy_net(obs_tensor)
+            predictions = mask_invalid_q_values(logits, valid_masks_tensor).argmax(dim=1).cpu().numpy()
+            correct += int(np.sum(predictions == actions))
+            total += int(actions.shape[0])
+    policy_net.train()
+    return correct / max(1, total)
+
+
+def bootstrap_stage_schedule(monsters: list[int], total_episodes: int) -> list[tuple[int, int]]:
+    if total_episodes <= 0:
+        return []
+
+    unique_monsters = list(dict.fromkeys(int(monster) for monster in monsters))
+    base = total_episodes // len(unique_monsters)
+    remainder = total_episodes % len(unique_monsters)
+    schedule: list[tuple[int, int]] = []
+    for idx, monster_count in enumerate(unique_monsters):
+        episode_count = base + (1 if idx < remainder else 0)
+        if episode_count > 0:
+            schedule.append((monster_count, episode_count))
+    return schedule
+
+
+def reached_convergence(metrics: dict[str, float], args: argparse.Namespace) -> bool:
+    return (
+        metrics["win_rate"] >= args.converge_win_rate
+        and metrics["truncation_rate"] <= args.converge_truncation_rate
+    )
 
 
 def select_action(
@@ -362,6 +625,31 @@ def select_action(
     return action_idx, q_values
 
 
+def select_heuristic_action(
+    heuristic_agent: HeuristicAgent,
+    state: dict,
+    valid_mask_np: np.ndarray,
+    noise: float,
+    rng: random.Random,
+) -> tuple[int, int]:
+    valid_indices = np.flatnonzero(valid_mask_np)
+    if len(valid_indices) == 0:
+        stay_idx = ACTION_NAMES.index("STAY")
+        return stay_idx, stay_idx
+
+    heuristic_action = heuristic_agent.choose_action(state)
+    heuristic_idx = ACTION_NAMES.index(heuristic_action)
+    if valid_mask_np[heuristic_idx]:
+        target_idx = heuristic_idx
+    else:
+        target_idx = int(valid_indices[0])
+
+    executed_idx = target_idx
+    if rng.random() < noise:
+        executed_idx = int(rng.choice(valid_indices.tolist()))
+    return executed_idx, target_idx
+
+
 def optimize_step(
     policy_net: DQNNetwork,
     target_net: DQNNetwork,
@@ -370,7 +658,9 @@ def optimize_step(
     batch_size: int,
     gamma: float,
     device: torch.device,
-) -> float:
+    expert_dataset: ImitationDataset | None = None,
+    bc_weight: float = 0.0,
+) -> tuple[float, float, float]:
     obs, actions, rewards, next_obs, dones, next_masks = replay_buffer.sample(batch_size)
 
     obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
@@ -391,12 +681,174 @@ def optimize_step(
         next_state_values = next_target_q.gather(1, next_actions).squeeze(1)
         targets = rewards_tensor + (1.0 - dones_tensor) * gamma * next_state_values
 
-    loss = F.smooth_l1_loss(q_values, targets)
+    rl_loss = F.smooth_l1_loss(q_values, targets)
+    total_loss = rl_loss
+    bc_loss_value = 0.0
+    if expert_dataset is not None and len(expert_dataset) > 0 and bc_weight > 0.0:
+        bc_obs, bc_actions, bc_masks = expert_dataset.sample(batch_size)
+        bc_loss = behavior_cloning_loss(policy_net, bc_obs, bc_actions, bc_masks, device)
+        total_loss = total_loss + bc_weight * bc_loss
+        bc_loss_value = float(bc_loss.item())
+
     optimizer.zero_grad()
-    loss.backward()
+    total_loss.backward()
     nn.utils.clip_grad_norm_(policy_net.parameters(), 10.0)
     optimizer.step()
-    return float(loss.item())
+    return float(total_loss.item()), float(rl_loss.item()), bc_loss_value
+
+
+def run_imitation_warm_start(
+    policy_net: DQNNetwork,
+    optimizer: torch.optim.Optimizer,
+    train_dataset: ImitationDataset,
+    holdout_dataset: ImitationDataset,
+    batch_size: int,
+    device: torch.device,
+    epochs: int = WARM_START_EPOCHS,
+) -> WarmStartStats:
+    if len(train_dataset) == 0:
+        return WarmStartStats(losses=[], holdout_accuracy=None, train_samples=0, holdout_samples=len(holdout_dataset))
+
+    losses: list[float] = []
+
+    for _ in range(epochs):
+        indices = np.random.permutation(len(train_dataset))
+        epoch_losses: list[float] = []
+        for start in range(0, len(indices), batch_size):
+            batch_indices = indices[start : start + batch_size]
+            loss = behavior_cloning_loss(
+                policy_net,
+                train_dataset.observations[batch_indices],
+                train_dataset.actions[batch_indices],
+                train_dataset.valid_masks[batch_indices],
+                device,
+            )
+            optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(policy_net.parameters(), 10.0)
+            optimizer.step()
+            epoch_losses.append(float(loss.item()))
+        losses.append(float(np.mean(epoch_losses)) if epoch_losses else 0.0)
+
+    holdout_accuracy = evaluate_imitation_accuracy(policy_net, holdout_dataset, batch_size=batch_size, device=device)
+    return WarmStartStats(
+        losses=losses,
+        holdout_accuracy=holdout_accuracy,
+        train_samples=len(train_dataset),
+        holdout_samples=len(holdout_dataset),
+    )
+
+
+def collect_bootstrap_experience(
+    args: argparse.Namespace,
+    replay_buffer: ReplayBuffer,
+    visualizer: TrainingVisualizer,
+    rng: random.Random,
+) -> tuple[list[ImitationSample], int]:
+    if args.bootstrap_episodes <= 0:
+        return [], 0
+
+    stage_schedule = bootstrap_stage_schedule(args.curriculum_monsters, args.bootstrap_episodes)
+    if not stage_schedule:
+        return [], 0
+
+    env = MazeEnvironment(
+        grid_size=args.grid_size,
+        num_monsters=stage_schedule[0][0],
+        seed=args.seed + 80_000,
+        max_steps=args.max_steps or None,
+        reward_preset=args.reward_preset,
+    )
+    heuristic_agent = HeuristicAgent()
+    recent_stats: deque[EpisodeStats] = deque(maxlen=max(1, args.log_every))
+    samples: list[ImitationSample] = []
+    total_transitions = 0
+
+    print(
+        f"[boot ] heuristic bootstrap: episodes={args.bootstrap_episodes} "
+        f"noise={args.bootstrap_noise:.1%} stages={stage_schedule}"
+    )
+    global_episode = 0
+    for stage_idx, (stage_monsters, stage_episodes) in enumerate(stage_schedule, start=1):
+        env.num_monsters = stage_monsters
+        print(
+            f"[boot ] stage={stage_idx}/{len(stage_schedule)} "
+            f"monsters={stage_monsters} episodes={stage_episodes}"
+        )
+        for _ in range(stage_episodes):
+            global_episode += 1
+            observation = env.reset_rl(seed=args.seed + 80_000 + global_episode)
+            state = env.get_state()
+            done = False
+            episode_reward = 0.0
+            episode_steps = 0
+
+            while not done:
+                mask = shielded_action_mask(state)
+                action_idx, target_action_idx = select_heuristic_action(
+                    heuristic_agent,
+                    state,
+                    mask,
+                    args.bootstrap_noise,
+                    rng,
+                )
+                action = ACTION_NAMES[action_idx]
+                samples.append(
+                    ImitationSample(
+                        observation=observation.astype(np.float32, copy=False),
+                        action_idx=target_action_idx,
+                        valid_mask=mask.astype(np.bool_, copy=False),
+                    )
+                )
+
+                next_observation, reward, done, info = env.step_rl(action)
+                next_state = info["state"]
+                replay_buffer.add(
+                    observation,
+                    action_idx,
+                    reward,
+                    next_observation,
+                    done,
+                    shielded_action_mask(next_state),
+                )
+                observation = next_observation
+                state = next_state
+                episode_reward += reward
+                episode_steps += 1
+                total_transitions += 1
+
+            recent_stats.append(
+                EpisodeStats(
+                    reward=episode_reward,
+                    steps=episode_steps,
+                    won=state["game_state"].value == "won",
+                    truncated=info["truncated"],
+                    loss=0.0,
+                )
+            )
+            avg_reward = float(np.mean([item.reward for item in recent_stats]))
+            avg_steps = float(np.mean([item.steps for item in recent_stats]))
+            win_rate = float(np.mean([1.0 if item.won else 0.0 for item in recent_stats]))
+            visualizer.record_bootstrap_episode(
+                episode=global_episode,
+                reward=episode_reward,
+                avg_reward=avg_reward,
+                win_rate=win_rate,
+                avg_steps=avg_steps,
+                train_monsters=stage_monsters,
+                reward_preset=args.reward_preset,
+                encoder=args.encoder,
+                bootstrap_phase="collect",
+            )
+            if global_episode % args.log_every == 0 or global_episode == 1:
+                print(
+                    f"[boot ] episode={global_episode:4d}/{args.bootstrap_episodes} "
+                    f"reward={episode_reward:7.2f} avg_reward={avg_reward:7.2f} "
+                    f"win_rate={win_rate:5.2%} avg_steps={avg_steps:6.1f} "
+                    f"train_monsters={stage_monsters}"
+                )
+
+    return samples, total_transitions
 
 
 def top_q_values(q_values: np.ndarray, valid_mask_np: np.ndarray, top_k: int = 4) -> list[tuple[str, float]]:
@@ -417,15 +869,18 @@ def evaluate_policy(
     args: argparse.Namespace,
     input_dim: int,
     device: torch.device,
+    num_monsters: int | None = None,
     viewer: TrainingGameViewer | None = None,
 ) -> dict[str, float]:
     del input_dim
     policy_net.eval()
+    eval_monsters = args.num_monsters if num_monsters is None else int(num_monsters)
     eval_env = MazeEnvironment(
         grid_size=args.grid_size,
-        num_monsters=args.num_monsters,
+        num_monsters=eval_monsters,
         seed=args.seed + 10_000,
         max_steps=args.max_steps or None,
+        reward_preset=args.reward_preset,
     )
 
     rewards: list[float] = []
@@ -441,7 +896,7 @@ def evaluate_policy(
         episode_steps = 0
 
         while not done:
-            mask = valid_action_mask(state)
+            mask = shielded_action_mask(state)
             action_idx, q_values = select_action(policy_net, observation, mask, 0.0, device, random.Random(episode))
             action = ACTION_NAMES[action_idx]
             observation, reward, done, info = eval_env.step_rl(action)
@@ -480,6 +935,32 @@ def evaluate_policy(
     }
 
 
+def record_evaluation(
+    visualizer: TrainingVisualizer,
+    episode: int,
+    total_episodes: int,
+    metrics: dict[str, float],
+    reward_preset: str,
+    encoder: str,
+    eval_scope: str,
+    eval_monsters: int,
+) -> None:
+    print(
+        f"[{eval_scope}] episode={episode:4d}/{total_episodes} "
+        f"monsters={eval_monsters} avg_reward={metrics['avg_reward']:7.2f} "
+        f"win_rate={metrics['win_rate']:5.2%} avg_steps={metrics['avg_steps']:6.1f} "
+        f"truncation_rate={metrics['truncation_rate']:5.2%}"
+    )
+    visualizer.record_eval(
+        episode,
+        metrics,
+        reward_preset=reward_preset,
+        encoder=encoder,
+        eval_scope=eval_scope,
+        eval_monsters=eval_monsters,
+    )
+
+
 def save_checkpoint(
     path: Path,
     policy_net: DQNNetwork,
@@ -490,27 +971,52 @@ def save_checkpoint(
     best_metrics: dict[str, float] | None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_env = MazeEnvironment(
+        grid_size=args.grid_size,
+        num_monsters=args.num_monsters,
+        seed=args.seed,
+        max_steps=args.max_steps or None,
+        reward_preset=args.reward_preset,
+    )
     checkpoint = {
         "model_state": policy_net.state_dict(),
         "optimizer_state": optimizer.state_dict(),
-        "input_dim": next(policy_net.parameters()).shape[1],
+        "input_dim": policy_net.input_dim,
         "action_names": ACTION_NAMES,
         "hidden_dims": tuple(args.hidden_dims),
+        "encoder_type": policy_net.encoder_type,
+        "grid_size": args.grid_size,
+        "spatial_channels": getattr(policy_net, "spatial_channels", 8),
+        "scalar_dim": getattr(policy_net, "scalar_dim", 7),
         "model_version": MODEL_VERSION,
         "metadata": {
             "algorithm": "DQN",
             "grid_size": args.grid_size,
             "num_monsters": args.num_monsters,
+            "max_steps": checkpoint_env.max_steps,
             "seed": args.seed,
+            "random_episode_fraction": args.random_episode_fraction,
+            "reward_preset": args.reward_preset,
+            "encoder_type": policy_net.encoder_type,
+            "spatial_channels": getattr(policy_net, "spatial_channels", 8),
+            "scalar_dim": getattr(policy_net, "scalar_dim", 7),
+            "curriculum_monsters": list(args.curriculum_monsters),
+            "curriculum_boundaries": list(args.curriculum_boundaries),
+            "bootstrap_episodes": args.bootstrap_episodes,
+            "bootstrap_noise": args.bootstrap_noise,
+            "warm_start_epochs": WARM_START_EPOCHS,
+            "bootstrap_holdout_fraction": BOOTSTRAP_HOLDOUT_FRACTION,
+            "expert_guidance_episodes": EXPERT_GUIDANCE_EPISODES,
+            "expert_rollout_start_prob": EXPERT_ROLLOUT_START_PROB,
+            "bc_loss_start_weight": BC_LOSS_START_WEIGHT,
+            "converge_win_rate": args.converge_win_rate,
+            "converge_truncation_rate": args.converge_truncation_rate,
+            "converge_consecutive_evals": args.converge_consecutive_evals,
+            "stop_on_converge": args.stop_on_converge,
             "episode": episode,
             "global_step": global_step,
             "best_metrics": best_metrics or {},
-            "reward_config": MazeEnvironment(
-                grid_size=args.grid_size,
-                num_monsters=args.num_monsters,
-                seed=args.seed,
-                max_steps=args.max_steps or None,
-            ).reward_config,
+            "reward_config": checkpoint_env.reward_config,
         },
     }
     torch.save(checkpoint, path)
@@ -523,20 +1029,36 @@ def train(args: argparse.Namespace) -> Path:
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
+    curriculum_monsters, curriculum_boundaries = normalize_curriculum(args)
+    args.curriculum_monsters = curriculum_monsters
+    args.curriculum_boundaries = curriculum_boundaries
 
     env = MazeEnvironment(
         grid_size=args.grid_size,
-        num_monsters=args.num_monsters,
+        num_monsters=curriculum_monsters[0],
         seed=args.seed,
         max_steps=args.max_steps or None,
+        reward_preset=args.reward_preset,
     )
     initial_obs = env.reset_rl(seed=args.seed)
     input_dim = int(initial_obs.shape[0])
     output_dim = len(ACTION_NAMES)
     hidden_dims = tuple(args.hidden_dims)
 
-    policy_net = DQNNetwork(input_dim, output_dim, hidden_dims=hidden_dims).to(device)
-    target_net = DQNNetwork(input_dim, output_dim, hidden_dims=hidden_dims).to(device)
+    policy_net = DQNNetwork(
+        input_dim,
+        output_dim,
+        hidden_dims=hidden_dims,
+        encoder_type=args.encoder,
+        grid_size=args.grid_size,
+    ).to(device)
+    target_net = DQNNetwork(
+        input_dim,
+        output_dim,
+        hidden_dims=hidden_dims,
+        encoder_type=args.encoder,
+        grid_size=args.grid_size,
+    ).to(device)
     target_net.load_state_dict(policy_net.state_dict())
     target_net.eval()
 
@@ -564,32 +1086,171 @@ def train(args: argparse.Namespace) -> Path:
         print("[game ] live game window enabled")
     else:
         print("[game ] live game window disabled")
+    print(
+        f"[train] encoder={args.encoder} reward_preset={args.reward_preset} "
+        f"curriculum={curriculum_monsters} boundaries={curriculum_boundaries}"
+    )
 
     global_step = 0
+    policy_step = 0
+    optimize_step_count = 0
     best_score = float("-inf")
     best_metrics: dict[str, float] | None = None
     recent_stats: deque[EpisodeStats] = deque(maxlen=max(1, args.log_every))
+    expert_agent = HeuristicAgent()
+    consecutive_converged_evals = 0
+    bootstrap_samples, bootstrap_steps = collect_bootstrap_experience(
+        args,
+        replay_buffer,
+        visualizer,
+        rng,
+    )
+    global_step = bootstrap_steps
+    expert_train_dataset, expert_holdout_dataset = split_imitation_samples(
+        bootstrap_samples,
+        holdout_fraction=BOOTSTRAP_HOLDOUT_FRACTION,
+        seed=args.seed,
+    )
+    warm_start_stats = run_imitation_warm_start(
+        policy_net,
+        optimizer,
+        expert_train_dataset,
+        expert_holdout_dataset,
+        batch_size=args.batch_size,
+        device=device,
+    )
+    if warm_start_stats.losses:
+        print("[boot ] imitation warm start losses=" + ", ".join(f"{loss:.4f}" for loss in warm_start_stats.losses))
+        if warm_start_stats.holdout_accuracy is not None:
+            print(
+                f"[boot ] holdout accuracy={warm_start_stats.holdout_accuracy:5.2%} "
+                f"train_samples={warm_start_stats.train_samples} holdout_samples={warm_start_stats.holdout_samples}"
+            )
+        target_net.load_state_dict(policy_net.state_dict())
+
+        stage_monsters = curriculum_monsters[0]
+        stage_metrics = evaluate_policy(
+            policy_net,
+            args,
+            input_dim,
+            device,
+            num_monsters=stage_monsters,
+            viewer=None,
+        )
+        record_evaluation(
+            visualizer,
+            episode=0,
+            total_episodes=args.episodes,
+            metrics=stage_metrics,
+            reward_preset=args.reward_preset,
+            encoder=args.encoder,
+            eval_scope="eval_stage",
+            eval_monsters=stage_monsters,
+        )
+        if stage_monsters == args.num_monsters:
+            final_metrics = dict(stage_metrics)
+        else:
+            final_metrics = evaluate_policy(
+                policy_net,
+                args,
+                input_dim,
+                device,
+                num_monsters=args.num_monsters,
+                viewer=game_viewer if args.show_game else None,
+            )
+        record_evaluation(
+            visualizer,
+            episode=0,
+            total_episodes=args.episodes,
+            metrics=final_metrics,
+            reward_preset=args.reward_preset,
+            encoder=args.encoder,
+            eval_scope="eval_final",
+            eval_monsters=args.num_monsters,
+        )
+        initial_score = final_metrics["win_rate"] * 100.0 + final_metrics["avg_reward"]
+        best_score = initial_score
+        best_metrics = final_metrics
+        save_checkpoint(save_path, policy_net, optimizer, args, global_step, 0, best_metrics)
+        consecutive_converged_evals = 1 if reached_convergence(final_metrics, args) else 0
+        print(f"[save ] bootstrap checkpoint -> {save_path}")
+    random_episode_fraction = min(1.0, max(0.0, args.random_episode_fraction))
+    random_episodes = min(
+        args.episodes,
+        max(1 if args.episodes > 0 and random_episode_fraction > 0 else 0, int(args.episodes * random_episode_fraction)),
+    )
+    if random_episodes > 0:
+        print(
+            f"[train] random collection phase: first {random_episodes}/{args.episodes} episodes "
+            f"({random_episode_fraction:.0%}) run with purely random actions"
+        )
+    else:
+        print("[train] random collection phase disabled")
 
     for episode in range(1, args.episodes + 1):
+        train_monsters = curriculum_monsters_for_episode(episode, curriculum_monsters, curriculum_boundaries)
+        env.num_monsters = train_monsters
         observation = env.reset_rl(seed=args.seed + episode)
         state = env.get_state()
         done = False
         episode_reward = 0.0
         episode_steps = 0
         losses: list[float] = []
+        in_random_phase = episode <= random_episodes
+        expert_rollout_prob = 0.0 if in_random_phase else linear_schedule_by_episode(
+            episode,
+            EXPERT_GUIDANCE_EPISODES,
+            EXPERT_ROLLOUT_START_PROB,
+            0.0,
+        )
+        bc_weight = 0.0 if in_random_phase else linear_schedule_by_episode(
+            episode,
+            EXPERT_GUIDANCE_EPISODES,
+            BC_LOSS_START_WEIGHT,
+            0.0,
+        )
 
         while not done:
-            epsilon = epsilon_by_step(global_step, args.epsilon_start, args.epsilon_end, args.epsilon_decay)
-            mask = valid_action_mask(state)
-            action_idx, q_values = select_action(policy_net, observation, mask, epsilon, device, rng)
+            epsilon = 1.0 if in_random_phase else epsilon_by_step(
+                policy_step, args.epsilon_start, args.epsilon_end, args.epsilon_decay
+            )
+            mask = shielded_action_mask(state)
+            policy_action_idx, q_values = select_action(
+                policy_net,
+                observation,
+                mask,
+                1.0 if in_random_phase else epsilon,
+                device,
+                rng,
+            )
+            action_idx = policy_action_idx
+            if expert_rollout_prob > 0.0 and rng.random() < expert_rollout_prob:
+                action_idx, _ = select_heuristic_action(
+                    expert_agent,
+                    state,
+                    mask,
+                    0.0,
+                    rng,
+                )
             action = ACTION_NAMES[action_idx]
 
             next_observation, reward, done, info = env.step_rl(action)
             next_state = info["state"]
-            replay_buffer.add(observation, action_idx, reward, next_observation, done, info["valid_action_mask"])
+            replay_buffer.add(
+                observation,
+                action_idx,
+                reward,
+                next_observation,
+                done,
+                shielded_action_mask(next_state),
+            )
 
-            if len(replay_buffer) >= max(args.batch_size, args.warmup_steps) and global_step % args.train_frequency == 0:
-                loss_value = optimize_step(
+            if (
+                not in_random_phase
+                and len(replay_buffer) >= max(args.batch_size, args.warmup_steps)
+                and global_step % args.train_frequency == 0
+            ):
+                loss_value, _, _ = optimize_step(
                     policy_net,
                     target_net,
                     optimizer,
@@ -597,10 +1258,13 @@ def train(args: argparse.Namespace) -> Path:
                     args.batch_size,
                     args.gamma,
                     device,
+                    expert_dataset=expert_train_dataset if len(expert_train_dataset) > 0 else None,
+                    bc_weight=bc_weight,
                 )
                 losses.append(loss_value)
+                optimize_step_count += 1
 
-            if global_step > 0 and global_step % args.target_update == 0:
+            if optimize_step_count > 0 and optimize_step_count % args.target_update == 0:
                 target_net.load_state_dict(policy_net.state_dict())
 
             observation = next_observation
@@ -608,6 +1272,8 @@ def train(args: argparse.Namespace) -> Path:
             episode_reward += reward
             episode_steps += 1
             global_step += 1
+            if not in_random_phase:
+                policy_step += 1
 
             if args.show_game and (episode_steps % max(1, args.game_refresh_steps) == 0 or done):
                 game_viewer.update(
@@ -646,6 +1312,10 @@ def train(args: argparse.Namespace) -> Path:
             avg_steps=avg_steps,
             loss=avg_loss,
             epsilon=epsilon,
+            train_monsters=train_monsters,
+            reward_preset=args.reward_preset,
+            encoder=args.encoder,
+            bootstrap_phase="off",
         )
 
         if episode % args.log_every == 0 or episode == 1:
@@ -653,30 +1323,114 @@ def train(args: argparse.Namespace) -> Path:
                 f"[train] episode={episode:4d}/{args.episodes} "
                 f"reward={episode_reward:7.2f} avg_reward={avg_reward:7.2f} "
                 f"win_rate={win_rate:5.2%} avg_steps={avg_steps:6.1f} "
-                f"epsilon={epsilon:5.3f} loss={avg_loss:7.4f}"
+                f"epsilon={epsilon:5.3f} loss={avg_loss:7.4f} "
+                f"phase={'random' if in_random_phase else 'learn'} "
+                f"train_monsters={train_monsters} "
+                f"expert_rollout={expert_rollout_prob:4.2f} bc_weight={bc_weight:4.2f}"
             )
 
-        if episode % args.eval_every == 0 or episode == args.episodes:
-            metrics = evaluate_policy(policy_net, args, input_dim, device, viewer=game_viewer if args.show_game else None)
-            score = metrics["win_rate"] * 100.0 + metrics["avg_reward"]
-            print(
-                f"[eval ] episode={episode:4d}/{args.episodes} "
-                f"avg_reward={metrics['avg_reward']:7.2f} "
-                f"win_rate={metrics['win_rate']:5.2%} "
-                f"avg_steps={metrics['avg_steps']:6.1f} "
-                f"truncation_rate={metrics['truncation_rate']:5.2%}"
+        if (not in_random_phase and episode % args.eval_every == 0) or episode == args.episodes:
+            stage_metrics = evaluate_policy(
+                policy_net,
+                args,
+                input_dim,
+                device,
+                num_monsters=train_monsters,
+                viewer=None,
             )
-            visualizer.record_eval(episode, metrics)
+            record_evaluation(
+                visualizer,
+                episode=episode,
+                total_episodes=args.episodes,
+                metrics=stage_metrics,
+                reward_preset=args.reward_preset,
+                encoder=args.encoder,
+                eval_scope="eval_stage",
+                eval_monsters=train_monsters,
+            )
+
+            if train_monsters == args.num_monsters:
+                final_metrics = dict(stage_metrics)
+            else:
+                final_metrics = evaluate_policy(
+                    policy_net,
+                    args,
+                    input_dim,
+                    device,
+                    num_monsters=args.num_monsters,
+                    viewer=game_viewer if args.show_game else None,
+                )
+            record_evaluation(
+                visualizer,
+                episode=episode,
+                total_episodes=args.episodes,
+                metrics=final_metrics,
+                reward_preset=args.reward_preset,
+                encoder=args.encoder,
+                eval_scope="eval_final",
+                eval_monsters=args.num_monsters,
+            )
+
+            score = final_metrics["win_rate"] * 100.0 + final_metrics["avg_reward"]
             if score > best_score:
                 best_score = score
-                best_metrics = metrics
+                best_metrics = final_metrics
                 save_checkpoint(save_path, policy_net, optimizer, args, global_step, episode, best_metrics)
                 print(f"[save ] new best checkpoint -> {save_path}")
+            if reached_convergence(final_metrics, args):
+                consecutive_converged_evals += 1
+                print(
+                    f"[stop ] convergence counter="
+                    f"{consecutive_converged_evals}/{args.converge_consecutive_evals}"
+                )
+            else:
+                consecutive_converged_evals = 0
+            if args.stop_on_converge and consecutive_converged_evals >= args.converge_consecutive_evals:
+                print("[stop ] convergence reached on eval_final, stopping early")
+                break
 
     if best_metrics is None:
-        best_metrics = evaluate_policy(policy_net, args, input_dim, device, viewer=game_viewer if args.show_game else None)
+        stage_monsters = curriculum_monsters_for_episode(max(1, args.episodes), curriculum_monsters, curriculum_boundaries)
+        stage_metrics = evaluate_policy(
+            policy_net,
+            args,
+            input_dim,
+            device,
+            num_monsters=stage_monsters,
+            viewer=None,
+        )
+        record_evaluation(
+            visualizer,
+            episode=args.episodes,
+            total_episodes=args.episodes,
+            metrics=stage_metrics,
+            reward_preset=args.reward_preset,
+            encoder=args.encoder,
+            eval_scope="eval_stage",
+            eval_monsters=stage_monsters,
+        )
+        if stage_monsters == args.num_monsters:
+            best_metrics = dict(stage_metrics)
+        else:
+            best_metrics = evaluate_policy(
+                policy_net,
+                args,
+                input_dim,
+                device,
+                num_monsters=args.num_monsters,
+                viewer=game_viewer if args.show_game else None,
+            )
+        record_evaluation(
+            visualizer,
+            episode=args.episodes,
+            total_episodes=args.episodes,
+            metrics=best_metrics,
+            reward_preset=args.reward_preset,
+            encoder=args.encoder,
+            eval_scope="eval_final",
+            eval_monsters=args.num_monsters,
+        )
         save_checkpoint(save_path, policy_net, optimizer, args, global_step, args.episodes, best_metrics)
-        visualizer.record_eval(args.episodes, best_metrics)
     game_viewer.close()
     visualizer.close()
     return save_path
@@ -684,7 +1438,9 @@ def train(args: argparse.Namespace) -> Path:
 
 def main() -> None:
     parser = build_parser()
-    args = parser.parse_args()
+    parser.parse_args()
+    args = build_fixed_args()
+    print(f"[cfg  ] fixed configuration -> {FIXED_TRAINING_SUMMARY}")
     checkpoint_path = train(args)
     print(f"[done ] best model saved to {checkpoint_path}")
 

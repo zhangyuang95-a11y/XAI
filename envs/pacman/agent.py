@@ -15,7 +15,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from environment import (
+from .environment import (
     ACTION_NAMES,
     ACTION_TO_INDEX,
     DIRECTIONS,
@@ -333,6 +333,7 @@ class RLAgent:
         self.metadata.setdefault("encoder_type", self.encoder_type)
         self.metadata.setdefault("spatial_channels", self.spatial_channels)
         self.metadata.setdefault("scalar_dim", self.scalar_dim)
+        self.metadata.setdefault("model_version", checkpoint.get("model_version", MODEL_VERSION))
         if self.grid_size is not None:
             self.metadata.setdefault("grid_size", self.grid_size)
 
@@ -379,6 +380,17 @@ class RLAgent:
 
     def get_action_risks(self, state: dict) -> dict[str, float]:
         return estimate_action_risks(state, danger_radius=self.danger_radius)
+
+    def score_action_values(self, state: dict) -> dict[str, float]:
+        observation = encode_state_vector(state, danger_radius=self.danger_radius)
+        q_values = self._predict_q_values(observation)
+        valid_mask_np = shielded_action_mask(state, minimum_monster_distance=self.safety_min_distance)
+        masked = np.where(valid_mask_np, q_values, -1e9)
+        return {
+            action_name: float(score)
+            for action_name, score in zip(self.action_names, masked)
+            if score > -1e8
+        }
 
     def get_reasoning(self, state: dict, chosen_action: str) -> str:
         del state, chosen_action

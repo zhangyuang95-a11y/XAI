@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import tkinter as tk
 
-from environment import WALL, manhattan_distance
+from .environment import WALL, manhattan_distance
 
 APP_BG = "#07111d"
 PANEL_BG = "#0f1b2d"

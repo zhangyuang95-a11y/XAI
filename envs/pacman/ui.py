@@ -9,11 +9,15 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import scrolledtext
 
-from agent import RLAgent
-from environment import GameState, MazeEnvironment, WALL, manhattan_distance
-from evidence_recorder import EvidenceRecorder
-from explanation_engine import ExplanationEngine
-from question_parser import ParsedQuestion, QuestionIntent, QuestionParser
+from .agent import RLAgent
+from .environment import GameState, MazeEnvironment, WALL, manhattan_distance
+from .evidence_recorder import EvidenceRecorder
+from .explanation_engine import (
+    ExplanationEngine,
+    SYMBOLIC_MATCH_VALIDATION_KEY,
+    SYMBOLIC_SUPPORT_VALIDATION_KEY,
+)
+from .question_parser import ParsedQuestion, QuestionIntent, QuestionParser
 
 
 APP_BG = "#07111d"
@@ -71,6 +75,8 @@ VALIDATION_HELP = {
     "x = R_u(E, Q)": "The answer matches the rendering function. / 最终回答等于渲染函数输出。",
     "Readable_u(x)": "The answer is readable for the user. / 回答对用户是可读的。",
     "Explain_u(Q, t, x)": "The final explanation definition holds. / 最终 explanation 定义成立。",
+    SYMBOLIC_SUPPORT_VALIDATION_KEY: "The symbolic surrogate supports the chosen action. / 符号代理支持当前动作。",
+    SYMBOLIC_MATCH_VALIDATION_KEY: "The symbolic surrogate matches the neural policy at this step. / 符号代理在这一帧与神经策略一致。",
 }
 
 GUIDE_TEXT = (
@@ -87,6 +93,9 @@ GUIDE_TEXT = (
     "S_t: all evidence at time t.  E: evidence actually used.  x: final natural-language answer.\n"
     "T / F / C: True, Faithful, Contrastive. / 真、忠实、可对比。"
 )
+
+
+INTENT_LABELS[QuestionIntent.POLICY_SUMMARY] = "Policy summary / 整体策略"
 
 
 class MazeGameUI:
@@ -113,11 +122,12 @@ class MazeGameUI:
         self.cell_size = max(20, min(34, 760 // self.env.grid_size))
         self.question_log_path = Path("artifacts/user_question_log.jsonl")
         self.question_log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.show_technical_details = False
 
         self.root.title("Pac-Man XAI Demo")
         self.root.configure(bg=APP_BG)
-        self.root.geometry("1460x940")
-        self.root.minsize(1180, 780)
+        self.root.geometry("1880x940")
+        self.root.minsize(1450, 780)
 
         self._build_layout()
         self._render()
@@ -131,8 +141,12 @@ class MazeGameUI:
         self.left_panel = tk.Frame(self.main, bg=APP_BG)
         self.left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 14))
 
+        self.diagnostics_shell = tk.Frame(self.main, bg=APP_BG, width=430)
+        self.diagnostics_shell.pack(side=tk.RIGHT, fill=tk.BOTH, expand=False)
+        self.diagnostics_shell.pack_propagate(False)
+
         self.right_shell = tk.Frame(self.main, bg=APP_BG)
-        self.right_shell.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self.right_shell.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(0, 14))
 
         self.right_canvas = tk.Canvas(
             self.right_shell,
@@ -205,6 +219,7 @@ class MazeGameUI:
         self.legend_label.pack(fill=tk.X, pady=(10, 0))
 
         self._build_right_panel()
+        self._build_diagnostics_panel()
 
     def _build_right_panel(self) -> None:
         hero = tk.Frame(self.right_panel, bg=PANEL_BG, padx=14, pady=14)
@@ -254,6 +269,54 @@ class MazeGameUI:
         explanation_outer.pack(fill=tk.BOTH, expand=True)
         self.explanation_card = explanation_outer.content
         self._build_explanation_box(self.explanation_card)
+
+    def _build_diagnostics_panel(self) -> None:
+        outer = tk.Frame(self.diagnostics_shell, bg=CARD_ACCENT, padx=1, pady=1)
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        inner = tk.Frame(outer, bg=CARD_BG, padx=12, pady=12)
+        inner.pack(fill=tk.BOTH, expand=True)
+
+        title = tk.Label(
+            inner,
+            text="Evidence & Metrics / Evidence and Metrics",
+            bg=CARD_BG,
+            fg=TEXT_MAIN,
+            font=("Segoe UI Semibold", 13),
+            anchor="w",
+        )
+        title.pack(fill=tk.X, pady=(0, 4))
+
+        subtitle = tk.Label(
+            inner,
+            text="All evidence, selected evidence, parser grounding, validation, and symbolic diagnostics.",
+            bg=CARD_BG,
+            fg=TEXT_MUTED,
+            font=("Segoe UI", 9),
+            justify=tk.LEFT,
+            anchor="w",
+            wraplength=390,
+        )
+        subtitle.pack(fill=tk.X, pady=(0, 8))
+
+        self.metrics_text = scrolledtext.ScrolledText(
+            inner,
+            wrap=tk.WORD,
+            font=("Consolas", 9),
+            bg="#06101d",
+            fg=TEXT_MAIN,
+            insertbackground=TEXT_MAIN,
+            relief=tk.FLAT,
+            bd=0,
+            height=20,
+        )
+        self.metrics_text.pack(fill=tk.BOTH, expand=True)
+        self.metrics_text.config(state=tk.NORMAL)
+        self.metrics_text.insert(
+            tk.END,
+            "Ask a question after at least one game step to inspect evidence and metrics here.\n",
+        )
+        self.metrics_text.config(state=tk.DISABLED)
 
     def _make_card(self, title: str) -> tk.Frame:
         outer = tk.Frame(self.right_panel, bg=CARD_ACCENT, padx=1, pady=1)
@@ -892,7 +955,7 @@ class MazeGameUI:
         action = self.agent.choose_action(state)
         self.last_action = action
         next_state = self.env.step(action)
-        self.recorder.record(next_state, self.agent, action)
+        self.recorder.record(state, self.agent, action)
         self._render()
         self._update_status()
 
@@ -936,6 +999,7 @@ class MazeGameUI:
         self.last_action = "RIGHT"
         self.recorder.clear()
         self._clear_explanation()
+        self._clear_diagnostics()
         self._render()
         self._update_status()
         self._sync_controls()
@@ -963,6 +1027,8 @@ class MazeGameUI:
 
         latest = self.recorder.get_latest()
         if latest is None:
+            self._clear_diagnostics()
+            self._append_diagnostics("No evidence yet. Take at least one step before asking a question.\n")
             self._append_explanation(
                 "No evidence yet. Take at least one step before asking a question.\n还没有可用证据，请先至少走一步再提问。\n"
             )
@@ -1001,11 +1067,17 @@ class MazeGameUI:
         secondary_result: dict | None,
     ) -> None:
         self._clear_explanation()
+        self._clear_diagnostics()
         self._append_explanation("Question / 提问\n")
         self._append_explanation(f"{question_text}\n\n")
+        self._append_explanation(
+            f"Intent / 类型: {INTENT_LABELS.get(parsed.intent, parsed.intent.value)}\n"
+            f"Confidence / 置信度: {parsed.confidence:.3f}\n"
+            f"Backend / 解析后端: {self.parser.backend}\n"
+            f"Question Log / 提问日志: {self.question_log_path}\n"
+        )
 
-        self._append_explanation("Answer / 回答\n")
-        self._append_explanation(f"{'-' * 56}\n")
+        self._append_explanation(f"\nShort Answer / 简明回答\n{'-' * 56}\n")
         self._append_explanation(
             f"{self._answer_language_title(primary_result['language'])}\n{primary_result['explanation_text']['text']}\n"
         )
@@ -1015,19 +1087,63 @@ class MazeGameUI:
                 f"{secondary_result['explanation_text']['text']}\n"
             )
 
-        self._append_explanation("\nParsed Question / 问题解析\n")
-        self._append_explanation(f"{'-' * 56}\n")
+        self._render_diagnostics_output(question_text, parsed, primary_result, secondary_result)
+
+        if not self.show_technical_details:
+            return
+
+        symbolic_rule = primary_result.get("symbolic_rule", {})
+        symbolic_trace = primary_result.get("symbolic_trace", {})
+        policy_summary = primary_result.get("policy_summary", {})
+
+        self._append_explanation(f"\nSymbolic Rule / 符号规则\n{'-' * 56}\n")
+        self._append_explanation(f"symbolic_match = {primary_result.get('symbolic_match')}\n")
+        if symbolic_rule.get("fallback_used"):
+            self._append_explanation("fallback_used = True\n")
+        if symbolic_rule.get("text"):
+            self._append_explanation(f"{symbolic_rule['text']}\n")
+        if symbolic_rule.get("python"):
+            self._append_explanation("\n```python\n")
+            self._append_explanation(f"{symbolic_rule['python']}\n")
+            self._append_explanation("```\n")
+
+        self._append_explanation(f"\nDecision Trace / 决策轨迹\n{'-' * 56}\n")
+        for item in symbolic_trace.get("trace", []):
+            self._append_explanation(
+                f"- {item['condition']} | {item.get('description', '')} | sources={', '.join(item.get('source', []))}\n"
+            )
+        if symbolic_trace.get("approximate_trace"):
+            self._append_explanation("\nApproximate Symbolic Trace / 近似符号轨迹\n")
+            for item in symbolic_trace.get("approximate_trace", []):
+                self._append_explanation(
+                    f"- {item['condition']} | {item.get('description', '')} | sources={', '.join(item.get('source', []))}\n"
+                )
+
+        self._append_explanation(f"\nHuman-Readable Explanation / 人类可读解释\n{'-' * 56}\n")
         self._append_explanation(
-            f"Intent / 类型: {INTENT_LABELS.get(parsed.intent, parsed.intent.value)}\n"
-            f"Confidence / 置信度: {parsed.confidence:.3f}  (0-1, higher means more certain / 越高表示解析越确定)\n"
-            f"Backend / 解析后端: {self.parser.backend}\n"
-            f"Question Log / 提问日志: {self.question_log_path}\n"
+            f"{self._answer_language_title(primary_result['language'])}\n{primary_result['explanation_text']['text']}\n"
         )
+        if secondary_result is not None:
+            self._append_explanation(
+                f"\n{self._answer_language_title(secondary_result['language'])}\n"
+                f"{secondary_result['explanation_text']['text']}\n"
+            )
+
+        self._append_explanation(f"\nGlobal Policy Summary / 全局策略摘要\n{'-' * 56}\n")
+        for bullet in policy_summary.get("bullets", []):
+            self._append_explanation(f"- {bullet}\n")
+        if policy_summary.get("python_snippet"):
+            self._append_explanation("\n```python\n")
+            self._append_explanation(f"{policy_summary['python_snippet']}\n")
+            self._append_explanation("```\n")
 
         layer2 = primary_result["evidence_used"]
         self._append_explanation(f"\nEvidence Used / 实际使用证据\n{'-' * 56}\n")
         for factor in layer2["factors"]:
-            self._append_explanation(f"- {factor['name']}: {factor['description']}\n")
+            self._append_explanation(f"- {factor['name']}: {factor['description']}")
+            if factor.get("sources"):
+                self._append_explanation(f" [sources: {', '.join(factor['sources'])}]")
+            self._append_explanation("\n")
 
         self._append_explanation(f"\nValidation / 形式化验证\n{'-' * 56}\n")
         for key, value in primary_result["validation"].items():
@@ -1047,10 +1163,183 @@ class MazeGameUI:
                     "C" if factor["is_contrastive"] else "-",
                 ]
             )
-            self._append_explanation(f"[{marks}] {factor['name']}: {factor['description']}\n")
+            self._append_explanation(f"[{marks}] {factor['name']}: {factor['description']}")
+            if factor.get("sources"):
+                self._append_explanation(f" [sources: {', '.join(factor['sources'])}]")
+            self._append_explanation("\n")
+
+    def _render_diagnostics_output(
+        self,
+        question_text: str,
+        parsed: ParsedQuestion,
+        primary_result: dict,
+        secondary_result: dict | None,
+    ) -> None:
+        latest = self.recorder.get_latest()
+        validation = primary_result.get("validation", {})
+        symbolic_rule = primary_result.get("symbolic_rule", {})
+        symbolic_trace = primary_result.get("symbolic_trace", {})
+        policy_summary = primary_result.get("policy_summary", {})
+        metrics = primary_result.get("distillation_metrics", {}) or {}
+        all_factors = primary_result.get("all_evidence", {}).get("factors", [])
+        used_factors = primary_result.get("evidence_used", {}).get("factors", [])
+        semantic_frame = getattr(parsed, "semantic_frame", {}) or {}
+
+        self._append_diagnostics("QUESTION PARSE\n")
+        self._append_diagnostics("-" * 54 + "\n")
+        self._append_diagnostics(f"question: {question_text}\n")
+        self._append_diagnostics(f"intent: {parsed.intent.value}\n")
+        self._append_diagnostics(f"mentioned_action: {parsed.mentioned_action or 'none'}\n")
+        self._append_diagnostics(f"language: {parsed.language}\n")
+        self._append_diagnostics(f"confidence: {parsed.confidence:.3f}\n")
+        self._append_diagnostics(f"backend: {self.parser.backend}\n")
+        self._append_diagnostics(f"grounded: {getattr(parsed, 'grounded', True)}\n")
+        reason = getattr(parsed, "relevance_reason", "")
+        if reason:
+            self._append_diagnostics(f"relevance_reason: {reason}\n")
+        if semantic_frame:
+            self._append_diagnostics("semantic_frame:\n")
+            self._append_diagnostics(json.dumps(semantic_frame, ensure_ascii=False, indent=2, default=str) + "\n")
+
+        self._append_diagnostics("\nCURRENT STATE METRICS\n")
+        self._append_diagnostics("-" * 54 + "\n")
+        if latest is None:
+            self._append_diagnostics("No latest evidence record is available.\n")
+        else:
+            risks = dict(latest.collision_risks)
+            self._append_diagnostics(f"step: {latest.step}\n")
+            self._append_diagnostics(f"player_pos: {latest.player_pos}\n")
+            self._append_diagnostics(f"chosen_action: {latest.chosen_action}\n")
+            self._append_diagnostics(f"available_actions: {', '.join(latest.available_actions)}\n")
+            self._append_diagnostics(f"collision_risks: {self._format_metrics_dict(risks, percent=True)}\n")
+            self._append_diagnostics(f"has_safer_alternative: {latest.has_safer_alternative}\n")
+            self._append_diagnostics(
+                "nearest_monster: "
+                f"id={latest.nearest_monster_id}, "
+                f"direction={latest.nearest_monster_direction}, "
+                f"distance={latest.nearest_monster_distance}\n"
+            )
+            self._append_diagnostics(
+                f"dots: remaining={latest.dots_remaining}, "
+                f"collected={latest.dots_collected}, "
+                f"total={latest.total_dots}, "
+                f"nearest_direction={latest.nearest_dot_direction}, "
+                f"nearest_distance={latest.nearest_dot_distance}\n"
+            )
+            self._append_diagnostics(
+                f"exit: open={latest.exit_open}, "
+                f"direction={latest.exit_direction}, "
+                f"distance={latest.exit_distance}, "
+                f"pos={latest.exit_pos}\n"
+            )
+            if latest.reasoning:
+                self._append_diagnostics(f"agent_reasoning: {latest.reasoning}\n")
+
+        self._append_diagnostics("\nEXPLANATION STATUS\n")
+        self._append_diagnostics("-" * 54 + "\n")
+        self._append_diagnostics(f"answer_language: {primary_result.get('language')}\n")
+        self._append_diagnostics(f"symbolic_match: {primary_result.get('symbolic_match')}\n")
+        self._append_diagnostics(f"symbolic_support: {validation.get(SYMBOLIC_SUPPORT_VALIDATION_KEY)}\n")
+        self._append_diagnostics(f"fallback_used: {symbolic_rule.get('fallback_used', False)}\n")
+        if secondary_result is not None:
+            self._append_diagnostics(f"secondary_language: {secondary_result.get('language')}\n")
+        if metrics:
+            self._append_diagnostics("distillation_metrics:\n")
+            for key, value in sorted(metrics.items()):
+                self._append_diagnostics(f"  {key}: {value}\n")
+        else:
+            self._append_diagnostics("distillation_metrics: none loaded\n")
+
+        self._append_diagnostics("\nEVIDENCE USED (E)\n")
+        self._append_diagnostics("-" * 54 + "\n")
+        if not used_factors:
+            self._append_diagnostics("No selected evidence factors.\n")
+        for factor in used_factors:
+            self._append_factor_line(factor)
+
+        self._append_diagnostics("\nALL EVIDENCE (S_t)\n")
+        self._append_diagnostics("-" * 54 + "\n")
+        if not all_factors:
+            self._append_diagnostics("No evidence factors were returned.\n")
+        for factor in all_factors:
+            marks = "".join(
+                [
+                    "T" if factor.get("is_true") else "-",
+                    "F" if factor.get("is_faithful") else "-",
+                    "C" if factor.get("is_contrastive") else "-",
+                ]
+            )
+            self._append_factor_line(factor, prefix=f"[{marks}] ")
+
+        self._append_diagnostics("\nVALIDATION\n")
+        self._append_diagnostics("-" * 54 + "\n")
+        for key, value in validation.items():
+            marker = "OK" if value else "FAIL"
+            self._append_diagnostics(f"[{marker}] {key}\n")
+
+        self._append_diagnostics("\nSYMBOLIC RULE AND TRACE\n")
+        self._append_diagnostics("-" * 54 + "\n")
+        self._append_diagnostics(f"chosen_action: {symbolic_trace.get('chosen_action')}\n")
+        self._append_diagnostics(f"predicted_action: {symbolic_trace.get('predicted_action')}\n")
+        self._append_diagnostics(f"alternative_action: {symbolic_trace.get('alternative_action')}\n")
+        if symbolic_rule.get("text"):
+            self._append_diagnostics(f"rule_text: {symbolic_rule['text']}\n")
+        if symbolic_rule.get("python"):
+            self._append_diagnostics("rule_python:\n")
+            self._append_diagnostics(symbolic_rule["python"] + "\n")
+        self._append_trace_items("chosen_trace", symbolic_trace.get("trace", []))
+        self._append_trace_items("approximate_trace", symbolic_trace.get("approximate_trace", []))
+
+        bullets = policy_summary.get("bullets", [])
+        if bullets:
+            self._append_diagnostics("\nPOLICY SUMMARY\n")
+            self._append_diagnostics("-" * 54 + "\n")
+            for bullet in bullets:
+                self._append_diagnostics(f"- {bullet}\n")
+        if policy_summary.get("python_snippet"):
+            self._append_diagnostics("policy_python_snippet:\n")
+            self._append_diagnostics(policy_summary["python_snippet"] + "\n")
+        if hasattr(self, "metrics_text"):
+            self.metrics_text.yview_moveto(0)
+
+    def _append_factor_line(self, factor: dict, prefix: str = "") -> None:
+        name = factor.get("name", "unknown")
+        description = factor.get("description", "")
+        sources = factor.get("sources") or []
+        suffix = f" | sources={', '.join(sources)}" if sources else ""
+        self._append_diagnostics(f"{prefix}{name}: {description}{suffix}\n")
+
+    def _append_trace_items(self, title: str, items: list[dict]) -> None:
+        if not items:
+            self._append_diagnostics(f"{title}: none\n")
+            return
+        self._append_diagnostics(f"{title}:\n")
+        for item in items:
+            condition = item.get("condition", "")
+            description = item.get("description", "")
+            sources = item.get("source") or []
+            suffix = f" | sources={', '.join(sources)}" if sources else ""
+            self._append_diagnostics(f"  - {condition} | {description}{suffix}\n")
+
+    @staticmethod
+    def _format_metrics_dict(values: dict, percent: bool = False) -> str:
+        if not values:
+            return "{}"
+        parts = []
+        for key, value in sorted(values.items()):
+            if percent and isinstance(value, (int, float)):
+                parts.append(f"{key}={value:.0%}")
+            else:
+                parts.append(f"{key}={value}")
+        return "{ " + ", ".join(parts) + " }"
 
     @staticmethod
     def _answer_language_title(language: str) -> str:
+        if language == "zh":
+            return "Chinese Answer / 中文回答"
+        if language == "en":
+            return "English Answer / 英文回答"
+        return "Answer / 回答"
         if language == "zh":
             return "Chinese Answer / 中文回答"
         if language == "en":
@@ -1093,6 +1382,10 @@ class MazeGameUI:
             "primary_answer": primary_result["explanation_text"]["text"],
             "primary_validation": primary_result["validation"],
             "evidence_used": primary_result["evidence_used"]["factors"],
+            "symbolic_match": primary_result.get("symbolic_match"),
+            "symbolic_rule": primary_result.get("symbolic_rule", {}),
+            "symbolic_trace": primary_result.get("symbolic_trace", {}),
+            "policy_summary": primary_result.get("policy_summary", {}),
         }
         if secondary_result is not None:
             payload["secondary_language"] = secondary_result.get("language")
@@ -1112,3 +1405,18 @@ class MazeGameUI:
         self.exp_text.config(state=tk.NORMAL)
         self.exp_text.delete("1.0", tk.END)
         self.exp_text.config(state=tk.DISABLED)
+
+    def _append_diagnostics(self, text: str) -> None:
+        if not hasattr(self, "metrics_text"):
+            return
+        self.metrics_text.config(state=tk.NORMAL)
+        self.metrics_text.insert(tk.END, text)
+        self.metrics_text.see(tk.END)
+        self.metrics_text.config(state=tk.DISABLED)
+
+    def _clear_diagnostics(self) -> None:
+        if not hasattr(self, "metrics_text"):
+            return
+        self.metrics_text.config(state=tk.NORMAL)
+        self.metrics_text.delete("1.0", tk.END)
+        self.metrics_text.config(state=tk.DISABLED)

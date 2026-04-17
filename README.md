@@ -1,5 +1,34 @@
 # Pac-Man RL + XAI Demo
 
+## Current Package Layout
+
+The codebase is now split into an environment-agnostic explanation core and
+environment-specific adapters:
+
+- `core/`: reusable explanation definitions, evidence shapes, symbolic-policy
+  interfaces, optional policy-lens contracts, and human-factor explanation
+  hooks.
+- `envs/pacman/`: the Pac-Man environment, agent, UI, training loop, validation
+  script, and Pac-Man-specific explanation adapters.
+
+Symbolic policy extraction is optional. A new environment can first expose
+state/action evidence and generate evidence-only explanations, then add a
+symbolic decision tree, program, policy graph, logical rules, or LLM-readable
+policy lens later if that environment needs one.
+
+Use the package entry points below from the repository root:
+
+```bash
+python -m envs.pacman.run
+python -m envs.pacman.run --no-symbolic-policy
+python -m envs.pacman.train_rl
+python -m envs.pacman.validate_explanations --agent rl --model-path models/dqn_pacman.pt --episodes 1 --max-steps 40
+python -m envs.pacman.validate_explanations --agent rl --model-path models/dqn_pacman.pt --episodes 1 --max-steps 40 --no-symbolic-policy
+```
+
+Future environments should be added under `envs/<environment_name>/` and should
+reuse `core/` instead of importing Pac-Man modules.
+
 This project is a small Pac-Man demo for learning and experimentation. You can train an RL agent, watch it play in a live UI, and ask why it made a decision. The question-and-answer part supports both Chinese and English.
 
 - [中文](#chinese)

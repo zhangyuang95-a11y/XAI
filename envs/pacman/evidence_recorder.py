@@ -8,11 +8,12 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Optional
 
-from environment import manhattan_distance, get_relative_direction, DIRECTIONS, WALL
+from .environment import manhattan_distance, get_relative_direction, DIRECTIONS, WALL
 
 
 @dataclass(frozen=True)
 class EvidenceRecord:
+    state_snapshot: dict
     step: int
     player_pos: tuple[int, int]
     exit_pos: tuple[int, int]
@@ -104,6 +105,7 @@ class EvidenceRecorder:
                 nearest_dot_dir = get_relative_direction(player, best_pos)
 
         record = EvidenceRecord(
+            state_snapshot=dict(state),
             step=state["step_count"],
             player_pos=player,
             exit_pos=exit_pos,

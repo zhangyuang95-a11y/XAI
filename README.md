@@ -1,394 +1,170 @@
-# Pac-Man RL + XAI Demo
+# 双机器人协作配送 XAI 用户实验
 
-This project trains a Pac-Man reinforcement-learning agent and explains its decisions through a question-aware, evidence-grounded explanation pipeline. The system supports Chinese and English questions such as "Why did you go up?", "Why not go left?", "Is it safe?", and "Did the monster affect the decision?"
+参与者固定控制 `robot_1`，与 MAPPO 控制的 `robot_2` 在 10×11 错位货架仓库中完成两个持续补充的共享 A→B 配送任务。服务器分配后、演示与任务开始前，界面会明确告知参与者属于 A 组（Task 1 后有解释）或 B 组（Task 1 后无解释）。实验流程为：AI–AI 演示（可完整观看或提前结束）→ Task 1 → A 组查看固定 AI–AI 解释轨迹/B 组确认过渡说明 → Task 2 → 简短问卷。提前结束演示会记录已观看帧数、剩余帧数和完成比例，然后以独立 seed、新状态和双方满电开始 Task 1。
 
-- [English](#english)
-- [中文](#中文)
+## 当前实验契约
 
-<a id="english"></a>
-## English
+- 两台机器人、120 个联合决策步，初始电量均为 100。
+- 任一空载机器人进入 A 点后认领任务；只有承运机器人能在 B 点完成交付。
+- 成功移动消耗 2 电量；在充电站执行等待恢复 10；阻塞动作不耗电。
+- 地图由独立 `MapLayout` 定义，不存在带特殊语义的 yield bay。地图固定为 10 行 × 11 列，第 6 列是纵向主通道，左右两侧横向通道逐层交错；充电站左前方 `(8,4)` 已按界面标注由货架改为普通通道，因此 `(8,5)` 是一个明确的四向交汇点。机器人起点为 `(9,4)`、`(9,6)`，充电站为 `(9,5)`；充电口上方 `(8,4)`、`(8,5)`、`(8,6)` 均禁止生成任务端点，避免货物堵住充电交接。界面、路径规划、观测和碰撞判定读取同一拓扑，不存在“视觉是货架但机器人仍可穿过”的差异。
+- 机器人冲突时双方本步均等待，计一次碰撞但不终止。除参与者在 Task 1/2 中替换 `robot_1` 的输入外，AI 命令由共享 MAPPO Actor 直接输出并原样提交给环境；系统不存在运行时通行权规则、coordination shield、教师策略或决策树动作改写。撞墙、货架阻塞、同格争抢、交换位置和进入未离开的队友位置，均只由环境动力学解析。网络必须自行学习任务分工、充电、让行和避免绕路。
+- 用户得分保持为：`100×配送数 − 200×机器人碰撞事件 − 50×断电事件 − 步数 − 2×参与者绕路单位`。断电提前结束时补扣到 120 步。
 
-### What This Project Does
+## 强化学习 Reward
 
-- Trains a fixed Pac-Man RL agent for an `11x11` maze with `2` monsters.
-- Runs a Tkinter UI where the agent plays and the user can ask questions.
-- Parses user questions into structured intents such as `why_this_action`, `why_not_other`, `safety_reason`, `monster_influence`, `dot_collection`, `policy_summary`, and `irrelevant`.
-- Generates natural-language explanations from current decision evidence instead of only dumping state variables.
-- Shows audit information, including all evidence, selected evidence, validation checks, symbolic match status, and risk metrics.
-- Uses a symbolic policy only as optional support, not as a mandatory explanation source.
+参与者得分和训练 Reward 是两个独立层次。界面、数据库和实验分析只使用未缩放的用户得分；训练专用势能不会进入参与者得分。
 
-### Current Method
-
-The current explanation method is:
+每个联合步给两台机器人相同的团队训练奖励：
 
 ```text
-user question
-  -> semantic frame / intent
-  -> current decision evidence
-  -> question-specific evidence selection
-  -> natural-language answer
-  -> evidence and validation diagnostics
+training_reward = user_score_delta / 100
+                + safe_mission_potential_shaping
+                - avoidable_wait_penalty
+                - mission_regression_penalty
 ```
 
-The system records evidence at each timestep, including the chosen action, available actions, collision risks, nearest target, nearest monster, dot progress, exit status, and agent reasoning. The explanation engine then chooses the evidence relevant to the user's question.
+安全任务成本势能包含到 A、A→B、交付后到充电站、2 格安全余量，以及电量不足时到充电站和必要充电等待次数。默认每减少一个安全动作成本产生 `+0.02` 塑形，因此必要充电等待在扣除 `−0.01` 时间成本后得到小幅正反馈。
 
-For example:
+- 断电终止步的势能塑形严格为 0，不会产生“死亡奖励”。
+- 达到安全电量即可离开充电站，不要求充满至 100。
+- 满电等待、无必要充电和充放电循环不能刷取正奖励。
+- 本步新生成的替补任务不进入本步 `potential_after`，从下一步起再同时进入势能两端。
+- 只有在存在一个不冲突、合法且能缩短当前冻结任务路线的移动时，主动 `WAIT` 才扣 `0.01`；必要充电、让行、排队、阻塞和无可行进展的等待不扣该项。
+- 当本步安全任务成本相对动作前增加时，按增加量的 `1/100` 额外扣分；该单边惩罚不会因为接近目标而重复发放正奖励。
+- 日志分别保存 `base_training_reward`、`potential_shaping_reward`、`avoidable_wait_penalty_reward`、`mission_regression_penalty_reward` 和 `training_reward`。
 
-- If the user asks "Why go up?", the answer explains the actual action, target, monster distance, and risk.
-- If the user asks "Why not go left?", the answer compares the chosen action with the mentioned alternative.
-- If the user asks an unrelated question such as "What is the weather today?", the system returns an irrelevant-question response instead of forcing a Pac-Man explanation.
-- If the user asks about an action that did not happen, the system first corrects the premise and then explains the real action.
+## 训练方法与版本
 
-### Symbolic Policy Role
+正式策略采用共享 Actor、集中式 Critic 的 MAPPO。30% 训练回合启用代理人类，其中约 20% 时间步替换机器人 1 的动作；替换样本不进入 Actor loss，但保留给 Critic。
 
-The symbolic policy is a distilled decision-tree surrogate for the neural RL policy. It is optional.
+训练开始前可使用可审计的行为克隆样本初始化神经网络权重；这些标签不会作为运行时动作，也不会在 MAPPO rollout 中替换 Actor 输出。主体训练的每一步均执行当前 Actor 动作。早期少量训练回合使用单机器人低电量课程，课程在后期衰减到 0；正式评估和用户任务始终从电量 100 开始。RCPD 只单向读取神经网络真实 rollout 并在训练后抽取程序，不向 Actor 提供 target、loss 或梯度，也不参与动作选择。
 
-```text
-if symbolic policy exists and matches the neural action:
-    use symbolic rule / trace as extra explanation evidence
-else:
-    use evidence-only explanation
-```
+当前 v27 Reward 候选兼容版本：
 
-This avoids treating an unfaithful surrogate as the explanation. New environments do not need to implement a symbolic policy first; they can start with an evidence recorder and add symbolic support later.
+- 模型：`warehouse_mappo_v34_efficiency_penalties`
+- 环境：`warehouse_collaborative_delivery_v21_training_efficiency_penalties`
+- Reward：`warehouse_safe_mission_reward_v18_efficiency_penalties`
+- 观测：`collaborative_observation_v22_neural_mission_intent`
+- 训练 checkpoint：`warehouse_mappo_training_v26_efficiency_penalties`
+- RCPD：`warehouse_rcpd_v29_efficiency_penalties_posthoc`
+- 地图：`warehouse_alternating_shelves_10x11_v6_open_charger_approach`
+- seed 库：`warehouse_parallel_seed_pairs_v30_efficiency_penalties`
+- 参考轨迹：`warehouse_reference_trajectory_v29_efficiency_penalties`
+- 动作执行：`autoregressive_direct_mappo_actor_action_v9_neural_mission`
+- 运行时控制器：`mappo_autoregressive_actor_direct_execution`
+- 日志：`human-study-log.v22`
 
-### Project Layout
+v27 候选产物写入 `output/collaborative/safe_mission_v27_efficiency_penalties/`，只有完成从零训练、后验 RCPD、固定参考轨迹和独立 200-seed 正式门控后才允许成为默认模型。v26 与更早模型、失败候选、正式评估和实验数据保持只读，不会被 v27 覆盖。解释证据来自真实网络动作、环境解析结果、任务状态和电量状态，不能声称某个外部控制器修改了动作。
 
-```text
-XAI/
-  core/
-    explanation.py
-    explanation_strict.py
-    symbolic_policy.py
-    explanation_engine.py
-    evidence.py
+v26 的共享 Actor 内部增加可训练的五类神经任务意图（两个任务槽、交付、充电、等待）。离线教师同时监督动作和神经意图，使充电与任务承诺能跨连续状态保持；该意图只是网络隐变量，既不绑定共享任务，也不在运行时屏蔽、替换或修正 Actor 动作。离线关键状态覆盖充电离站、任务连续未认领、两机器人同目标、狭窄通道避让和 Actor 队友上下文；正式 rollout、参考轨迹和 UI 中的 AI 动作仍全部直接来自共享 MAPPO Actor。
 
-  envs/
-    pacman/
-      environment.py
-      agent.py
-      train_rl.py
-      run.py
-      ui.py
-      evidence_recorder.py
-      explanation_engine.py
-      question_parser.py
-      symbolic_policy_adapter.py
-      validate_explanations.py
+成功移动固定消耗 2 点电量；撞墙、货架阻塞、机器人冲突和普通等待不耗电；在充电站等待仍恢复 10 点。安全任务势能会按 2 点/格计算任务路线、返充电站路线和两格安全余量。新增的可避免等待和任务成本回退项仅用于训练，参与者最终得分不包含任何训练塑形。
 
-  run.py
-  train_rl.py
-  validate_explanations.py
-```
+浏览器使用连续插值动画。地图机器人图标直接显示电量和承运货物；地图下方不再显示重复的机器人状态卡或“Active tasks/活动任务”卡片，任务 A/B、承运状态和电量直接呈现在地图中。地图没有特殊 yield-bay 标记；机器人使用普通支路和充电口通道完成交接。A 组解释阶段不公开参与者的 Task 1 轨迹，而是载入冻结的 AI–AI 参考轨迹。v20 从 seed `42026` 起搜索首个满足事件覆盖和无断电要求的纯神经轨迹，当前冻结参考轨迹为 seed `42027`，且记录 Actor 动作源、零干预和内容哈希。
 
-`core/` contains environment-agnostic explanation concepts and interfaces. `envs/pacman/` contains Pac-Man-specific environment logic, evidence extraction, question parsing, and explanation rendering. The top-level `run.py`, `train_rl.py`, and `validate_explanations.py` are compatibility wrappers.
+参考轨迹的 121 帧和事件标签只读取一次。拖动、上一帧、下一帧和事件跳转均在浏览器本地完成，拖动时不访问服务器；稳定 150 ms 后才循环播放选中动作。提问显式携带轨迹哈希、帧、机器人和问题类型。回答只保留与动作、电量、队友、分工或碰撞问题直接相关的证据，语义校验失败时使用确定性简短模板；公共载荷继续隐藏策略目标、神经分布和内部特征。
 
-### Installation
+## 环境安装
 
-Python 3 is recommended.
+推荐 Windows 10/11 和 Python 3.11。以下命令块均使用 `bash` 标记，每格只有一个命令，可由 PyCharm 显示左侧三角运行按钮。
 
 ```bash
-py -3 -m pip install torch numpy matplotlib sentence-transformers scikit-learn joblib
+py -3.11 -m pip install torch numpy matplotlib scikit-learn joblib transformers sentencepiece pytest
 ```
 
-Notes:
+## 训练与评估
 
-- `torch` is used for the RL model.
-- `sentence-transformers` and `scikit-learn` are used for question understanding and symbolic policy distillation.
-- `matplotlib` is used for training plots.
-- `tkinter` is used for the desktop UI and usually comes with Python.
-
-### Train
-
-Train the fixed Pac-Man model:
+运行隔离目录中的短训练测试：
 
 ```bash
-py -3 train_rl.py
+py -3.11 train_rl.py --smoke-test --device cuda --use-rcpd
 ```
 
-Equivalent package command:
+从零运行推荐的 2,800 回合 MAPPO + RCPD 正式训练：
 
 ```bash
-py -3 -m envs.pacman.train_rl
+py -3.11 train_rl.py --use-rcpd
 ```
 
-Default outputs:
-
-- `models/dqn_pacman.pt`
-- `models/dqn_pacman_symbolic.joblib`
-- `artifacts/training_progress.png`
-- `artifacts/training_metrics.csv`
-- `artifacts/policy_code.py`
-- `artifacts/policy_summary.json`
-
-### Run The UI
-
-Start the demo:
+如果一个从零训练出的同版本候选只在正式门槛中暴露稀有 Actor 错误，可运行隔离的 1,000 回合续训入口；它保留源候选并写入新的候选目录：
 
 ```bash
-py -3 run.py
+py -3.11 continue_train_rl.py
 ```
 
-Equivalent package command:
+重新执行 AI–AI、20% 噪声队友和随机策略各 200 个 seed 的评估：
 
 ```bash
-py -3 -m envs.pacman.run
+py -3.11 evaluate_rl.py
 ```
 
-Run without symbolic policy support:
+`train_rl.py`、`continue_train_rl.py` 和 `evaluate_rl.py` 都有 `main()` 入口，可直接使用 PyCharm 左侧绿色三角运行。项目解释器必须选择安装了 CUDA 版 PyTorch 的 Python 3.11。
+
+既有正式指标作为只读基线保留。v26 新增神经任务意图准确率、充电离站返回循环、任务连续 40 步无人认领、直接 Actor 动作来源、队友上下文和 seed=42027 五帧绕路回归门槛；在全部新门槛为 true 前，不在此处发布 v26 指标，也不切换正式启动默认模型。
+
+训练摘要会写入保守的 `warehouse-training-seed-ledger.v1` 区间清单，正式评估只有在全部评估区间与训练、课程、重标记、参考轨迹、旧失败候选诊断和后验蒸馏区间不重叠时才通过独立性门槛。RCPD 文件必须声明 `posthoc_explanation_only`、禁止反馈和运行时控制；参考轨迹与平行 seed 库必须声明 Actor 直接执行且干预次数为 0。只有这些产物契约和行为门槛全部通过，`run.py` 才接受该候选。
+
+## 启动用户实验
+
+日常界面测试使用开发入口。`run.py` 默认启用条件选择器、默认选择 A 组，并写入独立的 `development` namespace：
 
 ```bash
-py -3 -m envs.pacman.run --no-symbolic-policy
+py -3.11 run.py
 ```
 
-Require a symbolic policy artifact and fail if it is unavailable:
+正式 pilot/confirmatory 必须使用独立入口，该入口不显示条件选择器，并使用服务器区组分配：
 
 ```bash
-py -3 -m envs.pacman.run --require-symbolic-policy
+py -3.11 run_formal_ui.py
 ```
 
-User questions are logged to:
-
-- `artifacts/user_question_log.jsonl`
-
-### Validate Explanations
-
-Run a quick validation pass:
+显式指定模型和程序：
 
 ```bash
-py -3 -m envs.pacman.validate_explanations --agent rl --model-path models/dqn_pacman.pt --episodes 1 --max-steps 40
+py -3.11 run.py --checkpoint output/collaborative/safe_mission_v26_neural_mission_intent/warehouse_mappo.pt --program output/collaborative/safe_mission_v26_neural_mission_intent/rcpd_program.json --transformer-model Qwen/Qwen2.5-3B-Instruct --device cuda --host 0.0.0.0 --port 8000 --no-browser
 ```
 
-Validate evidence-only explanations:
+浏览器端每次方向键、WASD、方向按钮或“等待”输入只推进一个联合步。服务器使用 operation ID 和状态版本保证幂等、恢复和防重复。
+
+## 数据与分析
+
+SQLite 是实验日志的唯一运行时事实源。pilot 和 confirmatory 必须使用独立 namespace；旧数据保持只读。
+
+导出 pilot 数据：
 
 ```bash
-py -3 -m envs.pacman.validate_explanations --agent rl --model-path models/dqn_pacman.pt --episodes 1 --max-steps 40 --no-symbolic-policy
+py -3.11 -m ui.study_data --db output/collaborative/safe_mission_v26_neural_mission_intent/collaborative_study.sqlite3 --namespace pilot output/collaborative/safe_mission_v26_neural_mission_intent/pilot_events.jsonl
 ```
 
-Validation output:
-
-- `artifacts/explanation_validation.json`
-
-### Development Checks
-
-Check that `core/` does not depend on Pac-Man-specific classes:
+分析 `ΔScore = Task2 − Task1`、区组置换检验和 bootstrap 95% 置信区间：
 
 ```bash
-rg "MazeEnvironment|monster|dot|exit|grid|RLAgent|ACTION_NAMES" core
+py -3.11 evaluate_trace_ablation.py analyze-study --input output/collaborative/safe_mission_v26_neural_mission_intent/pilot_events.jsonl --study-phase pilot --output output/collaborative/safe_mission_v26_neural_mission_intent/pilot_analysis.json
 ```
 
-Compile the package:
+## 测试
 
 ```bash
-py -3 -m compileall -q core envs run.py train_rl.py validate_explanations.py
+py -3.11 -m pytest -q
 ```
 
-### Adding A New Environment
+测试覆盖地图连通性、拓扑死端端点排除、共享任务、计分、充电/断电、满电离站、三类碰撞、紧急充电禁止反向、载货交付承诺、必要单步让行、Reward 分项、不可刷分循环、任务补充隔离、代理人类 Actor mask、版本拒绝、RCPD 证据、121 帧本地 AI–AI 解释轨迹、实验状态机和 Web 契约。
 
-Add a new folder under `envs/`, for example:
+## 代码架构
 
-```text
-envs/
-  pacman/
-  traffic/
-  gridworld/
-  robotics/
-```
+模块职责、允许的依赖方向、兼容入口、产物保留规则和迁移说明见 [ARCHITECTURE.md](ARCHITECTURE.md)。持久化版本统一定义在 `env/warehouse/contracts.py`，正式产物路径统一由 `backend/artifacts.py` 生成；业务代码不得自行拼接版本字符串或使用浮动的 `current` 目录。
 
-Each environment should implement its own environment, agent, evidence recorder, explanation engine, question parser, runner, and validation script. The shared `core/` package should remain environment-agnostic.
+## 开发条件测试
 
-<a id="中文"></a>
-## 中文
-
-### 项目简介
-
-这个项目训练一个 Pac-Man 强化学习 agent，并用一个面向用户问题、基于证据的 explanation pipeline 来解释它的决策。系统支持中文和英文问题，例如“为什么向上走”“为什么不往左走”“安全吗”“怪物有没有影响决策”等。
-
-### 当前功能
-
-- 训练固定配置的 Pac-Man RL agent：`11x11` 地图，`2` 个怪物。
-- 打开 Tkinter UI，让 agent 自动运行，并允许用户随时提问。
-- 将用户问题解析成结构化 intent，例如 `why_this_action`、`why_not_other`、`safety_reason`、`monster_influence`、`dot_collection`、`policy_summary`、`irrelevant`。
-- 根据当前决策 evidence 生成自然语言解释，而不是简单堆砌状态变量。
-- 展示审计信息，包括全部证据、实际用到的证据、validation checks、symbolic match 状态和风险指标。
-- symbolic policy 是可选证据来源，不是系统必须依赖的解释来源。
-
-### 当前 Explanation 方法
-
-当前 explanation 流程是：
-
-```text
-用户问题
-  -> semantic frame / intent
-  -> 当前决策 evidence
-  -> 根据问题类型选择 evidence
-  -> 生成自然语言回答
-  -> 展示 evidence 和 validation diagnostics
-```
-
-系统会在每一步记录当前决策相关证据，例如实际动作、可选动作、碰撞风险、最近目标、最近怪物、豆子进度、出口状态和 agent reasoning。然后 explanation engine 会根据用户问题选择相关证据。
-
-例如：
-
-- 用户问“为什么向上走”，系统会解释真实动作、目标、怪物距离和风险。
-- 用户问“为什么不往左走”，系统会比较真实动作和用户提到的替代动作。
-- 用户问“今天天气如何”，系统会识别为无关问题，不会强行生成 Pac-Man 决策解释。
-- 如果用户问的动作和真实动作不一致，系统会先纠正问题前提，再解释真实发生的动作。
-
-### Symbolic Policy 的角色
-
-当前 symbolic policy 是一个从神经网络 RL policy 蒸馏出来的 decision-tree surrogate。它是可选的。
-
-```text
-如果 symbolic policy 存在，并且它和神经网络当前动作一致：
-    使用 symbolic rule / trace 作为额外解释证据
-否则：
-    回退到 evidence-only explanation
-```
-
-这样可以避免把不忠实的 surrogate 当成真正解释。未来新增环境时，不需要一开始就实现 symbolic policy；只要能提供 evidence recorder，就可以进入 explanation pipeline。
-
-### 项目结构
-
-```text
-XAI/
-  core/
-    explanation.py
-    explanation_strict.py
-    symbolic_policy.py
-    explanation_engine.py
-    evidence.py
-
-  envs/
-    pacman/
-      environment.py
-      agent.py
-      train_rl.py
-      run.py
-      ui.py
-      evidence_recorder.py
-      explanation_engine.py
-      question_parser.py
-      symbolic_policy_adapter.py
-      validate_explanations.py
-
-  run.py
-  train_rl.py
-  validate_explanations.py
-```
-
-`core/` 放通用 explanation 概念和接口。`envs/pacman/` 放 Pac-Man 专用环境、证据提取、问题解析和解释生成逻辑。顶层 `run.py`、`train_rl.py`、`validate_explanations.py` 是兼容入口。
-
-### 安装依赖
-
-推荐使用 Python 3。
+在 PyCharm 中直接运行 `run_test_ui.py`（文件左侧三角按钮），登记页会显示“自动区组分配／解释组／对照组”选择器。该模式按运行次数而不是参与者编号推进自动分配，并将记录写入独立的 `development` namespace，不得用于正式实验。
 
 ```bash
-py -3 -m pip install torch numpy matplotlib sentence-transformers scikit-learn joblib
+py -3.11 run_test_ui.py
 ```
 
-说明：
-
-- `torch` 用于 RL 模型。
-- `sentence-transformers` 和 `scikit-learn` 用于问题理解和 symbolic policy distillation。
-- `matplotlib` 用于训练曲线。
-- `tkinter` 用于桌面 UI，通常随 Python 自带。
-
-### 训练
-
-训练固定 Pac-Man 模型：
+正式 pilot 或 confirmatory 继续使用不带测试选择器的 `run_formal_ui.py`；服务器会拒绝强制条件请求，并保持同一正式参与者的分组不变。
 
 ```bash
-py -3 train_rl.py
+py -3.11 run_formal_ui.py
 ```
-
-等价 package 命令：
-
-```bash
-py -3 -m envs.pacman.train_rl
-```
-
-默认输出：
-
-- `models/dqn_pacman.pt`
-- `models/dqn_pacman_symbolic.joblib`
-- `artifacts/training_progress.png`
-- `artifacts/training_metrics.csv`
-- `artifacts/policy_code.py`
-- `artifacts/policy_summary.json`
-
-### 运行 UI
-
-启动 demo：
-
-```bash
-py -3 run.py
-```
-
-等价 package 命令：
-
-```bash
-py -3 -m envs.pacman.run
-```
-
-禁用 symbolic policy：
-
-```bash
-py -3 -m envs.pacman.run --no-symbolic-policy
-```
-
-要求必须加载 symbolic policy，否则直接报错：
-
-```bash
-py -3 -m envs.pacman.run --require-symbolic-policy
-```
-
-用户问题日志保存到：
-
-- `artifacts/user_question_log.jsonl`
-
-### 验证 Explanation
-
-快速验证：
-
-```bash
-py -3 -m envs.pacman.validate_explanations --agent rl --model-path models/dqn_pacman.pt --episodes 1 --max-steps 40
-```
-
-验证 evidence-only explanation：
-
-```bash
-py -3 -m envs.pacman.validate_explanations --agent rl --model-path models/dqn_pacman.pt --episodes 1 --max-steps 40 --no-symbolic-policy
-```
-
-验证结果输出：
-
-- `artifacts/explanation_validation.json`
-
-### 开发检查
-
-检查 `core/` 是否误引入 Pac-Man 专用内容：
-
-```bash
-rg "MazeEnvironment|monster|dot|exit|grid|RLAgent|ACTION_NAMES" core
-```
-
-编译检查：
-
-```bash
-py -3 -m compileall -q core envs run.py train_rl.py validate_explanations.py
-```
-
-### 新增环境
-
-未来新增环境时，在 `envs/` 下加新文件夹，例如：
-
-```text
-envs/
-  pacman/
-  traffic/
-  gridworld/
-  robotics/
-```
-
-每个环境实现自己的 environment、agent、evidence recorder、explanation engine、question parser、runner 和 validation script。共享的 `core/` 应保持与具体环境无关。

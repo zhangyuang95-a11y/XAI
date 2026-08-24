@@ -502,6 +502,38 @@ def _collaboration_context(
         teammate.position[0] + other_delta[0],
         teammate.position[1] + other_delta[1],
     )
+    target_delta = MOVE_DELTAS.get(str(executed_action), (0, 0))
+    target_position_after = (
+        agent.position[0] + target_delta[0],
+        agent.position[1] + target_delta[1],
+    )
+    enabled_teammate_action = bool(
+        str(executed_action) in MOVE_DELTAS
+        and other_action in MOVE_DELTAS
+        and other_target == agent.position
+        and target_position_after != teammate.position
+    )
+    charger_clearance = bool(
+        enabled_teammate_action
+        and agent.position == environment.layout.charger_position
+        and other_target == environment.layout.charger_position
+        and teammate.navigation_goal_kind == "charge"
+    )
+
+    target_endpoint = target_role.get("endpoint")
+    target_distance_before = None
+    target_distance_after = None
+    if target_endpoint is not None:
+        target_distance_before = shortest_path_distance(
+            agent.position,
+            tuple(target_endpoint),
+            environment.config.map_layout_id,
+        )
+        target_distance_after = shortest_path_distance(
+            target_position_after,
+            tuple(target_endpoint),
+            environment.config.map_layout_id,
+        )
     for action, delta in MOVE_DELTAS.items():
         candidate = (agent.position[0] + delta[0], agent.position[1] + delta[1])
         if (
@@ -518,9 +550,22 @@ def _collaboration_context(
         "teammate_role": teammate_role,
         "roles": roles,
         "teammate_position": teammate.position,
+        "target_position": agent.position,
+        "target_position_after": target_position_after,
         "teammate_distance": _manhattan(agent.position, teammate.position),
         "teammate_constrained_actions": tuple(dict.fromkeys(constrained_actions)),
         "teammate_executed_action": other_action,
+        "teammate_target_position": other_target,
+        "teammate_battery": float(teammate.battery),
+        "teammate_requires_charge": bool(
+            environment._requires_charge(state, teammate)
+        ),
+        "enabled_teammate_action": enabled_teammate_action,
+        "vacated_position": agent.position if enabled_teammate_action else None,
+        "charger_clearance": charger_clearance,
+        "charger_position": environment.layout.charger_position,
+        "target_distance_before": target_distance_before,
+        "target_distance_after": target_distance_after,
         "proposed_action": str(proposed_action),
         "executed_action": str(executed_action),
         "teammate_directly_limited_action": bool(

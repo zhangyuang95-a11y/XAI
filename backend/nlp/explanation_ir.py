@@ -1286,6 +1286,7 @@ def _action_effect_fact(
         preferred = (
             "charger_queue_context",
             "charging_outcome",
+            "collaboration_context",
             "movement_outcome",
             "observed_action_effect",
         )
@@ -1297,6 +1298,13 @@ def _action_effect_fact(
             arguments = tuple(str(value) for value in fact.get("arguments", ()))
             if arguments and target not in arguments:
                 continue
+            if focus == "action" and predicate == "collaboration_context":
+                raw_value = fact.get("value")
+                if not (
+                    isinstance(raw_value, Mapping)
+                    and raw_value.get("enabled_teammate_action", False)
+                ):
+                    continue
             if focus == "action":
                 return fact
             focused_fact = dict(fact)
@@ -1311,6 +1319,7 @@ def _action_effect_fact(
         {
             "charger_queue_context",
             "charging_outcome",
+            "collaboration_context",
             "movement_outcome",
             "observed_action_effect",
         }

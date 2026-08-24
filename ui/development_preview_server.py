@@ -635,12 +635,21 @@ class DevelopmentPreviewState:
             and isinstance(collaboration.value, Mapping)
             and collaboration.value.get("teammate_directly_limited_action", False)
         )
+        collaboration_enabled = bool(
+            collaboration is not None
+            and isinstance(collaboration.value, Mapping)
+            and collaboration.value.get("enabled_teammate_action", False)
+        )
         reason_order = ["charger_queue_context", "charging_outcome"]
         if resolution_changed:
             reason_order.append("action_resolution_reason")
-        if collaboration_limited and not resolution_changed:
+        if (
+            (collaboration_limited or collaboration_enabled)
+            and not resolution_changed
+        ):
             reason_order.append("collaboration_context")
-        reason_order.append("movement_outcome")
+        if not collaboration_enabled:
+            reason_order.append("movement_outcome")
         reasons = [
             rendered
             for predicate in reason_order

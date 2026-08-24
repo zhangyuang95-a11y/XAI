@@ -1200,6 +1200,7 @@ class WarehouseWebSession:
                 if rendered:
                     return rendered
 
+        objective_text = render("shared_objective_selection_reason")
         action_text = render("executed_action")
         resolution = by_predicate.get("action_resolution_reason")
         resolution_changed = bool(
@@ -1207,16 +1208,24 @@ class WarehouseWebSession:
             and isinstance(resolution.value, Mapping)
             and resolution.value.get("environment_changed_action", False)
         )
-        reason_order = [
-            "charger_queue_context",
-            "charging_outcome",
-        ]
+        collaboration = by_predicate.get("collaboration_context")
+        collaboration_enabled = bool(
+            collaboration is not None
+            and isinstance(collaboration.value, Mapping)
+            and collaboration.value.get("enabled_teammate_action", False)
+        )
+        reason_order = ["charger_queue_context", "charging_outcome"]
         if resolution_changed:
             reason_order.append("action_resolution_reason")
+        if collaboration_enabled and not resolution_changed:
+            reason_order.append("collaboration_context")
         reason_order.extend(("movement_outcome", "collaboration_context"))
         reason = next((render(name) for name in reason_order if render(name)), "")
-        if action_text and reason:
-            return f"{action_text}. {reason}."
+        parts = [item for item in (objective_text, action_text, reason) if item]
+        if parts:
+            if language == "zh-CN":
+                return "。".join(item.rstrip("。") for item in parts) + "。"
+            return ". ".join(item.rstrip(".") for item in parts) + "."
         if action_text:
             suffix = (
                 "现有可验证证据没有显示更具体的环境约束。"

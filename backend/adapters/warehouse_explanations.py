@@ -622,6 +622,78 @@ class WarehouseExplanationMixin:
                 str(value.get("executed_action", "WAIT")),
                 language,
             )
+            enabled_teammate_action = bool(
+                value.get("enabled_teammate_action", False)
+            )
+            charger_clearance = bool(value.get("charger_clearance", False))
+            if enabled_teammate_action:
+                target_position = tuple(value.get("target_position", ()))
+                target_position_after = tuple(
+                    value.get("target_position_after", ())
+                )
+                teammate_target = tuple(
+                    value.get("teammate_target_position", ())
+                )
+                teammate_battery = float(value.get("teammate_battery", 0.0))
+                before_distance = value.get("target_distance_before")
+                after_distance = value.get("target_distance_after")
+                route_effect = ""
+                if before_distance is not None and after_distance is not None:
+                    before_distance = int(before_distance)
+                    after_distance = int(after_distance)
+                    if language == "zh-CN":
+                        if after_distance > before_distance:
+                            route_effect = (
+                                f"；这使{robot}到自身长期任务目标的距离从"
+                                f"{before_distance}格增加到{after_distance}格，属于为队友"
+                                "进行的协作让行"
+                            )
+                        else:
+                            route_effect = (
+                                f"；本步后{robot}到自身长期任务目标的距离从"
+                                f"{before_distance}格变为{after_distance}格"
+                            )
+                    elif after_distance > before_distance:
+                        route_effect = (
+                            f"; this increased {robot}'s distance to its own longer-term "
+                            f"task target from {before_distance} to {after_distance} cells, "
+                            "so the move was a cooperative yield for its teammate"
+                        )
+                    else:
+                        route_effect = (
+                            f"; after the move, {robot}'s distance to its own longer-term "
+                            f"task target changed from {before_distance} to "
+                            f"{after_distance} cells"
+                        )
+                if language == "zh-CN":
+                    if charger_clearance:
+                        return (
+                            f"本帧的直接协作原因是让出充电站：{teammate}的电量仅剩"
+                            f"{teammate_battery:g}%，正准备进入{robot}占用的充电位"
+                            f"{teammate_target}；{robot}因此从{target_position}执行"
+                            f"{executed_action}到{target_position_after}，使{teammate}能够"
+                            f"进入充电站并准备充电{route_effect}"
+                        )
+                    return (
+                        f"本帧的直接协作原因是为{teammate}腾出位置{target_position}："
+                        f"{robot}执行{executed_action}到{target_position_after}，使"
+                        f"{teammate}能够移动到{teammate_target}{route_effect}"
+                    )
+                if charger_clearance:
+                    return (
+                        f"The immediate coordination reason was to clear the charger: "
+                        f"{teammate} had only {teammate_battery:g}% battery and was moving "
+                        f"into the charging cell {teammate_target} occupied by {robot}; "
+                        f"{robot} therefore moved {executed_action} from {target_position} "
+                        f"to {target_position_after}, allowing {teammate} to enter the "
+                        f"charger and prepare to charge{route_effect}"
+                    )
+                return (
+                    f"The immediate coordination reason was to clear {target_position} "
+                    f"for {teammate}: {robot} moved {executed_action} to "
+                    f"{target_position_after}, allowing {teammate} to move to "
+                    f"{teammate_target}{route_effect}"
+                )
             if study_focus == "collaboration":
                 directly_limited = bool(
                     value.get("teammate_directly_limited_action", False)

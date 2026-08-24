@@ -202,6 +202,25 @@ def test_action_explanation_states_recorded_goal_progress_and_outcome() -> None:
     assert "剩余距离从6格缩短到5格" in text
 
 
+def test_action_explanation_prioritizes_clearing_charger_for_teammate() -> None:
+    state = DevelopmentPreviewState()
+
+    text = state._grounded_development_explanation(
+        index=24,
+        target_agent="robot_1",
+        focus="action",
+        language="zh-CN",
+    )
+
+    assert "当前的临时导航目标" in text
+    assert "本帧的直接协作原因是让出充电站" in text
+    assert "机器人2的电量仅剩15%" in text
+    assert "使机器人2能够进入充电站并准备充电" in text
+    assert "距离从11格增加到12格" in text
+    assert "协作让行" in text
+    assert "选择概率最高" not in text
+
+
 def test_development_energy_explanation_uses_real_charging_frame() -> None:
     state = DevelopmentPreviewState()
     state.stage = "explanation"

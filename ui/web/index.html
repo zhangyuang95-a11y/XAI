@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f4f7fb">
-  <title>PolicyLens · 双机器人协作配送实验</title>
+  <title>PolicyLens · Two-Robot Collaborative Delivery Study</title>
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
@@ -12,40 +12,40 @@
   <header class="topbar">
     <div>
       <strong class="brand">PolicyLens</strong>
-      <span class="subtitle" data-i18n="appTitle">双机器人协作配送实验</span>
+      <span class="subtitle" data-i18n="appTitle">Two-Robot Collaborative Delivery Study</span>
     </div>
     <nav class="workflow" aria-label="Experiment workflow">
-      <span id="workflowInstructions" class="active" data-i18n="workflowDemo">说明与演示</span>
-      <i></i><span id="workflowTask1" data-i18n="task1">任务 1</span>
-      <i></i><span id="workflowExplanation" data-i18n="explanation">解释</span>
-      <i></i><span id="workflowTask2" data-i18n="task2">任务 2</span>
-      <i></i><span id="workflowSurvey" data-i18n="survey">问卷</span>
+      <span id="workflowInstructions" class="active" data-i18n="workflowDemo">Instructions &amp; demo</span>
+      <i></i><span id="workflowTask1" data-i18n="task1">Task 1</span>
+      <i></i><span id="workflowExplanation" data-i18n="explanation">Explanation</span>
+      <i></i><span id="workflowTask2" data-i18n="task2">Task 2</span>
+      <i></i><span id="workflowSurvey" data-i18n="survey">Survey</span>
     </nav>
-    <button class="ghost" id="languageButton" type="button"><span id="languageButtonLabel">EN</span></button>
+    <button class="ghost" id="languageButton" type="button"><span id="languageButtonLabel">中</span></button>
   </header>
 
   <main class="layout">
     <section class="card simulator-card">
       <div class="card-heading">
-        <div><span class="eyebrow" data-i18n="warehouse">10×11 仓库</span><h1 id="sceneTitle" data-i18n="liveScene">协作配送现场</h1></div>
-        <div class="round-progress"><span data-i18n="step">步数</span><strong id="stepValue">0 / 120</strong></div>
+        <div><span class="eyebrow" data-i18n="warehouse">10×11 warehouse</span><h1 id="sceneTitle" data-i18n="liveScene">Collaborative delivery</h1></div>
+        <div class="round-progress"><span data-i18n="step">Steps</span><strong id="stepValue">0 / 120</strong></div>
       </div>
 
       <p class="reference-metrics hidden" id="referenceMetricsLabel" data-i18n="referenceMetrics">以下为固定 AI–AI 参考轨迹数据，不是您的任务 1 成绩。</p>
       <div class="score-strip">
-        <div><span data-i18n="score">总分</span><strong id="scoreValue">0</strong></div>
-        <div><span data-i18n="deliveries">配送</span><strong id="deliveryValue">0</strong></div>
-        <div><span data-i18n="collisions">碰撞</span><strong id="collisionValue">0</strong></div>
-        <div><span data-i18n="shutdowns">断电</span><strong id="shutdownValue">0</strong></div>
-        <div><span data-i18n="detours">绕路单位</span><strong id="detourValue">0</strong></div>
+        <div><span data-i18n="score">Score</span><strong id="scoreValue">0</strong></div>
+        <div><span data-i18n="deliveries">Deliveries</span><strong id="deliveryValue">0</strong></div>
+        <div><span data-i18n="collisions">Collisions</span><strong id="collisionValue">0</strong></div>
+        <div><span data-i18n="shutdowns">Shutdowns</span><strong id="shutdownValue">0</strong></div>
+        <div><span data-i18n="detours">Detour units</span><strong id="detourValue">0</strong></div>
       </div>
 
       <div class="canvas-wrap"><canvas id="warehouseCanvas" aria-label="Warehouse map"></canvas></div>
       <div class="legend">
-        <span><i class="shelf"></i><b data-i18n="shelf">货架</b></span>
-        <span><i class="pickup">A</i><b data-i18n="pickup">取货点</b></span>
-        <span><i class="dropoff">B</i><b data-i18n="dropoff">交付点</b></span>
-        <span><i class="charger">⚡</i><b data-i18n="charger">充电站</b></span>
+        <span><i class="shelf"></i><b data-i18n="shelf">Shelf</b></span>
+        <span><i class="pickup">A</i><b data-i18n="pickup">Pickup A</b></span>
+        <span><i class="dropoff">B</i><b data-i18n="dropoff">Drop-off B</b></span>
+        <span><i class="charger">⚡</i><b data-i18n="charger">Charger</b></span>
       </div>
 
       <div class="timeline hidden" id="timelinePanel">
@@ -68,21 +68,21 @@
       </section>
       <p class="test-condition-status hidden" id="testConditionStatus"></p>
       <section id="setupPanel">
-        <span class="eyebrow" data-i18n="participantSetup">参与者登记</span>
-        <h2 data-i18n="welcome">开始协作配送实验</h2>
-        <p data-i18n="overview">你将固定控制机器人 1，与 AI 控制的机器人 2 完成两轮 120 步配送任务。</p>
-        <label class="field"><span data-i18n="participantId">参与者编号</span><input id="participantInput" autocomplete="off" maxlength="80"></label>
+        <span class="eyebrow" data-i18n="participantSetup">Participant setup</span>
+        <h2 data-i18n="welcome">Start the collaborative delivery study</h2>
+        <p data-i18n="overview">You will always control robot 1 and complete two 120-step delivery rounds with AI-controlled robot 2.</p>
+        <label class="field"><span data-i18n="participantId">Participant ID</span><input id="participantInput" autocomplete="off" maxlength="80"></label>
         <label class="field test-condition hidden" id="testConditionField">
-          <span data-i18n="testCondition">开发测试条件</span>
+          <span data-i18n="testCondition">Development test condition</span>
           <select id="testConditionSelector">
-            <option value="auto" data-i18n="conditionAuto">自动区组分配</option>
-            <option value="explanation" data-i18n="conditionExplanation" selected>A 组（有解释）</option>
-            <option value="control" data-i18n="conditionControl">B 组（无解释）</option>
+            <option value="auto" data-i18n="conditionAuto">Automatic block allocation</option>
+            <option value="explanation" data-i18n="conditionExplanation" selected>Group A (explanations)</option>
+            <option value="control" data-i18n="conditionControl">Group B (no explanations)</option>
           </select>
-          <small data-i18n="testConditionHint">仅用于界面测试；数据写入独立的 development 命名空间。</small>
+          <small data-i18n="testConditionHint">For interface testing only; records use the isolated development namespace.</small>
         </label>
-        <label class="agreement"><input id="rulesAgreement" type="checkbox"><span data-i18n="agreement">我已阅读并理解实验说明。</span></label>
-        <button class="primary" id="startButton" type="button" data-i18n="start">开始实验</button>
+        <label class="agreement"><input id="rulesAgreement" type="checkbox"><span data-i18n="agreement">I have read and understood the study instructions.</span></label>
+        <button class="primary" id="startButton" type="button" data-i18n="start">Start study</button>
       </section>
 
       <section class="hidden" id="instructionsPanel">

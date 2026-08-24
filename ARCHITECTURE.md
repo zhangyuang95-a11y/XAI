@@ -59,8 +59,8 @@ root entrypoints
 
 ## 数据与清理规则
 
-- 当前候选写入：`safe_mission_v26_neural_mission_intent`。只有 AI–AI、20% 噪声队友和随机策略各自独立 200-seed 门控、后验 RCPD 和参考轨迹全部通过后才可成为正式默认模型。
-- 保留：v24 与更早模型、失败候选、训练 checkpoint、正式评估和实验 SQLite，均作为只读历史，不得被 v25 覆盖。
+- 当前候选写入：`safe_mission_v28_individual_credit`。只有 AI–AI、20% 噪声队友和随机策略各自独立 200-seed 门控、后验 RCPD 和参考轨迹全部通过后才可成为正式默认模型。
+- 保留：v27 与更早模型、失败候选、训练 checkpoint、正式评估和实验 SQLite，均作为只读历史，不得被 v28 覆盖。
 - 可清理：明确标记为 `smoke`、临时截图、缓存和可由测试重新生成的 probe 文件。
 - 不得用清理脚本递归删除 `output/collaborative`、任一 SQLite 数据库或未知候选目录。删除前必须解析并核对每个绝对路径。
 

@@ -2,9 +2,10 @@
 
 const $ = (id) => document.getElementById(id);
 const PAGE_ID = crypto.randomUUID ? crypto.randomUUID() : `page-${Date.now()}`;
+const DEFAULT_LOCALE = "en";
 const state = {
   view: null,
-  locale: "en",
+  locale: DEFAULT_LOCALE,
   busy: false,
   demoPlaying: false,
   pendingBeginTask1: false,
@@ -95,6 +96,7 @@ Object.assign(COPY.zh, {
   robot2Option: "机器人 2（AI）",
   questionPlaceholder: "也可以在这里输入自己的问题。",
   ask: "询问所选机器人",
+  temporaryNetworkError: "临时网络连接中断，请重试；当前进度已保留。",
 });
 Object.assign(COPY.en, {
   controlTransitionHint: "This study flow does not provide an explanation or question period between the two rounds. Task 2 will start with a fresh robot state, 100 battery, and a different task sequence.",
@@ -116,6 +118,7 @@ Object.assign(COPY.en, {
   robot2Option: "Robot 2 (AI)",
   questionPlaceholder: "Or type your own question here.",
   ask: "Ask about selected robot",
+  temporaryNetworkError: "The temporary tunnel connection was interrupted. Please retry; your current progress is preserved.",
 });
 
 function tr(key) { return COPY[state.locale][key] || key; }
@@ -123,19 +126,49 @@ function localeCode() { return state.locale === "zh" ? "zh-CN" : "en"; }
 function allowed(command) { return Boolean(state.view?.study?.allowed_commands?.includes(command)); }
 function operationId() { return crypto.randomUUID ? crypto.randomUUID() : `op-${Date.now()}-${Math.random()}`; }
 
+const TRANSIENT_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+const API_MAX_ATTEMPTS = 4;
+
+function delay(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function isTransientHttpStatus(status) {
+  return TRANSIENT_HTTP_STATUSES.has(status) || (status >= 520 && status <= 530);
+}
+
 async function api(path, options = {}) {
-  const response = await fetch(path, {
+  const requestOptions = {
     ...options,
     headers: { "Content-Type": "application/json", "X-Warehouse-Page": PAGE_ID, ...(options.headers || {}) },
-  });
-  let payload = {};
-  try { payload = await response.json(); } catch (_) { payload = {}; }
-  if (!response.ok) {
-    const error = new Error(payload.error || `${response.status} ${response.statusText}`);
-    error.payload = payload;
-    throw error;
+  };
+
+  for (let attempt = 1; attempt <= API_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(path, requestOptions);
+      let payload = {};
+      try { payload = await response.json(); } catch (_) { payload = {}; }
+      if (response.ok) return payload;
+
+      const error = new Error(payload.error || `${response.status} ${response.statusText}`);
+      error.payload = payload;
+      error.status = response.status;
+      throw error;
+    } catch (error) {
+      const retryable = error.status == null || isTransientHttpStatus(error.status);
+      if (!retryable) throw error;
+      if (attempt === API_MAX_ATTEMPTS) {
+        const friendlyError = new Error(tr("temporaryNetworkError"));
+        friendlyError.cause = error;
+        friendlyError.status = error.status;
+        friendlyError.payload = error.payload || {};
+        throw friendlyError;
+      }
+      await delay(350 * (2 ** (attempt - 1)));
+    }
   }
-  return payload;
+
+  throw new Error(tr("temporaryNetworkError"));
 }
 
 async function ensureReferenceTrajectory() {
@@ -710,7 +743,7 @@ async function render(view, options = {}) {
   view = renderedView;
   document.body.dataset.studyStage = view.study?.stage || "idle";
   document.body.dataset.stateVersion = String(view.study?.state_version ?? 0);
-  if (view.study?.locale) {
+  if (requestedStage !== "idle" && view.study?.locale) {
     const requestedLocale = view.study.locale === "en" ? "en" : "zh";
     if (requestedLocale !== state.locale) setLanguage(requestedLocale, false, false);
   }
@@ -862,7 +895,7 @@ window.addEventListener("keydown", (event) => {
 window.addEventListener("resize", () => { if (state.view) drawWarehouse(state.view, state.visualFrame); });
 
 async function bootstrap() {
-  buildSurvey(); setLanguage("en", false);
+  buildSurvey(); setLanguage(DEFAULT_LOCALE, false);
   try { await render(await api("/api/view")); } catch (error) { showError(error); }
 }
 

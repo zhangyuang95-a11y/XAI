@@ -27,18 +27,18 @@ class WarehouseContractVersions:
 
 
 CURRENT_VERSIONS = WarehouseContractVersions(
-    environment="warehouse_collaborative_delivery_v21_training_efficiency_penalties",
-    observation="collaborative_observation_v22_neural_mission_intent",
-    reward="warehouse_safe_mission_reward_v18_efficiency_penalties",
-    model="warehouse_mappo_v34_efficiency_penalties",
-    training_checkpoint="warehouse_mappo_training_v26_efficiency_penalties",
-    rcpd_program="warehouse_rcpd_v29_efficiency_penalties_posthoc",
-    seed_library="warehouse_parallel_seed_pairs_v30_efficiency_penalties",
-    reference_trajectory="warehouse_reference_trajectory_v29_efficiency_penalties",
+    environment="warehouse_collaborative_delivery_v22_individual_credit",
+    observation="collaborative_observation_v23_avoidable_wait_memory",
+    reward="warehouse_safe_mission_reward_v19_individual_credit",
+    model="warehouse_mappo_v35_individual_credit",
+    training_checkpoint="warehouse_mappo_training_v27_individual_credit",
+    rcpd_program="warehouse_rcpd_v30_individual_credit_posthoc",
+    seed_library="warehouse_parallel_seed_pairs_v31_individual_credit",
+    reference_trajectory="warehouse_reference_trajectory_v30_individual_credit",
     study_log="human-study-log.v22",
     action_execution="autoregressive_direct_mappo_actor_action_v9_neural_mission",
     runtime_controller="mappo_autoregressive_actor_direct_execution",
-    artifact_namespace="safe_mission_v27_efficiency_penalties",
+    artifact_namespace="safe_mission_v28_individual_credit",
 )
 
 
@@ -65,7 +65,8 @@ FORMAL_ACCEPTANCE_CHECKS = frozenset(
         "collision_episode_rate_le_0_05",
         "maximum_collision_events_per_episode_le_1",
         "repeated_collision_episode_rate_eq_0",
-        "deadlock_episode_rate_le_0_05",
+        "deadlock_episode_rate_le_0_01",
+        "avoidable_wait_rate_le_0_005",
         "head_on_yield_success_ge_0_90",
         "delivery_bootstrap_lower_positive",
         "score_bootstrap_lower_positive",

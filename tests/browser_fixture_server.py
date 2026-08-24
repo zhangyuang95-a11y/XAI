@@ -5,16 +5,27 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
-
-LAYOUT_TILES = (
-    "####.#####", "#.......##", "####.#####", "####.#####",
-    "#........#", "####.#####", "####.#####", "#........#",
-    "###...####", "###...####",
-)
-
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from ui.warehouse_view import warehouse_map_payload
+
+
 WEB = ROOT / "ui" / "web"
+
+ROBOT_PATHS = (
+    (
+        (9, 4), (8, 4), (8, 5), (7, 5), (6, 5), (6, 6),
+        (6, 7), (6, 8), (6, 9), (6, 10),
+    ),
+    (
+        (9, 6), (8, 6), (8, 5), (7, 5), (6, 5), (5, 5),
+        (4, 5), (4, 6), (4, 7), (4, 8), (4, 9), (4, 10),
+    ),
+)
 
 
 class FixtureState:
@@ -55,12 +66,9 @@ class FixtureState:
 
     @staticmethod
     def path_position(display_frame: int, *, reverse: bool = False):
-        path = (
-            (9, 3), (9, 4), (8, 4), (7, 4), (6, 4), (5, 4),
-            (4, 4), (3, 4), (2, 4), (1, 4), (1, 3), (1, 2), (1, 1),
-        )
+        path = ROBOT_PATHS[1 if reverse else 0]
         index = int(display_frame) % len(path)
-        return list(path[-1 - index] if reverse else path[index])
+        return list(path[index])
 
     def snapshot(self, display_frame=None):
         if display_frame is None:
@@ -109,7 +117,7 @@ class FixtureState:
                 {
                     "task_id": "task_1",
                     "pickup_position": [1, 1],
-                    "delivery_position": [4, 1],
+                    "delivery_position": [3, 1],
                     "status": "available",
                     "carrier_agent_id": None,
                     "created_frame": 0,
@@ -117,7 +125,7 @@ class FixtureState:
                 },
                 {
                     "task_id": "task_2",
-                    "pickup_position": [7, 8],
+                    "pickup_position": [6, 8],
                     "delivery_position": [4, 8],
                     "status": "carried",
                     "carrier_agent_id": "robot_2",
@@ -184,20 +192,7 @@ class FixtureState:
 
     @staticmethod
     def map_payload():
-        return {
-            "rows": 10,
-            "cols": 10,
-            "shelves": [
-                [row, column]
-                for row, line in enumerate(LAYOUT_TILES)
-                for column, symbol in enumerate(line)
-                if symbol == "#"
-            ],
-            "charger_position": [9, 4],
-            "waiting_zone": [[9, 3], [9, 5]],
-            "robot_start_positions": [[9, 3], [9, 5]],
-            "shared_delivery_tasks": True,
-        }
+        return warehouse_map_payload()
 
     def reference_trajectory(self):
         self.reference_requests += 1

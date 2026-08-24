@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 
 from .environment import ACTIONS, MOVE_DELTAS, WarehouseMultiAgentEnv, shortest_path_distance
+from .teacher_efficiency import teacher_efficiency_guard as _teacher_efficiency_guard
 
 
 def _claim_safe_distance(
@@ -749,24 +750,23 @@ def _retreat_clearance_position(
     return None
 
 
-def stable_coordination_actions(
+
+def stable_coordination_goal_overrides(
     environment: WarehouseMultiAgentEnv,
     *,
-    fixed_actions: Mapping[str, str] | None = None,
     goal_overrides: Mapping[str, tuple[int, int]] | None = None,
-) -> dict[str, str]:
-    """Choose offline supervision labels for one shared-task joint state.
+) -> dict[str, tuple[int, int]]:
+    """Return the exact temporary mission goals used by the offline teacher.
 
     The environment deliberately leaves available tasks unassigned, so its
     public navigation goal is ``wait`` for an empty robot. Offline callers
     that omit explicit goals must therefore freeze the optimal shared-task
-    matching; otherwise relabeling would teach both robots to wait and erase
-    the Actor's pickup skill. This helper never rewrites runtime actions.
+    matching.  Explanation code can record this mapping at decision time
+    instead of later misreporting the public ``wait`` goal as the reason for
+    an action.
     """
 
     state = environment.get_state()
-    layout = environment.layout
-    layout_id = environment.config.map_layout_id
     if goal_overrides is None:
         overrides = {
             agent.agent_id: goal
@@ -792,7 +792,7 @@ def stable_coordination_actions(
     # Otherwise it is guaranteed either to steal the teammate's task or to
     # consume its exact post-charge reserve in a later retreat.  Removing this
     # one-frame teacher goal does not reserve or assign either task in state.
-    overrides = {
+    return {
         agent_id: goal
         for agent_id, goal in overrides.items()
         if not (
@@ -807,6 +807,30 @@ def stable_coordination_actions(
             >= 10_000
         )
     }
+
+
+def stable_coordination_actions(
+    environment: WarehouseMultiAgentEnv,
+    *,
+    fixed_actions: Mapping[str, str] | None = None,
+    goal_overrides: Mapping[str, tuple[int, int]] | None = None,
+) -> dict[str, str]:
+    """Choose offline supervision labels for one shared-task joint state.
+
+    The environment deliberately leaves available tasks unassigned, so its
+    public navigation goal is ``wait`` for an empty robot. Offline callers
+    that omit explicit goals must therefore freeze the optimal shared-task
+    matching; otherwise relabeling would teach both robots to wait and erase
+    the Actor's pickup skill. This helper never rewrites runtime actions.
+    """
+
+    state = environment.get_state()
+    layout = environment.layout
+    layout_id = environment.config.map_layout_id
+    overrides = stable_coordination_goal_overrides(
+        environment,
+        goal_overrides=goal_overrides,
+    )
     imminent_head_on = _clear_head_on_encounter(
         environment,
         goal_overrides=overrides,
@@ -882,10 +906,14 @@ def stable_coordination_actions(
         # teammate displace it at the apron, producing a *premature* departure
         # followed by a measured return cycle.  Waiting at the apron costs no
         # energy and is therefore the only commitment-consistent label.
-        return {
-            charging_occupants[0].agent_id: "WAIT",
-            adjacent_charger_waiters[0].agent_id: "WAIT",
-        }
+        return _teacher_efficiency_guard(
+            environment,
+            {
+                charging_occupants[0].agent_id: "WAIT",
+                adjacent_charger_waiters[0].agent_id: "WAIT",
+            },
+            fixed_actions=fixed,
+        )
     idle_occupants = tuple(
         agent
         for agent in state.agents
@@ -898,10 +926,14 @@ def stable_coordination_actions(
         # assignment (for example while the other A point blocks its aisle).
         # Charge until an actionable commitment exists before handing over;
         # otherwise it steps aside and immediately returns after the queue.
-        return {
-            idle_occupants[0].agent_id: "WAIT",
-            adjacent_charger_waiters[0].agent_id: "WAIT",
-        }
+        return _teacher_efficiency_guard(
+            environment,
+            {
+                idle_occupants[0].agent_id: "WAIT",
+                adjacent_charger_waiters[0].agent_id: "WAIT",
+            },
+            fixed_actions=fixed,
+        )
     safe_occupants = tuple(
         agent
         for agent in charger_exit_agents
@@ -949,10 +981,14 @@ def stable_coordination_actions(
                 ),
                 "WAIT",
             )
-            return {
-                occupant.agent_id: "WAIT",
-                inbound_delivery.agent_id: progress_action,
-            }
+            return _teacher_efficiency_guard(
+                environment,
+                {
+                    occupant.agent_id: "WAIT",
+                    inbound_delivery.agent_id: progress_action,
+                },
+                fixed_actions=fixed,
+            )
         inbound = tuple(
             agent
             for agent in charging_agents
@@ -1016,14 +1052,22 @@ def stable_coordination_actions(
                         clearance_candidates.append((required, action_index, action))
             if clearance_candidates:
                 _, _, clearance_action = min(clearance_candidates)
-                return {
-                    occupant.agent_id: clearance_action,
+                return _teacher_efficiency_guard(
+                    environment,
+                    {
+                        occupant.agent_id: clearance_action,
+                        inbound[0].agent_id: "WAIT",
+                    },
+                    fixed_actions=fixed,
+                )
+            return _teacher_efficiency_guard(
+                environment,
+                {
+                    occupant.agent_id: "WAIT",
                     inbound[0].agent_id: "WAIT",
-                }
-            return {
-                occupant.agent_id: "WAIT",
-                inbound[0].agent_id: "WAIT",
-            }
+                },
+                fixed_actions=fixed,
+            )
     if approaching_charger and not fixed:
         charging_agent = approaching_charger[0]
         side_agent = next(
@@ -1048,7 +1092,11 @@ def stable_coordination_actions(
                 simultaneous_handoff,
             )
             if not collision and not invalid:
-                return simultaneous_handoff
+                return _teacher_efficiency_guard(
+                    environment,
+                    simultaneous_handoff,
+                    fixed_actions=fixed,
+                )
     if (
         charger_exit_agents
         and approaching_charger
@@ -1094,7 +1142,11 @@ def stable_coordination_actions(
                 )
             )
         if handoff_candidates:
-            return min(handoff_candidates, key=lambda item: item[:2])[2]
+            return _teacher_efficiency_guard(
+                environment,
+                min(handoff_candidates, key=lambda item: item[:2])[2],
+                fixed_actions=fixed,
+            )
 
     available_pickups = {
         task.pickup_position
@@ -1589,13 +1641,46 @@ def stable_coordination_actions(
                     # makes the teammate clear first.  It is training-only;
                     # no runtime action is ever rewritten by this function.
                     score += 100_000.0
+            for departing_agent in state.agents:
+                if (
+                    environment.config.teacher_efficiency_guard_enabled
+                    and
+                    departing_agent.agent_id in fixed
+                    or departing_agent.position == layout.charger_position
+                    or targets[departing_agent.agent_id]
+                    != layout.charger_position
+                    or departing_agent.last_charger_departure_frame is None
+                    or state.frame - departing_agent.last_charger_departure_frame > 6
+                ):
+                    continue
+                made_mission_progress = bool(
+                    departing_agent.deliveries_completed
+                    > departing_agent.deliveries_at_last_charger_departure
+                    or (
+                        departing_agent.carrying_task_id is not None
+                        and departing_agent.carrying_task_id
+                        != departing_agent.carrying_task_at_last_charger_departure
+                    )
+                )
+                if not made_mission_progress:
+                    # Prefer the ordinary side apron over re-entering the
+                    # charger during a clearance.  The latter is recorded as
+                    # an unproductive departure/return cycle and was present
+                    # in early-return supervision despite zero collisions.
+                    score += 200_000.0
             candidates.append(((score, left_index, right_index), actions))
     if not candidates:
-        return {
+        selected = {
             agent_id: fixed.get(agent_id, "WAIT")
             for agent_id in environment.agent_ids
         }
-    return min(candidates, key=lambda item: item[0])[1]
+    else:
+        selected = min(candidates, key=lambda item: item[0])[1]
+    return _teacher_efficiency_guard(
+        environment,
+        selected,
+        fixed_actions=fixed,
+    )
 
 
 def _human_intent_task_override(

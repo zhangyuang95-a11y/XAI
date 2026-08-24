@@ -9,6 +9,7 @@ import math
 import random
 from typing import Any, Mapping
 
+from . import credit_assignment as credit
 from .contracts import ENVIRONMENT_VERSION
 from .domain import AgentState, DeliveryTask, WarehouseConfig, WarehouseState
 from .layouts import get_map_layout
@@ -1099,7 +1100,14 @@ class WarehouseMultiAgentEnv:
                 and right_toward_left
                 and not just_cleared_head_on
             ):
-                delay += clearance_cost
+                yielding = state.by_id(expected_yielding_agent_id)
+                delay += credit.measured_head_on_clearance_delay(
+                    self,
+                    positions.get(yielding.agent_id, yielding.position),
+                    positions.get(priority_agent.agent_id, priority_agent.position),
+                    same_row=same_row,
+                    clearance_cap=clearance_cost,
+                )
 
         charger = self.layout.charger_position
         occupant = next(
@@ -1130,7 +1138,11 @@ class WarehouseMultiAgentEnv:
                     )
                     <= 2
                 ):
-                    delay += clearance_cost
+                    # Vacating the single charger cell is one unit of real
+                    # clearance work; it is not equivalent to a long route.
+                    delay += credit.measured_charger_clearance_delay(
+                        self, clearance_cost
+                    )
         return float(delay)
 
     def _human_route_regret(
@@ -1328,6 +1340,7 @@ class WarehouseMultiAgentEnv:
             return self.layout.charger_position
         return None
 
+
     def step(
         self,
         actions: Mapping[str, str],
@@ -1340,6 +1353,20 @@ class WarehouseMultiAgentEnv:
             agent.agent_id: str(actions.get(agent.agent_id, "WAIT"))
             for agent in previous.agents
         }
+        frozen_missions = credit.frozen_training_missions(self, previous)
+        frozen_mission_costs_before = {
+            agent.agent_id: credit.frozen_mission_cost(
+                self,
+                previous,
+                agent.agent_id,
+                frozen_missions[agent.agent_id],
+            )
+            for agent in previous.agents
+        }
+        coordination_cost_before = self._coordination_delay_cost(
+            previous,
+            {agent.agent_id: agent.position for agent in previous.agents},
+        )
         potential_before = self._assignment_potential(
             previous,
             {agent.agent_id: agent.position for agent in previous.agents},
@@ -1364,10 +1391,20 @@ class WarehouseMultiAgentEnv:
             intended_targets,
             collision_kind,
         )
-        avoidable_wait_agents = self._avoidable_wait_agents(
+        (
+            counterfactual_regret_units,
+            avoidable_wait_agents,
+            detour_agents,
+            loaded_detour_agents,
+            best_counterfactual_distances,
+        ) = credit.counterfactual_action_regrets(
+            self,
             previous,
             raw_actions,
             executed,
+            targets,
+            frozen_missions,
+            coordination_events,
         )
 
         next_state = deepcopy(previous)
@@ -1509,6 +1546,10 @@ class WarehouseMultiAgentEnv:
                     claimed.carrier_agent_id = agent.agent_id
                     claimed.claimed_frame = next_state.frame
                     agent.carrying_task_id = claimed.task_id
+                    claimed.claimed_battery = float(agent.battery)
+                    claimed.shortest_safe_delivery_steps = (
+                        credit.safe_delivery_completion_steps(self, agent, claimed)
+                    )
                     pickup_agents.add(agent.agent_id)
                     claimed_tasks.append(claimed)
 
@@ -1552,6 +1593,13 @@ class WarehouseMultiAgentEnv:
             if ineffective_joint_wait
             else 0
         )
+        for agent in next_state.agents:
+            before_agent = previous.by_id(agent.agent_id)
+            agent.avoidable_wait_streak = (
+                before_agent.avoidable_wait_streak + 1
+                if agent.agent_id in avoidable_wait_agents
+                else 0
+            )
 
         shutdown_agents = [
             agent.agent_id
@@ -1588,50 +1636,44 @@ class WarehouseMultiAgentEnv:
         next_state.truncated = truncated
         next_state.terminal_reason = reason
         self._refresh_navigation_goals(next_state)
+        frozen_mission_costs_after = {
+            agent.agent_id: credit.frozen_mission_cost(
+                self,
+                next_state,
+                agent.agent_id,
+                frozen_missions[agent.agent_id],
+            )
+            for agent in next_state.agents
+        }
         potential_after = self._assignment_potential(
             next_state,
             {agent.agent_id: agent.position for agent in next_state.agents},
             excluded_task_ids={task.task_id for task in replacement_tasks},
             task_age_frame=previous.frame,
         )
-        base_training_reward = score_delta / 100.0
-        potential_shaping = (
-            0.0
-            if terminated
-            else (
-                self.config.reward.progress_scale
-                * (potential_before - potential_after)
-                / 100.0
-            )
+        reward_credit = credit.transition_credit_components(
+            self,
+            terminated=terminated,
+            score_delta=score_delta,
+            previous_state=previous,
+            next_state=next_state,
+            requested_actions=raw_actions,
+            executed_actions=executed,
+            mission_costs_before=frozen_mission_costs_before,
+            mission_costs_after=frozen_mission_costs_after,
+            coordination_cost_before=coordination_cost_before,
+            counterfactual_regret_units=counterfactual_regret_units,
+            avoidable_wait_agents=avoidable_wait_agents,
+            assignment_potential_before=potential_before,
+            assignment_potential_after=potential_after,
         )
-        avoidable_wait_penalty = (
-            0.0
-            if terminated
-            else (
-                self.config.reward.avoidable_wait_cost
-                * len(avoidable_wait_agents)
-            )
-        )
-        mission_regression_units = (
-            0.0
-            if terminated
-            else max(0.0, potential_after - potential_before)
-        )
-        mission_regression_penalty = (
-            self.config.reward.mission_regression_scale
-            * mission_regression_units
-            / 100.0
-        )
-        training_reward = (
-            base_training_reward
-            + potential_shaping
-            - avoidable_wait_penalty
-            - mission_regression_penalty
-        )
-        rewards = {
-            agent.agent_id: training_reward
-            for agent in next_state.agents
-        }
+        rewards = reward_credit["rewards"]
+        potential_shaping = reward_credit["potential_shaping_reward"]
+        avoidable_wait_penalty = -reward_credit["avoidable_wait_penalty_reward"]
+        mission_regression_units = reward_credit["mission_regression_units"]
+        mission_regression_penalty = -reward_credit[
+            "mission_regression_penalty_reward"
+        ]
         next_state.last_rewards = dict(rewards)
         self.state = next_state
 
@@ -1690,16 +1732,44 @@ class WarehouseMultiAgentEnv:
                 "assignment_potential_after": potential_after,
                 "safe_mission_potential_before": potential_before,
                 "safe_mission_potential_after": potential_after,
-                "base_training_reward": base_training_reward,
+                "frozen_missions": credit.serialized_frozen_missions(frozen_missions),
+                "frozen_mission_costs_before": frozen_mission_costs_before,
+                "frozen_mission_costs_after": frozen_mission_costs_after,
+                "base_training_reward": reward_credit["base_training_reward"],
                 "potential_shaping_reward": potential_shaping,
                 "avoidable_wait_penalty_reward": -avoidable_wait_penalty,
                 "mission_regression_penalty_reward": -mission_regression_penalty,
                 "mission_regression_units": mission_regression_units,
-                "training_reward": training_reward,
-                "avoidable_wait_agents": tuple(sorted(avoidable_wait_agents)),
-                "avoidable_detour_agents": (
-                    (self.config.human_agent_id,) if route_regret > 0 else ()
+                "training_reward": reward_credit["training_reward"],
+                "training_rewards": dict(rewards),
+                "individual_progress_units": reward_credit["individual_progress_units"],
+                "individual_progress_rewards": reward_credit["individual_progress_rewards"],
+                "coordination_cost_before": coordination_cost_before,
+                "coordination_cost_after": reward_credit["coordination_cost_after"],
+                "coordination_progress_reward": reward_credit[
+                    "coordination_progress_reward"
+                ],
+                "counterfactual_regret_units": counterfactual_regret_units,
+                "counterfactual_regret_penalty_rewards": (
+                    reward_credit["counterfactual_regret_penalty_rewards"]
                 ),
+                "best_counterfactual_distances": best_counterfactual_distances,
+                "repeated_avoidable_wait_penalty_rewards": (
+                    reward_credit["repeated_avoidable_wait_penalty_rewards"]
+                ),
+                "flat_avoidable_wait_penalty_rewards": (
+                    reward_credit["flat_avoidable_wait_penalty_rewards"]
+                ),
+                "avoidable_wait_streaks": {
+                    agent.agent_id: agent.avoidable_wait_streak
+                    for agent in next_state.agents
+                },
+                "avoidable_wait_agents": tuple(sorted(avoidable_wait_agents)),
+                "avoidable_detour_agents": tuple(sorted(detour_agents)),
+                "avoidable_loaded_delivery_detour_agents": tuple(
+                    sorted(loaded_detour_agents)
+                ),
+                **credit.completed_delivery_path_metrics(next_state),
                 "charger_energy_gained": charger_energy_gained,
                 "charger_energy_gained_by_agent": dict(
                     charger_energy_gained_by_agent

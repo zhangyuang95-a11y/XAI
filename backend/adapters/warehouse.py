@@ -849,12 +849,56 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
             "candidate.<ACTION>.conflicting_agent": "the teammate whose prior action predicts a conflict",
         }
 
+    def _decision_evidence_state(
+        self,
+        snapshot: EnvironmentSnapshot,
+    ) -> WarehouseState:
+        """Apply recorded decision goals to an explanation-only state copy.
+
+        Available warehouse tasks remain publicly unassigned, so an empty
+        robot's persistent navigation goal is deliberately ``wait``.  Offline
+        reference controllers can nevertheless use a temporary frozen task
+        match for one decision.  When that exact match was recorded in the
+        snapshot, explanations must use it instead of inventing a reason from
+        the public wait goal.
+        """
+
+        state: WarehouseState = deepcopy(snapshot.state)
+        if not bool(snapshot.metadata.get("decision_evidence_aligned", False)):
+            return state
+        raw_overrides = snapshot.metadata.get("decision_goal_overrides", {})
+        if not isinstance(raw_overrides, Mapping):
+            return state
+        for raw_agent_id, raw_position in raw_overrides.items():
+            try:
+                agent = state.by_id(str(raw_agent_id))
+                goal = tuple(int(item) for item in raw_position)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if len(goal) != 2 or not self.environment.layout.is_passable(goal):
+                continue
+            agent.navigation_goal_position = goal
+            if goal == self.environment.layout.charger_position:
+                agent.navigation_goal_kind = "charge"
+            elif agent.carrying_task_id is not None:
+                agent.navigation_goal_kind = "delivery"
+            elif any(
+                task.status == "available" and task.pickup_position == goal
+                for task in state.tasks
+            ):
+                agent.navigation_goal_kind = "pickup"
+            elif goal == agent.position:
+                agent.navigation_goal_kind = "wait"
+        return state
+
     def _objective_fact(
         self,
         state: WarehouseState,
         agent: AgentState,
     ) -> EvidenceFact:
-        tasks = sorted(state.tasks, key=lambda item: item.task_id)
+        # Preserve the live task-list order because the UI labels these slots
+        # A1/B1 and A2/B2 independently of monotonically increasing task IDs.
+        tasks = list(state.tasks)
         selected = next(
             (task for task in tasks if task.task_id == agent.carrying_task_id),
             None,
@@ -985,7 +1029,7 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
         target_entity: str,
         policy: PolicyProtocol,
     ) -> Sequence[EvidenceFact]:
-        state: WarehouseState = snapshot.state
+        state = self._decision_evidence_state(snapshot)
         agent = state.by_id(target_entity)
         probabilities = self.policy_distribution(snapshot, target_entity, policy)
         argmax = max(probabilities, key=probabilities.__getitem__)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -34,6 +34,12 @@ from .policy import (
     MAPPOPolicy,
     SharedActorCentralCritic,
     agent_index as _agent_index,
+)
+from .policy_metrics import (
+    EfficiencyMetrics,
+    max_agent_attribute,
+    mean_agent_attribute,
+    sum_agent_attribute,
 )
 from .rewards import REWARD_VERSION
 from .scenarios import (
@@ -238,6 +244,21 @@ class EpisodeBatch:
     potential_shaping_reward: float = 0.0
     avoidable_wait_penalty_reward: float = 0.0
     mission_regression_penalty_reward: float = 0.0
+    individual_training_rewards: dict[str, float] = field(default_factory=dict)
+    individual_progress_rewards: dict[str, float] = field(default_factory=dict)
+    coordination_progress_reward: float = 0.0
+    counterfactual_regret_units: dict[str, float] = field(default_factory=dict)
+    counterfactual_regret_penalty_rewards: dict[str, float] = field(
+        default_factory=dict
+    )
+    repeated_avoidable_wait_penalty_rewards: dict[str, float] = field(
+        default_factory=dict
+    )
+    avoidable_wait_counts: dict[str, int] = field(default_factory=dict)
+    maximum_avoidable_wait_streaks: dict[str, int] = field(default_factory=dict)
+    detour_counts: dict[str, int] = field(default_factory=dict)
+    loaded_detour_counts: dict[str, int] = field(default_factory=dict)
+    path_efficiency_actual_over_shortest_safe: float = 0.0
     energy_curriculum_applied: bool = False
     coordination_curriculum_kind: str | None = None
     initial_minimum_battery: float = 100.0
@@ -438,6 +459,7 @@ class MAPPOTrainer:
         potential_shaping_reward = 0.0
         avoidable_wait_penalty_reward = 0.0
         mission_regression_penalty_reward = 0.0
+        efficiency = EfficiencyMetrics()
         pickup_count = 0
         charger_uses = 0
         avoidable_detour_count = 0
@@ -530,6 +552,7 @@ class MAPPOTrainer:
             mission_regression_penalty_reward += float(
                 info.get("mission_regression_penalty_reward", 0.0)
             )
+            efficiency.update_step(info, rewards)
             pickup_count += len(info.get("pickup_agents", ()))
             charger_uses += int(bool(info.get("charger_used", False)))
             avoidable_detour_count += len(
@@ -600,6 +623,21 @@ class MAPPOTrainer:
             avoidable_wait_penalty_reward=avoidable_wait_penalty_reward,
             mission_regression_penalty_reward=(
                 mission_regression_penalty_reward
+            ),
+            individual_training_rewards=efficiency.individual_training_rewards,
+            individual_progress_rewards=efficiency.progress_rewards,
+            coordination_progress_reward=efficiency.coordination_progress_reward,
+            counterfactual_regret_units=efficiency.regret_units,
+            counterfactual_regret_penalty_rewards=efficiency.regret_penalties,
+            repeated_avoidable_wait_penalty_rewards=(
+                efficiency.repeated_wait_penalties
+            ),
+            avoidable_wait_counts=efficiency.avoidable_wait_counts,
+            maximum_avoidable_wait_streaks=efficiency.maximum_wait_streaks,
+            detour_counts=efficiency.detour_counts,
+            loaded_detour_counts=efficiency.loaded_detour_counts,
+            path_efficiency_actual_over_shortest_safe=float(
+                info.get("path_efficiency_actual_over_shortest_safe", 0.0)
             ),
             energy_curriculum_applied=energy_curriculum_applied,
             coordination_curriculum_kind=coordination_curriculum_kind,
@@ -1168,6 +1206,42 @@ class MAPPOTrainer:
                     [item.mission_regression_penalty_reward for item in batches]
                 )
             ),
+            individual_training_rewards=mean_agent_attribute(
+                batches, "individual_training_rewards"
+            ),
+            individual_progress_rewards=mean_agent_attribute(
+                batches, "individual_progress_rewards"
+            ),
+            coordination_progress_reward=float(
+                np.mean([item.coordination_progress_reward for item in batches])
+            ),
+            counterfactual_regret_units=mean_agent_attribute(
+                batches, "counterfactual_regret_units"
+            ),
+            counterfactual_regret_penalty_rewards=mean_agent_attribute(
+                batches, "counterfactual_regret_penalty_rewards"
+            ),
+            repeated_avoidable_wait_penalty_rewards=mean_agent_attribute(
+                batches, "repeated_avoidable_wait_penalty_rewards"
+            ),
+            avoidable_wait_counts=sum_agent_attribute(
+                batches, "avoidable_wait_counts"
+            ),
+            maximum_avoidable_wait_streaks=max_agent_attribute(
+                batches, "maximum_avoidable_wait_streaks"
+            ),
+            detour_counts=sum_agent_attribute(batches, "detour_counts"),
+            loaded_detour_counts=sum_agent_attribute(
+                batches, "loaded_detour_counts"
+            ),
+            path_efficiency_actual_over_shortest_safe=float(
+                np.mean(
+                    [
+                        item.path_efficiency_actual_over_shortest_safe
+                        for item in batches
+                    ]
+                )
+            ),
             energy_curriculum_applied=any(
                 item.energy_curriculum_applied for item in batches
             ),
@@ -1252,9 +1326,29 @@ def _evaluation_summary(
     charger_return_cycle_episodes: int = 0,
     charger_return_cycles: int = 0,
     task_starvation_episodes: int = 0,
+    per_agent_progress_rewards: Mapping[str, float] | None = None,
+    per_agent_counterfactual_regret_units: Mapping[str, float] | None = None,
+    per_agent_counterfactual_regret_penalties: Mapping[str, float] | None = None,
+    per_agent_repeated_wait_penalties: Mapping[str, float] | None = None,
+    per_agent_avoidable_wait_counts: Mapping[str, int] | None = None,
+    per_agent_maximum_avoidable_wait_streaks: Mapping[str, int] | None = None,
+    per_agent_detour_counts: Mapping[str, int] | None = None,
+    per_agent_loaded_detour_counts: Mapping[str, int] | None = None,
+    coordination_progress_reward: float = 0.0,
+    path_actual_steps: float = 0.0,
+    path_shortest_safe_steps: float = 0.0,
 ) -> dict[str, Any]:
     episode_count = max(1, len(training_rewards))
     total_steps = max(1, sum(steps))
+    agent_ids = ("robot_1", "robot_2")
+    progress = dict(per_agent_progress_rewards or {})
+    regret = dict(per_agent_counterfactual_regret_units or {})
+    regret_penalties = dict(per_agent_counterfactual_regret_penalties or {})
+    wait_penalties = dict(per_agent_repeated_wait_penalties or {})
+    wait_counts = dict(per_agent_avoidable_wait_counts or {})
+    max_wait_streaks = dict(per_agent_maximum_avoidable_wait_streaks or {})
+    detours = dict(per_agent_detour_counts or {})
+    loaded_detours = dict(per_agent_loaded_detour_counts or {})
     return {
         "episodes": float(len(training_rewards)),
         "mean_training_reward": float(np.mean(training_rewards)),
@@ -1305,6 +1399,40 @@ def _evaluation_summary(
             charger_return_cycles / episode_count
         ),
         "task_starvation_episode_rate": task_starvation_episodes / episode_count,
+        "mean_coordination_progress_reward": (
+            coordination_progress_reward / episode_count
+        ),
+        "per_agent_efficiency": {
+            agent_id: {
+                "mean_progress_reward": progress.get(agent_id, 0.0)
+                / episode_count,
+                "mean_counterfactual_regret_units": regret.get(agent_id, 0.0)
+                / episode_count,
+                "mean_counterfactual_regret_penalty_reward": (
+                    regret_penalties.get(agent_id, 0.0) / episode_count
+                ),
+                "mean_repeated_wait_penalty_reward": (
+                    wait_penalties.get(agent_id, 0.0) / episode_count
+                ),
+                "avoidable_wait_count": int(wait_counts.get(agent_id, 0)),
+                "avoidable_waits_per_1000_steps": (
+                    1000.0 * wait_counts.get(agent_id, 0) / total_steps
+                ),
+                "maximum_avoidable_wait_streak": int(
+                    max_wait_streaks.get(agent_id, 0)
+                ),
+                "detour_count": int(detours.get(agent_id, 0)),
+                "loaded_detour_count": int(
+                    loaded_detours.get(agent_id, 0)
+                ),
+            }
+            for agent_id in agent_ids
+        },
+        "path_actual_steps": float(path_actual_steps),
+        "path_shortest_safe_steps": float(path_shortest_safe_steps),
+        "path_efficiency_actual_over_shortest_safe": (
+            float(path_actual_steps) / max(1.0, float(path_shortest_safe_steps))
+        ),
         "user_score_samples": [float(value) for value in user_scores],
         "delivery_samples": [int(value) for value in deliveries],
         "collision_event_samples": [int(value) for value in collision_counts],
@@ -1352,6 +1480,7 @@ def evaluate_policy(
     charger_return_cycle_episodes = 0
     charger_return_cycles = 0
     task_starvation_episodes = 0
+    efficiency = EfficiencyMetrics()
     rng = np.random.default_rng(seed + 17_000_000)
     for episode in range(episodes):
         environment = WarehouseMultiAgentEnv(environment_config)
@@ -1442,6 +1571,7 @@ def evaluate_policy(
             total_potential_shaping_reward += float(
                 info.get("potential_shaping_reward", 0.0)
             )
+            efficiency.update_step(info)
             episode_steps += 1
             minimum_battery_seen = min(
                 minimum_battery_seen,
@@ -1507,6 +1637,7 @@ def evaluate_policy(
             for task in state.completed_tasks
             if task.delivered_frame is not None and task.claimed_frame is not None
         )
+        efficiency.update_completed_tasks(state)
     return _evaluation_summary(
         training_rewards=training_rewards,
         base_training_rewards=base_training_rewards,
@@ -1534,6 +1665,7 @@ def evaluate_policy(
         charger_return_cycle_episodes=charger_return_cycle_episodes,
         charger_return_cycles=charger_return_cycles,
         task_starvation_episodes=task_starvation_episodes,
+        **efficiency.evaluation_kwargs(),
     )
 
 
@@ -1567,6 +1699,7 @@ def evaluate_random_policy(
     charger_return_cycle_episodes = 0
     charger_return_cycles = 0
     task_starvation_episodes = 0
+    efficiency = EfficiencyMetrics()
     for episode in range(episodes):
         environment = WarehouseMultiAgentEnv(environment_config)
         environment.reset(seed=seed + episode)
@@ -1596,6 +1729,7 @@ def evaluate_random_policy(
             total_potential_shaping_reward += float(
                 info.get("potential_shaping_reward", 0.0)
             )
+            efficiency.update_step(info)
             episode_steps += 1
             minimum_battery_seen = min(
                 minimum_battery_seen,
@@ -1661,6 +1795,7 @@ def evaluate_random_policy(
             for task in state.completed_tasks
             if task.delivered_frame is not None and task.claimed_frame is not None
         )
+        efficiency.update_completed_tasks(state)
     return _evaluation_summary(
         training_rewards=training_rewards,
         base_training_rewards=base_training_rewards,
@@ -1683,6 +1818,7 @@ def evaluate_random_policy(
         charger_return_cycle_episodes=charger_return_cycle_episodes,
         charger_return_cycles=charger_return_cycles,
         task_starvation_episodes=task_starvation_episodes,
+        **efficiency.evaluation_kwargs(),
     )
 
 

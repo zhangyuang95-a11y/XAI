@@ -15,24 +15,26 @@
 
 参与者得分和训练 Reward 是两个独立层次。界面、数据库和实验分析只使用未缩放的用户得分；训练专用势能不会进入参与者得分。
 
-每个联合步给两台机器人相同的团队训练奖励：
+每个联合步保留共享任务结果，但效率归因按机器人独立计算：
 
 ```text
-training_reward = user_score_delta / 100
-                + safe_mission_potential_shaping
-                - avoidable_wait_penalty
-                - mission_regression_penalty
+reward_i = user_score_delta / 100
+         + 0.01 * frozen_safe_cost_reduction_i
+         + clipped_shared_coordination_progress
+         - 0.02 * clipped_counterfactual_regret_i
+         - repeated_avoidable_wait_penalty_i
 ```
 
-安全任务成本势能包含到 A、A→B、交付后到充电站、2 格安全余量，以及电量不足时到充电站和必要充电等待次数。默认每减少一个安全动作成本产生 `+0.02` 塑形，因此必要充电等待在扣除 `−0.01` 时间成本后得到小幅正反馈。
+每步开始时先冻结每台机器人的安全目标：载货配送、必要充电、已承诺 pickup，或一次性安全任务匹配。安全任务成本包含到 A、A→B、交付后返充、安全余量，以及必要的充电等待；同一步内重新匹配或生成替补任务不能制造虚假进展。每减少一个安全动作奖励 `+0.01`，所以必要充电 `WAIT` 大致抵消 `−0.01` 时间成本。
 
 - 断电终止步的势能塑形严格为 0，不会产生“死亡奖励”。
 - 达到安全电量即可离开充电站，不要求充满至 100。
 - 满电等待、无必要充电和充放电循环不能刷取正奖励。
 - 本步新生成的替补任务不进入本步 `potential_after`，从下一步起再同时进入势能两端。
-- 只有在存在一个不冲突、合法且能缩短当前冻结任务路线的移动时，主动 `WAIT` 才扣 `0.01`；必要充电、让行、排队、阻塞和无可行进展的等待不扣该项。
-- 当本步安全任务成本相对动作前增加时，按增加量的 `1/100` 额外扣分；该单边惩罚不会因为接近目标而重复发放正奖励。
-- 日志分别保存 `base_training_reward`、`potential_shaping_reward`、`avoidable_wait_penalty_reward`、`mission_regression_penalty_reward` 和 `training_reward`。
+- 固定队友动作后枚举本机器人安全动作；所选下一步距离比最佳安全距离多出的部分截断到 `[0,2]`，每单位扣 `0.02`。必要充电、真实让行、排队、charger clearance 和没有安全进展动作时不扣。
+- 第一次可避免 `WAIT` 只由 regret 处理；从第二次起额外依次扣 `0.01/0.02/0.03/0.04`，上限 `0.04`。合法等待立即清零 streak。
+- coordination delay 按实际清障步数计量，默认上限 4 个成本单位，单步共享 shaping 截断到 `±0.04`；往返循环净收益不为正。
+- 旧的全局 mission regression 默认关闭。日志保存每台机器人的 progress、regret、WAIT streak/penalty、普通/载货绕路、协调奖励和路径效率。
 
 ## 训练方法与版本
 
@@ -40,22 +42,22 @@ training_reward = user_score_delta / 100
 
 训练开始前可使用可审计的行为克隆样本初始化神经网络权重；这些标签不会作为运行时动作，也不会在 MAPPO rollout 中替换 Actor 输出。主体训练的每一步均执行当前 Actor 动作。早期少量训练回合使用单机器人低电量课程，课程在后期衰减到 0；正式评估和用户任务始终从电量 100 开始。RCPD 只单向读取神经网络真实 rollout 并在训练后抽取程序，不向 Actor 提供 target、loss 或梯度，也不参与动作选择。
 
-当前 v27 Reward 候选兼容版本：
+当前 v28 individual-credit 候选兼容版本：
 
-- 模型：`warehouse_mappo_v34_efficiency_penalties`
-- 环境：`warehouse_collaborative_delivery_v21_training_efficiency_penalties`
-- Reward：`warehouse_safe_mission_reward_v18_efficiency_penalties`
-- 观测：`collaborative_observation_v22_neural_mission_intent`
-- 训练 checkpoint：`warehouse_mappo_training_v26_efficiency_penalties`
-- RCPD：`warehouse_rcpd_v29_efficiency_penalties_posthoc`
+- 模型：`warehouse_mappo_v35_individual_credit`
+- 环境：`warehouse_collaborative_delivery_v22_individual_credit`
+- Reward：`warehouse_safe_mission_reward_v19_individual_credit`
+- 观测：`collaborative_observation_v23_avoidable_wait_memory`
+- 训练 checkpoint：`warehouse_mappo_training_v27_individual_credit`
+- RCPD：`warehouse_rcpd_v30_individual_credit_posthoc`
 - 地图：`warehouse_alternating_shelves_10x11_v6_open_charger_approach`
-- seed 库：`warehouse_parallel_seed_pairs_v30_efficiency_penalties`
-- 参考轨迹：`warehouse_reference_trajectory_v29_efficiency_penalties`
+- seed 库：`warehouse_parallel_seed_pairs_v31_individual_credit`
+- 参考轨迹：`warehouse_reference_trajectory_v30_individual_credit`
 - 动作执行：`autoregressive_direct_mappo_actor_action_v9_neural_mission`
 - 运行时控制器：`mappo_autoregressive_actor_direct_execution`
 - 日志：`human-study-log.v22`
 
-v27 候选产物写入 `output/collaborative/safe_mission_v27_efficiency_penalties/`，只有完成从零训练、后验 RCPD、固定参考轨迹和独立 200-seed 正式门控后才允许成为默认模型。v26 与更早模型、失败候选、正式评估和实验数据保持只读，不会被 v27 覆盖。解释证据来自真实网络动作、环境解析结果、任务状态和电量状态，不能声称某个外部控制器修改了动作。
+v28 候选产物写入 `output/collaborative/safe_mission_v28_individual_credit/`，只有完成从零训练、后验 RCPD、固定参考轨迹和独立 200-seed 正式门控后才允许成为默认模型。v27 与更早模型、失败候选、正式评估和实验数据保持只读，不会被 v28 覆盖。解释证据来自真实网络动作、环境解析结果、任务状态和电量状态，不能声称某个外部控制器修改了动作。
 
 v26 的共享 Actor 内部增加可训练的五类神经任务意图（两个任务槽、交付、充电、等待）。离线教师同时监督动作和神经意图，使充电与任务承诺能跨连续状态保持；该意图只是网络隐变量，既不绑定共享任务，也不在运行时屏蔽、替换或修正 Actor 动作。离线关键状态覆盖充电离站、任务连续未认领、两机器人同目标、狭窄通道避让和 Actor 队友上下文；正式 rollout、参考轨迹和 UI 中的 AI 动作仍全部直接来自共享 MAPPO Actor。
 
@@ -98,6 +100,15 @@ py -3.11 continue_train_rl.py
 ```bash
 py -3.11 evaluate_rl.py
 ```
+
+训练前执行离线教师 200-seed 门控，并运行 reward/teacher 四组消融：
+
+```bash
+py -3.11 evaluate_teacher.py --episodes 200 --seed-start 15000
+py -3.11 evaluate_reward_teacher_ablation.py --seeds 41,42,43 --episodes 200 --eval-episodes 20 --device cuda
+```
+
+完整公式、已运行的 30 回合 quick proxy 和正式可复现命令见 `docs/reward_ablation_v19.md`。quick proxy 只验证管线，不作为策略改进结论。
 
 `train_rl.py`、`continue_train_rl.py` 和 `evaluate_rl.py` 都有 `main()` 入口，可直接使用 PyCharm 左侧绿色三角运行。项目解释器必须选择安装了 CUDA 版 PyTorch 的 Python 3.11。
 

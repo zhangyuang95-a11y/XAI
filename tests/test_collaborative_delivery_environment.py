@@ -617,14 +617,19 @@ def test_assignment_potential_shaping_is_training_only() -> None:
     )
     user_delta = sum(info["reward_breakdown"].values())
     assert environment.get_state().user_score == pytest.approx(user_delta)
-    expected_training = (
-        user_delta / 100
-        + info["potential_shaping_reward"]
-        + info["avoidable_wait_penalty_reward"]
-        + info["mission_regression_penalty_reward"]
-    )
-    assert rewards["robot_1"] == pytest.approx(expected_training)
-    assert rewards["robot_2"] == pytest.approx(expected_training)
+    for agent_id in environment.agent_ids:
+        expected_training = (
+            user_delta / 100
+            + info["individual_progress_rewards"][agent_id]
+            + info["coordination_progress_reward"]
+            + info["counterfactual_regret_penalty_rewards"][agent_id]
+            + info["repeated_avoidable_wait_penalty_rewards"][agent_id]
+            + info["flat_avoidable_wait_penalty_rewards"][agent_id]
+        )
+        assert rewards[agent_id] == pytest.approx(expected_training)
+        assert rewards[agent_id] == pytest.approx(
+            info["training_rewards"][agent_id]
+        )
 
 
 def test_head_on_clearance_reduces_state_potential_without_fixed_bonus() -> None:
@@ -744,15 +749,11 @@ def test_necessary_charging_wait_reduces_safe_mission_potential() -> None:
     assert info["safe_mission_potential_before"] - info[
         "safe_mission_potential_after"
     ] == pytest.approx(1.0)
-    assert info["potential_shaping_reward"] == pytest.approx(0.02)
+    assert info["individual_progress_rewards"]["robot_1"] == pytest.approx(0.01)
     assert info["base_training_reward"] == pytest.approx(-0.01)
     assert "robot_1" not in info["avoidable_wait_agents"]
-    assert rewards["robot_1"] == pytest.approx(
-        info["base_training_reward"]
-        + info["potential_shaping_reward"]
-        + info["avoidable_wait_penalty_reward"]
-        + info["mission_regression_penalty_reward"]
-    )
+    assert info["counterfactual_regret_units"]["robot_1"] == 0.0
+    assert rewards["robot_1"] == pytest.approx(0.0)
 
 
 def test_full_charger_wait_receives_avoidable_wait_training_penalty() -> None:
@@ -771,44 +772,182 @@ def test_full_charger_wait_receives_avoidable_wait_training_penalty() -> None:
     assert info["potential_shaping_reward"] == pytest.approx(0.0)
     assert info["base_training_reward"] == pytest.approx(-0.01)
     assert "robot_1" in info["avoidable_wait_agents"]
-    assert info["avoidable_wait_penalty_reward"] < 0.0
-    assert rewards["robot_1"] < -0.01
+    assert info["counterfactual_regret_penalty_rewards"]["robot_1"] < 0.0
+    assert info["repeated_avoidable_wait_penalty_rewards"]["robot_1"] == 0.0
+    assert rewards["robot_1"] < info["base_training_reward"]
 
 
-def test_mission_regression_adds_training_only_distance_penalty() -> None:
-    enabled = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
-    enabled.reset(seed=3)
-    initial = enabled.get_state()
-    disabled = WarehouseMultiAgentEnv(
-        WarehouseConfig(
-            horizon=20,
-            reward=RewardConfig(
-                avoidable_wait_cost=0.0,
-                mission_regression_scale=0.0,
-            ),
+def test_safe_frozen_goal_progress_is_better_than_avoidable_wait() -> None:
+    config = WarehouseConfig(horizon=20, participant_detour_scoring=False)
+    baseline = WarehouseMultiAgentEnv(config)
+    baseline.reset(seed=7)
+    initial = baseline.get_state()
+    waiting = WarehouseMultiAgentEnv(config)
+    waiting.reset(seed=7)
+    waiting.set_state(deepcopy(initial))
+    moving = WarehouseMultiAgentEnv(config)
+    moving.reset(seed=7)
+    moving.set_state(deepcopy(initial))
+
+    _, wait_rewards, _, _, wait_info = waiting.step(
+        {"robot_1": "WAIT", "robot_2": "WAIT"}
+    )
+    _, move_rewards, _, _, move_info = moving.step(
+        {"robot_1": "UP", "robot_2": "WAIT"}
+    )
+
+    assert wait_info["counterfactual_regret_units"]["robot_1"] == 1.0
+    assert move_info["counterfactual_regret_units"]["robot_1"] == 0.0
+    assert move_info["individual_progress_rewards"]["robot_1"] == pytest.approx(
+        0.01
+    )
+    assert move_rewards["robot_1"] > wait_rewards["robot_1"]
+
+
+def test_repeated_avoidable_wait_penalty_increases_and_caps() -> None:
+    environment = WarehouseMultiAgentEnv(
+        WarehouseConfig(horizon=20, participant_detour_scoring=False)
+    )
+    environment.reset(seed=7)
+    penalties: list[float] = []
+    for _ in range(7):
+        _, _, _, _, info = environment.step(
+            {"robot_1": "WAIT", "robot_2": "WAIT"}
         )
-    )
-    disabled.reset(seed=3)
-    disabled.set_state(deepcopy(initial))
+        penalties.append(
+            info["repeated_avoidable_wait_penalty_rewards"]["robot_1"]
+        )
 
-    _, enabled_rewards, _, _, enabled_info = enabled.step(
+    assert penalties == pytest.approx(
+        [0.0, -0.01, -0.02, -0.03, -0.04, -0.04, -0.04]
+    )
+    assert environment.get_state().by_id("robot_1").avoidable_wait_streak == 7
+
+
+def test_teacher_yield_and_charger_handoff_have_zero_regret() -> None:
+    head_on = WarehouseMultiAgentEnv(
+        WarehouseConfig(horizon=20, participant_detour_scoring=False)
+    )
+    head_on.reset(seed=7001)
+    apply_head_on_scenario(head_on, reverse=False)
+    head_on_actions = stable_coordination_actions(head_on)
+    _, _, _, _, head_on_info = head_on.step(head_on_actions)
+    assert head_on_info["counterfactual_regret_units"] == {
+        "robot_1": 0.0,
+        "robot_2": 0.0,
+    }
+
+    handoff = WarehouseMultiAgentEnv(
+        WarehouseConfig(horizon=20, participant_detour_scoring=False)
+    )
+    handoff.reset(seed=7002)
+    apply_charger_handoff_scenario(
+        handoff,
+        occupant_agent_id="robot_1",
+        queued_battery=12.0,
+    )
+    handoff_actions = stable_coordination_actions(handoff)
+    _, _, _, _, handoff_info = handoff.step(handoff_actions)
+    assert handoff_info["counterfactual_regret_units"] == {
+        "robot_1": 0.0,
+        "robot_2": 0.0,
+    }
+
+
+def test_frozen_commitment_prevents_assignment_switch_progress() -> None:
+    environment = WarehouseMultiAgentEnv(
+        WarehouseConfig(horizon=20, participant_detour_scoring=False)
+    )
+    environment.reset(seed=81)
+    state = environment.get_state()
+    left_task, right_task = sorted(state.tasks, key=lambda task: task.task_id)
+    robot_one = state.by_id("robot_1")
+    robot_two = state.by_id("robot_2")
+    robot_one.route_commitment_task_id = left_task.task_id
+    robot_two.route_commitment_task_id = right_task.task_id
+
+    selected: tuple[tuple[int, int], str] | None = None
+    for position in environment.layout.passable_positions:
+        if position == robot_two.position:
+            continue
+        for action, delta in MOVE_DELTAS.items():
+            target = (position[0] + delta[0], position[1] + delta[1])
+            if not environment.layout.is_passable(target):
+                continue
+            committed_before = shortest_path_distance(
+                position,
+                left_task.pickup_position,
+            )
+            committed_after = shortest_path_distance(
+                target,
+                left_task.pickup_position,
+            )
+            other_before = shortest_path_distance(
+                position,
+                right_task.pickup_position,
+            )
+            other_after = shortest_path_distance(
+                target,
+                right_task.pickup_position,
+            )
+            if committed_after > committed_before and other_after < other_before:
+                selected = (position, action)
+                break
+        if selected is not None:
+            break
+    assert selected is not None
+    robot_one.position, action = selected
+    environment.set_state(state)
+
+    _, _, _, _, info = environment.step(
+        {"robot_1": action, "robot_2": "WAIT"}
+    )
+
+    assert info["frozen_missions"]["robot_1"]["task_id"] == left_task.task_id
+    assert info["individual_progress_rewards"]["robot_1"] < 0.0
+    assert info["counterfactual_regret_units"]["robot_1"] > 0.0
+
+
+def test_coordination_round_trip_cannot_create_reward() -> None:
+    environment = WarehouseMultiAgentEnv(
+        WarehouseConfig(horizon=20, participant_detour_scoring=False)
+    )
+    environment.reset(seed=7001)
+    apply_head_on_scenario(environment, reverse=False)
+    forward = stable_coordination_actions(environment)
+    _, _, _, _, forward_info = environment.step(forward)
+    _, _, _, _, reverse_info = environment.step(
+        {"robot_1": "UP", "robot_2": "LEFT"}
+    )
+
+    assert forward_info["coordination_progress_reward"] > 0.0
+    assert (
+        forward_info["coordination_progress_reward"]
+        + reverse_info["coordination_progress_reward"]
+    ) == pytest.approx(0.0)
+
+
+def test_counterfactual_regret_is_symmetric_and_individual() -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment.reset(seed=3)
+
+    _, rewards, _, _, info = environment.step(
         {"robot_1": "RIGHT", "robot_2": "DOWN"}
     )
-    _, disabled_rewards, _, _, disabled_info = disabled.step(
-        {"robot_1": "RIGHT", "robot_2": "DOWN"}
-    )
 
-    assert enabled_info["mission_regression_units"] == pytest.approx(1.0)
-    assert enabled_info["mission_regression_penalty_reward"] == pytest.approx(
-        -0.01
-    )
-    assert disabled_info["mission_regression_penalty_reward"] == 0.0
-    assert enabled_rewards["robot_1"] == pytest.approx(
-        disabled_rewards["robot_1"] - 0.01
-    )
-    assert enabled_rewards["robot_1"] == enabled_rewards["robot_2"]
-    assert enabled_info["reward_breakdown"] == disabled_info["reward_breakdown"]
-    assert enabled.get_state().user_score == disabled.get_state().user_score
+    assert info["mission_regression_units"] == 0.0
+    assert info["mission_regression_penalty_reward"] == 0.0
+    assert info["counterfactual_regret_units"] == {
+        "robot_1": pytest.approx(2.0),
+        "robot_2": pytest.approx(1.0),
+    }
+    for agent_id in environment.agent_ids:
+        assert info["counterfactual_regret_penalty_rewards"][agent_id] == (
+            pytest.approx(
+                -0.02 * info["counterfactual_regret_units"][agent_id]
+            )
+        )
+    assert rewards["robot_1"] != rewards["robot_2"]
 
 
 @pytest.mark.parametrize(
@@ -962,7 +1101,9 @@ def test_seed_42027_required_delivery_and_charging_moves_are_not_detours(
     assert legacy_regret >= 13.0  # documents the archived v20 failure
     assert info["route_regret"]["robot_1"] == pytest.approx(0.0)
     assert info["reward_breakdown"]["human_detour"] == pytest.approx(0.0)
-    assert rewards["robot_1"] == pytest.approx(rewards["robot_2"])
+    assert info["counterfactual_regret_units"]["robot_1"] == 0.0
+    assert info["counterfactual_regret_units"]["robot_2"] == 0.0
+    assert rewards == info["training_rewards"]
 
 
 def test_one_step_detour_regret_is_bounded_by_two_grid_steps() -> None:

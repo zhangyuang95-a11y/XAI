@@ -34,6 +34,10 @@ from backend.training.learner_dataset import (
     safe_navigation_teacher_actions as _safe_navigation_teacher_actions,
     teacher_mission_intent_label as _teacher_mission_intent_label,
 )
+from backend.training.warehouse_options import (
+    add_teacher_balance_options,
+    skill_retention_weight as _skill_retention_weight,
+)
 from core.rcpd import RCPD, RCPDConfig
 
 from env.warehouse.environment import (
@@ -56,6 +60,7 @@ from env.warehouse.mappo import (
     evaluate_random_policy,
 )
 from env.warehouse.policy import autoregressive_actor_input
+from env.warehouse.policy_metrics import batch_efficiency_log_fields
 from env.warehouse.observations import observation_dim
 from env.warehouse.rewards import RewardConfig
 from env.warehouse.seed_calibration import (
@@ -174,10 +179,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.95,
     )
-    parser.add_argument("--behavior-cloning-samples", type=int, default=65536)
-    parser.add_argument("--behavior-cloning-epochs", type=int, default=100)
-    parser.add_argument("--behavior-cloning-batch-size", type=int, default=512)
-    parser.add_argument("--behavior-cloning-lr", type=float, default=0.0003)
+    add_teacher_balance_options(parser)
     parser.add_argument(
         "--mission-intent-loss-coef",
         type=float,
@@ -186,16 +188,6 @@ def build_parser() -> argparse.ArgumentParser:
             "Auxiliary loss for the Actor's internal neural mission intent. "
             "It trains weights only and never replaces a runtime action."
         ),
-    )
-    parser.add_argument(
-        "--skill-retention-samples",
-        type=int,
-        default=32768,
-    )
-    parser.add_argument(
-        "--skill-retention-weight",
-        type=float,
-        default=5.0,
     )
     parser.add_argument(
         "--resume-behavior-cloning-epochs",
@@ -328,6 +320,8 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         parser.error("skill retention samples cannot be negative")
     if args.skill_retention_weight < 0.0:
         parser.error("skill retention weight cannot be negative")
+    if not 0.0 < args.skill_retention_fade_end <= 1.0:
+        parser.error("skill retention fade end must be in (0, 1]")
     if (
         args.learner_state_relabel_every < 0
         or args.learner_state_relabel_warmup_rounds < 0
@@ -1179,6 +1173,7 @@ def train(
         max_agents=args.max_agents,
         horizon=args.horizon,
         seed=args.seed,
+        teacher_efficiency_guard_enabled=(not args.legacy_teacher_supervision),
         reward=_reward_config_from_json(args.reward_overrides),
     )
     # Do not even instantiate RCPD until the final Actor update has completed.
@@ -1353,12 +1348,16 @@ def train(
         )
         _set_optimizer_lr(trainer.actor_optimizer, actor_lr)
         _set_optimizer_lr(trainer.critic_optimizer, critic_lr)
+        active_skill_retention_weight = _skill_retention_weight(
+            args,
+            group_end,
+        )
         losses = trainer.update_many(
             batches,
             entropy_coef=entropy,
             skill_anchor_observations=skill_anchor_observations,
             skill_anchor_labels=skill_anchor_labels,
-            skill_anchor_weight=float(args.skill_retention_weight),
+            skill_anchor_weight=active_skill_retention_weight,
         )
         relabel_applied = False
         if (
@@ -1394,6 +1393,7 @@ def train(
                     "mission_regression_penalty_reward": (
                         batch.mission_regression_penalty_reward
                     ),
+                    **batch_efficiency_log_fields(batch),
                     "steps": batch.episode_steps,
                     "pickups": batch.pickups,
                     "deliveries": batch.deliveries,
@@ -1425,6 +1425,12 @@ def train(
                     "skill_retention_weight": losses[
                         "skill_anchor_weight"
                     ],
+                    "configured_skill_retention_weight": float(
+                        args.skill_retention_weight
+                    ),
+                    "skill_retention_fade_end": float(
+                        args.skill_retention_fade_end
+                    ),
                     "learner_state_relabel_applied": int(relabel_applied),
                     "rcpd_extracted": 0,
                     "rcpd_extraction_error": "",
@@ -1560,7 +1566,9 @@ def train(
                 if skill_anchor_observations is not None
                 else 0
             ),
-            "weight": float(args.skill_retention_weight),
+            "initial_weight": float(args.skill_retention_weight),
+            "fade_end_fraction": float(args.skill_retention_fade_end),
+            "final_weight": _skill_retention_weight(args, args.episodes),
             "data_source": "offline_full_navigation_skill_retention_only",
             "runtime_action_source": "mappo_actor",
             "environment_action_interventions": 0,
@@ -1953,7 +1961,7 @@ def main() -> None:
     if not args.no_plot:
         write_plot(args.plot_output, metrics)
     summary = {
-        "format": "warehouse_collaborative_training_v26_neural_mission_intent",
+        "format": "warehouse_collaborative_training_v27_individual_credit",
         "model_version": policy.model_version,
         "warehouse_program_version": WAREHOUSE_PROGRAM_VERSION,
         "environment_config": asdict(policy.environment_config),

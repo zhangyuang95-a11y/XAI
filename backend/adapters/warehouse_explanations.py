@@ -17,7 +17,7 @@ class WarehouseExplanationMixin:
     def explanation_entity_label(self, entity_id: str, language: str) -> str:
         if language == "zh-CN":
             return "机器人1" if entity_id == "robot_1" else "机器人2"
-        return entity_id.replace("_", " ")
+        return entity_id.replace("_", " ").title()
 
     def explanation_action_label(self, action: str, language: str) -> str:
         return _action_zh(action) if language == "zh-CN" else str(action).lower()
@@ -103,8 +103,13 @@ class WarehouseExplanationMixin:
             task = value.get("next_task", {})
             task = task if isinstance(task, Mapping) else {}
             task_id = str(task.get("task_id", ""))
+            task_slot = task.get("task_slot")
             task_label = (
-                f"任务{task_id.removeprefix('task_')}"
+                f"任务{task_slot}"
+                if language == "zh-CN" and task_slot
+                else f"task {task_slot}"
+                if task_slot
+                else f"任务{task_id.removeprefix('task_')}"
                 if language == "zh-CN" and task_id
                 else task_id.replace("_", " ")
             )
@@ -180,20 +185,28 @@ class WarehouseExplanationMixin:
             work = work if isinstance(work, Mapping) else {}
             kind = str(work.get("kind", "reposition"))
             task_id = str(work.get("task_id", ""))
+            task_slot = work.get("task_slot")
             task_label = (
-                f"任务{task_id.removeprefix('task_')}"
+                f"任务{task_slot}"
+                if language == "zh-CN" and task_slot
+                else f"task {task_slot}"
+                if task_slot
+                else f"任务{task_id.removeprefix('task_')}"
                 if language == "zh-CN" and task_id
                 else task_id.replace("_", " ")
             )
             endpoint = work.get("endpoint")
             endpoint_text = str(tuple(endpoint)) if endpoint is not None else ""
+            before_position = tuple(value.get("position_before", ()))
+            after_position = tuple(value.get("position_after", ()))
             if language == "zh-CN":
                 if kind in {"pickup", "delivery"} and task_label and endpoint_text:
                     endpoint_kind = "A" if kind == "pickup" else "B"
                     purpose = "取货" if kind == "pickup" else "交付"
                     if after_distance < before_distance:
                         return (
-                            f"这样做使它到{task_label}的{endpoint_kind}点{endpoint_text}的"
+                            f"它从{before_position}移动到{after_position}，使到{task_label}的"
+                            f"{endpoint_kind}点{endpoint_text}的"
                             f"剩余距离从{before_distance}格缩短到{after_distance}格，"
                             f"从而推进{purpose}"
                         )
@@ -201,12 +214,14 @@ class WarehouseExplanationMixin:
                         return (
                             f"在当时可行的动作中，策略给{action_label}的选择概率最高"
                             f"（{selected_probability * 100:.1f}%），因此执行了该动作；"
-                            f"不过这一步没有缩短到{task_label}的{endpoint_kind}点"
+                            f"它从{before_position}移动到{after_position}，不过这一步没有缩短到"
+                            f"{task_label}的{endpoint_kind}点"
                             f"{endpoint_text}的路线，剩余距离从{before_distance}格变为"
                             f"{after_distance}格"
                         )
                     return (
-                        f"这一步没有缩短到{task_label}的{endpoint_kind}点{endpoint_text}"
+                        f"它从{before_position}移动到{after_position}；这一步没有缩短到"
+                        f"{task_label}的{endpoint_kind}点{endpoint_text}"
                         f"的路线，剩余距离从{before_distance}格变为{after_distance}格；"
                         "现有可验证证据不能支持更具体的动作原因"
                     )
@@ -216,8 +231,11 @@ class WarehouseExplanationMixin:
                     next_task = work.get("next_task", {})
                     next_task = next_task if isinstance(next_task, Mapping) else {}
                     next_id = str(next_task.get("task_id", ""))
+                    next_slot = next_task.get("task_slot")
                     next_label = (
-                        f"任务{next_id.removeprefix('task_')}"
+                        f"任务{next_slot}"
+                        if next_slot
+                        else f"任务{next_id.removeprefix('task_')}"
                         if next_id
                         else "后续共享任务"
                     )
@@ -236,19 +254,19 @@ class WarehouseExplanationMixin:
                         else "，充电后继续参与共享配送"
                     )
                     return (
-                        f"此时它的电量为{battery_text}%，这样做使其到充电站的"
+                        f"此时它的电量为{battery_text}%；它从{before_position}移动到"
+                        f"{after_position}，使到充电站的"
                         f"剩余距离从{before_distance}格缩短到{after_distance}格"
                         f"{following}"
                     )
-                before_position = tuple(value.get("position_before", ()))
-                after_position = tuple(value.get("position_after", ()))
                 return f"这样做使它从{before_position}移动到{after_position}"
             if kind in {"pickup", "delivery"} and task_label and endpoint_text:
                 endpoint_kind = "A" if kind == "pickup" else "B"
                 purpose = "pickup" if kind == "pickup" else "delivery"
                 if after_distance < before_distance:
                     return (
-                        f"This reduced the remaining distance to {task_label} point "
+                        f"It moved from {before_position} to {after_position}, reducing "
+                        f"the remaining distance to {task_label} point "
                         f"{endpoint_kind} {endpoint_text} from {before_distance} to "
                         f"{after_distance} cells, advancing {purpose}"
                     )
@@ -257,12 +275,14 @@ class WarehouseExplanationMixin:
                         f"Among the feasible actions, the policy assigned the highest "
                         f"selection probability to {action_label} "
                         f"({selected_probability * 100:.1f}%), so it executed that action; "
-                        f"however, this step did not shorten the route to {task_label} "
+                        f"it moved from {before_position} to {after_position}, but this step "
+                        f"did not shorten the route to {task_label} "
                         f"point {endpoint_kind} {endpoint_text}, changing the remaining "
                         f"distance from {before_distance} to {after_distance} cells"
                     )
                 return (
-                    f"This step did not shorten the route to {task_label} point "
+                    f"It moved from {before_position} to {after_position}; this step did "
+                    f"not shorten the route to {task_label} point "
                     f"{endpoint_kind} {endpoint_text}; the remaining distance changed "
                     f"from {before_distance} to {after_distance} cells, and the verified "
                     "evidence does not support a more specific reason for the action"
@@ -270,7 +290,8 @@ class WarehouseExplanationMixin:
             if kind == "charge":
                 battery = float(work.get("battery_before", 0.0))
                 return (
-                    f"With {battery:g}% battery, this reduced the remaining distance "
+                    f"With {battery:g}% battery, it moved from {before_position} to "
+                    f"{after_position}, reducing the remaining distance "
                     f"to the charger from {before_distance} to {after_distance} cells"
                 )
             return (
@@ -868,10 +889,71 @@ class WarehouseExplanationMixin:
                 f"{robot} actually executed {executed}"
             )
         if predicate == "shared_objective_selection_reason" and isinstance(value, Mapping):
-            objective = value.get("selected_objective", {}).get("id", "wait")
-            return (
-                f"{robot}当时的目标是{_goal_label(str(objective), language)}"
-                if language == "zh-CN"
-                else f"{robot}'s objective was {_goal_label(str(objective), language)}"
+            selected = value.get("selected_objective", {})
+            selected = selected if isinstance(selected, Mapping) else {}
+            objective = str(selected.get("id", "wait"))
+            task_id = str(selected.get("task_id", "") or "")
+            target = selected.get("target_position")
+            target_text = str(tuple(target)) if target is not None else ""
+            tasks = tuple(
+                item
+                for item in value.get("active_shared_tasks", ())
+                if isinstance(item, Mapping)
             )
+            task_slot = next(
+                (
+                    index
+                    for index, item in enumerate(tasks, start=1)
+                    if str(item.get("task_id", "")) == task_id
+                ),
+                None,
+            )
+            task_state = value.get("task_state", {})
+            task_state = task_state if isinstance(task_state, Mapping) else {}
+            current = task_state.get("current_position")
+            current_text = str(tuple(current)) if current is not None else ""
+            conditions = tuple(
+                item
+                for item in value.get("decision_conditions", ())
+                if isinstance(item, Mapping)
+            )
+            route_distance = next(
+                (
+                    int(item.get("value", 0))
+                    for item in conditions
+                    if item.get("name") == "route_distance"
+                ),
+                None,
+            )
+            if language == "zh-CN":
+                if objective == "pickup" and task_slot and target_text:
+                    goal = f"当前的临时导航目标是任务{task_slot}的A点{target_text}"
+                elif objective == "delivery" and task_slot and target_text:
+                    goal = f"当前的配送目标是任务{task_slot}的B点{target_text}"
+                elif objective == "charge" and target_text:
+                    goal = f"当前目标是充电站{target_text}"
+                else:
+                    goal = f"当前目标是{_goal_label(objective, language)}"
+                route = (
+                    f"；从当前位置{current_text}到该目标的最短可通行路径为"
+                    f"{route_distance}格"
+                    if current_text and route_distance is not None
+                    else ""
+                )
+                return f"{robot}{goal}{route}"
+            if objective == "pickup" and task_slot and target_text:
+                goal = f"current temporary navigation target was task {task_slot} point A {target_text}"
+            elif objective == "delivery" and task_slot and target_text:
+                goal = f"current delivery target was task {task_slot} point B {target_text}"
+            elif objective == "charge" and target_text:
+                goal = f"current target was the charger at {target_text}"
+            else:
+                goal = f"current objective was {_goal_label(objective, language)}"
+            route = (
+                f"; the shortest passable route from {current_text} to that target was "
+                f"{route_distance} cells"
+                if current_text and route_distance is not None
+                else ""
+            )
+            return f"{robot}'s {goal}{route}"
         return f"{predicate}: {value}"

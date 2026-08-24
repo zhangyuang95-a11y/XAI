@@ -162,6 +162,7 @@ def _recent_energy_features(
         max(-1.0, min(1.0, agent.last_battery_delta / config.charge_per_wait)),
         min(1.0, agent.steps_since_charging / max(1, config.horizon)),
         min(1.0, agent.charger_wait_streak / 10.0),
+        min(1.0, agent.avoidable_wait_streak / 5.0),
         min(1.0, frames_since_departure / max(1, config.horizon)),
         float(frames_since_departure <= 4),
     )
@@ -868,7 +869,7 @@ def local_observation(
         [0.0]
         * (
             (config.max_agents - 1 - len(others))
-            * (17 + len(NAVIGATION_GOAL_KINDS) + 3 * len(ACTIONS))
+            * (18 + len(NAVIGATION_GOAL_KINDS) + 3 * len(ACTIONS))
         )
     )
     values.extend(_canonical_team_context(state, config))
@@ -895,12 +896,12 @@ def observation_dim(config: WarehouseConfig) -> int:
         + 3
         + config.max_agents
         + 2 * len(ACTIONS)
-        + 5
+        + 6
     )
     tasks = config.active_task_count * 23
     teammate = (
         (config.max_agents - 1)
-        * (17 + len(NAVIGATION_GOAL_KINDS) + 3 * len(ACTIONS))
+        * (18 + len(NAVIGATION_GOAL_KINDS) + 3 * len(ACTIONS))
     )
     canonical_team = (
         config.max_agents
@@ -1026,6 +1027,7 @@ def observation_schema(config: WarehouseConfig) -> dict[str, Any]:
              "last_battery_delta",
              "steps_since_charging",
              "charger_wait_streak",
+             "avoidable_wait_streak",
              "frames_since_charger_departure",
              "departed_charger_within_four_steps",
          ),

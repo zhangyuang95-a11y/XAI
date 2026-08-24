@@ -36,6 +36,9 @@ class WarehouseConfig:
     # leaving the charger with a route that is safe only in an empty map.
     coordination_energy_reserve_steps: float = 2.0
     local_patch_radius: int = 2
+    # Offline-supervision ablation only; the environment never invokes the
+    # teacher and deployed Actor actions remain direct in either setting.
+    teacher_efficiency_guard_enabled: bool = True
     seed: int = 2026
     reward: RewardConfig = field(default_factory=RewardConfig)
 
@@ -92,6 +95,10 @@ class DeliveryTask:
     created_frame: int = 0
     claimed_frame: int | None = None
     delivered_frame: int | None = None
+    # Training/evaluation audit fields.  They never enter participant score or
+    # task ownership and remain optional for archived scenario fixtures.
+    claimed_battery: float | None = None
+    shortest_safe_delivery_steps: float | None = None
 
     @property
     def active(self) -> bool:
@@ -116,6 +123,10 @@ class AgentState:
     last_battery_delta: float = 0.0
     steps_since_charging: int = 0
     charger_wait_streak: int = 0
+    # Consecutive WAITs for which a collision-free, legal step toward the
+    # transition-frozen mission existed.  This is separate from charging and
+    # joint-stall memory so necessary waits never accumulate a penalty.
+    avoidable_wait_streak: int = 0
     last_charger_departure_frame: int | None = None
     deliveries_at_last_charger_departure: int = 0
     carrying_task_at_last_charger_departure: str | None = None

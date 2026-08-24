@@ -64,6 +64,7 @@ def main() -> None:
                 "--behavior-cloning-lr", "0.00015",
                 "--skill-retention-samples", "16384",
                 "--skill-retention-weight", "1.0",
+                "--skill-retention-fade-end", "0.50",
                 "--learner-state-relabel-every", "100",
                 "--learner-state-relabel-samples", "8192",
                 "--learner-state-relabel-replay-capacity", "32768",

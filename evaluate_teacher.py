@@ -7,7 +7,7 @@ prevent a structurally bad teacher from being distilled into a fresh Actor.
 from __future__ import annotations
 
 import argparse
-from collections import deque
+from collections import Counter, deque
 import json
 from statistics import mean
 
@@ -29,6 +29,13 @@ def evaluate_teacher(*, episodes: int, seed_start: int) -> dict[str, object]:
     shutdown_episodes = 0
     collision_episodes = 0
     deadlock_episodes = 0
+    action_metrics: Counter[str] = Counter()
+    maximum_avoidable_wait_streaks = {
+        "robot_1": 0,
+        "robot_2": 0,
+    }
+    path_actual_steps = 0.0
+    path_shortest_safe_steps = 0.0
     return_cycle_details: list[dict[str, object]] = []
     for seed in range(seed_start, seed_start + episodes):
         environment = WarehouseMultiAgentEnv(
@@ -94,6 +101,36 @@ def evaluate_teacher(*, episodes: int, seed_start: int) -> dict[str, object]:
                 }
             )
             _, _, terminated, truncated, info = environment.step(actions)
+            for agent_id in environment.agent_ids:
+                action_metrics[f"{agent_id}_steps"] += 1
+                action_metrics[f"{agent_id}_waits"] += int(
+                    str(actions.get(agent_id, "WAIT")) == "WAIT"
+                )
+                action_metrics[f"{agent_id}_avoidable_waits"] += int(
+                    agent_id in info.get("avoidable_wait_agents", ())
+                )
+                action_metrics[f"{agent_id}_detours"] += int(
+                    agent_id in info.get("avoidable_detour_agents", ())
+                )
+                action_metrics[f"{agent_id}_loaded_detours"] += int(
+                    agent_id
+                    in info.get(
+                        "avoidable_loaded_delivery_detour_agents",
+                        (),
+                    )
+                )
+                maximum_avoidable_wait_streaks[agent_id] = max(
+                    maximum_avoidable_wait_streaks[agent_id],
+                    int(
+                        info.get("avoidable_wait_streaks", {}).get(
+                            agent_id,
+                            0,
+                        )
+                    ),
+                )
+            action_metrics["ineffective_joint_wait_steps"] += int(
+                int(info.get("ineffective_joint_wait_streak", 0)) > 0
+            )
             episode_cycles = sum(
                 event.get("event") == "charger_return_cycle"
                 for event in info.get("energy_events", ())
@@ -130,6 +167,16 @@ def evaluate_teacher(*, episodes: int, seed_start: int) -> dict[str, object]:
             ) >= 8
             if terminated or truncated:
                 break
+        final_state = environment.get_state()
+        for task in final_state.completed_tasks:
+            if (
+                task.delivered_frame is None
+                or task.claimed_frame is None
+                or task.shortest_safe_delivery_steps is None
+            ):
+                continue
+            path_actual_steps += float(task.delivered_frame - task.claimed_frame)
+            path_shortest_safe_steps += float(task.shortest_safe_delivery_steps)
         deliveries.append(environment.get_state().total_deliveries)
         return_episodes += int(returned)
         starvation_episodes += int(starved)
@@ -153,6 +200,56 @@ def evaluate_teacher(*, episodes: int, seed_start: int) -> dict[str, object]:
         "shutdown_episode_rate": shutdown_episodes / denominator,
         "collision_episode_rate": collision_episodes / denominator,
         "deadlock_episode_rate": deadlock_episodes / denominator,
+        "per_agent_action_metrics": {
+            agent_id: {
+                "steps": action_metrics[f"{agent_id}_steps"],
+                "waits": action_metrics[f"{agent_id}_waits"],
+                "wait_rate": (
+                    action_metrics[f"{agent_id}_waits"]
+                    / max(1, action_metrics[f"{agent_id}_steps"])
+                ),
+                "avoidable_waits": action_metrics[
+                    f"{agent_id}_avoidable_waits"
+                ],
+                "avoidable_wait_rate": (
+                    action_metrics[f"{agent_id}_avoidable_waits"]
+                    / max(1, action_metrics[f"{agent_id}_steps"])
+                ),
+                "maximum_avoidable_wait_streak": (
+                    maximum_avoidable_wait_streaks[agent_id]
+                ),
+                "detours": action_metrics[f"{agent_id}_detours"],
+                "loaded_detours": action_metrics[
+                    f"{agent_id}_loaded_detours"
+                ],
+            }
+            for agent_id in environment.agent_ids
+        },
+        "avoidable_wait_rate": (
+            sum(
+                action_metrics[f"{agent_id}_avoidable_waits"]
+                for agent_id in environment.agent_ids
+            )
+            / max(
+                1,
+                sum(
+                    action_metrics[f"{agent_id}_steps"]
+                    for agent_id in environment.agent_ids
+                ),
+            )
+        ),
+        "avoidable_loaded_delivery_detours": sum(
+            action_metrics[f"{agent_id}_loaded_detours"]
+            for agent_id in environment.agent_ids
+        ),
+        "ineffective_joint_wait_steps": action_metrics[
+            "ineffective_joint_wait_steps"
+        ],
+        "path_efficiency_actual_over_shortest_safe": (
+            path_actual_steps / max(1.0, path_shortest_safe_steps)
+        ),
+        "path_actual_steps": path_actual_steps,
+        "path_shortest_safe_steps": path_shortest_safe_steps,
         "charger_return_cycle_details": return_cycle_details,
     }
     report["acceptance"] = {
@@ -164,7 +261,11 @@ def evaluate_teacher(*, episodes: int, seed_start: int) -> dict[str, object]:
         ),
         "shutdown_episode_rate_eq_0": report["shutdown_episode_rate"] == 0.0,
         "collision_episode_rate_eq_0": report["collision_episode_rate"] == 0.0,
-        "deadlock_episode_rate_le_0_05": report["deadlock_episode_rate"] <= 0.05,
+        "deadlock_episode_rate_le_0_01": report["deadlock_episode_rate"] <= 0.01,
+        "avoidable_wait_rate_le_0_005": report["avoidable_wait_rate"] <= 0.005,
+        "avoidable_loaded_delivery_detours_eq_0": (
+            report["avoidable_loaded_delivery_detours"] == 0
+        ),
     }
     report["accepted"] = all(report["acceptance"].values())
     return report

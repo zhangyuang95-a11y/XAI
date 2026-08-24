@@ -128,17 +128,17 @@ def test_shared_observation_contract_and_task_slots() -> None:
     config = WarehouseConfig(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     observations, _ = environment.reset(seed=12)
-    assert observation_dim(config) == 464
-    assert global_state_dim(config) == 936
+    assert observation_dim(config) == 466
+    assert global_state_dim(config) == 940
     assert set(observations) == {"robot_1", "robot_2"}
-    assert all(value.shape == (464,) for value in observations.values())
-    assert environment.global_state().shape == (936,)
+    assert all(value.shape == (466,) for value in observations.values())
+    assert environment.global_state().shape == (940,)
 
     schema = WarehouseAdapter(environment).observation_schema()
     serialized = str(schema)
     assert "task" in serialized.lower()
     assert schema["contract_version"] == (
-            "collaborative_observation_v22_neural_mission_intent"
+            "collaborative_observation_v23_avoidable_wait_memory"
     )
     assert "navigation_goal_fields" in schema
 
@@ -314,7 +314,7 @@ def test_explanation_evidence_binds_robot_two_live_task_and_frame() -> None:
 
 
 def test_program_version_constant_is_new_shared_contract() -> None:
-    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v29_efficiency_penalties_posthoc"
+    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v30_individual_credit_posthoc"
 
 
 def test_removed_runtime_controller_predicate_has_no_special_verbalizer() -> None:

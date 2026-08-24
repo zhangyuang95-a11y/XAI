@@ -63,6 +63,7 @@ def _post_charge_task_context(
         return {
             "kind": "delivery",
             "task_id": task.task_id,
+            "task_slot": _task_slot(state, task.task_id),
             "endpoint": task.delivery_position,
             "endpoint_kind": "B",
         }
@@ -90,6 +91,7 @@ def _post_charge_task_context(
             return {
                 "kind": "pickup",
                 "task_id": task.task_id,
+                "task_slot": _task_slot(state, task.task_id),
                 "endpoint": task.pickup_position,
                 "endpoint_kind": "A",
             }
@@ -123,6 +125,7 @@ def _movement_work_context(
         return {
             "kind": "delivery",
             "task_id": task.task_id,
+            "task_slot": _task_slot(state, task.task_id),
             "endpoint": task.delivery_position,
             "endpoint_kind": "B",
         }
@@ -140,6 +143,7 @@ def _movement_work_context(
             return {
                 "kind": "pickup",
                 "task_id": task.task_id,
+                "task_slot": _task_slot(state, task.task_id),
                 "endpoint": task.pickup_position,
                 "endpoint_kind": "A",
             }

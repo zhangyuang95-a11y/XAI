@@ -663,7 +663,10 @@ def test_task_question_only_reports_task_effect_and_omits_other_explanation_dime
         language="zh-CN",
     )
 
-    assert text == "这样做使它到任务1的B点(1, 2)的剩余距离从5格缩短到4格，从而推进交付。"
+    assert text == (
+        "它从(4, 4)移动到(3, 4)，使到任务1的B点(1, 2)的剩余距离"
+        "从5格缩短到4格，从而推进交付。"
+    )
     assert "墙或货架" not in text
     assert "电量" not in text
     assert "协作" not in text

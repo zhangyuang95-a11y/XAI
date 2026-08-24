@@ -1,0 +1,4 @@
+# Minimal dependencies for the deterministic development preview deployed on Render.
+# The formal neural/RCPD service has a separate, substantially larger runtime.
+numpy==2.2.3
+scikit-learn==1.9.0

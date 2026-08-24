@@ -9,7 +9,9 @@ from types import SimpleNamespace
 import pytest
 
 import run as run_entry
+from env.warehouse.layouts import DEFAULT_MAP_LAYOUT
 from env.warehouse.environment import WarehouseConfig, WarehouseMultiAgentEnv
+from tests.browser_fixture_server import FixtureState
 from ui.collaborative_study import CollaborativeConditionAllocator
 from ui.web_runtime import (
     WarehouseWebApplication,
@@ -65,6 +67,20 @@ def test_web_map_payload_matches_current_fixed_geometry() -> None:
     assert payload["robot_start_positions"] == [[9, 4], [9, 6]]
     assert len(payload["shelves"]) == 57
     assert payload["shared_delivery_tasks"] is True
+
+
+def test_browser_fixture_uses_the_production_map_geometry() -> None:
+    fixture = FixtureState()
+
+    assert fixture.map_payload() == warehouse_map_payload()
+    for frame in range(24):
+        assert DEFAULT_MAP_LAYOUT.is_passable(tuple(fixture.path_position(frame)))
+        assert DEFAULT_MAP_LAYOUT.is_passable(
+            tuple(fixture.path_position(frame, reverse=True))
+        )
+    for task in fixture.snapshot()["tasks"]:
+        assert DEFAULT_MAP_LAYOUT.is_passable(tuple(task["pickup_position"]))
+        assert DEFAULT_MAP_LAYOUT.is_passable(tuple(task["delivery_position"]))
 
 
 class _FakeApplication:
@@ -134,6 +150,31 @@ def test_only_current_study_write_endpoint_is_exposed() -> None:
         "/api/study/reference-trajectory": "reference_trajectory",
         "/api/study/timeline-events": "timeline_events",
     }
+
+
+def test_web_client_retries_transient_tunnel_failures() -> None:
+    source = (Path(__file__).parents[1] / "ui" / "web" / "app.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "const API_MAX_ATTEMPTS = 4" in source
+    assert "status >= 520 && status <= 530" in source
+    assert "await delay(350 * (2 ** (attempt - 1)))" in source
+    assert 'new Error(tr("temporaryNetworkError"))' in source
+
+
+def test_web_client_defaults_the_registration_page_to_english() -> None:
+    root = Path(__file__).parents[1] / "ui" / "web"
+    source = (root / "app.js").read_text(encoding="utf-8")
+    html = (root / "index.html").read_text(encoding="utf-8")
+
+    assert 'const DEFAULT_LOCALE = "en"' in source
+    assert 'setLanguage(DEFAULT_LOCALE, false)' in source
+    assert 'requestedStage !== "idle" && view.study?.locale' in source
+    assert "PolicyLens · Two-Robot Collaborative Delivery Study" in html
+    assert 'id="languageButtonLabel">中</span>' in html
+    assert 'data-i18n="participantSetup">Participant setup</span>' in html
+    assert 'data-i18n="start">Start study</button>' in html
 
 
 def test_web_cli_seed_library_defaults_to_checkpoint_sibling() -> None:
@@ -335,7 +376,7 @@ def test_frontend_uses_one_command_per_action_and_current_controls() -> None:
     assert 'condition_override: $("testConditionSelector").value' not in source
     assert 'id="testConditionSelector"' in html
     assert 'value="explanation" data-i18n="conditionExplanation" selected' in html
-    assert "开发测试条件" in html
+    assert "Development test condition" in html
     assert 'id="testConditionStatus"' in html
     assert 'id="assignmentGroupBanner"' in html
     assert "您已分配到 A 组（有解释）" in source
@@ -359,7 +400,7 @@ def test_frontend_uses_one_command_per_action_and_current_controls() -> None:
     assert "async function synchronizeReferenceTrajectory" in source
     assert "await synchronizeReferenceTrajectory()" in source
     assert '"/api/study/timeline-events"' in source
-    assert 'locale: "en"' in source
+    assert "locale: DEFAULT_LOCALE" in source
     assert 'state.referenceIndex = Math.min(1, count - 1)' in source
     assert '$("timelineRange").addEventListener("input"' in source
     assert 'command("timeline_select"' not in source

@@ -17,6 +17,7 @@ class MapLayout:
     tiles: tuple[str, ...]
     robot_start_positions: tuple[tuple[int, int], tuple[int, int]]
     charger_position: tuple[int, int]
+    robot_exit_positions: tuple[tuple[int, int], ...] = ()
     task_endpoint_exclusions: tuple[tuple[int, int], ...] = ()
     pickup_endpoint_exclusions: tuple[tuple[int, int], ...] = ()
 
@@ -31,6 +32,7 @@ class MapLayout:
         required = {
             *self.robot_start_positions,
             self.charger_position,
+            *self.robot_exit_positions,
         }
         if any(not self.is_passable(position) for position in required):
             raise ValueError("Robot starts and the charger must be passable.")
@@ -38,6 +40,8 @@ class MapLayout:
             raise ValueError("The two robot starts must be distinct.")
         if self.charger_position in self.robot_start_positions:
             raise ValueError("The charger cannot overlap a robot start.")
+        if len(set(self.robot_exit_positions)) != len(self.robot_exit_positions):
+            raise ValueError("Robot exit positions must be distinct.")
         if any(
             not self.is_passable(position)
             for position in (
@@ -117,7 +121,7 @@ class MapLayout:
 
 
 STAGGERED_AISLES_LAYOUT = MapLayout(
-    layout_id="warehouse_alternating_shelves_10x11_v6_open_charger_approach",
+    layout_id="warehouse_staggered_aisles_10x11_v7_three_cell_exit",
     tiles=(
         "#####.#####",
         "......#####",
@@ -132,10 +136,13 @@ STAGGERED_AISLES_LAYOUT = MapLayout(
     ),
     robot_start_positions=((9, 4), (9, 6)),
     charger_position=(9, 5),
-    # Keep the three-cell charger approach free of task endpoints.  These are
-    # ordinary aisle cells, not special "yield bays".  Opening (8, 4) gives
-    # both robots another route around a robot using the charger; the central
-    # cell at (8, 5) is consequently an intentional four-way junction.
+    # These are three real, adjacent, passable exits above robot 1, the
+    # charger, and robot 2.  They are part of the simulator topology rather
+    # than a renderer-only visual treatment.
+    robot_exit_positions=((8, 4), (8, 5), (8, 6)),
+    # Keep the three-cell exit free of task endpoints.  The central cell at
+    # (8, 5) has four open neighbours because it lies inside the three-wide
+    # charger apron; it is not an aligned crossing of two shelf work aisles.
     task_endpoint_exclusions=((8, 4), (8, 5), (8, 6)),
     # An A point claims automatically when an empty robot enters it.  The
     # central spine is the only route to the charger and between alternating
@@ -145,9 +152,8 @@ STAGGERED_AISLES_LAYOUT = MapLayout(
     pickup_endpoint_exclusions=tuple((row, 5) for row in range(10)),
 )
 
-# Production study layout. It preserves the alternating-shelf warehouse
-# grammar while shortening routes and putting three shared intersections on
-# every cross-aisle trip. Charger-adjacent cells are ordinary aisle cells.
+# Legacy compact comparison layout.  Its aligned full-width work aisles form
+# the cross-shaped intersections rejected for the production study.
 COMPACT_INTERACTION_LAYOUT = MapLayout(
     layout_id="warehouse_compact_interaction_8x9_v1",
     tiles=(
@@ -162,6 +168,7 @@ COMPACT_INTERACTION_LAYOUT = MapLayout(
     ),
     robot_start_positions=((7, 2), (7, 6)),
     charger_position=(7, 4),
+    robot_exit_positions=((6, 4),),
     task_endpoint_exclusions=((6, 4), (7, 3), (7, 5)),
     pickup_endpoint_exclusions=tuple((row, 4) for row in range(8)),
 )
@@ -173,7 +180,7 @@ MAP_LAYOUTS = {
     COMPACT_INTERACTION_LAYOUT.layout_id: COMPACT_INTERACTION_LAYOUT,
 }
 DEFAULT_MAP_LAYOUT = STAGGERED_AISLES_LAYOUT
-STUDY_MAP_LAYOUT = COMPACT_INTERACTION_LAYOUT
+STUDY_MAP_LAYOUT = STAGGERED_AISLES_LAYOUT
 
 
 def get_map_layout(layout_id: str) -> MapLayout:

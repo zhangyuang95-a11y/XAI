@@ -13,6 +13,7 @@ from backend.adapters.warehouse import (
     WarehouseAdapter,
 )
 from env.warehouse.environment import WarehouseConfig, WarehouseMultiAgentEnv
+from env.warehouse.contracts import OBSERVATION_CONTRACT_VERSION
 from env.warehouse.mappo import (
     MAPPOConfig,
     MAPPOPolicy,
@@ -116,7 +117,7 @@ def test_shared_observation_contract_and_task_slots() -> None:
     schema = WarehouseAdapter(environment).observation_schema()
     serialized = str(schema)
     assert "task" in serialized.lower()
-    assert schema["contract_version"] == "collaborative_observation_v24_compact_reserve4"
+    assert schema["contract_version"] == OBSERVATION_CONTRACT_VERSION
     assert "navigation_goal_fields" in schema
 
 
@@ -291,7 +292,7 @@ def test_explanation_evidence_binds_robot_two_live_task_and_frame() -> None:
 
 
 def test_program_version_constant_is_new_shared_contract() -> None:
-    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v31_joint_risk_posthoc"
+    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v32_staggered_posthoc"
 
 
 def test_removed_runtime_controller_predicate_has_no_special_verbalizer() -> None:

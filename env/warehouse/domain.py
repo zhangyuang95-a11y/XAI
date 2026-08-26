@@ -84,16 +84,14 @@ class WarehouseConfig:
 
 
 def collaborative_study_config(**overrides: Any) -> WarehouseConfig:
-    """Return the production 120-step compact warehouse configuration."""
+    """Return the production 120-step staggered-aisle configuration."""
 
     values: dict[str, Any] = {
         "rows": STUDY_MAP_LAYOUT.rows,
         "cols": STUDY_MAP_LAYOUT.cols,
         "map_layout_id": STUDY_MAP_LAYOUT.layout_id,
-        # The compact single-charger map needs enough reserve for one real
-        # two-robot queue manoeuvre. Fixed-seed calibration selected four
-        # steps: smaller values produced shutdown tails; larger values added
-        # unnecessary charging without improving safety.
+        # Preserve the calibrated reserve until the new staggered-map policy
+        # evaluation proves that a different value is safer and more useful.
         "battery_safety_margin": 4.0,
     }
     values.update(overrides)

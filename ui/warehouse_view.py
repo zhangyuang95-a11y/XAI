@@ -76,6 +76,9 @@ def warehouse_map_payload(
         "cols": layout.cols,
         "shelves": [_point(position) for position in layout.blocked_positions],
         "charger_position": _point(layout.charger_position),
+        "robot_exit_positions": [
+            _point(position) for position in layout.robot_exit_positions
+        ],
         "waiting_zone": [
             _point(position)
             for position in layout.passable_positions

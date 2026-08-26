@@ -28,7 +28,7 @@ DEFAULT_ARTIFACTS = CollaborativeArtifactPaths.under(
 )
 DEFAULT_ARTIFACT_ROOT = DEFAULT_ARTIFACTS.root
 DEFAULT_POLICY = (
-    PROJECT_ROOT / "output" / "deployment" / "warehouse_mappo_v37.pt"
+    PROJECT_ROOT / "output" / "deployment" / "warehouse_mappo_v38.pt"
 )
 DEFAULT_PROGRAM = DEFAULT_ARTIFACTS.rcpd_program
 SESSION_COOKIE = "warehouse_xai_session"

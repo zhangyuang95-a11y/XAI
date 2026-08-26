@@ -46,11 +46,15 @@ from ui.warehouse_view import (
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "ui" / "web"
-TUTORIAL_SEED = 40_221
+# Public NumPy tutorial seed, calibrated independently from scored rounds.
+# With fixed stochastic Actor sampling it covers one real simultaneous
+# collision and one charger-clearance transition without shutdown, detour,
+# task starvation, or an unproductive charger-return cycle.
+TUTORIAL_SEED = 40_786
 TASK1_SEED = 51_000
 TASK2_SEED = 51_500
 DEPLOYED_ACTOR_PATH = (
-    ROOT / "output" / "deployment" / "warehouse_mappo_v37_actor.npz"
+    ROOT / "output" / "deployment" / "warehouse_mappo_v38_actor.npz"
 )
 DEPLOYED_ACTOR = NumpyWarehousePolicy.load(DEPLOYED_ACTOR_PATH)
 
@@ -166,7 +170,7 @@ def build_development_tutorial() -> tuple[PreviewFrame, ...]:
         actions, distributions = _neural_actions(
             environment,
             rng=rng,
-            deterministic=True,
+            deterministic=False,
         )
         _, rewards, terminated, truncated, info = environment.step(actions)
         after = environment.get_state()

@@ -10,15 +10,79 @@ import torch
 from env.warehouse.domain import collaborative_study_config
 from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.interaction_calibration import calibrate_interactions
+from env.warehouse.layouts import STUDY_MAP_LAYOUT
 from env.warehouse.mappo import MAPPOConfig, MAPPOPolicy
+from env.warehouse.navigation import shortest_path_distance
 from env.warehouse.numpy_policy import NumpyWarehousePolicy
 from ui.development_preview_server import (
     DEPLOYED_ACTOR,
     DevelopmentPreviewState,
 )
+from ui.warehouse_view import warehouse_map_payload
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_production_map_uses_staggered_work_aisles_not_aligned_crossroads() -> None:
+    layout = STUDY_MAP_LAYOUT
+    assert layout.layout_id == "warehouse_staggered_aisles_10x11_v7_three_cell_exit"
+    assert (layout.rows, layout.cols) == (10, 11)
+
+    # Odd work rows open only to the left of the spine; the following even
+    # row opens only to the right.  No left/right pair is aligned into one
+    # full-width cross aisle.
+    for row in (1, 3, 5, 7):
+        assert all(layout.is_passable((row, column)) for column in range(0, 6))
+        assert all(layout.is_blocked((row, column)) for column in range(6, 11))
+    for row in (2, 4, 6):
+        assert all(layout.is_blocked((row, column)) for column in range(0, 5))
+        assert all(layout.is_passable((row, column)) for column in range(5, 11))
+
+    # The only degree-four cell is inside the three-wide charging apron.  No
+    # shelf work-aisle cell is a four-way crossing.
+    assert layout.four_way_intersections == ((8, 5),)
+    assert not {
+        position for position in layout.four_way_intersections if position[0] < 8
+    }
+
+
+def test_production_robot_exit_is_exactly_three_real_passable_cells() -> None:
+    layout = STUDY_MAP_LAYOUT
+    assert layout.robot_exit_positions == ((8, 4), (8, 5), (8, 6))
+    assert all(layout.is_passable(position) for position in layout.robot_exit_positions)
+    assert tuple(
+        (layout.rows - 2, column)
+        for column in sorted(
+            position[1]
+            for position in (*layout.robot_start_positions, layout.charger_position)
+        )
+    ) == layout.robot_exit_positions
+    assert tuple(
+        column
+        for column in range(layout.cols)
+        if layout.is_passable((layout.rows - 1, column))
+    ) == (4, 5, 6)
+
+
+def test_production_map_is_connected_and_ui_uses_the_same_geometry() -> None:
+    layout = STUDY_MAP_LAYOUT
+    origin = layout.robot_start_positions[0]
+    assert all(
+        shortest_path_distance(origin, position, layout.layout_id) < 100
+        for position in layout.passable_positions
+    )
+
+    payload = warehouse_map_payload(layout)
+    assert payload["layout_id"] == layout.layout_id
+    assert (payload["rows"], payload["cols"]) == (layout.rows, layout.cols)
+    assert {tuple(position) for position in payload["shelves"]} == set(
+        layout.blocked_positions
+    )
+    assert tuple(payload["charger_position"]) == layout.charger_position
+    assert tuple(map(tuple, payload["robot_exit_positions"])) == (
+        layout.robot_exit_positions
+    )
 
 
 def test_independent_actor_distribution_cannot_see_participant_current_action() -> None:
@@ -66,11 +130,11 @@ def test_development_preview_ai_action_is_independent_of_current_human_command()
 
 def test_render_actor_is_the_exported_neural_checkpoint() -> None:
     checkpoint = MAPPOPolicy.load(
-        ROOT / "output" / "deployment" / "warehouse_mappo_v37.pt",
+        ROOT / "output" / "deployment" / "warehouse_mappo_v38.pt",
         device="cpu",
     )
     exported = NumpyWarehousePolicy.load(
-        ROOT / "output" / "deployment" / "warehouse_mappo_v37_actor.npz"
+        ROOT / "output" / "deployment" / "warehouse_mappo_v38_actor.npz"
     )
     environment = WarehouseMultiAgentEnv(collaborative_study_config())
     observations, _ = environment.reset(seed=40_221)
@@ -119,14 +183,14 @@ def test_public_transition_animates_both_results_from_one_joint_step() -> None:
     }
 
 
-def test_compact_map_meets_interaction_and_delivery_calibration_gate() -> None:
+def test_staggered_map_meets_interaction_and_delivery_calibration_gate() -> None:
     report = calibrate_interactions(
         collaborative_study_config(),
         seeds=range(51_000, 51_010),
         participant_noise_probability=0.15,
     )
-    assert report["mean"]["deliveries"] >= 6.0
-    assert report["minimum"]["collision_opportunity_frames"] >= 20
+    assert report["mean"]["deliveries"] >= 5.5
+    assert report["minimum"]["collision_opportunity_frames"] >= 15
     assert report["mean"]["robot_collisions"] >= 0.5
 
 

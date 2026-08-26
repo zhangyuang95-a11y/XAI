@@ -1,0 +1,101 @@
+{
+  "format": "warehouse_reference_trajectory_v32_staggered",
+  "seed": 40221,
+  "frame_count": 121,
+  "model_version": "warehouse_mappo_v38_staggered_independent_actor",
+  "environment_version": "warehouse_collaborative_delivery_v25_staggered_three_exit_reserve4",
+  "warehouse_program_version": "warehouse_rcpd_v32_staggered_posthoc",
+  "map_layout_id": "warehouse_staggered_aisles_10x11_v7_three_cell_exit",
+  "action_execution_version": "independent_simultaneous_mappo_actor_v10",
+  "runtime_controller": "mappo_independent_actor_simultaneous_execution",
+  "rollout_action_source": "mappo_actor",
+  "post_policy_action_interventions": 0,
+  "agent_control": {
+    "robot_1": "ai",
+    "robot_2": "ai"
+  },
+  "event_frames": {
+    "pickup": [
+      6,
+      19,
+      31,
+      59,
+      70,
+      92,
+      105
+    ],
+    "delivery": [
+      20,
+      36,
+      36,
+      70,
+      82,
+      100,
+      111
+    ],
+    "charging": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      49,
+      50,
+      51,
+      52,
+      53,
+      82,
+      83,
+      84,
+      85,
+      87,
+      88,
+      89,
+      90,
+      91,
+      92,
+      104,
+      105,
+      106,
+      107,
+      108,
+      120
+    ],
+    "charger_queue": [
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47
+    ],
+    "coordination_yield": [
+      1,
+      49,
+      64,
+      65,
+      66,
+      87,
+      113
+    ],
+    "head_on_conflict_risk": [
+      20,
+      111,
+      112
+    ]
+  },
+  "battery_shutdown": false,
+  "charger_departure_return_cycles": 0,
+  "task_starvation_events": 0,
+  "participant_detour_scoring": false,
+  "frozen": true,
+  "trajectory_manifest_hash": "c2b8f4ae226002bd3f8cb8bcef7ce0956524254ef4319f27146351c97c56efdc"
+}

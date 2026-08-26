@@ -4,28 +4,37 @@
     "horizon": 120,
     "controller": "simultaneous offline teacher with participant action applied afterward"
   },
+  "topology": {
+    "formal_layout": "warehouse_staggered_aisles_10x11_v7_three_cell_exit",
+    "rows": 10,
+    "columns": 11,
+    "robot_exit_positions": [[8, 4], [8, 5], [8, 6]],
+    "shelf_work_aisle_four_way_intersections": [],
+    "charger_apron_four_way_intersections": [[8, 5]],
+    "all_passable_cells_connected": true
+  },
   "ai_ai": {
-    "legacy_10x11": {
-      "mean_deliveries": 7.9,
-      "mean_collision_opportunity_frames": 30.2,
-      "mean_coordination_event_frames": 12.1
-    },
-    "compact_8x9": {
-      "mean_deliveries": 8.5,
+    "staggered_10x11": {
+      "mean_deliveries": 7.8,
       "minimum_deliveries": 7,
+      "mean_collision_opportunity_frames": 32.6,
+      "minimum_collision_opportunity_frames": 22,
+      "mean_coordination_event_frames": 13.0
+    },
+    "legacy_compact_8x9": {
+      "mean_deliveries": 8.5,
       "mean_collision_opportunity_frames": 44.2,
-      "minimum_collision_opportunity_frames": 34,
       "mean_coordination_event_frames": 21.7
     }
   },
   "participant_noise_0_15": {
-    "legacy_10x11": {
-      "mean_deliveries": 5.8,
-      "mean_collision_opportunity_frames": 33.6,
-      "mean_robot_collisions": 0.8,
-      "mean_coordination_event_frames": 14.7
+    "staggered_10x11": {
+      "mean_deliveries": 5.9,
+      "mean_collision_opportunity_frames": 37.8,
+      "mean_robot_collisions": 0.7,
+      "mean_coordination_event_frames": 17.4
     },
-    "compact_8x9": {
+    "legacy_compact_8x9": {
       "mean_deliveries": 6.0,
       "mean_collision_opportunity_frames": 47.6,
       "mean_robot_collisions": 1.1,

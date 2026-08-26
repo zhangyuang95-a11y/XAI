@@ -1,0 +1,107 @@
+{
+  "version": "warehouse_parallel_seed_pairs_v33_staggered",
+  "action_execution_version": "independent_simultaneous_mappo_actor_v10",
+  "runtime_controller": "mappo_independent_actor_simultaneous_execution",
+  "rollout_action_source": "mappo_actor",
+  "post_policy_action_interventions": 0,
+  "maximum_delivery_gap": 1,
+  "maximum_score_gap": 50.0,
+  "pairs": [
+    {
+      "form_id": 0,
+      "task1_seed": 402066,
+      "task2_seed": 402126,
+      "task1": {
+        "seed": 402066,
+        "initial_path_workload": 34,
+        "ai_ai_deliveries": 8,
+        "ai_ai_score": 680.0,
+        "shutdowns": 0,
+        "robot_collisions": 0
+      },
+      "task2": {
+        "seed": 402126,
+        "initial_path_workload": 34,
+        "ai_ai_deliveries": 8,
+        "ai_ai_score": 680.0,
+        "shutdowns": 0,
+        "robot_collisions": 0
+      },
+      "delivery_gap": 0,
+      "score_gap": 0.0,
+      "workload_gap": 0
+    },
+    {
+      "form_id": 1,
+      "task1_seed": 402069,
+      "task2_seed": 402104,
+      "task1": {
+        "seed": 402069,
+        "initial_path_workload": 43,
+        "ai_ai_deliveries": 6,
+        "ai_ai_score": 462.0,
+        "shutdowns": 0,
+        "robot_collisions": 0
+      },
+      "task2": {
+        "seed": 402104,
+        "initial_path_workload": 43,
+        "ai_ai_deliveries": 6,
+        "ai_ai_score": 462.0,
+        "shutdowns": 0,
+        "robot_collisions": 0
+      },
+      "delivery_gap": 0,
+      "score_gap": 0.0,
+      "workload_gap": 0
+    },
+    {
+      "form_id": 2,
+      "task1_seed": 402079,
+      "task2_seed": 402141,
+      "task1": {
+        "seed": 402079,
+        "initial_path_workload": 48,
+        "ai_ai_deliveries": 7,
+        "ai_ai_score": 572.0,
+        "shutdowns": 0,
+        "robot_collisions": 0
+      },
+      "task2": {
+        "seed": 402141,
+        "initial_path_workload": 48,
+        "ai_ai_deliveries": 7,
+        "ai_ai_score": 572.0,
+        "shutdowns": 0,
+        "robot_collisions": 0
+      },
+      "delivery_gap": 0,
+      "score_gap": 0.0,
+      "workload_gap": 0
+    },
+    {
+      "form_id": 3,
+      "task1_seed": 402103,
+      "task2_seed": 402152,
+      "task1": {
+        "seed": 402103,
+        "initial_path_workload": 35,
+        "ai_ai_deliveries": 7,
+        "ai_ai_score": 578.0,
+        "shutdowns": 0,
+        "robot_collisions": 0
+      },
+      "task2": {
+        "seed": 402152,
+        "initial_path_workload": 35,
+        "ai_ai_deliveries": 7,
+        "ai_ai_score": 578.0,
+        "shutdowns": 0,
+        "robot_collisions": 0
+      },
+      "delivery_gap": 0,
+      "score_gap": 0.0,
+      "workload_gap": 0
+    }
+  ]
+}

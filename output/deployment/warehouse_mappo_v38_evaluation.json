@@ -1,0 +1,95 @@
+{
+  "model_version": "warehouse_mappo_v38_staggered_independent_actor",
+  "checkpoint": "warehouse_mappo_v38.pt",
+  "checkpoint_sha256": "1620dd430b42ca5ac7d4b36003d584de2c291a319fc3cf0e1b4c115a8ccef733",
+  "render_actor": "warehouse_mappo_v38_actor.npz",
+  "render_actor_sha256": "39aec528b1acfac15e457375aedb02407bdeb35ff4e472090a28f1ceec4bd4ad",
+  "protocol": {
+    "execution": "independent simultaneous stochastic actor",
+    "episodes_per_seed_range": 100,
+    "post_policy_action_interventions": 0
+  },
+  "seed_ranges": {
+    "760000-760099": {
+      "mean_deliveries": 6.41,
+      "deliveries_per_100_steps": 5.420260443091493,
+      "collision_episode_rate": 0.02,
+      "mean_robot_collision_events": 0.02,
+      "maximum_robot_collision_events": 1.0,
+      "repeated_collision_episode_rate": 0.0,
+      "shutdown_episode_rate": 0.05,
+      "deadlock_episode_rate": 0.02,
+      "mean_charger_use_steps": 28.25,
+      "path_efficiency_actual_over_shortest_safe": 1.0985639686684072,
+      "mean_post_policy_action_interventions": 0.0,
+      "charger_departure_return_cycle_episode_rate": 0.48,
+      "task_starvation_episode_rate": 0.15,
+      "avoidable_loaded_delivery_detour_steps": 111.0
+    },
+    "892000-892099": {
+      "mean_deliveries": 6.35,
+      "deliveries_per_100_steps": 5.3303114244942496,
+      "collision_episode_rate": 0.04,
+      "mean_robot_collision_events": 0.04,
+      "maximum_robot_collision_events": 1.0,
+      "repeated_collision_episode_rate": 0.0,
+      "shutdown_episode_rate": 0.03,
+      "deadlock_episode_rate": 0.05,
+      "mean_charger_use_steps": 28.17,
+      "path_efficiency_actual_over_shortest_safe": 1.1378748370273795,
+      "mean_post_policy_action_interventions": 0.0,
+      "charger_departure_return_cycle_episode_rate": 0.39,
+      "task_starvation_episode_rate": 0.17,
+      "avoidable_loaded_delivery_detour_steps": 131.0
+    }
+  },
+  "noisy_teammate_20_percent": {
+    "mean_deliveries": 5.2,
+    "deliveries_per_100_steps": 4.352921479993303,
+    "collision_episode_rate": 0.64,
+    "mean_robot_collision_events": 1.27,
+    "maximum_robot_collision_events": 6.0,
+    "repeated_collision_episode_rate": 0.34,
+    "shutdown_episode_rate": 0.02,
+    "deadlock_episode_rate": 0.07,
+    "mean_charger_use_steps": 26.03,
+    "path_efficiency_actual_over_shortest_safe": 1.3584533438548037,
+    "mean_post_policy_action_interventions": 0.0,
+    "charger_departure_return_cycle_episode_rate": 0.74,
+    "task_starvation_episode_rate": 0.32,
+    "avoidable_loaded_delivery_detour_steps": 112.0
+  },
+  "release_gates": {
+    "mean_deliveries_ge_6": true,
+    "collision_episode_rate_le_0_05": true,
+    "maximum_collision_events_le_1": true,
+    "repeated_collision_rate_eq_0": true,
+    "shutdown_episode_rate_le_0_05": true,
+    "deadlock_episode_rate_le_0_05": true,
+    "charger_use_positive": true,
+    "path_efficiency_le_1_20": true,
+    "post_policy_action_interventions_eq_0": true,
+    "tutorial_has_120_steps": true,
+    "tutorial_has_delivery": true,
+    "tutorial_has_charging": true,
+    "tutorial_has_no_shutdown": true
+  },
+  "tutorial": {
+    "seed": 40221,
+    "steps": 120,
+    "deliveries": 7,
+    "robot_collision_events": 0,
+    "shutdowns": 0,
+    "charging_steps": 33,
+    "events": [
+      "charger_departure",
+      "charger_queue",
+      "claimed",
+      "coordination_yield",
+      "created",
+      "delivered",
+      "head_on_conflict_risk"
+    ],
+    "terminal_reason": "horizon"
+  }
+}

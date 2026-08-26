@@ -306,7 +306,7 @@ def test_unproductive_short_charger_return_remains_an_anomalous_cycle() -> None:
     assert "charger_productive_return" not in events
 
 
-def test_v9_layout_opens_the_requested_charger_approach_cell() -> None:
+def test_staggered_layout_has_three_real_charger_exit_cells() -> None:
     layout = CORRIDOR_SHELF_LAYOUT
     assert layout.tiles == (
         "#####.#####",
@@ -322,6 +322,7 @@ def test_v9_layout_opens_the_requested_charger_approach_cell() -> None:
     )
     assert layout.robot_start_positions == ((9, 4), (9, 6))
     assert layout.charger_position == (9, 5)
+    assert layout.robot_exit_positions == ((8, 4), (8, 5), (8, 6))
     assert layout.task_endpoint_exclusions == ((8, 4), (8, 5), (8, 6))
     assert layout.is_passable((8, 4))
     assert layout.is_passable((8, 6))

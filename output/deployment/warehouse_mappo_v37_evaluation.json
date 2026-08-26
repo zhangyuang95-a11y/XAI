@@ -1,0 +1,46 @@
+{
+  "model_version": "warehouse_mappo_v37_independent_joint_risk_actor",
+  "checkpoint": "warehouse_mappo_v37.pt",
+  "checkpoint_sha256": "ab503b236f7dcddeda8e86af41c062ad65ee5d45b700894157ac768375c40a46",
+  "render_actor": "warehouse_mappo_v37_actor.npz",
+  "render_actor_sha256": "e04e27ac33269d68b3f6c76950c7f7868ad47e4bd476bb7276e377030e083c00",
+  "protocol": {
+    "execution": "independent simultaneous stochastic actor",
+    "episodes_per_seed_range": 100,
+    "horizon": 120,
+    "battery_safety_margin_steps": 4.0,
+    "post_policy_action_interventions": 0
+  },
+  "seed_ranges": {
+    "760000-760099": {
+      "mean_deliveries": 7.53,
+      "deliveries_per_100_steps": 6.301782575947778,
+      "collision_episode_rate": 0.04,
+      "mean_robot_collision_events": 0.06,
+      "maximum_robot_collision_events": 2,
+      "repeated_collision_episode_rate": 0.02,
+      "shutdown_episode_rate": 0.01,
+      "deadlock_episode_rate": 0.12,
+      "mean_charger_use_steps": 24.45,
+      "path_efficiency_actual_over_shortest_safe": 1.1388251896278003
+    },
+    "892000-892099": {
+      "mean_deliveries": 7.37,
+      "deliveries_per_100_steps": 6.178221141755386,
+      "collision_episode_rate": 0.08,
+      "mean_robot_collision_events": 0.1,
+      "maximum_robot_collision_events": 2,
+      "repeated_collision_episode_rate": 0.02,
+      "shutdown_episode_rate": 0.03,
+      "deadlock_episode_rate": 0.06,
+      "mean_charger_use_steps": 24.38,
+      "path_efficiency_actual_over_shortest_safe": 1.1193171608265948
+    }
+  },
+  "tutorial_seed_40221": {
+    "deliveries": 9,
+    "robot_collision_events": 1,
+    "shutdowns": 0,
+    "contains_low_battery_charger_handoff": true
+  }
+}

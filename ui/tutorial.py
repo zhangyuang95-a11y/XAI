@@ -19,7 +19,7 @@ from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.policy import MAPPOPolicy
 
 
-TUTORIAL_SEED = 42_026
+TUTORIAL_SEED = 40_221
 @dataclass(frozen=True)
 class TutorialTrajectory:
     """One uninterrupted, successful warehouse mission used for onboarding."""

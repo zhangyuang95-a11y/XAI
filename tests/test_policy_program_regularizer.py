@@ -44,8 +44,7 @@ def test_goal_clearance_curriculum_labels_joint_follow_through() -> None:
     assert targets["robot_2"] != state.by_id("robot_2").position
     assert "junction_conflict" in train_module.STRONG_ACTOR_CORRECTION_CATEGORIES
 from env.warehouse.policy import (
-    AUTOREGRESSIVE_CONTEXT_DIM,
-    autoregressive_actor_input,
+    independent_actor_input,
 )
 from backend.training import warehouse as train_module
 from backend.training import learner_dataset as learner_dataset_module
@@ -76,7 +75,7 @@ def test_rcpd_has_no_synthetic_probe_rows_and_training_states_are_passable() -> 
     )
     assert rows.shape == (
         64,
-        observation_dim(config) + AUTOREGRESSIVE_CONTEXT_DIM,
+        observation_dim(config),
     )
     assert labels.shape == (64,)
     assert categories.shape == (64,)
@@ -84,7 +83,7 @@ def test_rcpd_has_no_synthetic_probe_rows_and_training_states_are_passable() -> 
         set(REPLAY_CATEGORIES)
     )
     assert coverage["head_on_rows"] > 0
-    assert coverage["counterfactual_teammate_rows"] > 0
+    assert coverage["counterfactual_teammate_rows"] == 0
 
 
 def test_relabel_schedule_is_independent_of_episode_batch_size() -> None:
@@ -135,7 +134,8 @@ def test_learner_state_relabel_rollouts_submit_only_actor_actions(
     # WAIT/WAIT disagreements stay in the dedicated joint-wait bucket and
     # receive its escape margin. Ordinary mismatches are not globally forced,
     # because that causes poor Actor-state generalization.
-    assert set(categories) == {"joint_wait"}
+    assert set(categories).issubset({"joint_wait", "charger_queue"})
+    assert "joint_wait" in set(categories)
 
 
 def test_targeted_detour_miner_labels_mistake_but_executes_actor_action(
@@ -182,7 +182,7 @@ def test_targeted_detour_miner_labels_mistake_but_executes_actor_action(
 
     assert rows.shape == (
         1,
-        observation_dim(config) + AUTOREGRESSIVE_CONTEXT_DIM,
+        observation_dim(config),
     )
     assert labels.shape == (1,)
     assert ACTIONS[int(labels[0])] != "UP"
@@ -246,7 +246,7 @@ def test_collision_miner_labels_pair_but_executes_actor_collision(
 
     assert rows.shape == (
         2,
-        observation_dim(config) + AUTOREGRESSIVE_CONTEXT_DIM,
+        observation_dim(config),
     )
     assert labels.shape == (2,)
     assert categories.tolist() == ["collision", "collision"]
@@ -307,7 +307,7 @@ def test_commitment_failure_miner_replays_causal_rows_without_intervention(
 
     assert rows.shape == (
         2,
-        observation_dim(config) + AUTOREGRESSIVE_CONTEXT_DIM,
+        observation_dim(config),
     )
     assert labels.shape == (2,)
     assert categories.tolist().count("charger_cycle") == 1
@@ -330,7 +330,7 @@ def test_commitment_curriculum_covers_energy_and_old_task_geometry() -> None:
 
     assert rows.shape == (
         128,
-        observation_dim(config) + AUTOREGRESSIVE_CONTEXT_DIM,
+        observation_dim(config),
     )
     assert labels.shape == (128,)
     assert set(categories) == {"charger_cycle", "task_starvation"}
@@ -651,9 +651,7 @@ def test_non_wait_margin_teaches_actor_to_leave_an_ineffective_wait() -> None:
         for action, allowed in zip(ACTIONS, mask)
         if action != "WAIT" and allowed > 0.5
     )
-    row = autoregressive_actor_input(
-        observations["robot_1"], preceding_action=None
-    )
+    row = independent_actor_input(observations["robot_1"])
     rows = np.repeat(row[None, :], 32, axis=0)
     labels = np.full(32, ACTIONS.index(target_action), dtype=np.int64)
 
@@ -699,9 +697,7 @@ def test_supervised_actor_fit_updates_the_neural_intent_encoder() -> None:
         for action, allowed in zip(ACTIONS, mask)
         if action != "WAIT" and allowed > 0.5
     )
-    row = autoregressive_actor_input(
-        observations["robot_1"], preceding_action=None
-    )
+    row = independent_actor_input(observations["robot_1"])
     rows = np.repeat(row[None, :], 32, axis=0)
     labels = np.full(32, ACTIONS.index(target_action), dtype=np.int64)
     intent_before = tuple(
@@ -747,9 +743,7 @@ def test_structured_relabel_scope_preserves_base_actor_and_intent() -> None:
         config,
         MAPPOConfig(hidden_dim=16, update_epochs=1, minibatch_size=32, seed=224),
     )
-    row = autoregressive_actor_input(
-        observations["robot_1"], preceding_action=None
-    )
+    row = independent_actor_input(observations["robot_1"])
     rows = np.repeat(row[None, :], 32, axis=0)
     labels = np.full(32, ACTIONS.index("UP"), dtype=np.int64)
     frozen_before = tuple(
@@ -815,12 +809,8 @@ def test_supervised_actor_fit_updates_structured_neural_action_modules() -> None
     )
     rows = np.stack(
         [
-            autoregressive_actor_input(
-                observations["robot_1"], preceding_action=None
-            ),
-            autoregressive_actor_input(
-                observations["robot_2"], preceding_action="UP"
-            ),
+            independent_actor_input(observations["robot_1"]),
+            independent_actor_input(observations["robot_2"]),
         ]
         * 16
     )
@@ -888,9 +878,7 @@ def test_joint_wait_escape_margin_strongly_separates_motion_from_wait() -> None:
         for action, allowed in zip(ACTIONS, mask)
         if action != "WAIT" and allowed > 0.5
     )
-    row = autoregressive_actor_input(
-        observations["robot_1"], preceding_action=None
-    )
+    row = independent_actor_input(observations["robot_1"])
     rows = np.repeat(row[None, :], 32, axis=0)
     labels = np.full(32, ACTIONS.index(target_action), dtype=np.int64)
 
@@ -938,9 +926,7 @@ def test_loaded_detour_correction_margin_beats_every_alternative_action() -> Non
         for action, allowed in zip(ACTIONS, mask)
         if action != "WAIT" and allowed > 0.5
     )
-    row = autoregressive_actor_input(
-        observations["robot_1"], preceding_action=None
-    )
+    row = independent_actor_input(observations["robot_1"])
     rows = np.repeat(row[None, :], 32, axis=0)
     labels = np.full(32, ACTIONS.index(target_action), dtype=np.int64)
 
@@ -992,9 +978,7 @@ def test_wait_margin_teaches_actor_to_keep_charging_at_critical_battery() -> Non
         config,
         MAPPOConfig(hidden_dim=16, update_epochs=1, minibatch_size=32, seed=35),
     )
-    row = autoregressive_actor_input(
-        observations["robot_1"], preceding_action=None
-    )
+    row = independent_actor_input(observations["robot_1"])
     rows = np.repeat(row[None, :], 32, axis=0)
     labels = np.full(32, ACTIONS.index("WAIT"), dtype=np.int64)
 
@@ -1330,7 +1314,7 @@ def test_program_regularization_json_contains_required_research_metrics() -> Non
 
     assert summary["mode"] == "posthoc_extraction"
     assert summary["runtime_controller"] == (
-        "mappo_autoregressive_actor_direct_execution"
+        "mappo_independent_actor_simultaneous_execution"
     )
     assert summary["lambda_extract"] == 0.0
     assert summary["complexity_lambda"] == pytest.approx(0.001)

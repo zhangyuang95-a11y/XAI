@@ -20,6 +20,7 @@ def test_production_action_paths_do_not_import_or_call_coordination_shield() -> 
     action_paths = (
         "backend/adapters/warehouse.py",
         "ui/web_session.py",
+        "ui/development_preview_server.py",
         "env/warehouse/mappo.py",
         "env/warehouse/seed_calibration.py",
         "ui/tutorial.py",
@@ -31,6 +32,7 @@ def test_production_action_paths_do_not_import_or_call_coordination_shield() -> 
         'metadata["coordination_shield"]',
         "stable_coordination_actions",
         "_safe_navigation_teacher_actions",
+        "fixed_actions=",
     )
     for relative_path in action_paths:
         source = (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
@@ -67,7 +69,7 @@ def test_deterministic_ai_ai_rollout_submits_actor_actions_unchanged() -> None:
     assert frame.actions == actor_actions
     assert frame.snapshot.metadata["submitted_actions"] == actor_actions
     assert frame.snapshot.metadata["action_execution"] == (
-        "autoregressive_direct_mappo_actor"
+        "independent_simultaneous_mappo_actor"
     )
 
 
@@ -106,10 +108,10 @@ def test_wait_memory_contract_rejects_previous_direct_neural_model() -> None:
 
 def test_execution_contract_is_explicitly_direct_neural() -> None:
     assert ACTION_EXECUTION_VERSION == (
-        "autoregressive_direct_mappo_actor_action_v9_neural_mission"
+        "independent_simultaneous_mappo_actor_v10"
     )
     assert RUNTIME_CONTROLLER == (
-        "mappo_autoregressive_actor_direct_execution"
+        "mappo_independent_actor_simultaneous_execution"
     )
 
 
@@ -121,10 +123,7 @@ def test_actor_exposes_trainable_neural_mission_logits() -> None:
     )
     environment = WarehouseMultiAgentEnv(config)
     observations, _ = environment.reset(seed=81)
-    actor_input = policy.actor_input(
-        observations["robot_1"],
-        preceding_action=None,
-    )
+    actor_input = policy.actor_input(observations["robot_1"])
     action_logits, mission_logits = policy.network.actor_outputs(
         torch.as_tensor(actor_input[None, :], dtype=torch.float32)
     )

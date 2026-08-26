@@ -23,13 +23,10 @@ def _urgent_charge(environment: Any, agent: Any) -> bool:
 def teacher_efficiency_guard(
     environment: Any,
     proposed_actions: Mapping[str, str],
-    *,
-    fixed_actions: Mapping[str, str],
 ) -> dict[str, str]:
     """Remove avoidable stalls and loaded detours from every teacher branch."""
 
     state = environment.get_state()
-    fixed_ids = set(fixed_actions)
     actions = {
         agent_id: str(proposed_actions.get(agent_id, "WAIT"))
         for agent_id in environment.agent_ids
@@ -69,7 +66,7 @@ def teacher_efficiency_guard(
                 agent_id: (
                     entry_action
                     if agent_id == urgent_id
-                    else fixed_actions.get(agent_id, "WAIT")
+                    else "WAIT"
                 )
                 for agent_id in environment.agent_ids
             }
@@ -85,8 +82,7 @@ def teacher_efficiency_guard(
     # straight back to the charger and creates a deterministic two-step loop.
     for agent in state.agents:
         if (
-            agent.agent_id in fixed_ids
-            or agent.position != environment.layout.charger_position
+            agent.position != environment.layout.charger_position
             or actions[agent.agent_id] not in MOVE_DELTAS
             or not environment._requires_charge(state, agent)
         ):
@@ -132,8 +128,6 @@ def teacher_efficiency_guard(
 
     _, diagnosis = diagnose(actions)
     for agent_id in diagnosis[3]:
-        if agent_id in fixed_ids:
-            continue
         held = dict(actions)
         held[agent_id] = "WAIT"
         _, _, invalid, collision, _, _ = environment._resolve_motion(state, held)
@@ -146,8 +140,6 @@ def teacher_efficiency_guard(
         missions, diagnosis = diagnose(actions)
         changed = False
         for agent_id in diagnosis[1]:
-            if agent_id in fixed_ids:
-                continue
             agent = state.by_id(agent_id)
             mission = missions.get(agent_id)
             if mission is None:
@@ -196,12 +188,6 @@ def teacher_efficiency_guard(
         for left_index, left_action in enumerate(ACTIONS):
             for right_index, right_action in enumerate(ACTIONS):
                 candidate = {left_id: left_action, right_id: right_action}
-                if any(
-                    agent_id in fixed_ids
-                    and candidate[agent_id] != fixed_actions[agent_id]
-                    for agent_id in environment.agent_ids
-                ):
-                    continue
                 targets, _, invalid, collision, _, _ = environment._resolve_motion(
                     state,
                     candidate,
@@ -290,8 +276,7 @@ def teacher_efficiency_guard(
             )
         )
         if (
-            agent.agent_id in fixed_ids
-            or agent.position == environment.layout.charger_position
+            agent.position == environment.layout.charger_position
             or targets[agent.agent_id] != environment.layout.charger_position
             or agent.last_charger_departure_frame is None
             or state.frame - agent.last_charger_departure_frame > 6

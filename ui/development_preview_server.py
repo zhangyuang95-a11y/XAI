@@ -1,13 +1,13 @@
-"""Development-only Web preview backed by the real warehouse environment.
+"""Deployable Web study backed by the real warehouse environment and Actor.
 
 Unlike ``tests/browser_fixture_server.py``, this service never fabricates a
 two-step round.  The demonstration and both interactive rounds use
 ``WarehouseMultiAgentEnv`` for task sampling, movement, collisions, charging,
 scoring, task replacement, and the 120-step terminal boundary.
 
-The repository currently has no accepted neural-policy artifact bundle, so
-this preview uses the warehouse's deterministic coordination controller.  It
-is intentionally a UI/environment preview, not a formal study deployment.
+The training checkpoint is exported to a dependency-light NumPy artifact for
+Render.  It evaluates the same decentralized neural Actor as the PyTorch
+runtime; no rule controller substitutes for the model in the public study.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from dataclasses import dataclass, replace
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import numpy as np
 from pathlib import Path
 import threading
 from typing import Any, Mapping
@@ -27,13 +28,15 @@ from uuid import uuid4
 from backend.adapters.warehouse import WarehouseAdapter
 from backend.adapters.warehouse_context import _transition_events
 from core.policy_contracts import ActionDistribution
-from env.warehouse.coordination import (
-    stable_coordination_actions,
-    stable_coordination_goal_overrides,
+from env.warehouse.domain import (
+    WarehouseConfig,
+    WarehouseState,
+    collaborative_study_config,
 )
-from env.warehouse.domain import WarehouseConfig, WarehouseState
+from env.warehouse.contracts import RUNTIME_CONTROLLER
 from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.navigation import ACTIONS, MOVE_DELTAS
+from env.warehouse.numpy_policy import NumpyWarehousePolicy
 from ui.warehouse_view import (
     _study_question_focus,
     serialize_warehouse_state,
@@ -43,9 +46,13 @@ from ui.warehouse_view import (
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "ui" / "web"
-TUTORIAL_SEED = 42_026
+TUTORIAL_SEED = 40_221
 TASK1_SEED = 51_000
 TASK2_SEED = 51_500
+DEPLOYED_ACTOR_PATH = (
+    ROOT / "output" / "deployment" / "warehouse_mappo_v37_actor.npz"
+)
+DEPLOYED_ACTOR = NumpyWarehousePolicy.load(DEPLOYED_ACTOR_PATH)
 
 
 @dataclass(frozen=True)
@@ -57,24 +64,22 @@ class PreviewFrame:
     info: Mapping[str, Any]
     events: tuple[Mapping[str, Any], ...]
     transition: Mapping[str, Any] | None
+    action_distributions: Mapping[str, ActionDistribution]
 
 
-def _controller_actions(
+def _neural_actions(
     environment: WarehouseMultiAgentEnv,
     *,
-    fixed_actions: Mapping[str, str] | None = None,
-    goal_overrides: Mapping[str, tuple[int, int]] | None = None,
-) -> dict[str, str]:
-    """Return deterministic development actions without changing dynamics."""
+    rng: Any,
+    deterministic: bool,
+) -> tuple[dict[str, str], dict[str, ActionDistribution]]:
+    """Run both independent Actors against one frozen pre-move observation."""
 
-    actions = stable_coordination_actions(
-        environment,
-        fixed_actions=fixed_actions,
-        goal_overrides=goal_overrides,
+    return DEPLOYED_ACTOR.act(
+        environment.observations(),
+        rng=rng,
+        deterministic=deterministic,
     )
-    for agent_id in environment.agent_ids:
-        actions.setdefault(agent_id, "WAIT")
-    return actions
 
 
 def _transition_payload(
@@ -140,6 +145,7 @@ def _initial_frame(environment: WarehouseMultiAgentEnv) -> PreviewFrame:
         info={},
         events=(),
         transition=None,
+        action_distributions={},
     )
 
 
@@ -147,19 +153,20 @@ def build_development_tutorial() -> tuple[PreviewFrame, ...]:
     """Generate one verified 120-step trajectory from the real simulator."""
 
     environment = WarehouseMultiAgentEnv(
-        replace(WarehouseConfig(), participant_detour_scoring=False)
+        replace(collaborative_study_config(), participant_detour_scoring=False)
     )
     environment.reset(seed=TUTORIAL_SEED)
+    rng = np.random.default_rng(TUTORIAL_SEED)
     state = environment.get_state()
     state.by_id("robot_2").battery = 35.0
     environment.set_state(state)
     frames = [_initial_frame(environment)]
     for _ in range(environment.config.horizon):
         before = environment.get_state()
-        goal_overrides = stable_coordination_goal_overrides(environment)
-        actions = _controller_actions(
+        actions, distributions = _neural_actions(
             environment,
-            goal_overrides=goal_overrides,
+            rng=rng,
+            deterministic=True,
         )
         _, rewards, terminated, truncated, info = environment.step(actions)
         after = environment.get_state()
@@ -168,7 +175,7 @@ def build_development_tutorial() -> tuple[PreviewFrame, ...]:
             PreviewFrame(
                 state=after,
                 actions=dict(actions),
-                goal_overrides=dict(goal_overrides),
+                goal_overrides={},
                 rewards=dict(rewards),
                 info=deepcopy(dict(info)),
                 events=tuple(deepcopy(events)),
@@ -180,6 +187,7 @@ def build_development_tutorial() -> tuple[PreviewFrame, ...]:
                     reveal_ai_action=True,
                     loop=False,
                 ),
+                action_distributions=dict(distributions),
             )
         )
         if terminated or truncated:
@@ -242,8 +250,9 @@ class DevelopmentPreviewState:
             if tutorial_frames is not None
             else build_development_tutorial()
         )
-        self.environment = WarehouseMultiAgentEnv(WarehouseConfig())
+        self.environment = WarehouseMultiAgentEnv(collaborative_study_config())
         self.environment.reset(seed=TASK1_SEED)
+        self.policy_rng = np.random.default_rng(TASK1_SEED)
         self.round_frame = _initial_frame(self.environment)
         self.stage = "idle"
         self.version = 0
@@ -295,6 +304,8 @@ class DevelopmentPreviewState:
             "trajectory_kind": "ai_ai_reference",
             "trajectory_seed": TUTORIAL_SEED,
             "agent_control": {"robot_1": "ai", "robot_2": "ai"},
+            "policy_model_version": DEPLOYED_ACTOR.metadata.model_version,
+            "policy_artifact_sha256": DEPLOYED_ACTOR.artifact_sha256,
             "map_layout_id": self.environment.layout.layout_id,
             "map": warehouse_map_payload(self.environment.layout),
             "frames": frames,
@@ -332,8 +343,9 @@ class DevelopmentPreviewState:
         return ("set_language", "restart", *values) if self.stage != "idle" else values
 
     def _start_round(self, stage: str, seed: int) -> None:
-        self.environment = WarehouseMultiAgentEnv(WarehouseConfig())
+        self.environment = WarehouseMultiAgentEnv(collaborative_study_config())
         self.environment.reset(seed=seed)
+        self.policy_rng = np.random.default_rng(seed)
         self.round_frame = _initial_frame(self.environment)
         self.stage = stage
         self.last_explanation = None
@@ -365,21 +377,22 @@ class DevelopmentPreviewState:
             raise ValueError(f"Unknown participant action: {action}")
         round_name = self.stage
         before = self.environment.get_state()
-        goal_overrides = stable_coordination_goal_overrides(self.environment)
-        actions = _controller_actions(
+        actions, distributions = _neural_actions(
             self.environment,
-            fixed_actions={"robot_1": action},
-            goal_overrides=goal_overrides,
+            rng=self.policy_rng,
+            deterministic=False,
         )
-        if actions["robot_1"] != action:
-            raise RuntimeError("Development controller replaced the participant action.")
+        # The preview AI chooses from the frozen pre-move state without the
+        # participant's current command. Replace robot 1 only after robot 2's
+        # action has been selected, then resolve the pair simultaneously.
+        actions["robot_1"] = action
         _, rewards, terminated, truncated, info = self.environment.step(actions)
         after = self.environment.get_state()
         events = _transition_events(info)
         self.round_frame = PreviewFrame(
             state=after,
             actions=dict(actions),
-            goal_overrides=dict(goal_overrides),
+            goal_overrides={},
             rewards=dict(rewards),
             info=deepcopy(dict(info)),
             events=tuple(deepcopy(events)),
@@ -391,6 +404,7 @@ class DevelopmentPreviewState:
                 reveal_ai_action=False,
                 loop=False,
             ),
+            action_distributions=dict(distributions),
         )
         if not (terminated or truncated):
             return
@@ -470,8 +484,12 @@ class DevelopmentPreviewState:
                     if self.stage != "idle" else None
                 ),
                 "test_condition_selector": True,
-                "development_controller": "warehouse_stable_coordination_teacher",
-                "formal_policy_loaded": False,
+                "development_controller": (
+                    RUNTIME_CONTROLLER
+                ),
+                "formal_policy_loaded": True,
+                "policy_model_version": DEPLOYED_ACTOR.metadata.model_version,
+                "policy_artifact_sha256": DEPLOYED_ACTOR.artifact_sha256,
                 "progress": (
                     int(self.environment.state.frame)
                     if self.stage in {"task1", "task2"}
@@ -528,28 +546,15 @@ class DevelopmentPreviewState:
         before = self.tutorial_frames[index - 1]
         outcome = self.tutorial_frames[index]
         environment = WarehouseMultiAgentEnv(
-            replace(WarehouseConfig(), participant_detour_scoring=False)
+            replace(collaborative_study_config(), participant_detour_scoring=False)
         )
         environment.reset(seed=TUTORIAL_SEED)
         environment.set_state(before.state)
         adapter = WarehouseAdapter(environment)
         snapshot = adapter.snapshot(None)
-        masks = environment.action_masks()
-        distributions = {}
-        for agent_id in environment.agent_ids:
-            proposed = str(outcome.actions.get(agent_id, "WAIT"))
-            distributions[agent_id] = ActionDistribution(
-                agent_id=agent_id,
-                actions=ACTIONS,
-                probabilities=tuple(
-                    1.0 if action == proposed else 0.0 for action in ACTIONS
-                ),
-                action_mask=tuple(float(item) for item in masks[agent_id]),
-                proposed_action=proposed,
-            )
         return adapter, replace(
             snapshot,
-            action_distributions=distributions,
+            action_distributions=dict(outcome.action_distributions),
             proposed_actions=dict(outcome.actions),
             executed_actions=dict(outcome.info.get("executed_actions", {})),
             rewards=dict(outcome.rewards),
@@ -566,8 +571,10 @@ class DevelopmentPreviewState:
                 ),
                 "environment_events": tuple(outcome.events),
                 "development_controller": (
-                    "warehouse_stable_coordination_teacher"
+                    RUNTIME_CONTROLLER
                 ),
+                "policy_model_version": DEPLOYED_ACTOR.metadata.model_version,
+                "policy_artifact_sha256": DEPLOYED_ACTOR.artifact_sha256,
             },
         )
 
@@ -582,95 +589,12 @@ class DevelopmentPreviewState:
         """Render only facts derivable from the selected real transition."""
 
         adapter, snapshot = self._explanation_snapshot(index)
-        facts = tuple(adapter.evidence_facts(snapshot, target_agent, None))
-        by_predicate = {fact.predicate: fact for fact in facts}
-
-        def render(predicate: str) -> str:
-            fact = by_predicate.get(predicate)
-            if fact is None:
-                return ""
-            value = fact.value
-            if isinstance(value, Mapping):
-                value = {**dict(value), "study_focus": focus}
-            return adapter.explanation_verbalize_unit(
-                {
-                    "predicate": fact.predicate,
-                    "arguments": fact.arguments,
-                    "value": value,
-                },
-                language,
-            ).strip()
-
-        preferred = {
-            "energy": ("energy_decision_context", "charging_outcome"),
-            "charge_threshold": ("energy_decision_context",),
-            "collaboration": (
-                "charger_queue_context",
-                "collaboration_context",
-            ),
-            "allocation": ("collaboration_context",),
-            "collision": (
-                "action_resolution_reason",
-                "collaboration_context",
-            ),
-            "task": ("movement_outcome", "collaboration_context"),
-        }
-        if focus != "action":
-            for predicate in preferred.get(focus, ("movement_outcome",)):
-                rendered = render(predicate)
-                if rendered:
-                    return rendered
-
-        objective_text = render("shared_objective_selection_reason")
-        action_text = render("executed_action")
-        resolution = by_predicate.get("action_resolution_reason")
-        resolution_changed = bool(
-            resolution is not None
-            and isinstance(resolution.value, Mapping)
-            and resolution.value.get("environment_changed_action", False)
-        )
-        collaboration = by_predicate.get("collaboration_context")
-        collaboration_limited = bool(
-            collaboration is not None
-            and isinstance(collaboration.value, Mapping)
-            and collaboration.value.get("teammate_directly_limited_action", False)
-        )
-        collaboration_enabled = bool(
-            collaboration is not None
-            and isinstance(collaboration.value, Mapping)
-            and collaboration.value.get("enabled_teammate_action", False)
-        )
-        reason_order = ["charger_queue_context", "charging_outcome"]
-        if resolution_changed:
-            reason_order.append("action_resolution_reason")
-        if (
-            (collaboration_limited or collaboration_enabled)
-            and not resolution_changed
-        ):
-            reason_order.append("collaboration_context")
-        if not collaboration_enabled:
-            reason_order.append("movement_outcome")
-        reasons = [
-            rendered
-            for predicate in reason_order
-            if (rendered := render(predicate))
-        ]
-        parts = [item for item in (objective_text, action_text, *reasons) if item]
-        if parts:
-            if language == "zh-CN":
-                return "。".join(item.rstrip("。") for item in parts) + "。"
-            return ". ".join(item.rstrip(".") for item in parts) + "."
-        if action_text:
-            suffix = (
-                "所选帧没有显示更具体的环境约束。"
-                if language == "zh-CN"
-                else "The selected frame does not show a more specific environment constraint."
-            )
-            return f"{action_text}。{suffix}" if language == "zh-CN" else f"{action_text}. {suffix}"
-        return (
-            "所选帧没有足够的可验证证据。"
-            if language == "zh-CN"
-            else "The selected frame does not contain enough verifiable evidence."
+        return adapter.concise_study_explanation(
+            snapshot,
+            target_agent=target_agent,
+            policy=None,
+            focus=focus,
+            language=language,
         )
 
     def command(self, envelope: Mapping[str, Any]) -> dict[str, Any]:

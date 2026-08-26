@@ -346,7 +346,7 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
                 proposed_actions=dict(proposed_actions),
                 metadata={
                     **dict(decision.metadata),
-                    "action_execution": "autoregressive_direct_mappo_actor",
+                    "action_execution": "independent_simultaneous_mappo_actor",
                     "submitted_actions": dict(actions),
                 },
             )

@@ -1,13 +1,14 @@
 # 双机器人协作配送 XAI 用户实验
 
-参与者固定控制 `robot_1`，与 MAPPO 控制的 `robot_2` 在 10×11 错位货架仓库中完成两个持续补充的共享 A→B 配送任务。服务器分配后、演示与任务开始前，界面会明确告知参与者属于 A 组（Task 1 后有解释）或 B 组（Task 1 后无解释）。实验流程为：AI–AI 演示（可完整观看或提前结束）→ Task 1 → A 组查看固定 AI–AI 解释轨迹/B 组确认过渡说明 → Task 2 → 简短问卷。提前结束演示会记录已观看帧数、剩余帧数和完成比例，然后以独立 seed、新状态和双方满电开始 Task 1。
+参与者固定控制 `robot_1`，与 MAPPO 控制的 `robot_2` 在 8×9 紧凑货架仓库中完成两个持续补充的共享 A→B 配送任务。服务器分配后、演示与任务开始前，界面会明确告知参与者属于 A 组（Task 1 后有解释）或 B 组（Task 1 后无解释）。实验流程为：AI–AI 演示（可完整观看或提前结束）→ Task 1 → A 组查看固定 AI–AI 解释轨迹/B 组确认过渡说明 → Task 2 → 简短问卷。提前结束演示会记录已观看帧数、剩余帧数和完成比例，然后以独立 seed、新状态和双方满电开始 Task 1。
 
 ## 当前实验契约
 
 - 两台机器人、120 个联合决策步，初始电量均为 100。
 - 任一空载机器人进入 A 点后认领任务；只有承运机器人能在 B 点完成交付。
 - 成功移动消耗 2 电量；在充电站执行等待恢复 10；阻塞动作不耗电。
-- 地图由独立 `MapLayout` 定义，不存在带特殊语义的 yield bay。地图固定为 10 行 × 11 列，第 6 列是纵向主通道，左右两侧横向通道逐层交错；充电站左前方 `(8,4)` 已按界面标注由货架改为普通通道，因此 `(8,5)` 是一个明确的四向交汇点。机器人起点为 `(9,4)`、`(9,6)`，充电站为 `(9,5)`；充电口上方 `(8,4)`、`(8,5)`、`(8,6)` 均禁止生成任务端点，避免货物堵住充电交接。界面、路径规划、观测和碰撞判定读取同一拓扑，不存在“视觉是货架但机器人仍可穿过”的差异。
+- 正式地图是 `warehouse_compact_interaction_8x9_v1`：8 行 × 9 列，中央共享纵向通道连接四条横向作业通道，充电站位于 `(7,4)`，机器人从 `(7,2)`、`(7,6)` 出发。取货点、交付点、充电站、路径规划、观测和碰撞判定全部读取同一个 `MapLayout`。10 个固定种子的 AI–AI 校准平均完成 8.5 次配送、出现 44.2 个碰撞机会帧和 21.7 个协调事件帧。
+- 每一步先冻结共同状态 `S_t`，两个共享参数 Actor 分别只读取各自的 `S_t` 本地观察并独立产生动作，最后只调用一次 `env.step({robot_1: a1, robot_2: a2})`。参与者命令只在两个分布都计算完成后替换 `robot_1`；`robot_2` 永远看不到 `robot_1` 本帧动作。
 - 机器人冲突时双方本步均等待，计一次碰撞但不终止。除参与者在 Task 1/2 中替换 `robot_1` 的输入外，AI 命令由共享 MAPPO Actor 直接输出并原样提交给环境；系统不存在运行时通行权规则、coordination shield、教师策略或决策树动作改写。撞墙、货架阻塞、同格争抢、交换位置和进入未离开的队友位置，均只由环境动力学解析。网络必须自行学习任务分工、充电、让行和避免绕路。
 - 用户得分保持为：`100×配送数 − 200×机器人碰撞事件 − 50×断电事件 − 步数 − 2×参与者绕路单位`。断电提前结束时补扣到 120 步。
 
@@ -38,32 +39,32 @@ reward_i = user_score_delta / 100
 
 ## 训练方法与版本
 
-正式策略采用共享 Actor、集中式 Critic 的 MAPPO。30% 训练回合启用代理人类，其中约 20% 时间步替换机器人 1 的动作；替换样本不进入 Actor loss，但保留给 Critic。
+正式策略采用共享 Actor、集中式 Critic 的 MAPPO。Actor 是独立、去中心化的同时决策结构；Critic 训练时可以读取全局状态。30% 训练回合启用代理人类，其中约 20% 时间步会在两个 Actor 输出完成后替换机器人 1 的动作；替换样本不进入 Actor loss，但保留给 Critic。
 
 训练开始前可使用可审计的行为克隆样本初始化神经网络权重；这些标签不会作为运行时动作，也不会在 MAPPO rollout 中替换 Actor 输出。主体训练的每一步均执行当前 Actor 动作。早期少量训练回合使用单机器人低电量课程，课程在后期衰减到 0；正式评估和用户任务始终从电量 100 开始。RCPD 只单向读取神经网络真实 rollout 并在训练后抽取程序，不向 Actor 提供 target、loss 或梯度，也不参与动作选择。
 
-当前 v28 individual-credit 候选兼容版本：
+当前部署版本：
 
-- 模型：`warehouse_mappo_v35_individual_credit`
-- 环境：`warehouse_collaborative_delivery_v22_individual_credit`
+- 模型：`warehouse_mappo_v37_independent_joint_risk_actor`
+- 环境：`warehouse_collaborative_delivery_v24_simultaneous_compact_reserve4`
 - Reward：`warehouse_safe_mission_reward_v19_individual_credit`
-- 观测：`collaborative_observation_v23_avoidable_wait_memory`
-- 训练 checkpoint：`warehouse_mappo_training_v27_individual_credit`
-- RCPD：`warehouse_rcpd_v30_individual_credit_posthoc`
-- 地图：`warehouse_alternating_shelves_10x11_v6_open_charger_approach`
-- seed 库：`warehouse_parallel_seed_pairs_v31_individual_credit`
-- 参考轨迹：`warehouse_reference_trajectory_v30_individual_credit`
-- 动作执行：`autoregressive_direct_mappo_actor_action_v9_neural_mission`
-- 运行时控制器：`mappo_autoregressive_actor_direct_execution`
-- 日志：`human-study-log.v22`
+- 观测：`collaborative_observation_v24_compact_reserve4`
+- 训练 checkpoint：`warehouse_mappo_training_v29_joint_risk_actor`
+- RCPD：`warehouse_rcpd_v31_joint_risk_posthoc`
+- 地图：`warehouse_compact_interaction_8x9_v1`
+- seed 库：`warehouse_parallel_seed_pairs_v32_joint_risk`
+- 参考轨迹：`warehouse_reference_trajectory_v31_joint_risk`
+- 动作执行：`independent_simultaneous_mappo_actor_v10`
+- 运行时控制器：`mappo_independent_actor_simultaneous_execution`
+- 日志：`human-study-log.v23`
 
-v28 候选产物写入 `output/collaborative/safe_mission_v28_individual_credit/`，只有完成从零训练、后验 RCPD、固定参考轨迹和独立 200-seed 正式门控后才允许成为默认模型。v27 与更早模型、失败候选、正式评估和实验数据保持只读，不会被 v28 覆盖。解释证据来自真实网络动作、环境解析结果、任务状态和电量状态，不能声称某个外部控制器修改了动作。
+PyTorch checkpoint 位于 `output/deployment/warehouse_mappo_v37.pt`。Render 使用从该 checkpoint 精确导出的 `output/deployment/warehouse_mappo_v37_actor.npz`，以 NumPy 执行同一神经网络；测试逐 logit 比对两种运行时，允许误差不超过 `1e-4`。联合风险微调只使用同一决策前状态上的两个独立分布，最小化 `p1ᵀ C(S_t) p2`，不会把任一机器人本帧动作输入另一机器人。200 个独立评估种子平均完成 7.45 次配送，碰撞 episode rate 为 4–8%，每回合最多 2 次碰撞，断电率为 1–3%，运行时动作干预为 0。完整指标见 `output/deployment/warehouse_mappo_v37_evaluation.json`。
 
-v26 的共享 Actor 内部增加可训练的五类神经任务意图（两个任务槽、交付、充电、等待）。离线教师同时监督动作和神经意图，使充电与任务承诺能跨连续状态保持；该意图只是网络隐变量，既不绑定共享任务，也不在运行时屏蔽、替换或修正 Actor 动作。离线关键状态覆盖充电离站、任务连续未认领、两机器人同目标、狭窄通道避让和 Actor 队友上下文；正式 rollout、参考轨迹和 UI 中的 AI 动作仍全部直接来自共享 MAPPO Actor。
+共享 Actor 内部包含五类神经任务意图（两个任务槽、交付、充电、等待）。它只是网络隐变量，不绑定共享任务，也不在运行时屏蔽、替换或修正 Actor 动作。离线关键状态覆盖充电离站、任务连续未认领、两机器人同目标、狭窄通道避让和碰撞后恢复；正式 rollout、参考轨迹和 UI 中的 AI 动作全部直接来自共享 MAPPO Actor。
 
-成功移动固定消耗 2 点电量；撞墙、货架阻塞、机器人冲突和普通等待不耗电；在充电站等待仍恢复 10 点。安全任务势能会按 2 点/格计算任务路线、返充电站路线和两格安全余量。新增的可避免等待和任务成本回退项仅用于训练，参与者最终得分不包含任何训练塑形。
+成功移动固定消耗 2 点电量；撞墙、货架阻塞、机器人冲突和普通等待不耗电；在充电站等待仍恢复 10 点。紧凑地图的正式配置使用四步安全余量，避免两台低电量机器人排队时以 0 电量到站。新增的可避免等待和任务成本回退项仅用于训练，参与者最终得分不包含任何训练塑形。
 
-浏览器使用连续插值动画。地图机器人图标直接显示电量和承运货物；地图下方不再显示重复的机器人状态卡或“Active tasks/活动任务”卡片，任务 A/B、承运状态和电量直接呈现在地图中。地图没有特殊 yield-bay 标记；机器人使用普通支路和充电口通道完成交接。A 组解释阶段不公开参与者的 Task 1 轨迹，而是载入冻结的 AI–AI 参考轨迹。v20 从 seed `42026` 起搜索首个满足事件覆盖和无断电要求的纯神经轨迹，当前冻结参考轨迹为 seed `42027`，且记录 Actor 动作源、零干预和内容哈希。
+浏览器使用连续插值动画，在同一动画帧插值两个机器人的联合移动结果。地图机器人图标直接显示电量和承运货物。A 组解释阶段不公开参与者的 Task 1 轨迹，而是载入冻结的 AI–AI 参考轨迹。当前参考轨迹 seed 为 `40221`：120 步完成 9 次配送、包含一次真实同格碰撞、一次低电量充电站交接且无断电，并记录 Actor 分布、零干预和内容哈希。
 
 参考轨迹的 121 帧和事件标签只读取一次。拖动、上一帧、下一帧和事件跳转均在浏览器本地完成，拖动时不访问服务器；稳定 150 ms 后才循环播放选中动作。提问显式携带轨迹哈希、帧、机器人和问题类型。回答只保留与动作、电量、队友、分工或碰撞问题直接相关的证据，语义校验失败时使用确定性简短模板；公共载荷继续隐藏策略目标、神经分布和内部特征。
 
@@ -130,13 +131,19 @@ py -3.11 run.py
 py -3.11 run_formal_ui.py
 ```
 
-显式指定模型和程序：
+显式指定当前模型和一个同版本的后验 RCPD 程序：
 
 ```bash
-py -3.11 run.py --checkpoint output/collaborative/safe_mission_v26_neural_mission_intent/warehouse_mappo.pt --program output/collaborative/safe_mission_v26_neural_mission_intent/rcpd_program.json --transformer-model Qwen/Qwen2.5-3B-Instruct --device cuda --host 0.0.0.0 --port 8000 --no-browser
+py -3.11 run.py --checkpoint output/deployment/warehouse_mappo_v37.pt --program output/collaborative/simultaneous_compact_v30_joint_risk/rcpd_program.json --transformer-model Qwen/Qwen2.5-3B-Instruct --device cuda --host 0.0.0.0 --port 8000 --no-browser
 ```
 
 浏览器端每次方向键、WASD、方向按钮或“等待”输入只推进一个联合步。服务器使用 operation ID 和状态版本保证幂等、恢复和防重复。
+
+免费 Render 部署使用 `render.yaml` 启动公共实验服务，并直接加载同一 checkpoint 导出的 NumPy Actor：
+
+```text
+https://policylens-warehouse-study.onrender.com/
+```
 
 ## 数据与分析
 

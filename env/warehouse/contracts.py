@@ -27,18 +27,18 @@ class WarehouseContractVersions:
 
 
 CURRENT_VERSIONS = WarehouseContractVersions(
-    environment="warehouse_collaborative_delivery_v22_individual_credit",
-    observation="collaborative_observation_v23_avoidable_wait_memory",
+    environment="warehouse_collaborative_delivery_v24_simultaneous_compact_reserve4",
+    observation="collaborative_observation_v24_compact_reserve4",
     reward="warehouse_safe_mission_reward_v19_individual_credit",
-    model="warehouse_mappo_v35_individual_credit",
-    training_checkpoint="warehouse_mappo_training_v27_individual_credit",
-    rcpd_program="warehouse_rcpd_v30_individual_credit_posthoc",
-    seed_library="warehouse_parallel_seed_pairs_v31_individual_credit",
-    reference_trajectory="warehouse_reference_trajectory_v30_individual_credit",
-    study_log="human-study-log.v22",
-    action_execution="autoregressive_direct_mappo_actor_action_v9_neural_mission",
-    runtime_controller="mappo_autoregressive_actor_direct_execution",
-    artifact_namespace="safe_mission_v28_individual_credit",
+    model="warehouse_mappo_v37_independent_joint_risk_actor",
+    training_checkpoint="warehouse_mappo_training_v29_joint_risk_actor",
+    rcpd_program="warehouse_rcpd_v31_joint_risk_posthoc",
+    seed_library="warehouse_parallel_seed_pairs_v32_joint_risk",
+    reference_trajectory="warehouse_reference_trajectory_v31_joint_risk",
+    study_log="human-study-log.v23",
+    action_execution="independent_simultaneous_mappo_actor_v10",
+    runtime_controller="mappo_independent_actor_simultaneous_execution",
+    artifact_namespace="simultaneous_compact_v30_joint_risk",
 )
 
 

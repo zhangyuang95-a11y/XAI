@@ -1018,7 +1018,23 @@ class WarehouseWebSession:
                 focus=question_focus,
                 language=response_language,
             )
-            if not semantic_valid:
+            if study_request:
+                localized_text = self._deterministic_study_explanation(
+                    execution_snapshot,
+                    target_agent=target_agent,
+                    focus=question_focus,
+                    language=response_language,
+                )
+                semantic_valid = self._validate_study_explanation_text(
+                    localized_text,
+                    focus=question_focus,
+                    language=response_language,
+                )
+                localized_report["explanation"] = localized_text
+                document = dict(localized_report.get("explanation_document", {}))
+                document["text"] = localized_text
+                localized_report["explanation_document"] = document
+            elif not semantic_valid:
                 localized_text = self._deterministic_study_explanation(
                     execution_snapshot,
                     target_agent=target_agent,
@@ -1031,7 +1047,7 @@ class WarehouseWebSession:
                 localized_report["explanation_document"] = document
             localized_report["semantic_validation"] = {
                 "passed": bool(semantic_valid),
-                "fallback_used": not semantic_valid,
+                "fallback_used": bool(study_request or not semantic_valid),
                 "question_focus": question_focus,
             }
             reports[response_language] = localized_report
@@ -1118,8 +1134,18 @@ class WarehouseWebSession:
         normalized = " ".join(str(text).split()).casefold()
         if not normalized or any(
             token in normalized
-            for token in ("trace_type", "path_index", "candidate.", "action_constraint", "{")
+            for token in (
+                "trace_type", "path_index", "candidate.", "action_constraint", "{",
+                "selection probability", "highest probability", "概率最高",
+            )
         ):
+            return False
+        if language == "en":
+            if len(normalized.split()) > 80:
+                return False
+            if sum(normalized.count(mark) for mark in (".", "?", "!")) > 3:
+                return False
+        elif len(normalized) > 240 or normalized.count("。") > 3:
             return False
         has_number = bool(re.search(r"\d+(?:\.\d+)?", normalized))
         requirements = {
@@ -1161,82 +1187,12 @@ class WarehouseWebSession:
         focus: str,
         language: str,
     ) -> str:
-        facts = tuple(self.adapter.evidence_facts(snapshot, target_agent, self.policy))
-        by_predicate = {fact.predicate: fact for fact in facts}
-
-        def render(predicate: str) -> str:
-            fact = by_predicate.get(predicate)
-            if fact is None:
-                return ""
-            value = fact.value
-            if isinstance(value, Mapping):
-                value = {**dict(value), "study_focus": focus}
-            return self.adapter.explanation_verbalize_unit(
-                {
-                    "predicate": fact.predicate,
-                    "arguments": fact.arguments,
-                    "value": value,
-                },
-                language,
-            ).strip()
-
-        preferred = {
-            "energy": ("energy_decision_context", "charging_outcome"),
-            "charge_threshold": ("energy_decision_context",),
-            "collaboration": (
-                "charger_queue_context",
-                "collaboration_context",
-            ),
-            "allocation": ("collaboration_context",),
-            "collision": (
-                "action_resolution_reason",
-                "collaboration_context",
-            ),
-            "task": ("movement_outcome", "collaboration_context"),
-        }
-        if focus != "action":
-            for predicate in preferred.get(focus, ("movement_outcome",)):
-                rendered = render(predicate)
-                if rendered:
-                    return rendered
-
-        objective_text = render("shared_objective_selection_reason")
-        action_text = render("executed_action")
-        resolution = by_predicate.get("action_resolution_reason")
-        resolution_changed = bool(
-            resolution is not None
-            and isinstance(resolution.value, Mapping)
-            and resolution.value.get("environment_changed_action", False)
-        )
-        collaboration = by_predicate.get("collaboration_context")
-        collaboration_enabled = bool(
-            collaboration is not None
-            and isinstance(collaboration.value, Mapping)
-            and collaboration.value.get("enabled_teammate_action", False)
-        )
-        reason_order = ["charger_queue_context", "charging_outcome"]
-        if resolution_changed:
-            reason_order.append("action_resolution_reason")
-        if collaboration_enabled and not resolution_changed:
-            reason_order.append("collaboration_context")
-        reason_order.extend(("movement_outcome", "collaboration_context"))
-        reason = next((render(name) for name in reason_order if render(name)), "")
-        parts = [item for item in (objective_text, action_text, reason) if item]
-        if parts:
-            if language == "zh-CN":
-                return "。".join(item.rstrip("。") for item in parts) + "。"
-            return ". ".join(item.rstrip(".") for item in parts) + "."
-        if action_text:
-            suffix = (
-                "现有可验证证据没有显示更具体的环境约束。"
-                if language == "zh-CN"
-                else "The verified evidence does not show a more specific environment constraint."
-            )
-            return f"{action_text}. {suffix}"
-        return (
-            "本帧没有足够的可验证证据。"
-            if language == "zh-CN"
-            else "This frame does not contain enough verified evidence."
+        return self.adapter.concise_study_explanation(
+            snapshot,
+            target_agent=target_agent,
+            policy=self.policy,
+            focus=focus,
+            language=language,
         )
 
     def start_study(
@@ -1298,12 +1254,14 @@ class WarehouseWebSession:
         proposed, distributions = self.policy.act(
             before.observations,
             before.global_state,
-            deterministic=True,
-            fixed_actions={"robot_1": action},
+            deterministic=False,
         )
-        requested_joint_actions = dict(proposed)
+        requested_joint_actions = {
+            **dict(proposed),
+            "robot_1": action,
+        }
         # Robot 1 is the participant command. Robot 2 is the unmodified,
-        # deterministic MAPPO Actor command. Environment dynamics alone may
+        # sampled MAPPO Actor command. Environment dynamics alone may
         # subsequently block a move or resolve a robot conflict.
         joint_actions = dict(requested_joint_actions)
         _, rewards, terminated, truncated, info = self.environment.step(joint_actions)
@@ -1318,12 +1276,12 @@ class WarehouseWebSession:
                 "action_resolution": dict(info.get("action_resolution", {})),
                 "decision_outcome_frame": after.frame,
                 "decision_evidence_aligned": True,
-                "decision_deterministic": True,
+                "decision_deterministic": False,
                 "collaborative_round": round_name,
                 "human_requested_action": action,
                 "ai_network_action": proposed.get("robot_2"),
                 "ai_submitted_action": joint_actions.get("robot_2"),
-                "action_execution": "autoregressive_direct_mappo_actor",
+                "action_execution": "independent_simultaneous_mappo_actor",
             },
         )
         self.timeline.append(
@@ -1342,7 +1300,7 @@ class WarehouseWebSession:
                 "human_requested_action": action,
                 "ai_network_action": proposed.get("robot_2"),
                 "ai_submitted_action": joint_actions.get("robot_2"),
-                "action_execution": "autoregressive_direct_mappo_actor",
+                "action_execution": "independent_simultaneous_mappo_actor",
                 "executed_actions": dict(info.get("executed_actions", {})),
                 "task_changes": list(info.get("task_changes", ())),
                 "robot_collision_event": bool(info.get("robot_collision_event", False)),

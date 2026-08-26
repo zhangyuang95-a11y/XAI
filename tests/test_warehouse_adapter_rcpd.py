@@ -591,7 +591,9 @@ def test_nonprogress_move_reports_verified_policy_choice_without_false_progress(
         "zh-CN",
     )
 
-    assert "策略给向下的选择概率最高（56.1%）" in text
+    assert "它本帧执行了向下" in text
+    assert "执行后这一步没有缩短" in text
+    assert "选择概率最高" not in text
     assert "没有缩短" in text
     assert "剩余距离从3格变为4格" in text
     assert "推进交付" not in text

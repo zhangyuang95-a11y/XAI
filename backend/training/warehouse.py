@@ -45,6 +45,7 @@ from env.warehouse.environment import (
     WarehouseConfig,
     WarehouseMultiAgentEnv,
 )
+from env.warehouse.domain import collaborative_study_config
 from env.warehouse.contracts import (
     ACTION_EXECUTION_VERSION,
     ARTIFACT_NAMESPACE,
@@ -59,7 +60,7 @@ from env.warehouse.mappo import (
     evaluate_policy,
     evaluate_random_policy,
 )
-from env.warehouse.policy import autoregressive_actor_input
+from env.warehouse.policy import independent_actor_input
 from env.warehouse.policy_metrics import batch_efficiency_log_fields
 from env.warehouse.observations import observation_dim
 from env.warehouse.rewards import RewardConfig
@@ -612,14 +613,7 @@ def _collect_behavior_cloning_dataset(
                     if len(observations) >= sample_count:
                         break
                     observations.append(
-                        autoregressive_actor_input(
-                            local[agent.agent_id],
-                            preceding_action=(
-                                None
-                                if agent.agent_id == "robot_1"
-                                else actions["robot_1"]
-                            ),
-                        )
+                        independent_actor_input(local[agent.agent_id])
                     )
                     targets.append(ACTIONS.index(teacher_action))
                     intent_targets.append(
@@ -633,30 +627,38 @@ def _collect_behavior_cloning_dataset(
                     collision_recovery_samples += int(
                         state.last_robot_collision_event
                     )
-            if rng.random() < 0.15 and len(observations) < sample_count:
+            if rng.random() < 0.40 and len(observations) < sample_count:
                 original_state = environment.get_state()
-                recovery_state = deepcopy(original_state)
-                recovery_state.last_robot_collision_event = True
-                for agent in recovery_state.agents:
-                    agent.last_action = actions[agent.agent_id]
-                    agent.last_executed_action = "WAIT"
-                environment.set_state(recovery_state)
+                masks = environment.action_masks()
+                collision_actions = next(
+                    (
+                        {"robot_1": first, "robot_2": second}
+                        for first, first_allowed in zip(ACTIONS, masks["robot_1"])
+                        for second, second_allowed in zip(ACTIONS, masks["robot_2"])
+                        if first_allowed > 0.5
+                        and second_allowed > 0.5
+                        and environment._resolve_motion(
+                            original_state,
+                            {"robot_1": first, "robot_2": second},
+                        )[3]
+                    ),
+                    None,
+                )
+                if collision_actions is None:
+                    environment.set_state(original_state)
+                    collision_actions = {}
+                else:
+                    environment.step(collision_actions)
+                recovery_state = environment.get_state()
                 recovery_local = environment.observations()
                 recovery_actions = _safe_navigation_teacher_actions(environment)
                 for agent in environment.get_state().agents:
                     teacher_action = recovery_actions[agent.agent_id]
-                    for _ in range(3):
+                    for _ in range(8 if collision_actions else 0):
                         if len(observations) >= sample_count:
                             break
                         observations.append(
-                            autoregressive_actor_input(
-                                recovery_local[agent.agent_id],
-                                preceding_action=(
-                                    None
-                                    if agent.agent_id == "robot_1"
-                                    else recovery_actions["robot_1"]
-                                ),
-                            )
+                            independent_actor_input(recovery_local[agent.agent_id])
                         )
                         targets.append(ACTIONS.index(teacher_action))
                         intent_targets.append(
@@ -1168,7 +1170,7 @@ def train(
     """Train MAPPO, then optionally distil its executed trajectories post hoc."""
 
     requested_agents = args.agents if args.agents is not None else args.num_agents
-    environment_config = WarehouseConfig(
+    environment_config = collaborative_study_config(
         num_agents=requested_agents,
         max_agents=args.max_agents,
         horizon=args.horizon,

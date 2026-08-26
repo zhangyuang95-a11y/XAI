@@ -5,7 +5,7 @@ from http.server import ThreadingHTTPServer
 import json
 import threading
 
-from env.warehouse.layouts import DEFAULT_MAP_LAYOUT
+from env.warehouse.layouts import STUDY_MAP_LAYOUT
 import ui.development_preview_server as preview_server
 from ui.development_preview_server import (
     DevelopmentPreviewSessions,
@@ -45,9 +45,9 @@ def test_development_preview_uses_canonical_geometry_and_121_demo_frames() -> No
     state = DevelopmentPreviewState()
     view = state.view()
 
-    assert view["map"]["layout_id"] == DEFAULT_MAP_LAYOUT.layout_id
-    assert view["map"]["rows"] == DEFAULT_MAP_LAYOUT.rows
-    assert view["map"]["cols"] == DEFAULT_MAP_LAYOUT.cols
+    assert view["map"]["layout_id"] == STUDY_MAP_LAYOUT.layout_id
+    assert view["map"]["rows"] == STUDY_MAP_LAYOUT.rows
+    assert view["map"]["cols"] == STUDY_MAP_LAYOUT.cols
     assert view["study"]["tutorial"]["total_frames"] == 121
     assert len(state.reference_trajectory()["frames"]) == 121
 
@@ -177,7 +177,8 @@ def test_development_explanation_is_grounded_in_selected_action_evidence() -> No
     )
     report = result["view"]["last_explanation"]
 
-    assert "机器人2这一步执行了" in report["explanation"]
+    assert "机器人2本帧执行了" in report["explanation"]
+    assert "当前目标" in report["explanation"]
     assert "正式的 RCPD" not in report["explanation"]
     assert report["selected_timeline_frame"] == selected
     assert report["decision_evidence_frame"] == selected - 1
@@ -186,38 +187,50 @@ def test_development_explanation_is_grounded_in_selected_action_evidence() -> No
 
 def test_action_explanation_states_recorded_goal_progress_and_outcome() -> None:
     state = DevelopmentPreviewState()
-
-    assert state.tutorial_frames[65].goal_overrides["robot_1"] == (6, 10)
+    selected = next(
+        index
+        for index, frame in enumerate(state.tutorial_frames)
+        if index > 0 and frame.actions.get("robot_1") not in {None, "WAIT"}
+    )
     text = state._grounded_development_explanation(
-        index=65,
+        index=selected,
         target_agent="robot_1",
         focus="action",
         language="zh-CN",
     )
 
-    assert "临时导航目标是任务2的A点(6, 10)" in text
-    assert "从当前位置(5, 5)到该目标的最短可通行路径为6格" in text
-    assert "执行了向下" in text
-    assert "从(5, 5)移动到(6, 5)" in text
-    assert "剩余距离从6格缩短到5格" in text
+    assert "机器人1本帧执行了" in text
+    assert "决策前，机器人1的当前目标是" in text
+    assert "选择概率最高" not in text
 
 
 def test_action_explanation_prioritizes_clearing_charger_for_teammate() -> None:
     state = DevelopmentPreviewState()
+    selected = next(
+        index
+        for index in range(1, len(state.tutorial_frames))
+        if any(
+            fact.predicate == "collaboration_context"
+            and fact.value.get("charger_clearance")
+            for fact in state._explanation_snapshot(index)[0].evidence_facts(
+                state._explanation_snapshot(index)[1], "robot_1", None
+            )
+        )
+    )
 
     text = state._grounded_development_explanation(
-        index=24,
+        index=selected,
         target_agent="robot_1",
         focus="action",
         language="zh-CN",
     )
 
-    assert "当前的临时导航目标" in text
-    assert "本帧的直接协作原因是让出充电站" in text
-    assert "机器人2的电量仅剩15%" in text
-    assert "使机器人2能够进入充电站并准备充电" in text
-    assert "距离从11格增加到12格" in text
-    assert "协作让行" in text
+    assert "执行后的结果是让出充电站" in text
+    assert "低电量" in text
+    assert "队友能够进入" in text
+    assert "决策前，机器人1的当前目标是" in text
+    assert "同一决策前状态同时选动作" in text
+    assert "机器人2事先不知道机器人1本帧会怎么走" in text
     assert "选择概率最高" not in text
 
 
@@ -247,3 +260,34 @@ def test_development_energy_explanation_uses_real_charging_frame() -> None:
     assert "电量" in text
     assert "%" in text
     assert "充电" in text
+
+
+def test_collision_explanation_is_direct_concise_and_simultaneous() -> None:
+    state = DevelopmentPreviewState()
+    selected = next(
+        index
+        for index, frame in enumerate(state.tutorial_frames)
+        if frame.info.get("robot_collision_event")
+    )
+    english = state._grounded_development_explanation(
+        index=selected,
+        target_agent="robot_2",
+        focus="collision",
+        language="en",
+    )
+    chinese = state._grounded_development_explanation(
+        index=selected,
+        target_agent="robot_2",
+        focus="collision",
+        language="zh-CN",
+    )
+
+    assert english.startswith("Yes:")
+    assert "same pre-move state" in english
+    assert "did not know Robot 1's current move" in english
+    assert "current goal" in english
+    assert len(english.split()) <= 80
+    assert english.count(".") <= 3
+    assert "同一决策前状态同时选动作" in chinese
+    assert "当前目标" in chinese
+    assert chinese.count("。") <= 3

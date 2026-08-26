@@ -812,7 +812,6 @@ def stable_coordination_goal_overrides(
 def stable_coordination_actions(
     environment: WarehouseMultiAgentEnv,
     *,
-    fixed_actions: Mapping[str, str] | None = None,
     goal_overrides: Mapping[str, tuple[int, int]] | None = None,
 ) -> dict[str, str]:
     """Choose offline supervision labels for one shared-task joint state.
@@ -863,8 +862,6 @@ def stable_coordination_actions(
         and priority_agent.navigation_goal_kind == "delivery"
         else None
     )
-    fixed = {str(key): str(value) for key, value in (fixed_actions or {}).items()}
-
     # Atomic charger handoff: an energy-safe robot on the station must never
     # wait behind its own full battery while an energy-critical teammate is
     # parked in the single approach cell.  Generic mission scoring can prefer
@@ -900,7 +897,7 @@ def stable_coordination_actions(
         if agent.position == layout.charger_position
         and environment._requires_charge(state, agent)
     )
-    if charging_occupants and adjacent_charger_waiters and not fixed:
+    if charging_occupants and adjacent_charger_waiters:
         # A robot that has not yet reached a safe departure state owns the
         # single charger for this frame.  Earlier teacher labels let a loaded
         # teammate displace it at the apron, producing a *premature* departure
@@ -912,7 +909,6 @@ def stable_coordination_actions(
                 charging_occupants[0].agent_id: "WAIT",
                 adjacent_charger_waiters[0].agent_id: "WAIT",
             },
-            fixed_actions=fixed,
         )
     idle_occupants = tuple(
         agent
@@ -921,7 +917,7 @@ def stable_coordination_actions(
         and agent.battery < 100.0
         and overrides.get(agent.agent_id) in {None, layout.charger_position}
     )
-    if idle_occupants and adjacent_charger_waiters and not fixed:
+    if idle_occupants and adjacent_charger_waiters:
         # A nominally energy-safe occupant can still lack a feasible teacher
         # assignment (for example while the other A point blocks its aisle).
         # Charge until an actionable commitment exists before handing over;
@@ -932,14 +928,12 @@ def stable_coordination_actions(
                 idle_occupants[0].agent_id: "WAIT",
                 adjacent_charger_waiters[0].agent_id: "WAIT",
             },
-            fixed_actions=fixed,
         )
     safe_occupants = tuple(
         agent
         for agent in charger_exit_agents
-        if agent.agent_id not in fixed
     )
-    if safe_occupants and not fixed:
+    if safe_occupants:
         occupant = safe_occupants[0]
         prospective_delivery_inbound = tuple(
             agent
@@ -987,7 +981,6 @@ def stable_coordination_actions(
                     occupant.agent_id: "WAIT",
                     inbound_delivery.agent_id: progress_action,
                 },
-                fixed_actions=fixed,
             )
         inbound = tuple(
             agent
@@ -1058,7 +1051,6 @@ def stable_coordination_actions(
                         occupant.agent_id: clearance_action,
                         inbound[0].agent_id: "WAIT",
                     },
-                    fixed_actions=fixed,
                 )
             return _teacher_efficiency_guard(
                 environment,
@@ -1066,9 +1058,8 @@ def stable_coordination_actions(
                     occupant.agent_id: "WAIT",
                     inbound[0].agent_id: "WAIT",
                 },
-                fixed_actions=fixed,
             )
-    if approaching_charger and not fixed:
+    if approaching_charger:
         charging_agent = approaching_charger[0]
         side_agent = next(
             (
@@ -1095,12 +1086,10 @@ def stable_coordination_actions(
                 return _teacher_efficiency_guard(
                     environment,
                     simultaneous_handoff,
-                    fixed_actions=fixed,
                 )
     if (
         charger_exit_agents
         and approaching_charger
-        and charger_exit_agents[0].agent_id not in fixed
     ):
         exiting_agent = charger_exit_agents[0]
         teammate = next(
@@ -1115,12 +1104,11 @@ def stable_coordination_actions(
             if action not in MOVE_DELTAS or MOVE_DELTAS[action][0] != 0:
                 continue
             actions = {
-                agent.agent_id: fixed.get(agent.agent_id, "WAIT")
+                agent.agent_id: "WAIT"
                 for agent in state.agents
             }
             actions[exiting_agent.agent_id] = action
-            if teammate.agent_id not in fixed:
-                actions[teammate.agent_id] = "WAIT"
+            actions[teammate.agent_id] = "WAIT"
             targets, _, invalid, collision, _, _ = environment._resolve_motion(
                 state,
                 actions,
@@ -1145,7 +1133,6 @@ def stable_coordination_actions(
             return _teacher_efficiency_guard(
                 environment,
                 min(handoff_candidates, key=lambda item: item[:2])[2],
-                fixed_actions=fixed,
             )
 
     available_pickups = {
@@ -1228,28 +1215,24 @@ def stable_coordination_actions(
     legal_by_agent: dict[str, list[str]] = {}
     for agent in state.agents:
         agent_id = agent.agent_id
-        if agent_id in fixed:
-            legal_by_agent[agent_id] = [fixed[agent_id]]
-        else:
-            # Per-agent masks conservatively mark the teammate's current cell
-            # as blocked.  Joint coordination may safely enter that cell when
-            # the teammate leaves simultaneously (for example, handing over
-            # the charger).  Enumerate static-legal moves here and let the
-            # exact joint resolver reject same-cell, occupied, and swap cases.
-            legal_by_agent[agent_id] = [
-                action
-                for action in ACTIONS
-                if action == "WAIT"
-                or (
-                    action in MOVE_DELTAS
-                    and environment.layout.is_passable(
-                        (
-                            agent.position[0] + MOVE_DELTAS[action][0],
-                            agent.position[1] + MOVE_DELTAS[action][1],
-                        )
+        # Per-agent masks conservatively mark the teammate's current cell as
+        # blocked. Joint offline labels may enter that cell only when the
+        # teammate leaves simultaneously. The exact joint resolver rejects
+        # same-cell, occupied, and swap cases.
+        legal_by_agent[agent_id] = [
+            action
+            for action in ACTIONS
+            if action == "WAIT"
+            or (
+                action in MOVE_DELTAS
+                and environment.layout.is_passable(
+                    (
+                        agent.position[0] + MOVE_DELTAS[action][0],
+                        agent.position[1] + MOVE_DELTAS[action][1],
                     )
                 )
-            ]
+            )
+        ]
     left_id, right_id = environment.agent_ids
     candidates: list[tuple[tuple[float, int, int], dict[str, str]]] = []
     for left_index, left_action in enumerate(legal_by_agent[left_id]):
@@ -1259,23 +1242,18 @@ def stable_coordination_actions(
                 state,
                 actions,
             )
-            # Invalid participant actions remain fixed and become WAIT in the
-            # environment; invalid AI candidates are never selected.
-            if collision or any(agent_id not in fixed for agent_id in invalid):
+            if collision or invalid:
                 continue
             if any(
-                agent.agent_id not in fixed
-                and actions[agent.agent_id] in MOVE_DELTAS
+                actions[agent.agent_id] in MOVE_DELTAS
                 and agent.battery <= environment.config.move_battery_cost
                 for agent in state.agents
             ):
                 # Never turn a survivable wait into a move that immediately
-                # reaches zero battery.  Fixed participant input remains
-                # untouched and is handled by the environment contract.
+                # reaches zero battery.
                 continue
             if any(
-                agent.agent_id not in fixed
-                and _urgent_charge(
+                _urgent_charge(
                     environment,
                     agent,
                     goal_overrides=overrides,
@@ -1602,8 +1580,7 @@ def stable_coordination_actions(
                     score += 2_000.0
             for loaded_agent in state.agents:
                 if (
-                    loaded_agent.agent_id in fixed
-                    or loaded_agent.carrying_task_id is None
+                    loaded_agent.carrying_task_id is None
                     or loaded_agent.navigation_goal_kind != "delivery"
                     or environment._requires_charge(state, loaded_agent)
                 ):
@@ -1643,10 +1620,7 @@ def stable_coordination_actions(
                     score += 100_000.0
             for departing_agent in state.agents:
                 if (
-                    environment.config.teacher_efficiency_guard_enabled
-                    and
-                    departing_agent.agent_id in fixed
-                    or departing_agent.position == layout.charger_position
+                    departing_agent.position == layout.charger_position
                     or targets[departing_agent.agent_id]
                     != layout.charger_position
                     or departing_agent.last_charger_departure_frame is None
@@ -1671,7 +1645,7 @@ def stable_coordination_actions(
             candidates.append(((score, left_index, right_index), actions))
     if not candidates:
         selected = {
-            agent_id: fixed.get(agent_id, "WAIT")
+            agent_id: "WAIT"
             for agent_id in environment.agent_ids
         }
     else:
@@ -1679,7 +1653,6 @@ def stable_coordination_actions(
     return _teacher_efficiency_guard(
         environment,
         selected,
-        fixed_actions=fixed,
     )
 
 

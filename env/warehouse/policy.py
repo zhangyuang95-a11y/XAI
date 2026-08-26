@@ -32,7 +32,6 @@ from .observations import global_state_dim, observation_dim
 from .rewards import REWARD_VERSION, RewardConfig
 
 
-AUTOREGRESSIVE_CONTEXT_DIM = len(ACTIONS) + 1
 MISSION_INTENT_NAMES = (
     "task_slot_1",
     "task_slot_2",
@@ -42,24 +41,13 @@ MISSION_INTENT_NAMES = (
 )
 
 
-def autoregressive_actor_input(
-    observation: Any,
-    *,
-    preceding_action: str | None,
-) -> np.ndarray:
-    """Append the start token or robot-1 action used by the shared Actor."""
+def independent_actor_input(observation: Any) -> np.ndarray:
+    """Return one actor input containing pre-move observable state only."""
 
     local = np.asarray(observation, dtype=np.float32)
     if local.ndim != 1:
-        raise ValueError("An Actor input must start with one flat observation.")
-    context = np.zeros(AUTOREGRESSIVE_CONTEXT_DIM, dtype=np.float32)
-    if preceding_action is None:
-        context[0] = 1.0
-    else:
-        if preceding_action not in ACTIONS:
-            raise ValueError(f"Unknown preceding action {preceding_action!r}.")
-        context[1 + ACTIONS.index(preceding_action)] = 1.0
-    return np.concatenate((local, context)).astype(np.float32, copy=False)
+        raise ValueError("An Actor input must be one flat local observation.")
+    return local
 
 
 @dataclass(frozen=True)
@@ -96,7 +84,7 @@ class SharedActorCentralCritic(nn.Module):
     ) -> None:
         super().__init__()
         self.action_dim = int(action_dim)
-        self.base_local_dim = int(local_dim) - AUTOREGRESSIVE_CONTEXT_DIM
+        self.base_local_dim = int(local_dim)
         coordination_dim = (
             8
             + 2 * self.action_dim
@@ -152,17 +140,15 @@ class SharedActorCentralCritic(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden_dim, action_dim),
         )
-        # A shared per-action neural scorer exposes the algebra that a plain
-        # MLP struggled to learn: robot 2 must select the collision-matrix
-        # column identified by robot 1's already sampled action.  This branch
-        # is fully trainable and only contributes logits; it never masks,
-        # replaces, or post-processes the Actor's selected action.
+        # A shared per-action neural scorer reasons about collision risk under
+        # a learned teammate-action forecast.  Both robots make that forecast
+        # from the same pre-move state; neither receives the teammate's action
+        # for the current frame.
         structured_feature_dim = (
             self.per_action_feature_dim
             + 1
             + 1
             + self.action_dim
-            + 1
             + action_intent_dim
         )
         self.action_scorer = nn.Sequential(
@@ -199,8 +185,7 @@ class SharedActorCentralCritic(nn.Module):
         mission_probabilities = torch.softmax(mission_logits, dim=-1)
         intent = torch.cat((latent_intent, mission_probabilities), dim=-1)
         base_logits = self.actor(torch.cat((observations, intent), dim=-1))
-        local = observations[..., : self.base_local_dim]
-        context = observations[..., -AUTOREGRESSIVE_CONTEXT_DIM:]
+        local = observations
         own_action_features = local[
             ...,
             self.own_action_features_start : (
@@ -249,35 +234,59 @@ class SharedActorCentralCritic(nn.Module):
             predicted_teammate_logits,
             dim=-1,
         )
-        # Robot 1 uses a learned teammate forecast. Robot 2 receives robot 1's
-        # sampled action explicitly and therefore selects that exact matrix
-        # column. Both paths remain differentiable Actor computations.
-        preceding_action = (
-            context[..., :1] * predicted_teammate
-            + context[..., 1:]
-        )
         selected_collision = torch.einsum(
             "...ij,...j->...i",
             collision_matrix,
-            preceding_action,
+            predicted_teammate,
         ).unsqueeze(-1)
         legal = local[..., -self.action_dim :].unsqueeze(-1)
-        start_token = context[..., :1].unsqueeze(-2).expand(
-            *local.shape[:-1], self.action_dim, 1
-        )
         structured = torch.cat(
             (
                 own_action_features,
                 selected_collision,
                 legal,
                 action_identity,
-                start_token,
                 action_intent,
             ),
             dim=-1,
         )
         structured_logits = self.action_scorer(structured).squeeze(-1)
         return base_logits + structured_logits, mission_logits
+
+    def teammate_action_logits(self, observations: torch.Tensor) -> torch.Tensor:
+        """Predict the teammate action using pre-move observation only."""
+
+        latent_intent = self.intent_encoder(observations)
+        mission_probabilities = torch.softmax(
+            self.mission_head(latent_intent), dim=-1
+        )
+        intent = torch.cat((latent_intent, mission_probabilities), dim=-1)
+        local = observations
+        teammate_action_features = local[
+            ...,
+            self.teammate_action_features_start : (
+                self.teammate_action_features_start
+                + self.per_action_feature_dim * self.action_dim
+            ),
+        ].reshape(
+            *local.shape[:-1],
+            self.action_dim,
+            self.per_action_feature_dim,
+        )
+        action_identity = torch.eye(
+            self.action_dim,
+            dtype=observations.dtype,
+            device=observations.device,
+        ).expand(*local.shape[:-1], self.action_dim, self.action_dim)
+        action_intent = intent.unsqueeze(-2).expand(
+            *local.shape[:-1], self.action_dim, intent.shape[-1]
+        )
+        return self.teammate_action_predictor(
+            torch.cat(
+                (teammate_action_features, action_identity, action_intent),
+                dim=-1,
+            )
+        ).squeeze(-1)
 
     def actor_logits(self, observations: torch.Tensor) -> torch.Tensor:
         return self.actor_outputs(observations)[0]
@@ -330,7 +339,7 @@ class MAPPOPolicy:
         self._generator = torch.Generator(device="cpu")
         self._generator.manual_seed(self.algorithm_config.seed)
         self.network = SharedActorCentralCritic(
-            observation_dim(environment_config) + AUTOREGRESSIVE_CONTEXT_DIM,
+            observation_dim(environment_config),
             global_state_dim(environment_config),
             environment_config.max_agents,
             len(ACTIONS),
@@ -347,8 +356,6 @@ class MAPPOPolicy:
     def actor_input(
         self,
         observation: Any,
-        *,
-        preceding_action: str | None,
     ) -> np.ndarray:
         local = np.asarray(observation, dtype=np.float32)
         expected = observation_dim(self.environment_config)
@@ -357,46 +364,20 @@ class MAPPOPolicy:
                 f"Expected one local observation with shape {(expected,)}, "
                 f"received {local.shape}."
             )
-        return autoregressive_actor_input(
-            local,
-            preceding_action=preceding_action,
-        )
+        return independent_actor_input(local)
 
     def masked_actor_logits(
         self,
         observations: torch.Tensor,
-        action_contexts: torch.Tensor | None = None,
     ) -> torch.Tensor:
         local_dim = observation_dim(self.environment_config)
-        if observations.shape[-1] == local_dim:
-            mask_source = observations
-            if action_contexts is None:
-                action_contexts = torch.zeros(
-                    (*observations.shape[:-1], AUTOREGRESSIVE_CONTEXT_DIM),
-                    dtype=observations.dtype,
-                    device=observations.device,
-                )
-                action_contexts[..., 0] = 1.0
-            if action_contexts.shape != (
-                *observations.shape[:-1],
-                AUTOREGRESSIVE_CONTEXT_DIM,
-            ):
-                raise ValueError("Autoregressive action contexts do not align.")
-            actor_inputs = torch.cat((observations, action_contexts), dim=-1)
-        elif observations.shape[-1] == local_dim + AUTOREGRESSIVE_CONTEXT_DIM:
-            if action_contexts is not None:
-                raise ValueError(
-                    "Do not provide a separate context for augmented Actor inputs."
-                )
-            mask_source = observations[..., :local_dim]
-            actor_inputs = observations
-        else:
+        if observations.shape[-1] != local_dim:
             raise ValueError(
-                "Actor inputs must be local observations or local observations "
-                "augmented with one autoregressive action context."
+                "Actor inputs must be independent local observations from the "
+                "shared pre-move state."
             )
-        logits = self.network.actor_logits(actor_inputs)
-        mask = mask_source[..., -len(ACTIONS) :] > 0.5
+        logits = self.network.actor_logits(observations)
+        mask = observations[..., -len(ACTIONS) :] > 0.5
         if not torch.all(mask.any(dim=-1)):
             raise ValueError(
                 "Every agent observation must expose at least one legal action."
@@ -409,30 +390,15 @@ class MAPPOPolicy:
         global_state: Any,
         *,
         deterministic: bool = False,
-        fixed_actions: Mapping[str, str] | None = None,
     ) -> tuple[dict[str, str], dict[str, ActionDistribution]]:
         del global_state  # The decentralized actor consumes local observations.
         agent_ids = sorted(observations, key=agent_index)
         if agent_ids != ["robot_1", "robot_2"]:
-            raise ValueError("The autoregressive Actor requires robot_1 then robot_2.")
-        fixed = {str(key): str(value) for key, value in (fixed_actions or {}).items()}
-        if any(agent_id not in agent_ids for agent_id in fixed):
-            raise ValueError("fixed_actions contains an unknown robot.")
-        if any(agent_id != self.environment_config.human_agent_id for agent_id in fixed):
-            raise ValueError(
-                "Only the configured participant/proxy-human robot may replace "
-                "an Actor action; AI robot actions are immutable."
-            )
-        if any(action not in ACTIONS for action in fixed.values()):
-            raise ValueError("fixed_actions contains an unknown action.")
+            raise ValueError("The shared Actor requires robot_1 and robot_2.")
         actions: dict[str, str] = {}
         distributions: dict[str, ActionDistribution] = {}
-        preceding_action: str | None = None
         for agent_id in agent_ids:
-            actor_input = self.actor_input(
-                observations[agent_id],
-                preceding_action=preceding_action,
-            )
+            actor_input = self.actor_input(observations[agent_id])
             tensor = torch.as_tensor(
                 actor_input[None, :],
                 dtype=torch.float32,
@@ -441,9 +407,7 @@ class MAPPOPolicy:
             with torch.no_grad():
                 logits = self.masked_actor_logits(tensor)
                 probabilities = torch.softmax(logits, dim=-1)
-            if agent_id in fixed:
-                index = ACTIONS.index(fixed[agent_id])
-            elif deterministic:
+            if deterministic:
                 index = int(probabilities[0].argmax(dim=-1).item())
             else:
                 index = int(
@@ -474,7 +438,6 @@ class MAPPOPolicy:
                 ),
                 proposed_action=ACTIONS[index],
             )
-            preceding_action = actions[agent_id]
         return actions, distributions
 
     def values(

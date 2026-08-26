@@ -136,7 +136,7 @@ def test_persisted_version_literals_have_one_authoritative_source() -> None:
 
 def test_default_artifact_bundle_has_no_floating_current_alias() -> None:
     artifacts = CollaborativeArtifactPaths.under(ROOT, ARTIFACT_NAMESPACE)
-    assert artifacts.root.name == "safe_mission_v28_individual_credit"
+    assert artifacts.root.name == "simultaneous_compact_v30_joint_risk"
     assert "current" not in artifacts.root.parts
     assert artifacts.model.name == "warehouse_mappo.pt"
     assert artifacts.reference_trajectory.name == "reference_trajectory.json"

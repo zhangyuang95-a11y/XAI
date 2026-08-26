@@ -145,12 +145,35 @@ STAGGERED_AISLES_LAYOUT = MapLayout(
     pickup_endpoint_exclusions=tuple((row, 5) for row in range(10)),
 )
 
+# Production study layout. It preserves the alternating-shelf warehouse
+# grammar while shortening routes and putting three shared intersections on
+# every cross-aisle trip. Charger-adjacent cells are ordinary aisle cells.
+COMPACT_INTERACTION_LAYOUT = MapLayout(
+    layout_id="warehouse_compact_interaction_8x9_v1",
+    tiles=(
+        "####.####",
+        ".........",
+        "####.####",
+        ".........",
+        "####.####",
+        ".........",
+        "####.####",
+        "##.....##",
+    ),
+    robot_start_positions=((7, 2), (7, 6)),
+    charger_position=(7, 4),
+    task_endpoint_exclusions=((6, 4), (7, 3), (7, 5)),
+    pickup_endpoint_exclusions=tuple((row, 4) for row in range(8)),
+)
+
 CORRIDOR_CHARGER_APRON_LAYOUT = STAGGERED_AISLES_LAYOUT
 CORRIDOR_SHELF_LAYOUT = STAGGERED_AISLES_LAYOUT
 MAP_LAYOUTS = {
-    STAGGERED_AISLES_LAYOUT.layout_id: STAGGERED_AISLES_LAYOUT
+    STAGGERED_AISLES_LAYOUT.layout_id: STAGGERED_AISLES_LAYOUT,
+    COMPACT_INTERACTION_LAYOUT.layout_id: COMPACT_INTERACTION_LAYOUT,
 }
 DEFAULT_MAP_LAYOUT = STAGGERED_AISLES_LAYOUT
+STUDY_MAP_LAYOUT = COMPACT_INTERACTION_LAYOUT
 
 
 def get_map_layout(layout_id: str) -> MapLayout:

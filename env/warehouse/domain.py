@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .layouts import DEFAULT_MAP_LAYOUT, get_map_layout
+from .layouts import DEFAULT_MAP_LAYOUT, STUDY_MAP_LAYOUT, get_map_layout
 from .rewards import RewardConfig
 
 
@@ -81,6 +81,23 @@ class WarehouseConfig:
             self.battery_safety_margin
             + self.coordination_energy_reserve_steps
         )
+
+
+def collaborative_study_config(**overrides: Any) -> WarehouseConfig:
+    """Return the production 120-step compact warehouse configuration."""
+
+    values: dict[str, Any] = {
+        "rows": STUDY_MAP_LAYOUT.rows,
+        "cols": STUDY_MAP_LAYOUT.cols,
+        "map_layout_id": STUDY_MAP_LAYOUT.layout_id,
+        # The compact single-charger map needs enough reserve for one real
+        # two-robot queue manoeuvre. Fixed-seed calibration selected four
+        # steps: smaller values produced shutdown tails; larger values added
+        # unnecessary charging without improving safety.
+        "battery_safety_margin": 4.0,
+    }
+    values.update(overrides)
+    return WarehouseConfig(**values)
 
 
 @dataclass

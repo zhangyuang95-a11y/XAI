@@ -84,7 +84,7 @@ class CollaborativeConditionAllocator:
 
     block_size = 8
     pilot_size = 24
-    demo_seed = 42026
+    demo_seed = 40221
     base_form_seed = 51000
 
     def __init__(
@@ -93,7 +93,7 @@ class CollaborativeConditionAllocator:
         randomization_seed: int = 51000,
         study_phase: str = "pilot",
         parallel_seed_pairs: Sequence[ParallelSeedPair] | None = None,
-        demo_seed: int = 42026,
+        demo_seed: int = 40221,
     ) -> None:
         self.randomization_seed = int(randomization_seed)
         if study_phase not in {"pilot", "confirmatory"}:

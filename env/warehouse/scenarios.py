@@ -22,7 +22,14 @@ def apply_head_on_scenario(
     tasks = sorted(state.tasks, key=lambda item: item.task_id)
     robot_one = state.by_id("robot_1")
     robot_two = state.by_id("robot_2")
-    if reverse:
+    if environment.layout.rows == 8 and environment.layout.cols == 9:
+        upper, lower = (3, 4), (4, 4)
+        robot_one.position, robot_two.position = (
+            (lower, upper) if reverse else (upper, lower)
+        )
+        destinations = ((5, 0), (1, 8)) if not reverse else ((1, 8), (5, 0))
+        pickups = ((3, 0), (3, 8))
+    elif reverse:
         robot_one.position, robot_two.position = (4, 5), (3, 5)
         destinations = ((1, 0), (4, 10))
         pickups = ((6, 10), (7, 0))
@@ -138,20 +145,29 @@ def apply_delivery_goal_clearance_scenario(
     tasks = sorted(state.tasks, key=lambda item: item.task_id)
     if len(tasks) < 2:
         raise ValueError("The goal-clearance curriculum requires two tasks.")
-    lane_index = int(variant) % len(_DELIVERY_GOAL_CLEARANCE_LANES)
-    row, direction = _DELIVERY_GOAL_CLEARANCE_LANES[lane_index]
+    lanes = _DELIVERY_GOAL_CLEARANCE_LANES
+    center_column = 5
+    if environment.layout.rows == 8 and environment.layout.cols == 9:
+        lanes = tuple(
+            (row, direction)
+            for row in (1, 3, 5)
+            for direction in (-1, 1)
+        )
+        center_column = environment.layout.charger_position[1]
+    lane_index = int(variant) % len(lanes)
+    row, direction = lanes[lane_index]
     battery_index = (
-        int(variant) // len(_DELIVERY_GOAL_CLEARANCE_LANES)
+        int(variant) // len(lanes)
     ) % len(_DELIVERY_GOAL_CLEARANCE_BATTERIES)
     batteries = _DELIVERY_GOAL_CLEARANCE_BATTERIES[battery_index]
 
-    trailing_position = (row, 5)
-    occupied_delivery = (row, 5 + direction)
+    trailing_position = (row, center_column)
+    occupied_delivery = (row, center_column + direction)
     # A second step away from the spine is sufficient to make the teammate
     # vacate the contested B cell while keeping the lower-battery variants on
     # a genuinely delivery-safe route instead of silently switching them to
     # a charge goal.
-    teammate_delivery = (row, 5 + 2 * direction)
+    teammate_delivery = (row, center_column + 2 * direction)
     agents = sorted(state.agents, key=lambda item: item.agent_id)
     trailing, teammate = agents
     trailing.position = trailing_position
@@ -251,7 +267,20 @@ def apply_same_target_conflict_scenario(
     if len(tasks) < 2:
         raise ValueError("The conflict curriculum requires two active tasks.")
     base_count = len(_SAME_TARGET_CONFLICTS)
-    specification = _SAME_TARGET_CONFLICTS[int(variant) % base_count]
+    specifications = _SAME_TARGET_CONFLICTS
+    if environment.layout.rows == 8 and environment.layout.cols == 9:
+        specifications = (
+            ((1, 3), (0, 4), (1, 0), (1, 8), True, True),
+            ((1, 5), (2, 4), (1, 8), (3, 0), True, True),
+            ((3, 3), (2, 4), (3, 0), (3, 8), True, True),
+            ((3, 5), (4, 4), (3, 8), (5, 0), True, True),
+            ((5, 3), (4, 4), (5, 0), (5, 8), True, True),
+            ((5, 5), (6, 4), (5, 8), (7, 2), True, False),
+            ((7, 3), (6, 4), (3, 0), (5, 8), False, True),
+            ((7, 5), (6, 4), (3, 8), (5, 0), True, False),
+        )
+        base_count = len(specifications)
+    specification = specifications[int(variant) % base_count]
     (
         first_position,
         second_position,
@@ -278,10 +307,15 @@ def apply_same_target_conflict_scenario(
         environment.layout.charger_position,
     }
     far_endpoints: list[tuple[int, int]] = []
+    shelf_access_positions = {
+        access
+        for _, access in pickup_pairs(environment.config.map_layout_id)
+    }
     for goal in (first_goal, second_goal):
         far_endpoint = next(
             position
             for position in environment.layout.passable_positions
+            if position in shelf_access_positions
             if position not in excluded
             and position not in far_endpoints
             and position not in environment.layout.task_endpoint_exclusions
@@ -349,8 +383,11 @@ def apply_critical_charger_approach_scenario(
     teammate = next(
         agent for agent in state.agents if agent.agent_id != approaching_agent_id
     )
-    position = _CRITICAL_CHARGER_APPROACH_POSITIONS[
-        int(variant) % len(_CRITICAL_CHARGER_APPROACH_POSITIONS)
+    approach_positions = _CRITICAL_CHARGER_APPROACH_POSITIONS
+    if environment.layout.rows == 8 and environment.layout.cols == 9:
+        approach_positions = ((4, 4), (5, 4), (6, 4), (7, 3), (7, 5))
+    position = approach_positions[
+        int(variant) % len(approach_positions)
     ]
     distance = shortest_path_distance(
         position,
@@ -359,7 +396,7 @@ def apply_critical_charger_approach_scenario(
     )
     reserve_steps = (
         1
-        + (int(variant) // len(_CRITICAL_CHARGER_APPROACH_POSITIONS)) % 3
+        + (int(variant) // len(approach_positions)) % 3
     )
     approaching.position = position
     approaching.battery = float(
@@ -463,7 +500,10 @@ def apply_task_commitment_scenario(
     state = environment.get_state()
     state.frame = 60
     ordering = int(variant) % 2
-    positions = ((4, 5), (6, 5)) if not ordering else ((6, 5), (4, 5))
+    if environment.layout.rows == 8 and environment.layout.cols == 9:
+        positions = ((2, 4), (4, 4)) if not ordering else ((4, 4), (2, 4))
+    else:
+        positions = ((4, 5), (6, 5)) if not ordering else ((6, 5), (4, 5))
     for agent, position in zip(
         sorted(state.agents, key=lambda item: item.agent_id),
         positions,
@@ -472,14 +512,22 @@ def apply_task_commitment_scenario(
         agent.battery = (76.0, 84.0)[int(agent.agent_id[-1]) - 1]
         agent.carrying_task_id = None
     old_task, new_task = sorted(state.tasks, key=lambda item: item.task_id)
-    old_task.pickup_position = (7, 0) if not ordering else (2, 10)
-    old_task.delivery_position = (2, 8) if not ordering else (7, 2)
+    if environment.layout.rows == 8 and environment.layout.cols == 9:
+        old_task.pickup_position = (5, 0) if not ordering else (1, 8)
+        old_task.delivery_position = (1, 6) if not ordering else (5, 2)
+    else:
+        old_task.pickup_position = (7, 0) if not ordering else (2, 10)
+        old_task.delivery_position = (2, 8) if not ordering else (7, 2)
     old_task.created_frame = 0
     old_task.status = "available"
     old_task.carrier_agent_id = None
     old_task.claimed_frame = None
-    new_task.pickup_position = (6, 10) if not ordering else (3, 0)
-    new_task.delivery_position = (1, 2) if not ordering else (6, 8)
+    if environment.layout.rows == 8 and environment.layout.cols == 9:
+        new_task.pickup_position = (3, 8) if not ordering else (3, 0)
+        new_task.delivery_position = (1, 2) if not ordering else (5, 6)
+    else:
+        new_task.pickup_position = (6, 10) if not ordering else (3, 0)
+        new_task.delivery_position = (1, 2) if not ordering else (6, 8)
     new_task.created_frame = 56
     new_task.status = "available"
     new_task.carrier_agent_id = None

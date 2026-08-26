@@ -136,7 +136,6 @@ class PolicyProtocol(Protocol):
         global_state: Any,
         *,
         deterministic: bool = False,
-        fixed_actions: Mapping[str, str] | None = None,
     ) -> tuple[Mapping[str, str], Mapping[str, ActionDistribution]]: ...
 
     def get_rng_state(self) -> Any: ...

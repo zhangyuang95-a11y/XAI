@@ -472,7 +472,7 @@ class MAPPOTrainer:
             state_before_step = deepcopy(env.state)
             global_state = env.global_state()
             overridden_agents: set[str] = set()
-            fixed_actions: dict[str, str] = {}
+            participant_overrides: dict[str, str] = {}
             if proxy_human_episode and self._rollout_rng.random() < 0.20:
                 human_id = env.config.human_agent_id
                 mask = env.action_masks()[human_id]
@@ -489,29 +489,26 @@ class MAPPOTrainer:
                         if legal_moves
                         else "WAIT"
                     )
-                fixed_actions[human_id] = replacement
+                participant_overrides[human_id] = replacement
                 overridden_agents.add(human_id)
                 proxy_human_overrides += 1
             actions, distributions = self.policy.act(
                 observations,
                 global_state,
                 deterministic=False,
-                fixed_actions=fixed_actions,
             )
+            # Proxy-human commands replace robot 1 only after both Actor
+            # distributions have been computed from the frozen pre-move
+            # state. Robot 2 therefore cannot condition on the replacement.
+            actions.update(participant_overrides)
             values = self.policy.values(global_state, agent_ids)
             next_observations, rewards, terminated, truncated, info = env.step(actions)
             done = terminated or truncated
             for index, agent_id in enumerate(agent_ids):
                 action_index = ACTIONS.index(actions[agent_id])
                 probability = max(1e-8, distributions[agent_id].probabilities[action_index])
-                preceding_action = (
-                    None if index == 0 else actions[agent_ids[index - 1]]
-                )
                 rows["observations"].append(
-                    self.policy.actor_input(
-                        observations[agent_id],
-                        preceding_action=preceding_action,
-                    )
+                    self.policy.actor_input(observations[agent_id])
                 )
                 rows["global_states"].append(np.asarray(global_state, dtype=np.float32))
                 rows["agent_indices"].append(index)
@@ -1450,8 +1447,9 @@ def evaluate_policy(
     episodes: int,
     seed: int,
     noisy_teammate_probability: float = 0.0,
+    deterministic: bool = True,
 ) -> dict[str, float]:
-    """Evaluate deterministic robot 2 with an optional noisy robot 1 teammate."""
+    """Evaluate robot 2 with an optional noisy robot 1 teammate."""
 
     if not 0.0 <= noisy_teammate_probability <= 1.0:
         raise ValueError("noisy_teammate_probability must be between zero and one.")
@@ -1499,30 +1497,32 @@ def evaluate_policy(
             agent.battery for agent in environment.get_state().agents
         )
         while True:
-            fixed_agent_ids: tuple[str, ...] = ()
-            fixed_actions: dict[str, str] = {}
+            participant_override_ids: tuple[str, ...] = ()
+            participant_overrides: dict[str, str] = {}
             if rng.random() < noisy_teammate_probability:
                 human_id = environment.config.human_agent_id
                 mask = environment.action_masks()[human_id]
                 if rng.random() < 0.50:
-                    fixed_actions[human_id] = "WAIT"
+                    participant_overrides[human_id] = "WAIT"
                 else:
                     legal_moves = [
                         action
                         for action, allowed in zip(ACTIONS, mask)
                         if allowed > 0.5 and action != "WAIT"
                     ]
-                    fixed_actions[human_id] = (
+                    participant_overrides[human_id] = (
                         str(rng.choice(legal_moves)) if legal_moves else "WAIT"
                     )
                 proxy_human_overrides += 1
-                fixed_agent_ids = (human_id,)
+                participant_override_ids = (human_id,)
             actions, _ = policy.act(
                 observations,
                 environment.global_state(),
-                deterministic=True,
-                fixed_actions=fixed_actions,
+                deterministic=deterministic,
             )
+            # Apply the simulated participant command only after both
+            # independent Actor decisions have been produced from S_t.
+            actions.update(participant_overrides)
             # The actor output is submitted directly.  The only intentional
             # replacement is the configured proxy-human action for robot 1;
             # robot 2 is never rewritten by a controller or program.
@@ -1530,7 +1530,7 @@ def evaluate_policy(
             final_targets = environment._resolve_motion(state_before, actions)[0]
             for agent in state_before.agents:
                 if (
-                    agent.agent_id in fixed_agent_ids
+                    agent.agent_id in participant_override_ids
                     or agent.carrying_task_id is None
                     or agent.navigation_goal_kind != "delivery"
                     or environment._requires_charge(state_before, agent)

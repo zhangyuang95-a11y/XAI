@@ -90,14 +90,14 @@ def _wait_policy() -> MAPPOPolicy:
 
 def _tutorial(policy: MAPPOPolicy, *, horizon: int = 1) -> TutorialTrajectory:
     environment = WarehouseMultiAgentEnv(policy.environment_config)
-    environment.reset(seed=42_026)
+    environment.reset(seed=40_221)
     frames = WarehouseAdapter(environment).rollout(
         policy,
         horizon=horizon,
         deterministic=True,
     ).frames
     return TutorialTrajectory(
-        seed=42_026,
+        seed=40_221,
         focus_agent="robot_2",
         frames=frames,
         milestones=(("demonstration_complete", 1, "robot_2"),),
@@ -162,7 +162,7 @@ def test_tutorial_can_end_early_and_starts_a_fresh_task1_with_audit() -> None:
     assert not any(event["event"] == "tutorial_completed" for event in events)
     assert early == {
         "event": "tutorial_ended_early",
-        "tutorial_seed": 42_026,
+        "tutorial_seed": 40_221,
         "trajectory_kind": "continuous_partial_mission",
         "last_displayed_frame": 2,
         "displayed_frames": 3,
@@ -373,7 +373,7 @@ def test_explanation_questions_bind_any_action_frame_and_either_robot() -> None:
     assert session.timeline.index == 1
     explanation_view = session.view()
     assert explanation_view["timeline"]["trajectory_kind"] == "ai_ai_reference"
-    assert explanation_view["timeline"]["trajectory_seed"] == 42_026
+    assert explanation_view["timeline"]["trajectory_seed"] == 40_221
     assert explanation_view["timeline"]["agent_control"] == {
         "robot_1": "ai",
         "robot_2": "ai",
@@ -382,7 +382,7 @@ def test_explanation_questions_bind_any_action_frame_and_either_robot() -> None:
     assert session.current.snapshot == tutorial.frames[0].next_snapshot
     assert explanation_view["state"]["policy_hidden"] is False
     assert explanation_view["study"]["round_summaries"]["task1"]["steps"] == 120
-    assert 42_026 not in {assignment.task1_seed, assignment.task2_seed}
+    assert 40_221 not in {assignment.task1_seed, assignment.task2_seed}
     engine = _ExplanationEngine()
     session.engine = engine
     transition_events = session.drain_events()
@@ -391,7 +391,7 @@ def test_explanation_questions_bind_any_action_frame_and_either_robot() -> None:
         for event in transition_events
         if event["event"] == "explanation_reference_loaded"
     )
-    assert reference_event["trajectory_seed"] == 42_026
+    assert reference_event["trajectory_seed"] == 40_221
     assert reference_event["agent_control"] == {
         "robot_1": "ai",
         "robot_2": "ai",
@@ -406,7 +406,7 @@ def test_explanation_questions_bind_any_action_frame_and_either_robot() -> None:
     assert first_report["decision_evidence_frame"] == 3
     assert first_report["target_agent"] == "robot_2"
     assert first_report["trajectory_kind"] == "ai_ai_reference"
-    assert first_report["trajectory_seed"] == 42_026
+    assert first_report["trajectory_seed"] == 40_221
     assert first_report["agent_control"] == {
         "robot_1": "ai",
         "robot_2": "ai",
@@ -467,7 +467,7 @@ def test_explanation_questions_bind_any_action_frame_and_either_robot() -> None:
     assert len({event["question_seed"] for event in explanation_events}) == 2
     assert all(
         event["trajectory_kind"] == "ai_ai_reference"
-        and event["trajectory_seed"] == 42_026
+        and event["trajectory_seed"] == 40_221
         and event["agent_control"] == {"robot_1": "ai", "robot_2": "ai"}
         for event in explanation_events
     )
@@ -479,7 +479,7 @@ def test_explanation_questions_bind_any_action_frame_and_either_robot() -> None:
     assert all(
         event["study_stage"] == "explanation"
         and event["trajectory_kind"] == "ai_ai_reference"
-        and event["trajectory_seed"] == 42_026
+        and event["trajectory_seed"] == 40_221
         and "round" not in event
         for event in browse_events
     )
@@ -520,7 +520,7 @@ def test_reference_trajectory_is_one_immutable_public_121_frame_payload() -> Non
     assert len(first["frames"]) == 121
     assert [frame["index"] for frame in first["frames"]] == list(range(121))
     assert first["agent_control"] == {"robot_1": "ai", "robot_2": "ai"}
-    assert first["trajectory_seed"] == 42_026
+    assert first["trajectory_seed"] == 40_221
     public_text = str(first)
     assert "goal_kind" not in public_text
     assert "goal_position" not in public_text

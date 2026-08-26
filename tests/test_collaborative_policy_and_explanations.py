@@ -70,52 +70,31 @@ def test_actor_mask_does_not_preempt_teammate_occupancy_dynamics() -> None:
     assert environment.get_state().by_id("robot_1").position == (8, 5)
 
 
-def test_robot_two_neural_action_conditions_on_robot_one_current_action() -> None:
+def test_robot_two_distribution_is_independent_of_robot_one_current_action() -> None:
     config = WarehouseConfig(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     observations, _ = environment.reset(seed=72)
     policy = MAPPOPolicy(config, MAPPOConfig(hidden_dim=16, seed=72))
-    with torch.no_grad():
-        for parameter in policy.network.actor.parameters():
-            parameter.zero_()
-        first = policy.network.actor[0]
-        second = policy.network.actor[2]
-        third = policy.network.actor[4]
-        output = policy.network.actor[6]
-        context_offset = observation_dim(config)
-        first.weight[0, context_offset + 1 + ACTIONS.index("UP")] = 1.0
-        first.weight[1, context_offset + 1 + ACTIONS.index("DOWN")] = 1.0
-        second.weight[0, 0] = 1.0
-        second.weight[1, 1] = 1.0
-        third.weight[0, 0] = 1.0
-        third.weight[1, 1] = 1.0
-        output.weight[ACTIONS.index("LEFT"), 0] = 8.0
-        output.weight[ACTIONS.index("WAIT"), 1] = 8.0
-
-    up_actions, _ = policy.act(
-        observations,
-        environment.global_state(),
-        deterministic=True,
-        fixed_actions={"robot_1": "UP"},
+    first_actions, first_distributions = policy.act(
+        observations, environment.global_state(), deterministic=True
     )
-    down_actions, _ = policy.act(
-        observations,
-        environment.global_state(),
-        deterministic=True,
-        fixed_actions={"robot_1": "DOWN"},
+    second_actions, second_distributions = policy.act(
+        observations, environment.global_state(), deterministic=True
     )
+    first_actions["robot_1"] = "UP"
+    second_actions["robot_1"] = "DOWN"
 
-    assert up_actions == {"robot_1": "UP", "robot_2": "LEFT"}
-    assert down_actions == {"robot_1": "DOWN", "robot_2": "WAIT"}
+    assert first_distributions["robot_2"] == second_distributions["robot_2"]
+    assert first_actions["robot_2"] == second_actions["robot_2"]
 
 
-def test_actor_rejects_attempt_to_override_ai_robot_action() -> None:
+def test_actor_api_has_no_current_frame_action_override() -> None:
     config = WarehouseConfig(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     observations, _ = environment.reset(seed=90)
     policy = MAPPOPolicy(config, MAPPOConfig(hidden_dim=16, seed=90))
 
-    with pytest.raises(ValueError, match="AI robot actions are immutable"):
+    with pytest.raises(TypeError, match="fixed_actions"):
         policy.act(
             observations,
             environment.global_state(),
@@ -137,9 +116,7 @@ def test_shared_observation_contract_and_task_slots() -> None:
     schema = WarehouseAdapter(environment).observation_schema()
     serialized = str(schema)
     assert "task" in serialized.lower()
-    assert schema["contract_version"] == (
-            "collaborative_observation_v23_avoidable_wait_memory"
-    )
+    assert schema["contract_version"] == "collaborative_observation_v24_compact_reserve4"
     assert "navigation_goal_fields" in schema
 
 
@@ -314,7 +291,7 @@ def test_explanation_evidence_binds_robot_two_live_task_and_frame() -> None:
 
 
 def test_program_version_constant_is_new_shared_contract() -> None:
-    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v30_individual_credit_posthoc"
+    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v31_joint_risk_posthoc"
 
 
 def test_removed_runtime_controller_predicate_has_no_special_verbalizer() -> None:

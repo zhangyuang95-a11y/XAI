@@ -18,7 +18,7 @@ from env.warehouse.environment import (
 )
 from env.warehouse.mappo import MAPPOPolicy
 from env.warehouse.navigation import ACTIONS, all_passable_positions
-from env.warehouse.policy import MISSION_INTENT_NAMES, autoregressive_actor_input
+from env.warehouse.policy import MISSION_INTENT_NAMES, independent_actor_input
 from env.warehouse.scenarios import (
     apply_charger_commitment_scenario,
     apply_charger_handoff_scenario,
@@ -147,14 +147,7 @@ def collect_critical_coordination_dataset(
             labels = safe_navigation_teacher_actions(environment)
             for agent in state.agents:
                 rows.append(
-                    autoregressive_actor_input(
-                        local[agent.agent_id],
-                        preceding_action=(
-                            None
-                            if agent.agent_id == "robot_1"
-                            else labels["robot_1"]
-                        ),
-                    )
+                    independent_actor_input(local[agent.agent_id])
                 )
                 actions.append(ACTIONS.index(labels[agent.agent_id]))
                 intents.append(
@@ -195,7 +188,7 @@ def best_unilateral_mission_action(
     offline target constructor: the returned action is never submitted to the
     environment. It lets dataset aggregation correct an observed neural
     detour even when the broader coordination teacher happened to make the
-    same mistake, and gives the first autoregressive robot a concrete escape
+    same mistake, and gives the selected robot a concrete escape
     label for a neural WAIT/WAIT stall.
     """
 
@@ -373,11 +366,11 @@ def collect_learner_state_relabel_dataset(
             min(environment_config.horizon, 64 if head_on else 120)
         ):
             state = environment.get_state()
-            fixed_actions: dict[str, str] = {}
+            participant_overrides: dict[str, str] = {}
             proxy_override = False
             if noisy_teammate and rng.random() < 0.20:
                 robot_one_mask = environment.action_masks()["robot_1"]
-                fixed_actions["robot_1"] = str(
+                participant_overrides["robot_1"] = str(
                     rng.choice(
                         [
                             action
@@ -391,8 +384,10 @@ def collect_learner_state_relabel_dataset(
                 observations_by_agent,
                 environment.global_state(),
                 deterministic=True,
-                fixed_actions=fixed_actions,
             )
+            # A noisy proxy participant is applied only after both independent
+            # Actor outputs have been computed from the frozen state.
+            proposed.update(participant_overrides)
             teacher_actions = stable_coordination_actions(environment)
             (
                 predicted_targets,
@@ -595,10 +590,7 @@ def collect_learner_state_relabel_dataset(
                     if unilateral_escape != "WAIT":
                         robot_one_label = unilateral_escape
                 append_row(
-                    autoregressive_actor_input(
-                        observations_by_agent["robot_1"],
-                        preceding_action=None,
-                    ),
+                    independent_actor_input(observations_by_agent["robot_1"]),
                     robot_one_label,
                     actor_action=proposed["robot_1"],
                     row_collision=bool(predicted_collision),
@@ -607,86 +599,38 @@ def collect_learner_state_relabel_dataset(
                     counterfactual=False,
                 )
 
-            robot_one_mask = environment.action_masks()["robot_1"]
-            legal_contexts = [
-                action
-                for action, allowed in zip(ACTIONS, robot_one_mask)
-                if allowed > 0.5
-            ]
-            for robot_one_action in legal_contexts:
-                conditional_actor, _ = policy.act(
-                    observations_by_agent,
-                    environment.global_state(),
-                    deterministic=True,
-                    fixed_actions={"robot_1": robot_one_action},
-                )
-                conditional_teacher = stable_coordination_actions(
+            # Robot 2 receives one label for S_t. The label and the Actor row
+            # are deliberately not conditioned on robot 1's current action.
+            robot_two_label = teacher_actions["robot_2"]
+            robot_two_correctable_detour = False
+            if "robot_2" in predicted_detour_agent_ids:
+                detour_correction = best_unilateral_mission_action(
                     environment,
-                    fixed_actions={"robot_1": robot_one_action},
-                )
-                _, _, _, teacher_collision, _, _ = environment._resolve_motion(
                     state,
-                    conditional_teacher,
+                    proposed,
+                    agent_id="robot_2",
                 )
-                if teacher_collision:
-                    continue
-                (
-                    conditional_targets,
-                    _,
-                    _,
-                    conditional_collision,
-                    _,
-                    _,
-                ) = environment._resolve_motion(state, conditional_actor)
-                conditional_stall = ineffective_stall(
-                    conditional_actor,
-                    conditional_targets,
+                if detour_correction != "WAIT":
+                    robot_two_label = detour_correction
+                    robot_two_correctable_detour = True
+            elif predicted_stall and proposed["robot_2"] == "WAIT":
+                unilateral_escape = best_unilateral_mission_action(
+                    environment,
+                    state,
+                    proposed,
+                    agent_id="robot_2",
                 )
-                conditional_detour_agent_ids = set(
-                    avoidable_loaded_detour_agents(
-                        conditional_actor,
-                        conditional_targets,
-                        eligible_agent_ids={"robot_2"},
-                    )
-                )
-                robot_two_label = conditional_teacher["robot_2"]
-                robot_two_correctable_detour = False
-                if "robot_2" in conditional_detour_agent_ids:
-                    detour_correction = best_unilateral_mission_action(
-                        environment,
-                        state,
-                        conditional_actor,
-                        agent_id="robot_2",
-                    )
-                    if detour_correction != "WAIT":
-                        robot_two_label = detour_correction
-                        robot_two_correctable_detour = True
-                elif (
-                    conditional_stall
-                    and conditional_actor["robot_2"] == "WAIT"
-                ):
-                    unilateral_escape = best_unilateral_mission_action(
-                        environment,
-                        state,
-                        conditional_actor,
-                        agent_id="robot_2",
-                    )
-                    if unilateral_escape != "WAIT":
-                        robot_two_label = unilateral_escape
-                append_row(
-                    autoregressive_actor_input(
-                        observations_by_agent["robot_2"],
-                        preceding_action=robot_one_action,
-                    ),
-                    robot_two_label,
-                    actor_action=conditional_actor["robot_2"],
-                    row_collision=bool(conditional_collision),
-                    row_stall=conditional_stall,
-                    row_loaded_detour=robot_two_correctable_detour,
-                    counterfactual=robot_one_action != proposed["robot_1"],
-                )
-                if len(observations) >= sample_count:
-                    break
+                if unilateral_escape != "WAIT":
+                    robot_two_label = unilateral_escape
+            append_row(
+                independent_actor_input(observations_by_agent["robot_2"]),
+                robot_two_label,
+                actor_action=proposed["robot_2"],
+                row_collision=bool(predicted_collision),
+                row_stall=bool(predicted_stall),
+                row_loaded_detour=robot_two_correctable_detour,
+                counterfactual=False,
+            )
             if len(observations) >= sample_count:
                 break
             joint_signature = tuple(
@@ -805,8 +749,8 @@ def collect_loaded_detour_correction_dataset(
             if detouring_agent_ids:
                 # Correct the *joint* response.  A unilateral WAIT label can
                 # turn A->B->A oscillation into WAIT/WAIT; the paired teacher
-                # row instead teaches robot 1's decision and robot 2's neural
-                # response under that corrected autoregressive context.  The
+                # rows instead teach both independent decisions from the same
+                # corrected pre-move state. The
                 # pair remains offline supervision and is never executed.
                 correction_actions = stable_coordination_actions(environment)
                 if not environment._resolve_motion(
@@ -845,14 +789,7 @@ def collect_loaded_detour_correction_dataset(
                                     correction_actions = dict(correction_actions)
                                     correction_actions[agent.agent_id] = unilateral
                         rows.append(
-                            autoregressive_actor_input(
-                                observations[agent.agent_id],
-                                preceding_action=(
-                                    None
-                                    if agent.agent_id == "robot_1"
-                                    else correction_actions["robot_1"]
-                                ),
-                            )
+                            independent_actor_input(observations[agent.agent_id])
                         )
                         labels.append(ACTIONS.index(correction))
                         if len(rows) >= requested:
@@ -904,7 +841,7 @@ def collect_actor_collision_correction_dataset(
     the broad same-target curriculum.  In both cases the environment receives
     the Actor's original joint action unchanged.  A collision-free pair is
     computed only after observing the Actor proposal and is stored as two
-    autoregressive training rows; it is never executed by this collector.
+    independent pre-move-state training rows; it is never executed here.
     """
 
     requested = max(0, int(sample_count))
@@ -978,14 +915,7 @@ def collect_actor_collision_correction_dataset(
                         key=lambda item: item.agent_id,
                     ):
                         rows.append(
-                            autoregressive_actor_input(
-                                observations[agent.agent_id],
-                                preceding_action=(
-                                    None
-                                    if agent.agent_id == "robot_1"
-                                    else correction_actions["robot_1"]
-                                ),
-                            )
+                            independent_actor_input(observations[agent.agent_id])
                         )
                         labels.append(
                             ACTIONS.index(correction_actions[agent.agent_id])
@@ -1141,16 +1071,6 @@ def collect_actor_commitment_failure_dataset(
                 deterministic=True,
             )
             teacher_actions = stable_coordination_actions(environment)
-            # Robot 2 is autoregressive: at runtime it observes the action
-            # actually sampled for robot 1, not the action the offline
-            # teacher would have preferred. Label robot 2 conditionally on
-            # that real Actor context. Rows built with a teacher-only context
-            # were internally inconsistent whenever robot 1 caused the
-            # commitment failure and made successive DAgger rounds oscillate.
-            conditional_teacher_actions = stable_coordination_actions(
-                environment,
-                fixed_actions={"robot_1": actor_actions["robot_1"]},
-            )
             teacher_task_by_agent: dict[str, str | None] = {}
             for agent_id in environment.agent_ids:
                 goal = environment._frozen_route_goal(
@@ -1176,19 +1096,8 @@ def collect_actor_commitment_failure_dataset(
                 "rows": tuple(
                     (
                         agent_id,
-                        autoregressive_actor_input(
-                            observations[agent_id],
-                            preceding_action=(
-                                None
-                                if agent_id == "robot_1"
-                                else actor_actions["robot_1"]
-                            ),
-                        ),
-                        ACTIONS.index(
-                            teacher_actions[agent_id]
-                            if agent_id == "robot_1"
-                            else conditional_teacher_actions[agent_id]
-                        ),
+                        independent_actor_input(observations[agent_id]),
+                        ACTIONS.index(teacher_actions[agent_id]),
                         ACTIONS.index(actor_actions[agent_id]),
                         state.by_id(agent_id).carrying_task_id is None,
                         teacher_task_by_agent[agent_id],
@@ -1405,14 +1314,7 @@ def collect_commitment_curriculum_dataset(
             teacher_actions = stable_coordination_actions(environment)
             for agent_id in environment.agent_ids:
                 rows.append(
-                    autoregressive_actor_input(
-                        observations[agent_id],
-                        preceding_action=(
-                            None
-                            if agent_id == "robot_1"
-                            else teacher_actions["robot_1"]
-                        ),
-                    )
+                    independent_actor_input(observations[agent_id])
                 )
                 labels.append(ACTIONS.index(teacher_actions[agent_id]))
                 categories.append(category)

@@ -18,13 +18,25 @@ from env.warehouse.environment import (
 )
 from env.warehouse.mappo import MAPPOPolicy
 from env.warehouse.navigation import ACTIONS, all_passable_positions
+from env.warehouse.partner_policies import (
+    PARTNER_PROFILES,
+    participant_surrogate_action,
+    robust_partner_robot_two_action,
+)
 from env.warehouse.policy import MISSION_INTENT_NAMES, independent_actor_input
+from env.warehouse.transition_audit import (
+    necessary_participant_standoff_clearance,
+    necessary_teammate_route_clearance,
+)
 from env.warehouse.scenarios import (
     apply_charger_commitment_scenario,
     apply_charger_handoff_scenario,
     apply_critical_charger_approach_scenario,
     apply_delivery_goal_clearance_scenario,
+    apply_dual_charger_approach_scenario,
+    apply_empty_delivery_clearance_scenario,
     apply_head_on_scenario,
+    apply_outer_exit_charger_approach_scenario,
     apply_same_target_conflict_scenario,
     apply_task_commitment_scenario,
 )
@@ -93,44 +105,91 @@ def collect_critical_coordination_dataset(
     case = 0
     while len(rows) < sample_count:
         environment.reset(seed=seed + case)
-        kind = case % 8
+        kind = case % 11
+        scenario_index = case // 11
         if kind == 0:
-            apply_head_on_scenario(environment, reverse=bool((case // 8) % 2))
+            apply_head_on_scenario(
+                environment,
+                reverse=bool(scenario_index % 2),
+                variant=scenario_index // 2,
+            )
             rollout_steps = 8
         elif kind == 1:
-            variant = (case // 8) % 4
+            handoff_profiles = (
+                (2.0, 18.0, True, True),
+                (12.0, 20.0, True, True),
+                (20.0, 24.0, True, True),
+                (44.0, 16.0, False, True),
+                (58.0, 24.0, True, True),
+                (70.0, 28.0, True, False),
+                (100.0, 12.0, False, False),
+                (36.0, 30.0, False, True),
+            )
+            (
+                occupant_battery,
+                queued_battery,
+                occupant_carrying,
+                queued_carrying,
+            ) = handoff_profiles[scenario_index % len(handoff_profiles)]
             apply_charger_handoff_scenario(
                 environment,
-                occupant_agent_id=environment.agent_ids[(case // 8) % 2],
-                queued_battery=float(6 + 2 * (case % 12)),
-                occupant_battery=(2.0, 12.0, 22.0, 100.0)[variant],
-                occupant_carrying=variant in {1, 2},
-                queued_carrying=variant in {1, 3},
+                occupant_agent_id=environment.agent_ids[scenario_index % 2],
+                queued_battery=queued_battery,
+                occupant_battery=occupant_battery,
+                occupant_carrying=occupant_carrying,
+                queued_carrying=queued_carrying,
             )
             rollout_steps = 6
         elif kind == 2:
-            apply_same_target_conflict_scenario(environment, variant=case // 8)
+            apply_same_target_conflict_scenario(
+                environment,
+                variant=scenario_index,
+            )
             rollout_steps = 4
         elif kind == 3:
             apply_critical_charger_approach_scenario(
                 environment,
-                approaching_agent_id=environment.agent_ids[(case // 8) % 2],
-                variant=case // 8,
+                approaching_agent_id=environment.agent_ids[scenario_index % 2],
+                variant=scenario_index,
             )
             rollout_steps = 6
         elif kind == 4:
-            apply_delivery_goal_clearance_scenario(environment, variant=case // 8)
+            apply_delivery_goal_clearance_scenario(
+                environment,
+                variant=scenario_index,
+            )
             rollout_steps = 4
         elif kind == 5:
             apply_charger_commitment_scenario(
                 environment,
-                agent_id=environment.agent_ids[(case // 8) % 2],
-                variant=case // 8,
+                agent_id=environment.agent_ids[scenario_index % 2],
+                variant=scenario_index,
             )
             rollout_steps = 8
         elif kind == 6:
-            apply_task_commitment_scenario(environment, variant=case // 8)
+            apply_task_commitment_scenario(
+                environment,
+                variant=scenario_index,
+            )
             rollout_steps = 12
+        elif kind == 7:
+            apply_empty_delivery_clearance_scenario(
+                environment,
+                variant=scenario_index,
+            )
+            rollout_steps = 4
+        elif kind == 8:
+            apply_dual_charger_approach_scenario(
+                environment,
+                variant=scenario_index,
+            )
+            rollout_steps = 6
+        elif kind == 9:
+            apply_outer_exit_charger_approach_scenario(
+                environment,
+                variant=scenario_index,
+            )
+            rollout_steps = 6
         else:
             # Rehearse the exact fixed-demo departure geometry that previously
             # made the Actor idle at full battery while its teammate approached
@@ -141,11 +200,26 @@ def collect_critical_coordination_dataset(
             departure_state.by_id("robot_2").battery = 35.0
             environment.set_state(departure_state)
             rollout_steps = 8
+        participant_mode = bool(scenario_index % 2)
+        participant_profile = PARTNER_PROFILES[
+            (scenario_index // 2) % len(PARTNER_PROFILES)
+        ]
+        participant_rng = np.random.default_rng(seed + 20_000_000 + case)
+        if participant_mode:
+            participant_state = environment.get_state()
+            participant_state.participant_controlled_agent_id = (
+                environment.config.human_agent_id
+            )
+            environment.set_state(participant_state)
         for _ in range(rollout_steps):
             local = environment.observations()
             state = environment.get_state()
             labels = safe_navigation_teacher_actions(environment)
+            if participant_mode:
+                labels["robot_2"] = robust_partner_robot_two_action(environment)
             for agent in state.agents:
+                if participant_mode and agent.agent_id == "robot_1":
+                    continue
                 rows.append(
                     independent_actor_input(local[agent.agent_id])
                 )
@@ -162,7 +236,14 @@ def collect_critical_coordination_dataset(
                     break
             if len(rows) >= sample_count:
                 break
-            _, _, terminated, truncated, _ = environment.step(labels)
+            executed = dict(labels)
+            if participant_mode:
+                executed["robot_1"] = participant_surrogate_action(
+                    environment,
+                    profile=participant_profile,
+                    rng=participant_rng,
+                )
+            _, _, terminated, truncated, _ = environment.step(executed)
             if terminated or truncated:
                 break
         case += 1
@@ -177,23 +258,31 @@ def collect_critical_coordination_dataset(
 def best_unilateral_mission_action(
     environment: WarehouseMultiAgentEnv,
     state: object,
-    joint_actions: Mapping[str, str],
     *,
     agent_id: str,
 ) -> str:
-    """Return a collision-free one-agent mission correction for supervision.
+    """Return a causal, collision-free mission correction for supervision.
 
-    The teammate action is held at the neural proposal while the selected
-    robot's statically legal actions are enumerated. This is deliberately an
-    offline target constructor: the returned action is never submitted to the
-    environment. It lets dataset aggregation correct an observed neural
-    detour even when the broader coordination teacher happened to make the
-    same mistake, and gives the selected robot a concrete escape
-    label for a neural WAIT/WAIT stall.
+    The peer baseline is derived only from the same frozen ``S_t`` through the
+    deterministic coordination teacher.  This helper deliberately accepts no
+    current-frame Actor proposal: conditioning a label on the peer's sampled
+    ``a_t`` would give the decentralized Actor an unobservable target and
+    recreate the sequential/future-peek dependency forbidden at runtime.  The
+    returned action remains an offline label and is never submitted to the
+    environment.
     """
 
+    state_only_actions = stable_coordination_actions(environment)
     agent = state.by_id(agent_id)
-    goal = agent.navigation_goal_position
+    teammate = next(
+        item for item in state.agents if item.agent_id != agent_id
+    )
+    if environment._requires_charge(state, agent):
+        goal = environment.layout.charger_position
+    elif agent.carrying_task_id is not None:
+        goal = state.task_by_id(agent.carrying_task_id).delivery_position
+    else:
+        goal = agent.navigation_goal_position
     available_pickups = {
         task.pickup_position
         for task in state.tasks
@@ -204,7 +293,7 @@ def best_unilateral_mission_action(
     for action_index, (action, allowed) in enumerate(zip(ACTIONS, action_mask)):
         if allowed <= 0.5:
             continue
-        trial_actions = dict(joint_actions)
+        trial_actions = dict(state_only_actions)
         trial_actions[agent_id] = action
         targets, _, invalid, collision, _, _ = environment._resolve_motion(
             state,
@@ -213,6 +302,11 @@ def best_unilateral_mission_action(
         if collision or agent_id in invalid:
             continue
         target = targets[agent_id]
+        if target == teammate.position:
+            # Occupancy belongs to frozen S_t.  Never train the Actor to enter
+            # the peer's current cell by assuming that its predicted a_t will
+            # vacate the cell; the peer must clear it in an earlier frame.
+            continue
         if (
             agent.carrying_task_id is None
             and agent.navigation_goal_kind == "pickup"
@@ -240,10 +334,11 @@ def configure_learner_state_head_on(
     environment: WarehouseMultiAgentEnv,
     *,
     reverse: bool,
+    variant: int = 0,
 ) -> None:
     """Install one of the two symmetric loaded corridor encounters."""
 
-    apply_head_on_scenario(environment, reverse=reverse)
+    apply_head_on_scenario(environment, reverse=reverse, variant=variant)
 
 
 def collect_learner_state_relabel_dataset(
@@ -252,7 +347,11 @@ def collect_learner_state_relabel_dataset(
     *,
     sample_count: int,
     seed: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, int]]:
+    include_teammate_labels: bool = False,
+) -> (
+    tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, int]]
+    | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, int]]
+):
     """Label Actor-visited states without submitting expert actions.
 
     Robot 2 receives counterfactual neural-response examples for every legal
@@ -274,20 +373,27 @@ def collect_learner_state_relabel_dataset(
         "critical_energy_rows": 0,
         "junction_conflict_rows": 0,
         "delivery_goal_clearance_rows": 0,
+        "empty_delivery_clearance_rows": 0,
+        "dual_charger_approach_rows": 0,
+        "outer_exit_charger_approach_rows": 0,
         "policy_mismatch_rows": 0,
     }
     if sample_count <= 0:
-        return (
+        empty = (
             np.empty((0, 0), dtype=np.float32),
             np.empty((0,), dtype=np.int64),
             np.empty((0,), dtype="<U32"),
             empty_coverage,
         )
+        if include_teammate_labels:
+            return (empty[0], empty[1], empty[1].copy(), empty[2], empty[3])
+        return empty
 
     environment = WarehouseMultiAgentEnv(environment_config)
     rng = np.random.default_rng(seed)
     observations: list[np.ndarray] = []
     targets: list[int] = []
+    teammate_targets: list[int] = []
     categories: list[str] = []
     coverage = dict(empty_coverage)
     episode = 0
@@ -312,17 +418,31 @@ def collect_learner_state_relabel_dataset(
             "noisy_teammate",
             "delivery_goal_clearance",
             "delivery_goal_clearance",
-        )[episode % 18]
+            "empty_delivery_clearance",
+            "empty_delivery_clearance",
+            "dual_charger_approach",
+            "dual_charger_approach",
+            "outer_exit_charger_approach",
+            "outer_exit_charger_approach",
+        )[episode % 24]
         head_on = scenario_kind == "head_on"
         junction_conflict = scenario_kind == "junction_conflict"
         charger_handoff = scenario_kind == "charger_handoff"
         critical_approach = scenario_kind == "critical_approach"
         noisy_teammate = scenario_kind == "noisy_teammate"
         delivery_goal_clearance = scenario_kind == "delivery_goal_clearance"
+        empty_delivery_clearance = (
+            scenario_kind == "empty_delivery_clearance"
+        )
+        dual_charger_approach = scenario_kind == "dual_charger_approach"
+        outer_exit_charger_approach = (
+            scenario_kind == "outer_exit_charger_approach"
+        )
         if head_on:
             configure_learner_state_head_on(
                 environment,
                 reverse=bool((episode // 2) % 2),
+                variant=episode // 24,
             )
         elif junction_conflict:
             apply_same_target_conflict_scenario(
@@ -330,16 +450,32 @@ def collect_learner_state_relabel_dataset(
                 variant=seed + episode - 1,
             )
         elif charger_handoff:
-            charger_variant = (episode - 1) % 4
+            handoff_profiles = (
+                (2.0, 18.0, True, True),
+                (12.0, 20.0, True, True),
+                (20.0, 24.0, True, True),
+                (44.0, 16.0, False, True),
+                (58.0, 24.0, True, True),
+                (70.0, 28.0, True, False),
+                (100.0, 12.0, False, False),
+                (36.0, 30.0, False, True),
+            )
+            charger_variant = (
+                (episode // 24) * 2 + int(episode % 24 > 2)
+            ) % len(handoff_profiles)
+            (
+                occupant_battery,
+                queued_battery,
+                occupant_carrying,
+                queued_carrying,
+            ) = handoff_profiles[charger_variant]
             apply_charger_handoff_scenario(
                 environment,
                 occupant_agent_id=environment.agent_ids[episode % 2],
-                queued_battery=float(8 + 2 * (episode % 10)),
-                occupant_battery=(2.0, 12.0, 22.0, 100.0)[
-                    charger_variant
-                ],
-                occupant_carrying=charger_variant in {1, 2},
-                queued_carrying=charger_variant in {1, 3},
+                queued_battery=queued_battery,
+                occupant_battery=occupant_battery,
+                occupant_carrying=occupant_carrying,
+                queued_carrying=queued_carrying,
             )
         elif critical_approach:
             apply_critical_charger_approach_scenario(
@@ -352,12 +488,35 @@ def collect_learner_state_relabel_dataset(
                 environment,
                 variant=seed + episode - 1,
             )
+        elif empty_delivery_clearance:
+            apply_empty_delivery_clearance_scenario(
+                environment,
+                variant=seed + episode - 1,
+            )
+        elif dual_charger_approach:
+            apply_dual_charger_approach_scenario(
+                environment,
+                variant=seed + episode - 1,
+            )
+        elif outer_exit_charger_approach:
+            apply_outer_exit_charger_approach_scenario(
+                environment,
+                variant=seed + episode - 1,
+            )
         else:
             state = environment.get_state()
             if rng.random() < 0.50:
                 selected = int(rng.integers(0, len(state.agents)))
                 state.agents[selected].battery = float(rng.uniform(15.0, 45.0))
                 environment.set_state(state)
+        partner_profile = PARTNER_PROFILES[episode % len(PARTNER_PROFILES)]
+        partner_rng = np.random.default_rng(seed + 21_000_000 + episode)
+        if noisy_teammate:
+            participant_state = environment.get_state()
+            participant_state.participant_controlled_agent_id = (
+                environment.config.human_agent_id
+            )
+            environment.set_state(participant_state)
         episode += 1
         observations_by_agent = environment.observations()
         repeated_joint_state = 0
@@ -368,16 +527,11 @@ def collect_learner_state_relabel_dataset(
             state = environment.get_state()
             participant_overrides: dict[str, str] = {}
             proxy_override = False
-            if noisy_teammate and rng.random() < 0.20:
-                robot_one_mask = environment.action_masks()["robot_1"]
-                participant_overrides["robot_1"] = str(
-                    rng.choice(
-                        [
-                            action
-                            for action, allowed in zip(ACTIONS, robot_one_mask)
-                            if allowed > 0.5
-                        ]
-                    )
+            if noisy_teammate:
+                participant_overrides["robot_1"] = participant_surrogate_action(
+                    environment,
+                    profile=partner_profile,
+                    rng=partner_rng,
                 )
                 proxy_override = True
             proposed, _ = policy.act(
@@ -389,6 +543,11 @@ def collect_learner_state_relabel_dataset(
             # Actor outputs have been computed from the frozen state.
             proposed.update(participant_overrides)
             teacher_actions = stable_coordination_actions(environment)
+            if noisy_teammate:
+                teacher_actions["robot_2"] = robust_partner_robot_two_action(
+                    environment,
+                    preferred_action=proposed["robot_2"],
+                )
             (
                 predicted_targets,
                 _,
@@ -460,6 +619,11 @@ def collect_learner_state_relabel_dataset(
                             state,
                             agent,
                         )
+                        and not necessary_teammate_route_clearance(
+                            environment,
+                            state,
+                            agent,
+                        )
                     ):
                         offenders.append(agent.agent_id)
                 return tuple(offenders)
@@ -472,6 +636,8 @@ def collect_learner_state_relabel_dataset(
             energy_state = bool(
                 charger_handoff
                 or critical_approach
+                or dual_charger_approach
+                or outer_exit_charger_approach
                 or any(
                     agent.navigation_goal_kind == "charge"
                     or agent.battery <= 30.0
@@ -479,14 +645,18 @@ def collect_learner_state_relabel_dataset(
                 )
             )
             charger_queue_state = bool(
-                any(
+                dual_charger_approach
+                or outer_exit_charger_approach
+                or (
+                    any(
                     agent.position == environment.layout.charger_position
                     for agent in state.agents
-                )
-                and any(
-                    agent.position != environment.layout.charger_position
-                    and agent.navigation_goal_kind == "charge"
-                    for agent in state.agents
+                    )
+                    and any(
+                        agent.position != environment.layout.charger_position
+                        and agent.navigation_goal_kind == "charge"
+                        for agent in state.agents
+                    )
                 )
             )
             critical_energy_state = any(
@@ -502,6 +672,7 @@ def collect_learner_state_relabel_dataset(
                 row: np.ndarray,
                 label: str,
                 *,
+                teammate_label: str | None,
                 actor_action: str,
                 row_collision: bool,
                 row_stall: bool,
@@ -522,7 +693,7 @@ def collect_learner_state_relabel_dataset(
                     category = "critical_energy"
                 elif junction_conflict_state:
                     category = "junction_conflict"
-                elif delivery_goal_clearance:
+                elif delivery_goal_clearance or empty_delivery_clearance:
                     # Reuse the strongly supervised junction-conflict replay
                     # bucket.  The dedicated coverage counter below still
                     # distinguishes these follow-through states for audits.
@@ -537,13 +708,24 @@ def collect_learner_state_relabel_dataset(
                     category = "ordinary"
                 observations.append(row)
                 targets.append(ACTIONS.index(label))
+                teammate_targets.append(
+                    ACTIONS.index(teammate_label)
+                    if teammate_label in ACTIONS
+                    else -1
+                )
                 categories.append(category)
                 coverage["head_on_rows"] += int(head_on)
                 coverage["charger_handoff_rows"] += int(charger_handoff)
                 coverage["noisy_teammate_rows"] += int(noisy_teammate)
                 coverage["counterfactual_teammate_rows"] += int(counterfactual)
                 coverage["ordinary_rows"] += int(
-                    not head_on and not charger_handoff and not noisy_teammate
+                    not head_on
+                    and not charger_handoff
+                    and not noisy_teammate
+                    and not delivery_goal_clearance
+                    and not empty_delivery_clearance
+                    and not dual_charger_approach
+                    and not outer_exit_charger_approach
                 )
                 coverage["collision_rows"] += int(
                     state.last_robot_collision_event
@@ -563,10 +745,21 @@ def collect_learner_state_relabel_dataset(
                 coverage["delivery_goal_clearance_rows"] += int(
                     delivery_goal_clearance
                 )
+                coverage["empty_delivery_clearance_rows"] += int(
+                    empty_delivery_clearance
+                )
+                coverage["dual_charger_approach_rows"] += int(
+                    dual_charger_approach
+                )
+                coverage["outer_exit_charger_approach_rows"] += int(
+                    outer_exit_charger_approach
+                )
                 coverage["policy_mismatch_rows"] += int(
                     actor_action != label
                 )
 
+            robot_one_label: str | None = None
+            robot_one_correctable_detour = False
             if not proxy_override:
                 robot_one_label = teacher_actions["robot_1"]
                 robot_one_correctable_detour = False
@@ -574,57 +767,63 @@ def collect_learner_state_relabel_dataset(
                     detour_correction = best_unilateral_mission_action(
                         environment,
                         state,
-                        proposed,
                         agent_id="robot_1",
                     )
-                    if detour_correction != "WAIT":
-                        robot_one_label = detour_correction
-                        robot_one_correctable_detour = True
+                    robot_one_label = detour_correction
+                    robot_one_correctable_detour = True
                 elif predicted_stall and proposed["robot_1"] == "WAIT":
                     unilateral_escape = best_unilateral_mission_action(
                         environment,
                         state,
-                        proposed,
                         agent_id="robot_1",
                     )
                     if unilateral_escape != "WAIT":
                         robot_one_label = unilateral_escape
+            # Robot 2 receives one label for S_t. The label and the Actor row
+            # are deliberately not conditioned on robot 1's current action.
+            robot_two_label = teacher_actions["robot_2"]
+            robot_two_correctable_detour = False
+            if noisy_teammate:
+                # Keep the S_t-only robust participant label authoritative.
+                # Applying the generic detour/stall correction afterwards
+                # used to replace it with actions that were unsafe for a
+                # supported participant profile.
+                pass
+            elif "robot_2" in predicted_detour_agent_ids:
+                detour_correction = best_unilateral_mission_action(
+                    environment,
+                    state,
+                    agent_id="robot_2",
+                )
+                robot_two_label = detour_correction
+                robot_two_correctable_detour = True
+            elif predicted_stall and proposed["robot_2"] == "WAIT":
+                unilateral_escape = best_unilateral_mission_action(
+                    environment,
+                    state,
+                    agent_id="robot_2",
+                )
+                if unilateral_escape != "WAIT":
+                    robot_two_label = unilateral_escape
+            if robot_one_label is not None:
                 append_row(
                     independent_actor_input(observations_by_agent["robot_1"]),
                     robot_one_label,
+                    teammate_label=robot_two_label,
                     actor_action=proposed["robot_1"],
                     row_collision=bool(predicted_collision),
                     row_stall=bool(predicted_stall),
                     row_loaded_detour=robot_one_correctable_detour,
                     counterfactual=False,
                 )
-
-            # Robot 2 receives one label for S_t. The label and the Actor row
-            # are deliberately not conditioned on robot 1's current action.
-            robot_two_label = teacher_actions["robot_2"]
-            robot_two_correctable_detour = False
-            if "robot_2" in predicted_detour_agent_ids:
-                detour_correction = best_unilateral_mission_action(
-                    environment,
-                    state,
-                    proposed,
-                    agent_id="robot_2",
-                )
-                if detour_correction != "WAIT":
-                    robot_two_label = detour_correction
-                    robot_two_correctable_detour = True
-            elif predicted_stall and proposed["robot_2"] == "WAIT":
-                unilateral_escape = best_unilateral_mission_action(
-                    environment,
-                    state,
-                    proposed,
-                    agent_id="robot_2",
-                )
-                if unilateral_escape != "WAIT":
-                    robot_two_label = unilateral_escape
             append_row(
                 independent_actor_input(observations_by_agent["robot_2"]),
                 robot_two_label,
+                teammate_label=(
+                    robot_one_label
+                    if robot_one_label is not None
+                    else participant_overrides.get("robot_1")
+                ),
                 actor_action=proposed["robot_2"],
                 row_collision=bool(predicted_collision),
                 row_stall=bool(predicted_stall),
@@ -654,12 +853,21 @@ def collect_learner_state_relabel_dataset(
             )
             if terminated or truncated or repeated_joint_state >= 3:
                 break
-    return (
+    result = (
         np.stack(observations),
         np.asarray(targets, dtype=np.int64),
         np.asarray(categories, dtype="<U32"),
         coverage,
     )
+    if include_teammate_labels:
+        return (
+            result[0],
+            result[1],
+            np.asarray(teammate_targets, dtype=np.int64),
+            result[2],
+            result[3],
+        )
+    return result
 
 
 def collect_loaded_detour_correction_dataset(
@@ -742,6 +950,17 @@ def collect_loaded_detour_correction_dataset(
                         state,
                         agent,
                     )
+                    or necessary_teammate_route_clearance(
+                        environment,
+                        state,
+                        agent,
+                    )
+                    or necessary_participant_standoff_clearance(
+                        environment,
+                        state,
+                        agent,
+                        candidate_action=actions[agent.agent_id],
+                    )
                 ):
                     continue
                 detouring_agent_ids.add(agent.agent_id)
@@ -781,7 +1000,6 @@ def collect_loaded_detour_correction_dataset(
                                 unilateral = best_unilateral_mission_action(
                                     environment,
                                     state,
-                                    correction_actions,
                                     agent_id=agent.agent_id,
                                 )
                                 if unilateral != correction:
@@ -1040,6 +1258,11 @@ def collect_actor_commitment_failure_dataset(
                 # untouched on the next distribution.
                 if int(actor_label) == int(label):
                     continue
+                # A masked Actor cannot learn an action outside the static
+                # support encoded in this exact observation.  Keep failure
+                # mining defensive even if a future teacher branch regresses.
+                if float(row[-len(ACTIONS) + int(label)]) <= 0.5:
+                    continue
                 if category == "task_starvation":
                     if not bool(empty):
                         continue
@@ -1171,24 +1394,26 @@ def collect_actor_commitment_failure_dataset(
                 (starving or near_starvation)
                 and category_count("task_starvation") < starvation_limit
             ):
-                coverage["starving_tasks_found"] += len(starving)
+                near_starving_ids = {
+                    task_id
+                    for task_id, age in info.get(
+                        "available_task_ages", {}
+                    ).items()
+                    if int(age)
+                    >= max(
+                        1,
+                        environment.config.reward.task_age_priority_horizon - 4,
+                    )
+                }
+                coverage["starving_tasks_found"] += max(
+                    len(starving),
+                    len(near_starving_ids),
+                )
                 append_window(
                     tuple(history),
                     "task_starvation",
                     starvation_limit,
-                    starving_task_ids=set(starving)
-                    or {
-                        task_id
-                        for task_id, age in info.get(
-                            "available_task_ages", {}
-                        ).items()
-                        if int(age)
-                        >= max(
-                            1,
-                            environment.config.reward.task_age_priority_horizon
-                            - 4,
-                        )
-                    },
+                    starving_task_ids=set(starving) or near_starving_ids,
                 )
             if terminated or truncated:
                 break
@@ -1269,6 +1494,11 @@ def collect_commitment_curriculum_dataset(
                 agent_id=environment.agent_ids[(episode // 2) % 2],
                 variant=episode // 2,
             )
+            # The scenario mutates S_t after reset.  Supervision must pair the
+            # teacher label with an observation regenerated from that exact
+            # same state; retaining reset's observation leaks a different
+            # time slice into the training row.
+            observations = environment.observations()
             rollout_steps = 10
         else:
             state = environment.get_state()

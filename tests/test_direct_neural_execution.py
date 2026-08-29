@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
@@ -9,7 +11,12 @@ from backend.adapters.warehouse import WarehouseAdapter
 from env.warehouse.contracts import ACTION_EXECUTION_VERSION, RUNTIME_CONTROLLER
 from env.warehouse.environment import WarehouseConfig, WarehouseMultiAgentEnv
 from env.warehouse.policy import MAPPOConfig, MAPPOPolicy
-from env.warehouse.mappo import _evaluation_summary
+from env.warehouse.mappo import MAPPOTrainer, _evaluation_summary
+from env.warehouse.joint_risk_loss import (
+    expected_collision_loss,
+    trainable_joint_pairs,
+)
+from env.warehouse.scenarios import apply_head_on_scenario
 from backend.training import warehouse as train_module
 
 
@@ -108,11 +115,102 @@ def test_wait_memory_contract_rejects_previous_direct_neural_model() -> None:
 
 def test_execution_contract_is_explicitly_direct_neural() -> None:
     assert ACTION_EXECUTION_VERSION == (
-        "independent_simultaneous_mappo_actor_v10"
+        "batched_independent_simultaneous_actor_v13"
     )
-    assert RUNTIME_CONTROLLER == (
-        "mappo_independent_actor_simultaneous_execution"
+    assert RUNTIME_CONTROLLER == "mappo_batched_actor_atomic_joint_execution"
+
+
+def test_batched_actor_rejects_an_invalid_action_mask_before_device_forward() -> None:
+    config = WarehouseConfig(horizon=1)
+    policy = MAPPOPolicy(config, MAPPOConfig(hidden_dim=16, seed=92))
+    environment = WarehouseMultiAgentEnv(config)
+    observations, _ = environment.reset(seed=92)
+    invalid = {
+        agent_id: np.asarray(observation, dtype=np.float32).copy()
+        for agent_id, observation in observations.items()
+    }
+    invalid["robot_2"][-len(policy.action_names) :] = 0.0
+
+    with pytest.raises(ValueError, match="at least one legal action"):
+        policy.act(
+            invalid,
+            environment.global_state(),
+            decision_key=(1, 0),
+        )
+
+
+def test_ppo_optimizes_paired_same_state_expected_collision_risk() -> None:
+    config = WarehouseConfig(horizon=6)
+    policy = MAPPOPolicy(
+        config,
+        MAPPOConfig(
+            hidden_dim=16,
+            intent_dim=8,
+            update_epochs=1,
+            minibatch_size=12,
+            seed=93,
+        ),
     )
+    trainer = MAPPOTrainer(policy)
+    batch = trainer.collect_episode(
+        WarehouseMultiAgentEnv(config),
+        seed=93,
+    )
+    batch.trainable_mask[:] = 1.0
+
+    metrics = trainer.update(
+        batch,
+        joint_collision_loss_weight=0.25,
+    )
+
+    assert metrics["joint_collision_loss_weight"] == pytest.approx(0.25)
+    assert metrics["joint_collision_pair_updates"] > 0.0
+    assert metrics["joint_expected_collision_loss"] >= 0.0
+
+    with pytest.raises(ValueError, match="must be non-negative"):
+        trainer.update(batch, joint_collision_loss_weight=-0.1)
+
+
+def test_joint_risk_loss_equals_manual_p1_c_p2_on_frozen_state() -> None:
+    config = WarehouseConfig(horizon=6)
+    policy = MAPPOPolicy(
+        config,
+        MAPPOConfig(hidden_dim=16, intent_dim=8, seed=94),
+    )
+    environment = WarehouseMultiAgentEnv(config)
+    environment.reset(seed=94)
+    apply_head_on_scenario(environment, reverse=True, variant=1)
+    observations = environment.observations()
+    rows = np.stack(
+        [policy.actor_input(observations[agent_id]) for agent_id in environment.agent_ids]
+    )
+    batch = SimpleNamespace(
+        observations=rows,
+        agent_indices=np.asarray((0, 1), dtype=np.int64),
+        trainable_mask=np.ones(2, dtype=np.float32),
+    )
+
+    measured = expected_collision_loss(
+        policy,
+        batch,
+        trainable_joint_pairs(batch),
+        selected_row_count=2,
+        rng=np.random.default_rng(94),
+    )
+    with torch.no_grad():
+        logits = policy.masked_actor_logits(
+            torch.as_tensor(rows, dtype=torch.float32)
+        )
+        probabilities = torch.softmax(logits, dim=-1)
+        start = policy.network.joint_collision_matrix_start
+        matrix = torch.as_tensor(
+            rows[0, start : start + 25].reshape(5, 5),
+            dtype=torch.float32,
+        )
+        expected = probabilities[0] @ matrix @ probabilities[1]
+
+    assert measured.item() == pytest.approx(expected.item())
+    assert measured.item() > 0.0
 
 
 def test_actor_exposes_trainable_neural_mission_logits() -> None:
@@ -245,9 +343,12 @@ def test_formal_evaluation_requires_disjoint_declared_training_seed_ledger() -> 
     training = (PROJECT_ROOT / "backend/training/warehouse.py").read_text(
         encoding="utf-8"
     )
+    ledger_source = (
+        PROJECT_ROOT / "backend/training/seed_ledger.py"
+    ).read_text(encoding="utf-8")
     evaluation = (PROJECT_ROOT / "evaluate_rl.py").read_text(encoding="utf-8")
-    assert '"schema": "warehouse-training-seed-ledger.v1"' in training
-    assert '"seed_ledger": _training_seed_ledger(args)' in training
+    assert '"schema": "warehouse-training-seed-ledger.v1"' in ledger_source
+    assert '"seed_ledger": training_seed_ledger(args)' in training
     assert (
         'ledger.get("schema") == "warehouse-training-seed-ledger.v1"'
         in evaluation

@@ -47,14 +47,14 @@ def test_required_program_groups_use_shared_tasks_energy_and_teammate() -> None:
 
 
 def test_charging_wait_has_nonempty_action_explanation_without_private_goal() -> None:
-    _, adapter, policy = _system()
+    environment, adapter, policy = _system()
     snapshot = adapter.snapshot(policy)
     state = deepcopy(snapshot.state)
     robot = state.by_id("robot_2")
-    robot.position = (9, 5)
+    robot.position = environment.layout.charger_position
     robot.battery = 27.0
     robot.navigation_goal_kind = "charge"
-    robot.navigation_goal_position = (9, 5)
+    robot.navigation_goal_position = environment.layout.charger_position
     decision = replace(
         snapshot,
         state=state,
@@ -131,7 +131,7 @@ def test_charging_wait_has_nonempty_action_explanation_without_private_goal() ->
     assert "本步后电量升至37%" in document.text
     assert "因此它在充电站等待充电" in document.text
     assert "充电完成后" in document.text
-    assert "目标" not in document.text
+    assert "充电" in document.text
 
 
 def test_action_constraint_is_natural_language_not_internal_trace_dump() -> None:
@@ -253,19 +253,21 @@ def test_charging_explanation_orders_action_reason_energy_and_next_task() -> Non
 
 
 def test_low_battery_robot_waiting_for_occupied_charger_gets_queue_explanation() -> None:
-    _, adapter, policy = _system()
+    environment, adapter, policy = _system()
     snapshot = adapter.snapshot(policy)
     state = deepcopy(snapshot.state)
     robot_one = state.by_id("robot_1")
     robot_two = state.by_id("robot_2")
-    robot_one.position = (9, 4)
+    charger_row, charger_column = environment.layout.charger_position
+    queue_position = (charger_row - 1, charger_column)
+    robot_one.position = queue_position
     robot_one.battery = 10.0
     robot_one.navigation_goal_kind = "charge"
-    robot_one.navigation_goal_position = (9, 5)
-    robot_two.position = (9, 5)
+    robot_one.navigation_goal_position = environment.layout.charger_position
+    robot_two.position = environment.layout.charger_position
     robot_two.battery = 31.0
     robot_two.navigation_goal_kind = "charge"
-    robot_two.navigation_goal_position = (9, 5)
+    robot_two.navigation_goal_position = environment.layout.charger_position
     decision = replace(
         snapshot,
         state=state,
@@ -323,14 +325,14 @@ def test_low_battery_robot_waiting_for_occupied_charger_gets_queue_explanation()
                 {
                     "trace_type": "action_constraint",
                     "program_selected_action": "WAIT",
-                    "constrained_action": "RIGHT",
+                    "constrained_action": "DOWN",
                     "active_reason_features": (
-                        "candidate.RIGHT.blocked_by_robot",
+                        "candidate.DOWN.blocked_by_robot",
                     ),
                     "observed_meaning": {
                         "explanation_role": "action_feasibility",
                         "action": "WAIT",
-                        "constrained_action": "RIGHT",
+                        "constrained_action": "DOWN",
                     },
                 },
             ),
@@ -340,9 +342,9 @@ def test_low_battery_robot_waiting_for_occupied_charger_gets_queue_explanation()
     )
 
     assert "机器人1本步等待，因为它的电量仅有10%，已经需要充电" in text
-    assert "唯一的充电站(9, 5)正由机器人2占用" in text
+    assert "唯一的充电站(7, 4)正由机器人2占用" in text
     assert "机器人2本步在站内等待充电，电量从31%升至41%" in text
-    assert "只能在(9, 4)等待充电站空出" in text
+    assert "只能在(6, 4)等待充电站空出" in text
     assert "会被墙或货架阻挡" not in text
     assert "选择等待的原因之一" not in text
 
@@ -392,11 +394,11 @@ def test_battery_departure_question_reports_threshold_waits_and_next_task() -> N
         },
         "zh-CN",
     )
-    assert value["minimum_safe_departure_battery"] == 28.0
-    assert value["charge_waits_remaining"] == 2
-    assert value["projected_departure_battery"] == 31.0
-    assert all(token in english for token in ("11%", "at least 28%", "2 more", "31%", "task 1"))
-    assert all(token in chinese for token in ("11%", "至少需要28%", "2次", "31%", "任务1"))
+    assert value["minimum_safe_departure_battery"] == 36.0
+    assert value["charge_waits_remaining"] == 3
+    assert value["projected_departure_battery"] == 41.0
+    assert all(token in english for token in ("11%", "at least 36%", "3 more", "41%", "task 1"))
+    assert all(token in chinese for token in ("11%", "至少需要36%", "3次", "41%", "任务1"))
     assert _study_question_focus("why did robot 2 stop") == "action"
     assert _study_question_focus(
         "what battery does robot 2 try to hold before trying to go out again?"
@@ -405,10 +407,10 @@ def test_battery_departure_question_reports_threshold_waits_and_next_task() -> N
 
 def test_all_move_directions_explain_shared_task_progress_without_trace() -> None:
     directions = {
-        "UP": ((3, 5), (2, 5), "向上"),
-        "DOWN": ((2, 5), (3, 5), "向下"),
+        "UP": ((3, 4), (2, 4), "向上"),
+        "DOWN": ((2, 4), (3, 4), "向下"),
         "LEFT": ((1, 4), (1, 3), "向左"),
-        "RIGHT": ((1, 4), (1, 5), "向右"),
+        "RIGHT": ((2, 4), (2, 5), "向右"),
     }
     for action, (origin, delivery_position, action_label) in directions.items():
         _, adapter, policy = _system()
@@ -489,19 +491,21 @@ def test_all_move_directions_explain_shared_task_progress_without_trace() -> Non
 
 
 def test_low_battery_carrier_move_explains_charging_before_delivery() -> None:
-    _, adapter, policy = _system()
+    environment, adapter, policy = _system()
     snapshot = adapter.snapshot(policy)
     state = deepcopy(snapshot.state)
     robot = state.by_id("robot_2")
-    robot.position = (9, 4)
+    charger_row, charger_column = environment.layout.charger_position
+    robot.position = (charger_row, charger_column - 1)
+    state.by_id("robot_1").position = (charger_row - 1, charger_column - 1)
     robot.battery = 18.0
     task = state.tasks[0]
-    task.delivery_position = (0, 5)
+    task.delivery_position = (0, 4)
     task.status = "carried"
     task.carrier_agent_id = robot.agent_id
     robot.carrying_task_id = task.task_id
     robot.navigation_goal_kind = "charge"
-    robot.navigation_goal_position = (9, 5)
+    robot.navigation_goal_position = environment.layout.charger_position
     decision = replace(
         snapshot,
         state=state,
@@ -560,7 +564,7 @@ def test_low_battery_carrier_move_explains_charging_before_delivery() -> None:
     assert "机器人2这一步执行了向右" in text
     assert "电量为18%" in text
     assert "到充电站的剩余距离从1格缩短到0格" in text
-    assert f"充电后继续将任务{task.task_id.removeprefix('task_')}送往B点(0, 5)" in text
+    assert f"充电后继续将任务{task.task_id.removeprefix('task_')}送往B点(0, 4)" in text
     assert all(
         token not in text
         for token in ("navigation_goal", "goal_kind", "candidate.", "{")

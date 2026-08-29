@@ -493,7 +493,7 @@ class WarehouseExplanationMixin:
                     if waits_remaining > 0:
                         return (
                             f"{robot}当前电量为{battery:g}%，安全离开充电站至少需要"
-                            f"{float(minimum_departure):g}%（包括完成路线并保留2格余量）。"
+                            f"{float(minimum_departure):g}%（包括任务路线、返航安全余量和充电迟滞）。"
                             f"它还需等待充电{waits_remaining}次，每次增加"
                             f"{float(value.get('charge_per_wait', 0.0)):g}点；预计达到"
                             f"{projected_departure:g}%后离开，{next_work}"
@@ -519,7 +519,7 @@ class WarehouseExplanationMixin:
                     return (
                         f"{robot} had {battery:g}% battery and needed at least "
                         f"{float(minimum_departure):g}% before safely leaving the charger "
-                        "(including the two-cell reserve). It needed "
+                        "(including the route, return reserve, and charging hysteresis). It needed "
                         f"{waits_remaining} more charging wait"
                         f"{'s' if waits_remaining != 1 else ''} at "
                         f"{float(value.get('charge_per_wait', 0.0)):g} points each, "

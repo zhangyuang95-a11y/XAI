@@ -1,9 +1,8 @@
 """Parameter-sharing MAPPO with a centralized critic and decentralized actors."""
-
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -11,7 +10,6 @@ import numpy as np
 import torch
 from torch import nn
 from torch.distributions import Categorical
-
 from core.policy_program_regularizer import (
     PolicyProgramRegularizer,
     RegularizationStateBatch,
@@ -22,13 +20,19 @@ from .contracts import (
     RUNTIME_CONTROLLER,
     TRAINING_CHECKPOINT_VERSION,
 )
+from .decision_protocol import distribution_decision_metadata
 from .environment import (
     ACTIONS,
     WarehouseConfig,
     WarehouseMultiAgentEnv,
-    shortest_path_distance,
 )
-from .coordination import is_necessary_urgent_charger_clearance
+from .evaluation_diagnostics import avoidable_loaded_delivery_detour_agents
+from .joint_risk_loss import expected_collision_loss, trainable_joint_pairs
+from .gradient_guard import guard_program_gradients as _guard_program_gradients
+from .coordination_priority import (
+    coordination_priority,
+    imminent_head_on_encounter,
+)
 from .policy import (
     MAPPOConfig,
     MAPPOPolicy,
@@ -41,231 +45,26 @@ from .policy_metrics import (
     mean_agent_attribute,
     sum_agent_attribute,
 )
+from .partner_policies import (
+    participant_surrogate_action,
+    sampled_partner_profile,
+)
 from .rewards import REWARD_VERSION
+from .rollout_batch import EpisodeBatch
 from .scenarios import (
     apply_charger_commitment_scenario,
     apply_charger_handoff_scenario,
     apply_delivery_goal_clearance_scenario,
+    apply_dual_charger_approach_scenario,
+    apply_empty_delivery_clearance_scenario,
     apply_head_on_scenario,
+    apply_outer_exit_charger_approach_scenario,
+    apply_same_target_conflict_scenario,
     apply_task_commitment_scenario,
 )
 
 
 MAPPO_TRAINING_CHECKPOINT_VERSION = TRAINING_CHECKPOINT_VERSION
-
-
-def _guard_program_gradients(
-    task_gradients: Sequence[torch.Tensor | None],
-    program_gradients: Sequence[torch.Tensor | None],
-    *,
-    regularization_weight: float,
-    maximum_gradient_ratio: float,
-    task_gradient_floor: float,
-    project_conflicts: bool,
-) -> tuple[list[torch.Tensor | None], dict[str, float]]:
-    """Combine task and program gradients without sacrificing the task step.
-
-    The extracted program is an intentionally lossy teacher.  Its gradient is
-    first projected away from the task gradient when the two conflict, then
-    capped relative to the task-gradient norm.  Consequently, a large
-    configured lambda can strengthen compatible regularity updates without
-    allowing the auxiliary objective to reverse the local PPO improvement.
-    """
-
-    if len(task_gradients) != len(program_gradients):
-        raise ValueError("Task and program gradient lists must have equal length.")
-    if regularization_weight < 0.0:
-        raise ValueError("regularization_weight must be non-negative.")
-    if maximum_gradient_ratio < 0.0:
-        raise ValueError("maximum_gradient_ratio must be non-negative.")
-    if task_gradient_floor < 0.0:
-        raise ValueError("task_gradient_floor must be non-negative.")
-
-    reference = next(
-        (
-            gradient
-            for gradient in (*task_gradients, *program_gradients)
-            if gradient is not None
-        ),
-        None,
-    )
-    if reference is None:
-        return [None for _ in task_gradients], {
-            "task_gradient_norm": 0.0,
-            "program_gradient_norm": 0.0,
-            "applied_program_gradient_norm": 0.0,
-            "applied_program_lambda": 0.0,
-            "program_gradient_ratio": 0.0,
-            "gradient_conflict": 0.0,
-            "gradient_guard_saturated": 0.0,
-        }
-
-    zero = torch.zeros((), dtype=reference.dtype, device=reference.device)
-    task_squared_norm = zero
-    program_squared_norm = zero
-    task_program_dot = zero
-    for task_gradient, program_gradient in zip(
-        task_gradients,
-        program_gradients,
-    ):
-        if task_gradient is not None:
-            task_squared_norm = (
-                task_squared_norm + task_gradient.detach().pow(2).sum()
-            )
-        if program_gradient is not None:
-            program_squared_norm = (
-                program_squared_norm + program_gradient.detach().pow(2).sum()
-            )
-        if task_gradient is not None and program_gradient is not None:
-            task_program_dot = task_program_dot + (
-                task_gradient.detach() * program_gradient.detach()
-            ).sum()
-
-    epsilon = torch.finfo(reference.dtype).eps
-    gradient_conflict = bool(task_program_dot.item() < 0.0)
-    projection_coefficient = zero
-    if project_conflicts and gradient_conflict:
-        projection_coefficient = task_program_dot / (
-            task_squared_norm + epsilon
-        )
-
-    projected_program_gradients: list[torch.Tensor | None] = []
-    projected_squared_norm = zero
-    for task_gradient, program_gradient in zip(
-        task_gradients,
-        program_gradients,
-    ):
-        if program_gradient is None:
-            projected_program_gradients.append(None)
-            continue
-        projected = program_gradient.detach()
-        if project_conflicts and gradient_conflict and task_gradient is not None:
-            projected = projected - (
-                projection_coefficient * task_gradient.detach()
-            )
-        projected_program_gradients.append(projected)
-        projected_squared_norm = projected_squared_norm + projected.pow(2).sum()
-
-    task_norm = torch.sqrt(task_squared_norm)
-    projected_program_norm = torch.sqrt(projected_squared_norm)
-    protected_task_norm = torch.maximum(
-        task_norm,
-        torch.as_tensor(
-            task_gradient_floor,
-            dtype=reference.dtype,
-            device=reference.device,
-        ),
-    )
-    requested_lambda = torch.as_tensor(
-        regularization_weight,
-        dtype=reference.dtype,
-        device=reference.device,
-    )
-    maximum_program_norm = maximum_gradient_ratio * protected_task_norm
-    applied_lambda = requested_lambda
-    if projected_program_norm.item() > 0.0:
-        applied_lambda = torch.minimum(
-            requested_lambda,
-            maximum_program_norm / (projected_program_norm + epsilon),
-        )
-    else:
-        applied_lambda = zero
-
-    combined_gradients: list[torch.Tensor | None] = []
-    for task_gradient, projected_program_gradient in zip(
-        task_gradients,
-        projected_program_gradients,
-    ):
-        if task_gradient is None and projected_program_gradient is None:
-            combined_gradients.append(None)
-            continue
-        if task_gradient is None:
-            assert projected_program_gradient is not None
-            combined_gradients.append(
-                applied_lambda * projected_program_gradient
-            )
-            continue
-        combined = task_gradient.detach()
-        if projected_program_gradient is not None:
-            combined = combined + applied_lambda * projected_program_gradient
-        combined_gradients.append(combined)
-
-    applied_program_norm = applied_lambda * projected_program_norm
-    return combined_gradients, {
-        "task_gradient_norm": float(task_norm.detach().cpu()),
-        "program_gradient_norm": float(
-            projected_program_norm.detach().cpu()
-        ),
-        "applied_program_gradient_norm": float(
-            applied_program_norm.detach().cpu()
-        ),
-        "applied_program_lambda": float(applied_lambda.detach().cpu()),
-        "program_gradient_ratio": float(
-            (
-                applied_program_norm
-                / torch.clamp(protected_task_norm, min=epsilon)
-            )
-            .detach()
-            .cpu()
-        ),
-        "gradient_conflict": float(gradient_conflict),
-        "gradient_guard_saturated": float(
-            applied_lambda.item() + float(epsilon) < regularization_weight
-        ),
-    }
-
-
-@dataclass
-class EpisodeBatch:
-    observations: np.ndarray
-    global_states: np.ndarray
-    agent_indices: np.ndarray
-    actions: np.ndarray
-    old_log_probs: np.ndarray
-    old_values: np.ndarray
-    rewards: np.ndarray
-    dones: np.ndarray
-    advantages: np.ndarray
-    returns: np.ndarray
-    trainable_mask: np.ndarray
-    episode_reward: float
-    episode_steps: int
-    pickups: int
-    deliveries: int
-    collisions: int
-    shutdowns: int
-    terminal_reason: str | None
-    charger_uses: int = 0
-    avoidable_detours: int = 0
-    route_regret: float = 0.0
-    minimum_battery: float = 0.0
-    proxy_human_overrides: int = 0
-    base_training_reward: float = 0.0
-    potential_shaping_reward: float = 0.0
-    avoidable_wait_penalty_reward: float = 0.0
-    mission_regression_penalty_reward: float = 0.0
-    individual_training_rewards: dict[str, float] = field(default_factory=dict)
-    individual_progress_rewards: dict[str, float] = field(default_factory=dict)
-    coordination_progress_reward: float = 0.0
-    counterfactual_regret_units: dict[str, float] = field(default_factory=dict)
-    counterfactual_regret_penalty_rewards: dict[str, float] = field(
-        default_factory=dict
-    )
-    repeated_avoidable_wait_penalty_rewards: dict[str, float] = field(
-        default_factory=dict
-    )
-    avoidable_wait_counts: dict[str, int] = field(default_factory=dict)
-    maximum_avoidable_wait_streaks: dict[str, int] = field(default_factory=dict)
-    detour_counts: dict[str, int] = field(default_factory=dict)
-    loaded_detour_counts: dict[str, int] = field(default_factory=dict)
-    path_efficiency_actual_over_shortest_safe: float = 0.0
-    energy_curriculum_applied: bool = False
-    coordination_curriculum_kind: str | None = None
-    initial_minimum_battery: float = 100.0
-    semantic_features: tuple[Mapping[str, float], ...] = ()
-    regularization_observations: np.ndarray | None = None
-    regularization_targets: np.ndarray | None = None
-    regularization_weights: np.ndarray | None = None
 
 
 class MAPPOTrainer:
@@ -275,7 +74,7 @@ class MAPPOTrainer:
         self.policy = policy
         cfg = policy.algorithm_config
         self.actor_optimizer = torch.optim.Adam(
-            policy.network.actor_parameters(),
+            policy.network.ppo_actor_parameters(),
             lr=cfg.actor_lr,
         )
         self.critic_optimizer = torch.optim.Adam(policy.network.critic.parameters(), lr=cfg.critic_lr)
@@ -382,23 +181,77 @@ class MAPPOTrainer:
             raise ValueError(
                 "coordination_curriculum_probability must be between zero and one."
             )
+        proxy_human_episode = bool(self._rollout_rng.random() < 0.50)
+        proxy_human_profile = (
+            sampled_partner_profile(self._rollout_rng)
+            if proxy_human_episode
+            else None
+        )
         observations, _ = env.reset(seed=seed)
+        if proxy_human_episode:
+            participant_state = env.get_state()
+            participant_state.participant_controlled_agent_id = (
+                env.config.human_agent_id
+            )
+            env.set_state(participant_state)
+            observations = env.observations()
         coordination_curriculum_kind: str | None = None
         if self._rollout_rng.random() < coordination_curriculum_probability:
-            curriculum_choice = int(self._rollout_rng.integers(0, 5))
+            curriculum_choice = int(self._rollout_rng.integers(0, 9))
             if curriculum_choice == 0:
                 coordination_curriculum_kind = "head_on"
                 apply_head_on_scenario(
                     env,
                     reverse=bool(self._rollout_rng.integers(0, 2)),
+                    variant=int(self._rollout_rng.integers(0, 6)),
                 )
             elif curriculum_choice == 1:
                 coordination_curriculum_kind = "charger_handoff"
                 occupant_index = int(self._rollout_rng.integers(0, 2))
+                handoff_profile = int(self._rollout_rng.integers(0, 4))
+                if handoff_profile == 0:
+                    occupant_battery = 100.0
+                    queued_battery = float(
+                        self._rollout_rng.uniform(8.0, 28.0)
+                    )
+                elif handoff_profile in {1, 2}:
+                    # Exercise the failure-mined case where the station
+                    # occupant is still below its own release threshold but a
+                    # strictly lower-energy teammate must receive a two-phase
+                    # handoff.  The old full-battery-only curriculum could not
+                    # teach this distinction.
+                    occupant_battery = float(
+                        self._rollout_rng.uniform(44.0, 70.0)
+                    )
+                    queued_battery = float(
+                        self._rollout_rng.uniform(
+                            8.0,
+                            min(36.0, occupant_battery - 4.0),
+                        )
+                    )
+                else:
+                    # Also preserve the inverse priority case: a more depleted
+                    # occupant must continue charging while its teammate waits.
+                    occupant_battery = float(
+                        self._rollout_rng.uniform(8.0, 24.0)
+                    )
+                    queued_battery = float(
+                        self._rollout_rng.uniform(
+                            occupant_battery + 2.0,
+                            min(40.0, occupant_battery + 12.0),
+                        )
+                    )
                 apply_charger_handoff_scenario(
                     env,
                     occupant_agent_id=env.agent_ids[occupant_index],
-                    queued_battery=float(self._rollout_rng.uniform(8.0, 28.0)),
+                    queued_battery=queued_battery,
+                    occupant_battery=occupant_battery,
+                    occupant_carrying=bool(
+                        self._rollout_rng.integers(0, 2)
+                    ),
+                    queued_carrying=bool(
+                        self._rollout_rng.integers(0, 2)
+                    ),
                 )
             elif curriculum_choice == 2:
                 coordination_curriculum_kind = "delivery_goal_clearance"
@@ -407,6 +260,30 @@ class MAPPOTrainer:
                     variant=int(self._rollout_rng.integers(0, 10_000)),
                 )
             elif curriculum_choice == 3:
+                coordination_curriculum_kind = "empty_delivery_clearance"
+                apply_empty_delivery_clearance_scenario(
+                    env,
+                    variant=int(self._rollout_rng.integers(0, 8)),
+                )
+            elif curriculum_choice == 4:
+                coordination_curriculum_kind = "dual_charger_approach"
+                apply_dual_charger_approach_scenario(
+                    env,
+                    variant=int(self._rollout_rng.integers(0, 8)),
+                )
+            elif curriculum_choice == 5:
+                coordination_curriculum_kind = "outer_exit_charger_approach"
+                apply_outer_exit_charger_approach_scenario(
+                    env,
+                    variant=int(self._rollout_rng.integers(0, 48)),
+                )
+            elif curriculum_choice == 6:
+                coordination_curriculum_kind = "same_target_conflict"
+                apply_same_target_conflict_scenario(
+                    env,
+                    variant=int(self._rollout_rng.integers(0, 10_000)),
+                )
+            elif curriculum_choice == 7:
                 coordination_curriculum_kind = "charger_commitment"
                 apply_charger_commitment_scenario(
                     env,
@@ -465,7 +342,6 @@ class MAPPOTrainer:
         avoidable_detour_count = 0
         route_regret_total = 0.0
         terminal_reason: str | None = None
-        proxy_human_episode = bool(self._rollout_rng.random() < 0.30)
         proxy_human_overrides = 0
         minimum_battery_seen = initial_minimum_battery
         while True:
@@ -473,22 +349,13 @@ class MAPPOTrainer:
             global_state = env.global_state()
             overridden_agents: set[str] = set()
             participant_overrides: dict[str, str] = {}
-            if proxy_human_episode and self._rollout_rng.random() < 0.20:
+            if proxy_human_profile is not None:
                 human_id = env.config.human_agent_id
-                mask = env.action_masks()[human_id]
-                if self._rollout_rng.random() < 0.50:
-                    replacement = "WAIT"
-                else:
-                    legal_moves = [
-                        action
-                        for action, allowed in zip(ACTIONS, mask)
-                        if allowed > 0.5 and action != "WAIT"
-                    ]
-                    replacement = (
-                        str(self._rollout_rng.choice(legal_moves))
-                        if legal_moves
-                        else "WAIT"
-                    )
+                replacement = participant_surrogate_action(
+                    env,
+                    profile=proxy_human_profile,
+                    rng=self._rollout_rng,
+                )
                 participant_overrides[human_id] = replacement
                 overridden_agents.add(human_id)
                 proxy_human_overrides += 1
@@ -496,13 +363,28 @@ class MAPPOTrainer:
                 observations,
                 global_state,
                 deterministic=False,
+                decision_key=(
+                    int(state_before_step.episode_id),
+                    int(state_before_step.frame),
+                ),
             )
             # Proxy-human commands replace robot 1 only after both Actor
             # distributions have been computed from the frozen pre-move
             # state. Robot 2 therefore cannot condition on the replacement.
             actions.update(participant_overrides)
             values = self.policy.values(global_state, agent_ids)
-            next_observations, rewards, terminated, truncated, info = env.step(actions)
+            next_observations, rewards, terminated, truncated, info = env.step(
+                actions,
+                decision_metadata=distribution_decision_metadata(
+                    distributions,
+                    decision_source=(
+                        "proxy_human_plus_pytorch_actor"
+                        if participant_overrides
+                        else "pytorch_actor_ai_ai"
+                    ),
+                    participant_overrides=participant_overrides,
+                ),
+            )
             done = terminated or truncated
             for index, agent_id in enumerate(agent_ids):
                 action_index = ACTIONS.index(actions[agent_id])
@@ -655,6 +537,7 @@ class MAPPOTrainer:
         skill_anchor_observations: np.ndarray | None = None,
         skill_anchor_labels: np.ndarray | None = None,
         skill_anchor_weight: float = 0.0,
+        joint_collision_loss_weight: float = 0.0,
     ) -> dict[str, float]:
         trainable_indices = np.flatnonzero(
             batch.trainable_mask > 0.5
@@ -685,6 +568,10 @@ class MAPPOTrainer:
         )
         if skill_anchor_weight < 0.0:
             raise ValueError("skill_anchor_weight must be non-negative.")
+        if joint_collision_loss_weight < 0.0:
+            raise ValueError(
+                "joint_collision_loss_weight must be non-negative."
+            )
         if has_skill_anchor:
             assert skill_anchor_observations is not None
             assert skill_anchor_labels is not None
@@ -714,8 +601,36 @@ class MAPPOTrainer:
             "skill_anchor_loss": 0.0,
             "skill_anchor_accuracy": 0.0,
             "skill_anchor_weight": float(skill_anchor_weight),
+            "joint_expected_collision_loss": 0.0,
+            "joint_collision_loss_weight": float(
+                joint_collision_loss_weight
+            ),
+            "joint_collision_pair_updates": 0.0,
             "updates": 0.0,
         }
+        # Keep loss accounting on the accelerator and materialise each scalar
+        # once after all minibatches.  Calling ``.cpu()`` for every metric in
+        # every minibatch serialises MPS execution without changing training.
+        tensor_metric_names = (
+            "actor_loss",
+            "critic_loss",
+            "critic_masked_sample_loss",
+            "entropy",
+            "program_regularity_loss",
+            "program_complexity_loss",
+            "program_regularization_total_loss",
+            "mean_program_target_weight",
+            "program_feedback_coverage",
+            "program_lambda_active_fraction",
+            "skill_anchor_loss",
+            "skill_anchor_accuracy",
+            "joint_expected_collision_loss",
+        )
+        tensor_metrics = {
+            key: torch.zeros((), dtype=torch.float32, device=self.policy.device)
+            for key in tensor_metric_names
+        }
+        trainable_pairs = trainable_joint_pairs(batch)
         if (
             regularization_gradient_guard_ratio is not None
             and regularization_gradient_guard_ratio < 0.0
@@ -788,6 +703,13 @@ class MAPPOTrainer:
                     (),
                     dtype=torch.float32,
                     device=self.policy.device,
+                )
+                joint_expected_collision = expected_collision_loss(
+                    self.policy,
+                    batch,
+                    trainable_pairs if joint_collision_loss_weight > 0.0 else trainable_pairs[:0],
+                    selected_row_count=len(selected),
+                    rng=self._regularizer_rng,
                 )
                 if has_skill_anchor:
                     assert skill_anchor_observations is not None
@@ -942,6 +864,8 @@ class MAPPOTrainer:
                 task_actor_loss = (
                     actor_loss - effective_entropy_coef * entropy
                     + float(skill_anchor_weight) * skill_anchor_loss
+                    + float(joint_collision_loss_weight)
+                    * joint_expected_collision
                 )
                 gradient_metrics = {
                     "task_gradient_norm": 0.0,
@@ -957,7 +881,7 @@ class MAPPOTrainer:
                     and regularization_gradient_guard_ratio is not None
                 ):
                     actor_parameters = tuple(
-                        self.policy.network.actor_parameters()
+                        self.policy.network.ppo_actor_parameters()
                     )
                     task_gradients = torch.autograd.grad(
                         task_actor_loss,
@@ -1012,7 +936,7 @@ class MAPPOTrainer:
                         )
                     ).backward()
                 nn.utils.clip_grad_norm_(
-                    self.policy.network.actor_parameters(),
+                    self.policy.network.ppo_actor_parameters(),
                     cfg.max_grad_norm,
                 )
                 self.actor_optimizer.step()
@@ -1024,32 +948,37 @@ class MAPPOTrainer:
                 nn.utils.clip_grad_norm_(self.policy.network.critic.parameters(), cfg.max_grad_norm)
                 self.critic_optimizer.step()
 
-                metrics["actor_loss"] += float(actor_loss.detach().cpu())
-                metrics["critic_loss"] += float(critic_loss.detach().cpu())
-                metrics["entropy"] += float(entropy.detach().cpu())
-                metrics["skill_anchor_loss"] += float(
-                    skill_anchor_loss.detach().cpu()
+                tensor_metrics["actor_loss"] += actor_loss.detach()
+                tensor_metrics["critic_loss"] += critic_loss.detach()
+                tensor_metrics["entropy"] += entropy.detach()
+                tensor_metrics["skill_anchor_loss"] += skill_anchor_loss.detach()
+                tensor_metrics["skill_anchor_accuracy"] += (
+                    skill_anchor_accuracy.detach()
                 )
-                metrics["skill_anchor_accuracy"] += float(
-                    skill_anchor_accuracy.detach().cpu()
+                tensor_metrics["joint_expected_collision_loss"] += (
+                    joint_expected_collision.detach()
                 )
-                metrics["program_regularity_loss"] += float(
-                    program_regularity_loss.detach().cpu()
+                metrics["joint_collision_pair_updates"] += float(
+                    joint_collision_loss_weight > 0.0
+                    and len(trainable_pairs) > 0
                 )
-                metrics["program_complexity_loss"] += float(
-                    program_complexity_loss.detach().cpu()
+                tensor_metrics["program_regularity_loss"] += (
+                    program_regularity_loss.detach()
                 )
-                metrics["program_regularization_total_loss"] += float(
-                    program_regularization_objective.detach().cpu()
+                tensor_metrics["program_complexity_loss"] += (
+                    program_complexity_loss.detach()
                 )
-                metrics["mean_program_target_weight"] += float(
-                    mean_program_target_weight.detach().cpu()
+                tensor_metrics["program_regularization_total_loss"] += (
+                    program_regularization_objective.detach()
                 )
-                metrics["program_feedback_coverage"] += float(
-                    program_feedback_coverage.detach().cpu()
+                tensor_metrics["mean_program_target_weight"] += (
+                    mean_program_target_weight.detach()
                 )
-                metrics["program_lambda_active_fraction"] += float(
-                    program_lambda_active.detach().cpu()
+                tensor_metrics["program_feedback_coverage"] += (
+                    program_feedback_coverage.detach()
+                )
+                tensor_metrics["program_lambda_active_fraction"] += (
+                    program_lambda_active.detach()
                 )
                 metrics["task_actor_gradient_norm"] += gradient_metrics[
                     "task_gradient_norm"
@@ -1115,10 +1044,12 @@ class MAPPOTrainer:
                         cfg.max_grad_norm,
                     )
                     self.critic_optimizer.step()
-                    metrics["critic_masked_sample_loss"] += float(
-                        critic_only_loss.detach().cpu()
+                    tensor_metrics["critic_masked_sample_loss"] += (
+                        critic_only_loss.detach()
                     )
                     metrics["critic_masked_sample_updates"] += 1.0
+        for key, value in tensor_metrics.items():
+            metrics[key] = float(value.cpu())
         masked_divisor = max(1.0, metrics["critic_masked_sample_updates"])
         metrics["critic_masked_sample_loss"] /= masked_divisor
         divisor = max(1.0, metrics["updates"])
@@ -1141,6 +1072,7 @@ class MAPPOTrainer:
             "program_gradient_guard_saturation_fraction",
             "skill_anchor_loss",
             "skill_anchor_accuracy",
+            "joint_expected_collision_loss",
         ):
             metrics[key] /= divisor
         metrics["entropy_coef"] = effective_entropy_coef
@@ -1166,6 +1098,7 @@ class MAPPOTrainer:
         skill_anchor_observations: np.ndarray | None = None,
         skill_anchor_labels: np.ndarray | None = None,
         skill_anchor_weight: float = 0.0,
+        joint_collision_loss_weight: float = 0.0,
     ) -> dict[str, float]:
         """Run one PPO update over several complete on-policy trajectories."""
 
@@ -1289,6 +1222,7 @@ class MAPPOTrainer:
             skill_anchor_observations=skill_anchor_observations,
             skill_anchor_labels=skill_anchor_labels,
             skill_anchor_weight=skill_anchor_weight,
+            joint_collision_loss_weight=joint_collision_loss_weight,
         )
 
 
@@ -1334,10 +1268,12 @@ def _evaluation_summary(
     coordination_progress_reward: float = 0.0,
     path_actual_steps: float = 0.0,
     path_shortest_safe_steps: float = 0.0,
+    efficiency_agent_ids: Sequence[str] | None = None,
+    failure_seeds: Mapping[str, Sequence[int]] | None = None,
 ) -> dict[str, Any]:
     episode_count = max(1, len(training_rewards))
     total_steps = max(1, sum(steps))
-    agent_ids = ("robot_1", "robot_2")
+    agent_ids = tuple(efficiency_agent_ids or ("robot_1", "robot_2"))
     progress = dict(per_agent_progress_rewards or {})
     regret = dict(per_agent_counterfactual_regret_units or {})
     regret_penalties = dict(per_agent_counterfactual_regret_penalties or {})
@@ -1376,6 +1312,7 @@ def _evaluation_summary(
         ),
         "mean_minimum_battery": float(np.mean(minimum_batteries)),
         "mean_proxy_human_overrides": proxy_human_overrides / episode_count,
+        "efficiency_metric_agent_ids": list(agent_ids),
         "delivery_episode_rate": sum(value > 0 for value in deliveries) / episode_count,
         "deadlock_episode_rate": deadlock_episodes / episode_count,
         "mean_coordination_yield_events": yield_events / episode_count,
@@ -1396,6 +1333,10 @@ def _evaluation_summary(
             charger_return_cycles / episode_count
         ),
         "task_starvation_episode_rate": task_starvation_episodes / episode_count,
+        "avoidable_wait_rate": (
+            sum(int(wait_counts.get(agent_id, 0)) for agent_id in agent_ids)
+            / max(1, total_steps * len(agent_ids))
+        ),
         "mean_coordination_progress_reward": (
             coordination_progress_reward / episode_count
         ),
@@ -1433,11 +1374,40 @@ def _evaluation_summary(
         "user_score_samples": [float(value) for value in user_scores],
         "delivery_samples": [int(value) for value in deliveries],
         "collision_event_samples": [int(value) for value in collision_counts],
+        "failure_seeds": {
+            str(kind): [int(value) for value in values]
+            for kind, values in sorted((failure_seeds or {}).items())
+        },
         **{
             f"terminal_{reason}_rate": count / episode_count
             for reason, count in sorted(terminal_reasons.items())
         },
     }
+
+
+def _attributable_starving_task_ids(
+    info: Mapping[str, Any],
+    *,
+    excluded_agent_ids: Sequence[str] = (),
+) -> tuple[str, ...]:
+    """Limit starvation evidence to agents evaluated in this condition.
+
+    The environment assigns every reported starving task from frozen S_t.
+    A participant override is intentionally outside the neural Actor's
+    control, just like participant detours and waits, so multi-partner
+    evaluation must not attribute that participant's neglect to Robot 2.
+    """
+
+    task_ids = tuple(str(value) for value in info.get("starving_task_ids", ()))
+    assignees = info.get("starving_task_assignees", {})
+    if not isinstance(assignees, Mapping):
+        return task_ids
+    excluded = {str(value) for value in excluded_agent_ids}
+    return tuple(
+        task_id
+        for task_id in task_ids
+        if str(assignees.get(task_id, "")) not in excluded
+    )
 
 
 def evaluate_policy(
@@ -1447,12 +1417,15 @@ def evaluate_policy(
     episodes: int,
     seed: int,
     noisy_teammate_probability: float = 0.0,
+    partner_profile: str | None = None,
     deterministic: bool = True,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Evaluate robot 2 with an optional noisy robot 1 teammate."""
 
     if not 0.0 <= noisy_teammate_probability <= 1.0:
         raise ValueError("noisy_teammate_probability must be between zero and one.")
+    if partner_profile is not None and noisy_teammate_probability > 0.0:
+        raise ValueError("Choose partner_profile or noisy teammate noise, not both.")
 
     training_rewards: list[float] = []
     base_training_rewards: list[float] = []
@@ -1479,10 +1452,27 @@ def evaluate_policy(
     charger_return_cycles = 0
     task_starvation_episodes = 0
     efficiency = EfficiencyMetrics()
+    failure_seeds: dict[str, list[int]] = {
+        "collision": [],
+        "repeated_collision": [],
+        "shutdown": [],
+        "deadlock": [],
+        "charger_return_cycle": [],
+        "task_starvation": [],
+        "loaded_delivery_detour": [],
+    }
     rng = np.random.default_rng(seed + 17_000_000)
     for episode in range(episodes):
         environment = WarehouseMultiAgentEnv(environment_config)
         observations, _ = environment.reset(seed=seed + episode)
+        if partner_profile is not None or noisy_teammate_probability > 0.0:
+            participant_state = environment.get_state()
+            participant_state.participant_controlled_agent_id = (
+                environment.config.human_agent_id
+            )
+            environment.set_state(participant_state)
+            observations = environment.observations()
+        inference = policy.fork_for_inference(seed=seed + episode + 29_000_000)
         total_training_reward = 0.0
         total_base_training_reward = 0.0
         total_potential_shaping_reward = 0.0
@@ -1493,13 +1483,23 @@ def evaluate_policy(
         deadlocked = False
         episode_return_cycles = 0
         episode_starvation = False
+        episode_loaded_delivery_detours = 0
         minimum_battery_seen = min(
             agent.battery for agent in environment.get_state().agents
         )
         while True:
             participant_override_ids: tuple[str, ...] = ()
             participant_overrides: dict[str, str] = {}
-            if rng.random() < noisy_teammate_probability:
+            if partner_profile is not None:
+                human_id = environment.config.human_agent_id
+                participant_overrides[human_id] = participant_surrogate_action(
+                    environment,
+                    profile=partner_profile,
+                    rng=rng,
+                )
+                proxy_human_overrides += 1
+                participant_override_ids = (human_id,)
+            elif rng.random() < noisy_teammate_probability:
                 human_id = environment.config.human_agent_id
                 mask = environment.action_masks()[human_id]
                 if rng.random() < 0.50:
@@ -1515,10 +1515,15 @@ def evaluate_policy(
                     )
                 proxy_human_overrides += 1
                 participant_override_ids = (human_id,)
-            actions, _ = policy.act(
+            decision_state = environment.get_state()
+            actions, distributions = inference.act(
                 observations,
                 environment.global_state(),
                 deterministic=deterministic,
+                decision_key=(
+                    decision_state.episode_id,
+                    decision_state.frame,
+                ),
             )
             # Apply the simulated participant command only after both
             # independent Actor decisions have been produced from S_t.
@@ -1527,42 +1532,25 @@ def evaluate_policy(
             # replacement is the configured proxy-human action for robot 1;
             # robot 2 is never rewritten by a controller or program.
             state_before = environment.get_state()
-            final_targets = environment._resolve_motion(state_before, actions)[0]
-            for agent in state_before.agents:
-                if (
-                    agent.agent_id in participant_override_ids
-                    or agent.carrying_task_id is None
-                    or agent.navigation_goal_kind != "delivery"
-                    or environment._requires_charge(state_before, agent)
-                ):
-                    continue
-                current_distance = shortest_path_distance(
-                    agent.position,
-                    agent.navigation_goal_position,
-                    environment.config.map_layout_id,
-                )
-                final_distance = shortest_path_distance(
-                    final_targets[agent.agent_id],
-                    agent.navigation_goal_position,
-                    environment.config.map_layout_id,
-                )
-                if final_distance <= current_distance:
-                    continue
-                if is_necessary_urgent_charger_clearance(
-                    environment,
-                    state_before,
-                    agent,
-                ):
-                    continue
-                held_actions = dict(actions)
-                held_actions[agent.agent_id] = "WAIT"
-                if not environment._resolve_motion(
-                    state_before,
-                    held_actions,
-                )[3]:
-                    avoidable_loaded_delivery_detour_steps += 1
+            strict_loaded_detours = avoidable_loaded_delivery_detour_agents(
+                environment,
+                state_before,
+                actions,
+                excluded_agent_ids=participant_override_ids,
+            )
+            avoidable_loaded_delivery_detour_steps += len(strict_loaded_detours)
+            episode_loaded_delivery_detours += len(strict_loaded_detours)
             observations, reward, terminated, truncated, info = environment.step(
-                actions
+                actions,
+                decision_metadata=distribution_decision_metadata(
+                    distributions,
+                    decision_source=(
+                        "proxy_human_plus_pytorch_actor"
+                        if participant_overrides
+                        else "pytorch_actor_ai_ai"
+                    ),
+                    participant_overrides=participant_overrides,
+                ),
             )
             total_training_reward += float(np.mean(tuple(reward.values())))
             total_base_training_reward += float(
@@ -1571,7 +1559,10 @@ def evaluate_policy(
             total_potential_shaping_reward += float(
                 info.get("potential_shaping_reward", 0.0)
             )
-            efficiency.update_step(info)
+            efficiency.update_step(
+                info,
+                excluded_agent_ids=participant_override_ids,
+            )
             episode_steps += 1
             minimum_battery_seen = min(
                 minimum_battery_seen,
@@ -1595,9 +1586,13 @@ def evaluate_policy(
                 str(item.get("event", "")) == "charger_return_cycle"
                 for item in info.get("energy_events", ())
                 if isinstance(item, Mapping)
+                and str(item.get("agent_id", "")) not in participant_override_ids
             )
             episode_starvation = episode_starvation or bool(
-                info.get("starving_task_ids", ())
+                _attributable_starving_task_ids(
+                    info,
+                    excluded_agent_ids=participant_override_ids,
+                )
             )
             ineffective_joint_wait = bool(
                 all(
@@ -1637,7 +1632,25 @@ def evaluate_policy(
             for task in state.completed_tasks
             if task.delivered_frame is not None and task.claimed_frame is not None
         )
-        efficiency.update_completed_tasks(state)
+        efficiency.update_completed_tasks(
+            state,
+            excluded_agent_ids=participant_override_ids,
+        )
+        episode_seed = seed + episode
+        if collided:
+            failure_seeds["collision"].append(episode_seed)
+        if state.robot_collision_events > 1:
+            failure_seeds["repeated_collision"].append(episode_seed)
+        if shutdown:
+            failure_seeds["shutdown"].append(episode_seed)
+        if deadlocked:
+            failure_seeds["deadlock"].append(episode_seed)
+        if episode_return_cycles > 0:
+            failure_seeds["charger_return_cycle"].append(episode_seed)
+        if episode_starvation:
+            failure_seeds["task_starvation"].append(episode_seed)
+        if episode_loaded_delivery_detours > 0:
+            failure_seeds["loaded_delivery_detour"].append(episode_seed)
     return _evaluation_summary(
         training_rewards=training_rewards,
         base_training_rewards=base_training_rewards,
@@ -1665,6 +1678,10 @@ def evaluate_policy(
         charger_return_cycle_episodes=charger_return_cycle_episodes,
         charger_return_cycles=charger_return_cycles,
         task_starvation_episodes=task_starvation_episodes,
+        efficiency_agent_ids=(
+            ("robot_2",) if partner_profile is not None else None
+        ),
+        failure_seeds=failure_seeds,
         **efficiency.evaluation_kwargs(),
     )
 
@@ -1846,29 +1863,43 @@ def evaluate_head_on_yield_scenarios(
         environment = WarehouseMultiAgentEnv(environment_config)
         environment.reset(seed=seed + episode)
         reverse = bool(episode % 2)
-        apply_head_on_scenario(environment, reverse=reverse)
+        apply_head_on_scenario(
+            environment,
+            reverse=reverse,
+            variant=episode // 2,
+        )
         scenario_state = environment.get_state()
         robot_one = scenario_state.by_id("robot_1")
         robot_two = scenario_state.by_id("robot_2")
-        scenario_agents = tuple(
-            scenario_state.by_id(agent_id)
-            for agent_id in environment.agent_ids
-        )
-        priority_agent = min(
-            scenario_agents,
-            key=lambda agent: (
-                -int(agent.carrying_task_id is not None),
-                shortest_path_distance(
-                    agent.position,
-                    agent.navigation_goal_position,
-                    environment_config.map_layout_id,
-                ),
-                agent.agent_id,
+        scenario_goals = {
+            agent.agent_id: agent.navigation_goal_position
+            for agent in scenario_state.agents
+        }
+        scenario_goal_kinds = {
+            agent.agent_id: agent.navigation_goal_kind
+            for agent in scenario_state.agents
+        }
+        priority = coordination_priority(
+            scenario_state,
+            environment_config,
+            goal_positions=scenario_goals,
+            goal_kinds=scenario_goal_kinds,
+            requires_charge={
+                agent.agent_id: environment._requires_charge(
+                    scenario_state,
+                    agent,
+                )
+                for agent in scenario_state.agents
+            },
+            imminent_head_on=imminent_head_on_encounter(
+                scenario_state,
+                environment_config,
+                scenario_goals,
             ),
         )
         yielding_agent_id = (
             robot_two.agent_id
-            if priority_agent.agent_id == robot_one.agent_id
+            if priority.agent_id == robot_one.agent_id
             else robot_one.agent_id
         )
         initial_yielding_position = environment.get_state().by_id(
@@ -1908,7 +1939,7 @@ def evaluate_head_on_yield_scenarios(
             wait_streak = wait_streak + 1 if ineffective_wait else 0
             current_state = environment.get_state()
             passage_completed = (
-                current_state.by_id(priority_agent.agent_id).position
+                current_state.by_id(priority.agent_id).position
                 == initial_yielding_position
                 and current_state.by_id(yielding_agent_id).position
                 != initial_yielding_position

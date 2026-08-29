@@ -1,0 +1,110 @@
+{
+  "model_version": "warehouse_mappo_v64_compact8_forecast_isolated_actor",
+  "checkpoint": "warehouse_mappo_v64.pt",
+  "checkpoint_sha256": "2103d516461565ae5edb029bb7e61a044985a49fc94cee75b13881d8461167b2",
+  "render_actor": "warehouse_mappo_v64_actor.npz",
+  "render_actor_sha256": "c877b91c81af7efaa47129da1f77a02e0813bbb14023629943f8c414ccd9ee21",
+  "formal_evaluation": "/Users/zhangyuang/Desktop/ICLR/XAI/output/collaborative/simultaneous_compact8_v57_forecast_isolated/formal_evaluation.json",
+  "formal_evaluation_sha256": "629bd5fd6bdccf9a2a198fe967a1a7338cd3a5b2e9046e0ea69ca40789753fb9",
+  "protocol": {
+    "execution": "independent simultaneous stochastic actor",
+    "episodes_per_seed_range": 100,
+    "post_policy_action_interventions": 0
+  },
+  "seed_ranges": {
+    "25000004-25000103": {
+      "mean_deliveries": 7.91,
+      "deliveries_per_100_steps": 6.591666666666667,
+      "collision_episode_rate": 0.0,
+      "mean_robot_collision_events": 0.0,
+      "maximum_robot_collision_events": 0.0,
+      "repeated_collision_episode_rate": 0.0,
+      "shutdown_episode_rate": 0.0,
+      "deadlock_episode_rate": 0.01,
+      "avoidable_wait_rate": 0.003916666666666666,
+      "mean_charger_use_steps": 26.39,
+      "path_efficiency_actual_over_shortest_safe": 1.0012185215272136,
+      "mean_post_policy_action_interventions": 0.0,
+      "charger_departure_return_cycle_episode_rate": 0.0,
+      "task_starvation_episode_rate": 0.0,
+      "avoidable_loaded_delivery_detour_steps": 0.0
+    },
+    "25100004-25100103": {
+      "mean_deliveries": 7.96,
+      "deliveries_per_100_steps": 6.633333333333334,
+      "collision_episode_rate": 0.0,
+      "mean_robot_collision_events": 0.0,
+      "maximum_robot_collision_events": 0.0,
+      "repeated_collision_episode_rate": 0.0,
+      "shutdown_episode_rate": 0.0,
+      "deadlock_episode_rate": 0.0,
+      "avoidable_wait_rate": 0.0033333333333333335,
+      "mean_charger_use_steps": 25.91,
+      "path_efficiency_actual_over_shortest_safe": 1.0005364806866952,
+      "mean_post_policy_action_interventions": 0.0,
+      "charger_departure_return_cycle_episode_rate": 0.0,
+      "task_starvation_episode_rate": 0.01,
+      "avoidable_loaded_delivery_detour_steps": 0.0
+    }
+  },
+  "noisy_teammate_20_percent": {
+    "mean_deliveries": 6.09,
+    "deliveries_per_100_steps": 5.105633802816901,
+    "collision_episode_rate": 0.25,
+    "mean_robot_collision_events": 0.29,
+    "maximum_robot_collision_events": 2.0,
+    "repeated_collision_episode_rate": 0.04,
+    "shutdown_episode_rate": 0.02,
+    "deadlock_episode_rate": 0.05,
+    "avoidable_wait_rate": 0.013958752515090543,
+    "mean_charger_use_steps": 24.03,
+    "path_efficiency_actual_over_shortest_safe": 1.1018250042640287,
+    "mean_post_policy_action_interventions": 0.0,
+    "charger_departure_return_cycle_episode_rate": 0.1,
+    "task_starvation_episode_rate": 0.16,
+    "avoidable_loaded_delivery_detour_steps": 0.0
+  },
+  "release_gates": {
+    "strict_formal_evaluation_passed": true,
+    "supplemental_seed_ranges_pass": true,
+    "tutorial_has_120_steps": true,
+    "tutorial_has_delivery": true,
+    "tutorial_has_charging": true,
+    "tutorial_has_no_shutdown": true
+  },
+  "supplemental_gates": {
+    "mean_deliveries_ge_6": true,
+    "collision_episode_rate_le_0_01": true,
+    "maximum_collision_events_le_1": true,
+    "repeated_collision_rate_eq_0": true,
+    "shutdown_episode_rate_le_0_01": true,
+    "deadlock_episode_rate_le_0_01": true,
+    "avoidable_wait_rate_le_0_005": true,
+    "charger_use_positive": true,
+    "path_efficiency_le_1_10": true,
+    "charger_return_cycle_rate_le_0_01": true,
+    "task_starvation_rate_le_0_05": true,
+    "avoidable_loaded_delivery_detours_eq_0": true,
+    "post_policy_action_interventions_eq_0": true
+  },
+  "tutorial": {
+    "seed": 40221,
+    "steps": 120,
+    "deliveries": 5,
+    "robot_collision_events": 0,
+    "shutdowns": 0,
+    "charging_steps": 32,
+    "events": [
+      "charger_departure",
+      "charger_productive_return",
+      "charger_queue",
+      "claimed",
+      "coordination_yield",
+      "created",
+      "delivered",
+      "head_on_conflict_risk",
+      "occupied_cell_clearance_wait"
+    ],
+    "terminal_reason": "horizon"
+  }
+}

@@ -19,8 +19,11 @@ from env.warehouse.environment import (
     shortest_path_distance,
 )
 from env.warehouse.mappo import MAPPOConfig, MAPPOPolicy, MAPPOTrainer
+from env.warehouse import scenario_evaluation as scenario_evaluation_module
 from env.warehouse.observations import _coordination_features, observation_dim
 from env.warehouse.navigation import ACTIONS
+from env.warehouse.layouts import STAGGERED_AISLES_LAYOUT
+from env.warehouse.contracts import RUNTIME_CONTROLLER
 from env.warehouse.scenarios import (
     apply_charger_handoff_scenario,
     apply_critical_charger_approach_scenario,
@@ -28,9 +31,14 @@ from env.warehouse.scenarios import (
     apply_head_on_scenario,
     apply_same_target_conflict_scenario,
 )
+from env.warehouse.coordination import stable_coordination_actions
+from env.warehouse.energy_management import (
+    charge_release_energy,
+    charger_service_required,
+)
 
 
-def test_goal_clearance_curriculum_labels_joint_follow_through() -> None:
+def test_goal_clearance_curriculum_labels_two_step_follow_through() -> None:
     config = WarehouseConfig(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=819)
@@ -40,20 +48,55 @@ def test_goal_clearance_curriculum_labels_joint_follow_through() -> None:
     labels = train_module._safe_navigation_teacher_actions(environment)
     targets = environment._resolve_motion(state, labels)[0]
 
-    assert targets["robot_1"] == state.by_id("robot_1").navigation_goal_position
+    assert targets["robot_1"] == state.by_id("robot_1").position
     assert targets["robot_2"] != state.by_id("robot_2").position
+
+    environment.step(labels)
+    next_state = environment.get_state()
+    next_labels = train_module._safe_navigation_teacher_actions(environment)
+    next_targets = environment._resolve_motion(next_state, next_labels)[0]
+    assert (
+        next_targets["robot_1"]
+        == state.by_id("robot_1").navigation_goal_position
+    )
     assert "junction_conflict" in train_module.STRONG_ACTOR_CORRECTION_CATEGORIES
 from env.warehouse.policy import (
     independent_actor_input,
 )
 from backend.training import warehouse as train_module
 from backend.training import learner_dataset as learner_dataset_module
+from backend.training import partner_risk as partner_risk_module
 from backend.training.learner_replay import (
     MAXIMUM_OVERSAMPLE_FACTOR,
     REPLAY_CATEGORIES,
     fit_actor_supervised,
 )
 from backend.training.learner_dataset import best_unilateral_mission_action
+
+
+def test_partner_risk_all_scope_updates_participant_forecast_parameters() -> None:
+    config = WarehouseConfig(horizon=8)
+    policy = MAPPOPolicy(
+        config,
+        MAPPOConfig(hidden_dim=16, intent_dim=8, seed=2_621),
+    )
+    selected_ids = {
+        id(parameter)
+        for parameter in partner_risk_module._optimization_parameters(
+            policy,
+            "all",
+        )
+    }
+    participant_forecast_ids = {
+        id(parameter)
+        for parameter in policy.network.participant_context_predictor.parameters()
+    }
+
+    assert participant_forecast_ids
+    assert participant_forecast_ids.issubset(selected_ids)
+    assert participant_forecast_ids.isdisjoint(
+        {id(parameter) for parameter in policy.network.ppo_actor_parameters()}
+    )
 
 
 def test_rcpd_has_no_synthetic_probe_rows_and_training_states_are_passable() -> None:
@@ -84,6 +127,30 @@ def test_rcpd_has_no_synthetic_probe_rows_and_training_states_are_passable() -> 
     )
     assert coverage["head_on_rows"] > 0
     assert coverage["counterfactual_teammate_rows"] == 0
+
+
+def test_learner_relabel_can_return_same_state_teammate_labels() -> None:
+    config = WarehouseConfig(horizon=12)
+    policy = MAPPOPolicy(
+        config,
+        MAPPOConfig(hidden_dim=16, update_epochs=1, minibatch_size=32, seed=311),
+    )
+
+    rows, labels, teammate_labels, categories, coverage = (
+        train_module._collect_learner_state_relabel_dataset(
+            policy,
+            config,
+            sample_count=48,
+            seed=18_811,
+            include_teammate_labels=True,
+        )
+    )
+
+    assert rows.shape == (48, observation_dim(config))
+    assert labels.shape == teammate_labels.shape == categories.shape == (48,)
+    assert np.any(teammate_labels >= 0)
+    assert np.all(teammate_labels < len(ACTIONS))
+    assert coverage["ordinary_rows"] > 0
 
 
 def test_relabel_schedule_is_independent_of_episode_batch_size() -> None:
@@ -229,7 +296,18 @@ def test_collision_miner_labels_pair_but_executes_actor_collision(
             variant=0,
         ),
     )
-    actor_collision = {"robot_1": "RIGHT", "robot_2": "UP"}
+    original_reset(seed=914)
+    apply_same_target_conflict_scenario(environment, variant=0)
+    conflict_state = environment.get_state()
+    actor_collision = next(
+        {"robot_1": first, "robot_2": second}
+        for first in ACTIONS
+        for second in ACTIONS
+        if environment._resolve_motion(
+            conflict_state,
+            {"robot_1": first, "robot_2": second},
+        )[3]
+    )
     policy = SimpleNamespace(
         act=lambda *_args, **_kwargs: (dict(actor_collision), {})
     )
@@ -385,7 +463,7 @@ def test_wait_stall_gets_offline_progress_label_without_action_intervention(
     )
 
 
-def test_unilateral_mission_correction_prefers_delivery_progress() -> None:
+def test_unilateral_mission_correction_never_enters_peer_frozen_cell() -> None:
     environment = WarehouseMultiAgentEnv(WarehouseConfig())
     environment.reset(seed=100091)
     state = environment.get_state()
@@ -410,22 +488,9 @@ def test_unilateral_mission_correction_prefers_delivery_progress() -> None:
     correction = best_unilateral_mission_action(
         environment,
         state,
-        {"robot_1": "UP", "robot_2": "DOWN"},
         agent_id="robot_1",
     )
-    targets = environment._resolve_motion(
-        state,
-        {"robot_1": correction, "robot_2": "DOWN"},
-    )[0]
-
-    assert correction == "LEFT"
-    assert shortest_path_distance(
-        targets["robot_1"],
-        state.by_id("robot_1").navigation_goal_position,
-    ) < shortest_path_distance(
-        state.by_id("robot_1").position,
-        state.by_id("robot_1").navigation_goal_position,
-    )
+    assert correction == "WAIT"
 
 
 def test_learner_state_replay_balances_rare_collision_rows() -> None:
@@ -597,8 +662,306 @@ def test_low_battery_charger_occupant_charges_while_teammate_queues_safely() -> 
     assert targets["robot_1"] == before.by_id("robot_1").position
 
 
+def test_lower_battery_waiter_receives_two_phase_charger_handoff() -> None:
+    environment = WarehouseMultiAgentEnv(
+        WarehouseConfig(horizon=8, participant_detour_scoring=False)
+    )
+    environment.reset(seed=940)
+    apply_charger_handoff_scenario(
+        environment,
+        occupant_agent_id="robot_2",
+        occupant_battery=58.0,
+        queued_battery=36.0,
+        occupant_carrying=True,
+        queued_carrying=True,
+    )
+
+    before = environment.get_state()
+    occupant_priority = _coordination_features(
+        before,
+        "robot_2",
+        environment.config,
+    )[6:8]
+    waiter_priority = _coordination_features(
+        before,
+        "robot_1",
+        environment.config,
+    )[6:8]
+    teacher = train_module.stable_coordination_actions(environment)
+    targets, _, invalid, collision, _, _ = environment._resolve_motion(
+        before,
+        teacher,
+    )
+
+    assert teacher["robot_2"] in {"LEFT", "RIGHT"}
+    assert teacher["robot_1"] == "WAIT"
+    assert occupant_priority == [0.0, 1.0]
+    assert waiter_priority == [1.0, 0.0]
+    assert not invalid
+    assert not collision
+    assert targets["robot_1"] == before.by_id("robot_1").position
+
+    waiting = WarehouseMultiAgentEnv(
+        WarehouseConfig(horizon=8, participant_detour_scoring=False)
+    )
+    waiting.reset(seed=940)
+    waiting.set_state(before)
+    _, _, _, _, wait_info = waiting.step(
+        {"robot_1": "WAIT", "robot_2": "WAIT"}
+    )
+    _, _, _, _, teacher_info = environment.step(teacher)
+
+    assert wait_info["counterfactual_regret_units"] == {
+        "robot_1": 0.0,
+        "robot_2": 1.0,
+    }
+    assert wait_info["avoidable_wait_agents"] == ("robot_2",)
+    assert wait_info["joint_wait_escape_actions"] == teacher
+    assert teacher_info["counterfactual_regret_units"] == {
+        "robot_1": 0.0,
+        "robot_2": 0.0,
+    }
+
+
+def test_lower_battery_charger_occupant_retains_station() -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=8))
+    environment.reset(seed=940)
+    apply_charger_handoff_scenario(
+        environment,
+        occupant_agent_id="robot_2",
+        occupant_battery=20.0,
+        queued_battery=24.0,
+        occupant_carrying=True,
+        queued_carrying=True,
+    )
+
+    before = environment.get_state()
+    occupant_priority = _coordination_features(
+        before,
+        "robot_2",
+        environment.config,
+    )[6:8]
+    teacher = train_module.stable_coordination_actions(environment)
+    targets, _, invalid, collision, _, _ = environment._resolve_motion(
+        before,
+        teacher,
+    )
+
+    assert environment._requires_charge(before, before.by_id("robot_2"))
+    assert teacher == {"robot_1": "WAIT", "robot_2": "WAIT"}
+    assert occupant_priority == [1.0, 0.0]
+    assert not invalid
+    assert not collision
+    assert targets == {
+        agent.agent_id: agent.position
+        for agent in before.agents
+    }
+
+
+def test_small_charger_energy_gap_does_not_create_one_wait_ping_pong() -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment.reset(seed=940)
+    apply_charger_handoff_scenario(
+        environment,
+        occupant_agent_id="robot_2",
+        occupant_battery=38.0,
+        queued_battery=30.0,
+        occupant_carrying=True,
+        queued_carrying=True,
+    )
+
+    state = environment.get_state()
+    teacher = stable_coordination_actions(environment)
+    occupant_priority = _coordination_features(
+        state,
+        "robot_2",
+        environment.config,
+    )[6:8]
+
+    assert teacher == {"robot_1": "WAIT", "robot_2": "WAIT"}
+    assert occupant_priority == [1.0, 0.0]
+
+
+def test_hysteretic_charging_wait_is_not_relabelled_as_joint_escape() -> None:
+    environment = WarehouseMultiAgentEnv(
+        WarehouseConfig(horizon=120, participant_detour_scoring=False)
+    )
+    environment.reset(seed=1)
+    state = environment.get_state()
+    charger_row, charger_column = environment.layout.charger_position
+    occupant = state.by_id("robot_2")
+    waiter = state.by_id("robot_1")
+    occupant.position = environment.layout.charger_position
+    occupant.battery = 50.0
+    occupant.charge_mode_active = True
+    occupant.navigation_goal_kind = "charge"
+    occupant.navigation_goal_position = environment.layout.charger_position
+    waiter.position = (charger_row, charger_column + 1)
+    waiter.battery = 46.0
+    waiter.charge_mode_active = True
+    waiter.navigation_goal_kind = "charge"
+    waiter.navigation_goal_position = environment.layout.charger_position
+    environment.set_state(state)
+    before = environment.get_state()
+    occupant = before.by_id("robot_2")
+
+    assert not environment._requires_charge(before, occupant)
+    assert occupant.battery < charge_release_energy(
+        environment,
+        before,
+        occupant,
+    )
+    assert charger_service_required(environment, before, occupant)
+    assert stable_coordination_actions(environment) == {
+        "robot_1": "WAIT",
+        "robot_2": "WAIT",
+    }
+
+    _, _, _, _, info = environment.step(
+        {"robot_1": "WAIT", "robot_2": "WAIT"}
+    )
+
+    assert info["counterfactual_regret_units"] == {
+        "robot_1": 0.0,
+        "robot_2": 0.0,
+    }
+    assert info["avoidable_wait_agents"] == ()
+    assert info["joint_wait_escape_actions"] == {}
+
+
+def test_actor_leaves_charger_after_charge_goal_releases() -> None:
+    config = WarehouseConfig(horizon=120)
+    environment = WarehouseMultiAgentEnv(config)
+    environment.reset(seed=941)
+    state = environment.get_state()
+    robot = state.by_id("robot_1")
+    task = state.tasks[0]
+    robot.position = environment.layout.charger_position
+    robot.battery = 80.0
+    robot.charge_mode_active = False
+    robot.carrying_task_id = task.task_id
+    task.status = "carried"
+    task.carrier_agent_id = robot.agent_id
+    task.delivery_position = (5, 4)
+    environment.set_state(state)
+
+    before = environment.get_state()
+    assert before.by_id(robot.agent_id).navigation_goal_kind == "delivery"
+    assert not charger_service_required(
+        environment,
+        before,
+        before.by_id(robot.agent_id),
+    )
+    policy = MAPPOPolicy(
+        config,
+        MAPPOConfig(hidden_dim=16, intent_dim=8, seed=942),
+    )
+
+    actions, distributions = policy.act(
+        environment.observations(),
+        environment.global_state(),
+        deterministic=True,
+    )
+
+    assert actions[robot.agent_id] != "WAIT"
+    assert (
+        distributions[robot.agent_id].probabilities[ACTIONS.index("WAIT")]
+        < 1e-6
+    )
+
+
+def test_actor_enters_empty_charger_after_productive_causal_handoff() -> None:
+    config = WarehouseConfig(horizon=120)
+    environment = WarehouseMultiAgentEnv(config)
+    environment.reset(seed=942)
+    state = environment.get_state()
+    state.frame = 46
+    charger_row, charger_column = environment.layout.charger_position
+    returning = state.by_id("robot_1")
+    teammate = state.by_id("robot_2")
+    returning.position = (charger_row, charger_column + 1)
+    returning.battery = 30.0
+    returning.navigation_goal_kind = "charge"
+    returning.navigation_goal_position = environment.layout.charger_position
+    returning.charge_mode_active = True
+    returning.last_charger_departure_frame = 42
+    returning.team_deliveries_at_last_charger_departure = state.total_deliveries
+    teammate.position = (charger_row, charger_column - 1)
+    teammate.battery = 46.0
+    teammate.last_action = "LEFT"
+    teammate.last_executed_action = "LEFT"
+    teammate.last_battery_delta = -config.move_battery_cost
+    teammate.steps_since_charging = 1
+    teammate.last_charger_departure_frame = state.frame
+    teammate.navigation_goal_kind = "wait"
+    teammate.navigation_goal_position = teammate.position
+    environment.set_state(state)
+    observations = environment.observations()
+    policy = MAPPOPolicy(
+        config,
+        MAPPOConfig(hidden_dim=16, intent_dim=8, seed=943),
+    )
+
+    actions, distributions = policy.act(
+        observations,
+        environment.global_state(),
+        deterministic=True,
+    )
+    entry = "LEFT"
+
+    assert stable_coordination_actions(environment)["robot_1"] == entry
+    assert actions["robot_1"] == entry
+    assert (
+        distributions["robot_1"].probabilities[ACTIONS.index(entry)]
+        > distributions["robot_1"].probabilities[ACTIONS.index("WAIT")]
+    )
+
+
+def test_actor_does_not_immediately_reverse_into_charger_without_progress() -> None:
+    config = WarehouseConfig(horizon=120)
+    environment = WarehouseMultiAgentEnv(config)
+    environment.reset(seed=944)
+    state = environment.get_state()
+    state.frame = 109
+    charger_row, charger_column = environment.layout.charger_position
+    returning = state.by_id("robot_1")
+    teammate = state.by_id("robot_2")
+    returning.position = (charger_row - 1, charger_column)
+    returning.battery = 70.0
+    returning.carrying_task_id = None
+    returning.navigation_goal_kind = "wait"
+    returning.navigation_goal_position = returning.position
+    returning.last_charger_departure_frame = state.frame
+    returning.team_deliveries_at_last_charger_departure = state.total_deliveries
+    teammate.position = (charger_row - 2, charger_column - 1)
+    teammate.steps_since_charging = 8
+    environment.set_state(state)
+    policy = MAPPOPolicy(
+        config,
+        MAPPOConfig(hidden_dim=16, intent_dim=8, seed=945),
+    )
+
+    actions, distributions = policy.act(
+        environment.observations(),
+        environment.global_state(),
+        deterministic=True,
+    )
+    reverse = "DOWN"
+
+    assert actions["robot_1"] != reverse
+    assert (
+        distributions["robot_1"].probabilities[ACTIONS.index(reverse)]
+        < distributions["robot_1"].probabilities[ACTIONS.index("WAIT")]
+    )
+
+
 def test_offline_teacher_clears_a_delivery_goal_without_blocking_the_loaded_robot() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig())
+    legacy_config = WarehouseConfig(
+        rows=STAGGERED_AISLES_LAYOUT.rows,
+        cols=STAGGERED_AISLES_LAYOUT.cols,
+        map_layout_id=STAGGERED_AISLES_LAYOUT.layout_id,
+    )
+    environment = WarehouseMultiAgentEnv(legacy_config)
     environment.reset(seed=100)
     state = environment.get_state()
     delivery_task, available_task = state.tasks
@@ -626,14 +989,29 @@ def test_offline_teacher_clears_a_delivery_goal_without_blocking_the_loaded_robo
     before = environment.get_state()
     targets = environment._resolve_motion(before, teacher)[0]
 
-    assert teacher == {"robot_1": "RIGHT", "robot_2": "UP"}
-    assert targets["robot_1"] != before.by_id("robot_2").navigation_goal_position
+    # Robot 2 cannot assume that Robot 1 will vacate or avoid its next route
+    # cell in the same frame.  Clear Robot 1 first, then advance from the next
+    # frozen state; the old simultaneous exact-action assertion encoded a
+    # current-frame action dependency.
+    assert teacher["robot_1"] != "WAIT"
+    assert teacher["robot_2"] == "WAIT"
+    assert targets["robot_1"] not in {
+        before.by_id("robot_2").navigation_goal_position,
+        (3, 5),
+    }
+    environment.step(teacher)
+    cleared = environment.get_state()
+    follow = train_module.stable_coordination_actions(environment)
+    follow_targets = environment._resolve_motion(cleared, follow)[0]
+    assert follow["robot_2"] != "WAIT"
     assert shortest_path_distance(
-        targets["robot_2"],
-        before.by_id("robot_2").navigation_goal_position,
+        follow_targets["robot_2"],
+        cleared.by_id("robot_2").navigation_goal_position,
+        legacy_config.map_layout_id,
     ) < shortest_path_distance(
-        before.by_id("robot_2").position,
-        before.by_id("robot_2").navigation_goal_position,
+        cleared.by_id("robot_2").position,
+        cleared.by_id("robot_2").navigation_goal_position,
+        legacy_config.map_layout_id,
     )
 
 
@@ -864,6 +1242,42 @@ def test_supervised_actor_fit_updates_structured_neural_action_modules() -> None
     )
 
 
+def test_ppo_update_preserves_supervised_peer_forecast_parameters() -> None:
+    config = WarehouseConfig(horizon=6)
+    policy = MAPPOPolicy(
+        config,
+        MAPPOConfig(hidden_dim=16, update_epochs=1, minibatch_size=32, seed=235),
+    )
+    trainer = MAPPOTrainer(policy)
+    environment = WarehouseMultiAgentEnv(config)
+    batch = trainer.collect_episode(environment, seed=2916)
+    forecast_before = tuple(
+        parameter.detach().clone()
+        for module in (
+            policy.network.teammate_action_predictor,
+            policy.network.teammate_context_predictor,
+            policy.network.participant_context_predictor,
+        )
+        for parameter in module.parameters()
+    )
+
+    trainer.update(batch)
+
+    forecast_after = tuple(
+        parameter.detach()
+        for module in (
+            policy.network.teammate_action_predictor,
+            policy.network.teammate_context_predictor,
+            policy.network.participant_context_predictor,
+        )
+        for parameter in module.parameters()
+    )
+    assert all(
+        torch.equal(before, after)
+        for before, after in zip(forecast_before, forecast_after)
+    )
+
+
 def test_joint_wait_escape_margin_strongly_separates_motion_from_wait() -> None:
     config = WarehouseConfig(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
@@ -1058,6 +1472,74 @@ def test_periodic_head_on_evaluation_uses_current_alternating_shelf_map() -> Non
 
     assert result["episodes"] == 2.0
     assert result["success_rate"] == 0.0
+
+
+def test_formal_compact_coordination_scenarios_measure_completed_outcomes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = WarehouseConfig(horizon=120)
+    active_environments: list[WarehouseMultiAgentEnv] = []
+    real_environment = WarehouseMultiAgentEnv
+
+    class TrackingEnvironment(real_environment):
+        def __init__(self, environment_config: WarehouseConfig) -> None:
+            super().__init__(environment_config)
+            active_environments.append(self)
+
+    class FrozenStateTeacherInference:
+        def act(self, *_args, **_kwargs):
+            return stable_coordination_actions(active_environments[-1]), {}
+
+    class FrozenStateTeacherPolicy:
+        environment_config = config
+
+        @staticmethod
+        def fork_for_inference(*_args, **_kwargs):
+            return FrozenStateTeacherInference()
+
+    monkeypatch.setattr(
+        scenario_evaluation_module,
+        "WarehouseMultiAgentEnv",
+        TrackingEnvironment,
+    )
+    policy = FrozenStateTeacherPolicy()
+    empty = scenario_evaluation_module.evaluate_empty_delivery_clearance_scenarios(
+        policy,  # type: ignore[arg-type]
+        config,
+        episodes=16,
+        seed=4_500,
+    )
+    dual = scenario_evaluation_module.evaluate_dual_charger_approach_scenarios(
+        policy,  # type: ignore[arg-type]
+        config,
+        episodes=16,
+        seed=4_600,
+    )
+    outer = scenario_evaluation_module.evaluate_outer_exit_charger_approach_scenarios(
+        policy,  # type: ignore[arg-type]
+        config,
+        episodes=48,
+        seed=4_700,
+    )
+    occupied = scenario_evaluation_module.evaluate_occupied_charger_handoff_scenarios(
+        policy,  # type: ignore[arg-type]
+        config,
+        episodes=32,
+        seed=4_800,
+    )
+
+    assert empty["success_rate"] == 1.0
+    assert empty["collision_rate"] == 0.0
+    assert empty["mean_completion_steps"] == 2.0
+    assert dual["success_rate"] == 1.0
+    assert dual["collision_rate"] == 0.0
+    assert dual["return_cycles_per_episode"] == 0.0
+    assert outer["success_rate"] == 1.0
+    assert outer["collision_rate"] == 0.0
+    assert outer["mean_completion_steps"] == 3.0
+    assert occupied["success_rate"] == 1.0
+    assert occupied["collision_rate"] == 0.0
+    assert occupied["priority_violation_rate"] == 0.0
 
 
 def _program() -> ExecutableProgram:
@@ -1313,13 +1795,12 @@ def test_program_regularization_json_contains_required_research_metrics() -> Non
     )
 
     assert summary["mode"] == "posthoc_extraction"
-    assert summary["runtime_controller"] == (
-        "mappo_independent_actor_simultaneous_execution"
-    )
+    assert summary["runtime_controller"] == RUNTIME_CONTROLLER
     assert summary["lambda_extract"] == 0.0
     assert summary["complexity_lambda"] == pytest.approx(0.001)
     assert summary["extraction_interval"] == 500
-    assert summary["program_target_temperature"] == 1.0
+    assert summary["program_target_temperature"] == 1.5
+    assert summary["action_structure_weight"] == pytest.approx(0.25)
     assert summary["minimum_counterfactual_pairs"] == 100
     assert summary["feedback_target"] == "none_posthoc_only"
     assert summary["reward"] == 245.3

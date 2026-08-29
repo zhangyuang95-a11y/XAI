@@ -59,13 +59,14 @@ def test_web_state_serialization_uses_shared_tasks_and_can_hide_policy() -> None
 def test_web_map_payload_matches_current_fixed_geometry() -> None:
     payload = warehouse_map_payload()
 
-    assert payload["rows"] == 10
-    assert payload["cols"] == 11
+    assert payload["rows"] == 8
+    assert payload["cols"] == 9
     assert "delivery_position" not in payload
-    assert payload["charger_position"] == [9, 5]
+    assert payload["charger_position"] == [7, 4]
     assert "yield_bays" not in payload
-    assert payload["robot_start_positions"] == [[9, 4], [9, 6]]
-    assert len(payload["shelves"]) == 57
+    assert payload["robot_start_positions"] == [[7, 3], [7, 5]]
+    assert payload["robot_exit_positions"] == [[6, 3], [6, 4], [6, 5]]
+    assert len(payload["shelves"]) == 37
     assert payload["shared_delivery_tasks"] is True
 
 
@@ -451,7 +452,9 @@ def test_frontend_uses_one_command_per_action_and_current_controls() -> None:
     assert "function animateOnce" in source
     assert "function animateLoop" in source
     assert "interpolateTransition" in source
-    assert "await animateOnce(view, view.transition, 400)" in source
+    assert "await animateOnce(beforeView, view.transition, 400)" in source
+    assert "paintView(view, true)" in source
+    assert "transition.before_state" in source
     assert "elapsed < 600" in source
     assert "elapsed < 850" in source
     assert "elapsed < 925" in source

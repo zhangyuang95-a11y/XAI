@@ -8,6 +8,10 @@ from typing import Any
 import numpy as np
 
 from .contracts import OBSERVATION_CONTRACT_VERSION
+from .coordination_priority import (
+    coordination_priority,
+    imminent_head_on_encounter,
+)
 from .domain import WarehouseConfig, WarehouseState
 from .navigation import (
     ACTIONS,
@@ -21,6 +25,67 @@ from .layouts import get_map_layout
 
 
 NAVIGATION_GOAL_KINDS = ("pickup", "delivery", "charge", "wait")
+
+
+def teammate_goal_kind_start(
+    *,
+    max_agents: int,
+    active_task_count: int,
+    action_dim: int,
+) -> int:
+    """Return the first teammate goal one-hot offset in a local observation."""
+
+    return (
+        34
+        + int(max_agents)
+        + 3 * int(action_dim)
+        + 23 * int(active_task_count)
+    )
+
+
+def own_frames_since_charger_departure_index(*, action_dim: int) -> int:
+    """Return the own recent-energy departure-age feature offset."""
+
+    return 24 + 2 * int(action_dim) + 5
+
+
+def teammate_steps_since_charging_index(
+    *,
+    max_agents: int,
+    active_task_count: int,
+    action_dim: int,
+) -> int:
+    """Return the teammate recent-energy charge-age feature offset."""
+
+    return (
+        teammate_goal_kind_start(
+            max_agents=max_agents,
+            active_task_count=active_task_count,
+            action_dim=action_dim,
+        )
+        + len(NAVIGATION_GOAL_KINDS)
+        + int(action_dim)
+        + 13
+    )
+
+
+def teammate_legal_action_mask_start(
+    *,
+    max_agents: int,
+    active_task_count: int,
+    action_dim: int,
+) -> int:
+    """Return the first frozen teammate legal-action bit."""
+
+    return (
+        teammate_goal_kind_start(
+            max_agents=max_agents,
+            active_task_count=active_task_count,
+            action_dim=action_dim,
+        )
+        + len(NAVIGATION_GOAL_KINDS)
+        + 7
+    )
 
 
 def _normalize_delta(value: int, limit: int) -> float:
@@ -162,6 +227,7 @@ def _recent_energy_features(
         max(-1.0, min(1.0, agent.last_battery_delta / config.charge_per_wait)),
         min(1.0, agent.steps_since_charging / max(1, config.horizon)),
         min(1.0, agent.charger_wait_streak / 10.0),
+        float(agent.charge_mode_active),
         min(1.0, agent.avoidable_wait_streak / 5.0),
         min(1.0, frames_since_departure / max(1, config.horizon)),
         float(frames_since_departure <= 4),
@@ -275,27 +341,36 @@ def _coordination_features(
         ),
         default=config.rows * config.cols,
     )
-    own_loaded = agent.carrying_task_id is not None
-    other_loaded = other.carrying_task_id is not None
-    own_priority_key = (
-        -int(own_loaded),
-        shortest_path_distance(
-            agent.position,
-            own_goal_position,
-            config.map_layout_id,
+    visible_goals = {
+        agent.agent_id: own_goal_position,
+        other.agent_id: other_goal_position,
+    }
+    visible_goal_kinds = {
+        agent.agent_id: own_goal_kind,
+        other.agent_id: other_goal_kind,
+    }
+    priority = coordination_priority(
+        state,
+        config,
+        goal_positions=visible_goals,
+        goal_kinds=visible_goal_kinds,
+        requires_charge={
+            agent.agent_id: bool(
+                agent.navigation_goal_kind == "charge"
+                or agent.charge_mode_active
+            ),
+            other.agent_id: bool(
+                other.navigation_goal_kind == "charge"
+                or other.charge_mode_active
+            ),
+        },
+        imminent_head_on=imminent_head_on_encounter(
+            state,
+            config,
+            visible_goals,
         ),
-        agent.agent_id,
     )
-    other_priority_key = (
-        -int(other_loaded),
-        shortest_path_distance(
-            other.position,
-            other_goal_position,
-            config.map_layout_id,
-        ),
-        other.agent_id,
-    )
-    own_priority = own_priority_key < other_priority_key
+    own_priority = priority.agent_id == agent.agent_id
     axis = (
         1
         if agent.position[0] == other.position[0]
@@ -740,6 +815,11 @@ def local_observation(
         )
         / float(config.rows * config.cols),
         *(1.0 if index == agent_index else 0.0 for index in range(config.max_agents)),
+        float(state.participant_controlled_agent_id == agent_id),
+        float(
+            state.participant_controlled_agent_id is not None
+            and state.participant_controlled_agent_id != agent_id
+        ),
         *(1.0 if agent.last_action == action else 0.0 for action in ACTIONS),
         *_recent_energy_features(state, agent_id, config),
     ]
@@ -869,7 +949,7 @@ def local_observation(
         [0.0]
         * (
             (config.max_agents - 1 - len(others))
-            * (18 + len(NAVIGATION_GOAL_KINDS) + 3 * len(ACTIONS))
+            * (19 + len(NAVIGATION_GOAL_KINDS) + 3 * len(ACTIONS))
         )
     )
     values.extend(_canonical_team_context(state, config))
@@ -891,9 +971,9 @@ def all_local_observations(
 
 def observation_dim(config: WarehouseConfig) -> int:
     own = (
-        13
+        14
         + len(NAVIGATION_GOAL_KINDS)
-        + 3
+        + 5
         + config.max_agents
         + 2 * len(ACTIONS)
         + 6
@@ -901,7 +981,7 @@ def observation_dim(config: WarehouseConfig) -> int:
     tasks = config.active_task_count * 23
     teammate = (
         (config.max_agents - 1)
-        * (18 + len(NAVIGATION_GOAL_KINDS) + 3 * len(ACTIONS))
+        * (19 + len(NAVIGATION_GOAL_KINDS) + 3 * len(ACTIONS))
     )
     canonical_team = (
         config.max_agents
@@ -1027,6 +1107,7 @@ def observation_schema(config: WarehouseConfig) -> dict[str, Any]:
              "last_battery_delta",
              "steps_since_charging",
              "charger_wait_streak",
+             "charge_mode_active",
              "avoidable_wait_streak",
              "frames_since_charger_departure",
              "departed_charger_within_four_steps",
@@ -1073,6 +1154,11 @@ def observation_schema(config: WarehouseConfig) -> dict[str, Any]:
             "contains_expert_or_program_action": False,
         },
         "agent_identity": {"type": "one_hot", "size": 2},
+        "control_provenance": {
+            "fields": ("self_is_participant", "teammate_is_participant"),
+            "known_before_episode": True,
+            "contains_current_action": False,
+        },
         "legal_action_mask": {
             "offset_from_end": len(ACTIONS),
             "actions": ACTIONS,

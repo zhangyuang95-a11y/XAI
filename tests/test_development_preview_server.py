@@ -5,12 +5,18 @@ from http.server import ThreadingHTTPServer
 import json
 import threading
 
+from core.policy_contracts import ActionDistribution
 from env.warehouse.layouts import STUDY_MAP_LAYOUT
+from env.warehouse.domain import collaborative_study_config
+from env.warehouse.environment import WarehouseMultiAgentEnv
+from env.warehouse.navigation import ACTIONS
 import ui.development_preview_server as preview_server
 from ui.development_preview_server import (
     DevelopmentPreviewSessions,
     DevelopmentPreviewState,
     Handler,
+    PreviewFrame,
+    _initial_frame,
     build_development_tutorial,
 )
 
@@ -24,6 +30,38 @@ def _envelope(state: DevelopmentPreviewState, command: str, **payload):
         "command": command,
         "payload": payload,
     }
+
+
+def _scenario_preview(
+    environment: WarehouseMultiAgentEnv,
+    actions: dict[str, str],
+) -> DevelopmentPreviewState:
+    """Build explanation evidence from one explicit real transition."""
+
+    before = _initial_frame(environment)
+    _, rewards, _, _, info = environment.step(actions)
+    outcome = PreviewFrame(
+        state=environment.get_state(),
+        actions=dict(actions),
+        goal_overrides={},
+        rewards=dict(rewards),
+        info=dict(info),
+        events=(),
+        transition=None,
+        action_distributions={
+            agent_id: ActionDistribution(
+                agent_id=agent_id,
+                actions=tuple(ACTIONS),
+                probabilities=tuple(
+                    1.0 if candidate == action else 0.0
+                    for candidate in ACTIONS
+                ),
+                proposed_action=action,
+            )
+            for agent_id, action in actions.items()
+        },
+    )
+    return DevelopmentPreviewState(tutorial_frames=(before, outcome))
 
 
 def test_development_tutorial_is_one_productive_real_environment_round() -> None:
@@ -205,16 +243,28 @@ def test_action_explanation_states_recorded_goal_progress_and_outcome() -> None:
 
 
 def test_action_explanation_prioritizes_clearing_charger_for_teammate() -> None:
-    state = DevelopmentPreviewState()
-    selected = next(
-        index
-        for index in range(1, len(state.tutorial_frames))
-        if any(
-            fact.predicate == "collaboration_context"
-            and fact.value.get("charger_clearance")
-            for fact in state._explanation_snapshot(index)[0].evidence_facts(
-                state._explanation_snapshot(index)[1], "robot_1", None
-            )
+    environment = WarehouseMultiAgentEnv(collaborative_study_config())
+    environment.reset(seed=20_901)
+    scenario = environment.get_state()
+    charger = environment.layout.charger_position
+    scenario.by_id("robot_1").position = charger
+    scenario.by_id("robot_1").battery = 100.0
+    scenario.by_id("robot_2").position = (charger[0], charger[1] + 1)
+    scenario.by_id("robot_2").battery = 10.0
+    scenario.by_id("robot_2").navigation_goal_kind = "charge"
+    scenario.by_id("robot_2").navigation_goal_position = charger
+    environment.set_state(scenario)
+    state = _scenario_preview(
+        environment,
+        {"robot_1": "UP", "robot_2": "LEFT"},
+    )
+    selected = 1
+
+    assert any(
+        fact.predicate == "collaboration_context"
+        and fact.value.get("charger_clearance")
+        for fact in state._explanation_snapshot(selected)[0].evidence_facts(
+            state._explanation_snapshot(selected)[1], "robot_1", None
         )
     )
 
@@ -263,12 +313,19 @@ def test_development_energy_explanation_uses_real_charging_frame() -> None:
 
 
 def test_collision_explanation_is_direct_concise_and_simultaneous() -> None:
-    state = DevelopmentPreviewState()
-    selected = next(
-        index
-        for index, frame in enumerate(state.tutorial_frames)
-        if frame.info.get("robot_collision_event")
+    environment = WarehouseMultiAgentEnv(collaborative_study_config())
+    environment.reset(seed=20_902)
+    scenario = environment.get_state()
+    scenario.by_id("robot_1").position = (1, 2)
+    scenario.by_id("robot_2").position = (1, 4)
+    environment.set_state(scenario)
+    state = _scenario_preview(
+        environment,
+        {"robot_1": "RIGHT", "robot_2": "LEFT"},
     )
+    selected = 1
+
+    assert state.tutorial_frames[selected].info["robot_collision_event"] is True
     english = state._grounded_development_explanation(
         index=selected,
         target_agent="robot_2",

@@ -21,6 +21,7 @@ import torch.nn.functional as F
 from env.warehouse.coordination import stable_coordination_actions
 from env.warehouse.domain import collaborative_study_config
 from env.warehouse.environment import WarehouseMultiAgentEnv
+from env.warehouse.decision_protocol import distribution_decision_metadata
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.policy import MAPPOPolicy
 
@@ -99,12 +100,23 @@ def collect_joint_risk_dataset(
             )
             collision_opportunity_rows += int(bool(np.any(matrix > 0.5)))
 
-            actions, _ = rollout_policy.act(
+            decision_state = environment.get_state()
+            actions, distributions = rollout_policy.act(
                 observations,
                 environment.global_state(),
                 deterministic=False,
+                decision_key=(
+                    decision_state.episode_id,
+                    decision_state.frame,
+                ),
             )
-            observations, _, terminated, truncated, info = environment.step(actions)
+            observations, _, terminated, truncated, info = environment.step(
+                actions,
+                decision_metadata=distribution_decision_metadata(
+                    distributions,
+                    decision_source="pytorch_actor_joint_risk_collection",
+                ),
+            )
             sampled_collision_steps += int(
                 bool(info.get("robot_collision_event", False))
             )
@@ -179,7 +191,7 @@ def fine_tune_joint_risk(
         base_first = torch.softmax(base_first_logits, dim=-1)
         base_second = torch.softmax(base_second_logits, dim=-1)
 
-    parameters = tuple(policy.network.actor_parameters())
+    parameters = tuple(policy.network.ppo_actor_parameters())
     optimizer = torch.optim.Adam(parameters, lr=float(config.learning_rate))
     rng = np.random.default_rng(int(config.seed) + 1)
     history: list[dict[str, float]] = []
@@ -235,11 +247,12 @@ def fine_tune_joint_risk(
                 first_probabilities[:, wait_index]
                 * second_probabilities[:, wait_index]
             )
-            avoidable_joint_wait = (
-                joint_wait_probabilities[teacher_requires_progress].mean()
-                if bool(teacher_requires_progress.any())
-                else torch.zeros((), dtype=first.dtype, device=policy.device)
+            progress_weights = teacher_requires_progress.to(
+                dtype=joint_wait_probabilities.dtype
             )
+            avoidable_joint_wait = (
+                joint_wait_probabilities * progress_weights
+            ).sum() / progress_weights.sum().clamp_min(1.0)
             loss = (
                 float(config.joint_expected_collision_weight) * expected_collision
                 + float(config.ordinary_kl_weight) * ordinary_kl

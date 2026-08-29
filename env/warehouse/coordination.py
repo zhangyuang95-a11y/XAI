@@ -6,63 +6,29 @@ reference-rollout, or deployed action execution.
 
 from __future__ import annotations
 
-from collections import deque
 from typing import Any, Mapping
 
 
+from .coordination_priority import (
+    coordination_priority,
+    imminent_head_on_encounter,
+    single_lane_egress_agent_id,
+)
+from .coordination_goals import (
+    claim_safe_distance as _claim_safe_distance,
+    stable_coordination_goal_overrides,
+)
+from .energy_management import (
+    charger_departure_progress,
+    charger_handoff_clearance_action,
+    charger_service_required,
+)
 from .environment import ACTIONS, MOVE_DELTAS, WarehouseMultiAgentEnv, shortest_path_distance
 from .teacher_efficiency import teacher_efficiency_guard as _teacher_efficiency_guard
-
-
-def _claim_safe_distance(
-    environment: WarehouseMultiAgentEnv,
-    agent: Any,
-    origin: tuple[int, int],
-    goal: tuple[int, int],
-    available_pickups: set[tuple[int, int]],
-) -> int:
-    """Shortest route that cannot accidentally claim another open task.
-
-    Entering an available pickup is an irreversible claim, so a geometrically
-    short path through a teammate's A point is not a legal route for the
-    current assignment.  Treat those cells as temporary obstacles while the
-    task is unclaimed.  Delivery and charging routes are unaffected.
-    """
-
-    if (
-        agent.carrying_task_id is not None
-        or (
-            agent.navigation_goal_kind != "pickup"
-            and goal not in available_pickups
-        )
-    ):
-        return shortest_path_distance(
-            origin,
-            goal,
-            environment.config.map_layout_id,
-        )
-    forbidden = available_pickups - ({goal} if goal in available_pickups else set())
-    if origin == goal:
-        return 0
-    queue = deque(((origin, 0),))
-    visited = {origin}
-    while queue:
-        position, distance = queue.popleft()
-        for delta in MOVE_DELTAS.values():
-            candidate = (position[0] + delta[0], position[1] + delta[1])
-            if (
-                candidate in visited
-                or candidate in forbidden
-                or not environment.layout.is_passable(candidate)
-            ):
-                continue
-            if candidate == goal:
-                return distance + 1
-            visited.add(candidate)
-            queue.append((candidate, distance + 1))
-    # A task endpoint can be an articulation point.  This assignment is not
-    # safely reachable until the other pickup has been claimed.
-    return 10_000
+from .transition_audit import (
+    action_is_robustly_safe,
+    necessary_teammate_route_clearance,
+)
 
 
 def _urgent_charge(
@@ -87,44 +53,6 @@ def _urgent_charge(
     return bool(charger_slack <= environment.config.charge_per_wait)
 
 
-def _priority_key(
-    environment: WarehouseMultiAgentEnv,
-    agent: Any,
-    *,
-    goal_overrides: Mapping[str, tuple[int, int]] | None = None,
-) -> tuple[int, int, int, int, str]:
-    goal = (goal_overrides or {}).get(
-        agent.agent_id,
-        agent.navigation_goal_position,
-    )
-    goal_distance = shortest_path_distance(
-        agent.position,
-        goal,
-        environment.config.map_layout_id,
-    )
-    return (
-        # A loaded robot whose public navigation goal is still delivery has
-        # already passed the safe-energy check.  Preserve that delivery
-        # commitment ahead of a teammate that can safely wait on its charger
-        # route without spending energy.  Truly unavoidable charger conflicts
-        # are still resolved by the joint safety costs below.
-        -int(
-            agent.carrying_task_id is not None
-            and agent.navigation_goal_kind == "delivery"
-        ),
-        -int(
-            _urgent_charge(
-                environment,
-                agent,
-                goal_overrides=goal_overrides,
-            )
-        ),
-        -int(agent.carrying_task_id is not None),
-        goal_distance,
-        agent.agent_id,
-    )
-
-
 def _priority_agent_and_basis(
     environment: WarehouseMultiAgentEnv,
     *,
@@ -140,80 +68,38 @@ def _priority_agent_and_basis(
 
     state = environment.get_state()
     layout = environment.layout
-    charging_agents = tuple(
-        agent
-        for agent in state.agents
-        if agent.navigation_goal_kind == "charge"
-        and (goal_overrides or {}).get(
+    goals = {
+        agent.agent_id: (goal_overrides or {}).get(
             agent.agent_id,
-            environment.layout.charger_position,
+            agent.navigation_goal_position,
         )
-        == environment.layout.charger_position
-    )
-    charger_exit_agents = tuple(
-        agent
         for agent in state.agents
-        if agent.position == layout.charger_position
-        and not environment._requires_charge(state, agent)
-        and (
-            goal_overrides is None
-            or (goal_overrides or {}).get(agent.agent_id)
-            not in {None, layout.charger_position}
+    }
+    goal_kinds = {
+        agent.agent_id: (
+            "charge"
+            if goals[agent.agent_id] == layout.charger_position
+            and charger_service_required(environment, state, agent)
+            else "delivery"
+            if agent.carrying_task_id is not None
+            else "pickup"
+            if goals[agent.agent_id] != agent.position
+            else agent.navigation_goal_kind
         )
-    )
-    loaded_delivery_agents = tuple(
-        agent
         for agent in state.agents
-        if agent.carrying_task_id is not None
-        and agent.navigation_goal_kind == "delivery"
+    }
+    decision = coordination_priority(
+        state,
+        environment.config,
+        goal_positions=goals,
+        goal_kinds=goal_kinds,
+        requires_charge={
+            agent.agent_id: charger_service_required(environment, state, agent)
+            for agent in state.agents
+        },
+        imminent_head_on=imminent_head_on,
     )
-    if charger_exit_agents:
-        candidates = charger_exit_agents
-        selection_mode = "charger_exit"
-    elif loaded_delivery_agents:
-        # Waiting is energy-neutral, while making a loaded robot reverse can
-        # consume the exact reserve that made its delivery safe and send it
-        # back to the charger.  A charging teammate therefore waits and lets
-        # the committed delivery pass; true motion conflicts are still handled
-        # by the joint candidate search below.
-        candidates = loaded_delivery_agents
-        selection_mode = "loaded_delivery"
-    elif imminent_head_on and charging_agents:
-        candidates = charging_agents
-        selection_mode = "charger_route"
-    else:
-        candidates = tuple(state.agents)
-        selection_mode = "mission"
-    selected = min(
-        candidates,
-        key=lambda agent: _priority_key(
-            environment,
-            agent,
-            goal_overrides=goal_overrides,
-        ),
-    )
-    if selection_mode == "charger_exit":
-        basis = "charger_exit"
-    elif selection_mode == "loaded_delivery":
-        basis = "loaded_delivery"
-    elif selection_mode == "charger_route":
-        basis = "urgent_charger_route"
-    elif (
-        selected.carrying_task_id is not None
-        and selected.navigation_goal_kind == "delivery"
-    ):
-        basis = "loaded_delivery"
-    elif _urgent_charge(
-        environment,
-        selected,
-        goal_overrides=goal_overrides,
-    ):
-        basis = "urgent_charger_route"
-    elif selected.carrying_task_id is not None:
-        basis = "loaded_robot"
-    else:
-        basis = "shorter_route_or_stable_tie_break"
-    return selected, basis
+    return state.by_id(decision.agent_id), decision.basis
 
 
 def _clear_head_on_encounter(
@@ -222,7 +108,6 @@ def _clear_head_on_encounter(
     goal_overrides: Mapping[str, tuple[int, int]] | None = None,
 ) -> bool:
     state = environment.get_state()
-    left, right = state.agents
     goals = {
         agent.agent_id: (goal_overrides or {}).get(
             agent.agent_id,
@@ -230,94 +115,10 @@ def _clear_head_on_encounter(
         )
         for agent in state.agents
     }
-    aligned = (
-        left.position[0] == right.position[0]
-        or left.position[1] == right.position[1]
-    )
-    direct_distance = abs(left.position[0] - right.position[0]) + abs(
-        left.position[1] - right.position[1]
-    )
-    if left.position[0] == right.position[0]:
-        axis = 1
-    elif left.position[1] == right.position[1]:
-        axis = 0
-    else:
-        axis = -1
-    coordinate_approach = bool(
-        axis >= 0
-        and (
-            goals[left.agent_id][axis] - left.position[axis]
-        )
-        * (right.position[axis] - left.position[axis]) > 0
-        and (
-            goals[right.agent_id][axis] - right.position[axis]
-        )
-        * (left.position[axis] - right.position[axis]) > 0
-    )
-    topology_approach = False
-    if axis >= 0:
-        progress_targets: dict[str, tuple[tuple[int, int], ...]] = {}
-        for agent in state.agents:
-            current_goal_distance = shortest_path_distance(
-                agent.position,
-                goals[agent.agent_id],
-                environment.config.map_layout_id,
-            )
-            candidates = []
-            for row_delta, column_delta in MOVE_DELTAS.values():
-                target = (
-                    agent.position[0] + row_delta,
-                    agent.position[1] + column_delta,
-                )
-                if (
-                    environment.layout.is_passable(target)
-                    and shortest_path_distance(
-                        target,
-                        goals[agent.agent_id],
-                        environment.config.map_layout_id,
-                    )
-                    < current_goal_distance
-                ):
-                    candidates.append(target)
-            progress_targets[agent.agent_id] = tuple(candidates)
-        # A topological head-on exists only when *every* shortest-progress
-        # choice of both robots continues along the shared line.  Using
-        # ``any`` here falsely reserved a robot's current cell whenever one
-        # shortest route approached its teammate, even if an equally short
-        # perpendicular route was open.  The offline coordination teacher
-        # then labelled the open move as WAIT and the Actor learned to idle
-        # beside a charging teammate.  If either robot has a shortest route
-        # that already leaves the shared line, ordinary joint scoring can use
-        # it without invoking right-of-way clearance.
-        topology_approach = bool(
-            progress_targets[left.agent_id]
-            and progress_targets[right.agent_id]
-            and all(
-                (target[axis] - left.position[axis])
-                * (right.position[axis] - left.position[axis])
-                > 0
-                for target in progress_targets[left.agent_id]
-            )
-            and all(
-                (target[axis] - right.position[axis])
-                * (left.position[axis] - right.position[axis])
-                > 0
-                for target in progress_targets[right.agent_id]
-            )
-        )
-    return bool(
-        aligned
-        and (coordinate_approach or topology_approach)
-        and shortest_path_distance(
-            left.position,
-            right.position,
-            environment.config.map_layout_id,
-        )
-        == direct_distance
-        # Coordinate only immediately before a collision.  Longer geometric
-        # lookahead made a loaded robot retreat even though the charging
-        # teammate could wait without spending energy.
-        and direct_distance <= 2
+    return imminent_head_on_encounter(
+        state,
+        environment.config,
+        goals,
     )
 
 
@@ -381,12 +182,13 @@ def is_necessary_urgent_charger_clearance(
             )
             or (
                 clearing_agent.position == environment.layout.charger_position
-                and teammate.navigation_goal_kind == "charge"
-                and teammate.position
-                == (
-                    environment.layout.charger_position[0] - 1,
-                    environment.layout.charger_position[1],
+                and charger_handoff_clearance_action(
+                    environment,
+                    state,
+                    clearing_agent,
+                    teammate,
                 )
+                is not None
             )
         )
         for teammate in state.agents
@@ -537,20 +339,10 @@ def _reserved_side_clearance(
         # an ordinary open perpendicular route into a forced WAIT (notably the
         # full-battery robot beside the charger at demonstration reset).
         return None
-    charging_agents = tuple(
-        agent
-        for agent in state.agents
-        if agent.navigation_goal_kind == "charge"
-        and overrides.get(agent.agent_id, environment.layout.charger_position)
-        == environment.layout.charger_position
-    )
-    priority_agent = min(
-        charging_agents or tuple(state.agents),
-        key=lambda agent: _priority_key(
-            environment,
-            agent,
-            goal_overrides=overrides,
-        ),
+    priority_agent, _ = _priority_agent_and_basis(
+        environment,
+        imminent_head_on=False,
+        goal_overrides=overrides,
     )
     yielding_agent = next(
         agent
@@ -750,63 +542,129 @@ def _retreat_clearance_position(
     return None
 
 
-
-def stable_coordination_goal_overrides(
+def _single_lane_egress_actions(
     environment: WarehouseMultiAgentEnv,
     *,
-    goal_overrides: Mapping[str, tuple[int, int]] | None = None,
-) -> dict[str, tuple[int, int]]:
-    """Return the exact temporary mission goals used by the offline teacher.
+    goal_overrides: Mapping[str, tuple[int, int]],
+    priority_basis: str,
+) -> dict[str, str] | None:
+    """Return one causal phase of a shelf-end egress handshake."""
 
-    The environment deliberately leaves available tasks unassigned, so its
-    public navigation goal is ``wait`` for an empty robot. Offline callers
-    that omit explicit goals must therefore freeze the optimal shared-task
-    matching.  Explanation code can record this mapping at decision time
-    instead of later misreporting the public ``wait`` goal as the reason for
-    an action.
-    """
-
+    if priority_basis != "single_lane_egress":
+        return None
     state = environment.get_state()
-    if goal_overrides is None:
-        overrides = {
-            agent.agent_id: goal
-            for agent in state.agents
-            if (
-                goal := environment._frozen_route_goal(
-                    state,
-                    agent.agent_id,
-                    prioritize_old_tasks=True,
-                )
+    layout = environment.layout
+    layout_id = environment.config.map_layout_id
+    egress_id = single_lane_egress_agent_id(
+        state,
+        environment.config,
+        goal_positions=goal_overrides,
+    )
+    if egress_id is None:
+        return None
+    egress = state.by_id(egress_id)
+    clearing = next(
+        agent for agent in state.agents if agent.agent_id != egress_id
+    )
+    spine_column = layout.charger_position[1]
+    inward_action = "RIGHT" if egress.position[1] < spine_column else "LEFT"
+    held = {agent.agent_id: "WAIT" for agent in state.agents}
+    inward_delta = MOVE_DELTAS[inward_action]
+    inward_target = (
+        egress.position[0] + inward_delta[0],
+        egress.position[1] + inward_delta[1],
+    )
+    trial = dict(held)
+    trial[egress.agent_id] = inward_action
+    _, _, invalid, collision, _, _ = environment._resolve_motion(state, trial)
+    participant_priority = bool(
+        state.participant_controlled_agent_id == egress.agent_id
+    )
+    if (
+        inward_target != clearing.position
+        and not collision
+        and egress.agent_id not in invalid
+        and (
+            participant_priority
+            or action_is_robustly_safe(
+                environment,
+                state,
+                held,
+                egress.agent_id,
+                inward_action,
             )
-            is not None
+        )
+    ):
+        return {
+            agent.agent_id: (
+                inward_action if agent.agent_id == egress.agent_id else "WAIT"
+            )
+            for agent in state.agents
         }
-    else:
-        overrides = dict(goal_overrides)
-    available_pickups_for_matching = {
+
+    available_pickups = {
         task.pickup_position
         for task in state.tasks
         if task.status == "available"
     }
-    # When one open pickup is an articulation point on the route to another,
-    # the farther robot must hold until the nearer task is physically claimed.
-    # Otherwise it is guaranteed either to steal the teammate's task or to
-    # consume its exact post-charge reserve in a later retreat.  Removing this
-    # one-frame teacher goal does not reserve or assign either task in state.
-    return {
-        agent_id: goal
-        for agent_id, goal in overrides.items()
-        if not (
-            goal in available_pickups_for_matching
-            and _claim_safe_distance(
-                environment,
-                state.by_id(agent_id),
-                state.by_id(agent_id).position,
-                goal,
-                available_pickups_for_matching,
-            )
-            >= 10_000
+    clearance: list[tuple[int, int, int, int, str]] = []
+    clearing_mask = environment.action_masks()[clearing.agent_id]
+    current_spine_distance = abs(clearing.position[1] - spine_column)
+    for action_index, (action, allowed) in enumerate(zip(ACTIONS, clearing_mask)):
+        if allowed <= 0.5 or action not in MOVE_DELTAS:
+            continue
+        delta = MOVE_DELTAS[action]
+        target = (
+            clearing.position[0] + delta[0],
+            clearing.position[1] + delta[1],
         )
-    }
+        target_spine_distance = abs(target[1] - spine_column)
+        # Before reaching the spine, the inner robot must keep moving inward.
+        # Once it occupies the spine, *any* safe move out of that occupied
+        # cell is a genuine clearance: compact 8x9 aisles clear vertically,
+        # while a conservative 9x9 shelf end can require a horizontal branch.
+        # Restricting this phase to either axis leaves one of the two layouts
+        # at WAIT/WAIT even though a causal clearance move exists.
+        moves_toward_or_off_spine = bool(
+            target_spine_distance < current_spine_distance
+            or current_spine_distance == 0
+        )
+        trial = dict(held)
+        trial[clearing.agent_id] = action
+        _, _, invalid, collision, _, _ = environment._resolve_motion(state, trial)
+        if (
+            not moves_toward_or_off_spine
+            or (
+                target in available_pickups
+                and clearing.carrying_task_id is not None
+            )
+            or clearing.battery <= environment.config.move_battery_cost
+            or collision
+            or clearing.agent_id in invalid
+        ):
+            continue
+        clearance.append(
+            (
+                int(
+                    clearing.last_executed_action in MOVE_DELTAS
+                    and action != clearing.last_executed_action
+                ),
+                -shortest_path_distance(target, egress.position, layout_id),
+                target_spine_distance,
+                action_index,
+                action,
+            )
+        )
+    if clearance:
+        _, _, _, _, action = min(clearance)
+        return {
+            agent.agent_id: (
+                action if agent.agent_id == clearing.agent_id else "WAIT"
+            )
+            for agent in state.agents
+        }
+    return held
+
 
 
 def stable_coordination_actions(
@@ -837,25 +695,475 @@ def stable_coordination_actions(
     charging_agents = tuple(
         agent
         for agent in state.agents
-        if agent.navigation_goal_kind == "charge"
-        and overrides.get(agent.agent_id, layout.charger_position)
-        == layout.charger_position
+        if overrides.get(agent.agent_id) == layout.charger_position
+        and charger_service_required(environment, state, agent)
     )
     charger_exit_agents = tuple(
         agent
         for agent in state.agents
         if agent.position == layout.charger_position
-        and not environment._requires_charge(state, agent)
+        and not charger_service_required(environment, state, agent)
         and overrides.get(agent.agent_id) not in {
             None,
             layout.charger_position,
         }
     )
-    priority_agent, _ = _priority_agent_and_basis(
+    priority_agent, priority_basis = _priority_agent_and_basis(
         environment,
         imminent_head_on=imminent_head_on,
         goal_overrides=overrides,
     )
+    # Finish the second half of an observed delivery-cell clearance before a
+    # fresh single-lane tie-break can assign right-of-way back to the robot
+    # that just vacated B.  Both Actors can derive this reservation from S_t
+    # (positions plus previous executed actions); no current-frame action is
+    # observed.  The exact joint resolver remains the final safety proof.
+    for event in state.last_coordination_events:
+        if str(event.get("event", "")) != "occupied_cell_clearance_wait":
+            continue
+        waiting_id = str(event.get("waiting_agent_id", ""))
+        clearing_id = str(event.get("clearing_agent_id", ""))
+        if waiting_id not in environment.agent_ids or clearing_id not in environment.agent_ids:
+            continue
+        waiting_agent = state.by_id(waiting_id)
+        clearing_agent = state.by_id(clearing_id)
+        occupied_position = tuple(event.get("occupied_position", ()))
+        if (
+            waiting_agent.carrying_task_id is None
+            or waiting_agent.navigation_goal_kind != "delivery"
+            or waiting_agent.navigation_goal_position != occupied_position
+            or clearing_agent.position == occupied_position
+        ):
+            continue
+        for action in ACTIONS:
+            if action not in MOVE_DELTAS:
+                continue
+            delta = MOVE_DELTAS[action]
+            if (
+                waiting_agent.position[0] + delta[0],
+                waiting_agent.position[1] + delta[1],
+            ) != occupied_position:
+                continue
+            followthrough = {
+                agent.agent_id: (
+                    action if agent.agent_id == waiting_id else "WAIT"
+                )
+                for agent in state.agents
+            }
+            _, _, invalid, collision, _, _ = environment._resolve_motion(
+                state,
+                followthrough,
+            )
+            if not invalid and not collision:
+                return followthrough
+    single_lane_actions = _single_lane_egress_actions(
+        environment,
+        goal_overrides=overrides,
+        priority_basis=priority_basis,
+    )
+    if single_lane_actions is not None:
+        return single_lane_actions
+    # Two depleted robots approaching the single station need a causal,
+    # multi-frame handshake.  The priority robot may advance only when its
+    # next charger step is safe against *every* legal action of the peer from
+    # S_t.  Otherwise the lower-priority robot moves one cell farther away
+    # from the station while the priority robot visibly waits.  Repeating this
+    # rule clears the conflicting side of the three-cell exit before entry
+    # and avoids the old
+    # approach/retreat ping-pong that consumed the priority robot's reserve.
+    if (
+        len(charging_agents) == 2
+        and all(
+            agent.position != layout.charger_position
+            for agent in charging_agents
+        )
+    ):
+        yielding_agent = next(
+            agent
+            for agent in charging_agents
+            if agent.agent_id != priority_agent.agent_id
+        )
+        held = {agent.agent_id: "WAIT" for agent in state.agents}
+        priority_distance = shortest_path_distance(
+            priority_agent.position,
+            layout.charger_position,
+            layout_id,
+        )
+        priority_progress: list[tuple[int, str]] = []
+        committed_priority_progress: list[tuple[int, str]] = []
+        priority_mask = environment.action_masks()[priority_agent.agent_id]
+        for action_index, (action, allowed) in enumerate(
+            zip(ACTIONS, priority_mask)
+        ):
+            if allowed <= 0.5 or action not in MOVE_DELTAS:
+                continue
+            delta = MOVE_DELTAS[action]
+            target = (
+                priority_agent.position[0] + delta[0],
+                priority_agent.position[1] + delta[1],
+            )
+            if shortest_path_distance(
+                target,
+                layout.charger_position,
+                layout_id,
+            ) >= priority_distance:
+                continue
+            trial = dict(held)
+            trial[priority_agent.agent_id] = action
+            _, _, invalid, collision, _, _ = environment._resolve_motion(
+                state,
+                trial,
+            )
+            if collision or priority_agent.agent_id in invalid:
+                continue
+            committed_priority_progress.append((action_index, action))
+            if not action_is_robustly_safe(
+                    environment,
+                    state,
+                    held,
+                    priority_agent.agent_id,
+                    action,
+                ):
+                continue
+            priority_progress.append((action_index, action))
+        if priority_progress:
+            _, action = min(priority_progress)
+            return {
+                agent.agent_id: (
+                    action if agent.agent_id == priority_agent.agent_id else "WAIT"
+                )
+                for agent in state.agents
+            }
+
+        yielding_distance = shortest_path_distance(
+            yielding_agent.position,
+            layout.charger_position,
+            layout_id,
+        )
+        yielding_priority_distance = shortest_path_distance(
+            yielding_agent.position,
+            priority_agent.position,
+            layout_id,
+        )
+        yielding_on_priority_charger_route = bool(
+            yielding_agent.position[0] == priority_agent.position[0]
+            and
+            priority_distance
+            == yielding_priority_distance + yielding_distance
+        )
+        priority_route_blocked_by_yielding = bool(
+            yielding_agent.position
+            in _shortest_progress_positions(
+                environment,
+                priority_agent,
+                layout.charger_position,
+            )
+        )
+        available_pickups = {
+            task.pickup_position
+            for task in state.tasks
+            if task.status == "available"
+        }
+        clearance: list[tuple[int, int, int, str]] = []
+        yielding_mask = environment.action_masks()[yielding_agent.agent_id]
+        for action_index, (action, allowed) in enumerate(
+            zip(ACTIONS, yielding_mask)
+        ):
+            if allowed <= 0.5 or action not in MOVE_DELTAS:
+                continue
+            delta = MOVE_DELTAS[action]
+            target = (
+                yielding_agent.position[0] + delta[0],
+                yielding_agent.position[1] + delta[1],
+            )
+            target_charger_distance = shortest_path_distance(
+                target,
+                layout.charger_position,
+                layout_id,
+            )
+            target_priority_distance = shortest_path_distance(
+                target,
+                priority_agent.position,
+                layout_id,
+            )
+            # On a one-cell arm, the lower-priority robot sometimes has no
+            # side exit and must travel ahead toward the shared apron before
+            # it can step aside.  That is still genuine clearance when it
+            # lies on the priority route and strictly increases separation.
+            # Conversely, moving farther from the charger but *toward* the
+            # priority robot is never clearance; it caused the pair to meet
+            # in the middle and repeat a same-target collision forever.
+            clears_along_single_lane = bool(
+                yielding_on_priority_charger_route
+                and target_charger_distance < yielding_distance
+            )
+            remaining = (
+                yielding_agent.battery - environment.config.move_battery_cost
+            )
+            # When the yielding robot physically occupies the priority
+            # robot's only charger-progress cell, refusing a side step in
+            # order to preserve the ordinary reserve creates an unsatisfiable
+            # WAIT/WAIT state.  Permit the clearance while retaining one move
+            # of survival energy beyond the route.  In all other cases keep
+            # the full study reserve.
+            return_reserve_steps = (
+                1.0
+                if priority_route_blocked_by_yielding
+                else environment.config.battery_safety_margin
+            )
+            required_return = (
+                target_charger_distance + return_reserve_steps
+            ) * environment.config.move_battery_cost
+            trial = dict(held)
+            trial[yielding_agent.agent_id] = action
+            _, _, invalid, collision, _, _ = environment._resolve_motion(
+                state,
+                trial,
+            )
+            if (
+                (
+                    yielding_on_priority_charger_route
+                    and target_priority_distance <= yielding_priority_distance
+                )
+                or (
+                    target_charger_distance <= yielding_distance
+                    and not clears_along_single_lane
+                )
+                or target in available_pickups
+                or remaining + 1e-8 < required_return
+                or collision
+                or yielding_agent.agent_id in invalid
+            ):
+                continue
+            clearance.append(
+                (
+                    -target_charger_distance,
+                    -target_priority_distance,
+                    action_index,
+                    action,
+                )
+            )
+        yielding_delta = MOVE_DELTAS.get(yielding_agent.last_executed_action)
+        yielding_just_vacated_charger = bool(
+            yielding_delta is not None
+            and yielding_delta[0] == 0
+            and (
+                yielding_agent.position[0] - yielding_delta[0],
+                yielding_agent.position[1] - yielding_delta[1],
+            )
+            == layout.charger_position
+        )
+        if (
+            clearance
+            and committed_priority_progress
+            and priority_basis == "charger_clearance_commitment"
+            and yielding_just_vacated_charger
+        ):
+            # Complete an observed two-phase handoff. The yielding robot's
+            # previous horizontal departure is already part of S_t, so both
+            # agents can derive this reservation without seeing either
+            # current action. Entering the now-empty station while the former
+            # occupant continues away prevents the occupant's charge mode
+            # from pulling it back into an otherwise artificial return loop.
+            for _, _, _, clearance_action in sorted(clearance):
+                for _, progress_action in sorted(committed_priority_progress):
+                    followthrough = {
+                        yielding_agent.agent_id: clearance_action,
+                        priority_agent.agent_id: progress_action,
+                    }
+                    _, _, invalid, collision, _, _ = environment._resolve_motion(
+                        state,
+                        followthrough,
+                    )
+                    if not invalid and not collision:
+                        return _teacher_efficiency_guard(
+                            environment,
+                            followthrough,
+                        )
+        if clearance:
+            _, _, _, action = min(clearance)
+            return {
+                agent.agent_id: (
+                    action if agent.agent_id == yielding_agent.agent_id else "WAIT"
+                )
+                for agent in state.agents
+            }
+        if committed_priority_progress:
+            # In a one-cell approach there are states where the yielding
+            # robot cannot spend another clearance move without losing its
+            # own charger reserve.  Both robots can nevertheless derive the
+            # same public order from S_t: the priority robot advances and the
+            # yielding robot waits.  This is a simultaneous state-based
+            # commitment, not observation of the peer's current action.
+            _, action = min(committed_priority_progress)
+            return {
+                agent.agent_id: (
+                    action
+                    if agent.agent_id == priority_agent.agent_id
+                    else "WAIT"
+                )
+                for agent in state.agents
+            }
+        return held
+    # A delivery point or its final approach can be occupied by the other
+    # loaded robot at a T-junction.  Resolve that conflict with the same
+    # causal two-phase protocol used at the charger: first move the
+    # lower-priority robot far enough away that the delivery step is robust to
+    # every legal peer action, then allow the carrier to advance on the next
+    # frozen state.  Remembering the prior clearance direction in S_t prevents
+    # the teacher/participant surrogate from alternating left-right forever.
+    priority_goal = overrides.get(
+        priority_agent.agent_id,
+        priority_agent.navigation_goal_position,
+    )
+    yielding_agent = next(
+        agent for agent in state.agents if agent.agent_id != priority_agent.agent_id
+    )
+    priority_goal_distance = shortest_path_distance(
+        priority_agent.position,
+        priority_goal,
+        layout_id,
+    )
+    yielding_goal_distance = shortest_path_distance(
+        yielding_agent.position,
+        priority_goal,
+        layout_id,
+    )
+    if (
+        priority_agent.carrying_task_id is not None
+        and priority_agent.navigation_goal_kind == "delivery"
+        and 0 < priority_goal_distance <= 2
+        and yielding_goal_distance <= 2
+    ):
+        public_delivery_clearance_committed = any(
+            str(event.get("event", ""))
+            == "occupied_cell_clearance_wait"
+            and str(event.get("waiting_agent_id", ""))
+            == priority_agent.agent_id
+            and str(event.get("clearing_agent_id", ""))
+            == yielding_agent.agent_id
+            for event in state.last_coordination_events
+        )
+        held = {agent.agent_id: "WAIT" for agent in state.agents}
+        progress: list[tuple[int, str]] = []
+        priority_mask = environment.action_masks()[priority_agent.agent_id]
+        for action_index, (action, allowed) in enumerate(
+            zip(ACTIONS, priority_mask)
+        ):
+            if allowed <= 0.5 or action not in MOVE_DELTAS:
+                continue
+            delta = MOVE_DELTAS[action]
+            target = (
+                priority_agent.position[0] + delta[0],
+                priority_agent.position[1] + delta[1],
+            )
+            trial = dict(held)
+            trial[priority_agent.agent_id] = action
+            _, _, invalid, collision, _, _ = environment._resolve_motion(
+                state,
+                trial,
+            )
+            participant_priority = bool(
+                state.participant_controlled_agent_id
+                == priority_agent.agent_id
+            )
+            if (
+                shortest_path_distance(target, priority_goal, layout_id)
+                >= priority_goal_distance
+                or collision
+                or priority_agent.agent_id in invalid
+                or (
+                    not participant_priority
+                    and not public_delivery_clearance_committed
+                    and not action_is_robustly_safe(
+                        environment,
+                        state,
+                        held,
+                        priority_agent.agent_id,
+                        action,
+                    )
+                )
+            ):
+                continue
+            progress.append((action_index, action))
+        if progress:
+            _, action = min(progress)
+            return {
+                agent.agent_id: (
+                    action if agent.agent_id == priority_agent.agent_id else "WAIT"
+                )
+                for agent in state.agents
+            }
+
+        available_pickups = {
+            task.pickup_position
+            for task in state.tasks
+            if task.status == "available"
+        }
+        priority_progress_positions = set(
+            _shortest_progress_positions(
+                environment,
+                priority_agent,
+                priority_goal,
+            )
+        )
+        clearance: list[tuple[int, int, int, int, str]] = []
+        yielding_mask = environment.action_masks()[yielding_agent.agent_id]
+        for action_index, (action, allowed) in enumerate(
+            zip(ACTIONS, yielding_mask)
+        ):
+            if allowed <= 0.5 or action not in MOVE_DELTAS:
+                continue
+            delta = MOVE_DELTAS[action]
+            target = (
+                yielding_agent.position[0] + delta[0],
+                yielding_agent.position[1] + delta[1],
+            )
+            target_clearance = shortest_path_distance(
+                target,
+                priority_goal,
+                layout_id,
+            )
+            trial = dict(held)
+            trial[yielding_agent.agent_id] = action
+            _, _, invalid, collision, _, _ = environment._resolve_motion(
+                state,
+                trial,
+            )
+            if (
+                target_clearance <= yielding_goal_distance
+                or target in priority_progress_positions
+                or (
+                    target in available_pickups
+                    and yielding_agent.carrying_task_id is not None
+                )
+                or yielding_agent.battery <= environment.config.move_battery_cost
+                or collision
+                or yielding_agent.agent_id in invalid
+            ):
+                continue
+            own_goal = overrides.get(
+                yielding_agent.agent_id,
+                yielding_agent.navigation_goal_position,
+            )
+            clearance.append(
+                (
+                    -int(action == yielding_agent.last_executed_action),
+                    -target_clearance,
+                    shortest_path_distance(target, own_goal, layout_id),
+                    action_index,
+                    action,
+                )
+            )
+        if clearance:
+            _, _, _, _, action = min(clearance)
+            return {
+                agent.agent_id: (
+                    action if agent.agent_id == yielding_agent.agent_id else "WAIT"
+                )
+                for agent in state.agents
+            }
+        return held
     delivery_commitment_agent = (
         priority_agent
         if priority_agent.carrying_task_id is not None
@@ -895,14 +1203,34 @@ def stable_coordination_actions(
         agent
         for agent in state.agents
         if agent.position == layout.charger_position
-        and environment._requires_charge(state, agent)
+        and charger_service_required(environment, state, agent)
     )
+    station_occupants = tuple(
+        agent
+        for agent in state.agents
+        if agent.position == layout.charger_position
+    )
+    if station_occupants and adjacent_charger_waiters:
+        occupant = station_occupants[0]
+        waiter = adjacent_charger_waiters[0]
+        handoff_action = charger_handoff_clearance_action(
+            environment,
+            state,
+            occupant,
+            waiter,
+        )
+        if handoff_action is not None:
+            return _teacher_efficiency_guard(
+                environment,
+                {
+                    occupant.agent_id: handoff_action,
+                    waiter.agent_id: "WAIT",
+                },
+            )
     if charging_occupants and adjacent_charger_waiters:
         # A robot that has not yet reached a safe departure state owns the
-        # single charger for this frame.  Earlier teacher labels let a loaded
-        # teammate displace it at the apron, producing a *premature* departure
-        # followed by a measured return cycle.  Waiting at the apron costs no
-        # energy and is therefore the only commitment-consistent label.
+        # single charger unless the shared frozen-state handoff predicate has
+        # already proved that its lower-energy teammate should receive it.
         return _teacher_efficiency_guard(
             environment,
             {
@@ -1610,6 +1938,11 @@ def stable_coordination_actions(
                         state,
                         loaded_agent,
                     )
+                    and not necessary_teammate_route_clearance(
+                        environment,
+                        state,
+                        loaded_agent,
+                    )
                 ):
                     # A loaded robot must not spend two battery units moving
                     # away from its delivery when holding for this one joint
@@ -1627,16 +1960,10 @@ def stable_coordination_actions(
                     or state.frame - departing_agent.last_charger_departure_frame > 6
                 ):
                     continue
-                made_mission_progress = bool(
-                    departing_agent.deliveries_completed
-                    > departing_agent.deliveries_at_last_charger_departure
-                    or (
-                        departing_agent.carrying_task_id is not None
-                        and departing_agent.carrying_task_id
-                        != departing_agent.carrying_task_at_last_charger_departure
-                    )
+                made_mission_progress, made_coordination_progress = (
+                    charger_departure_progress(state, departing_agent)
                 )
-                if not made_mission_progress:
+                if not (made_mission_progress or made_coordination_progress):
                     # Prefer the ordinary side apron over re-entering the
                     # charger during a clearance.  The latter is recorded as
                     # an unproductive departure/return cycle and was present
@@ -1654,281 +1981,3 @@ def stable_coordination_actions(
         environment,
         selected,
     )
-
-
-def _human_intent_task_override(
-    environment: WarehouseMultiAgentEnv,
-    proposed_actions: Mapping[str, str],
-    fixed_agent_ids: tuple[str, ...],
-) -> tuple[dict[str, tuple[int, int]], dict[str, str]]:
-    """Infer an unambiguous participant pickup choice for the AI to avoid.
-
-    Shared jobs remain unowned until pickup.  This is only a one-step
-    coordination target: it does not reserve a task or change environment
-    state.  An override is created only when the participant's requested move
-    makes strictly more path progress toward one available pickup than every
-    other pickup, so a common corridor move cannot be mistaken for intent.
-    """
-
-    if len(fixed_agent_ids) != 1:
-        return {}, {}
-    state = environment.get_state()
-    human_id = fixed_agent_ids[0]
-    if human_id not in environment.agent_ids:
-        return {}, {}
-    human = state.by_id(human_id)
-    ai = next(agent for agent in state.agents if agent.agent_id != human_id)
-    available = sorted(
-        (task for task in state.tasks if task.status == "available"),
-        key=lambda task: task.task_id,
-    )
-    requested = str(proposed_actions.get(human_id, "WAIT"))
-    if (
-        len(available) != 2
-        or requested not in MOVE_DELTAS
-        or human.carrying_task_id is not None
-        or ai.carrying_task_id is not None
-        or not human.active
-        or not ai.active
-        or ai.navigation_goal_kind == "charge"
-    ):
-        return {}, {}
-    delta = MOVE_DELTAS[requested]
-    requested_target = (
-        human.position[0] + delta[0],
-        human.position[1] + delta[1],
-    )
-    if not environment.layout.is_passable(requested_target):
-        return {}, {}
-    progress = []
-    for task in available:
-        before = shortest_path_distance(
-            human.position,
-            task.pickup_position,
-            environment.config.map_layout_id,
-        )
-        after = shortest_path_distance(
-            requested_target,
-            task.pickup_position,
-            environment.config.map_layout_id,
-        )
-        progress.append((before - after, task))
-    progress.sort(key=lambda item: (-item[0], item[1].task_id))
-    if progress[0][0] <= progress[1][0]:
-        return {}, {}
-    participant_task = progress[0][1]
-    ai_task = next(
-        task for task in available if task.task_id != participant_task.task_id
-    )
-    if ai.navigation_goal_position == ai_task.pickup_position:
-        return {}, {}
-    return (
-        {ai.agent_id: ai_task.pickup_position},
-        {ai.agent_id: ai_task.task_id},
-    )
-
-
-def _claim_safe_assignment_override(
-    environment: WarehouseMultiAgentEnv,
-    proposed_actions: Mapping[str, str],
-) -> tuple[dict[str, tuple[int, int]], dict[str, str]]:
-    """Repair a two-task match whose pickup order would cause a false race.
-
-    The environment's energy-aware matcher compares total mission cost, but an
-    open A point is also an automatic-claim cell.  When that cell lies on the
-    route to the other A point, the nominally cheaper assignment can be
-    operationally impossible.  This small exact matcher compares both task
-    permutations using claim-safe path lengths and swaps responsibility only
-    when the alternative is strictly shorter.
-    """
-
-    state = environment.get_state()
-    agents = sorted(
-        (
-            agent
-            for agent in state.agents
-            if agent.active
-            and agent.carrying_task_id is None
-            and agent.navigation_goal_kind == "pickup"
-        ),
-        key=lambda agent: agent.agent_id,
-    )
-    tasks = sorted(
-        (task for task in state.tasks if task.status == "available"),
-        key=lambda task: task.task_id,
-    )
-    if len(agents) != 2 or len(tasks) != 2:
-        return {}, {}
-    pickups = {task.pickup_position for task in tasks}
-    proposed_targets = environment._resolve_motion(
-        state,
-        proposed_actions,
-    )[0]
-    if not any(
-        proposed_targets[agent.agent_id] != agent.position
-        and proposed_targets[agent.agent_id] in pickups
-        and proposed_targets[agent.agent_id] != agent.navigation_goal_position
-        for agent in agents
-    ):
-        return {}, {}
-
-    def assignment_cost(assigned: tuple[Any, Any]) -> int:
-        return sum(
-            _claim_safe_distance(
-                environment,
-                agent,
-                agent.position,
-                task.pickup_position,
-                pickups,
-            )
-            for agent, task in zip(agents, assigned)
-        )
-
-    direct = (tasks[0], tasks[1])
-    crossed = (tasks[1], tasks[0])
-    candidates = sorted(
-        (
-            (assignment_cost(direct), tuple(task.task_id for task in direct), direct),
-            (assignment_cost(crossed), tuple(task.task_id for task in crossed), crossed),
-        ),
-        key=lambda item: (item[0], item[1]),
-    )
-    selected_cost, _, selected = candidates[0]
-    current_by_goal = {task.pickup_position: task for task in tasks}
-    current = tuple(current_by_goal.get(agent.navigation_goal_position) for agent in agents)
-    if any(task is None for task in current):
-        return {}, {}
-    current_tasks = tuple(task for task in current if task is not None)
-    current_cost = assignment_cost(current_tasks)  # type: ignore[arg-type]
-    if selected_cost >= current_cost or selected == current_tasks:
-        return {}, {}
-    return (
-        {
-            agent.agent_id: task.pickup_position
-            for agent, task in zip(agents, selected)
-        },
-        {
-            agent.agent_id: task.task_id
-            for agent, task in zip(agents, selected)
-        },
-    )
-
-
-def _mission_correction_reason(
-    environment: WarehouseMultiAgentEnv,
-    proposed: Mapping[str, str],
-    corrected: Mapping[str, str],
-    *,
-    fixed_agent_ids: tuple[str, ...],
-    goal_overrides: Mapping[str, tuple[int, int]],
-) -> str | None:
-    """Return why the deterministic alternative strictly dominates proposal."""
-
-    state = environment.get_state()
-    proposed_targets = environment._resolve_motion(
-        state,
-        proposed,
-    )[0]
-    corrected_collision = environment._resolve_motion(
-        state,
-        corrected,
-    )[3]
-    if corrected_collision:
-        return None
-    available_pickups = {
-        task.pickup_position
-        for task in state.tasks
-        if task.status == "available"
-    }
-    wrong_pickup = False
-    for agent in state.agents:
-        if not agent.active or agent.agent_id in fixed_agent_ids:
-            continue
-        goal = goal_overrides.get(
-            agent.agent_id,
-            agent.navigation_goal_position,
-        )
-        proposed_target = proposed_targets[agent.agent_id]
-        wrong_pickup = wrong_pickup or bool(
-            agent.carrying_task_id is None
-            and proposed_target in available_pickups
-            and proposed_target != goal
-        )
-    if wrong_pickup:
-        return "task_deconfliction"
-    if goal_overrides:
-        return "task_deconfliction"
-    return None
-
-
-def _mission_progress_offenders(
-    environment: WarehouseMultiAgentEnv,
-    proposed: Mapping[str, str],
-    teacher: Mapping[str, str],
-    *,
-    fixed_agent_ids: tuple[str, ...],
-    goal_overrides: Mapping[str, tuple[int, int]],
-) -> tuple[str, ...]:
-    """AI robots whose proposed step is a verified detour or idle stall."""
-
-    state = environment.get_state()
-    proposed_targets = environment._resolve_motion(state, proposed)[0]
-    teacher_targets = environment._resolve_motion(state, teacher)[0]
-    available_pickups = {
-        task.pickup_position
-        for task in state.tasks
-        if task.status == "available"
-    }
-    offenders: list[str] = []
-    for agent in state.agents:
-        if (
-            not agent.active
-            or agent.agent_id in fixed_agent_ids
-            or agent.navigation_goal_kind == "charge"
-        ):
-            continue
-        goal = goal_overrides.get(
-            agent.agent_id,
-            agent.navigation_goal_position,
-        )
-        current_distance = _claim_safe_distance(
-            environment,
-            agent,
-            agent.position,
-            goal,
-            available_pickups,
-        )
-        proposed_distance = _claim_safe_distance(
-            environment,
-            agent,
-            proposed_targets[agent.agent_id],
-            goal,
-            available_pickups,
-        )
-        teacher_distance = _claim_safe_distance(
-            environment,
-            agent,
-            teacher_targets[agent.agent_id],
-            goal,
-            available_pickups,
-        )
-        moved_away = proposed_distance > current_distance
-        # A loaded robot that still has enough energy to deliver and retain a
-        # safe charger route must not spend that reserve oscillating or
-        # waiting.  The old low-battery exemption (<40) allowed exactly that:
-        # the Actor could waste energy until `_requires_charge` flipped and
-        # then take a longer charge-first route.  Correct a no-progress action
-        # only when the collision-free joint teacher has a strictly closer
-        # step; real yielding or a blocked route therefore remains untouched.
-        stalled_safe_delivery = bool(
-            agent.carrying_task_id is not None
-            and not environment._requires_charge(state, agent)
-            and proposed_distance >= current_distance
-            and teacher_distance < current_distance
-        )
-        if (
-            (moved_away and teacher_distance < proposed_distance)
-            or stalled_safe_delivery
-        ):
-            offenders.append(agent.agent_id)
-    return tuple(offenders)

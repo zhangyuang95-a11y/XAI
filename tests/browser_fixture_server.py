@@ -18,12 +18,12 @@ WEB = ROOT / "ui" / "web"
 
 ROBOT_PATHS = (
     (
-        (9, 4), (8, 4), (8, 5), (7, 5), (6, 5), (6, 6),
-        (6, 7), (6, 8), (6, 9), (6, 10),
+        (7, 3), (6, 3), (6, 4), (5, 4),
+        (5, 3), (5, 2), (5, 1), (5, 0),
     ),
     (
-        (9, 6), (8, 6), (8, 5), (7, 5), (6, 5), (5, 5),
-        (4, 5), (4, 6), (4, 7), (4, 8), (4, 9), (4, 10),
+        (7, 5), (6, 5), (6, 6), (6, 7),
+        (6, 8), (6, 7), (6, 6), (6, 5),
     ),
 )
 
@@ -73,7 +73,7 @@ class FixtureState:
     def snapshot(self, display_frame=None):
         if display_frame is None:
             display_frame = self.tutorial_index if self.stage == "instructions" else self.frame
-        score = -self.frame
+        score = -int(display_frame)
         return {
             "episode_id": 1,
             "frame": display_frame,
@@ -125,8 +125,8 @@ class FixtureState:
                 },
                 {
                     "task_id": "task_2",
-                    "pickup_position": [6, 8],
-                    "delivery_position": [4, 8],
+                    "pickup_position": [4, 8],
+                    "delivery_position": [2, 7],
                     "status": "carried",
                     "carrier_agent_id": "robot_2",
                     "created_frame": 0,
@@ -158,6 +158,8 @@ class FixtureState:
             "from_frame": display_frame - 1,
             "to_frame": display_frame,
             "loop": self.stage == "explanation" if loop is None else bool(loop),
+            "before_stage": self.stage,
+            "before_state": self.snapshot(display_frame - 1),
             "agents": [
                 {
                     "id": "robot_1",
@@ -206,7 +208,7 @@ class FixtureState:
             "trajectory_seed": 42026,
             "trajectory_hash": "fixture-reference-hash",
             "agent_control": {"robot_1": "ai", "robot_2": "ai"},
-            "map_layout_id": "warehouse_alternating_shelves_10x11_v6_open_charger_approach",
+            "map_layout_id": "warehouse_staggered_aisles_8x9_v1_three_cell_exit",
             "map": self.map_payload(),
             "frames": [
                 {

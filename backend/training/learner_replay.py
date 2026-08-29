@@ -11,6 +11,23 @@ from env.warehouse.mappo import MAPPOPolicy
 from env.warehouse.navigation import ACTIONS
 
 
+STRONG_ACTOR_CORRECTION_CATEGORIES = frozenset(
+    {
+        "collision",
+        "junction_conflict",
+        "loaded_detour",
+        "charger_cycle",
+        "task_starvation",
+    }
+)
+
+
+def strong_actor_correction_mask(categories: np.ndarray) -> np.ndarray:
+    """Rows whose offline label must beat every competing Actor action."""
+
+    return np.isin(categories, tuple(STRONG_ACTOR_CORRECTION_CATEGORIES))
+
+
 REPLAY_CATEGORIES = (
     "collision",
     "joint_wait",
@@ -173,11 +190,25 @@ def fit_actor_supervised(
     wait_margin_mask: np.ndarray,
     seed: int,
     parameter_scope: str = "all",
+    teammate_labels: np.ndarray | None = None,
+    teammate_loss_weight: float = 0.0,
+    action_loss_weight: float = 1.0,
 ) -> dict[str, float | str]:
     """Fit Actor weights to offline labels without executing those labels."""
 
     observations = torch.as_tensor(rows, dtype=torch.float32, device=policy.device)
     targets = torch.as_tensor(labels, dtype=torch.long, device=policy.device)
+    teammate_targets = (
+        torch.as_tensor(
+            teammate_labels,
+            dtype=torch.long,
+            device=policy.device,
+        )
+        if teammate_labels is not None
+        else None
+    )
+    if teammate_targets is not None and len(teammate_targets) != len(rows):
+        raise ValueError("teammate_labels must align with supervised rows.")
     if len(wait_margin_mask) != len(rows):
         raise ValueError("wait_margin_mask must align with supervised rows.")
     if len(escape_wait_mask) != len(rows):
@@ -199,6 +230,39 @@ def fit_actor_supervised(
         dtype=torch.bool,
         device=policy.device,
     )
+    wait_index = ACTIONS.index("WAIT")
+    teammate_loss_active = bool(
+        teammate_labels is not None
+        and teammate_loss_weight > 0.0
+        and np.any(teammate_labels >= 0)
+    )
+    non_wait_margin_active = bool(
+        non_wait_weight > 0.0 and np.any(labels != wait_index)
+    )
+    escape_wait_margin_active = bool(
+        escape_wait_weight > 0.0
+        and np.any(escape_wait_mask & (labels != wait_index))
+    )
+    correction_margin_active = bool(
+        correction_weight > 0.0 and np.any(correction_mask)
+    )
+    wait_margin_active = bool(
+        wait_weight > 0.0
+        and np.any(wait_margin_mask & (labels == wait_index))
+    )
+
+    def masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """Return a differentiable zero for an empty minibatch mask.
+
+        The replay loop runs on MPS in production.  Calling ``bool(mask.any())``
+        for every minibatch synchronizes the accelerator with the CPU and made
+        each relabel round needlessly slow.  A clamped tensor denominator keeps
+        the exact non-empty mean while an empty mask contributes zero without
+        leaving the device.
+        """
+
+        weights = mask.to(dtype=values.dtype)
+        return (values * weights).sum() / weights.sum().clamp_min(1.0)
 
     def accuracy() -> float:
         with torch.no_grad():
@@ -206,6 +270,22 @@ def fit_actor_supervised(
         return float((predicted == targets).float().mean().detach().cpu())
 
     accuracy_before = accuracy()
+
+    def teammate_accuracy() -> float | None:
+        if teammate_targets is None:
+            return None
+        valid = teammate_targets >= 0
+        if not bool(valid.any()):
+            return None
+        with torch.no_grad():
+            predicted = policy.network.teammate_action_logits(
+                observations[valid]
+            ).argmax(dim=-1)
+        return float(
+            (predicted == teammate_targets[valid]).float().mean().cpu()
+        )
+
+    teammate_accuracy_before = teammate_accuracy()
     # The decentralized Actor includes both the intent encoder and the action
     # head.  Optimising only ``network.actor`` leaves the intent representation
     # frozen during BC/relabel rounds even though PPO updates it later.  That
@@ -214,13 +294,44 @@ def fit_actor_supervised(
     # optimiser and gradient clipping so the complete runtime Actor is fitted.
     if parameter_scope == "all":
         actor_parameters = tuple(policy.network.actor_parameters())
+    elif parameter_scope == "actor_without_teammate_predictor":
+        actor_parameters = tuple(policy.network.ppo_actor_parameters())
+    elif parameter_scope == "action_heads_only":
+        actor_parameters = tuple(
+            list(policy.network.actor.parameters())
+            + list(policy.network.action_scorer.parameters())
+        )
+    elif parameter_scope == "teammate_predictor_only":
+        actor_parameters = tuple(
+            policy.network.teammate_action_predictor.parameters()
+        )
+    elif parameter_scope == "teammate_context_predictor_only":
+        actor_parameters = tuple(
+            policy.network.teammate_context_predictor.parameters()
+        )
+    elif parameter_scope == "teammate_forecast_only":
+        actor_parameters = tuple(
+            list(policy.network.teammate_action_predictor.parameters())
+            + list(policy.network.teammate_context_predictor.parameters())
+            + list(policy.network.participant_context_predictor.parameters())
+        )
+    elif parameter_scope == "participant_partner_only":
+        actor_parameters = tuple(
+            list(policy.network.participant_partner_action_head.parameters())
+            + list(policy.network.participant_context_predictor.parameters())
+        )
     elif parameter_scope == "structured":
         actor_parameters = tuple(
             list(policy.network.action_scorer.parameters())
             + list(policy.network.teammate_action_predictor.parameters())
         )
     else:
-        raise ValueError("parameter_scope must be 'all' or 'structured'.")
+        raise ValueError(
+            "parameter_scope must be 'all', 'structured', or "
+            "'actor_without_teammate_predictor', 'action_heads_only', or "
+            "'teammate_predictor_only', 'teammate_context_predictor_only', "
+            "'teammate_forecast_only', or 'participant_partner_only'."
+        )
     optimizer = torch.optim.Adam(
         actor_parameters,
         lr=float(learning_rate),
@@ -237,76 +348,97 @@ def fit_actor_supervised(
             )
             logits = policy.masked_actor_logits(observations[indices])
             selected_targets = targets[indices]
-            loss = torch.nn.functional.cross_entropy(logits, selected_targets)
-            wait_index = ACTIONS.index("WAIT")
+            loss = float(action_loss_weight) * torch.nn.functional.cross_entropy(
+                logits,
+                selected_targets,
+            )
+            if teammate_loss_active:
+                assert teammate_targets is not None
+                selected_teammate_targets = teammate_targets[indices]
+                valid_teammate = selected_teammate_targets >= 0
+                teammate_logits = policy.network.teammate_action_logits(
+                    observations[indices]
+                )
+                teammate_loss = masked_mean(
+                    torch.nn.functional.cross_entropy(
+                        teammate_logits,
+                        selected_teammate_targets.clamp_min(0),
+                        reduction="none",
+                    ),
+                    valid_teammate,
+                )
+                loss = loss + float(teammate_loss_weight) * teammate_loss
             non_wait = selected_targets != wait_index
-            non_wait_margin_loss = torch.zeros((), device=policy.device)
-            if bool(non_wait.any()):
+            if non_wait_margin_active:
                 row_indices = torch.arange(
                     len(selected_targets), device=policy.device
                 )
                 target_logits = logits[row_indices, selected_targets]
                 wait_logits = logits[:, wait_index]
-                non_wait_margin_loss = torch.relu(
-                    float(non_wait_margin)
-                    - (target_logits[non_wait] - wait_logits[non_wait])
-                ).mean()
+                non_wait_margin_loss = masked_mean(
+                    torch.relu(
+                        float(non_wait_margin)
+                        - (target_logits - wait_logits)
+                    ),
+                    non_wait,
+                )
                 loss = loss + float(non_wait_weight) * non_wait_margin_loss
             escape_wait = non_wait & strong_escape_rows[indices]
-            if bool(escape_wait.any()):
+            if escape_wait_margin_active:
                 row_indices = torch.arange(
                     len(selected_targets), device=policy.device
                 )
                 target_logits = logits[row_indices, selected_targets]
                 wait_logits = logits[:, wait_index]
-                escape_wait_margin_loss = torch.relu(
-                    float(escape_wait_margin)
-                    - (
-                        target_logits[escape_wait]
-                        - wait_logits[escape_wait]
-                    )
-                ).mean()
+                escape_wait_margin_loss = masked_mean(
+                    torch.relu(
+                        float(escape_wait_margin)
+                        - (target_logits - wait_logits)
+                    ),
+                    escape_wait,
+                )
                 loss = (
                     loss
                     + float(escape_wait_weight) * escape_wait_margin_loss
                 )
             correction = strong_correction_rows[indices]
-            if bool(correction.any()):
-                correction_logits = logits[correction]
-                correction_targets = selected_targets[correction]
+            if correction_margin_active:
                 correction_row_indices = torch.arange(
-                    len(correction_targets), device=policy.device
+                    len(selected_targets), device=policy.device
                 )
-                correction_target_logits = correction_logits[
+                correction_target_logits = logits[
                     correction_row_indices,
-                    correction_targets,
+                    selected_targets,
                 ]
-                alternative_logits = correction_logits.clone()
+                alternative_logits = logits.clone()
                 alternative_logits[
                     correction_row_indices,
-                    correction_targets,
+                    selected_targets,
                 ] = -torch.inf
                 strongest_alternative = alternative_logits.max(dim=-1).values
-                correction_margin_loss = torch.relu(
-                    float(correction_margin)
-                    - (
-                        correction_target_logits
-                        - strongest_alternative
-                    )
-                ).mean()
+                correction_margin_loss = masked_mean(
+                    torch.relu(
+                        float(correction_margin)
+                        - (correction_target_logits - strongest_alternative)
+                    ),
+                    correction,
+                )
                 loss = loss + float(correction_weight) * correction_margin_loss
             wait = (selected_targets == wait_index) & strong_wait_rows[indices]
-            if bool(wait.any()):
-                wait_logits = logits[wait, wait_index]
+            if wait_margin_active:
+                selected_wait_logits = logits[:, wait_index]
                 non_wait_logits = torch.cat(
-                    (logits[wait, :wait_index], logits[wait, wait_index + 1 :]),
+                    (logits[:, :wait_index], logits[:, wait_index + 1 :]),
                     dim=-1,
                 )
                 strongest_non_wait_logits = non_wait_logits.max(dim=-1).values
-                wait_margin_loss = torch.relu(
-                    float(wait_margin)
-                    - (wait_logits - strongest_non_wait_logits)
-                ).mean()
+                wait_margin_loss = masked_mean(
+                    torch.relu(
+                        float(wait_margin)
+                        - (selected_wait_logits - strongest_non_wait_logits)
+                    ),
+                    wait,
+                )
                 loss = loss + float(wait_weight) * wait_margin_loss
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -315,11 +447,11 @@ def fit_actor_supervised(
                 policy.algorithm_config.max_grad_norm,
             )
             optimizer.step()
-            final_loss = float(loss.detach().cpu())
+            final_loss = loss.detach()
     return {
         "accuracy_before": accuracy_before,
         "accuracy_after": accuracy(),
-        "final_loss": final_loss,
+        "final_loss": float(final_loss.cpu()),
         "non_wait_margin": float(non_wait_margin),
         "non_wait_weight": float(non_wait_weight),
         "escape_wait_margin": float(escape_wait_margin),
@@ -332,6 +464,10 @@ def fit_actor_supervised(
         "wait_weight": float(wait_weight),
         "wait_margin_rows": float(np.sum(wait_margin_mask)),
         "parameter_scope": parameter_scope,
+        "teammate_loss_weight": float(teammate_loss_weight),
+        "action_loss_weight": float(action_loss_weight),
+        "teammate_accuracy_before": teammate_accuracy_before,
+        "teammate_accuracy_after": teammate_accuracy(),
     }
 
 
@@ -371,3 +507,43 @@ def supervised_category_accuracy(
         for category in REPLAY_CATEGORIES
         if bool(np.any(mask := categories == category))
     }
+
+
+def fit_teammate_forecast_supervised(
+    policy: MAPPOPolicy,
+    rows: np.ndarray,
+    actor_labels: np.ndarray,
+    teammate_labels: np.ndarray,
+    *,
+    epochs: int,
+    batch_size: int,
+    learning_rate: float,
+    seed: int,
+) -> dict[str, float | str]:
+    """Fit only S_t-based peer forecasts to paired offline labels."""
+
+    empty_mask = np.zeros(len(rows), dtype=bool)
+    return fit_actor_supervised(
+        policy,
+        rows,
+        actor_labels,
+        epochs=epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        non_wait_margin=0.0,
+        non_wait_weight=0.0,
+        escape_wait_margin=0.0,
+        escape_wait_weight=0.0,
+        escape_wait_mask=empty_mask,
+        correction_margin=0.0,
+        correction_weight=0.0,
+        correction_mask=empty_mask,
+        wait_margin=0.0,
+        wait_weight=0.0,
+        wait_margin_mask=empty_mask,
+        seed=seed,
+        parameter_scope="teammate_forecast_only",
+        teammate_labels=teammate_labels,
+        teammate_loss_weight=1.0,
+        action_loss_weight=0.0,
+    )

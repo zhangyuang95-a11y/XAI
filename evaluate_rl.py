@@ -25,7 +25,16 @@ from env.warehouse.mappo import (
     evaluate_policy,
     evaluate_random_policy,
 )
+from env.warehouse.scenario_evaluation import (
+    evaluate_dual_charger_approach_scenarios,
+    evaluate_empty_delivery_clearance_scenarios,
+    evaluate_occupied_charger_handoff_scenarios,
+    evaluate_outer_exit_charger_approach_scenarios,
+)
+from env.warehouse.partner_policies import PARTNER_PROFILES
 from env.warehouse.environment import WarehouseMultiAgentEnv
+from env.warehouse.layouts import get_map_layout
+from env.warehouse.navigation import shortest_path_distance
 from env.warehouse.policy import MAPPOPolicy
 from env.warehouse.seed_calibration import load_parallel_seed_library
 from env.warehouse.regressions import evaluate_seed_42027_detour_regressions
@@ -66,7 +75,8 @@ def main() -> None:
         "--checkpoint",
         default=str(DEFAULT_ARTIFACTS.model),
     )
-    parser.add_argument("--episodes", type=int, default=200)
+    parser.add_argument("--episodes", type=int, default=1000)
+    parser.add_argument("--multi-partner-episodes", type=int, default=1000)
     # The previous candidate was diagnosed on the 500004 seed family.  A
     # genuinely fresh family is required after using that result to improve
     # training, so the next formal gate starts above every training/offline
@@ -94,24 +104,117 @@ def main() -> None:
         default=str(DEFAULT_ARTIFACTS.parallel_seed_pairs),
     )
     args = parser.parse_args()
-    if args.episodes <= 0:
-        parser.error("--episodes must be positive")
+    if args.episodes <= 0 or args.multi_partner_episodes <= 0:
+        parser.error("evaluation episode counts must be positive")
 
     policy = MAPPOPolicy.load(args.checkpoint, device=args.device)
     config = policy.environment_config
+    layout = get_map_layout(config.map_layout_id)
+    required_tiles = (
+        "####.####",
+        ".....####",
+        "####.....",
+        ".....####",
+        "####.....",
+        ".....####",
+        "###......",
+        "###...###",
+    )
+    required_exit = ((6, 3), (6, 4), (6, 5))
+    compact_map_contract_valid = bool(
+        layout.rows == 8
+        and layout.cols == 9
+        and layout.tiles == required_tiles
+        and layout.robot_start_positions == ((7, 3), (7, 5))
+        and layout.charger_position == (7, 4)
+        and layout.robot_exit_positions == required_exit
+        and all(layout.is_passable(position) for position in required_exit)
+        and set(layout.four_way_intersections).issubset(required_exit)
+        and all(
+            shortest_path_distance(
+                layout.robot_start_positions[0],
+                position,
+                layout.layout_id,
+            )
+            < layout.rows * layout.cols
+            for position in layout.passable_positions
+        )
+    )
     ai_ai = evaluate_policy(
         policy,
         config,
         episodes=args.episodes,
         seed=args.seed,
+        deterministic=False,
     )
-    noisy = evaluate_policy(
-        policy,
-        config,
-        episodes=args.episodes,
-        seed=args.seed + 50_000,
-        noisy_teammate_probability=0.20,
-    )
+    per_profile = args.multi_partner_episodes // len(PARTNER_PROFILES)
+    remainder = args.multi_partner_episodes % len(PARTNER_PROFILES)
+    multi_partner_profiles: dict[str, dict[str, object]] = {}
+    profile_seed_ranges: dict[str, tuple[int, int]] = {}
+    for index, profile in enumerate(PARTNER_PROFILES):
+        count = per_profile + int(index < remainder)
+        profile_seed = args.seed + 20_000 * (index + 1)
+        profile_seed_ranges[profile] = (profile_seed, count)
+        multi_partner_profiles[profile] = evaluate_policy(
+            policy,
+            config,
+            episodes=count,
+            seed=profile_seed,
+            partner_profile=profile,
+            deterministic=False,
+        )
+    noisy = {
+        "episodes": args.multi_partner_episodes,
+        "profiles": multi_partner_profiles,
+        "minimum_delivery_episode_rate": min(
+            float(values["delivery_episode_rate"])
+            for values in multi_partner_profiles.values()
+        ),
+        "maximum_collision_episode_rate": max(
+            float(values["collision_episode_rate"])
+            for values in multi_partner_profiles.values()
+        ),
+        "maximum_robot_collision_events": max(
+            int(values["maximum_robot_collision_events"])
+            for values in multi_partner_profiles.values()
+        ),
+        "maximum_repeated_collision_episode_rate": max(
+            float(values["repeated_collision_episode_rate"])
+            for values in multi_partner_profiles.values()
+        ),
+        "maximum_shutdown_episode_rate": max(
+            float(values["shutdown_episode_rate"])
+            for values in multi_partner_profiles.values()
+        ),
+        "maximum_deadlock_episode_rate": max(
+            float(values["deadlock_episode_rate"])
+            for values in multi_partner_profiles.values()
+        ),
+        "maximum_avoidable_wait_rate": max(
+            float(values["avoidable_wait_rate"])
+            for values in multi_partner_profiles.values()
+        ),
+        "maximum_charger_departure_return_cycle_episode_rate": max(
+            float(values["charger_departure_return_cycle_episode_rate"])
+            for values in multi_partner_profiles.values()
+        ),
+        "maximum_task_starvation_episode_rate": max(
+            float(values["task_starvation_episode_rate"])
+            for values in multi_partner_profiles.values()
+        ),
+        "maximum_path_efficiency_actual_over_shortest_safe": max(
+            float(values["path_efficiency_actual_over_shortest_safe"])
+            for values in multi_partner_profiles.values()
+        ),
+        "total_avoidable_loaded_delivery_detour_steps": sum(
+            int(values["avoidable_loaded_delivery_detour_steps"])
+            for values in multi_partner_profiles.values()
+        ),
+        "maximum_post_policy_action_interventions": max(
+            float(values["mean_post_policy_action_interventions"])
+            for values in multi_partner_profiles.values()
+        ),
+    }
     random_policy = evaluate_random_policy(
         config,
         episodes=args.episodes,
@@ -122,6 +225,31 @@ def main() -> None:
         config,
         episodes=max(20, min(args.episodes, 200)),
         seed=args.seed + 150_000,
+    )
+    scenario_episodes = max(32, min(args.episodes, 200))
+    empty_clearance = evaluate_empty_delivery_clearance_scenarios(
+        policy,
+        config,
+        episodes=scenario_episodes,
+        seed=args.seed + 160_000,
+    )
+    dual_charger = evaluate_dual_charger_approach_scenarios(
+        policy,
+        config,
+        episodes=scenario_episodes,
+        seed=args.seed + 170_000,
+    )
+    outer_exit_charger = evaluate_outer_exit_charger_approach_scenarios(
+        policy,
+        config,
+        episodes=scenario_episodes,
+        seed=args.seed + 180_000,
+    )
+    occupied_charger_handoff = evaluate_occupied_charger_handoff_scenarios(
+        policy,
+        config,
+        episodes=scenario_episodes,
+        seed=args.seed + 190_000,
     )
     summary_path = Path(args.training_summary)
     training_summary = (
@@ -164,9 +292,13 @@ def main() -> None:
         artifact_contract_errors["parallel_seed_library"] = str(exc)
     formal_ranges = (
         (args.seed, args.episodes),
-        (args.seed + 50_000, args.episodes),
+        *profile_seed_ranges.values(),
         (args.seed + 100_000, args.episodes),
         (args.seed + 150_000, max(20, min(args.episodes, 200))),
+        (args.seed + 160_000, scenario_episodes),
+        (args.seed + 170_000, scenario_episodes),
+        (args.seed + 180_000, scenario_episodes),
+        (args.seed + 190_000, scenario_episodes),
     )
 
     def disjoint(left: tuple[int, int], right: tuple[int, int]) -> bool:
@@ -219,28 +351,80 @@ def main() -> None:
     )
     detour_regressions = evaluate_seed_42027_detour_regressions(config)
     checks = {
-        "episodes_per_condition_ge_200": args.episodes >= 200,
+        "episodes_per_condition_ge_1000": args.episodes >= 1000,
+        "multi_partner_episodes_ge_1000": args.multi_partner_episodes >= 1000,
         "formal_seed_ranges_disjoint_from_training": independent_seed_ranges,
-        "shutdown_episode_rate_le_0_05": ai_ai["shutdown_episode_rate"] <= 0.05,
+        "compact_map_topology_contract_valid": compact_map_contract_valid,
+        "shutdown_episode_rate_le_0_01": ai_ai["shutdown_episode_rate"] <= 0.01,
         "charger_utilization_positive": ai_ai["charger_utilization_rate"] > 0.0,
         "mean_minimum_battery_positive": ai_ai["mean_minimum_battery"] > 0.0,
-        "collision_episode_rate_le_0_05": ai_ai["collision_episode_rate"] <= 0.05,
+        "collision_episode_rate_le_0_01": ai_ai["collision_episode_rate"] <= 0.01,
         "maximum_collision_events_per_episode_le_1": (
             ai_ai["maximum_robot_collision_events"] <= 1
         ),
         "repeated_collision_episode_rate_eq_0": (
             ai_ai["repeated_collision_episode_rate"] == 0.0
         ),
-        "deadlock_episode_rate_le_0_05": ai_ai["deadlock_episode_rate"] <= 0.05,
+        "deadlock_episode_rate_le_0_01": ai_ai["deadlock_episode_rate"] <= 0.01,
+        "avoidable_wait_rate_le_0_005": ai_ai["avoidable_wait_rate"] <= 0.005,
         "head_on_yield_success_ge_0_90": head_on["success_rate"] >= 0.90,
+        "empty_delivery_clearance_success_eq_1": (
+            empty_clearance["success_rate"] == 1.0
+        ),
+        "dual_charger_approach_success_eq_1": (
+            dual_charger["success_rate"] == 1.0
+        ),
+        "outer_exit_charger_approach_success_eq_1": (
+            outer_exit_charger["success_rate"] == 1.0
+        ),
+        "occupied_charger_handoff_success_eq_1": (
+            occupied_charger_handoff["success_rate"] == 1.0
+        ),
         "delivery_bootstrap_lower_positive": delivery_difference_lower > 0.0,
         "score_bootstrap_lower_positive": score_difference_lower > 0.0,
-        "noisy_delivery_episode_rate_ge_0_80": noisy["delivery_episode_rate"] >= 0.80,
+        "noisy_delivery_episode_rate_ge_0_80": (
+            noisy["minimum_delivery_episode_rate"] >= 0.80
+        ),
+        "multi_partner_collision_episode_rate_le_0_01": (
+            noisy["maximum_collision_episode_rate"] <= 0.01
+        ),
+        "multi_partner_maximum_collision_events_per_episode_le_1": (
+            noisy["maximum_robot_collision_events"] <= 1
+        ),
+        "multi_partner_repeated_collision_episode_rate_eq_0": (
+            noisy["maximum_repeated_collision_episode_rate"] == 0.0
+        ),
+        "multi_partner_shutdown_episode_rate_le_0_01": (
+            noisy["maximum_shutdown_episode_rate"] <= 0.01
+        ),
+        "multi_partner_deadlock_episode_rate_le_0_01": (
+            noisy["maximum_deadlock_episode_rate"] <= 0.01
+        ),
+        "multi_partner_avoidable_wait_rate_le_0_005": (
+            noisy["maximum_avoidable_wait_rate"] <= 0.005
+        ),
+        "multi_partner_charger_departure_return_cycle_rate_le_0_01": (
+            noisy["maximum_charger_departure_return_cycle_episode_rate"]
+            <= 0.01
+        ),
+        "multi_partner_task_starvation_episode_rate_le_0_05": (
+            noisy["maximum_task_starvation_episode_rate"] <= 0.05
+        ),
+        "multi_partner_path_efficiency_le_1_10": (
+            noisy["maximum_path_efficiency_actual_over_shortest_safe"]
+            <= 1.10
+        ),
+        "multi_partner_avoidable_loaded_delivery_detours_eq_0": (
+            noisy["total_avoidable_loaded_delivery_detour_steps"] == 0
+        ),
         "charger_departure_return_cycle_rate_le_0_01": (
             ai_ai["charger_departure_return_cycle_episode_rate"] <= 0.01
         ),
         "task_starvation_episode_rate_le_0_05": (
             ai_ai["task_starvation_episode_rate"] <= 0.05
+        ),
+        "path_efficiency_le_1_10": (
+            ai_ai["path_efficiency_actual_over_shortest_safe"] <= 1.10
         ),
         "seed_42027_detour_regressions_pass": bool(
             detour_regressions["passed"]
@@ -252,7 +436,7 @@ def main() -> None:
             ai_ai["mean_post_policy_action_interventions"] == 0.0
         ),
         "noisy_post_policy_action_interventions_eq_0": (
-            noisy["mean_post_policy_action_interventions"] == 0.0
+            noisy["maximum_post_policy_action_interventions"] == 0.0
         ),
         "posthoc_rcpd_artifact_contract_valid": posthoc_rcpd_contract_valid,
         "pure_neural_reference_artifact_contract_valid": (
@@ -283,11 +467,34 @@ def main() -> None:
         "action_execution_version": ACTION_EXECUTION_VERSION,
         "checkpoint": str(Path(args.checkpoint).resolve()),
         "episodes_per_condition": args.episodes,
+        "multi_partner_episodes": args.multi_partner_episodes,
         "seed_ranges": {
             "ai_ai": [formal_ranges[0][0], formal_ranges[0][1]],
-            "noisy_teammate": [formal_ranges[1][0], formal_ranges[1][1]],
-            "random": [formal_ranges[2][0], formal_ranges[2][1]],
-            "head_on": [formal_ranges[3][0], formal_ranges[3][1]],
+            "multi_partner": {
+                profile: [start, count]
+                for profile, (start, count) in profile_seed_ranges.items()
+            },
+            "random": [args.seed + 100_000, args.episodes],
+            "head_on": [
+                args.seed + 150_000,
+                max(20, min(args.episodes, 200)),
+            ],
+            "empty_delivery_clearance": [
+                args.seed + 160_000,
+                scenario_episodes,
+            ],
+            "dual_charger_approach": [
+                args.seed + 170_000,
+                scenario_episodes,
+            ],
+            "outer_exit_charger_approach": [
+                args.seed + 180_000,
+                scenario_episodes,
+            ],
+            "occupied_charger_handoff": [
+                args.seed + 190_000,
+                scenario_episodes,
+            ],
         },
         "training_seed_ledger": ledger,
         "artifact_contracts": {
@@ -297,10 +504,26 @@ def main() -> None:
             "errors": artifact_contract_errors,
         },
         "artifact_hashes": artifact_hashes,
+        "map_layout": {
+            "layout_id": layout.layout_id,
+            "coordinate_rows": [
+                f"{row} {tiles}" for row, tiles in enumerate(layout.tiles)
+            ],
+            "columns": "012345678",
+            "robot_start_positions": layout.robot_start_positions,
+            "charger_position": layout.charger_position,
+            "robot_exit_positions": layout.robot_exit_positions,
+            "four_way_intersections": layout.four_way_intersections,
+            "contract_valid": compact_map_contract_valid,
+        },
         "ai_ai": ai_ai,
-        "noisy_teammate_20_percent": noisy,
+        "multi_partner": noisy,
         "random": random_policy,
         "standard_head_on": head_on,
+        "empty_delivery_clearance": empty_clearance,
+        "dual_charger_approach": dual_charger,
+        "outer_exit_charger_approach": outer_exit_charger,
+        "occupied_charger_handoff": occupied_charger_handoff,
         "bootstrap_95_percent_lower_bounds": {
             "ai_ai_minus_random_deliveries": delivery_difference_lower,
             "ai_ai_minus_random_user_score": score_difference_lower,

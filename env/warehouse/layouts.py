@@ -152,6 +152,52 @@ STAGGERED_AISLES_LAYOUT = MapLayout(
     pickup_endpoint_exclusions=tuple((row, 5) for row in range(10)),
 )
 
+# Compact candidates keep the same alternating left/right warehouse grammar.
+# They are registered here so comparison exercises the real simulator rather
+# than a renderer-only fixture.  The selected candidate becomes the study map
+# only after its topology and behavior audits pass.
+COMPACT_STAGGERED_8X9_LAYOUT = MapLayout(
+    layout_id="warehouse_staggered_aisles_8x9_v1_three_cell_exit",
+    tiles=(
+        "####.####",
+        ".....####",
+        "####.....",
+        ".....####",
+        "####.....",
+        ".....####",
+        "###......",
+        "###...###",
+    ),
+    robot_start_positions=((7, 3), (7, 5)),
+    charger_position=(7, 4),
+    robot_exit_positions=((6, 3), (6, 4), (6, 5)),
+    task_endpoint_exclusions=((6, 3), (6, 4), (6, 5)),
+    pickup_endpoint_exclusions=tuple((row, 4) for row in range(8)),
+)
+
+COMPACT_STAGGERED_9X9_LAYOUT = MapLayout(
+    layout_id="warehouse_staggered_loop_aisles_9x9_v2_three_cell_exit",
+    tiles=(
+        "#########",
+        "#.......#",
+        "##.###.##",
+        "#.......#",
+        "..#####..",
+        "#.......#",
+        "##..#..##",
+        "###...###",
+        "###...###",
+    ),
+    robot_start_positions=((8, 3), (8, 5)),
+    charger_position=(8, 4),
+    robot_exit_positions=((7, 3), (7, 4), (7, 5)),
+    task_endpoint_exclusions=((7, 3), (7, 4), (7, 5)),
+    # Pickup points are sampled from graph dead ends.  The two top shelf ends
+    # remain valid A points; the loop junctions and charger apron are transit
+    # cells and therefore cannot become auto-claiming pickup endpoints.
+    pickup_endpoint_exclusions=(),
+)
+
 # Legacy compact comparison layout.  Its aligned full-width work aisles form
 # the cross-shaped intersections rejected for the production study.
 COMPACT_INTERACTION_LAYOUT = MapLayout(
@@ -173,14 +219,16 @@ COMPACT_INTERACTION_LAYOUT = MapLayout(
     pickup_endpoint_exclusions=tuple((row, 4) for row in range(8)),
 )
 
-CORRIDOR_CHARGER_APRON_LAYOUT = STAGGERED_AISLES_LAYOUT
-CORRIDOR_SHELF_LAYOUT = STAGGERED_AISLES_LAYOUT
+CORRIDOR_CHARGER_APRON_LAYOUT = COMPACT_STAGGERED_9X9_LAYOUT
+CORRIDOR_SHELF_LAYOUT = COMPACT_STAGGERED_9X9_LAYOUT
 MAP_LAYOUTS = {
     STAGGERED_AISLES_LAYOUT.layout_id: STAGGERED_AISLES_LAYOUT,
+    COMPACT_STAGGERED_8X9_LAYOUT.layout_id: COMPACT_STAGGERED_8X9_LAYOUT,
+    COMPACT_STAGGERED_9X9_LAYOUT.layout_id: COMPACT_STAGGERED_9X9_LAYOUT,
     COMPACT_INTERACTION_LAYOUT.layout_id: COMPACT_INTERACTION_LAYOUT,
 }
-DEFAULT_MAP_LAYOUT = STAGGERED_AISLES_LAYOUT
-STUDY_MAP_LAYOUT = STAGGERED_AISLES_LAYOUT
+DEFAULT_MAP_LAYOUT = COMPACT_STAGGERED_8X9_LAYOUT
+STUDY_MAP_LAYOUT = COMPACT_STAGGERED_8X9_LAYOUT
 
 
 def get_map_layout(layout_id: str) -> MapLayout:

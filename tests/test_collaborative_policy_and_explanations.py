@@ -19,6 +19,8 @@ from env.warehouse.mappo import (
     MAPPOPolicy,
     MAPPOTrainer,
     MAPPO_TRAINING_CHECKPOINT_VERSION,
+    _attributable_starving_task_ids,
+    evaluate_policy,
 )
 from env.warehouse.rewards import REWARD_VERSION
 from env.warehouse.observations import global_state_dim, observation_dim
@@ -34,6 +36,45 @@ def _small_policy(*, horizon: int = 8) -> MAPPOPolicy:
     return MAPPOPolicy(
         WarehouseConfig(horizon=horizon),
         MAPPOConfig(hidden_dim=16, update_epochs=1, minibatch_size=64, seed=17),
+    )
+
+
+def test_multi_partner_efficiency_gate_scores_only_actor_controlled_robot() -> None:
+    policy = _small_policy(horizon=8)
+    result = evaluate_policy(
+        policy,
+        policy.environment_config,
+        episodes=2,
+        seed=90_001,
+        partner_profile="hesitant",
+        deterministic=True,
+    )
+
+    assert result["efficiency_metric_agent_ids"] == ["robot_2"]
+    robot_two = result["per_agent_efficiency"]["robot_2"]
+    assert set(result["per_agent_efficiency"]) == {"robot_2"}
+    assert result["avoidable_wait_rate"] == pytest.approx(
+        robot_two["avoidable_wait_count"]
+        / (result["episodes"] * result["mean_episode_steps"])
+    )
+
+
+def test_multi_partner_starvation_excludes_only_participant_responsibility() -> None:
+    info = {
+        "starving_task_ids": ("human_task", "actor_task"),
+        "starving_task_assignees": {
+            "human_task": "robot_1",
+            "actor_task": "robot_2",
+        },
+    }
+
+    assert _attributable_starving_task_ids(
+        info,
+        excluded_agent_ids=("robot_1",),
+    ) == ("actor_task",)
+    assert _attributable_starving_task_ids(info) == (
+        "human_task",
+        "actor_task",
     )
 
 
@@ -54,8 +95,8 @@ def test_actor_mask_does_not_preempt_teammate_occupancy_dynamics() -> None:
     environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=8))
     environment.reset(seed=71)
     state = environment.get_state()
-    state.by_id("robot_1").position = (8, 5)
-    state.by_id("robot_2").position = (9, 5)
+    state.by_id("robot_1").position = (6, 4)
+    state.by_id("robot_2").position = (7, 4)
     environment.set_state(state)
 
     mask = environment.action_masks()["robot_1"]
@@ -68,7 +109,41 @@ def test_actor_mask_does_not_preempt_teammate_occupancy_dynamics() -> None:
     assert not terminated and not truncated
     assert info["robot_collision_event"]
     assert info["robot_collision_kind"] == "occupied_stationary"
-    assert environment.get_state().by_id("robot_1").position == (8, 5)
+    assert environment.get_state().by_id("robot_1").position == (6, 4)
+
+
+def test_commitment_failure_labels_stay_inside_actor_action_support() -> None:
+    from backend.training.learner_dataset import (
+        collect_actor_commitment_failure_dataset,
+    )
+
+    config = WarehouseConfig(horizon=40)
+    policy = MAPPOPolicy(config, device="cpu")
+    rows, labels, _, _ = collect_actor_commitment_failure_dataset(
+        policy,
+        config,
+        charger_cycle_samples=16,
+        task_starvation_samples=16,
+        maximum_episodes=16,
+        seed=91_000,
+    )
+    if len(rows):
+        masks = rows[:, -len(ACTIONS) :]
+        assert np.all(masks[np.arange(len(labels)), labels] > 0.5)
+
+
+def test_commitment_curriculum_observations_match_mutated_state_labels() -> None:
+    from backend.training.learner_dataset import (
+        collect_commitment_curriculum_dataset,
+    )
+
+    rows, labels, _, _ = collect_commitment_curriculum_dataset(
+        WarehouseConfig(horizon=40),
+        sample_count=256,
+        seed=92_000,
+    )
+    masks = rows[:, -len(ACTIONS) :]
+    assert np.all(masks[np.arange(len(labels)), labels] > 0.5)
 
 
 def test_robot_two_distribution_is_independent_of_robot_one_current_action() -> None:
@@ -108,11 +183,11 @@ def test_shared_observation_contract_and_task_slots() -> None:
     config = WarehouseConfig(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     observations, _ = environment.reset(seed=12)
-    assert observation_dim(config) == 466
-    assert global_state_dim(config) == 940
+    assert observation_dim(config) == 470
+    assert global_state_dim(config) == 948
     assert set(observations) == {"robot_1", "robot_2"}
-    assert all(value.shape == (466,) for value in observations.values())
-    assert environment.global_state().shape == (940,)
+    assert all(value.shape == (470,) for value in observations.values())
+    assert environment.global_state().shape == (948,)
 
     schema = WarehouseAdapter(environment).observation_schema()
     serialized = str(schema)
@@ -213,6 +288,10 @@ def test_critical_skill_anchor_updates_actor_without_runtime_intervention() -> N
         "head_on",
         "charger_handoff",
         "delivery_goal_clearance",
+        "empty_delivery_clearance",
+        "dual_charger_approach",
+        "outer_exit_charger_approach",
+        "same_target_conflict",
         "charger_commitment",
         "task_commitment",
     }
@@ -292,7 +371,7 @@ def test_explanation_evidence_binds_robot_two_live_task_and_frame() -> None:
 
 
 def test_program_version_constant_is_new_shared_contract() -> None:
-    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v32_staggered_posthoc"
+    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v58_compact8_posthoc"
 
 
 def test_removed_runtime_controller_predicate_has_no_special_verbalizer() -> None:

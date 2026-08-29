@@ -17,15 +17,29 @@ from env.warehouse.environment import (
 )
 from env.warehouse.domain import DeliveryTask
 from env.warehouse.observations import _actor_visible_goal
-from env.warehouse.layouts import CORRIDOR_SHELF_LAYOUT
+from env.warehouse.layouts import CORRIDOR_SHELF_LAYOUT, STAGGERED_AISLES_LAYOUT
 from env.warehouse.coordination import stable_coordination_actions
 from env.warehouse.scenarios import (
+    apply_charger_commitment_scenario,
     apply_charger_handoff_scenario,
     apply_delivery_goal_clearance_scenario,
+    apply_dual_charger_approach_scenario,
+    apply_empty_delivery_clearance_scenario,
     apply_head_on_scenario,
+    apply_outer_exit_charger_approach_scenario,
 )
 from env.warehouse.regressions import seed_42027_regression_state
 from env.warehouse.rewards import RewardConfig
+
+
+def _legacy_config(**overrides) -> WarehouseConfig:
+    values = {
+        "rows": STAGGERED_AISLES_LAYOUT.rows,
+        "cols": STAGGERED_AISLES_LAYOUT.cols,
+        "map_layout_id": STAGGERED_AISLES_LAYOUT.layout_id,
+    }
+    values.update(overrides)
+    return WarehouseConfig(**values)
 
 
 def _task_signature(environment: WarehouseMultiAgentEnv):
@@ -61,7 +75,7 @@ def _give_first_task_to_robot_one(environment: WarehouseMultiAgentEnv):
 
 
 def test_executed_neural_progress_creates_nonbinding_route_commitment() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=12))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=12))
     environment.reset(seed=51)
     state = environment.get_state()
     state.tasks = [
@@ -87,8 +101,75 @@ def test_executed_neural_progress_creates_nonbinding_route_commitment() -> None:
     )
 
 
-def test_route_commitment_clears_when_teammate_claims_task() -> None:
+def test_charger_route_progress_does_not_create_task_commitment() -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig())
+    environment.reset(seed=17)
+    state = environment.get_state()
+    robot = state.by_id("robot_1")
+    robot.position = (6, 4)
+    robot.battery = 20.0
+    robot.navigation_goal_kind = "charge"
+    robot.navigation_goal_position = environment.layout.charger_position
+    robot.charge_mode_active = True
+    robot.route_commitment_task_id = None
+    # Make one task's A point lie on the same geometric branch as the charger
+    # step.  The step is charge intent, not evidence of task selection.
+    task = state.tasks[0]
+    task.pickup_position = (7, 3)
+    task.delivery_position = (0, 4)
+    environment.set_state(state)
+
+    environment.step({"robot_1": "DOWN", "robot_2": "WAIT"})
+
+    assert (
+        environment.get_state().by_id("robot_1").route_commitment_task_id
+        is None
+    )
+
+
+def test_shared_prefix_move_does_not_infer_one_of_two_tasks() -> None:
     environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=12))
+    environment.reset(seed=54)
+    state = environment.get_state()
+    state.tasks = [
+        DeliveryTask("task_1", (2, 8), (3, 2), created_frame=0),
+        DeliveryTask("task_2", (4, 8), (1, 2), created_frame=0),
+    ]
+    state.by_id("robot_1").position = (7, 3)
+    state.by_id("robot_2").position = (7, 5)
+    environment.set_state(state)
+
+    environment.step({"robot_1": "UP", "robot_2": "WAIT"})
+
+    assert (
+        environment.get_state().by_id("robot_1").route_commitment_task_id
+        is None
+    )
+
+
+def test_duplicate_commitment_is_not_created_while_another_task_is_free() -> None:
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=12))
+    environment.reset(seed=55)
+    state = environment.get_state()
+    state.tasks = [
+        DeliveryTask("task_1", (5, 0), (1, 0), created_frame=0),
+        DeliveryTask("task_2", (4, 10), (2, 10), created_frame=0),
+    ]
+    state.by_id("robot_1").position = (5, 5)
+    state.by_id("robot_2").position = (9, 6)
+    state.by_id("robot_2").route_commitment_task_id = "task_1"
+    environment.set_state(state)
+
+    environment.step({"robot_1": "LEFT", "robot_2": "WAIT"})
+
+    assert (
+        environment.get_state().by_id("robot_1").route_commitment_task_id
+        is None
+    )
+
+
+def test_route_commitment_clears_when_teammate_claims_task() -> None:
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=12))
     environment.reset(seed=52)
     state = environment.get_state()
     first = state.tasks[0]
@@ -104,8 +185,8 @@ def test_route_commitment_clears_when_teammate_claims_task() -> None:
     assert environment.get_state().by_id("robot_1").route_commitment_task_id is None
 
 
-def test_decisive_neural_progress_can_retarget_a_nonbinding_commitment() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=12))
+def test_clearance_move_cannot_retarget_a_valid_commitment() -> None:
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=12))
     environment.reset(seed=53)
     state = environment.get_state()
     state.tasks = [
@@ -121,10 +202,10 @@ def test_decisive_neural_progress_can_retarget_a_nonbinding_commitment() -> None
     environment.step({"robot_1": "UP", "robot_2": "WAIT"})
 
     updated = environment.get_state().by_id("robot_1")
-    assert updated.route_commitment_task_id == "task_2"
+    assert updated.route_commitment_task_id == "task_1"
     assert _actor_visible_goal(environment.get_state(), updated) == (
         "pickup",
-        (4, 10),
+        (5, 0),
     )
     assert environment.get_state().task_by_id("task_2").status == "available"
 
@@ -169,7 +250,7 @@ def test_committed_task_controls_safe_charger_departure_energy() -> None:
 
 def test_defaults_and_shared_task_endpoint_constraints() -> None:
     config = WarehouseConfig()
-    assert (config.rows, config.cols) == (10, 11)
+    assert (config.rows, config.cols) == (8, 9)
     assert (config.num_agents, config.max_agents) == (2, 2)
     assert config.horizon == 120
     assert config.active_task_count == 2
@@ -306,33 +387,105 @@ def test_unproductive_short_charger_return_remains_an_anomalous_cycle() -> None:
     assert "charger_productive_return" not in events
 
 
+def test_charger_handoff_return_is_productive_coordination_not_cycle() -> None:
+    environment = WarehouseMultiAgentEnv(
+        WarehouseConfig(participant_detour_scoring=False)
+    )
+    environment.reset(seed=42028)
+    state = environment.get_state()
+    charger_row, charger_column = environment.layout.charger_position
+    occupant = state.by_id("robot_1")
+    queued = state.by_id("robot_2")
+    occupant.position = environment.layout.charger_position
+    occupant.battery = 70.0
+    queued.position = (charger_row - 1, charger_column)
+    queued.battery = 20.0
+    environment.set_state(state)
+
+    environment.step({"robot_1": "LEFT", "robot_2": "DOWN"})
+    environment.step({"robot_1": "WAIT", "robot_2": "WAIT"})
+    _, _, _, _, info = environment.step(
+        {"robot_1": "RIGHT", "robot_2": "RIGHT"}
+    )
+
+    events = {
+        item["event"]: item
+        for item in info["energy_events"]
+        if item.get("agent_id") == "robot_1"
+    }
+    assert "charger_productive_return" in events
+    assert "charger_return_cycle" not in events
+    assert events["charger_productive_return"]["productive_reason"] == (
+        "coordination"
+    )
+
+
+def test_return_after_teammate_leaves_charger_remains_productive() -> None:
+    environment = WarehouseMultiAgentEnv(
+        WarehouseConfig(participant_detour_scoring=False)
+    )
+    environment.reset(seed=42029)
+    state = environment.get_state()
+    charger_row, charger_column = environment.layout.charger_position
+    returning = state.by_id("robot_1")
+    teammate = state.by_id("robot_2")
+    returning.position = environment.layout.charger_position
+    returning.battery = 70.0
+    teammate.position = (charger_row - 1, charger_column)
+    teammate.battery = 20.0
+    environment.set_state(state)
+
+    environment.step({"robot_1": "LEFT", "robot_2": "DOWN"})
+    environment.step({"robot_1": "WAIT", "robot_2": "WAIT"})
+    environment.step({"robot_1": "WAIT", "robot_2": "RIGHT"})
+    _, _, _, _, info = environment.step(
+        {"robot_1": "RIGHT", "robot_2": "UP"}
+    )
+
+    events = {
+        item["event"]: item
+        for item in info["energy_events"]
+        if item.get("agent_id") == "robot_1"
+    }
+    assert "charger_productive_return" in events
+    assert "charger_return_cycle" not in events
+    assert events["charger_productive_return"]["productive_reason"] == (
+        "coordination"
+    )
+
+
 def test_staggered_layout_has_three_real_charger_exit_cells() -> None:
     layout = CORRIDOR_SHELF_LAYOUT
     assert layout.tiles == (
-        "#####.#####",
-        "......#####",
-        "#####......",
-        "......#####",
-        "#####......",
-        "......#####",
-        "#####......",
-        "......#####",
-        "####.......",
-        "####...####",
+        "#########",
+        "#.......#",
+        "##.###.##",
+        "#.......#",
+        "..#####..",
+        "#.......#",
+        "##..#..##",
+        "###...###",
+        "###...###",
     )
-    assert layout.robot_start_positions == ((9, 4), (9, 6))
-    assert layout.charger_position == (9, 5)
-    assert layout.robot_exit_positions == ((8, 4), (8, 5), (8, 6))
-    assert layout.task_endpoint_exclusions == ((8, 4), (8, 5), (8, 6))
-    assert layout.is_passable((8, 4))
-    assert layout.is_passable((8, 6))
-    assert layout.four_way_intersections == ((8, 5),)
+    assert layout.robot_start_positions == ((8, 3), (8, 5))
+    assert layout.charger_position == (8, 4)
+    assert layout.robot_exit_positions == ((7, 3), (7, 4), (7, 5))
+    assert layout.task_endpoint_exclusions == ((7, 3), (7, 4), (7, 5))
+    assert layout.is_passable((7, 3))
+    assert layout.is_passable((7, 5))
+    assert layout.four_way_intersections == ()
     origin = layout.passable_positions[0]
     assert all(
         shortest_path_distance(origin, position, layout.layout_id) < 100
         for position in layout.passable_positions
     )
-    environment = WarehouseMultiAgentEnv(WarehouseConfig())
+    environment = WarehouseMultiAgentEnv(
+        WarehouseConfig(
+            rows=layout.rows,
+            cols=layout.cols,
+            map_layout_id=layout.layout_id,
+        )
+    )
     universally_forbidden = {
         *layout.robot_start_positions,
         *layout.task_endpoint_exclusions,
@@ -357,7 +510,7 @@ def test_staggered_layout_has_three_real_charger_exit_cells() -> None:
 
 
 def test_teacher_sends_full_robot_up_while_teammate_enters_charger() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=120))
     environment.reset(seed=42041)
     state = environment.get_state()
     state.by_id("robot_2").battery = 35.0
@@ -369,7 +522,7 @@ def test_teacher_sends_full_robot_up_while_teammate_enters_charger() -> None:
 
 
 def test_v8_records_head_on_risk_right_of_way_and_charger_queue() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=20))
     environment.reset(seed=901)
     _set_agent_positions(environment, (2, 5), (5, 5))
     _, _, _, _, info = environment.step(
@@ -405,7 +558,7 @@ def test_v8_records_head_on_risk_right_of_way_and_charger_queue() -> None:
     state = environment.get_state()
     state.by_id("robot_1").position = (9, 4)
     state.by_id("robot_1").battery = 1.0
-    state.by_id("robot_2").position = CHARGER_POSITION
+    state.by_id("robot_2").position = environment.layout.charger_position
     state.by_id("robot_2").battery = 20.0
     environment.set_state(state)
     _, _, _, _, info = environment.step(
@@ -515,13 +668,13 @@ def test_robot_conflicts_block_both_and_charge_one_collision(
 def test_static_obstacle_is_wait_without_collision_or_energy_cost() -> None:
     environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
     environment.reset(seed=4)
-    _set_agent_positions(environment, (0, 5), (9, 6))
+    _set_agent_positions(environment, (1, 1), (7, 5))
     before = environment.get_state().by_id("robot_1").battery
     _, _, _, _, info = environment.step(
         {"robot_1": "UP", "robot_2": "WAIT"}
     )
     state = environment.get_state()
-    assert state.by_id("robot_1").position == (0, 5)
+    assert state.by_id("robot_1").position == (1, 1)
     assert state.by_id("robot_1").battery == before
     assert state.robot_collision_events == 0
     assert state.last_robot_collision_event is False
@@ -591,7 +744,7 @@ def test_charging_and_shutdown_score_components() -> None:
     state = shutdown.get_state()
     state.by_id("robot_1").position = (1, 1)
     state.by_id("robot_1").battery = 1
-    state.by_id("robot_2").position = (9, 6)
+    state.by_id("robot_2").position = (7, 5)
     shutdown.set_state(state)
     _, _, terminated, truncated, info = shutdown.step(
         {"robot_1": "RIGHT", "robot_2": "WAIT"}
@@ -655,6 +808,37 @@ def test_head_on_clearance_reduces_state_potential_without_fixed_bonus() -> None
     assert info["reward_breakdown"]["robot_collision"] == pytest.approx(0.0)
 
 
+@pytest.mark.parametrize("variant", range(6))
+@pytest.mark.parametrize("reverse", (False, True))
+def test_compact_head_on_catalog_requires_one_causal_clearance_move(
+    variant: int,
+    reverse: bool,
+) -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment.reset(seed=7_100 + variant)
+    apply_head_on_scenario(
+        environment,
+        reverse=reverse,
+        variant=variant,
+    )
+    state = environment.get_state()
+
+    actions = stable_coordination_actions(environment)
+    targets, _, invalid, collision, _, _ = environment._resolve_motion(
+        state,
+        actions,
+    )
+
+    assert not environment.validate_state(state)
+    assert not invalid
+    assert not collision
+    assert tuple(actions.values()).count("WAIT") == 1
+    moving_id = next(
+        agent_id for agent_id, action in actions.items() if action != "WAIT"
+    )
+    assert targets[moving_id] != state.by_id(moving_id).position
+
+
 @pytest.mark.parametrize("variant", range(28))
 def test_delivery_goal_clearance_scenario_is_valid_follow_through_state(
     variant: int,
@@ -671,10 +855,13 @@ def test_delivery_goal_clearance_scenario_is_valid_follow_through_state(
     assert teammate.carrying_task_id is not None
     assert trailing.navigation_goal_kind == "delivery"
     assert trailing.navigation_goal_position == teammate.position
+    trailing_task = state.task_by_id(trailing.carrying_task_id)
+    trailing_task.shortest_safe_delivery_steps = 1.0
+    environment.set_state(state)
 
-    # The offline teacher label is a simultaneous follow-through: R2 vacates
-    # the B cell and R1 enters it. The scenario helper itself submitted no
-    # action; deployed rollouts still execute only Actor outputs.
+    # The offline teacher may not assume knowledge of the peer's private
+    # current-frame action.  R2 vacates the B cell first while R1 holds, then
+    # R1 enters it from the next frozen state.
     actions = stable_coordination_actions(environment)
     targets, _, invalid, collision, _, _ = environment._resolve_motion(
         state,
@@ -682,8 +869,261 @@ def test_delivery_goal_clearance_scenario_is_valid_follow_through_state(
     )
     assert not invalid
     assert not collision
-    assert targets["robot_1"] == trailing.navigation_goal_position
+    assert targets["robot_1"] == trailing.position
     assert targets["robot_2"] != teammate.position
+
+    _, _, _, _, info = environment.step(actions)
+    assert "occupied_cell_clearance_wait" in {
+        event["event"] for event in info["coordination_events"]
+    }
+    after_clearance = environment.get_state()
+    assert (
+        after_clearance.task_by_id(trailing.carrying_task_id)
+        .shortest_safe_delivery_steps
+        == 2.0
+    )
+    follow_actions = stable_coordination_actions(environment)
+    follow_targets = environment._resolve_motion(
+        after_clearance,
+        follow_actions,
+    )[0]
+    assert follow_targets["robot_1"] == trailing.navigation_goal_position
+
+
+def test_nonavoidable_participant_uncertainty_wait_extends_safe_path() -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment.reset(seed=17_900)
+    state = environment.get_state()
+    state.participant_controlled_agent_id = "robot_1"
+    robot_one = state.by_id("robot_1")
+    robot_two = state.by_id("robot_2")
+    task_one, task_two = state.tasks
+    robot_one.position = (2, 4)
+    robot_two.position = (4, 4)
+    robot_one.battery = robot_two.battery = 100.0
+    for robot, task, delivery in (
+        (robot_one, task_one, (2, 5)),
+        (robot_two, task_two, (3, 1)),
+    ):
+        task.status = "carried"
+        task.carrier_agent_id = robot.agent_id
+        task.claimed_frame = state.frame
+        robot.carrying_task_id = task.task_id
+        task.delivery_position = delivery
+    task_two.shortest_safe_delivery_steps = 8.0
+    task_two.safe_path_charge_planned = False
+    environment.set_state(state)
+
+    _, _, _, _, info = environment.step(
+        {"robot_1": "RIGHT", "robot_2": "WAIT"}
+    )
+    after = environment.get_state().task_by_id(task_two.task_id)
+
+    # UP is geometrically shorter for R2, but a participant may legally move
+    # DOWN into that same target from S_t. WAIT is therefore necessary causal
+    # safety work and must not make the route-efficiency ratio look worse.
+    assert "robot_2" not in info["avoidable_wait_agents"]
+    assert after.shortest_safe_delivery_steps == pytest.approx(9.0)
+    assert after.safe_path_clearance_extension_steps == pytest.approx(1.0)
+
+
+def test_nonavoidable_loaded_clearance_move_extends_safe_path() -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment.reset(seed=17_901)
+    state = environment.get_state()
+    state.participant_controlled_agent_id = "robot_1"
+    robot_one = state.by_id("robot_1")
+    robot_two = state.by_id("robot_2")
+    task_one, task_two = state.tasks
+    robot_one.position = (3, 4)
+    robot_two.position = (2, 4)
+    robot_one.battery = robot_two.battery = 100.0
+    for robot, task, delivery in (
+        (robot_one, task_one, (1, 3)),
+        (robot_two, task_two, (3, 3)),
+    ):
+        task.status = "carried"
+        task.carrier_agent_id = robot.agent_id
+        task.claimed_frame = state.frame
+        robot.carrying_task_id = task.task_id
+        task.delivery_position = delivery
+    task_two.shortest_safe_delivery_steps = 7.0
+    task_two.safe_path_charge_planned = False
+    environment.set_state(state)
+
+    _, _, _, _, info = environment.step(
+        {"robot_1": "DOWN", "robot_2": "UP"}
+    )
+    after = environment.get_state().task_by_id(task_two.task_id)
+
+    # Holding R2's old cell is not robust because the participant may legally
+    # enter it. The one-step retreat and later recovery are two exact units of
+    # necessary clearance, not an avoidable loaded detour.
+    assert "robot_2" not in info["avoidable_loaded_delivery_detour_agents"]
+    assert after.shortest_safe_delivery_steps == pytest.approx(9.0)
+    assert after.safe_path_clearance_extension_steps == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize("variant", range(8))
+def test_empty_robot_causally_clears_loaded_teammate_delivery(
+    variant: int,
+) -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment.reset(seed=18_000 + variant)
+    apply_empty_delivery_clearance_scenario(environment, variant=variant)
+    state = environment.get_state()
+    occupant_id = "robot_2" if variant >= 4 else "robot_1"
+    loaded_id = "robot_1" if occupant_id == "robot_2" else "robot_2"
+    occupant = state.by_id(occupant_id)
+    loaded = state.by_id(loaded_id)
+
+    assert not environment.validate_state(state)
+    assert occupant.carrying_task_id is None
+    assert occupant.route_commitment_task_id is not None
+    assert loaded.carrying_task_id is not None
+    assert loaded.navigation_goal_position == occupant.position
+
+    actions = stable_coordination_actions(environment)
+    targets, _, invalid, collision, _, _ = environment._resolve_motion(
+        state,
+        actions,
+    )
+    assert not invalid
+    assert not collision
+    assert actions[loaded_id] == "WAIT"
+    assert actions[occupant_id] != "WAIT"
+    assert targets[loaded_id] == loaded.position
+    assert targets[occupant_id] != occupant.position
+
+    environment.step(actions)
+    after_clearance = environment.get_state()
+    follow_actions = stable_coordination_actions(environment)
+    follow_targets = environment._resolve_motion(
+        after_clearance,
+        follow_actions,
+    )[0]
+    assert follow_targets[loaded_id] == loaded.navigation_goal_position
+
+
+@pytest.mark.parametrize("variant", range(8))
+def test_dual_charger_approach_selects_one_entry_from_frozen_state(
+    variant: int,
+) -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment.reset(seed=19_000 + variant)
+    apply_dual_charger_approach_scenario(environment, variant=variant)
+    state = environment.get_state()
+    entrant_id = next(
+        agent.agent_id
+        for agent in state.agents
+        if agent.position[0] == environment.layout.charger_position[0]
+    )
+    queued_id = "robot_1" if entrant_id == "robot_2" else "robot_2"
+    entrant = state.by_id(entrant_id)
+    queued = state.by_id(queued_id)
+    entrant_battery = entrant.battery
+
+    actions = stable_coordination_actions(environment)
+    targets, _, invalid, collision, _, _ = environment._resolve_motion(
+        state,
+        actions,
+    )
+    assert not environment.validate_state(state)
+    assert not invalid
+    assert not collision
+    assert targets[queued_id] != environment.layout.charger_position
+    _, _, _, _, first_info = environment.step(actions)
+    assert not first_info["robot_collision_event"]
+    if actions[entrant_id] == "WAIT":
+        # In four approach orientations the peer can legally enter the same
+        # target from S_t.  The causal protocol therefore clears that peer in
+        # one frozen state and lets the entrant move only from S_{t+1}.
+        assert targets[entrant_id] == entrant.position
+        assert targets[queued_id] != queued.position
+        second_state = environment.get_state()
+        second_actions = stable_coordination_actions(environment)
+        second_targets, _, second_invalid, second_collision, _, _ = (
+            environment._resolve_motion(second_state, second_actions)
+        )
+        assert not second_invalid
+        assert not second_collision
+        assert second_actions[entrant_id] != "WAIT"
+        assert second_targets[entrant_id] == environment.layout.charger_position
+        _, _, _, _, second_info = environment.step(second_actions)
+        assert not second_info["robot_collision_event"]
+    else:
+        assert targets[entrant_id] == environment.layout.charger_position
+
+    assert environment.get_state().by_id(entrant_id).position == (
+        environment.layout.charger_position
+    )
+    assert entrant_battery > environment.get_state().by_id(entrant_id).battery
+
+
+@pytest.mark.parametrize("variant", range(12))
+def test_outer_exit_charger_approach_advances_urgent_robot_first(
+    variant: int,
+) -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment.reset(seed=19_100 + variant)
+    apply_outer_exit_charger_approach_scenario(environment, variant=variant)
+    state = environment.get_state()
+    assert state.ineffective_joint_wait_streak == variant % 8
+    urgent = next(
+        agent
+        for agent in state.agents
+        if agent.position[0] == environment.layout.charger_position[0] - 1
+    )
+    idle = next(
+        agent for agent in state.agents if agent.agent_id != urgent.agent_id
+    )
+    before_distance = shortest_path_distance(
+        urgent.position,
+        environment.layout.charger_position,
+        environment.config.map_layout_id,
+    )
+
+    actions = stable_coordination_actions(environment)
+    targets, _, invalid, collision, _, _ = environment._resolve_motion(
+        state,
+        actions,
+    )
+
+    assert not invalid
+    assert not collision
+    assert actions[urgent.agent_id] != "WAIT"
+    assert actions[idle.agent_id] == "WAIT"
+    assert shortest_path_distance(
+        targets[urgent.agent_id],
+        environment.layout.charger_position,
+        environment.config.map_layout_id,
+    ) < before_distance
+    assert targets[idle.agent_id] == idle.position
+
+
+@pytest.mark.parametrize("agent_id", ("robot_1", "robot_2"))
+@pytest.mark.parametrize("variant", range(24))
+def test_recent_departure_curriculum_never_teaches_immediate_reentry(
+    agent_id: str,
+    variant: int,
+) -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment.reset(seed=20_000 + variant)
+    apply_charger_commitment_scenario(
+        environment,
+        agent_id=agent_id,
+        variant=variant,
+    )
+    state = environment.get_state()
+    agent = state.by_id(agent_id)
+    if agent.last_charger_departure_frame is None:
+        return
+
+    actions = stable_coordination_actions(environment)
+    target = environment._resolve_motion(state, actions)[0][agent_id]
+    assert agent.route_commitment_task_id is not None
+    assert not environment._requires_charge(state, agent)
+    assert target != environment.layout.charger_position
 
 
 def test_mask_representable_two_step_yield_keeps_positive_progress_signal() -> None:
@@ -691,16 +1131,28 @@ def test_mask_representable_two_step_yield_keeps_positive_progress_signal() -> N
     environment.reset(seed=7003)
     apply_head_on_scenario(environment, reverse=False)
 
-    _, _, _, _, wrong_info = environment.step(
-        {"robot_1": "WAIT", "robot_2": "RIGHT"}
-    )
-    _, _, _, _, correct_info = environment.step(
-        {"robot_1": "DOWN", "robot_2": "WAIT"}
-    )
+    first_actions = stable_coordination_actions(environment)
+    _, _, _, _, first_info = environment.step(first_actions)
+    second_actions = stable_coordination_actions(environment)
+    _, _, _, _, second_info = environment.step(second_actions)
+    third_actions = stable_coordination_actions(environment)
+    _, _, _, _, third_info = environment.step(third_actions)
+    fourth_actions = stable_coordination_actions(environment)
+    _, _, _, _, fourth_info = environment.step(fourth_actions)
 
-    assert wrong_info["potential_shaping_reward"] > 0.0
-    assert wrong_info["coordination_events"][0]["yielding_agent_id"] == "robot_2"
-    assert correct_info["potential_shaping_reward"] > 0.0
+    assert first_info["coordination_events"]
+    # Conservative decentralized clearance takes multiple frozen states: the
+    # follower never enters the peer's S_t cell in the same frame it vacates.
+    assert second_info["coordination_events"]
+    assert third_info["coordination_events"]
+    assert not fourth_info["coordination_events"]
+    assert not first_info["robot_collision_event"]
+    assert not second_info["robot_collision_event"]
+    assert not third_info["robot_collision_event"]
+    assert not fourth_info["robot_collision_event"]
+    infos = (first_info, second_info, third_info, fourth_info)
+    assert all(info["potential_shaping_reward"] >= 0.0 for info in infos)
+    assert sum(info["potential_shaping_reward"] for info in infos) > 0.0
 
 
 def test_full_charger_handoff_reduces_queue_potential_only_when_cleared() -> None:
@@ -820,7 +1272,7 @@ def test_repeated_avoidable_wait_penalty_increases_and_caps() -> None:
         )
 
     assert penalties == pytest.approx(
-        [0.0, -0.01, -0.02, -0.03, -0.04, -0.04, -0.04]
+        [0.0, -0.02, -0.04, -0.06, -0.08, -0.08, -0.08]
     )
     assert environment.get_state().by_id("robot_1").avoidable_wait_streak == 7
 
@@ -917,8 +1369,15 @@ def test_coordination_round_trip_cannot_create_reward() -> None:
     apply_head_on_scenario(environment, reverse=False)
     forward = stable_coordination_actions(environment)
     _, _, _, _, forward_info = environment.step(forward)
+    opposite = {
+        "UP": "DOWN",
+        "DOWN": "UP",
+        "LEFT": "RIGHT",
+        "RIGHT": "LEFT",
+        "WAIT": "WAIT",
+    }
     _, _, _, _, reverse_info = environment.step(
-        {"robot_1": "UP", "robot_2": "LEFT"}
+        {agent_id: opposite[action] for agent_id, action in forward.items()}
     )
 
     assert forward_info["coordination_progress_reward"] > 0.0
@@ -929,7 +1388,7 @@ def test_coordination_round_trip_cannot_create_reward() -> None:
 
 
 def test_counterfactual_regret_is_symmetric_and_individual() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=20))
     environment.reset(seed=3)
 
     _, rewards, _, _, info = environment.step(
@@ -945,7 +1404,7 @@ def test_counterfactual_regret_is_symmetric_and_individual() -> None:
     for agent_id in environment.agent_ids:
         assert info["counterfactual_regret_penalty_rewards"][agent_id] == (
             pytest.approx(
-                -0.02 * info["counterfactual_regret_units"][agent_id]
+                -0.03 * info["counterfactual_regret_units"][agent_id]
             )
         )
     assert rewards["robot_1"] != rewards["robot_2"]
@@ -1083,7 +1542,9 @@ def test_replacement_task_is_excluded_from_delivery_transition_potential() -> No
     [
         (25, {"robot_1": "RIGHT", "robot_2": "UP"}, 15.0),
         (69, {"robot_1": "DOWN", "robot_2": "UP"}, 14.0),
-        (99, {"robot_1": "DOWN", "robot_2": "UP"}, 13.0),
+        # The new charge-mode state correctly keeps robot 2 moving toward the
+        # charger here; the archived UP command was the old return-cycle bug.
+        (99, {"robot_1": "DOWN", "robot_2": "DOWN"}, 13.0),
         (119, {"robot_1": "DOWN", "robot_2": "UP"}, 13.0),
         (120, {"robot_1": "DOWN", "robot_2": "WAIT"}, 13.0),
     ],
@@ -1093,9 +1554,11 @@ def test_seed_42027_required_delivery_and_charging_moves_are_not_detours(
     actions: dict[str, str],
     legacy_regret: float,
 ) -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=120))
     environment.reset(seed=42027)
-    environment.set_state(seed_42027_regression_state(frame))
+    environment.set_state(
+        seed_42027_regression_state(frame, environment.config)
+    )
 
     _, rewards, _, _, info = environment.step(actions)
 
@@ -1108,9 +1571,9 @@ def test_seed_42027_required_delivery_and_charging_moves_are_not_detours(
 
 
 def test_one_step_detour_regret_is_bounded_by_two_grid_steps() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=20))
     environment.reset(seed=42027)
-    state = seed_42027_regression_state(25)
+    state = seed_42027_regression_state(25, environment.config)
     environment.set_state(state)
 
     _, _, _, _, info = environment.step(
@@ -1170,6 +1633,11 @@ def test_available_task_starvation_is_reported_after_forty_steps() -> None:
     )
 
     assert info["starving_task_ids"] == (state.tasks[0].task_id,)
+    assert set(info["starving_task_assignees"]) == {state.tasks[0].task_id}
+    assert info["starving_task_assignees"][state.tasks[0].task_id] in {
+        "robot_1",
+        "robot_2",
+    }
 
 
 def test_committed_task_in_progress_is_not_reported_as_starving() -> None:
@@ -1187,4 +1655,29 @@ def test_committed_task_in_progress_is_not_reported_as_starving() -> None:
         {"robot_1": "WAIT", "robot_2": "WAIT"}
     )
 
+    assert info["starving_task_ids"] == ()
+
+
+def test_old_task_is_not_starving_during_necessary_charging() -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment.reset(seed=190)
+    state = environment.get_state()
+    state.frame = 41
+    old_task = state.tasks[0]
+    old_task.created_frame = 0
+    state.tasks[1].created_frame = 40
+    charging = state.by_id("robot_1")
+    charging.position = environment.layout.charger_position
+    charging.battery = 20.0
+    charging.charge_mode_active = True
+    state.by_id("robot_2").active = False
+    environment.set_state(state)
+
+    _, _, _, _, info = environment.step(
+        {"robot_1": "WAIT", "robot_2": "WAIT"}
+    )
+
+    # Age alone is not starvation when the only feasible assignee is doing
+    # causally necessary energy work for that task. Active avoidable neglect
+    # after the age threshold remains covered by the preceding test.
     assert info["starving_task_ids"] == ()

@@ -8,6 +8,7 @@ import math
 from typing import Any, Mapping
 
 from backend.adapters.base import EnvironmentSnapshot
+from env.warehouse.energy_management import charge_release_energy
 from env.warehouse.environment import (
     MOVE_DELTAS,
     AgentState,
@@ -226,14 +227,10 @@ def _energy_decision_context(
             )
             * environment.config.move_battery_cost
         )
-        minimum_departure_battery = (
-            environment._mission_route_steps(
-                state,
-                agent,
-                task,
-                origin=environment.layout.charger_position,
-            )
-            * environment.config.move_battery_cost
+        minimum_departure_battery = charge_release_energy(
+            environment,
+            state,
+            agent,
         )
         travel_to_charger = shortest_path_distance(
             agent.position,

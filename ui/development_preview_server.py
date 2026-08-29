@@ -19,7 +19,6 @@ from dataclasses import dataclass, replace
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-import numpy as np
 from pathlib import Path
 import threading
 from typing import Any, Mapping
@@ -34,6 +33,7 @@ from env.warehouse.domain import (
     collaborative_study_config,
 )
 from env.warehouse.contracts import RUNTIME_CONTROLLER
+from env.warehouse.decision_protocol import distribution_decision_metadata
 from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.navigation import ACTIONS, MOVE_DELTAS
 from env.warehouse.numpy_policy import NumpyWarehousePolicy
@@ -47,16 +47,28 @@ from ui.warehouse_view import (
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "ui" / "web"
 # Public NumPy tutorial seed, calibrated independently from scored rounds.
-# With fixed stochastic Actor sampling it covers one real simultaneous
-# collision and one charger-clearance transition without shutdown, detour,
-# task starvation, or an unproductive charger-return cycle.
+# With fixed stochastic Actor sampling it produces a complete productive
+# mission with claiming, delivery, charging, and coordination-yield events.
 TUTORIAL_SEED = 40_786
 TASK1_SEED = 51_000
 TASK2_SEED = 51_500
 DEPLOYED_ACTOR_PATH = (
-    ROOT / "output" / "deployment" / "warehouse_mappo_v38_actor.npz"
+    ROOT / "output" / "deployment" / "warehouse_mappo_v64_actor.npz"
 )
-DEPLOYED_ACTOR = NumpyWarehousePolicy.load(DEPLOYED_ACTOR_PATH)
+DEPLOYED_ACTOR = (
+    NumpyWarehousePolicy.load(DEPLOYED_ACTOR_PATH)
+    if DEPLOYED_ACTOR_PATH.exists()
+    else None
+)
+
+
+def _require_deployed_actor() -> NumpyWarehousePolicy:
+    if DEPLOYED_ACTOR is None:
+        raise RuntimeError(
+            "The compact-map v64 NumPy Actor has not been exported. "
+            "Train and pass the release gates before starting the public study."
+        )
+    return DEPLOYED_ACTOR
 
 
 @dataclass(frozen=True)
@@ -74,15 +86,17 @@ class PreviewFrame:
 def _neural_actions(
     environment: WarehouseMultiAgentEnv,
     *,
-    rng: Any,
+    base_seed: int,
     deterministic: bool,
 ) -> tuple[dict[str, str], dict[str, ActionDistribution]]:
     """Run both independent Actors against one frozen pre-move observation."""
 
-    return DEPLOYED_ACTOR.act(
+    state = environment.get_state()
+    return _require_deployed_actor().act(
         environment.observations(),
-        rng=rng,
         deterministic=deterministic,
+        base_seed=base_seed,
+        decision_key=(state.episode_id, state.frame),
     )
 
 
@@ -137,6 +151,17 @@ def _transition_payload(
         "conflict_kind": info.get("robot_collision_kind"),
         "events": [dict(item) for item in events],
         "agents": agents,
+        "before_state": serialize_warehouse_state(
+            before,
+            selected_agent=("robot_2" if reveal_ai_action else "robot_1"),
+            actions={
+                agent.agent_id: agent.last_executed_action
+                for agent in before.agents
+            },
+            rewards=before.last_rewards,
+            events=before.last_coordination_events,
+            reveal_policy=reveal_ai_action,
+        ),
     }
 
 
@@ -160,7 +185,6 @@ def build_development_tutorial() -> tuple[PreviewFrame, ...]:
         replace(collaborative_study_config(), participant_detour_scoring=False)
     )
     environment.reset(seed=TUTORIAL_SEED)
-    rng = np.random.default_rng(TUTORIAL_SEED)
     state = environment.get_state()
     state.by_id("robot_2").battery = 35.0
     environment.set_state(state)
@@ -169,10 +193,16 @@ def build_development_tutorial() -> tuple[PreviewFrame, ...]:
         before = environment.get_state()
         actions, distributions = _neural_actions(
             environment,
-            rng=rng,
+            base_seed=TUTORIAL_SEED,
             deterministic=False,
         )
-        _, rewards, terminated, truncated, info = environment.step(actions)
+        _, rewards, terminated, truncated, info = environment.step(
+            actions,
+            decision_metadata=distribution_decision_metadata(
+                distributions,
+                decision_source="numpy_actor_ai_ai",
+            ),
+        )
         after = environment.get_state()
         events = _transition_events(info)
         frames.append(
@@ -190,7 +220,8 @@ def build_development_tutorial() -> tuple[PreviewFrame, ...]:
                     info,
                     reveal_ai_action=True,
                     loop=False,
-                ),
+                )
+                | {"before_stage": "instructions"},
                 action_distributions=dict(distributions),
             )
         )
@@ -256,7 +287,7 @@ class DevelopmentPreviewState:
         )
         self.environment = WarehouseMultiAgentEnv(collaborative_study_config())
         self.environment.reset(seed=TASK1_SEED)
-        self.policy_rng = np.random.default_rng(TASK1_SEED)
+        self.policy_seed = TASK1_SEED
         self.round_frame = _initial_frame(self.environment)
         self.stage = "idle"
         self.version = 0
@@ -283,6 +314,7 @@ class DevelopmentPreviewState:
         )
 
     def _build_reference_payload(self) -> dict[str, Any]:
+        actor = _require_deployed_actor()
         frames = [
             {
                 "index": index,
@@ -308,8 +340,8 @@ class DevelopmentPreviewState:
             "trajectory_kind": "ai_ai_reference",
             "trajectory_seed": TUTORIAL_SEED,
             "agent_control": {"robot_1": "ai", "robot_2": "ai"},
-            "policy_model_version": DEPLOYED_ACTOR.metadata.model_version,
-            "policy_artifact_sha256": DEPLOYED_ACTOR.artifact_sha256,
+            "policy_model_version": actor.metadata.model_version,
+            "policy_artifact_sha256": actor.artifact_sha256,
             "map_layout_id": self.environment.layout.layout_id,
             "map": warehouse_map_payload(self.environment.layout),
             "frames": frames,
@@ -349,7 +381,12 @@ class DevelopmentPreviewState:
     def _start_round(self, stage: str, seed: int) -> None:
         self.environment = WarehouseMultiAgentEnv(collaborative_study_config())
         self.environment.reset(seed=seed)
-        self.policy_rng = np.random.default_rng(seed)
+        participant_state = self.environment.get_state()
+        participant_state.participant_controlled_agent_id = (
+            self.environment.config.human_agent_id
+        )
+        self.environment.set_state(participant_state)
+        self.policy_seed = int(seed)
         self.round_frame = _initial_frame(self.environment)
         self.stage = stage
         self.last_explanation = None
@@ -383,16 +420,31 @@ class DevelopmentPreviewState:
         before = self.environment.get_state()
         actions, distributions = _neural_actions(
             self.environment,
-            rng=self.policy_rng,
+            base_seed=self.policy_seed,
             deterministic=False,
         )
         # The preview AI chooses from the frozen pre-move state without the
         # participant's current command. Replace robot 1 only after robot 2's
         # action has been selected, then resolve the pair simultaneously.
         actions["robot_1"] = action
-        _, rewards, terminated, truncated, info = self.environment.step(actions)
+        _, rewards, terminated, truncated, info = self.environment.step(
+            actions,
+            decision_metadata=distribution_decision_metadata(
+                distributions,
+                decision_source="participant_plus_numpy_actor",
+                participant_overrides={"robot_1": action},
+            ),
+        )
         after = self.environment.get_state()
         events = _transition_events(info)
+        transition_payload = _transition_payload(
+            before,
+            after,
+            actions,
+            info,
+            reveal_ai_action=False,
+            loop=False,
+        ) | {"before_stage": round_name}
         self.round_frame = PreviewFrame(
             state=after,
             actions=dict(actions),
@@ -400,14 +452,7 @@ class DevelopmentPreviewState:
             rewards=dict(rewards),
             info=deepcopy(dict(info)),
             events=tuple(deepcopy(events)),
-            transition=_transition_payload(
-                before,
-                after,
-                actions,
-                info,
-                reveal_ai_action=False,
-                loop=False,
-            ),
+            transition=transition_payload,
             action_distributions=dict(distributions),
         )
         if not (terminated or truncated):
@@ -428,6 +473,7 @@ class DevelopmentPreviewState:
         return self.round_frame, self.stage not in {"task1", "task2"}, f"human_ai_{self.stage}"
 
     def view(self) -> dict[str, Any]:
+        actor = _require_deployed_actor()
         frame, reveal_policy, trajectory_kind = self._display_frame()
         state_payload = serialize_warehouse_state(
             frame.state,
@@ -492,8 +538,8 @@ class DevelopmentPreviewState:
                     RUNTIME_CONTROLLER
                 ),
                 "formal_policy_loaded": True,
-                "policy_model_version": DEPLOYED_ACTOR.metadata.model_version,
-                "policy_artifact_sha256": DEPLOYED_ACTOR.artifact_sha256,
+                "policy_model_version": actor.metadata.model_version,
+                "policy_artifact_sha256": actor.artifact_sha256,
                 "progress": (
                     int(self.environment.state.frame)
                     if self.stage in {"task1", "task2"}
@@ -554,6 +600,7 @@ class DevelopmentPreviewState:
         )
         environment.reset(seed=TUTORIAL_SEED)
         environment.set_state(before.state)
+        actor = _require_deployed_actor()
         adapter = WarehouseAdapter(environment)
         snapshot = adapter.snapshot(None)
         return adapter, replace(
@@ -577,8 +624,8 @@ class DevelopmentPreviewState:
                 "development_controller": (
                     RUNTIME_CONTROLLER
                 ),
-                "policy_model_version": DEPLOYED_ACTOR.metadata.model_version,
-                "policy_artifact_sha256": DEPLOYED_ACTOR.artifact_sha256,
+                "policy_model_version": actor.metadata.model_version,
+                "policy_artifact_sha256": actor.artifact_sha256,
             },
         )
 
@@ -764,12 +811,21 @@ class DevelopmentPreviewSessions:
             return state
 
 
-SESSIONS = DevelopmentPreviewSessions()
+SESSIONS = DevelopmentPreviewSessions() if DEPLOYED_ACTOR is not None else None
+
+
+def _require_preview_sessions() -> DevelopmentPreviewSessions:
+    if SESSIONS is None:
+        _require_deployed_actor()
+        raise AssertionError("Unreachable: an Actor exists without preview sessions.")
+    return SESSIONS
 
 
 class Handler(BaseHTTPRequestHandler):
     def preview_state(self) -> DevelopmentPreviewState:
-        return SESSIONS.state_for(self.headers.get("X-Warehouse-Page"))
+        return _require_preview_sessions().state_for(
+            self.headers.get("X-Warehouse-Page")
+        )
 
     def do_GET(self) -> None:
         state = self.preview_state()
@@ -854,6 +910,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    _require_preview_sessions()
     ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
 
 

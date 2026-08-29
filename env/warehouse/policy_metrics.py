@@ -38,9 +38,14 @@ class EfficiencyMetrics:
         self,
         info: Mapping[str, Any],
         rewards: Mapping[str, float] | None = None,
+        *,
+        excluded_agent_ids: Iterable[str] = (),
     ) -> None:
+        excluded = set(excluded_agent_ids)
         if rewards is not None:
             for agent_id in AGENT_IDS:
+                if agent_id in excluded:
+                    continue
                 self.individual_training_rewards[agent_id] += float(
                     rewards[agent_id]
                 )
@@ -59,6 +64,8 @@ class EfficiencyMetrics:
         for target, key in mappings:
             values = info.get(key, {})
             for agent_id in AGENT_IDS:
+                if agent_id in excluded:
+                    continue
                 target[agent_id] += float(values.get(agent_id, 0.0))
         wait_agents = info.get("avoidable_wait_agents", ())
         detour_agents = info.get("avoidable_detour_agents", ())
@@ -68,6 +75,8 @@ class EfficiencyMetrics:
         )
         streaks = info.get("avoidable_wait_streaks", {})
         for agent_id in AGENT_IDS:
+            if agent_id in excluded:
+                continue
             self.avoidable_wait_counts[agent_id] += int(agent_id in wait_agents)
             self.detour_counts[agent_id] += int(agent_id in detour_agents)
             self.loaded_detour_counts[agent_id] += int(agent_id in loaded_agents)
@@ -76,12 +85,19 @@ class EfficiencyMetrics:
                 int(streaks.get(agent_id, 0)),
             )
 
-    def update_completed_tasks(self, state: Any) -> None:
+    def update_completed_tasks(
+        self,
+        state: Any,
+        *,
+        excluded_agent_ids: Iterable[str] = (),
+    ) -> None:
+        excluded = set(excluded_agent_ids)
         for task in state.completed_tasks:
             if (
                 task.delivered_frame is None
                 or task.claimed_frame is None
                 or task.shortest_safe_delivery_steps is None
+                or task.carrier_agent_id in excluded
             ):
                 continue
             self.path_actual_steps += float(

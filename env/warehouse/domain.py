@@ -35,6 +35,7 @@ class WarehouseConfig:
     # is energy planning, not an action rule: it keeps a neural robot from
     # leaving the charger with a route that is safe only in an empty map.
     coordination_energy_reserve_steps: float = 2.0
+    charge_release_hysteresis_steps: float = 2.0
     local_patch_radius: int = 2
     # Offline-supervision ablation only; the environment never invokes the
     # teacher and deployed Actor actions remain direct in either setting.
@@ -72,6 +73,8 @@ class WarehouseConfig:
             raise ValueError(
                 "coordination_energy_reserve_steps cannot be negative."
             )
+        if self.charge_release_hysteresis_steps < 0:
+            raise ValueError("charge_release_hysteresis_steps cannot be negative.")
 
     @property
     def mission_reserve_steps(self) -> float:
@@ -114,6 +117,14 @@ class DeliveryTask:
     # task ownership and remain optional for archived scenario fixtures.
     claimed_battery: float | None = None
     shortest_safe_delivery_steps: float | None = None
+    # Path-efficiency provenance.  The denominator starts with the exact
+    # claim-time safe plan and may grow only for transition-audited mandatory
+    # clearance work.  These fields never enter the Actor observation.
+    safe_path_charge_planned: bool | None = None
+    safe_path_clearance_extension_steps: float = 0.0
+    safe_path_clearance_energy_budget: float = 0.0
+    safe_path_unplanned_charge_active: bool = False
+    safe_path_unplanned_charge_extension_steps: float = 0.0
 
     @property
     def active(self) -> bool:
@@ -138,12 +149,14 @@ class AgentState:
     last_battery_delta: float = 0.0
     steps_since_charging: int = 0
     charger_wait_streak: int = 0
+    charge_mode_active: bool = False
     # Consecutive WAITs for which a collision-free, legal step toward the
     # transition-frozen mission existed.  This is separate from charging and
     # joint-stall memory so necessary waits never accumulate a penalty.
     avoidable_wait_streak: int = 0
     last_charger_departure_frame: int | None = None
     deliveries_at_last_charger_departure: int = 0
+    team_deliveries_at_last_charger_departure: int = 0
     carrying_task_at_last_charger_departure: str | None = None
     deliveries_completed: int = 0
     navigation_goal_kind: str = "pickup"
@@ -192,6 +205,9 @@ class WarehouseState:
     last_robot_collision_kind: str | None = None
     last_coordination_events: tuple[dict[str, Any], ...] = ()
     ineffective_joint_wait_streak: int = 0
+    # Episode-level control provenance is known before a decision.  It never
+    # contains the participant's current action.
+    participant_controlled_agent_id: str | None = None
 
     def by_id(self, agent_id: str) -> AgentState:
         for agent in self.agents:

@@ -37,6 +37,7 @@ from env.warehouse.environment import (
     WarehouseState,
 )
 from env.warehouse.contracts import ACTION_EXECUTION_VERSION, RUNTIME_CONTROLLER
+from env.warehouse.decision_protocol import distribution_decision_metadata
 from env.warehouse.layouts import DEFAULT_MAP_LAYOUT, MapLayout
 from env.warehouse.policy import MAPPOPolicy
 
@@ -740,6 +741,11 @@ class WarehouseWebSession:
     def _start_collaborative_round(self, round_name: str, seed: int) -> None:
         self.environment = WarehouseMultiAgentEnv(self.policy.environment_config)
         self.environment.reset(seed=int(seed))
+        participant_state = self.environment.get_state()
+        participant_state.participant_controlled_agent_id = (
+            self.environment.config.human_agent_id
+        )
+        self.environment.set_state(participant_state)
         self.adapter = WarehouseAdapter(self.environment)
         self.engine = self._engine_factory(self.adapter, self.policy)
         initial = self.adapter.snapshot(self.policy)
@@ -1251,10 +1257,12 @@ class WarehouseWebSession:
         if action not in self.policy.action_names:
             raise ValueError("Unknown participant action.")
         before = self.adapter.snapshot(self.policy)
+        decision_state = self.environment.get_state()
         proposed, distributions = self.policy.act(
             before.observations,
             before.global_state,
             deterministic=False,
+            decision_key=(decision_state.episode_id, decision_state.frame),
         )
         requested_joint_actions = {
             **dict(proposed),
@@ -1264,7 +1272,14 @@ class WarehouseWebSession:
         # sampled MAPPO Actor command. Environment dynamics alone may
         # subsequently block a move or resolve a robot conflict.
         joint_actions = dict(requested_joint_actions)
-        _, rewards, terminated, truncated, info = self.environment.step(joint_actions)
+        _, rewards, terminated, truncated, info = self.environment.step(
+            joint_actions,
+            decision_metadata=distribution_decision_metadata(
+                distributions,
+                decision_source="participant_plus_pytorch_actor",
+                participant_overrides={self.environment.config.human_agent_id: action},
+            ),
+        )
         after = self.adapter.snapshot(self.policy)
         decision = replace(
             before,

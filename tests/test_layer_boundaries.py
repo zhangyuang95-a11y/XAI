@@ -116,6 +116,11 @@ def test_environment_has_no_backend_ui_evaluation_dependencies() -> None:
         for node in ast.walk(tree):
             module = ""
             if isinstance(node, ast.ImportFrom):
+                if node.level:
+                    # A relative module such as ``.evaluation_diagnostics``
+                    # remains inside env.warehouse; it is not a dependency
+                    # on the top-level evaluation package.
+                    continue
                 module = node.module or ""
             elif isinstance(node, ast.Import):
                 module = ",".join(

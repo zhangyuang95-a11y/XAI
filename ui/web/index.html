@@ -27,7 +27,7 @@
   <main class="layout">
     <section class="card simulator-card">
       <div class="card-heading">
-        <div><span class="eyebrow" data-i18n="warehouse">10×11 warehouse</span><h1 id="sceneTitle" data-i18n="liveScene">Collaborative delivery</h1></div>
+        <div><span class="eyebrow" data-i18n="warehouse">8×9 warehouse</span><h1 id="sceneTitle" data-i18n="liveScene">Collaborative delivery</h1></div>
         <div class="round-progress"><span data-i18n="step">Steps</span><strong id="stepValue">0 / 120</strong></div>
       </div>
 
@@ -57,7 +57,7 @@
       </div>
 
       <div class="detail-grid">
-        <section id="robotDetailPanel"><h2 data-i18n="transitionActions">Selected actions</h2><div id="robotCards" class="robot-cards"></div></section>
+        <section id="robotDetailPanel"><h2 data-i18n="transitionActions">Selected actions</h2><p class="causal-frame-note" data-i18n="causalFrameNote">Decision evidence: pre-move state S_t. Outcome: state S_t+1 after both actions resolve simultaneously.</p><div id="robotCards" class="robot-cards"></div></section>
       </div>
     </section>
 
@@ -104,7 +104,7 @@
 
       <section class="hidden" id="roundPanel">
         <span class="phase" id="roundBadge">TASK 1</span><h2 id="roundTitle" data-i18n="roundInstruction">控制机器人 1，与机器人 2 协作配送</h2>
-        <p data-i18n="roundHint">选择一个动作后，服务器会同时取得机器人 2 的确定性动作，并推进一步。</p>
+        <p data-i18n="roundHint">你和机器人 2 都只根据同一移动前状态独立选动作，两个动作随后同时执行。</p>
         <div class="action-pad" id="actionPad">
           <button data-action="UP" type="button"><kbd>↑</kbd><span data-i18n="up">上</span></button>
           <button data-action="LEFT" type="button"><kbd>←</kbd><span data-i18n="left">左</span></button>

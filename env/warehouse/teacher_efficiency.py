@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from . import credit_assignment as credit
+from .energy_management import (
+    charger_departure_progress,
+    charger_service_required,
+)
 from .navigation import ACTIONS, MOVE_DELTAS, shortest_path_distance
 
 
@@ -84,7 +88,7 @@ def teacher_efficiency_guard(
         if (
             agent.position != environment.layout.charger_position
             or actions[agent.agent_id] not in MOVE_DELTAS
-            or not environment._requires_charge(state, agent)
+            or not charger_service_required(environment, state, agent)
         ):
             continue
         inbound_queue = any(
@@ -200,10 +204,7 @@ def teacher_efficiency_guard(
                     == environment.layout.charger_position
                     and agent.last_charger_departure_frame is not None
                     and state.frame - agent.last_charger_departure_frame <= 6
-                    and agent.deliveries_completed
-                    <= agent.deliveries_at_last_charger_departure
-                    and agent.carrying_task_id
-                    == agent.carrying_task_at_last_charger_departure
+                    and not any(charger_departure_progress(state, agent))
                     for agent in state.agents
                 ):
                     continue
@@ -267,14 +268,7 @@ def teacher_efficiency_guard(
     missions = credit.frozen_training_missions(environment, state)
     targets, _, _, _, _, _ = environment._resolve_motion(state, actions)
     for agent in state.agents:
-        made_progress = bool(
-            agent.deliveries_completed > agent.deliveries_at_last_charger_departure
-            or (
-                agent.carrying_task_id is not None
-                and agent.carrying_task_id
-                != agent.carrying_task_at_last_charger_departure
-            )
-        )
+        made_progress = any(charger_departure_progress(state, agent))
         if (
             agent.position == environment.layout.charger_position
             or targets[agent.agent_id] != environment.layout.charger_position
@@ -313,4 +307,42 @@ def teacher_efficiency_guard(
             alternatives.append((distance, index, action))
         if alternatives:
             actions[agent.agent_id] = min(alternatives)[2]
+    # A decentralized robot cannot know that its teammate will vacate an
+    # occupied cell in the current frame.  Earlier supervision labelled
+    # simultaneous follow-through (one robot leaves while the other enters
+    # its S_t cell), which is collision-free only after observing the peer's
+    # still-private action.  Hold the follower for one frozen transition and
+    # let it enter on the next frame.  This is an offline label invariant, not
+    # a runtime action rewrite.
+    targets, _, _, _, _, _ = environment._resolve_motion(state, actions)
+    occupied_followers = {
+        agent.agent_id
+        for agent in state.agents
+        for teammate in state.agents
+        if teammate.agent_id != agent.agent_id
+        and targets[agent.agent_id] == teammate.position
+        and targets[agent.agent_id] != agent.position
+    }
+    if occupied_followers:
+        actions = {
+            agent_id: ("WAIT" if agent_id in occupied_followers else action)
+            for agent_id, action in actions.items()
+        }
+
+    # Every offline label must belong to the Actor's static action support.
+    # Special charger branches may return before the generic joint search and
+    # a later efficiency rewrite can otherwise leave a wall-facing move in a
+    # rare scenario.  Such a label is impossible for the masked Actor to
+    # represent and makes cross-entropy overflow.  Fall back to WAIT for an
+    # invalid mover; if that exposes an occupied-stationary conflict, hold the
+    # complete joint action for this one supervision row.
+    _, _, invalid, collision, _, _ = environment._resolve_motion(state, actions)
+    if invalid:
+        actions = {
+            agent_id: ("WAIT" if agent_id in invalid else action)
+            for agent_id, action in actions.items()
+        }
+        _, _, _, collision, _, _ = environment._resolve_motion(state, actions)
+    if collision:
+        actions = {agent_id: "WAIT" for agent_id in environment.agent_ids}
     return actions

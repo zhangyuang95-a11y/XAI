@@ -24,13 +24,19 @@ class RewardConfig:
     coordination_progress_cap: float = 0.04
     task_age_priority_scale: float = 0.50
     task_age_priority_horizon: int = 40
-    counterfactual_regret_cost: float = 0.02
-    avoidable_wait_streak_cost: float = 0.01
+    counterfactual_regret_cost: float = 0.03
+    avoidable_wait_streak_cost: float = 0.02
     avoidable_wait_streak_cap: int = 4
     # Retained for explicit ablations and old command-line compatibility.
     # First-step WAIT regret is represented by counterfactual regret; applying
     # another flat cost here recreated the unsafe ``WAIT cost=0.03`` ablation.
-    avoidable_wait_cost: float = 0.0
+    avoidable_wait_cost: float = 0.01
+    # Explicit event costs close failure modes that one-step distance shaping
+    # cannot identify reliably.  All three are training credit only and never
+    # change the participant score.
+    loaded_detour_cost: float = 0.04
+    charger_return_cycle_cost: float = 0.08
+    starving_task_cost: float = 0.02
     # Individual frozen-goal progress and regret replace the old duplicated
     # global regression penalty.
     mission_regression_scale: float = 0.0
@@ -57,6 +63,12 @@ class RewardConfig:
             raise ValueError("avoidable_wait_streak_cap cannot be negative.")
         if self.mission_regression_scale < 0:
             raise ValueError("mission_regression_scale cannot be negative.")
+        if self.loaded_detour_cost < 0:
+            raise ValueError("loaded_detour_cost cannot be negative.")
+        if self.charger_return_cycle_cost < 0:
+            raise ValueError("charger_return_cycle_cost cannot be negative.")
+        if self.starving_task_cost < 0:
+            raise ValueError("starving_task_cost cannot be negative.")
         if self.version != REWARD_VERSION:
             raise ValueError(
                 f"Unsupported reward version {self.version!r}; "

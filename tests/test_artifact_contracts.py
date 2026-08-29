@@ -9,11 +9,16 @@ from backend.artifact_contracts import (
     validate_posthoc_rcpd_metadata,
     validate_reference_trajectory_manifest,
 )
+from backend.training.release_staggered_policy import (
+    _release_acceptance_gates,
+    _validated_formal_evaluation,
+)
 from env.warehouse.contracts import (
     ACTION_EXECUTION_VERSION,
     REFERENCE_TRAJECTORY_FORMAT,
     RCPD_PROGRAM_VERSION,
     RUNTIME_CONTROLLER,
+    MODEL_VERSION,
 )
 
 
@@ -116,3 +121,53 @@ def test_reference_contract_rejects_non_neural_or_mutable_trajectory(
             environment_version="test-environment",
             map_layout_id="test-map",
         )
+
+
+def test_release_packaging_requires_matching_strict_formal_gate(tmp_path) -> None:
+    source = tmp_path / "candidate.pt"
+    source.write_bytes(b"candidate checkpoint")
+    formal = tmp_path / "formal.json"
+    formal.write_text(
+        json.dumps(
+            {
+                "model_version": MODEL_VERSION,
+                "episodes_per_condition": 1_000,
+                "multi_partner_episodes": 1_000,
+                "formal_candidate": True,
+                "acceptance_checks": {"strict": True},
+                "artifact_hashes": {
+                    "model": sha256(source.read_bytes()).hexdigest(),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = _validated_formal_evaluation(formal, source)
+    assert payload["formal_candidate"] is True
+
+    payload["multi_partner_episodes"] = 999
+    formal.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Strict formal evaluation"):
+        _validated_formal_evaluation(formal, source)
+
+
+def test_release_packaging_rejects_a_failed_fresh_seed_smoke_gate() -> None:
+    tutorial = {
+        "steps": 120,
+        "deliveries": 1,
+        "charging_steps": 1,
+        "shutdowns": 0,
+    }
+    passing = _release_acceptance_gates(
+        tutorial,
+        {"collision_rate": True, "avoidable_wait_rate": True},
+    )
+    failing = _release_acceptance_gates(
+        tutorial,
+        {"collision_rate": True, "avoidable_wait_rate": False},
+    )
+
+    assert all(passing.values())
+    assert failing["supplemental_seed_ranges_pass"] is False
+    assert not all(failing.values())

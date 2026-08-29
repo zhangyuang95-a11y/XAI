@@ -12,6 +12,13 @@ from typing import Any, Mapping
 from . import credit_assignment as credit
 from .contracts import ENVIRONMENT_VERSION
 from .domain import AgentState, DeliveryTask, WarehouseConfig, WarehouseState
+from .energy_management import (
+    charge_release_energy,
+    charger_departure_progress,
+    charger_queue_clearance_delay,
+    charger_reentry_event,
+    should_continue_charge_mode,
+)
 from .layouts import get_map_layout
 from .navigation import (
     ACTIONS,
@@ -33,6 +40,12 @@ from .navigation import (
     pickup_pairs,
     shortest_path_distance,
 )
+from .transition_audit import (
+    action_is_robustly_safe,
+    environment_info,
+    joint_decision_audit,
+)
+from .state_support import render_ascii_state, validate_warehouse_state
 
 
 class WarehouseMultiAgentEnv:
@@ -91,7 +104,8 @@ class WarehouseMultiAgentEnv:
             next_task_index=next_task_index,
         )
         self._refresh_navigation_goals(self.state)
-        return self.observations(), self._info(
+        return self.observations(), environment_info(
+            self,
             reward_breakdown=None,
             collisions=(),
             shutdowns=(),
@@ -598,7 +612,14 @@ class WarehouseMultiAgentEnv:
                 agent.navigation_goal_kind = "wait"
                 agent.navigation_goal_position = agent.position
                 continue
+            if agent.charge_mode_active:
+                if should_continue_charge_mode(self, state, agent):
+                    agent.navigation_goal_kind = "charge"
+                    agent.navigation_goal_position = self.layout.charger_position
+                    continue
+                agent.charge_mode_active = False
             if self._requires_charge(state, agent):
+                agent.charge_mode_active = True
                 agent.navigation_goal_kind = "charge"
                 agent.navigation_goal_position = self.layout.charger_position
                 continue
@@ -645,8 +666,18 @@ class WarehouseMultiAgentEnv:
             agent.route_commitment_task_id = None
             if (
                 before_agent.carrying_task_id is not None
+                or before_agent.navigation_goal_kind == "charge"
+                or before_agent.charge_mode_active
                 or executed.get(agent.agent_id) not in MOVE_DELTAS
             ):
+                # A movement made while following the public charger route
+                # does not reveal a pickup choice.  On the compact staggered
+                # map the charger stem overlaps the shortest path to some A
+                # points; inferring a fresh task commitment there caused both
+                # robots to "choose" the same newer job while they were only
+                # trying to charge.  Existing neural intent survives a
+                # necessary charge trip, but charging geometry cannot create
+                # new task memory.
                 if existing in next_available:
                     agent.route_commitment_task_id = existing
                 continue
@@ -678,43 +709,44 @@ class WarehouseMultiAgentEnv:
             progress_candidates.sort()
             best = progress_candidates[0]
             # A movement that is equally informative for multiple pickups
-            # does not reveal which task the neural Actor chose.
+            # does not reveal which task the neural Actor chose.  Remaining
+            # distance and task age are useful tie-breakers for planning, but
+            # they cannot turn one shared-prefix movement into evidence of a
+            # private task choice.
             equally_informative = [
                 item
                 for item in progress_candidates
-                if item[:3] == best[:3]
+                if item[0] == best[0]
             ]
             if len(equally_informative) == 1:
                 inferred = best[3]
-                if existing not in next_available:
-                    agent.route_commitment_task_id = inferred
-                    continue
-                existing_task = previous_available.get(existing)
-                if existing_task is None:
-                    agent.route_commitment_task_id = inferred
-                    continue
-                existing_progress = (
-                    shortest_path_distance(
-                        before_agent.position,
-                        existing_task.pickup_position,
-                        self.config.map_layout_id,
-                    )
-                    - shortest_path_distance(
-                        agent.position,
-                        existing_task.pickup_position,
-                        self.config.map_layout_id,
-                    )
+                teammate = next(
+                    item
+                    for item in previous.agents
+                    if item.agent_id != before_agent.agent_id
                 )
-                inferred_progress = -best[0]
-                # A decisive neural step may retarget an existing commitment.
-                # Equal progress keeps the stable commitment, preventing a
-                # common corridor move from causing task oscillation.
-                agent.route_commitment_task_id = (
-                    inferred
-                    if inferred != existing
-                    and inferred_progress > max(0, existing_progress)
-                    else existing
+                uncommitted_alternative_exists = any(
+                    task_id != inferred
+                    and task_id != teammate.route_commitment_task_id
+                    for task_id in previous_available
                 )
+                duplicate_teammate_commitment = bool(
+                    inferred == teammate.route_commitment_task_id
+                    and uncommitted_alternative_exists
+                )
+                if existing in next_available:
+                    # A valid commitment is episode memory, not a fresh
+                    # interpretation of every movement.  A collision-avoidance
+                    # retreat or charger-apron clearance can temporarily make
+                    # more geometric progress toward another A point.  Using
+                    # that single step to retarget caused the Actor to abandon
+                    # its energy-safe post-charge job and immediately return to
+                    # the station.  Keep the commitment until the task is
+                    # claimed (by either robot) or delivered; only then may a
+                    # later neural progress step reveal a new intention.
+                    agent.route_commitment_task_id = existing
+                elif not duplicate_teammate_commitment:
+                    agent.route_commitment_task_id = inferred
             elif existing in next_available:
                 agent.route_commitment_task_id = existing
 
@@ -1109,40 +1141,13 @@ class WarehouseMultiAgentEnv:
                     clearance_cap=clearance_cost,
                 )
 
-        charger = self.layout.charger_position
-        occupant = next(
-            (agent for agent in active if positions.get(agent.agent_id, agent.position) == charger),
-            None,
-        )
-        if occupant is not None and not self._requires_charge(
+        delay += charger_queue_clearance_delay(
+            self,
             state,
-            occupant,
-            position=charger,
-        ):
-            queued = next(
-                (agent for agent in active if agent.agent_id != occupant.agent_id),
-                None,
-            )
-            if queued is not None:
-                queued_position = positions.get(queued.agent_id, queued.position)
-                if (
-                    self._requires_charge(
-                        state,
-                        queued,
-                        position=queued_position,
-                    )
-                    and shortest_path_distance(
-                        queued_position,
-                        charger,
-                        self.config.map_layout_id,
-                    )
-                    <= 2
-                ):
-                    # Vacating the single charger cell is one unit of real
-                    # clearance work; it is not equivalent to a long route.
-                    delay += credit.measured_charger_clearance_delay(
-                        self, clearance_cost
-                    )
+            positions,
+            active,
+            clearance_cost,
+        )
         return float(delay)
 
     def _human_route_regret(
@@ -1248,11 +1253,9 @@ class WarehouseMultiAgentEnv:
                 continue
             if (
                 agent.position == self.layout.charger_position
-                and agent.battery < 100.0
-                and self._requires_charge(
-                    state,
-                    agent,
-                    position=self.layout.charger_position,
+                and (
+                    agent.charge_mode_active
+                    or agent.navigation_goal_kind == "charge"
                 )
             ):
                 continue
@@ -1269,6 +1272,14 @@ class WarehouseMultiAgentEnv:
                 self.config.map_layout_id,
             )
             for candidate_action in MOVE_DELTAS:
+                if not action_is_robustly_safe(
+                    self,
+                    state,
+                    requested_actions,
+                    agent.agent_id,
+                    candidate_action,
+                ):
+                    continue
                 trial_actions = dict(requested_actions)
                 trial_actions[agent.agent_id] = candidate_action
                 targets, _, invalid, collision, _, _ = self._resolve_motion(
@@ -1344,11 +1355,14 @@ class WarehouseMultiAgentEnv:
     def step(
         self,
         actions: Mapping[str, str],
+        *,
+        decision_metadata: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, float], bool, bool, dict[str, Any]]:
         self._require_state()
         if self.state.terminated or self.state.truncated:
             raise RuntimeError("Cannot step a completed warehouse episode.")
         previous = deepcopy(self.state)
+        pre_move_observations = self.observations()
         raw_actions = {
             agent.agent_id: str(actions.get(agent.agent_id, "WAIT"))
             for agent in previous.agents
@@ -1391,12 +1405,14 @@ class WarehouseMultiAgentEnv:
             intended_targets,
             collision_kind,
         )
+        coordination_events += credit.occupied_cell_clearance_events(self, previous, executed, intended_targets)
         (
             counterfactual_regret_units,
             avoidable_wait_agents,
             detour_agents,
             loaded_detour_agents,
             best_counterfactual_distances,
+            joint_wait_escape_actions,
         ) = credit.counterfactual_action_regrets(
             self,
             previous,
@@ -1408,6 +1424,18 @@ class WarehouseMultiAgentEnv:
         )
 
         next_state = deepcopy(previous)
+        credit.extend_safe_path_baseline_for_clearance(
+            self,
+            previous,
+            next_state,
+            raw_actions,
+            executed,
+            targets,
+            coordination_events,
+            avoidable_wait_agents,
+            tuple(sorted(loaded_detour_agents)),
+            robot_collision,
+        )
         next_state.frame += 1
         next_state.last_robot_collision_event = robot_collision
         next_state.last_robot_collision_kind = collision_kind
@@ -1463,6 +1491,9 @@ class WarehouseMultiAgentEnv:
                 agent.deliveries_at_last_charger_departure = (
                     previous_agent.deliveries_completed
                 )
+                agent.team_deliveries_at_last_charger_departure = (
+                    previous.total_deliveries
+                )
                 agent.carrying_task_at_last_charger_departure = (
                     previous_agent.carrying_task_id
                 )
@@ -1486,33 +1517,44 @@ class WarehouseMultiAgentEnv:
                 and previous_agent.last_charger_departure_frame is not None
             ):
                 elapsed = next_state.frame - previous_agent.last_charger_departure_frame
-                completed_mission_progress = bool(
-                    previous_agent.deliveries_completed
-                    > previous_agent.deliveries_at_last_charger_departure
-                    or (
-                        previous_agent.carrying_task_id is not None
-                        and previous_agent.carrying_task_id
-                        != previous_agent.carrying_task_at_last_charger_departure
+                (
+                    completed_mission_progress,
+                    completed_coordination_progress,
+                ) = charger_departure_progress(
+                    previous,
+                    previous_agent,
+                )
+                frozen_goal = self._frozen_route_goal(
+                    previous,
+                    previous_agent.agent_id,
+                    prioritize_old_tasks=True,
+                )
+                route_progress = bool(
+                    frozen_goal is not None
+                    and frozen_goal != self.layout.charger_position
+                    and shortest_path_distance(
+                        self.layout.charger_position,
+                        frozen_goal,
+                        self.config.map_layout_id,
+                    )
+                    < shortest_path_distance(
+                        previous_agent.position,
+                        frozen_goal,
+                        self.config.map_layout_id,
                     )
                 )
-                if elapsed <= 6 and not completed_mission_progress:
-                    energy_events.append(
-                        {
-                            "event": "charger_return_cycle",
-                            "agent_id": agent.agent_id,
-                            "steps_since_departure": int(elapsed),
-                            "battery": float(agent.battery),
-                        }
-                    )
-                elif elapsed <= 6:
-                    energy_events.append(
-                        {
-                            "event": "charger_productive_return",
-                            "agent_id": agent.agent_id,
-                            "steps_since_departure": int(elapsed),
-                            "battery": float(agent.battery),
-                        }
-                    )
+                reentry = charger_reentry_event(
+                    agent,
+                    elapsed=elapsed,
+                    completed_mission_progress=(
+                        completed_mission_progress or route_progress
+                    ),
+                    completed_coordination_progress=(
+                        completed_coordination_progress
+                    ),
+                )
+                if reentry is not None:
+                    energy_events.append(reentry)
 
         claimed_tasks: list[DeliveryTask] = []
         delivered_tasks: list[DeliveryTask] = []
@@ -1547,8 +1589,13 @@ class WarehouseMultiAgentEnv:
                     claimed.claimed_frame = next_state.frame
                     agent.carrying_task_id = claimed.task_id
                     claimed.claimed_battery = float(agent.battery)
-                    claimed.shortest_safe_delivery_steps = (
-                        credit.safe_delivery_completion_steps(self, agent, claimed)
+                    (
+                        claimed.shortest_safe_delivery_steps,
+                        claimed.safe_path_charge_planned,
+                    ) = credit.safe_delivery_completion_plan(
+                        self,
+                        agent,
+                        claimed,
                     )
                     pickup_agents.add(agent.agent_id)
                     claimed_tasks.append(claimed)
@@ -1651,6 +1698,36 @@ class WarehouseMultiAgentEnv:
             excluded_task_ids={task.task_id for task in replacement_tasks},
             task_age_frame=previous.frame,
         )
+        charger_return_cycle_agents = tuple(
+            sorted(
+                str(event["agent_id"])
+                for event in energy_events
+                if event.get("event") == "charger_return_cycle"
+            )
+        )
+        frozen_assignees_by_task = {
+            mission.task.task_id: agent_id
+            for agent_id, mission in frozen_missions.items()
+            if mission is not None and mission.task is not None
+        }
+        starving_task_ids = tuple(
+            sorted(
+                task.task_id
+                for task in next_state.tasks
+                if task.status == "available"
+                and next_state.frame - task.created_frame > 40
+                and not any(
+                    agent.route_commitment_task_id == task.task_id
+                    for agent in next_state.agents
+                    if agent.active
+                )
+                and (
+                    assignee_id := frozen_assignees_by_task.get(task.task_id)
+                )
+                is not None
+                and counterfactual_regret_units.get(assignee_id, 0.0) > 0.0
+            )
+        )
         reward_credit = credit.transition_credit_components(
             self,
             terminated=terminated,
@@ -1664,6 +1741,10 @@ class WarehouseMultiAgentEnv:
             coordination_cost_before=coordination_cost_before,
             counterfactual_regret_units=counterfactual_regret_units,
             avoidable_wait_agents=avoidable_wait_agents,
+            loaded_detour_agents=tuple(sorted(loaded_detour_agents)),
+            coordination_events=coordination_events,
+            charger_return_cycle_agents=charger_return_cycle_agents,
+            starving_task_ids=starving_task_ids,
             assignment_potential_before=potential_before,
             assignment_potential_after=potential_after,
         )
@@ -1678,7 +1759,8 @@ class WarehouseMultiAgentEnv:
         self.state = next_state
 
         collision_agents = self.agent_ids if robot_collision else ()
-        info = self._info(
+        info = environment_info(
+            self,
             reward_breakdown=score_components,
             collisions=collision_agents,
             shutdowns=tuple(sorted(shutdown_agents)),
@@ -1754,11 +1836,15 @@ class WarehouseMultiAgentEnv:
                     reward_credit["counterfactual_regret_penalty_rewards"]
                 ),
                 "best_counterfactual_distances": best_counterfactual_distances,
+                "joint_wait_escape_actions": dict(joint_wait_escape_actions),
                 "repeated_avoidable_wait_penalty_rewards": (
                     reward_credit["repeated_avoidable_wait_penalty_rewards"]
                 ),
                 "flat_avoidable_wait_penalty_rewards": (
                     reward_credit["flat_avoidable_wait_penalty_rewards"]
+                ),
+                "causal_efficiency_penalty_rewards": (
+                    reward_credit["causal_efficiency_penalty_rewards"]
                 ),
                 "avoidable_wait_streaks": {
                     agent.agent_id: agent.avoidable_wait_streak
@@ -1781,19 +1867,11 @@ class WarehouseMultiAgentEnv:
                     for task in next_state.tasks
                     if task.status == "available"
                 },
-                "starving_task_ids": tuple(
-                    sorted(
-                        task.task_id
-                        for task in next_state.tasks
-                        if task.status == "available"
-                        and next_state.frame - task.created_frame > 40
-                        and not any(
-                            agent.route_commitment_task_id == task.task_id
-                            for agent in next_state.agents
-                            if agent.active
-                        )
-                    )
-                ),
+                "starving_task_ids": starving_task_ids,
+                "starving_task_assignees": {
+                    task_id: frozen_assignees_by_task[task_id]
+                    for task_id in starving_task_ids
+                },
                 "ineffective_joint_wait_streak": (
                     next_state.ineffective_joint_wait_streak
                 ),
@@ -1832,6 +1910,13 @@ class WarehouseMultiAgentEnv:
                     }
                     for agent in next_state.agents
                 },
+                "decision_audit": joint_decision_audit(
+                    previous=previous,
+                    next_state=next_state,
+                    pre_move_observations=pre_move_observations,
+                    raw_actions=raw_actions,
+                    decision_metadata=decision_metadata,
+                ),
                 "terminal_reason": reason,
             }
         )
@@ -1856,143 +1941,13 @@ class WarehouseMultiAgentEnv:
         self._rng.setstate(state)
 
     def validate_state(self, state: WarehouseState) -> tuple[str, ...]:
-        errors: list[str] = []
-        ids = [agent.agent_id for agent in state.agents]
-        if ids != list(self.agent_ids):
-            errors.append("state must contain robot_1 and robot_2 in stable order")
-        positions = [agent.position for agent in state.agents]
-        if len(positions) != len(set(positions)):
-            errors.append("robots cannot overlap")
-        for agent in state.agents:
-            if not is_passable(agent.position, self.config.map_layout_id):
-                errors.append(f"{agent.agent_id} is outside a passable aisle")
-            if not 0.0 <= agent.battery <= 100.0:
-                errors.append(f"{agent.agent_id} battery is outside [0, 100]")
-            if agent.last_action not in ACTIONS:
-                errors.append(f"{agent.agent_id} has an invalid requested action")
-            if agent.last_executed_action not in ACTIONS:
-                errors.append(f"{agent.agent_id} has an invalid executed action")
-        active_ids = [task.task_id for task in state.tasks]
-        completed_ids = [task.task_id for task in state.completed_tasks]
-        if len(active_ids) != self.config.active_task_count:
-            errors.append("state must keep exactly two active tasks")
-        if len(set((*active_ids, *completed_ids))) != len(active_ids) + len(completed_ids):
-            errors.append("task IDs must be unique")
-        endpoints: list[tuple[int, int]] = []
-        pickup_positions = {
-            access for _, access in pickup_pairs(self.config.map_layout_id)
-        }
-        for task in state.tasks:
-            if task.status not in {"available", "carried"}:
-                errors.append(f"active task {task.task_id} has invalid status")
-            if task.pickup_position not in pickup_positions:
-                errors.append(f"task {task.task_id} pickup is not shelf-adjacent")
-            if not is_passable(task.delivery_position, self.config.map_layout_id):
-                errors.append(f"task {task.task_id} delivery is not passable")
-            if task.pickup_position == task.delivery_position:
-                errors.append(f"task {task.task_id} has identical endpoints")
-            if (
-                shortest_path_distance(
-                    task.pickup_position,
-                    task.delivery_position,
-                    self.config.map_layout_id,
-                )
-                < self.config.minimum_task_distance
-            ):
-                errors.append(f"task {task.task_id} is shorter than the minimum")
-            endpoints.extend((task.pickup_position, task.delivery_position))
-            if task.status == "available" and task.carrier_agent_id is not None:
-                errors.append(f"available task {task.task_id} has a carrier")
-            if task.status == "carried":
-                if task.carrier_agent_id not in ids:
-                    errors.append(f"carried task {task.task_id} has no valid carrier")
-                elif state.by_id(task.carrier_agent_id).carrying_task_id != task.task_id:
-                    errors.append(f"task {task.task_id} and carrier disagree")
-        if len(endpoints) != len(set(endpoints)):
-            errors.append("active task endpoints must be unique")
-        carried_ids = [
-            agent.carrying_task_id
-            for agent in state.agents
-            if agent.carrying_task_id is not None
-        ]
-        if len(carried_ids) != len(set(carried_ids)):
-            errors.append("a task cannot be carried by two robots")
-        if state.total_deliveries != len(state.completed_tasks):
-            errors.append("total deliveries must equal completed task history")
-        expected_score = sum(float(value) for value in state.score_breakdown.values())
-        if not math.isclose(state.user_score, expected_score, abs_tol=1e-6):
-            errors.append("user score must equal its component breakdown")
-        return tuple(errors)
+        return validate_warehouse_state(self, state)
 
     def render_ascii(self, state: WarehouseState | None = None) -> tuple[str, ...]:
         current = state or self.state
         if current is None:
             raise RuntimeError("Environment has not been reset.")
-        grid = [
-            [
-                "."
-                if is_passable((row, column), self.config.map_layout_id)
-                else "S"
-                for column in range(self.layout.cols)
-            ]
-            for row in range(self.layout.rows)
-        ]
-        charger = self.layout.charger_position
-        grid[charger[0]][charger[1]] = "C"
-        for row, column in self.layout.robot_start_positions:
-            grid[row][column] = "W"
-        for index, task in enumerate(sorted(current.tasks, key=lambda item: item.task_id)):
-            if task.status == "available":
-                row, column = task.pickup_position
-                grid[row][column] = chr(ord("A") + index)
-            row, column = task.delivery_position
-            grid[row][column] = chr(ord("a") + index)
-        for index, agent in enumerate(current.agents, start=1):
-            row, column = agent.position
-            grid[row][column] = str(index) if agent.active else "X"
-        return tuple("".join(row) for row in grid)
-
-    def _info(
-        self,
-        *,
-        reward_breakdown: Mapping[str, float] | None,
-        collisions: tuple[str, ...],
-        shutdowns: tuple[str, ...],
-    ) -> dict[str, Any]:
-        self._require_state()
-        return {
-            "contract_version": "collaborative_delivery_v1",
-            "episode_id": self.state.episode_id,
-            "frame": self.state.frame,
-            "total_deliveries": self.state.total_deliveries,
-            "per_agent_deliveries": {
-                agent.agent_id: agent.deliveries_completed
-                for agent in self.state.agents
-            },
-            "collisions": collisions,
-            "shutdowns": shutdowns,
-            "reward_breakdown": dict(reward_breakdown or {}),
-            "terminal_reason": self.state.terminal_reason,
-            "active_task_count": len(self.state.tasks),
-            "tasks": [
-                {
-                    "task_id": task.task_id,
-                    "pickup_position": task.pickup_position,
-                    "delivery_position": task.delivery_position,
-                    "status": task.status,
-                    "carrier_agent_id": task.carrier_agent_id,
-                    "created_frame": task.created_frame,
-                    "claimed_frame": task.claimed_frame,
-                    "delivered_frame": task.delivered_frame,
-                }
-                for task in self.state.tasks
-            ],
-            "user_score": self.state.user_score,
-            "score_breakdown": dict(self.state.score_breakdown),
-            "human_route_regret_units": self.state.human_route_regret_units,
-            "robot_collision_events": self.state.robot_collision_events,
-            "invalid_move_count": self.state.invalid_move_count,
-        }
+        return render_ascii_state(self, current)
 
     def _require_state(self) -> None:
         if self.state is None:

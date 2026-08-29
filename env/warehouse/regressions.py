@@ -7,11 +7,12 @@ evaluator prove that a candidate still fixes the v20 seed-42027 detour bug.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from .domain import AgentState, DeliveryTask, WarehouseConfig, WarehouseState
 from .environment import WarehouseMultiAgentEnv
-from .layouts import get_map_layout
+from .layouts import STAGGERED_AISLES_LAYOUT, get_map_layout
 
 
 SEED_42027_DETOUR_ACTIONS: dict[int, dict[str, str]] = {
@@ -114,14 +115,31 @@ def seed_42027_regression_state(
 def evaluate_seed_42027_detour_regressions(
     config: WarehouseConfig,
 ) -> dict[str, Any]:
-    """Execute every archived transition and report corrected detour units."""
+    """Execute every archived transition and report corrected detour units.
+
+    The snapshots are intentionally exact 10x11 historical evidence.  A
+    compact production policy must not reinterpret those coordinates on its
+    own MapLayout, so run this environment-only regression against the layout
+    that produced the archive and report that provenance explicitly.
+    """
+
+    regression_config = config
+    if config.map_layout_id != STAGGERED_AISLES_LAYOUT.layout_id:
+        regression_config = replace(
+            config,
+            rows=STAGGERED_AISLES_LAYOUT.rows,
+            cols=STAGGERED_AISLES_LAYOUT.cols,
+            map_layout_id=STAGGERED_AISLES_LAYOUT.layout_id,
+        )
 
     frames: dict[str, dict[str, Any]] = {}
     passed = True
     for frame, actions in SEED_42027_DETOUR_ACTIONS.items():
-        environment = WarehouseMultiAgentEnv(config)
+        environment = WarehouseMultiAgentEnv(regression_config)
         environment.reset(seed=42027)
-        environment.set_state(seed_42027_regression_state(frame, config))
+        environment.set_state(
+            seed_42027_regression_state(frame, regression_config)
+        )
         _observations, rewards, _terminated, _truncated, info = environment.step(
             actions
         )
@@ -139,4 +157,10 @@ def evaluate_seed_42027_detour_regressions(
             ),
             "passed": frame_passed,
         }
-    return {"seed": 42027, "frames": frames, "passed": passed}
+    return {
+        "seed": 42027,
+        "requested_layout_id": config.map_layout_id,
+        "archived_layout_id": regression_config.map_layout_id,
+        "frames": frames,
+        "passed": passed,
+    }

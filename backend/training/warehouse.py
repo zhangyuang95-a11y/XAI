@@ -20,7 +20,10 @@ from backend.artifacts import CollaborativeArtifactPaths
 from backend.simulation.trajectory_store import TrajectoryStore
 from backend.training.learner_replay import (
     CategoryBalancedReplay,
+    STRONG_ACTOR_CORRECTION_CATEGORIES,
     fit_actor_supervised,
+    fit_teammate_forecast_supervised,
+    strong_actor_correction_mask as _strong_actor_correction_mask,
     supervised_category_accuracy,
 )
 from backend.training.learner_dataset import (
@@ -38,6 +41,7 @@ from backend.training.warehouse_options import (
     add_teacher_balance_options,
     skill_retention_weight as _skill_retention_weight,
 )
+from backend.training.seed_ledger import training_seed_ledger
 from core.rcpd import RCPD, RCPDConfig
 
 from env.warehouse.environment import (
@@ -61,6 +65,7 @@ from env.warehouse.mappo import (
     evaluate_random_policy,
 )
 from env.warehouse.policy import independent_actor_input
+from env.warehouse.partner_policies import PARTNER_PROFILES
 from env.warehouse.policy_metrics import batch_efficiency_log_fields
 from env.warehouse.observations import observation_dim
 from env.warehouse.rewards import RewardConfig
@@ -92,26 +97,6 @@ DEFAULT_TRAJECTORY = DEFAULT_ARTIFACTS.training_trajectory
 DEFAULT_SEEDS = DEFAULT_ARTIFACTS.parallel_seed_pairs
 DEFAULT_REFERENCE_TRAJECTORY = DEFAULT_ARTIFACTS.reference_trajectory
 
-STRONG_ACTOR_CORRECTION_CATEGORIES = frozenset(
-    {
-        "collision",
-        "junction_conflict",
-        "loaded_detour",
-        "charger_cycle",
-        "task_starvation",
-    }
-)
-
-
-def _strong_actor_correction_mask(categories: np.ndarray) -> np.ndarray:
-    """Rows whose offline label must beat every competing Actor action."""
-
-    return np.isin(
-        categories,
-        tuple(STRONG_ACTOR_CORRECTION_CATEGORIES),
-    )
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Train the two-robot shared-task Warehouse MAPPO policy."
@@ -132,6 +117,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--entropy-coef-start", type=float, default=0.005)
     parser.add_argument("--entropy-coef-final", type=float, default=0.001)
     parser.add_argument("--episodes-per-update", type=int, default=8)
+    parser.add_argument("--joint-collision-loss-weight", type=float, default=0.25,
+                        help="Weight for paired same-S_t p1^T C(S_t) p2.")
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--eval-episodes", type=int, default=50)
@@ -208,8 +195,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learner-state-relabel-lr", type=float, default=3e-4)
     parser.add_argument(
         "--learner-state-parameter-scope",
-        choices=("structured", "all"),
-        default="structured",
+        choices=("structured", "all", "actor_without_teammate_predictor"),
+        default="actor_without_teammate_predictor",
     )
     parser.add_argument("--learner-state-detour-samples", type=int, default=16)
     parser.add_argument("--learner-state-detour-search-episodes", type=int, default=80)
@@ -230,18 +217,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learner-state-correction-weight", type=float, default=0.0)
     parser.add_argument("--learner-state-wait-margin", type=float, default=0.0)
     parser.add_argument("--learner-state-wait-weight", type=float, default=0.0)
-
     parser.add_argument("--use-rcpd", action="store_true")
     parser.add_argument(
         "--rcpd-extract-every", "--extraction-interval",
         dest="rcpd_extract_every", type=int, default=500,
     )
     parser.add_argument("--lambda-complexity", type=float, default=0.001)
-    parser.add_argument("--rcpd-target-temperature", type=float, default=1.0)
-    parser.add_argument("--rcpd-max-depth", type=int, default=8)
-    parser.add_argument("--rcpd-max-leaf-nodes", type=int, default=48)
-    parser.add_argument("--rcpd-min-samples-leaf", type=int, default=4)
-    parser.add_argument("--rcpd-replay-records", type=int, default=4096)
+    # The final Actor is deliberately confident.  A mildly softened leaf
+    # distribution plus a small action-boundary split objective gives the
+    # post-hoc tree a faithful probability model without feeding it back into
+    # training.  These values were selected on the declared post-hoc interval,
+    # never on formal evaluation seeds.
+    parser.add_argument("--rcpd-target-temperature", type=float, default=1.5)
+    parser.add_argument("--rcpd-action-structure-weight", type=float, default=0.25)
+    parser.add_argument("--rcpd-max-depth", type=int, default=10)
+    parser.add_argument("--rcpd-max-leaf-nodes", type=int, default=96)
+    parser.add_argument("--rcpd-min-samples-leaf", type=int, default=2)
+    parser.add_argument("--rcpd-replay-records", type=int, default=8192)
     parser.add_argument(
         "--minimum-counterfactual-pairs", "--rcpd-minimum-counterfactual-pairs",
         dest="rcpd_minimum_counterfactual_pairs", type=int, default=100,
@@ -277,6 +269,8 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         parser.error("episodes, horizon, and episodes-per-update must be positive")
     if args.periodic_eval_every < 0 or args.periodic_eval_episodes <= 0:
         parser.error("periodic evaluation interval must be non-negative and episodes positive")
+    if args.joint_collision_loss_weight < 0.0:
+        parser.error("--joint-collision-loss-weight must be non-negative")
     if args.reference_seed_candidates <= 0:
         parser.error("reference seed candidates must be positive")
     for name in ("actor_lr", "critic_lr"):
@@ -371,6 +365,8 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         parser.error("--rcpd-max-depth must be in [1, 10]")
     if args.rcpd_max_leaf_nodes < 2 or args.rcpd_min_samples_leaf < 1:
         parser.error("RCPD leaf limits must be positive")
+    if args.rcpd_action_structure_weight < 0.0:
+        parser.error("RCPD action-structure weight cannot be negative")
     if args.parallel_seed_candidates < 8 and not args.skip_seed_calibration:
         parser.error("at least eight candidate seeds are needed for four disjoint pairs")
     requested_device = torch.device(args.device)
@@ -713,6 +709,25 @@ def _behavior_cloning_accuracy(
     return float((predictions == targets).float().mean().detach().cpu())
 
 
+def _assert_supervised_action_support(
+    observations: np.ndarray,
+    labels: np.ndarray,
+    *,
+    phase: str,
+) -> None:
+    """Fail closed when a label and its frozen-state mask disagree."""
+
+    if not len(labels):
+        return
+    masks = observations[:, -len(ACTIONS) :]
+    supported = masks[np.arange(len(labels)), labels] > 0.5
+    if not bool(np.all(supported)):
+        raise ValueError(
+            f"{phase} contains {int(np.sum(~supported))} labels outside "
+            "their same-state Actor action support."
+        )
+
+
 def _mission_intent_accuracy(
     policy: MAPPOPolicy,
     observations: torch.Tensor,
@@ -742,6 +757,11 @@ def _pretrain_safe_navigation(
         sample_count=int(args.behavior_cloning_samples),
         seed=int(args.seed) + 700_000,
         )
+    )
+    _assert_supervised_action_support(
+        rows,
+        labels,
+        phase="behavior cloning",
     )
     observations = torch.as_tensor(rows, dtype=torch.float32, device=policy.device)
     targets = torch.as_tensor(labels, dtype=torch.long, device=policy.device)
@@ -801,11 +821,9 @@ def _pretrain_safe_navigation(
                 policy.algorithm_config.max_grad_norm,
             )
             optimizer.step()
-            final_loss = float(loss.detach().cpu())
-            final_action_loss = float(action_loss.detach().cpu())
-            final_mission_intent_loss = float(
-                mission_intent_loss.detach().cpu()
-            )
+            final_loss = loss.detach()
+            final_action_loss = action_loss.detach()
+            final_mission_intent_loss = mission_intent_loss.detach()
     return {
         "enabled": True,
         "samples": len(rows),
@@ -829,9 +847,9 @@ def _pretrain_safe_navigation(
             observations,
             intent_targets,
         ),
-        "final_loss": final_loss,
-        "final_action_loss": final_action_loss,
-        "final_mission_intent_loss": final_mission_intent_loss,
+        "final_loss": float(final_loss.cpu()),
+        "final_action_loss": float(final_action_loss.cpu()),
+        "final_mission_intent_loss": float(final_mission_intent_loss.cpu()),
         "teacher": "collision_free_assigned_safe_navigation_v1",
     }
 
@@ -874,13 +892,23 @@ class _LearnerStateRelabeler:
             int(self.args.learner_state_relabel_samples)
             - learner_sample_count
         )
-        learner_rows, learner_labels, learner_categories, coverage = (
-            _collect_learner_state_relabel_dataset(
+        (learner_rows, learner_labels, learner_teammate_labels,
+         learner_categories, coverage) = _collect_learner_state_relabel_dataset(
                 self.policy,
                 self.environment_config,
                 sample_count=learner_sample_count,
                 seed=seed,
-            )
+                include_teammate_labels=True,
+        )
+        forecast_fit = fit_teammate_forecast_supervised(
+            self.policy,
+            learner_rows,
+            learner_labels,
+            learner_teammate_labels,
+            epochs=int(self.args.learner_state_relabel_epochs),
+            batch_size=int(self.args.behavior_cloning_batch_size),
+            learning_rate=float(self.args.learner_state_relabel_lr),
+            seed=seed + 1,
         )
         self.replay.append(
             learner_rows,
@@ -988,6 +1016,11 @@ class _LearnerStateRelabeler:
         )
         rows = np.concatenate((balanced_rows, rehearsal_rows), axis=0)
         labels = np.concatenate((balanced_labels, rehearsal_labels), axis=0)
+        _assert_supervised_action_support(
+            rows,
+            labels,
+            phase="learner-state relabeling",
+        )
         strong_wait_categories = {
             "collision",
             "charger_queue",
@@ -1083,6 +1116,7 @@ class _LearnerStateRelabeler:
             "learning_rate": float(self.args.learner_state_relabel_lr),
             "parameter_scope": str(self.args.learner_state_parameter_scope),
             "learner_visited_rows": int(len(learner_rows)),
+            "teammate_forecast_fit": forecast_fit,
             "targeted_detour_rows": int(len(detour_rows)),
             "targeted_collision_rows": int(len(collision_rows)),
             "targeted_commitment_rows": int(len(commitment_rows)),
@@ -1151,6 +1185,7 @@ def _rcpd_from_args(args: argparse.Namespace) -> RCPD | None:
             max_leaf_nodes=int(args.rcpd_max_leaf_nodes),
             min_samples_leaf=int(args.rcpd_min_samples_leaf),
             complexity_penalty=float(args.lambda_complexity),
+            action_structure_weight=float(args.rcpd_action_structure_weight),
             require_action_agreement_for_feedback=True,
             # Natural-language answers are additionally guarded by the v5
             # per-question semantic validators and deterministic templates.
@@ -1360,6 +1395,7 @@ def train(
             skill_anchor_observations=skill_anchor_observations,
             skill_anchor_labels=skill_anchor_labels,
             skill_anchor_weight=active_skill_retention_weight,
+            joint_collision_loss_weight=float(args.joint_collision_loss_weight),
         )
         relabel_applied = False
         if (
@@ -1416,6 +1452,8 @@ def train(
                     "actor_loss": losses["actor_loss"],
                     "critic_loss": losses["critic_loss"],
                     "entropy": losses["entropy"],
+                    "joint_expected_collision_loss": losses["joint_expected_collision_loss"],
+                    "joint_collision_pair_updates": losses["joint_collision_pair_updates"],
                     "actor_lr": actor_lr,
                     "critic_lr": critic_lr,
                     "skill_retention_loss": losses[
@@ -1619,6 +1657,7 @@ def _program_regularization_summary(
         "complexity_lambda": float(args.lambda_complexity),
         "extraction_interval": int(args.rcpd_extract_every),
         "program_target_temperature": float(args.rcpd_target_temperature),
+        "action_structure_weight": float(args.rcpd_action_structure_weight),
         "minimum_counterfactual_pairs": int(args.rcpd_minimum_counterfactual_pairs),
         "feedback_target": "none_posthoc_only",
         "reward": reward,
@@ -1677,54 +1716,6 @@ def write_policy_trajectory(
     for frame in rollout.frames:
         store.append("ai_ai_demo", frame)
     return store.save(path)
-
-
-def _training_seed_ledger(args: argparse.Namespace) -> dict[str, object]:
-    """Conservatively disclose every seed family touched before formal eval.
-
-    Intervals use an exclusive upper bound. Broad offline intervals are
-    intentional: proving independence is more important than reclaiming
-    unused values between curriculum and learner-state relabel jobs.
-    """
-
-    first_family_end = max(
-        int(args.seed) + int(args.episodes) + 1,
-        int(args.seed) + 200_000 + int(args.eval_episodes),
-        int(args.seed) + 300_001,
-        int(args.seed) + 400_000 + int(args.parallel_seed_candidates),
-    )
-    return {
-        "schema": "warehouse-training-seed-ledger.v1",
-        "interval_semantics": "start_inclusive_end_exclusive",
-        "reserved_intervals": [
-            {
-                "name": "mappo_training_final_eval_trajectory_and_seed_calibration",
-                "start": int(args.seed),
-                "end_exclusive": first_family_end,
-            },
-            {
-                "name": "fixed_reference_calibration",
-                "start": int(TUTORIAL_SEED),
-                "end_exclusive": int(TUTORIAL_SEED)
-                + int(args.reference_seed_candidates),
-            },
-            {
-                "name": "offline_actor_curricula_periodic_eval_and_relabeling",
-                "start": int(args.seed) + 700_000,
-                "end_exclusive": int(args.seed) + 10_000_000,
-            },
-            {
-                "name": "final_posthoc_rcpd_rollouts",
-                "start": int(args.seed) + 11_000_000,
-                "end_exclusive": int(args.seed) + 11_100_000,
-            },
-            {
-                "name": "failed_v19_candidate_development_evaluation",
-                "start": 500_004,
-                "end_exclusive": 650_204,
-            },
-        ],
-    }
 
 
 def main() -> None:
@@ -1873,8 +1864,10 @@ def main() -> None:
         training_metadata={
             "environment": "two_robot_shared_delivery",
             "episodes": args.episodes,
-            "proxy_human_episode_probability": 0.30,
-            "proxy_human_override_probability": 0.20,
+            "proxy_human_episode_probability": 0.50,
+            "proxy_human_override_probability": 1.0,
+            "proxy_human_profiles": PARTNER_PROFILES,
+            "joint_collision_loss_weight": float(args.joint_collision_loss_weight),
             "energy_curriculum": {
                 "initial_probability": args.energy_curriculum_probability,
                 "minimum_battery": args.energy_curriculum_min_battery,
@@ -1891,6 +1884,9 @@ def main() -> None:
                     "head_on",
                     "charger_handoff",
                     "delivery_goal_clearance",
+                    "empty_delivery_clearance",
+                    "dual_charger_approach", "outer_exit_charger_approach",
+                    "same_target_conflict",
                     "charger_commitment",
                     "task_commitment",
                 ),
@@ -1963,12 +1959,12 @@ def main() -> None:
     if not args.no_plot:
         write_plot(args.plot_output, metrics)
     summary = {
-        "format": "warehouse_collaborative_training_v27_individual_credit",
+        "format": "warehouse_collaborative_training_v28_causal_clearance",
         "model_version": policy.model_version,
         "warehouse_program_version": WAREHOUSE_PROGRAM_VERSION,
         "environment_config": asdict(policy.environment_config),
-        "algorithm_config": asdict(policy.algorithm_config),
-        "seed_ledger": _training_seed_ledger(args),
+        "algorithm_config": {**asdict(policy.algorithm_config), "joint_collision_loss_weight": float(args.joint_collision_loss_weight)},
+        "seed_ledger": training_seed_ledger(args),
         "evaluation": evaluation,
         "program_regularization": regularization,
         "artifacts": {

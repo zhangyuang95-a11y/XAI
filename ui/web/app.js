@@ -26,7 +26,7 @@ const state = {
 const COPY = {
   zh: {
     appTitle: "双机器人协作配送实验", workflowDemo: "说明与演示", task1: "任务 1", explanation: "解释", task2: "任务 2", survey: "问卷",
-    warehouse: "10×11 仓库", liveScene: "协作配送现场", step: "步数", score: "总分", deliveries: "配送", collisions: "碰撞", shutdowns: "断电", detours: "绕路单位",
+    warehouse: "8×9 仓库", liveScene: "协作配送现场", step: "步数", score: "总分", deliveries: "配送", collisions: "碰撞", shutdowns: "断电", detours: "绕路单位",
     shelf: "货架", pickup: "取货点", dropoff: "交付点", charger: "充电站", robots: "机器人",
     participantSetup: "参与者登记", welcome: "开始协作配送实验", overview: "你将固定控制机器人 1，与 AI 控制的机器人 2 完成两轮 120 步配送任务。",
     participantId: "参与者编号", agreement: "我已阅读并理解实验说明。", start: "开始实验",
@@ -34,7 +34,7 @@ const COPY = {
     ruleJobs: "地图始终有两个未预分配的 A→B 共享任务。", ruleControl: "方向键、WASD 或按钮每次提交一个联合决策步；空格表示等待。",
     ruleCharge: "成功移动耗电 2；在充电站等待恢复 10；断电会提前结束本轮。", ruleScore: "计分：配送 +100、机器人碰撞 −200、断电 −50、每步 −1、参与者绕路每单位 −2。",
     playDemo: "播放演示", pauseDemo: "暂停演示", beginTask1: "开始任务 1", endDemoEarly: "提前结束演示并开始任务 1", roundInstruction: "控制机器人 1，与机器人 2 协作配送",
-    roundHint: "选择一个动作后，服务器会同时取得机器人 2 的确定性动作，并推进一步。", up: "上", down: "下", left: "左", right: "右", wait: "等待",
+    roundHint: "你和机器人 2 都只根据同一移动前状态独立选动作，两个动作随后同时执行。", up: "上", down: "下", left: "左", right: "右", wait: "等待",
     task1Complete: "任务 1 已完成", timeLeft: "剩余时间", aiAiExplanationTitle: "AI–AI 解释轨迹", aiAiExplanationScene: "AI–AI 固定参考轨迹", referenceMetrics: "以下为固定 AI–AI 参考轨迹数据，不是您的任务 1 成绩。", explanationTimelineLabel: "AI–AI 参考轨迹帧", explanationHint: "这里显示的是与开场演示相同的固定 AI–AI 参考轨迹，不是您刚完成的任务 1。拖动时间轴选择任意实际动作帧，再选择机器人 1 或机器人 2 并自由提问。每次提问都会使用新的生成种子；可以零次提问并随时结束。",
     question: "你的问题", questionPlaceholder: "也可以在这里输入自己的问题。", ask: "询问所选机器人", finishExplanation: "结束解释并开始任务 2", answer: "系统解释", emptyExplanation: "本帧未能生成可靠解释，请重试或选择其他动作帧。",
     presetQuestions: "快捷问题（点击后直接提问）", presetWhyAction: "为什么所选机器人在这一帧执行了这个动作？", presetTaskEffect: "这个动作如何影响当前配送任务？", presetEnergy: "当前电量和充电需求如何影响了这个动作？", presetTeammate: "队友的位置或动作是否影响了这个决定？", presetCollision: "这一步是否存在冲突或碰撞风险？", presetWhyAssignedA1: "为什么任务 1 的 A 点由所选机器人去取？", presetWhyNotAssignedA1: "为什么所选机器人没有去取任务 1 的 A 点？",
@@ -46,12 +46,12 @@ const COPY = {
     deliveryScore: "配送得分", collisionPenalty: "碰撞扣分", shutdownPenalty: "断电扣分", timePenalty: "步数扣分", detourPenalty: "绕路扣分",
     loading: "处理中…", requiredFields: "请填写参与者编号并确认已阅读说明。", requestFailed: "操作失败", taskLabel: "任务", roundScore: "本轮得分",
     action: "动作", requestedAction: "请求", executedAction: "实际", batteryChange: "电量",
-    transitionActions: "所选帧动作", workingExplanation: "正在根据所选帧生成解释…", stillWorking: "仍在生成，请稍候…",
+    transitionActions: "所选帧动作", causalFrameNote: "决策依据：移动前状态 S_t。执行结果：两个动作同时解析后的状态 S_t+1。", workingExplanation: "正在根据所选帧生成解释…", stillWorking: "仍在生成，请稍候…",
     eventPickup: "取货", eventDelivery: "交付", eventCharging: "充电", eventChargerQueue: "排队", eventYield: "让行", eventConflict: "冲突风险", eventCollision: "碰撞",
   },
   en: {
     appTitle: "Two-Robot Collaborative Delivery Study", workflowDemo: "Instructions & demo", task1: "Task 1", explanation: "Explanation", task2: "Task 2", survey: "Survey",
-    warehouse: "10×11 warehouse", liveScene: "Collaborative delivery", step: "Steps", score: "Score", deliveries: "Deliveries", collisions: "Collisions", shutdowns: "Shutdowns", detours: "Detour units",
+    warehouse: "8×9 warehouse", liveScene: "Collaborative delivery", step: "Steps", score: "Score", deliveries: "Deliveries", collisions: "Collisions", shutdowns: "Shutdowns", detours: "Detour units",
     shelf: "Shelf", pickup: "Pickup A", dropoff: "Drop-off B", charger: "Charger", robots: "Robots",
     participantSetup: "Participant setup", welcome: "Start the collaborative delivery study", overview: "You will always control robot 1 and complete two 120-step delivery rounds with AI-controlled robot 2.",
     participantId: "Participant ID", agreement: "I have read and understood the study instructions.", start: "Start study",
@@ -59,7 +59,7 @@ const COPY = {
     ruleJobs: "The map always contains two unassigned shared A-to-B jobs.", ruleControl: "Arrow keys, WASD, or a button submits one joint decision step; Space means wait.",
     ruleCharge: "A successful move costs 2 battery; waiting at the charger restores 10; shutdown ends the round.", ruleScore: "Score: +100 delivery, −200 robot collision, −50 shutdown, −1 per step, and −2 per human detour unit.",
     playDemo: "Play demonstration", pauseDemo: "Pause demonstration", beginTask1: "Begin Task 1", endDemoEarly: "Finish demo early and begin Task 1", roundInstruction: "Control robot 1 and collaborate with robot 2",
-    roundHint: "After your action, the server obtains robot 2's deterministic action and advances one joint step.", up: "Up", down: "Down", left: "Left", right: "Right", wait: "Wait",
+    roundHint: "You and robot 2 choose independently from the same pre-move state; both actions then execute simultaneously.", up: "Up", down: "Down", left: "Left", right: "Right", wait: "Wait",
     task1Complete: "Task 1 complete", timeLeft: "Time left", aiAiExplanationTitle: "AI–AI explanation trajectory", aiAiExplanationScene: "Fixed AI–AI reference trajectory", referenceMetrics: "These are metrics from the fixed AI–AI reference trajectory, not your Task 1 score.", explanationTimelineLabel: "AI–AI reference trajectory frame", explanationHint: "This is the same fixed AI–AI reference trajectory shown in the opening demonstration, not the Task 1 you just completed. Select any executed frame, choose robot 1 or robot 2, and ask a free-form question. Every question uses a fresh generation seed; you may ask zero questions and finish early.",
     question: "Your question", questionPlaceholder: "Or type your own question here.", ask: "Ask about selected robot", finishExplanation: "Finish explanations and begin Task 2", answer: "System explanation", emptyExplanation: "No grounded explanation was produced for this frame. Please retry or select another action frame.",
     presetQuestions: "Quick questions (click to ask)", presetWhyAction: "Why did the selected robot execute this action at this frame?", presetTaskEffect: "How did this action affect the current delivery task?", presetEnergy: "How did the battery level and charging needs affect this action?", presetTeammate: "Did the teammate's position or action affect this decision?", presetCollision: "Was there a conflict or collision risk on this step?", presetWhyAssignedA1: "Why is the selected robot assigned to collect task 1 at point A?", presetWhyNotAssignedA1: "Why is the selected robot not collecting task 1 at point A?",
@@ -71,7 +71,7 @@ const COPY = {
     deliveryScore: "Delivery points", collisionPenalty: "Collision penalty", shutdownPenalty: "Shutdown penalty", timePenalty: "Step penalty", detourPenalty: "Detour penalty",
     loading: "Working…", requiredFields: "Enter a participant ID and confirm the instructions.", requestFailed: "Request failed", taskLabel: "Task", roundScore: "Round score",
     action: "Action", requestedAction: "Requested", executedAction: "Executed", batteryChange: "Battery",
-    transitionActions: "Selected actions", workingExplanation: "Generating an explanation for the selected frame…", stillWorking: "Still generating—please wait…",
+    transitionActions: "Selected actions", causalFrameNote: "Decision evidence: pre-move state S_t. Outcome: state S_t+1 after both actions resolve simultaneously.", workingExplanation: "Generating an explanation for the selected frame…", stillWorking: "Still generating—please wait…",
     eventPickup: "Pickup", eventDelivery: "Delivery", eventCharging: "Charging", eventChargerQueue: "Queue", eventYield: "Yield", eventConflict: "Conflict risk", eventCollision: "Collision",
   },
 };
@@ -569,7 +569,7 @@ function animateLoop(view, transition) {
   state.animationFrame = requestAnimationFrame(paint);
 }
 
-function renderRobots(agents, transition = null, showActions = false, agentControl = {}) {
+function renderRobots(agents, transition = null, showActions = false, agentControl = {}, revealOutcome = false) {
   const motions = Object.fromEntries((transition?.agents || []).map((item) => [item.id, item]));
   $("robotCards").replaceChildren(...agents.map((agent) => {
     const article = document.createElement("article");
@@ -580,11 +580,11 @@ function renderRobots(agents, transition = null, showActions = false, agentContr
     let motionMarkup = "";
     if (showActions && motion) {
       const proposed = motion.proposed_action;
-      const executed = motion.executed_action;
-      const actionText = proposed && proposed !== executed
+      const executed = revealOutcome ? motion.executed_action : proposed;
+      const actionText = revealOutcome && proposed && proposed !== executed
         ? `<span><b>${tr("requestedAction")}:</b> ${actionLabel(proposed)} · <b>${tr("executedAction")}:</b> ${actionLabel(executed)}</span>`
         : `<span><b>${tr("action")}:</b> ${actionLabel(executed)}</span>`;
-      const delta = Number(motion.battery_delta || 0);
+      const delta = revealOutcome ? Number(motion.battery_delta || 0) : 0;
       const deltaText = delta === 0 ? "" : `<em>${tr("batteryChange")} ${delta > 0 ? "+" : ""}${delta.toFixed(0)}</em>`;
       motionMarkup = `<div class="motion-status ${motion.blocked ? "blocked" : ""} ${motion.charging ? "charging" : ""}">${actionText}${deltaText}</div>`;
     }
@@ -720,6 +720,39 @@ function renderAnswer(report) {
   $("answerText").textContent = text; $("answerPanel").classList.remove("hidden");
 }
 
+function transitionBeforeView(view) {
+  const transition = view.transition;
+  if (!transition?.before_state) return view;
+  return {
+    ...view,
+    state: transition.before_state,
+    study: {
+      ...(view.study || {}),
+      stage: transition.loop
+        ? view.study?.stage
+        : (transition.before_stage || view.study?.stage),
+      progress: Number(transition.from_frame || 0),
+    },
+  };
+}
+
+function paintView(view, revealOutcome = false) {
+  state.view = view;
+  document.body.dataset.studyStage = view.study?.stage || "idle";
+  document.body.dataset.stateVersion = String(view.study?.state_version ?? 0);
+  const stage = view.study?.stage || "idle";
+  const showActions = ["instructions", "explanation"].includes(stage);
+  renderRobots(
+    view.state?.agents || [],
+    view.transition,
+    showActions,
+    view.timeline?.agent_control || {},
+    revealOutcome,
+  );
+  renderScores(view.state || {});
+  renderStage();
+}
+
 async function render(view, options = {}) {
   const previousStage = state.view?.study?.stage;
   let renderedView = view;
@@ -739,28 +772,20 @@ async function render(view, options = {}) {
     state.scrubbing = false;
     cancelMotion();
   }
-  state.view = renderedView;
   view = renderedView;
-  document.body.dataset.studyStage = view.study?.stage || "idle";
-  document.body.dataset.stateVersion = String(view.study?.state_version ?? 0);
   if (requestedStage !== "idle" && view.study?.locale) {
     const requestedLocale = view.study.locale === "en" ? "en" : "zh";
     if (requestedLocale !== state.locale) setLanguage(requestedLocale, false, false);
   }
   const stage = view.study?.stage || "idle";
-  const showActions = ["instructions", "explanation"].includes(stage);
-  renderRobots(
-    view.state?.agents || [],
-    view.transition,
-    showActions,
-    view.timeline?.agent_control || {},
-  );
-  renderScores(view.state || {});
-  renderStage();
+  const beforeView = transitionBeforeView(view);
+  paintView(beforeView);
   if (view.transition?.loop && stage === "explanation" && !state.scrubbing) {
-    animateLoop(view, view.transition);
+    animateLoop(beforeView, view.transition);
   } else if (view.transition) {
-    await animateOnce(view, view.transition, 400);
+    await animateOnce(beforeView, view.transition, 400);
+    paintView(view, true);
+    drawWarehouse(view);
   } else {
     cancelMotion();
     drawWarehouse(view);

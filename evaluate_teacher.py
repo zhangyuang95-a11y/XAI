@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter, deque
 import json
+from pathlib import Path
 from statistics import mean
 
 from env.warehouse.coordination import (
@@ -16,12 +17,19 @@ from env.warehouse.coordination import (
     _priority_agent_and_basis,
     _reserved_side_clearance,
     stable_coordination_actions,
+    stable_coordination_goal_overrides,
 )
-from env.warehouse.domain import WarehouseConfig
+from env.warehouse.domain import WarehouseConfig, collaborative_study_config
 from env.warehouse.environment import WarehouseMultiAgentEnv
+from env.warehouse.layouts import get_map_layout
 
 
-def evaluate_teacher(*, episodes: int, seed_start: int) -> dict[str, object]:
+def evaluate_teacher(
+    *,
+    episodes: int,
+    seed_start: int,
+    layout_id: str | None = None,
+) -> dict[str, object]:
     deliveries: list[int] = []
     return_episodes = 0
     return_cycles = 0
@@ -37,10 +45,23 @@ def evaluate_teacher(*, episodes: int, seed_start: int) -> dict[str, object]:
     path_actual_steps = 0.0
     path_shortest_safe_steps = 0.0
     return_cycle_details: list[dict[str, object]] = []
-    for seed in range(seed_start, seed_start + episodes):
-        environment = WarehouseMultiAgentEnv(
-            WarehouseConfig(participant_detour_scoring=False)
+    shutdown_details: list[dict[str, object]] = []
+    deadlock_details: list[dict[str, object]] = []
+    if layout_id is None:
+        environment_config = collaborative_study_config(
+            participant_detour_scoring=False
         )
+    else:
+        layout = get_map_layout(layout_id)
+        environment_config = WarehouseConfig(
+            rows=layout.rows,
+            cols=layout.cols,
+            map_layout_id=layout.layout_id,
+            participant_detour_scoring=False,
+            battery_safety_margin=4.0,
+        )
+    for seed in range(seed_start, seed_start + episodes):
+        environment = WarehouseMultiAgentEnv(environment_config)
         environment.reset(seed=seed)
         returned = False
         starved = False
@@ -50,18 +71,7 @@ def evaluate_teacher(*, episodes: int, seed_start: int) -> dict[str, object]:
         recent_steps: deque[dict[str, object]] = deque(maxlen=7)
         while True:
             before = environment.get_state()
-            overrides = {
-                agent.agent_id: goal
-                for agent in before.agents
-                if (
-                    goal := environment._frozen_route_goal(
-                        before,
-                        agent.agent_id,
-                        prioritize_old_tasks=True,
-                    )
-                )
-                is not None
-            }
+            overrides = stable_coordination_goal_overrides(environment)
             imminent_head_on = _clear_head_on_encounter(
                 environment,
                 goal_overrides=overrides,
@@ -160,11 +170,36 @@ def evaluate_teacher(*, episodes: int, seed_start: int) -> dict[str, object]:
                 )
             returned = returned or episode_cycles > 0
             starved = starved or bool(info.get("starving_task_ids", ()))
-            shutdown = shutdown or bool(info.get("shutdowns", ()))
+            step_shutdown = bool(info.get("shutdowns", ()))
+            if step_shutdown and not shutdown:
+                shutdown_details.append(
+                    {
+                        "seed": seed,
+                        "frame": environment.get_state().frame,
+                        "shutdowns": tuple(info.get("shutdowns", ())),
+                        "recent_steps": list(recent_steps),
+                    }
+                )
+            shutdown = shutdown or step_shutdown
             collided = collided or bool(info.get("collisions", ()))
-            deadlocked = deadlocked or int(
+            step_deadlock = int(
                 info.get("ineffective_joint_wait_streak", 0)
             ) >= 8
+            if step_deadlock and not deadlocked:
+                deadlock_details.append(
+                    {
+                        "seed": seed,
+                        "frame": environment.get_state().frame,
+                        "joint_wait_escape_actions": dict(
+                            info.get("joint_wait_escape_actions", {})
+                        ),
+                        "avoidable_wait_agents": tuple(
+                            info.get("avoidable_wait_agents", ())
+                        ),
+                        "recent_steps": list(recent_steps),
+                    }
+                )
+            deadlocked = deadlocked or step_deadlock
             if terminated or truncated:
                 break
         final_state = environment.get_state()
@@ -186,6 +221,7 @@ def evaluate_teacher(*, episodes: int, seed_start: int) -> dict[str, object]:
     denominator = max(1, episodes)
     report: dict[str, object] = {
         "kind": "offline_teacher_preflight",
+        "map_layout_id": environment_config.map_layout_id,
         "episodes": episodes,
         "seed_start": seed_start,
         "seed_end": seed_start + episodes - 1,
@@ -251,6 +287,8 @@ def evaluate_teacher(*, episodes: int, seed_start: int) -> dict[str, object]:
         "path_actual_steps": path_actual_steps,
         "path_shortest_safe_steps": path_shortest_safe_steps,
         "charger_return_cycle_details": return_cycle_details,
+        "shutdown_details": shutdown_details,
+        "deadlock_details": deadlock_details,
     }
     report["acceptance"] = {
         "charger_departure_return_cycle_rate_le_0_01": (
@@ -266,6 +304,9 @@ def evaluate_teacher(*, episodes: int, seed_start: int) -> dict[str, object]:
         "avoidable_loaded_delivery_detours_eq_0": (
             report["avoidable_loaded_delivery_detours"] == 0
         ),
+        "path_efficiency_le_1_10": (
+            report["path_efficiency_actual_over_shortest_safe"] <= 1.10
+        ),
     }
     report["accepted"] = all(report["acceptance"].values())
     return report
@@ -275,11 +316,22 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", type=int, default=200)
     parser.add_argument("--seed-start", type=int, default=15000)
+    parser.add_argument("--layout-id", default=None)
+    parser.add_argument("--output", default=None)
     args = parser.parse_args()
     if args.episodes < 1:
         raise ValueError("episodes must be positive")
-    report = evaluate_teacher(episodes=args.episodes, seed_start=args.seed_start)
-    print(json.dumps(report, indent=2, sort_keys=True))
+    report = evaluate_teacher(
+        episodes=args.episodes,
+        seed_start=args.seed_start,
+        layout_id=args.layout_id,
+    )
+    rendered = json.dumps(report, indent=2, sort_keys=True)
+    if args.output:
+        target = Path(args.output)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(rendered + "\n", encoding="utf-8")
+    print(rendered)
     if not report["accepted"]:
         raise SystemExit(2)
 

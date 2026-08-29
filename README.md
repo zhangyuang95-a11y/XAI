@@ -1,13 +1,13 @@
 # 双机器人协作配送 XAI 用户实验
 
-参与者固定控制 `robot_1`，与 MAPPO 控制的 `robot_2` 在 10×11 错位货架仓库中完成两个持续补充的共享 A→B 配送任务。服务器分配后、演示与任务开始前，界面会明确告知参与者属于 A 组（Task 1 后有解释）或 B 组（Task 1 后无解释）。实验流程为：AI–AI 演示（可完整观看或提前结束）→ Task 1 → A 组查看固定 AI–AI 解释轨迹/B 组确认过渡说明 → Task 2 → 简短问卷。提前结束演示会记录已观看帧数、剩余帧数和完成比例，然后以独立 seed、新状态和双方满电开始 Task 1。
+参与者固定控制 `robot_1`，与 MAPPO 控制的 `robot_2` 在 8×9 紧凑错位货架仓库中完成两个持续补充的共享 A→B 配送任务。服务器分配后、演示与任务开始前，界面会明确告知参与者属于 A 组（Task 1 后有解释）或 B 组（Task 1 后无解释）。实验流程为：AI–AI 演示（可完整观看或提前结束）→ Task 1 → A 组查看固定 AI–AI 解释轨迹/B 组确认过渡说明 → Task 2 → 简短问卷。提前结束演示会记录已观看帧数、剩余帧数和完成比例，然后以独立 seed、新状态和双方满电开始 Task 1。
 
 ## 当前实验契约
 
 - 两台机器人、120 个联合决策步，初始电量均为 100。
 - 任一空载机器人进入 A 点后认领任务；只有承运机器人能在 B 点完成交付。
 - 成功移动消耗 2 电量；在充电站执行等待恢复 10；阻塞动作不耗电。
-- 正式地图是 `warehouse_staggered_aisles_10x11_v7_three_cell_exit`：左侧作业通道位于第 1/3/5/7 行，右侧位于第 2/4/6/8 行，开口逐层错开，不再形成紧凑地图的贯通十字路口。机器人从 `(9,4)`、`(9,6)` 出发，充电站位于 `(9,5)`；正上方 `(8,4)`、`(8,5)`、`(8,6)` 是三个连续且真实可通行的出口格。货架作业区没有四向交叉，唯一四邻接开放格 `(8,5)` 位于三格宽充电区内部。取货点、交付点、充电站、路径规划、观测、碰撞判定和浏览器全部读取同一个 `MapLayout`。
+- 正式地图是 `warehouse_staggered_aisles_8x9_v1_three_cell_exit`：左右作业通道逐层错开，不形成贯通十字路口。机器人从 `(7,3)`、`(7,5)` 出发，充电站位于 `(7,4)`；正上方 `(6,3)`、`(6,4)`、`(6,5)` 是三个连续且真实可通行的出口格。取货点、交付点、充电站、路径规划、观测、碰撞判定和浏览器全部读取同一个 `MapLayout`。
 - 每一步先冻结共同状态 `S_t`，两个共享参数 Actor 分别只读取各自的 `S_t` 本地观察并独立产生动作，最后只调用一次 `env.step({robot_1: a1, robot_2: a2})`。参与者命令只在两个分布都计算完成后替换 `robot_1`；`robot_2` 永远看不到 `robot_1` 本帧动作。
 - 机器人冲突时双方本步均等待，计一次碰撞但不终止。除参与者在 Task 1/2 中替换 `robot_1` 的输入外，AI 命令由共享 MAPPO Actor 直接输出并原样提交给环境；系统不存在运行时通行权规则、coordination shield、教师策略或决策树动作改写。撞墙、货架阻塞、同格争抢、交换位置和进入未离开的队友位置，均只由环境动力学解析。网络必须自行学习任务分工、充电、让行和避免绕路。
 - 用户得分保持为：`100×配送数 − 200×机器人碰撞事件 − 50×断电事件 − 步数 − 2×参与者绕路单位`。断电提前结束时补扣到 120 步。
@@ -45,26 +45,26 @@ reward_i = user_score_delta / 100
 
 当前部署版本：
 
-- 模型：`warehouse_mappo_v38_staggered_independent_actor`
-- 环境：`warehouse_collaborative_delivery_v25_staggered_three_exit_reserve4`
-- Reward：`warehouse_safe_mission_reward_v19_individual_credit`
-- 观测：`collaborative_observation_v25_staggered_three_exit_reserve4`
-- 训练 checkpoint：`warehouse_mappo_training_v30_staggered_actor`
-- RCPD 合同：`warehouse_rcpd_v32_staggered_posthoc`
-- 地图：`warehouse_staggered_aisles_10x11_v7_three_cell_exit`
-- seed 库合同：`warehouse_parallel_seed_pairs_v33_staggered`
-- 参考轨迹合同：`warehouse_reference_trajectory_v32_staggered`
-- 动作执行：`independent_simultaneous_mappo_actor_v10`
-- 运行时控制器：`mappo_independent_actor_simultaneous_execution`
-- 日志：`human-study-log.v24`
+- 模型：`warehouse_mappo_v64_compact8_forecast_isolated_actor`
+- 环境：`warehouse_collaborative_delivery_v40_compact8_causal_clearance`
+- Reward：`warehouse_safe_mission_reward_v27_causal_clearance_progress`
+- 观测：`collaborative_observation_v37_causal_queue_commitment`
+- 训练 checkpoint：`warehouse_mappo_training_v56_forecast_isolated`
+- RCPD 合同：`warehouse_rcpd_v58_compact8_posthoc`
+- 地图：`warehouse_staggered_aisles_8x9_v1_three_cell_exit`
+- seed 库合同：`warehouse_parallel_seed_pairs_v59_compact8`
+- 参考轨迹合同：`warehouse_reference_trajectory_v58_compact8`
+- 动作执行：`batched_independent_simultaneous_actor_v13`
+- 运行时控制器：`mappo_batched_actor_atomic_joint_execution`
+- 日志：`human-study-log.v28`
 
-PyTorch checkpoint 位于 `output/deployment/warehouse_mappo_v38.pt`。Render 使用从该 checkpoint 精确导出的 `output/deployment/warehouse_mappo_v38_actor.npz`，以 NumPy 执行同一神经网络；测试逐 logit 比对两种运行时，允许误差不超过 `1e-4`。联合风险微调只使用同一决策前状态上的两个独立分布，最小化 `p1ᵀ C(S_t) p2`，并在安全教师认为至少一台应行动时抑制双 WAIT；不会把任一机器人本帧动作输入另一机器人。两个各 100 回合的独立随机评估区间平均完成 6.35–6.41 次配送，碰撞回合率为 2–4%，每回合最多 1 次、重复碰撞率为 0，断电率为 3–5%，无效联合等待回合率为 2–5%，运行时动作干预为 0。完整指标见 `output/deployment/warehouse_mappo_v38_evaluation.json`。
+PyTorch checkpoint 位于 `output/deployment/warehouse_mappo_v64.pt`。Render 使用从该 checkpoint 精确导出的 `output/deployment/warehouse_mappo_v64_actor.npz`，以 NumPy 执行同一神经网络；测试逐 logit 比对两种运行时，允许误差不超过 `1e-4`。联合风险训练只使用同一决策前状态上的两个独立分布，不会把任一机器人本帧动作输入另一机器人。最终正式评估包含 1,000 局 AI–AI 和 1,000 局多类队友：AI–AI 平均完成 7.96 次配送，碰撞率和断电率均为 0，死锁率为 0.5%，可避免等待率为 0.362%，载货绕路为 0，运行时动作干预为 0；多队友条件的最高碰撞率为 0.4%，最高死锁率和断电率均为 0。两个额外的 100 局发布种子区间同样为零碰撞、零断电、零载货绕路、零运行时干预。完整发布指标见 `output/deployment/warehouse_mappo_v64_evaluation.json`。
 
 共享 Actor 内部包含五类神经任务意图（两个任务槽、交付、充电、等待）。它只是网络隐变量，不绑定共享任务，也不在运行时屏蔽、替换或修正 Actor 动作。离线关键状态覆盖充电离站、任务连续未认领、两机器人同目标、狭窄通道避让和碰撞后恢复；正式 rollout、参考轨迹和 UI 中的 AI 动作全部直接来自共享 MAPPO Actor。
 
 成功移动固定消耗 2 点电量；撞墙、货架阻塞、机器人冲突和普通等待不耗电；在充电站等待仍恢复 10 点。错位地图的正式配置使用四步安全余量，避免两台低电量机器人排队时以 0 电量到站。新增的可避免等待和任务成本回退项仅用于训练，参与者最终得分不包含任何训练塑形。
 
-浏览器使用连续插值动画，在同一动画帧插值两个机器人的联合移动结果。地图机器人图标直接显示电量和承运货物。A 组解释阶段不公开参与者的 Task 1 轨迹，而是载入冻结的 AI–AI 参考轨迹。公共 NumPy 演示 seed 为 `40786`：120 步中两台机器人各完成 3 次配送，包含恰好一次真实碰撞、一次低电量充电站让位，且无断电、无充电返回循环、无任务饥饿或绕路惩罚，并记录 Actor 分布、零干预和内容哈希。
+浏览器使用连续插值动画，在同一动画帧插值两个机器人的联合移动结果。地图机器人图标直接显示电量和承运货物。A 组解释阶段不公开参与者的 Task 1 轨迹，而是载入冻结的 AI–AI 参考轨迹。当前公共 NumPy 教程完整运行 120 步，完成 5 次配送，包含取货、交付、充电、排队和协作让行事件，且无碰撞或断电，并记录 Actor 分布、零干预和内容哈希。
 
 参考轨迹的 121 帧和事件标签只读取一次。拖动、上一帧、下一帧和事件跳转均在浏览器本地完成，拖动时不访问服务器；稳定 150 ms 后才循环播放选中动作。提问显式携带轨迹哈希、帧、机器人和问题类型。回答只保留与动作、电量、队友、分工或碰撞问题直接相关的证据，语义校验失败时使用确定性简短模板；公共载荷继续隐藏策略目标、神经分布和内部特征。
 

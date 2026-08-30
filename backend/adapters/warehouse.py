@@ -1263,6 +1263,10 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
                         "selected_probability": float(
                             probabilities.get(str(executed), 0.0)
                         ),
+                        "highest_probability_action": str(argmax),
+                        "highest_probability": float(
+                            probabilities.get(str(argmax), 0.0)
+                        ),
                         "policy_selected": str(proposed) == str(argmax),
                         "work": work,
                         "available_pickup_progress": available_pickup_progress,

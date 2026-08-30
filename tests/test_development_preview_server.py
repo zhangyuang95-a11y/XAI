@@ -250,6 +250,7 @@ def test_action_explanations_use_direct_reasons_on_reported_frames() -> None:
     cases = {
         (31, "robot_2"): ("让出通道", "机器人1电量为40%"),
         (56, "robot_2"): ("离开充电站", "59%和26%"),
+        (60, "robot_2"): ("策略随机采样", "非必要绕路"),
         (61, "robot_2"): ("任务2的A点取货", "3格缩短到2格"),
         (84, "robot_1"): ("让机器人2先通过", "下一格(3, 4)"),
         (87, "robot_2"): ("机器人1优先前往充电站", "18%"),
@@ -275,6 +276,7 @@ def test_all_tutorial_action_explanations_are_short_and_reason_bearing() -> None
         "是在",
         "但因",
         "属于重新定位",
+        "策略",
         "冻结状态",
         "因为决策前",
     )
@@ -320,6 +322,22 @@ def test_charger_departure_explanations_state_the_operational_reason() -> None:
                 reason in text
                 for reason in ("离开充电站", "充电已经完成", "A点取货")
             ), (frame, text)
+
+
+def test_nonprogress_task_moves_are_identified_as_policy_detours() -> None:
+    state = DevelopmentPreviewState()
+
+    for frame in (60, 63, 64):
+        text = state._grounded_development_explanation(
+            index=frame,
+            target_agent="robot_2",
+            focus="action",
+            language="zh-CN",
+        )
+        assert "任务2的A点取货" in text
+        assert "非必要绕路" in text
+        assert "不是任务或安全要求" in text
+        assert "冻结状态无法支持" not in text
 
 
 def test_action_explanation_prioritizes_clearing_charger_for_teammate() -> None:

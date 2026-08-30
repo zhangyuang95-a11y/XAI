@@ -312,9 +312,33 @@ class WarehouseExplanationMixin:
                 if language == "zh-CN":
                     return f"{robot}{action_label}是为了{goal}；本步将剩余距离从{distance_before}格缩短到{distance_after}格。"
                 return f"{robot} chose {action_label} to {goal}; this reduced the remaining route from {distance_before} to {distance_after} cells."
+            selected_probability = float(
+                movement.get("selected_probability", 0.0) or 0.0
+            )
+            policy_selected = bool(movement.get("policy_selected", False))
+            highest_action = self.explanation_action_label(
+                str(movement.get("highest_probability_action", "")), language
+            )
+            highest_probability = float(
+                movement.get("highest_probability", 0.0) or 0.0
+            )
             if language == "zh-CN":
-                return f"{robot}的当前目标是{goal}，但{action_label}没有缩短路线；冻结状态无法支持更具体的必要理由。"
-            return f"{robot}'s current goal was to {goal}, but {action_label} did not shorten the route; the frozen state supports no more specific necessity."
+                route_change = (
+                    f"将距离从{distance_before}格增加到{distance_after}格"
+                    if distance_after > distance_before
+                    else f"未减少{distance_before}格的剩余距离"
+                )
+                if not policy_selected:
+                    return f"{robot}的目标是{goal}，但{action_label}是策略随机采样出的低概率动作（{selected_probability * 100:.1f}%），{route_change}。这是非必要绕路，不是任务或安全要求。"
+                return f"{robot}的目标是{goal}，但策略最高概率动作{action_label}（{highest_probability * 100:.1f}%）{route_change}。这是策略产生的非必要绕路，不是任务或安全要求。"
+            route_change = (
+                f"increased the route from {distance_before} to {distance_after} cells"
+                if distance_after > distance_before
+                else f"did not reduce the remaining {distance_before}-cell route"
+            )
+            if not policy_selected:
+                return f"{robot}'s goal was to {goal}, but {action_label} was a low-probability stochastic sample ({selected_probability * 100:.1f}%) that {route_change}. This was an unnecessary detour, not a task or safety requirement."
+            return f"{robot}'s goal was to {goal}, but the policy's highest-probability action, {highest_action} ({highest_probability * 100:.1f}%), {route_change}. This was a policy-generated unnecessary detour, not a task or safety requirement."
 
         pickup_progress = tuple(
             item

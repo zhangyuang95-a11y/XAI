@@ -249,6 +249,7 @@ def test_action_explanations_use_direct_reasons_on_reported_frames() -> None:
     state = DevelopmentPreviewState()
     cases = {
         (31, "robot_2"): ("让出通道", "机器人1电量为40%"),
+        (56, "robot_2"): ("离开充电站", "59%和26%"),
         (61, "robot_2"): ("任务2的A点取货", "3格缩短到2格"),
         (84, "robot_1"): ("让机器人2先通过", "下一格(3, 4)"),
         (87, "robot_2"): ("机器人1优先前往充电站", "18%"),
@@ -271,6 +272,7 @@ def test_all_tutorial_action_explanations_are_short_and_reason_bearing() -> None
     reason_markers = (
         "是为了",
         "是因为",
+        "是在",
         "但因",
         "属于重新定位",
         "冻结状态",
@@ -295,6 +297,29 @@ def test_all_tutorial_action_explanations_are_short_and_reason_bearing() -> None
             )
             if action != "WAIT":
                 assert "当前目标是等待" not in text, (frame, agent_id, text)
+
+
+def test_charger_departure_explanations_state_the_operational_reason() -> None:
+    state = DevelopmentPreviewState()
+
+    for frame, record in enumerate(state.tutorial_frames):
+        departures = tuple(
+            event
+            for event in record.events
+            if event.get("event") == "charger_departure"
+        )
+        for event in departures:
+            text = state._grounded_development_explanation(
+                index=frame,
+                target_agent=str(event["agent_id"]),
+                focus="action",
+                language="zh-CN",
+            )
+            assert "重新定位" not in text
+            assert any(
+                reason in text
+                for reason in ("离开充电站", "充电已经完成", "A点取货")
+            ), (frame, text)
 
 
 def test_action_explanation_prioritizes_clearing_charger_for_teammate() -> None:

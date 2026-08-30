@@ -1230,6 +1230,25 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
                 if endpoint is not None
                 else 0
             )
+            available_pickup_progress = tuple(
+                {
+                    "task_id": task.task_id,
+                    "task_slot": slot,
+                    "endpoint": task.pickup_position,
+                    "distance_before": shortest_path_distance(
+                        position_before,
+                        task.pickup_position,
+                        self.environment.config.map_layout_id,
+                    ),
+                    "distance_after": shortest_path_distance(
+                        position_after,
+                        task.pickup_position,
+                        self.environment.config.map_layout_id,
+                    ),
+                }
+                for slot, task in enumerate(state.tasks, start=1)
+                if task.status == "available"
+            )
             facts.append(
                 EvidenceFact(
                     fact_id=f"{target_entity}.movement_outcome",
@@ -1246,6 +1265,7 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
                         ),
                         "policy_selected": str(proposed) == str(argmax),
                         "work": work,
+                        "available_pickup_progress": available_pickup_progress,
                     },
                     factor_groups=(
                         "action",

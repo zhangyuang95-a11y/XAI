@@ -562,6 +562,16 @@ def _collaboration_context(
         ),
         None,
     )
+    charger_departure = next(
+        (
+            dict(event)
+            for event in environment_events
+            if isinstance(event, Mapping)
+            and str(event.get("event", "")) == "charger_departure"
+            and str(event.get("agent_id", "")) == agent.agent_id
+        ),
+        None,
+    )
 
     visible_goal_kind, visible_goal_position = _actor_visible_goal(state, agent)
     visible_goal_distance = shortest_path_distance(
@@ -648,6 +658,7 @@ def _collaboration_context(
         "teammate_yielded_for_target": teammate_yielded_for_target,
         "occupied_clearance_wait": occupied_clearance_wait,
         "charger_queue": charger_queue,
+        "charger_departure": charger_departure,
         "charger_position": environment.layout.charger_position,
         "visible_goal_kind": visible_goal_kind,
         "visible_goal_position": visible_goal_position,

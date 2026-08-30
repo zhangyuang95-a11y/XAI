@@ -282,6 +282,27 @@ class WarehouseExplanationMixin:
             return f"{robot} chose {action_label} to vacate the charger for low-battery {teammate}. Before the decision, {teammate} had {teammate_battery:g}% battery."
 
         kind = str(work.get("kind", goal_kind))
+        charger_departure = collaboration.get("charger_departure")
+        if isinstance(charger_departure, Mapping):
+            if bool(collaboration.get("teammate_requires_charge", False)):
+                if language == "zh-CN":
+                    own_status = (
+                        f"自身仍需充电，但{teammate}电量更低"
+                        if bool(collaboration.get("target_requires_charge", False))
+                        else "自身已不需要继续充电"
+                    )
+                    return f"{robot}{action_label}是为了离开充电站，把唯一充电位让给电量更低的{teammate}。{own_status}；两者电量分别为{target_battery:g}%和{teammate_battery:g}%。"
+                own_status = (
+                    f"it still needed charge, but {teammate} was lower"
+                    if bool(collaboration.get("target_requires_charge", False))
+                    else "it no longer needed to keep charging"
+                )
+                return f"{robot} chose {action_label} to leave the charger free for lower-battery {teammate}. It had {target_battery:g}% versus {teammate_battery:g}%; {own_status}."
+            if kind == "reposition":
+                if language == "zh-CN":
+                    return f"{robot}{action_label}是因为本轮充电已经完成，需要离站并重新参与共享取货。决策前电量为{target_battery:g}%，已不需要继续充电。"
+                return f"{robot} chose {action_label} because this charging round was complete and it needed to rejoin shared pickup work. Before deciding, it had {target_battery:g}% and no longer needed to charge."
+
         if action in {"UP", "DOWN", "LEFT", "RIGHT"} and kind in {
             "pickup",
             "delivery",
@@ -294,6 +315,43 @@ class WarehouseExplanationMixin:
             if language == "zh-CN":
                 return f"{robot}的当前目标是{goal}，但{action_label}没有缩短路线；冻结状态无法支持更具体的必要理由。"
             return f"{robot}'s current goal was to {goal}, but {action_label} did not shorten the route; the frozen state supports no more specific necessity."
+
+        pickup_progress = tuple(
+            item
+            for item in movement.get("available_pickup_progress", ())
+            if isinstance(item, Mapping)
+        )
+        if action in {"UP", "DOWN", "LEFT", "RIGHT"} and pickup_progress:
+            improved = tuple(
+                item
+                for item in pickup_progress
+                if int(item.get("distance_after", 0))
+                < int(item.get("distance_before", 0))
+            )
+            nearest_before = min(
+                int(item.get("distance_before", 0)) for item in pickup_progress
+            )
+            nearest_after = min(
+                int(item.get("distance_after", 0)) for item in pickup_progress
+            )
+            if nearest_after < nearest_before:
+                if language == "zh-CN":
+                    return f"{robot}{action_label}是为了靠近尚未领取的共享取货区；最近A点的距离从{nearest_before}格缩短到{nearest_after}格。此时尚未承诺具体任务。"
+                return f"{robot} chose {action_label} to approach the unclaimed shared pickup area; the nearest A point fell from {nearest_before} to {nearest_after} cells. No specific task was committed yet."
+            if improved:
+                candidate = min(
+                    improved,
+                    key=lambda item: (
+                        int(item.get("distance_after", 0)),
+                        int(item.get("task_slot", 0)),
+                    ),
+                )
+                slot = int(candidate.get("task_slot", 0))
+                before = int(candidate.get("distance_before", 0))
+                after = int(candidate.get("distance_after", 0))
+                if language == "zh-CN":
+                    return f"{robot}{action_label}是在靠近任务{slot}的A点候选方向，距离从{before}格缩短到{after}格。任务尚未承诺，因此不能断言它最终会领取该货物。"
+                return f"{robot} chose {action_label} along a candidate route toward task {slot}'s A point, reducing that distance from {before} to {after} cells. The task was not committed, so this does not prove the final pickup choice."
 
         if action == "WAIT":
             if goal_kind == "wait":

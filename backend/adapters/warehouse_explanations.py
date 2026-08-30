@@ -34,11 +34,10 @@ class WarehouseExplanationMixin:
         focus: str,
         language: str,
     ) -> str:
-        """Answer one study question directly in at most three sentences.
+        """Answer with one direct reason and, at most, one key fact.
 
-        All reasons are state facts available before the joint decision. Any
-        movement, charging, or collision statement is explicitly an observed
-        outcome of the simultaneous transition.
+        Causes are limited to the frozen pre-decision state.  Current joint
+        actions and the resulting movement are described only as outcomes.
         """
 
         facts = tuple(self.evidence_facts(snapshot, target_agent, policy))
@@ -46,6 +45,7 @@ class WarehouseExplanationMixin:
         robot = self.explanation_entity_label(target_agent, language)
         action = str(by_predicate.get("executed_action", "WAIT"))
         action_label = self.explanation_action_label(action, language)
+
         objective = by_predicate.get("shared_objective_selection_reason", {})
         objective = objective if isinstance(objective, Mapping) else {}
         selected = objective.get("selected_objective", {})
@@ -68,24 +68,27 @@ class WarehouseExplanationMixin:
 
         if language == "zh-CN":
             if goal_kind == "pickup" and task_slot:
-                goal = f"任务{task_slot}的A取货点"
+                goal = f"任务{task_slot}的A点取货"
+                goal_target = f"任务{task_slot}的A点"
             elif goal_kind == "delivery" and task_slot:
-                goal = f"任务{task_slot}的B交付点"
+                goal = f"任务{task_slot}的B点交付"
+                goal_target = f"任务{task_slot}的B点"
             elif goal_kind == "charge":
-                goal = "充电站"
+                goal = "前往充电站"
+                goal_target = "充电站"
             else:
                 goal = _goal_label(goal_kind, language)
-            goal_sentence = f"决策前，{robot}的当前目标是{goal}。"
+                goal_target = goal
         else:
             if goal_kind == "pickup" and task_slot:
-                goal = f"task {task_slot} pickup A"
+                goal = f"collect task {task_slot} at A"
             elif goal_kind == "delivery" and task_slot:
-                goal = f"task {task_slot} drop-off B"
+                goal = f"deliver task {task_slot} at B"
             elif goal_kind == "charge":
-                goal = "the charger"
+                goal = "reach the charger"
             else:
                 goal = _goal_label(goal_kind, language)
-            goal_sentence = f"Before deciding, {robot}'s current goal was {goal}."
+            goal_target = goal
 
         resolution = by_predicate.get("action_resolution_reason", {})
         resolution = resolution if isinstance(resolution, Mapping) else {}
@@ -95,97 +98,215 @@ class WarehouseExplanationMixin:
             or ""
         )
         collision = collision_kind in {
-            "same_target", "swap", "occupied_stationary", "robot_collision"
+            "same_target",
+            "swap",
+            "occupied_stationary",
+            "robot_collision",
         }
-        collaboration = by_predicate.get("collaboration_context", {})
-        collaboration = collaboration if isinstance(collaboration, Mapping) else {}
-        charger_clearance = bool(collaboration.get("charger_clearance", False))
-        teammate_battery = float(collaboration.get("teammate_battery", 0.0) or 0.0)
-        movement = by_predicate.get("movement_outcome", {})
-        movement = movement if isinstance(movement, Mapping) else {}
-        distance_before = int(movement.get("distance_before", 0) or 0)
-        distance_after = int(movement.get("distance_after", distance_before) or 0)
+        collision_zh = {
+            "same_target": "双方试图进入同一格",
+            "swap": "双方试图交换位置",
+            "occupied_stationary": "它试图进入队友未离开的格子",
+            "robot_collision": "双方路径冲突",
+        }.get(collision_kind, "双方路径存在冲突")
+        collision_en = {
+            "same_target": "both robots targeted the same cell",
+            "swap": "the robots tried to swap cells",
+            "occupied_stationary": "it targeted a cell the teammate did not leave",
+            "robot_collision": "the robot paths conflicted",
+        }.get(collision_kind, "the robot paths conflicted")
 
-        simultaneous_zh = (
-            "两台机器人都只根据同一决策前状态同时选动作，"
-            "机器人2事先不知道机器人1本帧会怎么走。"
-        )
+        simultaneous_zh = "两台机器人只依据同一决策前状态同时选动作，事先不知道对方本帧动作。"
         simultaneous_en = (
-            "Both robots chose simultaneously from the same pre-move state, "
-            "so Robot 2 did not know Robot 1's current move."
+            "Both robots chose simultaneously from the same pre-move state; "
+            "neither knew the other's current action."
         )
         if focus == "collision":
-            collision_label_zh = {
-                "same_target": "双方进入同一格",
-                "swap": "双方交换位置",
-                "occupied_stationary": "一方进入了队友本帧未离开的格子",
-                "robot_collision": "机器人之间",
-            }.get(collision_kind, "机器人之间")
-            collision_label_en = {
-                "same_target": "both robots targeted the same cell",
-                "swap": "the robots tried to swap cells",
-                "occupied_stationary": (
-                    "one robot entered a cell the teammate did not leave"
-                ),
-                "robot_collision": "the robot paths conflicted",
-            }.get(collision_kind, "the robot paths conflicted")
             if language == "zh-CN":
                 first = (
-                    f"是的，本帧因{collision_label_zh}发生碰撞，环境阻止了双方移动。"
+                    f"本帧发生碰撞：{collision_zh}，因此环境阻止了移动。"
                     if collision
-                    else "本帧没有实际碰撞，但同时决策意味着双方仍存在同格或换位风险。"
+                    else "本帧没有实际碰撞；风险来自双方可能选择同一格或互换位置。"
                 )
-                return f"{first}{simultaneous_zh}{goal_sentence}"
+                return f"{first}{simultaneous_zh}"
             first = (
-                f"Yes: {collision_label_en}, so the environment blocked both moves."
+                f"A collision occurred: {collision_en}, so the environment blocked the move."
                 if collision
-                else "No collision occurred in this frame, but simultaneous choices still created same-cell or swap risk."
+                else "No collision occurred; the risk was a same-cell target or a position swap."
             )
-            return f"{first} {simultaneous_en} {goal_sentence}"
+            return f"{first} {simultaneous_en}"
 
-        if charger_clearance:
-            if language == "zh-CN":
-                direct = (
-                    f"{robot}{action_label}，执行后的结果是让出充电站，"
-                    f"使低电量（{teammate_battery:g}%）的队友能够进入。"
-                )
-                return f"{direct}{goal_sentence}{simultaneous_zh}"
-            direct = (
-                f"{robot} moved {action_label}; the observed result was to vacate the charger "
-                f"for its low-battery teammate ({teammate_battery:g}%)."
-            )
-            return f"{direct} {goal_sentence} {simultaneous_en}"
+        collaboration = by_predicate.get("collaboration_context", {})
+        collaboration = collaboration if isinstance(collaboration, Mapping) else {}
+        teammate_id = str(collaboration.get("teammate_agent", ""))
+        teammate = self.explanation_entity_label(teammate_id, language)
+        teammate_battery = float(collaboration.get("teammate_battery", 0.0) or 0.0)
+        target_battery = float(collaboration.get("target_battery", 0.0) or 0.0)
+        teammate_role = collaboration.get("teammate_role", {})
+        teammate_role = teammate_role if isinstance(teammate_role, Mapping) else {}
+        movement = by_predicate.get("movement_outcome", {})
+        movement = movement if isinstance(movement, Mapping) else {}
+        work = movement.get("work", {})
+        work = work if isinstance(work, Mapping) else {}
+        distance_before = int(movement.get("distance_before", 0) or 0)
+        distance_after = int(movement.get("distance_after", distance_before) or 0)
+        energy = by_predicate.get("energy_decision_context", {})
+        energy = energy if isinstance(energy, Mapping) else {}
+        battery = float(energy.get("battery", target_battery) or 0.0)
+        requires_charge = bool(energy.get("requires_charge", False))
+        required_energy = energy.get("required_safe_energy")
+        charging = by_predicate.get("charging_outcome", {})
+        charging = charging if isinstance(charging, Mapping) else {}
+        queue = by_predicate.get("charger_queue_context", {})
+        queue = queue if isinstance(queue, Mapping) else {}
 
         if focus in {"energy", "charge_threshold"}:
-            energy = by_predicate.get("energy_decision_context", {})
-            energy = energy if isinstance(energy, Mapping) else {}
-            battery = float(energy.get("battery", 0.0) or 0.0)
-            requires_charge = bool(energy.get("requires_charge", False))
-            if language == "zh-CN":
-                direct = (
-                    f"{robot}本帧{action_label}；决策前电量为{battery:g}%"
-                    f"，当时{'需要充电' if requires_charge else '尚不需要充电'}。"
+            if charging:
+                before = float(charging.get("battery_before", battery) or 0.0)
+                after = float(charging.get("battery_after", before) or before)
+                if language == "zh-CN":
+                    return (
+                        f"{robot}等待是为了继续充电，以达到安全配送所需电量。"
+                        f"本步电量从{before:g}%升至{after:g}%。"
+                    )
+                return (
+                    f"{robot} waited to keep charging toward the level needed for a safe "
+                    f"delivery. This step raised it from {before:g}% to {after:g}%."
                 )
-                return f"{direct}{goal_sentence}"
-            direct = (
-                f"{robot} executed {action_label}; before deciding it had {battery:g}% battery and "
-                f"{'needed to charge' if requires_charge else 'did not yet need to charge'}."
-            )
-            return f"{direct} {goal_sentence}"
-
-        if language == "zh-CN":
-            effect = (
-                f"，执行后到目标的距离从{distance_before}格缩短到{distance_after}格"
-                if distance_after < distance_before
+            if language == "zh-CN":
+                if requires_charge:
+                    evidence = (
+                        f"当前仅{battery:g}%，下一条安全配送路线约需{float(required_energy):g}点电量"
+                        if required_energy is not None
+                        else f"当前仅{battery:g}%，不足以安全完成下一次配送"
+                    )
+                    return f"充电需求影响了{robot}的{action_label}：{evidence}。"
+                enough = (
+                    f"，下一条安全路线约需{float(required_energy):g}点"
+                    if required_energy is not None
+                    else ""
+                )
+                return f"{robot}当前电量为{battery:g}%{enough}，电量并未迫使它改变本步动作。"
+            if requires_charge:
+                evidence = (
+                    f"it had {battery:g}% while the next safe route required about {float(required_energy):g} points"
+                    if required_energy is not None
+                    else f"it had only {battery:g}%, insufficient for the next safe delivery"
+                )
+                return f"Charging needs affected {robot}'s {action_label}: {evidence}."
+            enough = (
+                f"; the next safe route required about {float(required_energy):g} points"
+                if required_energy is not None
                 else ""
             )
-            return f"{robot}本帧执行了{action_label}{effect}。{goal_sentence}"
-        effect = (
-            f", and after execution its distance to the goal fell from {distance_before} to {distance_after} cells"
-            if distance_after < distance_before
-            else ""
-        )
-        return f"{robot} executed {action_label}{effect}. {goal_sentence}"
+            return f"{robot} had {battery:g}% battery{enough}, so energy did not force this action."
+
+        if collision and bool(resolution.get("environment_changed_action", False)):
+            proposed = self.explanation_action_label(
+                str(resolution.get("requested_action", action)), language
+            )
+            if language == "zh-CN":
+                return f"{robot}原本选择{proposed}，但因{collision_zh}被环境改为等待。{simultaneous_zh}"
+            return f"{robot} chose {proposed}, but the environment changed it to wait because {collision_en}. {simultaneous_en}"
+
+        if charging:
+            before = float(charging.get("battery_before", battery) or 0.0)
+            after = float(charging.get("battery_after", before) or before)
+            if language == "zh-CN":
+                return f"{robot}等待是为了继续充电，以达到安全配送所需电量。本步电量{before:g}%→{after:g}%。"
+            return f"{robot} waited to keep charging toward the level needed for a safe delivery. Battery rose from {before:g}% to {after:g}%."
+
+        if queue:
+            occupant_id = str(queue.get("occupant_agent", teammate_id))
+            occupant = self.explanation_entity_label(occupant_id, language)
+            if language == "zh-CN":
+                return f"{robot}等待是因为需要充电，但唯一的充电站正被{occupant}占用。当前电量为{battery:g}%。"
+            return f"{robot} waited because it needed to charge, but {occupant} occupied the only charger. Its battery was {battery:g}%."
+
+        if action == "WAIT" and collaboration.get("occupied_clearance_wait"):
+            occupied = collaboration.get("occupied_clearance_wait", {})
+            occupied = occupied if isinstance(occupied, Mapping) else {}
+            cell = tuple(occupied.get("occupied_position", ()))
+            if language == "zh-CN":
+                return f"{robot}等待是为了先让{teammate}通过；通往当前目标的下一格{cell}在决策前被队友占用。"
+            return f"{robot} waited to let {teammate} pass; the next cell {cell} toward its goal was occupied before the decision."
+
+        occupied_goal_cells = tuple(collaboration.get("occupied_goal_cells", ()))
+        if action == "WAIT" and occupied_goal_cells:
+            cell = tuple(occupied_goal_cells[0])
+            if language == "zh-CN":
+                return f"{robot}等待是为了让{teammate}先通过；通往{goal_target}的下一格{cell}在决策前被队友占用。"
+            return f"{robot} waited to let {teammate} pass; the next cell {cell} toward its goal was occupied before the decision."
+
+        if action == "WAIT" and bool(collaboration.get("teammate_has_charge_priority", False)):
+            if language == "zh-CN":
+                return f"{robot}等待是为了让电量更低的{teammate}优先前往充电站。两者都需充电，{teammate}为{teammate_battery:g}%，{robot}为{target_battery:g}%。"
+            return f"{robot} waited to give the lower-battery {teammate} charger priority. Both needed to charge: {teammate_battery:g}% versus {target_battery:g}%."
+
+        teammate_yield = collaboration.get("teammate_yielded_for_target")
+        if action == "WAIT" and isinstance(teammate_yield, Mapping):
+            if language == "zh-CN":
+                return f"{robot}等待是为了给相邻的{teammate}留出通道空间，降低双方挤入同一区域的风险。决策前两者相距{int(collaboration.get('teammate_distance', 0))}格。"
+            return f"{robot} waited to leave aisle space for nearby {teammate}, reducing the risk of both entering the same narrow area. They were {int(collaboration.get('teammate_distance', 0))} cells apart before deciding."
+
+        if (
+            action == "WAIT"
+            and bool(collaboration.get("teammate_requires_charge", False))
+            and str(teammate_role.get("kind", "")) == "charge"
+            and int(collaboration.get("teammate_distance", 99)) <= 3
+        ):
+            if language == "zh-CN":
+                return f"{robot}等待是为了避免阻挡低电量的{teammate}，让其先前往充电站。决策前，{teammate}仅有{teammate_battery:g}%电量。"
+            return f"{robot} waited to avoid obstructing low-battery {teammate} on the way to the charger. Before deciding, {teammate} had {teammate_battery:g}% battery."
+
+        if action == "WAIT" and bool(collaboration.get("goal_advance_near_teammate", False)):
+            if language == "zh-CN":
+                return f"{robot}等待是为了与{teammate}保持间距，让队友先通过狭窄通道。"
+            return f"{robot} waited to keep spacing and let {teammate} clear the narrow aisle first."
+
+        coordination_yield = collaboration.get("coordination_yield")
+        if isinstance(coordination_yield, Mapping):
+            if str(teammate_role.get("kind", "")) == "charge":
+                purpose_zh = f"给低电量的{teammate}让出通道，使其前往充电站"
+                purpose_en = f"clear the aisle for low-battery {teammate} to reach the charger"
+            else:
+                purpose_zh = f"给{teammate}让路，避免双方在狭窄通道发生冲突"
+                purpose_en = f"yield to {teammate} and avoid a narrow-aisle conflict"
+            if language == "zh-CN":
+                return f"{robot}{action_label}是为了{purpose_zh}。决策前，{teammate}电量为{teammate_battery:g}%。"
+            return f"{robot} chose {action_label} to {purpose_en}. Before the decision, {teammate} had {teammate_battery:g}% battery."
+
+        if bool(collaboration.get("charger_clearance", False)):
+            if language == "zh-CN":
+                return f"{robot}{action_label}是为了让出充电站，供低电量的{teammate}进入。决策前，{teammate}仅有{teammate_battery:g}%电量。"
+            return f"{robot} chose {action_label} to vacate the charger for low-battery {teammate}. Before the decision, {teammate} had {teammate_battery:g}% battery."
+
+        kind = str(work.get("kind", goal_kind))
+        if action in {"UP", "DOWN", "LEFT", "RIGHT"} and kind in {
+            "pickup",
+            "delivery",
+            "charge",
+        }:
+            if distance_after < distance_before:
+                if language == "zh-CN":
+                    return f"{robot}{action_label}是为了{goal}；本步将剩余距离从{distance_before}格缩短到{distance_after}格。"
+                return f"{robot} chose {action_label} to {goal}; this reduced the remaining route from {distance_before} to {distance_after} cells."
+            if language == "zh-CN":
+                return f"{robot}的当前目标是{goal}，但{action_label}没有缩短路线；冻结状态无法支持更具体的必要理由。"
+            return f"{robot}'s current goal was to {goal}, but {action_label} did not shorten the route; the frozen state supports no more specific necessity."
+
+        if action == "WAIT":
+            if goal_kind == "wait":
+                if language == "zh-CN":
+                    return f"{robot}保持位置，因为决策前没有已确认的取货、交付、充电或让行目标。"
+                return f"{robot} held position because no pickup, delivery, charging, or yielding objective was established before the decision."
+            if language == "zh-CN":
+                return f"{robot}当前需要{goal}，但冻结状态未显示必须等待的安全或任务原因；这是一次未被证据充分解释的停顿。"
+            return f"{robot} needed to {goal}, but the frozen state shows no safety or task reason that required waiting; this pause is not fully explained by the evidence."
+
+        if language == "zh-CN":
+            return f"{robot}{action_label}属于重新定位；冻结状态没有显示明确的取货、交付、充电或让行理由。"
+        return f"{robot}'s {action_label} was a repositioning move; the frozen state shows no specific pickup, delivery, charging, or yielding reason."
 
     def explanation_predicate_schema(self) -> Mapping[str, Any]:
         return {

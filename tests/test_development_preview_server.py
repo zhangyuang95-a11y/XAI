@@ -215,8 +215,11 @@ def test_development_explanation_is_grounded_in_selected_action_evidence() -> No
     )
     report = result["view"]["last_explanation"]
 
-    assert "机器人2本帧执行了" in report["explanation"]
-    assert "当前目标" in report["explanation"]
+    assert "机器人2" in report["explanation"]
+    assert any(
+        reason in report["explanation"]
+        for reason in ("是为了", "是因为", "冻结状态")
+    )
     assert "正式的 RCPD" not in report["explanation"]
     assert report["selected_timeline_frame"] == selected
     assert report["decision_evidence_frame"] == selected - 1
@@ -237,9 +240,61 @@ def test_action_explanation_states_recorded_goal_progress_and_outcome() -> None:
         language="zh-CN",
     )
 
-    assert "机器人1本帧执行了" in text
-    assert "决策前，机器人1的当前目标是" in text
+    assert "机器人1" in text
+    assert "是为了" in text
     assert "选择概率最高" not in text
+
+
+def test_action_explanations_use_direct_reasons_on_reported_frames() -> None:
+    state = DevelopmentPreviewState()
+    cases = {
+        (31, "robot_2"): ("让出通道", "机器人1电量为40%"),
+        (61, "robot_2"): ("任务2的A点取货", "3格缩短到2格"),
+        (84, "robot_1"): ("让机器人2先通过", "下一格(3, 4)"),
+        (87, "robot_2"): ("机器人1优先前往充电站", "18%"),
+    }
+
+    for (frame, agent_id), expected_fragments in cases.items():
+        text = state._grounded_development_explanation(
+            index=frame,
+            target_agent=agent_id,
+            focus="action",
+            language="zh-CN",
+        )
+        assert all(fragment in text for fragment in expected_fragments)
+        assert "当前目标是等待" not in text
+        assert text.count("。") <= 2
+
+
+def test_all_tutorial_action_explanations_are_short_and_reason_bearing() -> None:
+    state = DevelopmentPreviewState()
+    reason_markers = (
+        "是为了",
+        "是因为",
+        "但因",
+        "属于重新定位",
+        "冻结状态",
+        "因为决策前",
+    )
+
+    for frame in range(1, len(state.tutorial_frames)):
+        for agent_id in ("robot_1", "robot_2"):
+            action = state.tutorial_frames[frame].actions[agent_id]
+            text = state._grounded_development_explanation(
+                index=frame,
+                target_agent=agent_id,
+                focus="action",
+                language="zh-CN",
+            )
+            assert len(text) <= 120, (frame, agent_id, text)
+            assert text.count("。") <= 2, (frame, agent_id, text)
+            assert any(marker in text for marker in reason_markers), (
+                frame,
+                agent_id,
+                text,
+            )
+            if action != "WAIT":
+                assert "当前目标是等待" not in text, (frame, agent_id, text)
 
 
 def test_action_explanation_prioritizes_clearing_charger_for_teammate() -> None:
@@ -275,12 +330,10 @@ def test_action_explanation_prioritizes_clearing_charger_for_teammate() -> None:
         language="zh-CN",
     )
 
-    assert "执行后的结果是让出充电站" in text
+    assert "是为了让出充电站" in text
     assert "低电量" in text
-    assert "队友能够进入" in text
-    assert "决策前，机器人1的当前目标是" in text
-    assert "同一决策前状态同时选动作" in text
-    assert "机器人2事先不知道机器人1本帧会怎么走" in text
+    assert "机器人2进入" in text
+    assert "机器人2仅有10%电量" in text
     assert "选择概率最高" not in text
 
 
@@ -339,12 +392,10 @@ def test_collision_explanation_is_direct_concise_and_simultaneous() -> None:
         language="zh-CN",
     )
 
-    assert english.startswith("Yes:")
+    assert english.startswith("A collision occurred:")
     assert "same pre-move state" in english
-    assert "did not know Robot 1's current move" in english
-    assert "current goal" in english
+    assert "neither knew the other's current action" in english
     assert len(english.split()) <= 80
     assert english.count(".") <= 3
     assert "同一决策前状态同时选动作" in chinese
-    assert "当前目标" in chinese
     assert chinese.count("。") <= 3

@@ -32,6 +32,7 @@ from env.warehouse.environment import (
     shortest_path_distance,
 )
 from env.warehouse.observations import (
+    _actor_visible_goal,
     all_local_observations,
     global_observation,
     observation_schema,
@@ -899,6 +900,7 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
         # Preserve the live task-list order because the UI labels these slots
         # A1/B1 and A2/B2 independently of monotonically increasing task IDs.
         tasks = list(state.tasks)
+        visible_goal_kind, visible_goal_position = _actor_visible_goal(state, agent)
         selected = next(
             (task for task in tasks if task.task_id == agent.carrying_task_id),
             None,
@@ -909,13 +911,13 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
                     task
                     for task in tasks
                     if task.status == "available"
-                    and task.pickup_position == agent.goal_position
+                    and task.pickup_position == visible_goal_position
                 ),
                 None,
             )
         route_distance = shortest_path_distance(
             agent.position,
-            agent.goal_position,
+            visible_goal_position,
             self.environment.config.map_layout_id,
         )
         requirements = [
@@ -924,12 +926,12 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
                 "semantic_name": "selected_objective",
                 "role": "objective_reason",
                 "group": "objective",
-                "value": agent.goal_kind,
+                "value": visible_goal_kind,
                 "selection_basis": "shared_task_context",
-                "decision_features": [f"goal.is_{agent.goal_kind}"],
+                "decision_features": [f"goal.is_{visible_goal_kind}"],
                 "fact_verbalizations": [
-                    f"机器人当前目标是{_goal_label(agent.goal_kind, 'zh-CN')}。",
-                    f"The robot's current objective is {_goal_label(agent.goal_kind, 'en')}.",
+                    f"机器人当前目标是{_goal_label(visible_goal_kind, 'zh-CN')}。",
+                    f"The robot's current objective is {_goal_label(visible_goal_kind, 'en')}.",
                 ],
             },
             {
@@ -937,12 +939,12 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
                 "semantic_name": "target_position",
                 "role": "objective_reason",
                 "group": "route",
-                "value": agent.goal_position,
+                "value": visible_goal_position,
                 "selection_basis": "shared_task_context",
                 "decision_features": ["goal.distance", "candidate."],
                 "fact_verbalizations": [
-                    f"目标坐标是{agent.goal_position}。",
-                    f"The target is at {agent.goal_position}.",
+                    f"目标坐标是{visible_goal_position}。",
+                    f"The target is at {visible_goal_position}.",
                 ],
             },
             {
@@ -980,8 +982,8 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
             "schema": "shared_objective_selection_reason.v2",
             "evidence_frame": int(state.frame),
             "selected_objective": {
-                "id": agent.goal_kind,
-                "target_position": agent.goal_position,
+                "id": visible_goal_kind,
+                "target_position": visible_goal_position,
                 "task_id": selected.task_id if selected else None,
             },
             "task_state": {
@@ -994,7 +996,7 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
             "locations": {"charger": self.environment.layout.charger_position},
             "route_considered": [
                 {"stage": "current_position", "position": agent.position},
-                {"stage": agent.goal_kind, "position": agent.goal_position},
+                {"stage": visible_goal_kind, "position": visible_goal_position},
             ],
             "decision_conditions": [
                 {"name": "carrying_task_id", "value": agent.carrying_task_id},
@@ -1009,7 +1011,7 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
             predicate="shared_objective_selection_reason",
             arguments=(
                 agent.agent_id,
-                agent.goal_kind,
+                visible_goal_kind,
                 selected.task_id if selected else "none",
                 int(state.frame),
             ),
@@ -1017,9 +1019,9 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
             factor_groups=("objective_reason", "goal", "shared_task", "rationale", "state"),
             verbalizations=(),
             value_verbalizations=(
-                agent.goal_kind,
-                _goal_label(agent.goal_kind, "zh-CN"),
-                _goal_label(agent.goal_kind, "en"),
+                visible_goal_kind,
+                _goal_label(visible_goal_kind, "zh-CN"),
+                _goal_label(visible_goal_kind, "en"),
             ),
         )
 
@@ -1293,6 +1295,7 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
                         executed_action=str(executed),
                         executed_actions=snapshot.executed_actions,
                         action_resolution=resolution,
+                        environment_events=tuple(environment_events),
                     ),
                     factor_groups=(
                         "action",

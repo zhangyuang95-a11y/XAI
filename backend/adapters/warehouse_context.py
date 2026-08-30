@@ -16,6 +16,7 @@ from env.warehouse.environment import (
     WarehouseState,
     shortest_path_distance,
 )
+from env.warehouse.observations import _actor_visible_goal
 
 
 @dataclass(frozen=True)
@@ -110,7 +111,8 @@ def _movement_work_context(
     # deliberately move away from B on its way to the charger; describing that
     # move against the delivery endpoint would invert the observed progress
     # and give participants a false reason for the action.
-    if agent.navigation_goal_kind == "charge":
+    visible_goal_kind, visible_goal_position = _actor_visible_goal(state, agent)
+    if visible_goal_kind == "charge":
         return {
             "kind": "charge",
             "endpoint": environment.layout.charger_position,
@@ -130,13 +132,13 @@ def _movement_work_context(
             "endpoint": task.delivery_position,
             "endpoint_kind": "B",
         }
-    if agent.navigation_goal_kind == "pickup":
+    if visible_goal_kind == "pickup":
         task = next(
             (
                 item
                 for item in state.tasks
                 if item.status == "available"
-                and item.pickup_position == agent.navigation_goal_position
+                and item.pickup_position == visible_goal_position
             ),
             None,
         )
@@ -175,13 +177,14 @@ def _agent_task_role(
             "endpoint": task.delivery_position,
             "endpoint_kind": "B",
         }
-    if agent.navigation_goal_kind == "pickup":
+    visible_goal_kind, visible_goal_position = _actor_visible_goal(state, agent)
+    if visible_goal_kind == "pickup":
         task = next(
             (
                 item
                 for item in state.tasks
                 if item.status == "available"
-                and item.pickup_position == agent.navigation_goal_position
+                and item.pickup_position == visible_goal_position
             ),
             None,
         )
@@ -193,7 +196,7 @@ def _agent_task_role(
                 "endpoint": task.pickup_position,
                 "endpoint_kind": "A",
             }
-    if agent.navigation_goal_kind == "charge":
+    if visible_goal_kind == "charge":
         return {"kind": "charge", "endpoint": charger_position}
     return {"kind": "wait"}
 
@@ -395,6 +398,7 @@ def _collaboration_context(
     executed_action: str,
     executed_actions: Mapping[str, str],
     action_resolution: Mapping[str, Any],
+    environment_events: tuple[Any, ...] = (),
 ) -> dict[str, Any]:
     teammate = next(item for item in state.agents if item.agent_id != agent.agent_id)
     target_role = _agent_task_role(
@@ -517,6 +521,80 @@ def _collaboration_context(
         and teammate.navigation_goal_kind == "charge"
     )
 
+    coordination_yield = next(
+        (
+            dict(event)
+            for event in environment_events
+            if isinstance(event, Mapping)
+            and str(event.get("event", "")) == "coordination_yield"
+            and str(event.get("yielding_agent_id", "")) == agent.agent_id
+        ),
+        None,
+    )
+    teammate_yielded_for_target = next(
+        (
+            dict(event)
+            for event in environment_events
+            if isinstance(event, Mapping)
+            and str(event.get("event", "")) == "coordination_yield"
+            and str(event.get("passing_agent_id", "")) == agent.agent_id
+        ),
+        None,
+    )
+    occupied_clearance_wait = next(
+        (
+            dict(event)
+            for event in environment_events
+            if isinstance(event, Mapping)
+            and str(event.get("event", ""))
+            == "occupied_cell_clearance_wait"
+            and str(event.get("waiting_agent_id", "")) == agent.agent_id
+        ),
+        None,
+    )
+    charger_queue = next(
+        (
+            dict(event)
+            for event in environment_events
+            if isinstance(event, Mapping)
+            and str(event.get("event", "")) == "charger_queue"
+            and str(event.get("waiting_agent_id", "")) == agent.agent_id
+        ),
+        None,
+    )
+
+    visible_goal_kind, visible_goal_position = _actor_visible_goal(state, agent)
+    visible_goal_distance = shortest_path_distance(
+        agent.position,
+        visible_goal_position,
+        environment.config.map_layout_id,
+    )
+    goal_advancing_actions: list[str] = []
+    goal_advancing_cells: list[tuple[int, int]] = []
+    for candidate_action, delta in MOVE_DELTAS.items():
+        candidate = (
+            agent.position[0] + delta[0],
+            agent.position[1] + delta[1],
+        )
+        if not environment.layout.is_passable(candidate):
+            continue
+        if shortest_path_distance(
+            candidate,
+            visible_goal_position,
+            environment.config.map_layout_id,
+        ) < visible_goal_distance:
+            goal_advancing_actions.append(candidate_action)
+            goal_advancing_cells.append(candidate)
+    occupied_goal_cells = tuple(
+        cell for cell in goal_advancing_cells if cell == teammate.position
+    )
+    goal_advance_near_teammate = any(
+        _manhattan(cell, teammate.position) <= 1
+        for cell in goal_advancing_cells
+    )
+    target_requires_charge = bool(environment._requires_charge(state, agent))
+    teammate_requires_charge = bool(environment._requires_charge(state, teammate))
+
     target_endpoint = target_role.get("endpoint")
     target_distance_before = None
     target_distance_after = None
@@ -554,13 +632,29 @@ def _collaboration_context(
         "teammate_executed_action": other_action,
         "teammate_target_position": other_target,
         "teammate_battery": float(teammate.battery),
-        "teammate_requires_charge": bool(
-            environment._requires_charge(state, teammate)
+        "target_battery": float(agent.battery),
+        "target_requires_charge": target_requires_charge,
+        "teammate_requires_charge": teammate_requires_charge,
+        "both_require_charge": target_requires_charge and teammate_requires_charge,
+        "teammate_has_charge_priority": bool(
+            target_requires_charge
+            and teammate_requires_charge
+            and float(teammate.battery) < float(agent.battery)
         ),
         "enabled_teammate_action": enabled_teammate_action,
         "vacated_position": agent.position if enabled_teammate_action else None,
         "charger_clearance": charger_clearance,
+        "coordination_yield": coordination_yield,
+        "teammate_yielded_for_target": teammate_yielded_for_target,
+        "occupied_clearance_wait": occupied_clearance_wait,
+        "charger_queue": charger_queue,
         "charger_position": environment.layout.charger_position,
+        "visible_goal_kind": visible_goal_kind,
+        "visible_goal_position": visible_goal_position,
+        "goal_advancing_actions": tuple(goal_advancing_actions),
+        "goal_advancing_cells": tuple(goal_advancing_cells),
+        "occupied_goal_cells": occupied_goal_cells,
+        "goal_advance_near_teammate": goal_advance_near_teammate,
         "target_distance_before": target_distance_before,
         "target_distance_after": target_distance_after,
         "proposed_action": str(proposed_action),

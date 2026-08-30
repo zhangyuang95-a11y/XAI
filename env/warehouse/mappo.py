@@ -26,7 +26,10 @@ from .environment import (
     WarehouseConfig,
     WarehouseMultiAgentEnv,
 )
-from .evaluation_diagnostics import avoidable_loaded_delivery_detour_agents
+from .evaluation_diagnostics import (
+    avoidable_loaded_delivery_detour_agents,
+    avoidable_mission_detour_agents,
+)
 from .joint_risk_loss import expected_collision_loss, trainable_joint_pairs
 from .gradient_guard import guard_program_gradients as _guard_program_gradients
 from .coordination_priority import (
@@ -1253,6 +1256,7 @@ def _evaluation_summary(
     yield_events: int = 0,
     head_on_risk_events: int = 0,
     post_policy_action_interventions: int = 0,
+    avoidable_mission_detour_steps: int = 0,
     avoidable_loaded_delivery_detour_steps: int = 0,
     charger_return_cycle_episodes: int = 0,
     charger_return_cycles: int = 0,
@@ -1319,6 +1323,10 @@ def _evaluation_summary(
         "mean_head_on_risk_events": head_on_risk_events / episode_count,
         "mean_post_policy_action_interventions": (
             post_policy_action_interventions / episode_count
+        ),
+        "avoidable_mission_detour_steps": int(avoidable_mission_detour_steps),
+        "avoidable_mission_detours_per_1000_steps": (
+            1000.0 * avoidable_mission_detour_steps / total_steps
         ),
         "avoidable_loaded_delivery_detour_steps": int(
             avoidable_loaded_delivery_detour_steps
@@ -1447,6 +1455,7 @@ def evaluate_policy(
     yield_events = 0
     head_on_risk_events = 0
     post_policy_action_interventions = 0
+    avoidable_mission_detour_steps = 0
     avoidable_loaded_delivery_detour_steps = 0
     charger_return_cycle_episodes = 0
     charger_return_cycles = 0
@@ -1459,6 +1468,7 @@ def evaluate_policy(
         "deadlock": [],
         "charger_return_cycle": [],
         "task_starvation": [],
+        "mission_detour": [],
         "loaded_delivery_detour": [],
     }
     rng = np.random.default_rng(seed + 17_000_000)
@@ -1484,6 +1494,7 @@ def evaluate_policy(
         episode_return_cycles = 0
         episode_starvation = False
         episode_loaded_delivery_detours = 0
+        episode_mission_detours = 0
         minimum_battery_seen = min(
             agent.battery for agent in environment.get_state().agents
         )
@@ -1540,6 +1551,14 @@ def evaluate_policy(
             )
             avoidable_loaded_delivery_detour_steps += len(strict_loaded_detours)
             episode_loaded_delivery_detours += len(strict_loaded_detours)
+            strict_mission_detours = avoidable_mission_detour_agents(
+                environment,
+                state_before,
+                actions,
+                excluded_agent_ids=participant_override_ids,
+            )
+            avoidable_mission_detour_steps += len(strict_mission_detours)
+            episode_mission_detours += len(strict_mission_detours)
             observations, reward, terminated, truncated, info = environment.step(
                 actions,
                 decision_metadata=distribution_decision_metadata(
@@ -1651,6 +1670,8 @@ def evaluate_policy(
             failure_seeds["task_starvation"].append(episode_seed)
         if episode_loaded_delivery_detours > 0:
             failure_seeds["loaded_delivery_detour"].append(episode_seed)
+        if episode_mission_detours > 0:
+            failure_seeds["mission_detour"].append(episode_seed)
     return _evaluation_summary(
         training_rewards=training_rewards,
         base_training_rewards=base_training_rewards,
@@ -1672,6 +1693,7 @@ def evaluate_policy(
         yield_events=yield_events,
         head_on_risk_events=head_on_risk_events,
         post_policy_action_interventions=post_policy_action_interventions,
+        avoidable_mission_detour_steps=avoidable_mission_detour_steps,
         avoidable_loaded_delivery_detour_steps=(
             avoidable_loaded_delivery_detour_steps
         ),

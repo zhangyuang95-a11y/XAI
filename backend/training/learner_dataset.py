@@ -7,6 +7,7 @@ from typing import Mapping
 
 import numpy as np
 
+from env.warehouse import credit_assignment as credit
 from env.warehouse.coordination import (
     is_necessary_urgent_charger_clearance,
     stable_coordination_actions,
@@ -17,7 +18,7 @@ from env.warehouse.environment import (
     shortest_path_distance,
 )
 from env.warehouse.mappo import MAPPOPolicy
-from env.warehouse.navigation import ACTIONS, all_passable_positions
+from env.warehouse.navigation import ACTIONS, MOVE_DELTAS, all_passable_positions
 from env.warehouse.partner_policies import (
     PARTNER_PROFILES,
     participant_surrogate_action,
@@ -277,12 +278,10 @@ def best_unilateral_mission_action(
     teammate = next(
         item for item in state.agents if item.agent_id != agent_id
     )
-    if environment._requires_charge(state, agent):
-        goal = environment.layout.charger_position
-    elif agent.carrying_task_id is not None:
-        goal = state.task_by_id(agent.carrying_task_id).delivery_position
-    else:
-        goal = agent.navigation_goal_position
+    mission = credit.frozen_training_missions(environment, state).get(agent_id)
+    if mission is None:
+        return "WAIT"
+    goal = mission.goal_position
     available_pickups = {
         task.pickup_position
         for task in state.tasks
@@ -308,18 +307,19 @@ def best_unilateral_mission_action(
             # vacate the cell; the peer must clear it in an earlier frame.
             continue
         if (
-            agent.carrying_task_id is None
-            and agent.navigation_goal_kind == "pickup"
+            mission.goal_kind == "pickup"
             and target in available_pickups
             and target != goal
         ):
             # Do not use a geometrically short action that would irreversibly
             # claim the teammate's currently assigned open task.
             continue
-        distance = shortest_path_distance(
+        distance = credit.mission_goal_distance(
+            environment,
+            state,
+            agent,
+            mission,
             target,
-            goal,
-            environment.config.map_layout_id,
         )
         # Prefer actual progress over an equally distant WAIT. ACTIONS order
         # remains the final deterministic tie-break for symmetric routes.
@@ -328,6 +328,81 @@ def best_unilateral_mission_action(
     if not candidates:
         return "WAIT"
     return min(candidates, key=lambda item: item[0])[1]
+
+
+def avoidable_mission_detour_agents(
+    environment: WarehouseMultiAgentEnv,
+    state: object,
+    actions: Mapping[str, str],
+    targets_by_agent: Mapping[str, tuple[int, int]],
+    *,
+    eligible_agent_ids: set[str] | None = None,
+) -> tuple[str, ...]:
+    """Find avoidable pickup or delivery regressions from one frozen S_t.
+
+    The same resolved mission drives reward credit, teacher labels, and this
+    correction audit. In particular, an empty robot with a valid route
+    commitment is evaluated against that pickup instead of its public
+    ``navigation_goal_kind == 'wait'`` fallback.
+    """
+
+    missions = credit.frozen_training_missions(environment, state)
+    coordinated = stable_coordination_actions(environment)
+    offenders: list[str] = []
+    for agent in state.agents:
+        if (
+            eligible_agent_ids is not None
+            and agent.agent_id not in eligible_agent_ids
+        ):
+            continue
+        mission = missions.get(agent.agent_id)
+        action = str(actions.get(agent.agent_id, "WAIT"))
+        if mission is None or mission.goal_kind not in {"pickup", "delivery"}:
+            continue
+        if action not in MOVE_DELTAS:
+            continue
+        current_distance = credit.mission_goal_distance(
+            environment,
+            state,
+            agent,
+            mission,
+            agent.position,
+        )
+        next_distance = credit.mission_goal_distance(
+            environment,
+            state,
+            agent,
+            mission,
+            targets_by_agent[agent.agent_id],
+        )
+        if next_distance <= current_distance:
+            continue
+        if coordinated.get(agent.agent_id) == action:
+            continue
+        held_actions = dict(actions)
+        held_actions[agent.agent_id] = "WAIT"
+        held_collision = environment._resolve_motion(state, held_actions)[3]
+        if (
+            not held_collision
+            and not is_necessary_urgent_charger_clearance(
+                environment,
+                state,
+                agent,
+            )
+            and not necessary_teammate_route_clearance(
+                environment,
+                state,
+                agent,
+            )
+            and not necessary_participant_standoff_clearance(
+                environment,
+                state,
+                agent,
+                candidate_action=action,
+            )
+        ):
+            offenders.append(agent.agent_id)
+    return tuple(sorted(offenders))
 
 
 def configure_learner_state_head_on(
@@ -575,60 +650,9 @@ def collect_learner_state_relabel_dataset(
 
             predicted_stall = ineffective_stall(proposed, predicted_targets)
 
-            def avoidable_loaded_detour_agents(
-                actions: Mapping[str, str],
-                targets_by_agent: Mapping[str, tuple[int, int]],
-                *,
-                eligible_agent_ids: set[str] | None = None,
-            ) -> tuple[str, ...]:
-                offenders: list[str] = []
-                for agent in state.agents:
-                    if (
-                        eligible_agent_ids is not None
-                        and agent.agent_id not in eligible_agent_ids
-                    ):
-                        continue
-                    if (
-                        agent.carrying_task_id is None
-                        or agent.navigation_goal_kind != "delivery"
-                        or environment._requires_charge(state, agent)
-                    ):
-                        continue
-                    current_distance = shortest_path_distance(
-                        agent.position,
-                        agent.navigation_goal_position,
-                        environment.config.map_layout_id,
-                    )
-                    next_distance = shortest_path_distance(
-                        targets_by_agent[agent.agent_id],
-                        agent.navigation_goal_position,
-                        environment.config.map_layout_id,
-                    )
-                    if next_distance <= current_distance:
-                        continue
-                    held_actions = dict(actions)
-                    held_actions[agent.agent_id] = "WAIT"
-                    held_collision = environment._resolve_motion(
-                        state,
-                        held_actions,
-                    )[3]
-                    if (
-                        not held_collision
-                        and not is_necessary_urgent_charger_clearance(
-                            environment,
-                            state,
-                            agent,
-                        )
-                        and not necessary_teammate_route_clearance(
-                            environment,
-                            state,
-                            agent,
-                        )
-                    ):
-                        offenders.append(agent.agent_id)
-                return tuple(offenders)
-
-            predicted_detour_agents = avoidable_loaded_detour_agents(
+            predicted_detour_agents = avoidable_mission_detour_agents(
+                environment,
+                state,
                 proposed,
                 predicted_targets,
             )
@@ -878,10 +902,10 @@ def collect_loaded_detour_correction_dataset(
     maximum_episodes: int,
     seed: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, int]]:
-    """Mine rare loaded detours from unmodified deterministic Actor rollouts.
+    """Mine rare pickup/delivery detours from deterministic Actor rollouts.
 
     The general learner-state collector records every visited state, so a
-    roughly one-in-a-thousand loaded detour can be absent from an entire
+    rare mission detour can be absent from an entire
     relabel round.  This pass scans a wider, disjoint seed range and stores
     only those rare mistakes.  Environment transitions still receive the
     Actor's joint action unchanged; the unilateral mission action is computed
@@ -921,49 +945,14 @@ def collect_loaded_detour_correction_dataset(
             )
             actor_steps += 1
             targets = environment._resolve_motion(state, actions)[0]
-            detouring_agent_ids: set[str] = set()
-            for agent in state.agents:
-                if (
-                    agent.carrying_task_id is None
-                    or agent.navigation_goal_kind != "delivery"
-                    or environment._requires_charge(state, agent)
-                ):
-                    continue
-                distance_before = shortest_path_distance(
-                    agent.position,
-                    agent.navigation_goal_position,
-                    environment.config.map_layout_id,
+            detouring_agent_ids = set(
+                avoidable_mission_detour_agents(
+                    environment,
+                    state,
+                    actions,
+                    targets,
                 )
-                distance_after = shortest_path_distance(
-                    targets[agent.agent_id],
-                    agent.navigation_goal_position,
-                    environment.config.map_layout_id,
-                )
-                if distance_after <= distance_before:
-                    continue
-                held_actions = dict(actions)
-                held_actions[agent.agent_id] = "WAIT"
-                if (
-                    environment._resolve_motion(state, held_actions)[3]
-                    or is_necessary_urgent_charger_clearance(
-                        environment,
-                        state,
-                        agent,
-                    )
-                    or necessary_teammate_route_clearance(
-                        environment,
-                        state,
-                        agent,
-                    )
-                    or necessary_participant_standoff_clearance(
-                        environment,
-                        state,
-                        agent,
-                        candidate_action=actions[agent.agent_id],
-                    )
-                ):
-                    continue
-                detouring_agent_ids.add(agent.agent_id)
+            )
 
             if detouring_agent_ids:
                 # Correct the *joint* response.  A unilateral WAIT label can
@@ -986,15 +975,24 @@ def collect_loaded_detour_correction_dataset(
                                 state,
                                 correction_actions,
                             )[0]
-                            distance_before = shortest_path_distance(
+                            mission = credit.frozen_training_missions(
+                                environment,
+                                state,
+                            )[agent.agent_id]
+                            assert mission is not None
+                            distance_before = credit.mission_goal_distance(
+                                environment,
+                                state,
+                                agent,
+                                mission,
                                 agent.position,
-                                agent.navigation_goal_position,
-                                environment.config.map_layout_id,
                             )
-                            corrected_distance = shortest_path_distance(
+                            corrected_distance = credit.mission_goal_distance(
+                                environment,
+                                state,
+                                agent,
+                                mission,
                                 correction_targets[agent.agent_id],
-                                agent.navigation_goal_position,
-                                environment.config.map_layout_id,
                             )
                             if corrected_distance > distance_before:
                                 unilateral = best_unilateral_mission_action(

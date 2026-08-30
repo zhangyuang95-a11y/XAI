@@ -128,6 +128,12 @@ class SharedActorCentralCritic(nn.Module):
         # mission/coordination returns are excluded by the state predicate.
         self.minimum_charger_reentry_logit_scale = 200.0
         self.minimum_occupied_cell_logit_scale = 50.0
+        # If a collision-robust non-regressing alternative exists, pickup,
+        # delivery, and charge regressions are not useful exploration. Keep
+        # their probability below the combined bounded learned heads. The
+        # gate stays zero when every safe action must temporarily detour, so
+        # public clearance manoeuvres remain available.
+        self.minimum_mission_detour_logit_scale = 50.0
         self.action_dim = int(action_dim)
         self.base_local_dim = int(local_dim)
         self.horizon = int(horizon)
@@ -505,6 +511,13 @@ class SharedActorCentralCritic(nn.Module):
             min=0.0,
             max=1.0,
         )
+        teammate_previous_wait_for_clearance = local[
+            ..., self.teammate_previous_action_start + ACTIONS.index("WAIT")
+        ]
+        own_previous_horizontal_departure = (
+            local[..., 24 + ACTIONS.index("LEFT")]
+            + local[..., 24 + ACTIONS.index("RIGHT")]
+        )
         self_adjacent_to_charger = (
             own_action_features[..., :, 5].amax(dim=-1)
             * (1.0 - self_at_charger)
@@ -616,10 +629,6 @@ class SharedActorCentralCritic(nn.Module):
             * self_has_priority
             * (1.0 - teammate_safe_charger_clearance_exists)
         )
-        teammate_priority_progress_blocked_by_self = (
-            teammate_charger_progress_gain
-            * teammate_action_features[..., :, 3]
-        ).amax(dim=-1)
         teammate_progress_worst_collision = (
             collision_matrix * legal.squeeze(-1).unsqueeze(-1)
         ).amax(dim=-2)
@@ -636,6 +645,8 @@ class SharedActorCentralCritic(nn.Module):
             - participant_teammate.squeeze(-1)
             + participant_teammate.squeeze(-1)
             * dual_charger_clearance_required
+            * teammate_previous_wait_for_clearance
+            * (1.0 - own_previous_horizontal_departure)
         )
         # A critical charger route is a public reservation derived from S_t.
         # Every supported participant profile observes the same bit and
@@ -664,6 +675,29 @@ class SharedActorCentralCritic(nn.Module):
             * charger_progress_gain,
             min=0.0,
             max=1.0,
+        )
+        teammate_goal_arrival_actions = (
+            (teammate_action_features[..., :, 2] > 0.0).to(local.dtype)
+            * (teammate_action_features[..., :, 0] <= 1e-8).to(local.dtype)
+            * teammate_legal_actions
+        )
+        participant_goal_arrival_collision = (
+            collision_matrix
+            * teammate_goal_arrival_actions.unsqueeze(-2)
+        ).amax(dim=-1)
+        # Critical battery priority is not permission to enter a cell that a
+        # participant can reach as its visible goal in the same
+        # joint step.  Keep the collision term active for that exact action;
+        # after the participant has passed, the same frozen-state test clears
+        # and the charger advance becomes available.
+        public_priority_action_commitment = (
+            public_priority_action_commitment
+            * (
+                1.0
+                - participant_teammate
+                * participant_goal_arrival_collision
+                * (1.0 - participant_handoff_followthrough).unsqueeze(-1)
+            )
         )
         public_participant_action_commitment = (
             participant_teammate * public_priority_action_commitment
@@ -720,6 +754,8 @@ class SharedActorCentralCritic(nn.Module):
             * (1.0 - self_at_charger).unsqueeze(-1)
             * (1.0 - teammate_at_charger).unsqueeze(-1)
             * dual_charger_clearance_required.unsqueeze(-1)
+            * teammate_previous_wait_for_clearance.unsqueeze(-1)
+            * (1.0 - own_previous_horizontal_departure).unsqueeze(-1)
             * charger_clearance_gain
             * (1.0 - selected_collision.squeeze(-1))
             * non_wait_action
@@ -882,6 +918,11 @@ class SharedActorCentralCritic(nn.Module):
             min=0.0,
             max=1.0,
         )
+        self_has_route_goal = torch.clamp(
+            self_has_work_goal + self_has_charge_goal,
+            min=0.0,
+            max=1.0,
+        )
         robust_progress_exit_exists = (
             (1.0 - yielding_collision)
             * torch.clamp(own_action_features[..., :, 2], min=0.0)
@@ -903,10 +944,33 @@ class SharedActorCentralCritic(nn.Module):
         self_has_delivery_goal = local[..., 14]
         robust_wait_safe = 1.0 - collision_matrix[..., -1, :].amax(dim=-1)
         robust_action_safe = 1.0 - collision_matrix.amax(dim=-1)
-        delivery_detour_penalty = (
-            torch.nn.functional.softplus(self.delivery_detour_log_scale)
-            * self_has_delivery_goal.unsqueeze(-1)
-            * robust_wait_safe.unsqueeze(-1)
+        teammate_progress_actions = (
+            (teammate_action_features[..., :, 2] > 0.0).to(local.dtype)
+            * teammate_legal_actions
+        )
+        ai_ai_progress_wait_safe = 1.0 - (
+            collision_matrix[..., -1, :] * teammate_progress_actions
+        ).amax(dim=-1)
+        public_yield_wait_available = (
+            (1.0 - participant_teammate.squeeze(-1))
+            * teammate_has_priority
+            * ai_ai_progress_wait_safe
+        )
+        robust_nonregression_exit_exists = (
+            robust_action_safe
+            * (own_action_features[..., :, 2] >= 0.0).to(local.dtype)
+        ).amax(dim=-1)
+        robust_nonregression_exit_exists = torch.maximum(
+            robust_nonregression_exit_exists,
+            public_yield_wait_available,
+        )
+        mission_detour_penalty = (
+            torch.clamp(
+                torch.nn.functional.softplus(self.delivery_detour_log_scale),
+                min=self.minimum_mission_detour_logit_scale,
+            )
+            * self_has_route_goal.unsqueeze(-1)
+            * robust_nonregression_exit_exists.unsqueeze(-1)
             * torch.clamp(-own_action_features[..., :, 2], min=0.0)
         )
         robust_progress_bonus = (
@@ -953,6 +1017,65 @@ class SharedActorCentralCritic(nn.Module):
             next_manhattan - current_manhattan.unsqueeze(-1),
             min=0.0,
             max=1.0,
+        )
+        horizontal_clearance_action = (
+            action_identity[..., ACTIONS.index("LEFT")]
+            + action_identity[..., ACTIONS.index("RIGHT")]
+        )
+        # A participant waiting beside the single charger is an observed
+        # two-phase handoff request.  From the same S_t, choose the side exit
+        # away from that participant when leaving the occupied station, then
+        # continue away from both the station and participant on the apron.
+        # This removes the UP->RIGHT->LEFT loop that used to arise because all
+        # charger-clearance moves received the same structural score.
+        participant_station_handoff_direction_bonus = (
+            self.minimum_occupied_cell_logit_scale
+            * 2.0
+            * participant_teammate
+            * self_at_charger.unsqueeze(-1)
+            * self_has_charge_goal.unsqueeze(-1)
+            * teammate_has_charge_goal.unsqueeze(-1)
+            * teammate_has_priority.unsqueeze(-1)
+            * teammate_adjacent_to_charger.unsqueeze(-1)
+            * horizontal_clearance_action
+            * separation_gain
+            * robust_action_safe
+            * non_wait_action
+        )
+        participant_approach_clearance_direction_bonus = (
+            self.minimum_occupied_cell_logit_scale
+            * 2.0
+            * participant_teammate
+            * (1.0 - self_at_charger).unsqueeze(-1)
+            * (1.0 - teammate_at_charger).unsqueeze(-1)
+            * self_has_charge_goal.unsqueeze(-1)
+            * teammate_has_charge_goal.unsqueeze(-1)
+            * teammate_has_priority.unsqueeze(-1)
+            * dual_charger_clearance_required.unsqueeze(-1)
+            * teammate_previous_wait.unsqueeze(-1)
+            * (1.0 - own_previous_horizontal_departure).unsqueeze(-1)
+            * charger_clearance_gain
+            * separation_gain
+            * robust_action_safe
+            * non_wait_action
+        )
+        own_goal_blocked_by_teammate = (
+            torch.clamp(own_action_features[..., :, 2], min=0.0)
+            * own_action_features[..., :, 3]
+        ).amax(dim=-1)
+        # If both AIs have already produced an ineffective joint wait while
+        # one robot physically occupies the other's next goal-progress cell,
+        # the blocked robot must take a collision-robust separating step.
+        # The gate uses only the recorded S_t wait streak and geometry; no
+        # current-frame peer action is observed.
+        observed_goal_block_escape_bonus = (
+            self.minimum_occupied_cell_logit_scale
+            * local[..., 11].unsqueeze(-1)
+            * own_goal_blocked_by_teammate.unsqueeze(-1)
+            * ((1.0 - local[..., 22]) * (1.0 - local[..., 23])).unsqueeze(-1)
+            * robust_action_safe
+            * separation_gain
+            * non_wait_action
         )
         move_energy_viable = (
             local[..., 2] > self.move_battery_cost_fraction + 1e-8
@@ -1056,12 +1179,15 @@ class SharedActorCentralCritic(nn.Module):
             - charger_occupant_penalty
             - completed_charge_wait_penalty
             + priority_progress_bonus
-            - delivery_detour_penalty
+            - mission_detour_penalty
             - participant_delivery_detour_penalty
             + robust_progress_bonus
             + participant_robust_progress_bonus
             + participant_standoff_progress_bonus
             + participant_dual_charger_clearance_bonus
+            + participant_station_handoff_direction_bonus
+            + participant_approach_clearance_direction_bonus
+            + observed_goal_block_escape_bonus
             + public_ai_ai_parallel_charger_progress_bonus
             + public_participant_progress_bonus
             + participant_partner_residual

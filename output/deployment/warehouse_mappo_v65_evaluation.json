@@ -1,0 +1,108 @@
+{
+  "model_version": "warehouse_mappo_v65_commitment_aligned_actor",
+  "checkpoint": "warehouse_mappo_v65.pt",
+  "checkpoint_sha256": "833295c06d85d62127ac97d047f25a6ab0cb39ea6087e14bbc6c4d24a768e371",
+  "render_actor": "warehouse_mappo_v65_actor.npz",
+  "render_actor_sha256": "3a8854f3dd522e0e27d5c70c543240e09aa6b5d59bf1a751b90735759705b6bc",
+  "evaluation_status": "development_validation_passed_formal_reevaluation_pending",
+  "protocol": {
+    "execution": "independent simultaneous deterministic actor",
+    "post_policy_action_interventions": 0,
+    "decision_information": "both actors use the same frozen pre-move S_t"
+  },
+  "ai_ai": {
+    "seed_start": 27100004,
+    "episodes": 100,
+    "mean_deliveries": 8.15,
+    "collision_episode_rate": 0.0,
+    "maximum_robot_collision_events": 0,
+    "repeated_collision_episode_rate": 0.0,
+    "shutdown_episode_rate": 0.0,
+    "deadlock_episode_rate": 0.0,
+    "avoidable_wait_rate": 0.0012083333333333334,
+    "avoidable_mission_detour_steps": 0,
+    "avoidable_loaded_delivery_detour_steps": 0,
+    "path_efficiency_actual_over_shortest_safe": 1.0,
+    "task_starvation_episode_rate": 0.01
+  },
+  "multi_partner": {
+    "episodes_per_profile": 50,
+    "profiles": {
+      "coordinated": {
+        "seed_start": 28100004,
+        "mean_deliveries": 7.6,
+        "collision_episode_rate": 0.0,
+        "deadlock_episode_rate": 0.0,
+        "avoidable_mission_detour_steps": 0,
+        "avoidable_loaded_delivery_detour_steps": 0,
+        "path_efficiency_actual_over_shortest_safe": 1.0017897091722594
+      },
+      "goal_directed": {
+        "seed_start": 27300004,
+        "mean_deliveries": 7.6,
+        "collision_episode_rate": 0.0,
+        "deadlock_episode_rate": 0.0,
+        "avoidable_mission_detour_steps": 0,
+        "avoidable_loaded_delivery_detour_steps": 0,
+        "path_efficiency_actual_over_shortest_safe": 1.0
+      },
+      "cautious": {
+        "seed_start": 27400004,
+        "mean_deliveries": 7.8,
+        "collision_episode_rate": 0.0,
+        "deadlock_episode_rate": 0.0,
+        "avoidable_mission_detour_steps": 0,
+        "avoidable_loaded_delivery_detour_steps": 0,
+        "path_efficiency_actual_over_shortest_safe": 1.0
+      },
+      "hesitant": {
+        "seed_start": 27500004,
+        "mean_deliveries": 7.14,
+        "collision_episode_rate": 0.0,
+        "deadlock_episode_rate": 0.0,
+        "avoidable_mission_detour_steps": 0,
+        "avoidable_loaded_delivery_detour_steps": 0,
+        "path_efficiency_actual_over_shortest_safe": 1.000474833808167
+      }
+    }
+  },
+  "closed_loop_scenarios": {
+    "episodes_per_scenario": 100,
+    "head_on_yield_success_rate": 0.91,
+    "empty_delivery_clearance_success_rate": 1.0,
+    "dual_charger_approach_success_rate": 1.0,
+    "outer_exit_charger_approach_success_rate": 1.0,
+    "occupied_charger_handoff_success_rate": 1.0,
+    "maximum_collision_rate": 0.0,
+    "maximum_deadlock_rate": 0.0,
+    "maximum_shutdown_rate": 0.0
+  },
+  "tutorial": {
+    "seed": 40786,
+    "steps": 120,
+    "deliveries": 8,
+    "robot_collision_events": 0,
+    "shutdowns": 0,
+    "avoidable_mission_detour_explanations": 0,
+    "terminal_reason": "horizon"
+  },
+  "release_gates": {
+    "development_validation_passed": true,
+    "strict_formal_evaluation_passed": false,
+    "formal_reevaluation_required_for_research_claims": true,
+    "collision_episode_rate_le_0_01": true,
+    "maximum_collision_events_le_1": true,
+    "repeated_collision_rate_eq_0": true,
+    "shutdown_episode_rate_le_0_01": true,
+    "deadlock_episode_rate_le_0_01": true,
+    "avoidable_wait_rate_le_0_005": true,
+    "avoidable_mission_detours_eq_0": true,
+    "avoidable_loaded_delivery_detours_eq_0": true,
+    "multi_partner_collision_episode_rate_le_0_01": true,
+    "multi_partner_deadlock_episode_rate_le_0_01": true,
+    "multi_partner_avoidable_mission_detours_eq_0": true,
+    "head_on_yield_success_ge_0_90": true,
+    "charger_and_clearance_scenarios_pass": true,
+    "post_policy_action_interventions_eq_0": true
+  }
+}

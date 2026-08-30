@@ -71,7 +71,10 @@ from backend.training.learner_replay import (
     REPLAY_CATEGORIES,
     fit_actor_supervised,
 )
-from backend.training.learner_dataset import best_unilateral_mission_action
+from backend.training.learner_dataset import (
+    avoidable_mission_detour_agents,
+    best_unilateral_mission_action,
+)
 
 
 def test_partner_risk_all_scope_updates_participant_forecast_parameters() -> None:
@@ -491,6 +494,47 @@ def test_unilateral_mission_correction_never_enters_peer_frozen_cell() -> None:
         agent_id="robot_1",
     )
     assert correction == "WAIT"
+
+
+def test_pickup_commitment_detour_receives_offline_left_correction() -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment.reset(seed=40_786)
+    state = environment.get_state()
+    state.frame = 62
+    old_task, committed_task = sorted(
+        state.tasks,
+        key=lambda task: task.task_id,
+    )
+    old_task.pickup_position = (3, 0)
+    old_task.delivery_position = (1, 4)
+    old_task.created_frame = 49
+    committed_task.pickup_position = (5, 0)
+    committed_task.delivery_position = (3, 3)
+    committed_task.created_frame = 53
+    charging = state.by_id("robot_1")
+    charging.position = environment.layout.charger_position
+    charging.battery = 10.0
+    charging.route_commitment_task_id = None
+    committed = state.by_id("robot_2")
+    committed.position = (5, 1)
+    committed.battery = 45.0
+    committed.route_commitment_task_id = committed_task.task_id
+    environment.set_state(state)
+    state = environment.get_state()
+    actions = {"robot_1": "WAIT", "robot_2": "RIGHT"}
+    targets = environment._resolve_motion(state, actions)[0]
+
+    assert avoidable_mission_detour_agents(
+        environment,
+        state,
+        actions,
+        targets,
+    ) == ("robot_2",)
+    assert best_unilateral_mission_action(
+        environment,
+        state,
+        agent_id="robot_2",
+    ) == "LEFT"
 
 
 def test_learner_state_replay_balances_rare_collision_rows() -> None:

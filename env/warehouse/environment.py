@@ -577,19 +577,25 @@ class WarehouseMultiAgentEnv:
             )
             if prioritize_old_tasks:
                 score: tuple[Any, ...] = (
+                    # A valid Actor-visible route commitment is episode
+                    # memory. It must outrank assignment count and task age;
+                    # otherwise reward and offline labels silently retarget a
+                    # robot while its observation still exposes the committed
+                    # pickup. Task coverage and age remain authoritative only
+                    # among assignments preserving the same commitments.
+                    -preserved_neural_commitments,
                     -assigned_count,
                     -overdue_count,
                     -sum(ages),
                     projected_starvation,
-                    -preserved_neural_commitments,
                     -recent_departure_commitments,
                     route_cost,
                     stable_ids,
                 )
             else:
                 score = (
-                    -assigned_count,
                     -preserved_neural_commitments,
+                    -assigned_count,
                     route_cost,
                     stable_ids,
                 )

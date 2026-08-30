@@ -1361,6 +1361,93 @@ def test_frozen_commitment_prevents_assignment_switch_progress() -> None:
     assert info["counterfactual_regret_units"]["robot_1"] > 0.0
 
 
+def test_old_task_priority_cannot_retarget_valid_pickup_commitment() -> None:
+    """Reward and teacher must use the pickup visible to the Actor."""
+
+    environment = WarehouseMultiAgentEnv(
+        WarehouseConfig(horizon=120, participant_detour_scoring=False)
+    )
+    environment.reset(seed=40_786)
+    state = environment.get_state()
+    state.frame = 62
+    old_task, committed_task = sorted(
+        state.tasks,
+        key=lambda task: task.task_id,
+    )
+    old_task.pickup_position = (3, 0)
+    old_task.delivery_position = (1, 4)
+    old_task.created_frame = 49
+    committed_task.pickup_position = (5, 0)
+    committed_task.delivery_position = (3, 3)
+    committed_task.created_frame = 53
+
+    charging = state.by_id("robot_1")
+    charging.position = environment.layout.charger_position
+    charging.battery = 10.0
+    charging.carrying_task_id = None
+    charging.route_commitment_task_id = None
+    committed = state.by_id("robot_2")
+    committed.position = (5, 1)
+    committed.battery = 45.0
+    committed.carrying_task_id = None
+    committed.route_commitment_task_id = committed_task.task_id
+    environment.set_state(state)
+
+    frozen = environment._frozen_task_assignments(
+        environment.get_state(),
+        prioritize_old_tasks=True,
+    )
+    assert frozen["robot_2"].task_id == committed_task.task_id
+    assert stable_coordination_actions(environment)["robot_2"] == "LEFT"
+
+    _, _, _, _, info = environment.step(
+        {"robot_1": "WAIT", "robot_2": "RIGHT"}
+    )
+
+    assert info["frozen_missions"]["robot_2"]["task_id"] == (
+        committed_task.task_id
+    )
+    assert info["individual_progress_rewards"]["robot_2"] < 0.0
+    assert info["counterfactual_regret_units"]["robot_2"] > 0.0
+    assert "robot_2" in info["avoidable_detour_agents"]
+
+
+def test_valid_commitment_outranks_matching_an_extra_robot() -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment.reset(seed=26_210_004)
+    state = environment.get_state()
+    state.frame = 46
+    committed_task, other_task = sorted(
+        state.tasks,
+        key=lambda task: task.task_id,
+    )
+    committed_task.pickup_position = (4, 8)
+    committed_task.delivery_position = (5, 4)
+    committed_task.created_frame = 32
+    other_task.pickup_position = (2, 8)
+    other_task.delivery_position = (5, 3)
+    other_task.created_frame = 39
+    committed = state.by_id("robot_1")
+    committed.position = (4, 5)
+    committed.battery = 44.0
+    committed.carrying_task_id = None
+    committed.route_commitment_task_id = committed_task.task_id
+    teammate = state.by_id("robot_2")
+    teammate.position = environment.layout.charger_position
+    teammate.battery = 44.0
+    teammate.carrying_task_id = None
+    teammate.route_commitment_task_id = None
+    environment.set_state(state)
+
+    assignments = environment._frozen_task_assignments(
+        environment.get_state(),
+        prioritize_old_tasks=True,
+    )
+
+    assert assignments["robot_1"].task_id == committed_task.task_id
+    assert stable_coordination_actions(environment)["robot_1"] == "RIGHT"
+
+
 def test_coordination_round_trip_cannot_create_reward() -> None:
     environment = WarehouseMultiAgentEnv(
         WarehouseConfig(horizon=20, participant_detour_scoring=False)

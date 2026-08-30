@@ -27,18 +27,18 @@ class WarehouseContractVersions:
 
 
 CURRENT_VERSIONS = WarehouseContractVersions(
-    environment="warehouse_collaborative_delivery_v40_compact8_causal_clearance",
+    environment="warehouse_collaborative_delivery_v41_commitment_aligned",
     observation="collaborative_observation_v37_causal_queue_commitment",
-    reward="warehouse_safe_mission_reward_v27_causal_clearance_progress",
-    model="warehouse_mappo_v64_compact8_forecast_isolated_actor",
-    training_checkpoint="warehouse_mappo_training_v56_forecast_isolated",
+    reward="warehouse_safe_mission_reward_v28_committed_mission_regret",
+    model="warehouse_mappo_v65_commitment_aligned_actor",
+    training_checkpoint="warehouse_mappo_training_v57_commitment_aligned",
     rcpd_program="warehouse_rcpd_v58_compact8_posthoc",
     seed_library="warehouse_parallel_seed_pairs_v59_compact8",
     reference_trajectory="warehouse_reference_trajectory_v58_compact8",
     study_log="human-study-log.v28",
     action_execution="batched_independent_simultaneous_actor_v13",
     runtime_controller="mappo_batched_actor_atomic_joint_execution",
-    artifact_namespace="simultaneous_compact8_v57_forecast_isolated",
+    artifact_namespace="simultaneous_compact8_v58_commitment_aligned",
 )
 
 
@@ -92,6 +92,7 @@ FORMAL_ACCEPTANCE_CHECKS = frozenset(
         "path_efficiency_le_1_10",
         "seed_42027_detour_regressions_pass",
         "avoidable_loaded_delivery_detours_eq_0",
+        "avoidable_mission_detours_eq_0",
         "ai_ai_post_policy_action_interventions_eq_0",
         "noisy_post_policy_action_interventions_eq_0",
         "posthoc_rcpd_artifact_contract_valid",

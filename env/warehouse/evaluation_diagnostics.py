@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping
 
-from .coordination import is_necessary_urgent_charger_clearance
+from . import credit_assignment as credit
+from .coordination import (
+    is_necessary_urgent_charger_clearance,
+    stable_coordination_actions,
+)
 from .coordination_priority import single_lane_egress_agent_id
 from .navigation import MOVE_DELTAS, shortest_path_distance
 from .observations import _actor_visible_goal
@@ -188,6 +192,93 @@ def avoidable_loaded_delivery_detour_agents(
             state,
             agent,
             candidate_action=actions[agent.agent_id],
+        ):
+            continue
+        held_actions = {**actions, agent.agent_id: "WAIT"}
+        if (
+            not environment._resolve_motion(state, held_actions)[3]
+            and wait_is_robustly_safe(
+                environment,
+                state,
+                actions,
+                agent.agent_id,
+            )
+        ):
+            avoidable.append(agent.agent_id)
+    return tuple(avoidable)
+
+
+def avoidable_mission_detour_agents(
+    environment: Any,
+    state: Any,
+    actions: Mapping[str, str],
+    *,
+    excluded_agent_ids: Iterable[str] = (),
+) -> tuple[str, ...]:
+    """Return avoidable regressions on frozen pickup/delivery/charge routes."""
+
+    excluded = set(excluded_agent_ids)
+    final_targets = environment._resolve_motion(state, actions)[0]
+    missions = credit.frozen_training_missions(environment, state)
+    coordinated = stable_coordination_actions(environment)
+    avoidable: list[str] = []
+    for agent in state.agents:
+        mission = missions.get(agent.agent_id)
+        action = str(actions.get(agent.agent_id, "WAIT"))
+        if (
+            agent.agent_id in excluded
+            or mission is None
+            or action not in MOVE_DELTAS
+        ):
+            continue
+        if (
+            mission.goal_kind == "pickup"
+            and (
+                mission.task is None
+                or agent.route_commitment_task_id != mission.task.task_id
+            )
+        ):
+            # Before the Actor reveals a pickup commitment, either available
+            # task is a legitimate neural choice. A training assignment is
+            # not yet a participant-visible route whose deviation can be
+            # called a detour.
+            continue
+        current_distance = credit.mission_goal_distance(
+            environment,
+            state,
+            agent,
+            mission,
+            agent.position,
+        )
+        final_distance = credit.mission_goal_distance(
+            environment,
+            state,
+            agent,
+            mission,
+            final_targets[agent.agent_id],
+        )
+        if final_distance <= current_distance:
+            continue
+        if coordinated.get(agent.agent_id) == action:
+            continue
+        if is_necessary_urgent_charger_clearance(environment, state, agent):
+            continue
+        if _necessary_preemptive_charger_clearance(
+            environment,
+            state,
+            actions,
+            agent,
+        ):
+            continue
+        if _necessary_single_lane_clearance(environment, state, actions, agent):
+            continue
+        if necessary_teammate_route_clearance(environment, state, agent):
+            continue
+        if necessary_participant_standoff_clearance(
+            environment,
+            state,
+            agent,
+            candidate_action=action,
         ):
             continue
         held_actions = {**actions, agent.agent_id: "WAIT"}

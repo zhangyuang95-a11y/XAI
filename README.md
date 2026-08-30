@@ -45,9 +45,9 @@ reward_i = user_score_delta / 100
 
 当前部署版本：
 
-- 模型：`warehouse_mappo_v64_compact8_forecast_isolated_actor`
-- 环境：`warehouse_collaborative_delivery_v40_compact8_causal_clearance`
-- Reward：`warehouse_safe_mission_reward_v27_causal_clearance_progress`
+- 模型：`warehouse_mappo_v65_commitment_aligned_actor`
+- 环境：`warehouse_collaborative_delivery_v41_commitment_aligned`
+- Reward：`warehouse_safe_mission_reward_v28_committed_mission_regret`
 - 观测：`collaborative_observation_v37_causal_queue_commitment`
 - 训练 checkpoint：`warehouse_mappo_training_v56_forecast_isolated`
 - RCPD 合同：`warehouse_rcpd_v58_compact8_posthoc`
@@ -58,9 +58,9 @@ reward_i = user_score_delta / 100
 - 运行时控制器：`mappo_batched_actor_atomic_joint_execution`
 - 日志：`human-study-log.v28`
 
-PyTorch checkpoint 位于 `output/deployment/warehouse_mappo_v64.pt`。Render 使用从该 checkpoint 精确导出的 `output/deployment/warehouse_mappo_v64_actor.npz`，以 NumPy 执行同一神经网络；测试逐 logit 比对两种运行时，允许误差不超过 `1e-4`。联合风险训练只使用同一决策前状态上的两个独立分布，不会把任一机器人本帧动作输入另一机器人。最终正式评估包含 1,000 局 AI–AI 和 1,000 局多类队友：AI–AI 平均完成 7.96 次配送，碰撞率和断电率均为 0，死锁率为 0.5%，可避免等待率为 0.362%，载货绕路为 0，运行时动作干预为 0；多队友条件的最高碰撞率为 0.4%，最高死锁率和断电率均为 0。两个额外的 100 局发布种子区间同样为零碰撞、零断电、零载货绕路、零运行时干预。完整发布指标见 `output/deployment/warehouse_mappo_v64_evaluation.json`。
+PyTorch checkpoint 位于 `output/deployment/warehouse_mappo_v65.pt`。Render 使用从该 checkpoint 精确导出的 `output/deployment/warehouse_mappo_v65_actor.npz`，以 NumPy 执行同一神经网络；测试逐 logit 比对两种运行时，允许误差不超过 `1e-4`。联合风险训练只使用同一决策前状态上的两个独立分布，不会把任一机器人本帧动作输入另一机器人。v65 将奖励、离线教师和 Actor 可见的取货承诺统一到同一冻结任务，并将绕路约束扩展至取货、交付和充电路线。独立开发验证覆盖 100 局 AI–AI、每类 50 局的四类参与者代理以及每类 100 局的五组闭环冲突场景，结果为零碰撞、零死锁和零可避免任务绕路；新的正式研究评估仍需另行运行。完整指标见 `output/deployment/warehouse_mappo_v65_evaluation.json`。
 
-共享 Actor 内部包含五类神经任务意图（两个任务槽、交付、充电、等待）。它只是网络隐变量，不绑定共享任务，也不在运行时屏蔽、替换或修正 Actor 动作。离线关键状态覆盖充电离站、任务连续未认领、两机器人同目标、狭窄通道避让和碰撞后恢复；正式 rollout、参考轨迹和 UI 中的 AI 动作全部直接来自共享 MAPPO Actor。
+共享 Actor 内部包含五类神经任务意图（两个任务槽、交付、充电、等待）。它只是网络隐变量，不绑定共享任务，也不在运行时屏蔽、替换或修正 Actor 动作。离线关键状态覆盖充电离站、任务连续未认领、两机器人同目标、狭窄通道避让和碰撞后恢复；评估 rollout、参考轨迹和 UI 中的 AI 动作全部直接来自共享 MAPPO Actor。
 
 成功移动固定消耗 2 点电量；撞墙、货架阻塞、机器人冲突和普通等待不耗电；在充电站等待仍恢复 10 点。错位地图的正式配置使用四步安全余量，避免两台低电量机器人排队时以 0 电量到站。新增的可避免等待和任务成本回退项仅用于训练，参与者最终得分不包含任何训练塑形。
 

@@ -307,6 +307,15 @@ class NumpyWarehousePolicy:
             0.0,
             1.0,
         )
+        teammate_previous_wait_for_clearance = local[
+            ...,
+            self.metadata.teammate_previous_action_start
+            + ACTIONS.index("WAIT"),
+        ]
+        own_previous_horizontal_departure = (
+            local[..., 24 + ACTIONS.index("LEFT")]
+            + local[..., 24 + ACTIONS.index("RIGHT")]
+        )
         self_adjacent_to_charger = np.max(
             own_features[..., :, 5], axis=-1
         ) * (1.0 - self_at_charger)
@@ -413,10 +422,6 @@ class NumpyWarehousePolicy:
             * self_has_priority
             * (1.0 - teammate_safe_charger_clearance_exists)
         )
-        teammate_priority_progress_blocked_by_self = np.max(
-            teammate_charger_progress_gain * teammate_features[..., :, 3],
-            axis=-1,
-        )
         teammate_progress_worst_collision = np.max(
             collision_matrix * legal[..., 0, None],
             axis=-2,
@@ -434,6 +439,8 @@ class NumpyWarehousePolicy:
             1.0
             - participant_flag[..., 0]
             + participant_flag[..., 0] * dual_charger_clearance_required
+            * teammate_previous_wait_for_clearance
+            * (1.0 - own_previous_horizontal_departure)
         )
         public_priority_action_commitment = np.clip(
             public_dual_charger_priority[..., None]
@@ -456,6 +463,25 @@ class NumpyWarehousePolicy:
             * charger_progress_gain,
             0.0,
             1.0,
+        )
+        teammate_goal_arrival_actions = (
+            (teammate_features[..., :, 2] > 0.0).astype(np.float64)
+            * (teammate_features[..., :, 0] <= 1e-8).astype(np.float64)
+            * teammate_legal_actions
+        )
+        participant_goal_arrival_collision = np.max(
+            collision_matrix
+            * teammate_goal_arrival_actions[..., None, :],
+            axis=-1,
+        )
+        public_priority_action_commitment = (
+            public_priority_action_commitment
+            * (
+                1.0
+                - participant_flag
+                * participant_goal_arrival_collision
+                * (1.0 - participant_handoff_followthrough)[..., None]
+            )
         )
         public_participant_action_commitment = (
             participant_flag * public_priority_action_commitment
@@ -513,6 +539,8 @@ class NumpyWarehousePolicy:
             * (1.0 - self_at_charger)[..., None]
             * (1.0 - teammate_at_charger)[..., None]
             * dual_charger_clearance_required[..., None]
+            * teammate_previous_wait_for_clearance[..., None]
+            * (1.0 - own_previous_horizontal_departure)[..., None]
             * charger_clearance_gain
             * (1.0 - selected_collision[..., 0])
             * non_wait_action
@@ -659,6 +687,11 @@ class NumpyWarehousePolicy:
             0.0,
             1.0,
         )
+        self_has_route_goal = np.clip(
+            self_has_work_goal + self_has_charge_goal,
+            0.0,
+            1.0,
+        )
         robust_progress_exit_exists = np.max(
             (1.0 - yielding_collision)
             * np.maximum(own_features[..., :, 2], 0.0)
@@ -684,13 +717,36 @@ class NumpyWarehousePolicy:
         detour_scale = np.logaddexp(
             0.0, self.weights["delivery_detour_log_scale"]
         )
+        detour_scale = np.maximum(detour_scale, 50.0)
         self_has_delivery_goal = local[..., 14]
         robust_wait_safe = 1.0 - np.max(collision_matrix[..., -1, :], axis=-1)
         robust_action_safe = 1.0 - np.max(collision_matrix, axis=-1)
-        delivery_detour_penalty = (
+        teammate_progress_actions = (
+            (teammate_features[..., :, 2] > 0.0).astype(np.float64)
+            * teammate_legal_actions
+        )
+        ai_ai_progress_wait_safe = 1.0 - np.max(
+            collision_matrix[..., -1, :] * teammate_progress_actions,
+            axis=-1,
+        )
+        public_yield_wait_available = (
+            (1.0 - participant_flag[..., 0])
+            * teammate_has_priority
+            * ai_ai_progress_wait_safe
+        )
+        robust_nonregression_exit_exists = np.max(
+            robust_action_safe
+            * (own_features[..., :, 2] >= 0.0).astype(np.float64),
+            axis=-1,
+        )
+        robust_nonregression_exit_exists = np.maximum(
+            robust_nonregression_exit_exists,
+            public_yield_wait_available,
+        )
+        mission_detour_penalty = (
             detour_scale
-            * self_has_delivery_goal[..., None]
-            * robust_wait_safe[..., None]
+            * self_has_route_goal[..., None]
+            * robust_nonregression_exit_exists[..., None]
             * np.maximum(-own_features[..., :, 2], 0.0)
         )
         robust_progress_scale = np.logaddexp(
@@ -735,6 +791,53 @@ class NumpyWarehousePolicy:
             next_manhattan - current_manhattan[..., None],
             0.0,
             1.0,
+        )
+        horizontal_clearance_action = (
+            action_identity[..., ACTIONS.index("LEFT")]
+            + action_identity[..., ACTIONS.index("RIGHT")]
+        )
+        participant_station_handoff_direction_bonus = (
+            100.0
+            * participant_flag
+            * self_at_charger[..., None]
+            * self_has_charge_goal[..., None]
+            * teammate_has_charge_goal[..., None]
+            * teammate_has_priority[..., None]
+            * teammate_adjacent_to_charger[..., None]
+            * horizontal_clearance_action
+            * separation_gain
+            * robust_action_safe
+            * non_wait_action
+        )
+        participant_approach_clearance_direction_bonus = (
+            100.0
+            * participant_flag
+            * (1.0 - self_at_charger)[..., None]
+            * (1.0 - teammate_at_charger)[..., None]
+            * self_has_charge_goal[..., None]
+            * teammate_has_charge_goal[..., None]
+            * teammate_has_priority[..., None]
+            * dual_charger_clearance_required[..., None]
+            * teammate_previous_wait[..., None]
+            * (1.0 - own_previous_horizontal_departure)[..., None]
+            * charger_clearance_gain
+            * separation_gain
+            * robust_action_safe
+            * non_wait_action
+        )
+        own_goal_blocked_by_teammate = np.max(
+            np.maximum(own_features[..., :, 2], 0.0)
+            * own_features[..., :, 3],
+            axis=-1,
+        )
+        observed_goal_block_escape_bonus = (
+            50.0
+            * local[..., 11, None]
+            * own_goal_blocked_by_teammate[..., None]
+            * ((1.0 - local[..., 22]) * (1.0 - local[..., 23]))[..., None]
+            * robust_action_safe
+            * separation_gain
+            * non_wait_action
         )
         move_energy_viable = (
             local[..., 2]
@@ -864,12 +967,15 @@ class NumpyWarehousePolicy:
             - charger_occupant_penalty
             - completed_charge_wait_penalty
             + priority_progress_bonus
-            - delivery_detour_penalty
+            - mission_detour_penalty
             - participant_delivery_detour_penalty
             + robust_progress_bonus
             + participant_robust_progress_bonus
             + participant_standoff_progress_bonus
             + participant_dual_charger_clearance_bonus
+            + participant_station_handoff_direction_bonus
+            + participant_approach_clearance_direction_bonus
+            + observed_goal_block_escape_bonus
             + public_ai_ai_parallel_charger_progress_bonus
             + public_participant_progress_bonus
             + participant_partner_residual

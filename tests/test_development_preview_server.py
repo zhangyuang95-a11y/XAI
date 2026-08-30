@@ -250,10 +250,10 @@ def test_action_explanations_use_direct_reasons_on_reported_frames() -> None:
     cases = {
         (31, "robot_2"): ("让出通道", "机器人1电量为40%"),
         (56, "robot_2"): ("离开充电站", "59%和26%"),
-        (60, "robot_2"): ("策略随机采样", "非必要绕路"),
-        (61, "robot_2"): ("任务2的A点取货", "3格缩短到2格"),
-        (84, "robot_1"): ("让机器人2先通过", "下一格(3, 4)"),
-        (87, "robot_2"): ("机器人1优先前往充电站", "18%"),
+        (60, "robot_2"): ("任务2的A点取货", "2格缩短到1格"),
+        (61, "robot_2"): ("任务2的A点取货", "1格缩短到0格"),
+        (84, "robot_1"): ("任务1的B点交付", "1格缩短到0格"),
+        (87, "robot_2"): ("任务1的B点交付", "6格缩短到5格"),
     }
 
     for (frame, agent_id), expected_fragments in cases.items():
@@ -324,19 +324,25 @@ def test_charger_departure_explanations_state_the_operational_reason() -> None:
             ), (frame, text)
 
 
-def test_nonprogress_task_moves_are_identified_as_policy_detours() -> None:
+def test_tutorial_task_moves_have_direct_progress_reasons() -> None:
     state = DevelopmentPreviewState()
 
-    for frame in (60, 63, 64):
+    cases = {
+        60: "任务2的A点取货",
+        61: "任务2的A点取货",
+        63: "任务2的B点交付",
+        64: "任务2的B点交付",
+    }
+    for frame, mission in cases.items():
         text = state._grounded_development_explanation(
             index=frame,
             target_agent="robot_2",
             focus="action",
             language="zh-CN",
         )
-        assert "任务2的A点取货" in text
-        assert "非必要绕路" in text
-        assert "不是任务或安全要求" in text
+        assert mission in text
+        assert "缩短到" in text
+        assert "非必要绕路" not in text
         assert "冻结状态无法支持" not in text
 
 

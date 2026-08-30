@@ -34,6 +34,7 @@ EVALUATION_FIELDS = (
     "mean_charger_use_steps",
     "path_efficiency_actual_over_shortest_safe",
     "mean_post_policy_action_interventions",
+    "avoidable_mission_detour_steps",
     "charger_departure_return_cycle_episode_rate",
     "task_starvation_episode_rate",
     "avoidable_loaded_delivery_detour_steps",
@@ -159,6 +160,10 @@ def _release_gate(seed_ranges: dict[str, dict[str, float]]) -> dict[str, bool]:
         ),
         "avoidable_loaded_delivery_detours_eq_0": all(
             item["avoidable_loaded_delivery_detour_steps"] == 0.0
+            for item in values
+        ),
+        "avoidable_mission_detours_eq_0": all(
+            item["avoidable_mission_detour_steps"] == 0.0
             for item in values
         ),
         "post_policy_action_interventions_eq_0": all(

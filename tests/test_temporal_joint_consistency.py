@@ -144,6 +144,38 @@ def test_immediate_reverse_without_lifecycle_event_is_audited() -> None:
     assert info["temporal_consistency_penalty_rewards"]["robot_1"] < 0.0
 
 
+def test_energy_infeasible_pickup_is_rejected_before_first_task_step() -> None:
+    """Do not take an A-directed step and discover the charge need later."""
+
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment.reset(seed=31_006)
+    state = environment.get_state()
+    charging = state.by_id("robot_1")
+    teammate = state.by_id("robot_2")
+    pickup_task, teammate_task = state.tasks
+    charging.position = (5, 4)
+    charging.battery = 10.0
+    charging.route_commitment_task_id = pickup_task.task_id
+    pickup_task.pickup_position = (3, 4)
+    pickup_task.delivery_position = (3, 0)
+    teammate.position = (1, 0)
+    teammate_task.status = "carried"
+    teammate_task.carrier_agent_id = teammate.agent_id
+    teammate_task.delivery_position = (2, 8)
+    teammate.carrying_task_id = teammate_task.task_id
+    environment.set_state(state)
+
+    before = environment.get_state().by_id("robot_1")
+    assert before.goal_type == "GO_TO_CHARGER"
+    assert before.navigation_goal_kind == "charge"
+    assert _only_allowed_action(environment.observations()["robot_1"]) == "DOWN"
+
+    environment.step({"robot_1": "DOWN", "robot_2": "WAIT"})
+    after = environment.get_state().by_id("robot_1")
+    assert after.goal_type == "GO_TO_CHARGER"
+    assert _only_allowed_action(environment.observations()["robot_1"]) == "DOWN"
+
+
 def test_persistent_pickup_goals_are_distinct_and_observable() -> None:
     environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
     observations, _ = environment.reset(seed=31_004)

@@ -12,7 +12,10 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from .domain import WarehouseConfig, WarehouseState
-from .energy_management import charger_departure_progress
+from .energy_management import (
+    charger_departure_progress,
+    charger_route_is_critical,
+)
 from .layouts import get_map_layout
 from .navigation import MOVE_DELTAS, shortest_path_distance
 
@@ -279,16 +282,12 @@ def coordination_priority(
     critical_charging = tuple(
         agent
         for agent in charging
-        if (
-            agent.battery
-            - shortest_path_distance(
-                agent.position,
-                layout.charger_position,
-                config.map_layout_id,
-            )
-            * config.move_battery_cost
+        if charger_route_is_critical(
+            config,
+            position=agent.position,
+            battery=agent.battery,
+            charger_position=layout.charger_position,
         )
-        <= config.battery_safety_margin * config.move_battery_cost
     )
     charger_occupant = next(
         (
@@ -490,7 +489,13 @@ def coordination_priority(
         candidates = charging
         selection_mode = "charger_route"
     else:
-        candidates = active
+        active_missions = tuple(
+            agent
+            for agent in active
+            if goal_kind(agent.agent_id) != "wait"
+            and goal(agent.agent_id) != agent.position
+        )
+        candidates = active_missions or active
         selection_mode = "mission"
 
     def urgent_charge(agent_id: str) -> bool:
@@ -500,13 +505,12 @@ def coordination_priority(
         ):
             return False
         agent = state.by_id(agent_id)
-        distance = shortest_path_distance(
-            agent.position,
-            layout.charger_position,
-            config.map_layout_id,
+        return charger_route_is_critical(
+            config,
+            position=agent.position,
+            battery=agent.battery,
+            charger_position=layout.charger_position,
         )
-        slack = agent.battery - distance * config.move_battery_cost
-        return bool(slack <= config.charge_per_wait)
 
     def recent_unproductive_departure(agent_id: str) -> bool:
         agent = state.by_id(agent_id)

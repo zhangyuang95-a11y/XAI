@@ -371,7 +371,7 @@ def test_explanation_evidence_binds_robot_two_live_task_and_frame() -> None:
 
 
 def test_program_version_constant_is_new_shared_contract() -> None:
-    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v58_compact8_posthoc"
+    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v59_decision_trace"
 
 
 def test_removed_runtime_controller_predicate_has_no_special_verbalizer() -> None:

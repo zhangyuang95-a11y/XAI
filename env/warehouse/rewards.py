@@ -37,6 +37,9 @@ class RewardConfig:
     loaded_detour_cost: float = 0.04
     charger_return_cycle_cost: float = 0.08
     starving_task_cost: float = 0.02
+    unexplained_reversal_cost: float = 0.08
+    short_cycle_cost: float = 0.08
+    invalid_goal_switch_cost: float = 0.10
     # Individual frozen-goal progress and regret replace the old duplicated
     # global regression penalty.
     mission_regression_scale: float = 0.0
@@ -69,6 +72,12 @@ class RewardConfig:
             raise ValueError("charger_return_cycle_cost cannot be negative.")
         if self.starving_task_cost < 0:
             raise ValueError("starving_task_cost cannot be negative.")
+        if self.unexplained_reversal_cost < 0:
+            raise ValueError("unexplained_reversal_cost cannot be negative.")
+        if self.short_cycle_cost < 0:
+            raise ValueError("short_cycle_cost cannot be negative.")
+        if self.invalid_goal_switch_cost < 0:
+            raise ValueError("invalid_goal_switch_cost cannot be negative.")
         if self.version != REWARD_VERSION:
             raise ValueError(
                 f"Unsupported reward version {self.version!r}; "

@@ -247,25 +247,35 @@ def test_action_explanation_states_recorded_goal_progress_and_outcome() -> None:
 
 def test_action_explanations_use_direct_reasons_on_reported_frames() -> None:
     state = DevelopmentPreviewState()
-    cases = {
-        (31, "robot_2"): ("让出通道", "机器人1电量为40%"),
-        (56, "robot_2"): ("离开充电站", "59%和26%"),
-        (60, "robot_2"): ("任务2的A点取货", "2格缩短到1格"),
-        (61, "robot_2"): ("任务2的A点取货", "1格缩短到0格"),
-        (84, "robot_1"): ("任务1的B点交付", "1格缩短到0格"),
-        (87, "robot_2"): ("任务1的B点交付", "6格缩短到5格"),
+    expected_by_reason = {
+        "CLEAR_TEAMMATE_ROUTE": ("是为了", "清空"),
+        "WAIT_FOR_OCCUPIED_ROUTE_CLEARANCE": ("等待", "被机器人"),
+        "PRIORITY_ROUTE_PROGRESS": ("联合通行计划", "保持等待"),
+        "PICKUP_ROUTE_PROGRESS": ("A点取货", "缩短到"),
+        "DELIVERY_ROUTE_PROGRESS": ("送到B点", "缩短到"),
+        "CHARGER_ROUTE_PROGRESS": ("前往充电站", "电量不足"),
     }
 
-    for (frame, agent_id), expected_fragments in cases.items():
-        text = state._grounded_development_explanation(
-            index=frame,
-            target_agent=agent_id,
-            focus="action",
-            language="zh-CN",
-        )
-        assert all(fragment in text for fragment in expected_fragments)
-        assert "当前目标是等待" not in text
-        assert text.count("。") <= 2
+    found: set[str] = set()
+    for frame, record in enumerate(state.tutorial_frames[1:], start=1):
+        trace = record.info["decision_trace"]
+        for agent_id, decision in trace["agents"].items():
+            reason = decision["primary_reason_code"]
+            if reason not in expected_by_reason or reason in found:
+                continue
+            expected_fragments = expected_by_reason[reason]
+            found.add(reason)
+            text = state._grounded_development_explanation(
+                index=frame,
+                target_agent=agent_id,
+                focus="action",
+                language="zh-CN",
+            )
+            assert all(fragment in text for fragment in expected_fragments)
+            assert "当前目标是等待" not in text
+            assert text.count("。") <= 2
+
+    assert found == set(expected_by_reason)
 
 
 def test_all_tutorial_action_explanations_are_short_and_reason_bearing() -> None:
@@ -279,6 +289,9 @@ def test_all_tutorial_action_explanations_are_short_and_reason_bearing() -> None
         "策略",
         "冻结状态",
         "因为决策前",
+        "因为",
+        "没有推进",
+        "没有可验证",
     )
 
     for frame in range(1, len(state.tutorial_frames)):
@@ -326,24 +339,24 @@ def test_charger_departure_explanations_state_the_operational_reason() -> None:
 
 def test_tutorial_task_moves_have_direct_progress_reasons() -> None:
     state = DevelopmentPreviewState()
-
-    cases = {
-        60: "任务2的A点取货",
-        61: "任务2的A点取货",
-        63: "任务2的B点交付",
-        64: "任务2的B点交付",
-    }
-    for frame, mission in cases.items():
-        text = state._grounded_development_explanation(
-            index=frame,
-            target_agent="robot_2",
-            focus="action",
-            language="zh-CN",
-        )
-        assert mission in text
-        assert "缩短到" in text
-        assert "非必要绕路" not in text
-        assert "冻结状态无法支持" not in text
+    seen: set[str] = set()
+    for frame, record in enumerate(state.tutorial_frames[1:], start=1):
+        for agent_id, decision in record.info["decision_trace"]["agents"].items():
+            reason = decision["primary_reason_code"]
+            if reason not in {"PICKUP_ROUTE_PROGRESS", "DELIVERY_ROUTE_PROGRESS"}:
+                continue
+            seen.add(reason)
+            text = state._grounded_development_explanation(
+                index=frame,
+                target_agent=agent_id,
+                focus="action",
+                language="zh-CN",
+            )
+            assert ("A点取货" if reason == "PICKUP_ROUTE_PROGRESS" else "送到B点") in text
+            assert "缩短到" in text
+            assert "非必要绕路" not in text
+            assert "冻结状态无法支持" not in text
+    assert seen == {"PICKUP_ROUTE_PROGRESS", "DELIVERY_ROUTE_PROGRESS"}
 
 
 def test_action_explanation_prioritizes_clearing_charger_for_teammate() -> None:
@@ -358,18 +371,22 @@ def test_action_explanation_prioritizes_clearing_charger_for_teammate() -> None:
     scenario.by_id("robot_2").navigation_goal_kind = "charge"
     scenario.by_id("robot_2").navigation_goal_position = charger
     environment.set_state(scenario)
+    plan = environment.get_state().active_coordination_plan
+    assert plan is not None
     state = _scenario_preview(
         environment,
-        {"robot_1": "UP", "robot_2": "LEFT"},
+        {
+            str(plan["waiting_agent_id"]): "WAIT",
+            str(plan["moving_agent_id"]): str(plan["moving_action"]),
+        },
     )
     selected = 1
 
-    assert any(
-        fact.predicate == "collaboration_context"
-        and fact.value.get("charger_clearance")
-        for fact in state._explanation_snapshot(selected)[0].evidence_facts(
-            state._explanation_snapshot(selected)[1], "robot_1", None
-        )
+    trace = state.tutorial_frames[selected].info["decision_trace"]
+    decision = trace["agents"][str(plan["moving_agent_id"])]
+    assert decision["primary_reason_code"] == "CLEAR_TEAMMATE_ROUTE"
+    assert decision["joint_coordination_plan"]["reason_code"].startswith(
+        "critical_charger"
     )
 
     text = state._grounded_development_explanation(
@@ -379,10 +396,11 @@ def test_action_explanation_prioritizes_clearing_charger_for_teammate() -> None:
         language="zh-CN",
     )
 
-    assert "是为了让出充电站" in text
+    assert "离开充电站" in text
+    assert "是为了" in text
     assert "低电量" in text
-    assert "机器人2进入" in text
-    assert "机器人2仅有10%电量" in text
+    assert "机器人2" in text
+    assert "清空" in text
     assert "选择概率最高" not in text
 
 

@@ -1,0 +1,178 @@
+"""Cross-frame decision diagnostics without policy or environment imports."""
+
+from __future__ import annotations
+
+from typing import Any, Iterable, Mapping
+
+from .navigation import MOVE_DELTAS, shortest_path_distance
+
+
+OPPOSITE_ACTION = {
+    "UP": "DOWN",
+    "DOWN": "UP",
+    "LEFT": "RIGHT",
+    "RIGHT": "LEFT",
+}
+
+
+def transition_temporal_violations(
+    environment: Any,
+    previous: Any,
+    next_state: Any,
+    *,
+    requested_actions: Mapping[str, str],
+    executed_actions: Mapping[str, str],
+    pickup_agents: Iterable[str] = (),
+    delivery_agents: Iterable[str] = (),
+    coordination_events: Iterable[Mapping[str, Any]] = (),
+    energy_events: Iterable[Mapping[str, Any]] = (),
+) -> dict[str, tuple[str, ...]]:
+    """Audit unexplained reversals, short cycles, and late goal switches."""
+
+    pickup = set(pickup_agents)
+    delivery = set(delivery_agents)
+    coordinated: set[str] = set()
+    for event in coordination_events:
+        if (
+            str(event.get("event", "")) == "joint_coordination_plan"
+            and bool(event.get("execution_aligned", False))
+        ):
+            coordinated.update(
+                str(event.get(key, ""))
+                for key in (
+                    "waiting_agent_id",
+                    "moving_agent_id",
+                    "clearing_agent_id",
+                )
+                if str(event.get(key, ""))
+            )
+    energy_progress = {
+        str(event.get("agent_id", ""))
+        for event in energy_events
+        if str(event.get("event", ""))
+        in {"charger_departure", "charger_productive_return"}
+    }
+    unexplained_reversals: list[str] = []
+    short_cycles: list[str] = []
+    invalid_goal_switches: list[str] = []
+    for before in previous.agents:
+        agent_id = before.agent_id
+        after = next_state.by_id(agent_id)
+        action = str(executed_actions.get(agent_id, "WAIT"))
+        requested = str(requested_actions.get(agent_id, action))
+        recent_lifecycle_switch = bool(
+            before.goal_since == previous.frame
+            and before.goal_switch_reason
+            in {
+                "pickup_completed",
+                "delivery_completed",
+                "charge_release_threshold_met",
+                "joint_coordination_plan_completed",
+                "task_claimed_by_teammate",
+            }
+        )
+        allowed_event = bool(
+            agent_id in pickup
+            or agent_id in delivery
+            or agent_id in coordinated
+            or agent_id in energy_progress
+            or requested != action
+            or recent_lifecycle_switch
+        )
+        immediate_reverse = bool(
+            action == OPPOSITE_ACTION.get(before.last_executed_action)
+            and len(before.recent_positions) >= 2
+            and after.position == before.recent_positions[-2]
+        )
+        if immediate_reverse and not allowed_event:
+            unexplained_reversals.append(agent_id)
+        goal_position = None
+        if before.navigation_goal_kind == "charge":
+            goal_position = before.navigation_goal_position
+        elif before.carrying_task_id is not None:
+            goal_position = previous.task_by_id(
+                before.carrying_task_id
+            ).delivery_position
+        elif before.route_commitment_task_id is not None:
+            committed = next(
+                (
+                    task
+                    for task in previous.tasks
+                    if task.task_id == before.route_commitment_task_id
+                ),
+                None,
+            )
+            if committed is not None:
+                goal_position = committed.pickup_position
+        elif before.goal_type == "GO_TO_PICKUP" and before.goal_id is not None:
+            selected = next(
+                (
+                    task
+                    for task in previous.tasks
+                    if task.task_id == before.goal_id
+                    and task.status == "available"
+                ),
+                None,
+            )
+            if selected is not None:
+                goal_position = selected.pickup_position
+        route_progress = bool(
+            goal_position is not None
+            and shortest_path_distance(
+                after.position,
+                goal_position,
+                environment.config.map_layout_id,
+            )
+            < shortest_path_distance(
+                before.position,
+                goal_position,
+                environment.config.map_layout_id,
+            )
+        )
+        prior_positions = tuple(before.recent_positions[:-1])[-5:]
+        if (
+            action in MOVE_DELTAS
+            and after.position in prior_positions
+            and not allowed_event
+            and goal_position is not None
+            and not route_progress
+            and before.goal_type == after.goal_type
+            and before.goal_id == after.goal_id
+        ):
+            short_cycles.append(agent_id)
+
+        goal_changed = bool(
+            before.goal_type != after.goal_type
+            or before.goal_id != after.goal_id
+        )
+        if not goal_changed:
+            continue
+        reason = str(after.goal_switch_reason)
+        valid_reasons = {
+            "pickup_completed",
+            "delivery_completed",
+            "task_completed_or_unavailable",
+            "task_claimed_by_teammate",
+            "charge_release_threshold_met",
+            "joint_coordination_plan_started",
+            "joint_coordination_plan_completed",
+            "energy_safe_task_committed",
+            "energy_route_infeasible",
+        }
+        invalid = reason not in valid_reasons
+        if (
+            reason == "energy_route_infeasible"
+            and before.navigation_goal_kind != "charge"
+            and not environment._requires_charge(previous, before)
+            and action in MOVE_DELTAS
+        ):
+            invalid = True
+        if invalid:
+            invalid_goal_switches.append(agent_id)
+    return {
+        "unexplained_reversal_agents": tuple(sorted(unexplained_reversals)),
+        "short_cycle_agents": tuple(sorted(set(short_cycles))),
+        "invalid_goal_switch_agents": tuple(
+            sorted(set(invalid_goal_switches))
+        ),
+    }

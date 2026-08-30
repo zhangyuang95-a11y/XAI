@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import pytest
-import torch
-
+from core.policy_contracts import ActionDistribution
 from backend.adapters.warehouse import WarehouseAdapter
-from env.warehouse.environment import WarehouseConfig, WarehouseMultiAgentEnv
+from env.warehouse.environment import ACTIONS, WarehouseConfig, WarehouseMultiAgentEnv
 from env.warehouse.mappo import MAPPOConfig, MAPPOPolicy
 from ui.tutorial import (
     TUTORIAL_SEED,
@@ -19,6 +18,33 @@ def _policy(*, horizon: int) -> MAPPOPolicy:
         WarehouseConfig(horizon=horizon),
         MAPPOConfig(hidden_dim=16, seed=9),
     )
+
+
+class _AlwaysWaitPolicy:
+    """Minimal deterministic policy for testing ownership transitions only."""
+
+    action_names = ACTIONS
+
+    def act(self, observations, global_state, *, deterministic=False):
+        del global_state, deterministic
+        probabilities = tuple(1.0 if action == "WAIT" else 0.0 for action in ACTIONS)
+        actions = {agent_id: "WAIT" for agent_id in observations}
+        distributions = {
+            agent_id: ActionDistribution(
+                agent_id=agent_id,
+                actions=ACTIONS,
+                probabilities=probabilities,
+                proposed_action="WAIT",
+            )
+            for agent_id in observations
+        }
+        return actions, distributions
+
+    def get_rng_state(self):
+        return None
+
+    def set_rng_state(self, state):
+        del state
 
 
 def test_tutorial_validator_accepts_one_continuous_scored_round() -> None:
@@ -38,19 +64,14 @@ def test_tutorial_validator_accepts_one_continuous_scored_round() -> None:
 
 
 def test_tutorial_transition_detection_uses_shared_task_ownership() -> None:
-    policy = _policy(horizon=4)
-    with torch.no_grad():
-        final_layer = policy.network.actor[-1]
-        final_layer.weight.zero_()
-        final_layer.bias.zero_()
-        final_layer.bias[-1] = 10.0
-    environment = WarehouseMultiAgentEnv(policy.environment_config)
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=4))
     environment.reset(seed=12)
     state = environment.get_state()
     state.by_id("robot_2").position = state.tasks[0].pickup_position
+    state.participant_controlled_agent_id = "robot_1"
     environment.set_state(state)
     rollout = WarehouseAdapter(environment).rollout(
-        policy,
+        _AlwaysWaitPolicy(),
         horizon=1,
         deterministic=True,
     )

@@ -11,14 +11,17 @@ from typing import Any, Mapping
 
 from . import credit_assignment as credit
 from .contracts import ENVIRONMENT_VERSION
+from .coordination_plan import coordination_plan_execution_event
 from .domain import AgentState, DeliveryTask, WarehouseConfig, WarehouseState
-from .energy_management import (
-    charge_release_energy,
-    charger_departure_progress,
-    charger_queue_clearance_delay,
-    charger_reentry_event,
-    should_continue_charge_mode,
+from .energy_management import (charge_release_energy, charger_departure_progress,
+    charger_queue_clearance_delay, charger_reentry_event)
+from .goal_management import (
+    advance_coordination_plan, assign_persistent_pickup_goals,
+    frozen_coordination_plan as derive_frozen_coordination_plan,
+    prepare_coordination_plan, refresh_navigation_goals,
+    synchronize_persistent_goals, update_route_commitments,
 )
+from .temporal_audit import transition_temporal_violations
 from .layouts import get_map_layout
 from .navigation import (
     ACTIONS,
@@ -42,6 +45,7 @@ from .navigation import (
 )
 from .transition_audit import (
     action_is_robustly_safe,
+    build_decision_trace,
     environment_info,
     joint_decision_audit,
 )
@@ -104,6 +108,28 @@ class WarehouseMultiAgentEnv:
             next_task_index=next_task_index,
         )
         self._refresh_navigation_goals(self.state)
+        assign_persistent_pickup_goals(self, self.state)
+        # Task reservations change which remaining missions are energy-safe
+        # for the teammate. Recompute physical mode from that same frozen
+        # assignment before publishing the observation; otherwise an
+        # unassigned robot can take one task-directed step and discover only
+        # on the next frame that it actually needed to charge.
+        self._refresh_navigation_goals(self.state)
+        synchronize_persistent_goals(
+            self,
+            None,
+            self.state,
+            reset_reason="episode_reset",
+        )
+        initial_plan = prepare_coordination_plan(self, self.state)
+        if initial_plan is not None:
+            synchronize_persistent_goals(
+                self,
+                None,
+                self.state,
+                reset_reason="episode_reset",
+                coordination_plan=initial_plan,
+            )
         return self.observations(), environment_info(
             self,
             reward_breakdown=None,
@@ -297,8 +323,39 @@ class WarehouseMultiAgentEnv:
                     task for task in state.tasks if task.status == "available"
                 ]
             )
+        elif agent.goal_type == "GO_TO_PICKUP" and agent.goal_id is not None:
+            selected = next(
+                (
+                    task
+                    for task in state.tasks
+                    if task.task_id == agent.goal_id
+                    and task.status == "available"
+                ),
+                None,
+            )
+            tasks = (
+                [selected]
+                if selected is not None
+                else [
+                    task for task in state.tasks if task.status == "available"
+                ]
+            )
         else:
-            tasks = [task for task in state.tasks if task.status == "available"]
+            available_tasks = [
+                task for task in state.tasks if task.status == "available"
+            ]
+            teammate_reservations = {
+                teammate.route_commitment_task_id or teammate.goal_id
+                for teammate in state.agents
+                if teammate.agent_id != agent.agent_id
+                and teammate.carrying_task_id is None
+            }
+            unreserved = [
+                task
+                for task in available_tasks
+                if task.task_id not in teammate_reservations
+            ]
+            tasks = unreserved or available_tasks
         if not tasks:
             required = (
                 shortest_path_distance(
@@ -306,7 +363,7 @@ class WarehouseMultiAgentEnv:
                     self.layout.charger_position,
                     self.config.map_layout_id,
                 )
-                + self.config.battery_safety_margin
+                + self.config.mission_reserve_steps
             ) * self.config.move_battery_cost
             return agent.battery < required
         return all(
@@ -497,7 +554,7 @@ class WarehouseMultiAgentEnv:
                             self.layout.charger_position,
                             self.config.map_layout_id,
                         )
-                        + self.config.battery_safety_margin
+                        + self.config.mission_reserve_steps
                     )
                     * self.config.move_battery_cost
                     + claim_commitment_reserve
@@ -605,157 +662,9 @@ class WarehouseMultiAgentEnv:
         return min(candidates, key=lambda item: item[0])[1]
 
     def _refresh_navigation_goals(self, state: WarehouseState) -> None:
-        """Refresh physical route context without assigning shared pickups.
+        """Compatibility wrapper for adapters that restore edited states."""
 
-        Available tasks remain genuinely shared: an empty Actor receives both
-        task slots and chooses its own implicit commitment.  The environment
-        only exposes unavoidable physical modes (carry-to-B and energy-safe
-        charger access); it never binds an available task to a robot.
-        """
-
-        for agent in state.agents:
-            if not agent.active:
-                agent.navigation_goal_kind = "wait"
-                agent.navigation_goal_position = agent.position
-                continue
-            if agent.charge_mode_active:
-                if should_continue_charge_mode(self, state, agent):
-                    agent.navigation_goal_kind = "charge"
-                    agent.navigation_goal_position = self.layout.charger_position
-                    continue
-                agent.charge_mode_active = False
-            if self._requires_charge(state, agent):
-                agent.charge_mode_active = True
-                agent.navigation_goal_kind = "charge"
-                agent.navigation_goal_position = self.layout.charger_position
-                continue
-            if agent.carrying_task_id:
-                task = state.task_by_id(agent.carrying_task_id)
-                agent.navigation_goal_kind = "delivery"
-                agent.navigation_goal_position = task.delivery_position
-                continue
-            agent.navigation_goal_kind = "wait"
-            agent.navigation_goal_position = agent.position
-
-    def _update_route_commitments(
-        self,
-        previous: WarehouseState,
-        next_state: WarehouseState,
-        executed: Mapping[str, str],
-    ) -> None:
-        """Persist task intent revealed by the Actor's own movement.
-
-        No task is assigned or reserved here.  When an empty robot takes a
-        successful step that uniquely makes progress toward one available A
-        point, that neural choice becomes observable memory on the following
-        frame.  The memory survives a necessary charging trip and is cleared
-        when the task disappears or another robot claims it.  Ambiguous moves
-        do not create a commitment.
-        """
-
-        previous_available = {
-            task.task_id: task
-            for task in previous.tasks
-            if task.status == "available"
-        }
-        next_available = {
-            task.task_id: task
-            for task in next_state.tasks
-            if task.status == "available"
-        }
-        for agent in next_state.agents:
-            before_agent = previous.by_id(agent.agent_id)
-            if agent.carrying_task_id is not None:
-                agent.route_commitment_task_id = agent.carrying_task_id
-                continue
-            existing = before_agent.route_commitment_task_id
-            agent.route_commitment_task_id = None
-            if (
-                before_agent.carrying_task_id is not None
-                or before_agent.navigation_goal_kind == "charge"
-                or before_agent.charge_mode_active
-                or executed.get(agent.agent_id) not in MOVE_DELTAS
-            ):
-                # A movement made while following the public charger route
-                # does not reveal a pickup choice.  On the compact staggered
-                # map the charger stem overlaps the shortest path to some A
-                # points; inferring a fresh task commitment there caused both
-                # robots to "choose" the same newer job while they were only
-                # trying to charge.  Existing neural intent survives a
-                # necessary charge trip, but charging geometry cannot create
-                # new task memory.
-                if existing in next_available:
-                    agent.route_commitment_task_id = existing
-                continue
-            progress_candidates: list[tuple[int, int, int, str]] = []
-            for task_id, task in previous_available.items():
-                if task_id not in next_available:
-                    continue
-                before_distance = shortest_path_distance(
-                    before_agent.position,
-                    task.pickup_position,
-                    self.config.map_layout_id,
-                )
-                after_distance = shortest_path_distance(
-                    agent.position,
-                    task.pickup_position,
-                    self.config.map_layout_id,
-                )
-                progress = before_distance - after_distance
-                if progress <= 0:
-                    continue
-                age = max(0, previous.frame - task.created_frame)
-                progress_candidates.append(
-                    (-progress, after_distance, -age, task_id)
-                )
-            if not progress_candidates:
-                if existing in next_available:
-                    agent.route_commitment_task_id = existing
-                continue
-            progress_candidates.sort()
-            best = progress_candidates[0]
-            # A movement that is equally informative for multiple pickups
-            # does not reveal which task the neural Actor chose.  Remaining
-            # distance and task age are useful tie-breakers for planning, but
-            # they cannot turn one shared-prefix movement into evidence of a
-            # private task choice.
-            equally_informative = [
-                item
-                for item in progress_candidates
-                if item[0] == best[0]
-            ]
-            if len(equally_informative) == 1:
-                inferred = best[3]
-                teammate = next(
-                    item
-                    for item in previous.agents
-                    if item.agent_id != before_agent.agent_id
-                )
-                uncommitted_alternative_exists = any(
-                    task_id != inferred
-                    and task_id != teammate.route_commitment_task_id
-                    for task_id in previous_available
-                )
-                duplicate_teammate_commitment = bool(
-                    inferred == teammate.route_commitment_task_id
-                    and uncommitted_alternative_exists
-                )
-                if existing in next_available:
-                    # A valid commitment is episode memory, not a fresh
-                    # interpretation of every movement.  A collision-avoidance
-                    # retreat or charger-apron clearance can temporarily make
-                    # more geometric progress toward another A point.  Using
-                    # that single step to retarget caused the Actor to abandon
-                    # its energy-safe post-charge job and immediately return to
-                    # the station.  Keep the commitment until the task is
-                    # claimed (by either robot) or delivered; only then may a
-                    # later neural progress step reveal a new intention.
-                    agent.route_commitment_task_id = existing
-                elif not duplicate_teammate_commitment:
-                    agent.route_commitment_task_id = inferred
-            elif existing in next_available:
-                agent.route_commitment_task_id = existing
-
+        refresh_navigation_goals(self, state)
     def observations(self) -> dict[str, Any]:
         self._require_state()
         from .observations import all_local_observations
@@ -1411,7 +1320,52 @@ class WarehouseMultiAgentEnv:
             intended_targets,
             collision_kind,
         )
-        coordination_events += credit.occupied_cell_clearance_events(self, previous, executed, intended_targets)
+        # A generic one-step collision counterfactual is not sufficient to
+        # claim that a robot intentionally yielded.  Retain only a plan that
+        # was derived before either current action existed, then audit whether
+        # both independently selected actions actually followed it.
+        coordination_events = tuple(
+            event
+            for event in coordination_events
+            if str(event.get("event", "")) != "coordination_yield"
+        )
+        frozen_coordination_plan = derive_frozen_coordination_plan(self, previous)
+        plan_execution = coordination_plan_execution_event(
+            frozen_coordination_plan,
+            requested_actions=raw_actions,
+            executed_actions=executed,
+            intended_targets=intended_targets,
+        )
+        if plan_execution is not None:
+            coordination_events += (plan_execution,)
+            if bool(plan_execution.get("completed", False)):
+                coordination_events += (
+                    {
+                        "event": "coordination_yield",
+                        "plan_id": plan_execution["plan_id"],
+                        "yielding_agent_id": plan_execution.get(
+                            "yielding_agent_id",
+                            plan_execution.get("clearing_agent_id"),
+                        ),
+                        "passing_agent_id": plan_execution[
+                            "priority_agent_id"
+                        ],
+                        "candidate_action": plan_execution["moving_action"],
+                        "candidate_conflict_kind": plan_execution[
+                            "plan_kind"
+                        ],
+                        "reason_code": plan_execution["reason_code"],
+                        "proposed_actions": dict(raw_actions),
+                        "executed_actions": dict(executed),
+                        "intended_targets": dict(intended_targets),
+                    },
+                )
+        coordination_events += credit.occupied_cell_clearance_events(
+            self,
+            previous,
+            executed,
+            intended_targets,
+        )
         (
             counterfactual_regret_units,
             avoidable_wait_agents,
@@ -1443,6 +1397,7 @@ class WarehouseMultiAgentEnv:
             robot_collision,
         )
         next_state.frame += 1
+        advance_coordination_plan(previous, next_state, plan_execution)
         next_state.last_robot_collision_event = robot_collision
         next_state.last_robot_collision_kind = collision_kind
         next_state.last_coordination_events = coordination_events
@@ -1514,6 +1469,24 @@ class WarehouseMultiAgentEnv:
                                 previous_agent,
                                 position=self.layout.charger_position,
                             )
+                            and not (
+                                plan_execution is not None
+                                and bool(
+                                    plan_execution.get(
+                                        "execution_aligned",
+                                        False,
+                                    )
+                                )
+                                and str(
+                                    plan_execution.get("phase", "")
+                                ) == "CLEAR_CELL"
+                                and str(
+                                    plan_execution.get(
+                                        "moving_agent_id",
+                                        "",
+                                    )
+                                ) == agent.agent_id
+                            )
                         ),
                     }
                 )
@@ -1557,6 +1530,16 @@ class WarehouseMultiAgentEnv:
                     ),
                     completed_coordination_progress=(
                         completed_coordination_progress
+                        or bool(
+                            plan_execution is not None
+                            and plan_execution.get(
+                                "execution_aligned",
+                                False,
+                            )
+                            and str(
+                                plan_execution.get("moving_agent_id", "")
+                            ) == agent.agent_id
+                        )
                     ),
                 )
                 if reentry is not None:
@@ -1633,7 +1616,7 @@ class WarehouseMultiAgentEnv:
                 next_state.tasks.append(replacement)
                 replacement_tasks.append(replacement)
 
-        self._update_route_commitments(previous, next_state, executed)
+        update_route_commitments(self, previous, next_state, executed)
 
         ineffective_joint_wait = bool(
             all(action == "WAIT" for action in executed.values())
@@ -1689,6 +1672,15 @@ class WarehouseMultiAgentEnv:
         next_state.truncated = truncated
         next_state.terminal_reason = reason
         self._refresh_navigation_goals(next_state)
+        assign_persistent_pickup_goals(self, next_state)
+        self._refresh_navigation_goals(next_state)
+        next_coordination_plan = prepare_coordination_plan(self, next_state)
+        synchronize_persistent_goals(
+            self,
+            previous,
+            next_state,
+            coordination_plan=next_coordination_plan,
+        )
         frozen_mission_costs_after = {
             agent.agent_id: credit.frozen_mission_cost(
                 self,
@@ -1734,6 +1726,17 @@ class WarehouseMultiAgentEnv:
                 and counterfactual_regret_units.get(assignee_id, 0.0) > 0.0
             )
         )
+        temporal_violations = transition_temporal_violations(
+            self,
+            previous,
+            next_state,
+            requested_actions=raw_actions,
+            executed_actions=executed,
+            pickup_agents=pickup_agents,
+            delivery_agents=delivery_agents,
+            coordination_events=coordination_events,
+            energy_events=energy_events,
+        )
         reward_credit = credit.transition_credit_components(
             self,
             terminated=terminated,
@@ -1753,6 +1756,15 @@ class WarehouseMultiAgentEnv:
             starving_task_ids=starving_task_ids,
             assignment_potential_before=potential_before,
             assignment_potential_after=potential_after,
+            unexplained_reversal_agents=temporal_violations[
+                "unexplained_reversal_agents"
+            ],
+            short_cycle_agents=temporal_violations[
+                "short_cycle_agents"
+            ],
+            invalid_goal_switch_agents=temporal_violations[
+                "invalid_goal_switch_agents"
+            ],
         )
         rewards = reward_credit["rewards"]
         potential_shaping = reward_credit["potential_shaping_reward"]
@@ -1765,6 +1777,52 @@ class WarehouseMultiAgentEnv:
         self.state = next_state
 
         collision_agents = self.agent_ids if robot_collision else ()
+        action_resolution = {
+            agent.agent_id: {
+                "requested_action": raw_actions[agent.agent_id],
+                "executed_action": executed[agent.agent_id],
+                "position": previous.by_id(agent.agent_id).position,
+                "intended_target": intended_targets[agent.agent_id],
+                "teammate_position": next(
+                    other.position
+                    for other in previous.agents
+                    if other.agent_id != agent.agent_id
+                ),
+                "teammate_requested_action": next(
+                    raw_actions[other.agent_id]
+                    for other in previous.agents
+                    if other.agent_id != agent.agent_id
+                ),
+                "teammate_intended_target": next(
+                    intended_targets[other.agent_id]
+                    for other in previous.agents
+                    if other.agent_id != agent.agent_id
+                ),
+                "collision_kind": collision_kind,
+                "environment_changed_action": (
+                    raw_actions[agent.agent_id] != executed[agent.agent_id]
+                ),
+                "blocked_reason": (
+                    collision_kind or "robot_collision"
+                    if robot_collision
+                    else "static_obstacle"
+                    if agent.agent_id in invalid
+                    else None
+                ),
+            }
+            for agent in next_state.agents
+        }
+        decision_trace = build_decision_trace(
+            self,
+            previous=previous,
+            next_state=next_state,
+            raw_actions=raw_actions,
+            executed_actions=executed,
+            action_resolution=action_resolution,
+            decision_metadata=decision_metadata,
+            frozen_missions=credit.serialized_frozen_missions(frozen_missions),
+            coordination_plan=plan_execution,
+        )
         info = environment_info(
             self,
             reward_breakdown=score_components,
@@ -1852,6 +1910,10 @@ class WarehouseMultiAgentEnv:
                 "causal_efficiency_penalty_rewards": (
                     reward_credit["causal_efficiency_penalty_rewards"]
                 ),
+                "temporal_consistency_penalty_rewards": (
+                    reward_credit["temporal_consistency_penalty_rewards"]
+                ),
+                **temporal_violations,
                 "avoidable_wait_streaks": {
                     agent.agent_id: agent.avoidable_wait_streak
                     for agent in next_state.agents
@@ -1881,41 +1943,8 @@ class WarehouseMultiAgentEnv:
                 "ineffective_joint_wait_streak": (
                     next_state.ineffective_joint_wait_streak
                 ),
-                "action_resolution": {
-                    agent.agent_id: {
-                        "requested_action": raw_actions[agent.agent_id],
-                        "executed_action": executed[agent.agent_id],
-                        "position": previous.by_id(agent.agent_id).position,
-                        "intended_target": intended_targets[agent.agent_id],
-                        "teammate_position": next(
-                            other.position
-                            for other in previous.agents
-                            if other.agent_id != agent.agent_id
-                        ),
-                        "teammate_requested_action": next(
-                            raw_actions[other.agent_id]
-                            for other in previous.agents
-                            if other.agent_id != agent.agent_id
-                        ),
-                        "teammate_intended_target": next(
-                            intended_targets[other.agent_id]
-                            for other in previous.agents
-                            if other.agent_id != agent.agent_id
-                        ),
-                        "collision_kind": collision_kind,
-                        "environment_changed_action": (
-                            raw_actions[agent.agent_id] != executed[agent.agent_id]
-                        ),
-                        "blocked_reason": (
-                            collision_kind or "robot_collision"
-                            if robot_collision
-                            else "static_obstacle"
-                            if agent.agent_id in invalid
-                            else None
-                        ),
-                    }
-                    for agent in next_state.agents
-                },
+                "action_resolution": action_resolution,
+                "decision_trace": decision_trace,
                 "decision_audit": joint_decision_audit(
                     previous=previous,
                     next_state=next_state,
@@ -1935,6 +1964,17 @@ class WarehouseMultiAgentEnv:
     def set_state(self, state: WarehouseState) -> None:
         candidate = deepcopy(state)
         self._refresh_navigation_goals(candidate)
+        assign_persistent_pickup_goals(self, candidate)
+        self._refresh_navigation_goals(candidate)
+        candidate.active_coordination_plan = None
+        restored_plan = prepare_coordination_plan(self, candidate)
+        synchronize_persistent_goals(
+            self,
+            None,
+            candidate,
+            reset_reason="state_restore",
+            coordination_plan=restored_plan,
+        )
         errors = self.validate_state(candidate)
         if errors:
             raise ValueError("Invalid warehouse state: " + "; ".join(errors))

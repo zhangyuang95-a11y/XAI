@@ -21,6 +21,17 @@ def validate_warehouse_state(
     """Return every state-contract error without mutating the environment."""
 
     errors: list[str] = []
+    allowed_goal_types = {
+        "IDLE",
+        "SELECT_TASK",
+        "GO_TO_PICKUP",
+        "GO_TO_DROPOFF",
+        "GO_TO_CHARGER",
+        "QUEUED_FOR_CHARGER",
+        "CHARGING",
+        "LEAVE_CHARGER",
+        "YIELDING",
+    }
     ids = [agent.agent_id for agent in state.agents]
     if ids != list(environment.agent_ids):
         errors.append("state must contain robot_1 and robot_2 in stable order")
@@ -36,6 +47,12 @@ def validate_warehouse_state(
             errors.append(f"{agent.agent_id} has an invalid requested action")
         if agent.last_executed_action not in ACTIONS:
             errors.append(f"{agent.agent_id} has an invalid executed action")
+        if agent.goal_type not in allowed_goal_types:
+            errors.append(f"{agent.agent_id} has an invalid persistent goal type")
+        if not agent.goal_switch_reason:
+            errors.append(f"{agent.agent_id} has no goal switch reason")
+        if agent.goal_since > state.frame:
+            errors.append(f"{agent.agent_id} goal starts in the future")
     active_ids = [task.task_id for task in state.tasks]
     completed_ids = [task.task_id for task in state.completed_tasks]
     if len(active_ids) != environment.config.active_task_count:
@@ -95,6 +112,39 @@ def validate_warehouse_state(
     expected_score = sum(float(value) for value in state.score_breakdown.values())
     if not math.isclose(state.user_score, expected_score, abs_tol=1e-6):
         errors.append("user score must equal its component breakdown")
+    plan = state.active_coordination_plan
+    if plan is not None:
+        required = {
+            "plan_id",
+            "phase",
+            "priority_agent_id",
+            "waiting_agent_id",
+            "moving_agent_id",
+            "moving_action",
+            "moving_target",
+        }
+        missing = sorted(required - set(plan))
+        if missing:
+            errors.append(
+                "active coordination plan is missing " + ", ".join(missing)
+            )
+        else:
+            phase = str(plan["phase"])
+            if phase not in {"CLEAR_CELL", "PASS_THROUGH", "SINGLE_STEP"}:
+                errors.append("active coordination plan has an invalid phase")
+            priority_id = str(plan["priority_agent_id"])
+            waiting_id = str(plan["waiting_agent_id"])
+            moving_id = str(plan["moving_agent_id"])
+            if priority_id not in ids or waiting_id not in ids or moving_id not in ids:
+                errors.append("active coordination plan names an unknown robot")
+            if waiting_id == moving_id:
+                errors.append("active coordination plan cannot move and wait one robot")
+            action = str(plan["moving_action"])
+            if action not in ACTIONS or action == "WAIT":
+                errors.append("active coordination plan has no movement action")
+            target = tuple(plan["moving_target"])
+            if not is_passable(target, environment.config.map_layout_id):
+                errors.append("active coordination target is not passable")
     return tuple(errors)
 
 

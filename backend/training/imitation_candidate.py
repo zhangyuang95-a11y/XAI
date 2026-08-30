@@ -31,6 +31,46 @@ from env.warehouse.observations import observation_dim
 from env.warehouse.policy import MAPPOPolicy, independent_actor_input
 
 
+def _align_labels_to_frozen_actor_masks(
+    policy: MAPPOPolicy,
+    rows: np.ndarray,
+    labels: np.ndarray,
+) -> tuple[np.ndarray, int]:
+    """Make every offline target executable under its exact frozen S_t mask.
+
+    Persistent coordination plans can deliberately reduce an Actor row to a
+    single allowed action.  Older teacher rows may prefer another geometrically
+    safe action, but training that masked-out label produces infinite CE loss
+    and a policy that can never execute its target.  For those rows, retain the
+    source policy's highest-logit action among the frozen allowed set.
+    """
+
+    masks = np.asarray(rows[:, -len(ACTIONS) :], dtype=np.float32)
+    aligned = np.asarray(labels, dtype=np.int64).copy()
+    valid = masks[np.arange(len(aligned)), aligned] > 0.5
+    invalid_count = int(np.sum(~valid))
+    if not invalid_count:
+        return aligned, 0
+    allowed_counts = np.sum(masks[~valid] > 0.5, axis=1)
+    if bool(np.any(allowed_counts == 0)):
+        raise RuntimeError("A supervised row has no frozen Actor-valid action.")
+    with torch.no_grad():
+        fallback = (
+            policy.masked_actor_logits(
+                torch.as_tensor(
+                    rows[~valid],
+                    dtype=torch.float32,
+                    device=policy.device,
+                )
+            )
+            .argmax(dim=-1)
+            .cpu()
+            .numpy()
+        )
+    aligned[~valid] = fallback
+    return aligned, invalid_count
+
+
 def _collect_central_teacher_dagger_dataset(
     policy: MAPPOPolicy,
     *,
@@ -358,6 +398,11 @@ def main() -> None:
     labels = np.concatenate(label_groups, axis=0)
     teammate_labels = np.concatenate(teammate_label_groups, axis=0)
     categories = np.concatenate(category_groups, axis=0)
+    labels, mask_aligned_labels = _align_labels_to_frozen_actor_masks(
+        policy,
+        rows,
+        labels,
+    )
     label_sets: dict[bytes, set[int]] = {}
     for row, label in zip(rows, labels):
         label_sets.setdefault(row.tobytes(), set()).add(int(label))
@@ -449,6 +494,7 @@ def main() -> None:
         "collision_repeat": int(args.collision_repeat),
         "unique_inputs": int(len(label_sets)),
         "conflicting_inputs": int(conflicting_inputs),
+        "mask_aligned_labels": int(mask_aligned_labels),
         "ambiguous_inputs_removed": int(len(ambiguous_inputs)),
         "ambiguous_rows_removed": dropped_ambiguous_rows,
         "dataset": str(dataset_path),

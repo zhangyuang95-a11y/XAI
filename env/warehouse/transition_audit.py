@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from .decision_protocol import DECISION_AUDIT_SCHEMA, canonical_sha256
+from .energy_management import charge_release_energy
 from .navigation import ACTIONS, MOVE_DELTAS, shortest_path_distance
 
 
@@ -249,3 +250,382 @@ def joint_decision_audit(
         "same_pre_move_state": True,
         "environment_step_calls": 1,
     }
+
+
+def _best_alternative_action(
+    selected: str,
+    distribution: Mapping[str, Any],
+) -> str | None:
+    actions = tuple(str(item) for item in distribution.get("actions", ACTIONS))
+    probabilities = tuple(
+        float(item) for item in distribution.get("probabilities", ())
+    )
+    ranked = sorted(
+        zip(probabilities, actions),
+        key=lambda item: (-item[0], item[1]),
+    )
+    return next((action for _, action in ranked if action != selected), None)
+
+
+def _decision_reason_code(
+    environment: Any,
+    previous: Any,
+    next_state: Any,
+    agent_id: str,
+    requested_action: str,
+    executed_action: str,
+    coordination_plan: Mapping[str, Any] | None,
+) -> str:
+    before = previous.by_id(agent_id)
+    after = next_state.by_id(agent_id)
+    if requested_action != executed_action:
+        return "SAFETY_RULE_BLOCKED"
+    if coordination_plan is not None and bool(
+        coordination_plan.get("execution_aligned", False)
+    ):
+        if str(coordination_plan.get("waiting_agent_id")) == agent_id:
+            return (
+                "WAIT_FOR_PRIORITY_PASSAGE"
+                if str(coordination_plan.get("plan_kind"))
+                in {"head_on_priority", "priority_followthrough"}
+                else "WAIT_FOR_OCCUPIED_ROUTE_CLEARANCE"
+            )
+        if (
+            str(coordination_plan.get("moving_agent_id")) == agent_id
+            and str(coordination_plan.get("plan_kind"))
+            == "occupied_route_clearance"
+        ):
+            return "CLEAR_TEAMMATE_ROUTE"
+        if str(coordination_plan.get("moving_agent_id")) == agent_id:
+            return "PRIORITY_ROUTE_PROGRESS"
+    if (
+        executed_action == "WAIT"
+        and before.position == environment.layout.charger_position
+        and after.battery > before.battery
+    ):
+        return "CONTINUE_CHARGING"
+    if (
+        executed_action == "WAIT"
+        and before.navigation_goal_kind == "charge"
+        and before.position != environment.layout.charger_position
+        and any(
+            teammate.active
+            and teammate.agent_id != agent_id
+            and teammate.position == environment.layout.charger_position
+            for teammate in previous.agents
+        )
+    ):
+        return "WAIT_FOR_CHARGER_AVAILABILITY"
+    if (
+        before.position == environment.layout.charger_position
+        and after.position != before.position
+        and (
+            before.charge_mode_active
+            or before.navigation_goal_kind == "charge"
+            or before.goal_type in {"CHARGING", "LEAVE_CHARGER"}
+        )
+    ):
+        return "LEAVE_CHARGER_THRESHOLD_MET"
+    if before.navigation_goal_kind == "charge":
+        return (
+            "CHARGER_ROUTE_PROGRESS"
+            if shortest_path_distance(
+                after.position,
+                environment.layout.charger_position,
+                environment.config.map_layout_id,
+            )
+            < shortest_path_distance(
+                before.position,
+                environment.layout.charger_position,
+                environment.config.map_layout_id,
+            )
+            else "CHARGER_ROUTE_WAIT_OR_DETOUR"
+        )
+    if executed_action == "WAIT":
+        return "POLICY_WAIT_NO_VERIFIED_COORDINATION_CAUSE"
+    if before.carrying_task_id is not None:
+        task = previous.task_by_id(before.carrying_task_id)
+        return (
+            "DELIVERY_ROUTE_PROGRESS"
+            if shortest_path_distance(
+                after.position,
+                task.delivery_position,
+                environment.config.map_layout_id,
+            )
+            < shortest_path_distance(
+                before.position,
+                task.delivery_position,
+                environment.config.map_layout_id,
+            )
+            else "POLICY_MISSION_DETOUR"
+        )
+    if before.route_commitment_task_id is not None:
+        task = next(
+            (
+                item
+                for item in previous.tasks
+                if item.task_id == before.route_commitment_task_id
+            ),
+            None,
+        )
+        if task is not None:
+            return (
+                "PICKUP_ROUTE_PROGRESS"
+                if shortest_path_distance(
+                    after.position,
+                    task.pickup_position,
+                    environment.config.map_layout_id,
+                )
+                < shortest_path_distance(
+                    before.position,
+                    task.pickup_position,
+                    environment.config.map_layout_id,
+                )
+                else "POLICY_MISSION_DETOUR"
+            )
+    return "ENERGY_SAFE_TASK_SELECTION"
+
+
+def validate_decision_trace(
+    environment: Any,
+    previous: Any,
+    next_state: Any,
+    trace: Mapping[str, Any],
+) -> tuple[str, ...]:
+    """Return factual failures that make a generated reason unsafe to show."""
+
+    failures: list[str] = []
+    if trace.get("pre_state_hash") != canonical_sha256(previous):
+        failures.append("pre_state_hash_mismatch")
+    if trace.get("post_state_hash") != canonical_sha256(next_state):
+        failures.append("post_state_hash_mismatch")
+    if int(trace.get("decision_frame", -1)) + 1 != int(
+        trace.get("outcome_frame", -1)
+    ):
+        failures.append("non_atomic_frame_boundary")
+    for agent_id, decision in dict(trace.get("agents", {})).items():
+        before = previous.by_id(agent_id)
+        after = next_state.by_id(agent_id)
+        action = str(decision.get("resolved_action", "WAIT"))
+        delta = MOVE_DELTAS.get(action)
+        expected = (
+            before.position
+            if delta is None
+            else (before.position[0] + delta[0], before.position[1] + delta[1])
+        )
+        if action in MOVE_DELTAS and after.position != expected:
+            failures.append(f"{agent_id}:action_position_mismatch")
+        if action == "WAIT" and after.position != before.position:
+            failures.append(f"{agent_id}:wait_position_changed")
+        reason = str(decision.get("primary_reason_code", ""))
+        plan = decision.get("joint_coordination_plan")
+        if reason in {
+            "WAIT_FOR_OCCUPIED_ROUTE_CLEARANCE",
+            "WAIT_FOR_PRIORITY_PASSAGE",
+            "CLEAR_TEAMMATE_ROUTE",
+            "PRIORITY_ROUTE_PROGRESS",
+        } and not (
+            isinstance(plan, Mapping)
+            and bool(plan.get("execution_aligned", False))
+        ):
+            failures.append(f"{agent_id}:coordination_reason_without_plan")
+        if reason == "LEAVE_CHARGER_THRESHOLD_MET":
+            charging = decision.get("charging_state", {})
+            threshold = float(charging.get("release_threshold", 101.0))
+            if before.position != environment.layout.charger_position:
+                failures.append(f"{agent_id}:charger_departure_source_mismatch")
+            if before.battery + 1e-8 < threshold:
+                failures.append(f"{agent_id}:charger_release_below_threshold")
+        if reason in {
+            "CHARGER_ROUTE_PROGRESS",
+            "DELIVERY_ROUTE_PROGRESS",
+            "PICKUP_ROUTE_PROGRESS",
+        }:
+            effect = decision.get("direct_effect", {})
+            if int(effect.get("distance_after", 0)) >= int(
+                effect.get("distance_before", 0)
+            ):
+                failures.append(f"{agent_id}:false_progress_claim")
+    return tuple(failures)
+
+
+def build_decision_trace(
+    environment: Any,
+    *,
+    previous: Any,
+    next_state: Any,
+    raw_actions: Mapping[str, str],
+    executed_actions: Mapping[str, str],
+    action_resolution: Mapping[str, Mapping[str, Any]],
+    decision_metadata: Mapping[str, Any] | None,
+    frozen_missions: Mapping[str, Any],
+    coordination_plan: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Build one trace whose causes are restricted to the frozen ``S_t``."""
+
+    metadata = dict(decision_metadata or {})
+    distributions = dict(metadata.get("action_distributions", {}))
+    agents: dict[str, Any] = {}
+    for before in previous.agents:
+        agent_id = before.agent_id
+        after = next_state.by_id(agent_id)
+        distribution = dict(distributions.get(agent_id, {}))
+        battery_feasibility = []
+        for task in sorted(previous.tasks, key=lambda item: item.task_id):
+            if task.status not in {"available", "carried"}:
+                continue
+            if task.status == "carried" and task.carrier_agent_id != agent_id:
+                continue
+            route_steps = environment._mission_route_steps(
+                previous,
+                before,
+                task,
+                origin=before.position,
+            )
+            required = route_steps * environment.config.move_battery_cost
+            battery_feasibility.append(
+                {
+                    "task_id": task.task_id,
+                    "route_steps": float(route_steps),
+                    "required_energy": float(required),
+                    "battery": float(before.battery),
+                    "energy_slack": float(before.battery - required),
+                    "safe": bool(before.battery + 1e-8 >= required),
+                }
+            )
+        goal_position = before.navigation_goal_position
+        if before.navigation_goal_kind == "charge":
+            goal_position = environment.layout.charger_position
+        elif before.carrying_task_id is not None:
+            goal_position = previous.task_by_id(
+                before.carrying_task_id
+            ).delivery_position
+        elif before.route_commitment_task_id is not None:
+            committed = next(
+                (
+                    task
+                    for task in previous.tasks
+                    if task.task_id == before.route_commitment_task_id
+                ),
+                None,
+            )
+            if committed is not None:
+                goal_position = committed.pickup_position
+        elif before.goal_type == "GO_TO_PICKUP" and before.goal_id is not None:
+            selected_goal = next(
+                (
+                    task
+                    for task in previous.tasks
+                    if task.task_id == before.goal_id
+                    and task.status == "available"
+                ),
+                None,
+            )
+            if selected_goal is not None:
+                goal_position = selected_goal.pickup_position
+        distance_before = shortest_path_distance(
+            before.position,
+            goal_position,
+            environment.config.map_layout_id,
+        )
+        distance_after = shortest_path_distance(
+            after.position,
+            goal_position,
+            environment.config.map_layout_id,
+        )
+        selected = str(raw_actions.get(agent_id, "WAIT"))
+        agents[agent_id] = {
+            "frozen_goal": {
+                "goal_type": before.goal_type,
+                "goal_id": before.goal_id,
+                "goal_since": int(before.goal_since),
+                "navigation_kind": before.navigation_goal_kind,
+                "position": before.navigation_goal_position,
+            },
+            "committed_task": (
+                before.route_commitment_task_id or before.goal_id
+            ),
+            "battery_feasibility": battery_feasibility,
+            "charging_state": {
+                "active": bool(before.charge_mode_active),
+                "at_charger": bool(
+                    before.position == environment.layout.charger_position
+                ),
+                "battery": float(before.battery),
+                "requires_charge": bool(
+                    before.navigation_goal_kind == "charge"
+                ),
+                "release_threshold": float(
+                    charge_release_energy(environment, previous, before)
+                ),
+                "reason": before.charging_reason,
+            },
+            "joint_coordination_plan": (
+                dict(coordination_plan) if coordination_plan is not None else None
+            ),
+            "candidate_actions": list(
+                distribution.get("actions", ACTIONS)
+            ),
+            "policy_logits": list(distribution.get("logits", ())),
+            "policy_probabilities": list(
+                distribution.get("probabilities", ())
+            ),
+            "safety_mask": list(
+                distribution.get("action_mask", ())
+            ),
+            "selected_action": selected,
+            "resolved_action": str(
+                executed_actions.get(agent_id, "WAIT")
+            ),
+            "action_resolution": dict(action_resolution.get(agent_id, {})),
+            "primary_reason_code": _decision_reason_code(
+                environment,
+                previous,
+                next_state,
+                agent_id,
+                selected,
+                str(executed_actions.get(agent_id, "WAIT")),
+                coordination_plan,
+            ),
+            "alternative_action": _best_alternative_action(
+                selected,
+                distribution,
+            ),
+            "goal_switch_reason": after.goal_switch_reason,
+            "resulting_goal": {
+                "goal_type": after.goal_type,
+                "goal_id": after.goal_id,
+                "goal_since": int(after.goal_since),
+            },
+            "direct_effect": {
+                "position_before": before.position,
+                "position_after": after.position,
+                "goal_position": goal_position,
+                "distance_before": int(distance_before),
+                "distance_after": int(distance_after),
+                "battery_before": float(before.battery),
+                "battery_after": float(after.battery),
+            },
+            "frozen_mission": frozen_missions.get(agent_id),
+        }
+    trace: dict[str, Any] = {
+        "schema_version": "warehouse-decision-trace.v1",
+        "episode_id": int(previous.episode_id),
+        "decision_frame": int(previous.frame),
+        "outcome_frame": int(next_state.frame),
+        "pre_state_hash": canonical_sha256(previous),
+        "post_state_hash": canonical_sha256(next_state),
+        "same_frozen_state_for_all_agents": True,
+        "environment_step_calls": 1,
+        "decision_source": metadata.get("decision_source", "unspecified"),
+        "agents": agents,
+    }
+    failures = validate_decision_trace(
+        environment,
+        previous,
+        next_state,
+        trace,
+    )
+    trace["fact_validation_failures"] = failures
+    trace["fact_valid"] = not failures
+    return trace

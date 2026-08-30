@@ -7,6 +7,51 @@ from typing import Any
 from .navigation import ACTIONS, MOVE_DELTAS, shortest_path_distance
 
 
+def charger_route_slack(
+    config: Any,
+    *,
+    position: tuple[int, int],
+    battery: float,
+    charger_position: tuple[int, int],
+) -> float:
+    """Energy left on arrival at the charger from one frozen state."""
+
+    distance = shortest_path_distance(
+        position,
+        charger_position,
+        config.map_layout_id,
+    )
+    return float(battery - distance * config.move_battery_cost)
+
+
+def charger_route_is_critical(
+    config: Any,
+    *,
+    position: tuple[int, int],
+    battery: float,
+    charger_position: tuple[int, int],
+) -> bool:
+    """Whether a charging route has consumed its mission safety reserve.
+
+    The old implementation used three different thresholds in the priority,
+    teacher, and reward paths.  In particular, a robot with exactly the
+    configured mission reserve was treated as ordinary charging by the public
+    priority feature but urgent by later training heuristics.  That mismatch
+    produced the right-then-left charger detour.  This single predicate is
+    intentionally state-only and is shared by every decision consumer.
+    """
+
+    return bool(
+        charger_route_slack(
+            config,
+            position=position,
+            battery=battery,
+            charger_position=charger_position,
+        )
+        <= config.mission_reserve_steps * config.move_battery_cost
+    )
+
+
 def charger_departure_progress(
     state: Any,
     agent: Any,
@@ -234,10 +279,14 @@ def charger_reentry_event(
         "steps_since_departure": int(elapsed),
         "battery": float(agent.battery),
         "productive_reason": (
-            "mission"
-            if completed_mission_progress
-            else "coordination"
+            # If the station was used by the teammate during the absence,
+            # that observable handoff is the more specific causal reason for
+            # the short return. Mission geometry may also have improved, but
+            # must not hide the completed coordination event.
+            "coordination"
             if completed_coordination_progress
+            else "mission"
+            if completed_mission_progress
             else None
         ),
     }
@@ -268,7 +317,7 @@ def charge_release_energy(environment: Any, state: Any, agent: Any) -> float:
         )
     else:
         required = (
-            environment.config.battery_safety_margin
+            environment.config.mission_reserve_steps
             * environment.config.move_battery_cost
         )
     return float(

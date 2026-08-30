@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-
 from .coordination_priority import (
     coordination_priority,
     imminent_head_on_encounter,
@@ -21,6 +20,7 @@ from .coordination_goals import (
 from .energy_management import (
     charger_departure_progress,
     charger_handoff_clearance_action,
+    charger_route_is_critical,
     charger_service_required,
 )
 from .environment import ACTIONS, MOVE_DELTAS, WarehouseMultiAgentEnv, shortest_path_distance
@@ -42,15 +42,12 @@ def _urgent_charge(
         return False
     if agent.navigation_goal_kind != "charge":
         return False
-    goal_distance = shortest_path_distance(
-        agent.position,
-        agent.navigation_goal_position,
-        environment.config.map_layout_id,
+    return charger_route_is_critical(
+        environment.config,
+        position=agent.position,
+        battery=agent.battery,
+        charger_position=environment.layout.charger_position,
     )
-    charger_slack = (
-        agent.battery - goal_distance * environment.config.move_battery_cost
-    )
-    return bool(charger_slack <= environment.config.charge_per_wait)
 
 
 def _priority_agent_and_basis(
@@ -684,6 +681,26 @@ def stable_coordination_actions(
     state = environment.get_state()
     layout = environment.layout
     layout_id = environment.config.map_layout_id
+    plan = state.active_coordination_plan
+    if (
+        plan is not None
+        and state.participant_controlled_agent_id is None
+        and str(plan.get("moving_agent_id", ""))
+        in environment.agent_ids
+        and str(plan.get("moving_action", "")) in ACTIONS
+    ):
+        # Offline labels, runtime observations, and DecisionTrace must consume
+        # the same frozen multi-frame contract. Re-ranking from the changed
+        # geometry after CLEAR_CELL is exactly what used to flip priority and
+        # produce mutually contradictory "I yielded for you" explanations.
+        return {
+            agent_id: (
+                str(plan["moving_action"])
+                if agent_id == str(plan["moving_agent_id"])
+                else "WAIT"
+            )
+            for agent_id in environment.agent_ids
+        }
     overrides = stable_coordination_goal_overrides(
         environment,
         goal_overrides=goal_overrides,
@@ -909,7 +926,7 @@ def stable_coordination_actions(
             return_reserve_steps = (
                 1.0
                 if priority_route_blocked_by_yielding
-                else environment.config.battery_safety_margin
+                else environment.config.mission_reserve_steps
             )
             required_return = (
                 target_charger_distance + return_reserve_steps
@@ -1609,7 +1626,7 @@ def stable_coordination_actions(
                             layout.charger_position,
                             layout_id,
                         )
-                        + environment.config.battery_safety_margin
+                        + environment.config.mission_reserve_steps
                     )
                     * environment.config.move_battery_cost
                 )
@@ -1898,7 +1915,7 @@ def stable_coordination_actions(
                 )
                 required_battery = (
                     next_urgent_distance
-                    + environment.config.battery_safety_margin
+                    + environment.config.mission_reserve_steps
                 ) * environment.config.move_battery_cost
                 if (
                     next_urgent_distance > current_urgent_distance

@@ -1088,6 +1088,52 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
             ),
             self._objective_fact(state, agent),
         ]
+        decision_trace = snapshot.metadata.get("decision_trace", {})
+        if isinstance(decision_trace, Mapping):
+            agent_trace = dict(
+                decision_trace.get("agents", {})
+            ).get(target_entity)
+            if isinstance(agent_trace, Mapping):
+                facts.append(
+                    EvidenceFact(
+                        fact_id=f"{target_entity}.decision_trace",
+                        predicate="decision_trace",
+                        arguments=(target_entity,),
+                        value={
+                            "schema_version": decision_trace.get(
+                                "schema_version"
+                            ),
+                            "decision_frame": decision_trace.get(
+                                "decision_frame"
+                            ),
+                            "outcome_frame": decision_trace.get(
+                                "outcome_frame"
+                            ),
+                            "pre_state_hash": decision_trace.get(
+                                "pre_state_hash"
+                            ),
+                            "post_state_hash": decision_trace.get(
+                                "post_state_hash"
+                            ),
+                            "fact_valid": bool(
+                                decision_trace.get("fact_valid", False)
+                            ),
+                            "fact_validation_failures": tuple(
+                                decision_trace.get(
+                                    "fact_validation_failures", ()
+                                )
+                            ),
+                            **dict(agent_trace),
+                        },
+                        factor_groups=(
+                            "decision_trace",
+                            "action_reason",
+                            "rationale",
+                        ),
+                        verbalizations=(),
+                        value_verbalizations=(),
+                    )
+                )
         resolution = dict(snapshot.metadata.get("action_resolution", {})).get(
             target_entity,
             {},

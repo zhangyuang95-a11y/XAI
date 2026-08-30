@@ -8,6 +8,7 @@ server later.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -585,6 +586,9 @@ class WarehouseWebSession:
                 **dict(rollout_frame.snapshot.metadata),
                 "action_resolution": dict(
                     rollout_frame.info.get("action_resolution", {})
+                ),
+                "decision_trace": deepcopy(
+                    rollout_frame.info.get("decision_trace", {})
                 ),
                 "decision_outcome_frame": rollout_frame.next_snapshot.frame,
                 "decision_evidence_aligned": True,
@@ -1289,6 +1293,7 @@ class WarehouseWebSession:
             metadata={
                 **dict(before.metadata),
                 "action_resolution": dict(info.get("action_resolution", {})),
+                "decision_trace": deepcopy(info.get("decision_trace", {})),
                 "decision_outcome_frame": after.frame,
                 "decision_evidence_aligned": True,
                 "decision_deterministic": False,

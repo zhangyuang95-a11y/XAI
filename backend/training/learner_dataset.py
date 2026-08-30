@@ -1540,6 +1540,23 @@ def collect_commitment_curriculum_dataset(
         for _ in range(rollout_steps):
             state = environment.get_state()
             teacher_actions = stable_coordination_actions(environment)
+            # The frozen runtime action set is part of the observation
+            # contract. A legacy teacher preference may use a different safe
+            # side exit, but an offline label must never target an action
+            # masked out in the exact row it supervises.
+            for agent_id in environment.agent_ids:
+                mask = np.asarray(
+                    observations[agent_id][-len(ACTIONS) :],
+                    dtype=np.float32,
+                )
+                target_index = ACTIONS.index(teacher_actions[agent_id])
+                if mask[target_index] <= 0.5:
+                    allowed = np.flatnonzero(mask > 0.5)
+                    if len(allowed) == 0:
+                        raise RuntimeError(
+                            f"{agent_id} has no Actor-valid curriculum label."
+                        )
+                    teacher_actions[agent_id] = ACTIONS[int(allowed[0])]
             for agent_id in environment.agent_ids:
                 rows.append(
                     independent_actor_input(observations[agent_id])

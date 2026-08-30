@@ -432,6 +432,23 @@ def main() -> None:
         "avoidable_loaded_delivery_detours_eq_0": (
             ai_ai["avoidable_loaded_delivery_detour_steps"] == 0
         ),
+        "avoidable_mission_detours_eq_0": (
+            ai_ai["avoidable_mission_detour_steps"] == 0
+        ),
+        "unexplained_reversals_eq_0": (
+            ai_ai["unexplained_reversals"] == 0
+        ),
+        "short_cycles_eq_0": ai_ai["short_cycles"] == 0,
+        "invalid_goal_switches_eq_0": (
+            ai_ai["invalid_goal_switches"] == 0
+        ),
+        "explanation_fact_failures_eq_0": (
+            ai_ai["explanation_fact_failures"] == 0
+        ),
+        "simultaneous_semantics_violations_eq_0": (
+            ai_ai["simultaneous_semantics_violations"] == 0
+        ),
+        "unnecessary_waits_eq_0": ai_ai["unnecessary_waits"] == 0,
         "ai_ai_post_policy_action_interventions_eq_0": (
             ai_ai["mean_post_policy_action_interventions"] == 0.0
         ),

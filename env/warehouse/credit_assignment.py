@@ -17,6 +17,7 @@ from .domain import AgentState, DeliveryTask, WarehouseState
 from .coordination_priority import single_lane_egress_agent_id
 from .energy_management import (
     charger_handoff_clearance_action,
+    charger_route_is_critical,
     charger_service_required,
 )
 from .navigation import ACTIONS, MOVE_DELTAS, shortest_path_distance
@@ -256,13 +257,12 @@ def mission_goal_distance(
 def _urgent_charge(environment: Any, agent: AgentState) -> bool:
     if agent.navigation_goal_kind != "charge":
         return False
-    distance = shortest_path_distance(
-        agent.position,
-        agent.navigation_goal_position,
-        environment.config.map_layout_id,
+    return charger_route_is_critical(
+        environment.config,
+        position=agent.position,
+        battery=agent.battery,
+        charger_position=environment.layout.charger_position,
     )
-    slack = agent.battery - distance * environment.config.move_battery_cost
-    return bool(slack <= environment.config.charge_per_wait)
 
 
 def _shortest_progress_positions(
@@ -995,6 +995,9 @@ def individual_credit_components(
     necessary_clearance_agents: tuple[str, ...],
     charger_return_cycle_agents: tuple[str, ...],
     starving_task_ids: tuple[str, ...],
+    unexplained_reversal_agents: tuple[str, ...],
+    short_cycle_agents: tuple[str, ...],
+    invalid_goal_switch_agents: tuple[str, ...],
 ) -> dict[str, Any]:
     """Build all reward components without touching the user score."""
 
@@ -1072,6 +1075,20 @@ def individual_credit_components(
         )
         for agent in next_state.agents
     }
+    reversal_set = set(unexplained_reversal_agents)
+    short_cycle_set = set(short_cycle_agents)
+    invalid_switch_set = set(invalid_goal_switch_agents)
+    temporal_consistency_penalties = {
+        agent.agent_id: (
+            -config.unexplained_reversal_cost
+            * int(agent.agent_id in reversal_set)
+            -config.short_cycle_cost
+            * int(agent.agent_id in short_cycle_set)
+            -config.invalid_goal_switch_cost
+            * int(agent.agent_id in invalid_switch_set)
+        )
+        for agent in next_state.agents
+    }
     rewards = {
         agent.agent_id: (
             base_reward
@@ -1081,6 +1098,7 @@ def individual_credit_components(
             + repeated_wait_penalties[agent.agent_id]
             + flat_wait_penalties[agent.agent_id]
             + causal_efficiency_penalties[agent.agent_id]
+            + temporal_consistency_penalties[agent.agent_id]
         )
         for agent in next_state.agents
     }
@@ -1096,6 +1114,7 @@ def individual_credit_components(
         "repeated_avoidable_wait_penalty_rewards": repeated_wait_penalties,
         "flat_avoidable_wait_penalty_rewards": flat_wait_penalties,
         "causal_efficiency_penalty_rewards": causal_efficiency_penalties,
+        "temporal_consistency_penalty_rewards": temporal_consistency_penalties,
     }
 
 
@@ -1119,6 +1138,9 @@ def transition_credit_components(
     starving_task_ids: tuple[str, ...],
     assignment_potential_before: float,
     assignment_potential_after: float,
+    unexplained_reversal_agents: tuple[str, ...],
+    short_cycle_agents: tuple[str, ...],
+    invalid_goal_switch_agents: tuple[str, ...],
 ) -> dict[str, Any]:
     """Select production individual credit or the isolated legacy ablation."""
 
@@ -1169,6 +1191,9 @@ def transition_credit_components(
             necessary_clearance_agents=necessary_clearance_agents,
             charger_return_cycle_agents=charger_return_cycle_agents,
             starving_task_ids=starving_task_ids,
+            unexplained_reversal_agents=unexplained_reversal_agents,
+            short_cycle_agents=short_cycle_agents,
+            invalid_goal_switch_agents=invalid_goal_switch_agents,
         )
         result["potential_shaping_reward"] = (
             sum(result["individual_progress_rewards"].values())
@@ -1235,6 +1260,7 @@ def transition_credit_components(
             for agent_id in agent_ids
         },
         "causal_efficiency_penalty_rewards": dict(zeros),
+        "temporal_consistency_penalty_rewards": dict(zeros),
         "potential_shaping_reward": shaping,
         "avoidable_wait_penalty_reward": -wait_penalty,
         "mission_regression_units": regression_units,

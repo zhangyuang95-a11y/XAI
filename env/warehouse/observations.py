@@ -16,6 +16,7 @@ from .domain import WarehouseConfig, WarehouseState
 from .navigation import (
     ACTIONS,
     CHARGER_POSITION,
+    MOVE_DELTAS,
     is_passable,
     is_shelf,
     legal_action_mask,
@@ -107,13 +108,20 @@ def _actor_visible_goal(
     if (
         agent.navigation_goal_kind == "wait"
         and agent.carrying_task_id is None
-        and agent.route_commitment_task_id is not None
+        and (
+            agent.route_commitment_task_id is not None
+            or (
+                agent.goal_type == "GO_TO_PICKUP"
+                and agent.goal_id is not None
+            )
+        )
     ):
+        task_id = agent.route_commitment_task_id or agent.goal_id
         task = next(
             (
                 item
                 for item in state.tasks
-                if item.task_id == agent.route_commitment_task_id
+                if item.task_id == task_id
                 and item.status == "available"
             ),
             None,
@@ -121,6 +129,110 @@ def _actor_visible_goal(
         if task is not None:
             return "pickup", task.pickup_position
     return agent.navigation_goal_kind, agent.navigation_goal_position
+
+
+def _actor_action_mask(
+    state: WarehouseState,
+    agent: Any,
+    config: WarehouseConfig,
+) -> list[float]:
+    """Return the frozen-state safety mask, including an AI-AI joint plan.
+
+    This is decided before either current action exists. Participant rounds
+    retain the ordinary geometry mask so a human action is never represented
+    as compliance with an AI coordination plan.
+    """
+
+    static = legal_action_mask(state, agent, config.map_layout_id)
+    plan = state.active_coordination_plan
+    if state.participant_controlled_agent_id is not None:
+        return static
+    if plan is None:
+        other = next(
+            item for item in state.agents if item.agent_id != agent.agent_id
+        )
+        _, goal = _actor_visible_goal(state, agent)
+        current_distance = shortest_path_distance(
+            agent.position,
+            goal,
+            config.map_layout_id,
+        )
+        progress_actions: dict[str, tuple[int, int]] = {}
+        for action, allowed in zip(ACTIONS, static):
+            if action not in MOVE_DELTAS or allowed <= 0.5:
+                continue
+            target = (
+                agent.position[0] + MOVE_DELTAS[action][0],
+                agent.position[1] + MOVE_DELTAS[action][1],
+            )
+            if shortest_path_distance(
+                target,
+                goal,
+                config.map_layout_id,
+            ) < current_distance:
+                progress_actions[action] = target
+        progress_targets = set(progress_actions.values())
+        other_static = legal_action_mask(state, other, config.map_layout_id)
+        other_targets = {
+            action: (
+                other.position
+                if action == "WAIT"
+                else (
+                    other.position[0] + MOVE_DELTAS[action][0],
+                    other.position[1] + MOVE_DELTAS[action][1],
+                )
+            )
+            for action, allowed in zip(ACTIONS, other_static)
+            if allowed > 0.5
+        }
+        robust_progress_actions = {
+            action
+            for action, target in progress_actions.items()
+            if all(
+                target != other_target
+                and not (
+                    target == other.position
+                    and other_target == agent.position
+                )
+                for other_target in other_targets.values()
+            )
+        }
+        if robust_progress_actions:
+            return [
+                1.0 if action in robust_progress_actions else 0.0
+                for action in ACTIONS
+            ]
+        # A temporary step away from a locked goal is not a solution when the
+        # only progress cell is occupied by the teammate. Wait for the frozen
+        # blocker to move; a genuine clearance manoeuvre has an explicit plan
+        # and is handled below instead.
+        if progress_targets == {other.position} and static[ACTIONS.index("WAIT")] > 0.5:
+            return [
+                1.0 if action == "WAIT" else 0.0
+                for action in ACTIONS
+            ]
+        return static
+    phase = str(plan.get("phase", ""))
+    expected: str | None = None
+    if phase == "CLEAR_CELL":
+        if str(plan.get("priority_agent_id")) == agent.agent_id:
+            expected = "WAIT"
+        elif str(plan.get("clearing_agent_id")) == agent.agent_id:
+            expected = str(plan.get("moving_action", ""))
+    elif phase in {"PASS_THROUGH", "SINGLE_STEP"}:
+        if str(plan.get("moving_agent_id")) == agent.agent_id:
+            expected = str(plan.get("moving_action", ""))
+        elif str(plan.get("waiting_agent_id")) == agent.agent_id:
+            expected = "WAIT"
+    if expected not in ACTIONS:
+        return static
+    index = ACTIONS.index(expected)
+    if static[index] <= 0.5:
+        return static
+    return [
+        1.0 if action_index == index else 0.0
+        for action_index in range(len(ACTIONS))
+    ]
 
 
 def _route_energy_features(
@@ -370,7 +482,16 @@ def _coordination_features(
             visible_goals,
         ),
     )
-    own_priority = priority.agent_id == agent.agent_id
+    if state.active_coordination_plan is not None:
+        planned_priority = str(
+            state.active_coordination_plan.get("priority_agent_id", "")
+        )
+        if planned_priority in {agent.agent_id, other.agent_id}:
+            own_priority = planned_priority == agent.agent_id
+        else:
+            own_priority = priority.agent_id == agent.agent_id
+    else:
+        own_priority = priority.agent_id == agent.agent_id
     axis = (
         1
         if agent.position[0] == other.position[0]
@@ -401,7 +522,7 @@ def _coordination_features(
         )
         for action, allowed in zip(
             ACTIONS,
-            legal_action_mask(state, other, config.map_layout_id),
+            _actor_action_mask(state, other, config),
         )
         if allowed > 0.5
     }
@@ -836,8 +957,14 @@ def local_observation(
                     task.carrier_agent_id is not None
                     and task.carrier_agent_id != agent_id
                 ),
-                float(agent.route_commitment_task_id == task.task_id),
-                float(teammate.route_commitment_task_id == task.task_id),
+                float(
+                    (agent.route_commitment_task_id or agent.goal_id)
+                    == task.task_id
+                ),
+                float(
+                    (teammate.route_commitment_task_id or teammate.goal_id)
+                    == task.task_id
+                ),
                 _normalize_delta(
                     task.pickup_position[0] - agent.position[0],
                     config.rows,
@@ -941,7 +1068,7 @@ def local_observation(
                     other_goal_kind == "charge"
                     and teammate_charger_slack <= config.charge_per_wait
                 ),
-                *legal_action_mask(state, other, config.map_layout_id),
+                *_actor_action_mask(state, other, config),
                 *_recent_energy_features(state, other.agent_id, config),
             )
         )
@@ -955,7 +1082,7 @@ def local_observation(
     values.extend(_canonical_team_context(state, config))
     values.extend(_coordination_features(state, agent_id, config))
     values.extend(_local_patch(state, agent_id, config))
-    values.extend(legal_action_mask(state, agent, config.map_layout_id))
+    values.extend(_actor_action_mask(state, agent, config))
     return np.asarray(values, dtype=np.float32)
 
 

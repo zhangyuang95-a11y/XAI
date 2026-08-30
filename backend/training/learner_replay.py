@@ -262,7 +262,8 @@ def fit_actor_supervised(
         """
 
         weights = mask.to(dtype=values.dtype)
-        return (values * weights).sum() / weights.sum().clamp_min(1.0)
+        selected = torch.where(mask, values, torch.zeros_like(values))
+        return selected.sum() / weights.sum().clamp_min(1.0)
 
     def accuracy() -> float:
         with torch.no_grad():
@@ -440,6 +441,11 @@ def fit_actor_supervised(
                     wait,
                 )
                 loss = loss + float(wait_weight) * wait_margin_loss
+            if not bool(torch.isfinite(loss)):
+                raise RuntimeError(
+                    "Non-finite supervised Actor loss; verify that every "
+                    "target is allowed by its frozen S_t action mask."
+                )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(

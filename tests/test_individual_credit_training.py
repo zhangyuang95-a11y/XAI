@@ -189,7 +189,7 @@ def test_actor_priority_and_teacher_share_loaded_delivery_precedence() -> None:
     assert robot_one_features[6:8] == [0.0, 1.0]
     assert robot_two_features[6:8] == [1.0, 0.0]
     assert stable_coordination_actions(environment) == {
-        "robot_1": "RIGHT",
+        "robot_1": "WAIT",
         "robot_2": "UP",
     }
 

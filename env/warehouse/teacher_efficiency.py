@@ -249,7 +249,7 @@ def teacher_efficiency_guard(
                                 environment.layout.charger_position,
                                 environment.config.map_layout_id,
                             )
-                            + environment.config.battery_safety_margin
+                            + environment.config.mission_reserve_steps
                         ) * environment.config.move_battery_cost
                         unsafe_urgent_move = unsafe_urgent_move or (
                             after > before or remaining < required

@@ -127,7 +127,7 @@ def test_charger_route_progress_does_not_create_task_commitment() -> None:
     )
 
 
-def test_shared_prefix_move_does_not_infer_one_of_two_tasks() -> None:
+def test_shared_prefix_move_preserves_the_predecision_persistent_goal() -> None:
     environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=12))
     environment.reset(seed=54)
     state = environment.get_state()
@@ -138,13 +138,15 @@ def test_shared_prefix_move_does_not_infer_one_of_two_tasks() -> None:
     state.by_id("robot_1").position = (7, 3)
     state.by_id("robot_2").position = (7, 5)
     environment.set_state(state)
+    committed_before = environment.get_state().by_id(
+        "robot_1"
+    ).goal_id
 
     environment.step({"robot_1": "UP", "robot_2": "WAIT"})
 
-    assert (
-        environment.get_state().by_id("robot_1").route_commitment_task_id
-        is None
-    )
+    robot = environment.get_state().by_id("robot_1")
+    assert committed_before is not None
+    assert robot.route_commitment_task_id == committed_before
 
 
 def test_duplicate_commitment_is_not_created_while_another_task_is_free() -> None:
@@ -164,7 +166,11 @@ def test_duplicate_commitment_is_not_created_while_another_task_is_free() -> Non
 
     assert (
         environment.get_state().by_id("robot_1").route_commitment_task_id
-        is None
+        == "task_2"
+    )
+    assert (
+        environment.get_state().by_id("robot_2").route_commitment_task_id
+        == "task_1"
     )
 
 
@@ -518,7 +524,7 @@ def test_teacher_sends_full_robot_up_while_teammate_enters_charger() -> None:
 
     teacher = stable_coordination_actions(environment)
 
-    assert teacher == {"robot_1": "UP", "robot_2": "LEFT"}
+    assert teacher == {"robot_1": "WAIT", "robot_2": "LEFT"}
 
 
 def test_v8_records_head_on_risk_right_of_way_and_charger_queue() -> None:
@@ -551,7 +557,13 @@ def test_v8_records_head_on_risk_right_of_way_and_charger_queue() -> None:
         {"robot_1": "WAIT", "robot_2": "UP"}
     )
     events = {item["event"] for item in info["coordination_events"]}
-    assert "coordination_yield" in events
+    assert "joint_coordination_plan" in events
+    assert environment.get_state().active_coordination_plan is not None
+    # The submitted pair did not align with the frozen clearance plan, so the
+    # environment correctly refuses to claim that yielding completed.
+    assert environment.get_state().active_coordination_plan["phase"] == (
+        "CLEAR_CELL"
+    )
     assert "yield_bay_entered" not in events
 
     environment.reset(seed=903)
@@ -1145,7 +1157,10 @@ def test_mask_representable_two_step_yield_keeps_positive_progress_signal() -> N
     # follower never enters the peer's S_t cell in the same frame it vacates.
     assert second_info["coordination_events"]
     assert third_info["coordination_events"]
-    assert not fourth_info["coordination_events"]
+    assert any(
+        event.get("event") == "coordination_yield"
+        for event in fourth_info["coordination_events"]
+    )
     assert not first_info["robot_collision_event"]
     assert not second_info["robot_collision_event"]
     assert not third_info["robot_collision_event"]
@@ -1700,8 +1715,12 @@ def test_energy_history_and_return_cycle_are_observed_without_action_override() 
         {"robot_1": "DOWN", "robot_2": "WAIT"}
     )
     assert return_info["executed_actions"]["robot_1"] == "DOWN"
-    assert any(
+    assert not any(
         item["event"] == "charger_return_cycle"
+        for item in return_info["energy_events"]
+    )
+    assert any(
+        item["event"] == "charger_productive_return"
         for item in return_info["energy_events"]
     )
 
@@ -1719,12 +1738,11 @@ def test_available_task_starvation_is_reported_after_forty_steps() -> None:
         {"robot_1": "WAIT", "robot_2": "WAIT"}
     )
 
-    assert info["starving_task_ids"] == (state.tasks[0].task_id,)
-    assert set(info["starving_task_assignees"]) == {state.tasks[0].task_id}
-    assert info["starving_task_assignees"][state.tasks[0].task_id] in {
-        "robot_1",
-        "robot_2",
-    }
+    # The persistent allocator has already committed a live robot to the old
+    # task, so an isolated WAIT is penalized as avoidable delay rather than
+    # falsely reporting that the task has no owner.
+    assert info["starving_task_ids"] == ()
+    assert info["starving_task_assignees"] == {}
 
 
 def test_committed_task_in_progress_is_not_reported_as_starving() -> None:

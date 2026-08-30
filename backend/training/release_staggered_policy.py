@@ -38,6 +38,12 @@ EVALUATION_FIELDS = (
     "charger_departure_return_cycle_episode_rate",
     "task_starvation_episode_rate",
     "avoidable_loaded_delivery_detour_steps",
+    "unexplained_reversals",
+    "short_cycles",
+    "invalid_goal_switches",
+    "explanation_fact_failures",
+    "simultaneous_semantics_violations",
+    "unnecessary_waits",
 )
 
 # Fresh post-formal smoke ranges.  These sit beyond the complete declared
@@ -169,6 +175,25 @@ def _release_gate(seed_ranges: dict[str, dict[str, float]]) -> dict[str, bool]:
         "post_policy_action_interventions_eq_0": all(
             item["mean_post_policy_action_interventions"] == 0.0
             for item in values
+        ),
+        "unexplained_reversals_eq_0": all(
+            item["unexplained_reversals"] == 0.0 for item in values
+        ),
+        "short_cycles_eq_0": all(
+            item["short_cycles"] == 0.0 for item in values
+        ),
+        "invalid_goal_switches_eq_0": all(
+            item["invalid_goal_switches"] == 0.0 for item in values
+        ),
+        "explanation_fact_failures_eq_0": all(
+            item["explanation_fact_failures"] == 0.0 for item in values
+        ),
+        "simultaneous_semantics_violations_eq_0": all(
+            item["simultaneous_semantics_violations"] == 0.0
+            for item in values
+        ),
+        "unnecessary_waits_eq_0": all(
+            item["unnecessary_waits"] == 0.0 for item in values
         ),
     }
 

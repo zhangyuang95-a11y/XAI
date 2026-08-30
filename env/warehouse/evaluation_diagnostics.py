@@ -232,6 +232,18 @@ def avoidable_mission_detour_agents(
         ):
             continue
         if (
+            agent.navigation_goal_kind == "wait"
+            and agent.carrying_task_id is None
+            and agent.route_commitment_task_id is None
+            and not (
+                agent.goal_type == "GO_TO_PICKUP"
+                and agent.goal_id is not None
+            )
+        ):
+            # A private training assignment is not a locked runtime goal.
+            # An uncommitted Actor may legitimately choose any safe task.
+            continue
+        if (
             mission.goal_kind == "pickup"
             and (
                 mission.task is None

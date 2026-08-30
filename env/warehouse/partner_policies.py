@@ -186,7 +186,7 @@ def participant_surrogate_distribution(
             - ai_charger_distance * environment.config.move_battery_cost
         )
         <= (
-            environment.config.battery_safety_margin
+            environment.config.mission_reserve_steps
             * environment.config.move_battery_cost
         )
     )

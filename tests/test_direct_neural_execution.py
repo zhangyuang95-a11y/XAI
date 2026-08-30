@@ -115,9 +115,11 @@ def test_wait_memory_contract_rejects_previous_direct_neural_model() -> None:
 
 def test_execution_contract_is_explicitly_direct_neural() -> None:
     assert ACTION_EXECUTION_VERSION == (
-        "batched_independent_simultaneous_actor_v13"
+        "frozen_joint_plan_atomic_actor_v14"
     )
-    assert RUNTIME_CONTROLLER == "mappo_batched_actor_atomic_joint_execution"
+    assert RUNTIME_CONTROLLER == (
+        "mappo_frozen_state_actor_atomic_joint_execution"
+    )
 
 
 def test_batched_actor_rejects_an_invalid_action_mask_before_device_forward() -> None:
@@ -210,7 +212,9 @@ def test_joint_risk_loss_equals_manual_p1_c_p2_on_frozen_state() -> None:
         expected = probabilities[0] @ matrix @ probabilities[1]
 
     assert measured.item() == pytest.approx(expected.item())
-    assert measured.item() > 0.0
+    # The frozen joint-plan action mask is a hard semantic constraint, so a
+    # detected head-on state can have exactly zero residual collision mass.
+    assert measured.item() == pytest.approx(0.0)
 
 
 def test_actor_exposes_trainable_neural_mission_logits() -> None:

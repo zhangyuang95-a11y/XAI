@@ -45,6 +45,9 @@ def export_numpy_actor(checkpoint: str | Path, output: str | Path) -> Path:
         "battery_safety_margin": float(
             policy.environment_config.battery_safety_margin
         ),
+        "mission_reserve_steps": float(
+            policy.environment_config.mission_reserve_steps
+        ),
         "map_rows": int(policy.environment_config.rows),
         "map_cols": int(policy.environment_config.cols),
         "observation_dim": observation_dim(policy.environment_config),

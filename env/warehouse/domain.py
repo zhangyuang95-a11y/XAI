@@ -161,6 +161,17 @@ class AgentState:
     deliveries_completed: int = 0
     navigation_goal_kind: str = "pickup"
     navigation_goal_position: tuple[int, int] = (0, 0)
+    # Persistent, human-auditable decision state. Goal identity and age are
+    # derived before the next joint decision and are therefore safe to expose
+    # to both Actors without leaking either current action.
+    goal_type: str = "SELECT_TASK"
+    goal_id: str | None = None
+    goal_since: int = 0
+    goal_switch_reason: str = "episode_reset"
+    charging_reason: str | None = None
+    yielding_plan_id: str | None = None
+    recent_positions: tuple[tuple[int, int], ...] = ()
+    recent_goal_types: tuple[str, ...] = ()
 
     @property
     def goal_kind(self) -> str:
@@ -205,6 +216,12 @@ class WarehouseState:
     last_robot_collision_kind: str | None = None
     last_coordination_events: tuple[dict[str, Any], ...] = ()
     ineffective_joint_wait_streak: int = 0
+    # A frozen multi-frame clearance contract.  The first transition clears
+    # the occupied route cell; the second lets the original priority robot
+    # enter it.  Persisting the contract prevents priority from flipping when
+    # the geometry changes after the clearance move.
+    active_coordination_plan: dict[str, Any] | None = None
+    coordination_plan_cooldown_until: int = 0
     # Episode-level control provenance is known before a decision.  It never
     # contains the participant's current action.
     participant_controlled_agent_id: str | None = None

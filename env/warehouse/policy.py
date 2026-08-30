@@ -92,7 +92,7 @@ class SharedActorCentralCritic(nn.Module):
         active_task_count: int,
         horizon: int,
         move_battery_cost: float,
-        battery_safety_margin: float,
+        mission_reserve_steps: float,
         map_rows: int,
         map_cols: int,
     ) -> None:
@@ -133,12 +133,19 @@ class SharedActorCentralCritic(nn.Module):
         # their probability below the combined bounded learned heads. The
         # gate stays zero when every safe action must temporarily detour, so
         # public clearance manoeuvres remain available.
-        self.minimum_mission_detour_logit_scale = 50.0
+        self.minimum_mission_detour_logit_scale = 250.0
+        # Before an empty robot commits to a shared task, positive pickup
+        # progress is admissible only for a task whose complete A->B->charger
+        # route remains energy-safe.  This prevents the first half of the
+        # observed UP->DOWN oscillation: the unsafe UP action is rejected in
+        # S_t instead of being regretted only after its battery cost is paid.
+        self.minimum_unsafe_task_progress_logit_scale = 250.0
+        self.active_task_count = int(active_task_count)
         self.action_dim = int(action_dim)
         self.base_local_dim = int(local_dim)
         self.horizon = int(horizon)
         self.move_battery_cost_fraction = float(move_battery_cost) / 100.0
-        self.battery_safety_margin = float(battery_safety_margin)
+        self.mission_reserve_steps = float(mission_reserve_steps)
         self.map_rows = int(map_rows)
         self.map_cols = int(map_cols)
         coordination_dim = (
@@ -553,7 +560,7 @@ class SharedActorCentralCritic(nn.Module):
             self_has_charge_goal
             * (
                 current_charger_slack
-                <= self.battery_safety_margin
+                <= self.mission_reserve_steps
                 * self.move_battery_cost_fraction
                 + 1e-8
             ).to(local.dtype)
@@ -605,7 +612,7 @@ class SharedActorCentralCritic(nn.Module):
         teammate_clearance_required_battery = (
             teammate_action_features[..., :, 1]
             * float(self.map_rows * self.map_cols)
-            + self.battery_safety_margin
+            + self.mission_reserve_steps
         ) * self.move_battery_cost_fraction
         teammate_energy_safe_charger_clearance = (
             teammate_clearance_remaining_battery + 1e-8
@@ -948,8 +955,16 @@ class SharedActorCentralCritic(nn.Module):
             (teammate_action_features[..., :, 2] > 0.0).to(local.dtype)
             * teammate_legal_actions
         )
-        ai_ai_progress_wait_safe = 1.0 - (
-            collision_matrix[..., -1, :] * teammate_progress_actions
+        # Under the shared frozen-state priority contract the priority Actor
+        # must choose one collision-free progress route when one exists.  The
+        # yielding robot therefore need not retreat merely because a
+        # different, avoidable peer action could enter its cell.  Requiring
+        # WAIT to survive *all* legal peer actions created a LEFT->RIGHT
+        # cul-de-sac cycle even though the priority robot had a safe DOWN
+        # route.  This remains independent of the peer's sampled action.
+        ai_ai_progress_wait_safe = (
+            (1.0 - collision_matrix[..., -1, :])
+            * teammate_progress_actions
         ).amax(dim=-1)
         public_yield_wait_available = (
             (1.0 - participant_teammate.squeeze(-1))
@@ -972,6 +987,45 @@ class SharedActorCentralCritic(nn.Module):
             * self_has_route_goal.unsqueeze(-1)
             * robust_nonregression_exit_exists.unsqueeze(-1)
             * torch.clamp(-own_action_features[..., :, 2], min=0.0)
+        )
+        task_action_features = own_action_features[..., 9:].reshape(
+            *local.shape[:-1],
+            self.action_dim,
+            self.active_task_count,
+            6,
+        )
+        task_progress = torch.clamp(
+            task_action_features[..., 1],
+            min=0.0,
+        )
+        task_energy_safe = (
+            task_action_features[..., 4] >= -1e-8
+        ).to(local.dtype)
+        safe_task_progress = task_progress * task_energy_safe
+        unsafe_task_progress = task_progress * (1.0 - task_energy_safe)
+        safe_task_progress_exists = (
+            safe_task_progress.amax(dim=(-2, -1)) > 0.0
+        ).to(local.dtype)
+        action_has_safe_task_progress = (
+            safe_task_progress.amax(dim=-1) > 0.0
+        ).to(local.dtype)
+        action_has_unsafe_task_progress = (
+            unsafe_task_progress.amax(dim=-1) > 0.0
+        ).to(local.dtype)
+        uncommitted_task_selection = (
+            (1.0 - self_has_route_goal) * (1.0 - local[..., 4])
+        )
+        unsafe_task_progress_penalty = (
+            torch.clamp(
+                torch.nn.functional.softplus(
+                    self.energy_route_deficit_log_scale
+                ),
+                min=self.minimum_unsafe_task_progress_logit_scale,
+            )
+            * uncommitted_task_selection.unsqueeze(-1)
+            * safe_task_progress_exists.unsqueeze(-1)
+            * action_has_unsafe_task_progress
+            * (1.0 - action_has_safe_task_progress)
         )
         robust_progress_bonus = (
             torch.nn.functional.softplus(self.robust_progress_log_scale)
@@ -1063,6 +1117,28 @@ class SharedActorCentralCritic(nn.Module):
             torch.clamp(own_action_features[..., :, 2], min=0.0)
             * own_action_features[..., :, 3]
         ).amax(dim=-1)
+        unoccupied_robust_goal_progress = (
+            torch.clamp(own_action_features[..., :, 2], min=0.0)
+            * (1.0 - own_action_features[..., :, 3])
+            * robust_action_safe
+        )
+        unoccupied_goal_progress_exists = (
+            unoccupied_robust_goal_progress.amax(dim=-1) > 0.0
+        ).to(local.dtype)
+        blocked_priority_action_penalty = (
+            self.minimum_occupied_cell_logit_scale
+            * ((1.0 - local[..., 22]) * (1.0 - local[..., 23])).unsqueeze(-1)
+            * self_has_priority.unsqueeze(-1)
+            * own_goal_blocked_by_teammate.unsqueeze(-1)
+            * (
+                unoccupied_goal_progress_exists.unsqueeze(-1)
+                * (
+                    unoccupied_robust_goal_progress <= 0.0
+                ).to(local.dtype)
+                + (1.0 - unoccupied_goal_progress_exists).unsqueeze(-1)
+                * non_wait_action
+            )
+        )
         # If both AIs have already produced an ineffective joint wait while
         # one robot physically occupies the other's next goal-progress cell,
         # the blocked robot must take a collision-robust separating step.
@@ -1178,8 +1254,10 @@ class SharedActorCentralCritic(nn.Module):
             - charger_reentry_cycle_penalty
             - charger_occupant_penalty
             - completed_charge_wait_penalty
+            - blocked_priority_action_penalty
             + priority_progress_bonus
             - mission_detour_penalty
+            - unsafe_task_progress_penalty
             - participant_delivery_detour_penalty
             + robust_progress_bonus
             + participant_robust_progress_bonus
@@ -1351,7 +1429,7 @@ class MAPPOPolicy:
             environment_config.active_task_count,
             environment_config.horizon,
             environment_config.move_battery_cost,
-            environment_config.battery_safety_margin,
+            environment_config.mission_reserve_steps,
             environment_config.rows,
             environment_config.cols,
         ).to(self.device)

@@ -98,7 +98,12 @@ def collect_priority_yield_rows(
     skipped = 0
     actor_non_wait_skipped = 0
     wait_index = ACTIONS.index("WAIT")
-    for episode in range(int(episodes)):
+    requested_rows = int(episodes)
+    attempt = 0
+    maximum_attempts = max(requested_rows, requested_rows * 8)
+    while len(rows) < requested_rows and attempt < maximum_attempts:
+        episode = attempt
+        attempt += 1
         environment = WarehouseMultiAgentEnv(policy.environment_config)
         environment.reset(seed=int(seed) + episode)
         priority_id, yielding_id = _configure_priority_yield_case(
@@ -132,6 +137,7 @@ def collect_priority_yield_rows(
         np.asarray(labels, dtype=np.int64),
         {
             "requested_episodes": int(episodes),
+            "attempted_cases": attempt,
             "rows": len(rows),
             "skipped": skipped,
             "actor_non_wait_skipped": actor_non_wait_skipped,

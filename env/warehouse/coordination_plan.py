@@ -24,6 +24,71 @@ from .navigation import (
 )
 
 
+def _goal_progress_actions(
+    state: WarehouseState,
+    config: WarehouseConfig,
+    *,
+    goals: Mapping[str, tuple[int, int]],
+) -> dict[str, tuple[tuple[int, str, tuple[int, int]], ...]]:
+    """Return each robot's legal one-step shortest-route progress actions."""
+
+    layout = get_map_layout(config.map_layout_id)
+    result: dict[str, tuple[tuple[int, str, tuple[int, int]], ...]] = {}
+    for agent in state.agents:
+        goal = goals[agent.agent_id]
+        current_distance = shortest_path_distance(
+            agent.position,
+            goal,
+            config.map_layout_id,
+        )
+        candidates: list[tuple[int, str, tuple[int, int]]] = []
+        for action_index, action in enumerate(ACTIONS):
+            delta = MOVE_DELTAS.get(action)
+            if delta is None:
+                continue
+            target = (
+                agent.position[0] + delta[0],
+                agent.position[1] + delta[1],
+            )
+            if not layout.is_passable(target):
+                continue
+            if shortest_path_distance(
+                target,
+                goal,
+                config.map_layout_id,
+            ) < current_distance:
+                candidates.append((action_index, action, target))
+        result[agent.agent_id] = tuple(candidates)
+    return result
+
+
+def _independent_parallel_progress_exists(
+    state: WarehouseState,
+    progress: Mapping[str, tuple[tuple[int, str, tuple[int, int]], ...]],
+) -> bool:
+    """Whether both robots can advance into distinct, initially free cells.
+
+    A right-of-way plan is unnecessary when two mission-progress moves are
+    already independent.  Requiring initially free targets preserves the
+    conservative frozen-state hand-off used when one robot needs the other's
+    currently occupied cell; that case receives an explicit clearance plan.
+    """
+
+    active = tuple(agent for agent in state.agents if agent.active)
+    if len(active) != 2:
+        return False
+    first, second = active
+    for _, _, first_target in progress.get(first.agent_id, ()):
+        for _, _, second_target in progress.get(second.agent_id, ()):
+            if (
+                first_target != second_target
+                and first_target != second.position
+                and second_target != first.position
+            ):
+                return True
+    return False
+
+
 def frozen_joint_coordination_plan(
     state: WarehouseState,
     config: WarehouseConfig,
@@ -145,6 +210,26 @@ def frozen_joint_coordination_plan(
         else:
             goals[agent.agent_id] = agent.navigation_goal_position
             kinds[agent.agent_id] = agent.navigation_goal_kind
+    progress_actions = _goal_progress_actions(
+        state,
+        config,
+        goals=goals,
+    )
+    active_progress_targets = {
+        agent.agent_id: {
+            target
+            for _, _, target in progress_actions.get(agent.agent_id, ())
+        }
+        for agent in active
+    }
+    shared_progress_targets = set.intersection(
+        *(active_progress_targets[agent.agent_id] for agent in active)
+    )
+    # Do not manufacture a single-lane conflict from mere proximity.  If
+    # both frozen goals have progress moves into different free cells, both
+    # Actors can advance simultaneously without a right-of-way handshake.
+    if _independent_parallel_progress_exists(state, progress_actions):
+        return None
     priority = coordination_priority(
         state,
         config,
@@ -153,6 +238,57 @@ def frozen_joint_coordination_plan(
         requires_charge=requires_charge,
         imminent_head_on=imminent_head_on_encounter(state, config, goals),
     )
+    # A robot whose only progress cell is occupied must wait until that cell
+    # is visibly cleared.  When the occupant is also the frozen priority robot
+    # and can progress away, retain the causal plan for exactly that clearing
+    # step instead of dropping the reason one frame too early.
+    for blocked in active:
+        occupant = next(
+            agent for agent in active if agent.agent_id != blocked.agent_id
+        )
+        blocked_targets = {
+            target
+            for _, _, target in progress_actions.get(blocked.agent_id, ())
+        }
+        occupant_progress = tuple(
+            item
+            for item in progress_actions.get(occupant.agent_id, ())
+            if item[2] != blocked.position
+        )
+        if (
+            blocked_targets != {occupant.position}
+            or not occupant_progress
+            or priority.agent_id != occupant.agent_id
+        ):
+            continue
+        _, moving_action, moving_target = min(occupant_progress)
+        priority_goal_id = (
+            occupant.carrying_task_id
+            or occupant.route_commitment_task_id
+            or occupant.goal_id
+        )
+        return {
+            "plan_id": (
+                f"coord:{state.episode_id}:{state.frame}:release:"
+                f"{occupant.agent_id}:{blocked.agent_id}"
+            ),
+            "plan_kind": "occupied_route_release",
+            "phase": "SINGLE_STEP",
+            "priority_agent_id": occupant.agent_id,
+            "waiting_agent_id": blocked.agent_id,
+            "moving_agent_id": occupant.agent_id,
+            "moving_action": moving_action,
+            "moving_target": moving_target,
+            "yielding_agent_id": blocked.agent_id,
+            "occupied_position": occupant.position,
+            "priority_basis": priority.basis,
+            "priority_goal_id": priority_goal_id,
+            "reason_code": "occupied_route_release",
+            "expected_duration_frames": 1,
+            "completion_condition": "occupied_position_cleared",
+            "resume_condition": "waiting_robot_route_cell_is_free",
+            "derived_from_frame": state.frame,
+        }
     waiting = state.by_id(priority.agent_id)
     clearing = next(
         agent for agent in active if agent.agent_id != waiting.agent_id
@@ -163,26 +299,9 @@ def frozen_joint_coordination_plan(
         or waiting.goal_id
     )
     goal = goals[waiting.agent_id]
-    current_distance = shortest_path_distance(
-        waiting.position,
-        goal,
-        config.map_layout_id,
-    )
     progress_cells = {
-        candidate
-        for delta in MOVE_DELTAS.values()
-        if layout.is_passable(
-            candidate := (
-                waiting.position[0] + delta[0],
-                waiting.position[1] + delta[1],
-            )
-        )
-        and shortest_path_distance(
-            candidate,
-            goal,
-            config.map_layout_id,
-        )
-        < current_distance
+        target
+        for _, _, target in progress_actions.get(waiting.agent_id, ())
     }
     head_on = imminent_head_on_encounter(state, config, goals)
     occupied_progress = clearing.position in progress_cells
@@ -191,6 +310,8 @@ def frozen_joint_coordination_plan(
         state.frame < state.coordination_plan_cooldown_until
         and not uniquely_blocked
         and not charger_handoff_needed
+        and not head_on
+        and not shared_progress_targets
     ):
         return None
     if not uniquely_blocked:

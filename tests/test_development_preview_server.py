@@ -250,10 +250,10 @@ def test_action_explanations_use_direct_reasons_on_reported_frames() -> None:
     expected_by_reason = {
         "CLEAR_TEAMMATE_ROUTE": ("是为了", "清空"),
         "WAIT_FOR_OCCUPIED_ROUTE_CLEARANCE": ("等待", "被机器人"),
-        "PRIORITY_ROUTE_PROGRESS": ("联合通行计划", "保持等待"),
+        "PRIORITY_ROUTE_PROGRESS": ("因为", "等待让行"),
         "PICKUP_ROUTE_PROGRESS": ("A点取货", "缩短到"),
         "DELIVERY_ROUTE_PROGRESS": ("送到B点", "缩短到"),
-        "CHARGER_ROUTE_PROGRESS": ("前往充电站", "电量不足"),
+        "CHARGER_ROUTE_PROGRESS": ("前往充电站", "当前电量"),
     }
 
     found: set[str] = set()
@@ -430,6 +430,110 @@ def test_development_energy_explanation_uses_real_charging_frame() -> None:
     assert "电量" in text
     assert "%" in text
     assert "充电" in text
+
+
+def test_tutorial_explanations_route_question_focus_and_show_energy_math() -> None:
+    state = DevelopmentPreviewState()
+
+    charging = state._grounded_development_explanation(
+        index=2,
+        target_agent="robot_2",
+        focus="energy",
+        language="zh-CN",
+    )
+    assert all(
+        fragment in charging
+        for fragment in ("当前电量33%", "预计需64%", "另留4%", "充至68%", "升至43%")
+    )
+
+    task_departure = state._grounded_development_explanation(
+        index=6,
+        target_agent="robot_2",
+        focus="action",
+        language="zh-CN",
+    )
+    assert all(
+        fragment in task_departure
+        for fragment in ("任务1的A点", "当前电量73%", "预计需64%", "电量足够")
+    )
+
+    allocation = state._grounded_development_explanation(
+        index=23,
+        target_agent="robot_1",
+        focus="allocation",
+        language="zh-CN",
+    )
+    assert "任务1已由机器人2取走" in allocation
+    assert "当前目标是任务3" in allocation
+
+    focused = {
+        focus: state._grounded_development_explanation(
+            index=6,
+            target_agent="robot_2",
+            focus=focus,
+            language="zh-CN",
+        )
+        for focus in ("action", "energy", "task", "collaboration", "allocation")
+    }
+    assert len(set(focused.values())) == len(focused)
+
+
+def test_tutorial_coordination_explains_loaded_priority_and_only_real_waits() -> None:
+    state = DevelopmentPreviewState()
+
+    loaded_priority = state._grounded_development_explanation(
+        index=37,
+        target_agent="robot_2",
+        focus="action",
+        language="zh-CN",
+    )
+    assert "载有任务3货物" in loaded_priority
+    assert "前往B点交付" in loaded_priority
+    assert "优先" not in loaded_priority or "先通过" in loaded_priority
+
+    clearance = state._grounded_development_explanation(
+        index=38,
+        target_agent="robot_2",
+        focus="action",
+        language="zh-CN",
+    )
+    assert "下一格(5, 4)被机器人1占用" in clearance
+    assert "正在清空该格" in clearance
+    assert (
+        state.tutorial_frames[38]
+        .info["decision_trace"]["agents"]["robot_2"]["primary_reason_code"]
+        == "WAIT_FOR_OCCUPIED_ROUTE_CLEARANCE"
+    )
+
+    parallel = state.tutorial_frames[40]
+    assert parallel.actions == {"robot_1": "RIGHT", "robot_2": "UP"}
+    assert parallel.info["decision_trace"]["agents"]["robot_2"][
+        "joint_coordination_plan"
+    ] is None
+    parallel_text = state._grounded_development_explanation(
+        index=40,
+        target_agent="robot_2",
+        focus="action",
+        language="zh-CN",
+    )
+    assert "任务4的A点" in parallel_text
+    assert "缩短到7格" in parallel_text
+
+
+def test_decision_trace_exposes_release_threshold_components() -> None:
+    state = DevelopmentPreviewState()
+    charging = state.tutorial_frames[2].info["decision_trace"]["agents"][
+        "robot_2"
+    ]["charging_state"]
+
+    assert charging["task_id"] == "task_1"
+    assert charging["pickup_steps"] == 10.0
+    assert charging["delivery_steps"] == 10.0
+    assert charging["return_steps"] == 6.0
+    assert charging["mission_reserve_steps"] == 6.0
+    assert charging["route_energy"] == 64.0
+    assert charging["hysteresis_energy"] == 4.0
+    assert charging["release_threshold"] == 68.0
 
 
 def test_collision_explanation_is_direct_concise_and_simultaneous() -> None:

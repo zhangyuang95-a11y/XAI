@@ -30,9 +30,10 @@ class WarehouseExplanationMixin:
         trace: Mapping[str, Any],
         *,
         target_agent: str,
+        focus: str,
         language: str,
     ) -> str | None:
-        """Verbalize only a fact-validated causal trace in at most two sentences."""
+        """Answer the requested question from one fact-validated joint trace."""
 
         agents = trace.get("agents", {})
         if not isinstance(agents, Mapping):
@@ -47,6 +48,23 @@ class WarehouseExplanationMixin:
                 if language == "zh-CN"
                 else f"{robot}'s trace failed factual validation, so no more specific reason can be confirmed."
             )
+        teammate_id = next(
+            (str(agent_id) for agent_id in agents if str(agent_id) != target_agent),
+            "",
+        )
+        teammate = self.explanation_entity_label(teammate_id, language)
+        teammate_decision = agents.get(teammate_id, {})
+        teammate_decision = (
+            teammate_decision if isinstance(teammate_decision, Mapping) else {}
+        )
+
+        def task_label(task_id: object) -> str:
+            raw = str(task_id or "")
+            suffix = raw.removeprefix("task_")
+            if language == "zh-CN":
+                return f"任务{suffix}" if suffix else "当前任务"
+            return f"task {suffix}" if suffix else "the current task"
+
         reason = str(decision.get("primary_reason_code", ""))
         selected = str(decision.get("selected_action", "WAIT"))
         resolved = str(decision.get("resolved_action", selected))
@@ -73,6 +91,166 @@ class WarehouseExplanationMixin:
         )
         plan = decision.get("joint_coordination_plan")
         plan = plan if isinstance(plan, Mapping) else {}
+        feasibility = tuple(
+            item
+            for item in decision.get("battery_feasibility", ())
+            if isinstance(item, Mapping)
+        )
+        selected_energy = next(
+            (
+                item
+                for item in feasibility
+                if str(item.get("task_id", "")) == goal_id
+            ),
+            None,
+        )
+        current_battery = float(
+            charging.get("battery", before_battery) or before_battery
+        )
+        tasks = tuple(
+            item for item in trace.get("tasks", ()) if isinstance(item, Mapping)
+        )
+        tasks_by_id = {str(item.get("task_id", "")): item for item in tasks}
+
+        def priority_clause() -> tuple[str, str]:
+            priority_id = str(plan.get("priority_agent_id", ""))
+            priority = self.explanation_entity_label(priority_id, language)
+            basis = str(plan.get("priority_basis", ""))
+            priority_goal = str(plan.get("priority_goal_id", ""))
+            if language == "zh-CN":
+                if basis == "loaded_delivery":
+                    return priority, (
+                        f"载有{task_label(priority_goal)}货物并正前往B点交付"
+                    )
+                if basis in {
+                    "urgent_charger_route",
+                    "critical_charger_route",
+                    "lower_energy_charger_waiter",
+                }:
+                    return priority, "电量较低并需要优先前往充电站"
+                if basis == "charger_exit":
+                    return priority, "已经充足电并需要离开充电站"
+                if basis == "single_lane_egress":
+                    return priority, "位于单通道深处并需要先驶出"
+                return priority, "当前路线具有通行优先级"
+            if basis == "loaded_delivery":
+                return priority, (
+                    f"was carrying {task_label(priority_goal)} to point B"
+                )
+            if basis in {
+                "urgent_charger_route",
+                "critical_charger_route",
+                "lower_energy_charger_waiter",
+            }:
+                return priority, "had low battery and needed the charger first"
+            if basis == "charger_exit":
+                return priority, "had enough charge and needed to leave the charger"
+            if basis == "single_lane_egress":
+                return priority, "was deeper in the single lane and needed to exit first"
+            return priority, "had right of way on the current route"
+
+        # Question routing comes before action-template routing.  Previously
+        # every non-collision question returned the same action explanation.
+        if focus == "allocation":
+            task_one = tasks_by_id.get("task_1")
+            if task_one is not None:
+                carrier_id = str(task_one.get("carrier_agent_id") or "")
+                if carrier_id:
+                    carrier = self.explanation_entity_label(carrier_id, language)
+                    if language == "zh-CN":
+                        if carrier_id == target_agent:
+                            return f"{robot}已经取得任务1的货物，正在前往B点交付。"
+                        current = task_label(goal_id) if goal_id else "其他任务"
+                        return f"任务1已由{carrier}取走并正在配送，{robot}不能再次领取；其当前目标是{current}。"
+                    if carrier_id == target_agent:
+                        return f"{robot} had already collected task 1 and was delivering it to B."
+                    current = task_label(goal_id) if goal_id else "another task"
+                    return f"{carrier} had already collected task 1, so {robot} could not claim it again; its current goal was {current}."
+                if goal_id == "task_1":
+                    if language == "zh-CN":
+                        return f"{robot}选择任务1，因为它已将该任务锁定为当前取货目标。"
+                    return f"{robot} was heading to task 1 because it was its locked pickup goal."
+                if str(frozen_goal.get("navigation_kind", "")) == "charge":
+                    least_required = min(
+                        (
+                            float(item.get("required_energy", 0.0) or 0.0)
+                            for item in feasibility
+                        ),
+                        default=0.0,
+                    )
+                    if language == "zh-CN":
+                        return f"任务1仍可领取，但{robot}当前仅{current_battery:g}%电量，最省电的安全配送也需{least_required:g}%，因此先去充电。"
+                    return f"Task 1 was still available, but {robot} had only {current_battery:g}% battery and even the least costly safe delivery required {least_required:g}%, so it charged first."
+            if language == "zh-CN":
+                return f"{robot}当前锁定的是{task_label(goal_id)}，不是任务1。"
+            return f"{robot}'s locked goal was {task_label(goal_id)}, not task 1."
+
+        if focus in {"energy", "charge_threshold"}:
+            route_energy = float(charging.get("route_energy", 0.0) or 0.0)
+            hysteresis_energy = float(
+                charging.get("hysteresis_energy", 0.0) or 0.0
+            )
+            controlling_task = task_label(charging.get("task_id"))
+            if reason == "CONTINUE_CHARGING":
+                if language == "zh-CN":
+                    return f"{robot}继续充电：当前电量{before_battery:g}%，{controlling_task}完整配送及安全返航预计需{route_energy:g}%，另留{hysteresis_energy:g}%防止离站后折返，因此需充至{release_threshold:g}%；本步升至{after_battery:g}%。"
+                return f"{robot} kept charging: it had {before_battery:g}%; {controlling_task} required {route_energy:g}% for delivery and a safe return, plus {hysteresis_energy:g}% to prevent an immediate return, so the release level was {release_threshold:g}%. This step raised it to {after_battery:g}%."
+            if selected_energy is not None:
+                required = float(selected_energy.get("required_energy", 0.0) or 0.0)
+                slack = float(selected_energy.get("energy_slack", 0.0) or 0.0)
+                if language == "zh-CN":
+                    enough = "足够" if slack >= 0 else "不足"
+                    return f"{robot}当前电量{current_battery:g}%，{task_label(goal_id)}完整配送、返航及安全余量预计需{required:g}%，电量{enough}。"
+                enough = "enough" if slack >= 0 else "not enough"
+                return f"{robot} had {current_battery:g}% battery; {task_label(goal_id)} required {required:g}% for delivery, return, and safety reserve, so its battery was {enough}."
+            if feasibility:
+                least_required = min(
+                    float(item.get("required_energy", 0.0) or 0.0)
+                    for item in feasibility
+                )
+                if language == "zh-CN":
+                    return f"{robot}当前电量{current_battery:g}%，最省电的可选安全配送仍需{least_required:g}%，因此需要先充电。"
+                return f"{robot} had {current_battery:g}% battery, while even the least costly safe delivery required {least_required:g}%, so it needed to charge first."
+
+        if focus == "collaboration":
+            if plan:
+                priority, basis = priority_clause()
+                if str(plan.get("waiting_agent_id", "")) == target_agent:
+                    if language == "zh-CN":
+                        return f"队友影响了本步：{robot}等待，让{basis}的{priority}先通过。"
+                    return f"The teammate affected this step: {robot} waited because {priority} {basis}."
+                if language == "zh-CN":
+                    return f"队友影响了本步：{robot}因{basis}而优先通过，{teammate}等待让行。"
+                return f"The teammate affected this step: {robot} moved first because it {basis}, while {teammate} waited."
+            resolution = decision.get("action_resolution", {})
+            resolution = resolution if isinstance(resolution, Mapping) else {}
+            if language == "zh-CN":
+                return f"队友没有迫使{robot}改变动作；本帧没有联合让行计划或目标格冲突。"
+            return f"The teammate did not force {robot} to change action; there was no joint yield plan or target-cell conflict."
+
+        if focus == "task":
+            goal_kind = str(frozen_goal.get("goal_type", ""))
+            if (
+                goal_kind == "GO_TO_PICKUP"
+                and after_distance < before_distance
+            ):
+                if language == "zh-CN":
+                    return f"这个动作推进了{task_label(goal_id)}取货：到A点的剩余距离从{before_distance}格缩短到{after_distance}格。"
+                return f"This advanced pickup for {task_label(goal_id)}: the remaining distance to A fell from {before_distance} to {after_distance} cells."
+            if (
+                goal_kind == "GO_TO_DROPOFF"
+                and after_distance < before_distance
+            ):
+                if language == "zh-CN":
+                    return f"这个动作推进了{task_label(goal_id)}交付：到B点的剩余距离从{before_distance}格缩短到{after_distance}格。"
+                return f"This advanced delivery for {task_label(goal_id)}: the remaining distance to B fell from {before_distance} to {after_distance} cells."
+            if resolved == "WAIT" and goal_id:
+                if language == "zh-CN":
+                    return f"{robot}本帧没有推进{task_label(goal_id)}，剩余距离仍为{before_distance}格。"
+                return f"{robot} did not advance {task_label(goal_id)} on this step; {before_distance} cells remained."
+            if language == "zh-CN":
+                return f"本步用于充电或通道协调，没有直接推进{task_label(goal_id)}。"
+            return f"This step handled charging or aisle coordination and did not directly advance {task_label(goal_id)}."
 
         if reason == "SAFETY_RULE_BLOCKED":
             resolution = decision.get("action_resolution", {})
@@ -84,12 +262,24 @@ class WarehouseExplanationMixin:
             return f"{robot} selected {proposed}, but the safety resolver blocked it because of {blocked}; this was not an intentional wait."
 
         if reason == "WAIT_FOR_OCCUPIED_ROUTE_CLEARANCE":
-            clearing_id = str(plan.get("clearing_agent_id", ""))
+            clearing_id = str(
+                plan.get("clearing_agent_id")
+                or plan.get("moving_agent_id")
+                or ""
+            )
             clearing = self.explanation_entity_label(clearing_id, language)
             cell = tuple(plan.get("occupied_position", ()))
+            _, basis = priority_clause()
             if language == "zh-CN":
-                return f"{robot}等待，因为通往当前目标的下一格{cell}被{clearing}占用；{clearing}正在清空该格。"
+                return f"{robot}等待，因为通往{task_label(goal_id)}的下一格{cell}被{clearing}占用；{clearing}{basis}，正在清空该格。"
             return f"{robot} waited because {clearing} occupied the next cell {cell} on its route; {clearing} was clearing that cell."
+
+        if reason == "WAIT_FOR_CONFLICTING_TARGET":
+            priority, basis = priority_clause()
+            cell = tuple(plan.get("moving_target", ()))
+            if language == "zh-CN":
+                return f"{robot}等待，因为两台机器人的下一步都需要进入{cell}；{basis}的{priority}先行，避免同格冲突。"
+            return f"{robot} waited because both robots needed cell {cell} next; {priority}, which {basis}, moved first to avoid a same-cell conflict."
 
         if reason == "CLEAR_TEAMMATE_ROUTE":
             priority_id = str(plan.get("priority_agent_id", ""))
@@ -112,11 +302,10 @@ class WarehouseExplanationMixin:
             return f"{robot} moved {action} to clear the next cell on {priority}'s route."
 
         if reason == "WAIT_FOR_PRIORITY_PASSAGE":
-            priority_id = str(plan.get("priority_agent_id", ""))
-            priority = self.explanation_entity_label(priority_id, language)
+            priority, basis = priority_clause()
             if language == "zh-CN":
-                return f"{robot}等待是为了让具有通行优先权的{priority}先通过当前狭窄通道。"
-            return f"{robot} waited so that {priority}, which had right of way, could pass through the narrow aisle."
+                return f"{robot}等待是为了让{basis}的{priority}先通过狭窄通道。"
+            return f"{robot} waited so that {priority}, which {basis}, could pass through the narrow aisle."
 
         if reason == "PRIORITY_ROUTE_PROGRESS":
             left_charger = bool(
@@ -125,16 +314,28 @@ class WarehouseExplanationMixin:
                 != tuple(effect.get("position_after", ()))
             )
             if language == "zh-CN":
+                if str(frozen_goal.get("navigation_kind", "")) == "charge":
+                    least_required = min(
+                        (
+                            float(item.get("required_energy", 0.0) or 0.0)
+                            for item in feasibility
+                        ),
+                        default=0.0,
+                    )
+                    return f"{robot}{action}进入充电站，是因为当前电量{current_battery:g}%，而最省电的安全配送仍需{least_required:g}%；{teammate}等待保留入口。"
+                priority, basis = priority_clause()
                 if left_charger:
-                    return f"{robot}{action}离开充电站，是为了按联合通行计划通过；另一台机器人本帧保持等待。"
-                return f"{robot}{action}是为了按联合通行计划通过；另一台机器人本帧保持等待。"
+                    return f"{robot}{action}离开充电站，因为它{basis}；{teammate}等待让行。"
+                return f"{robot}{action}继续前进，因为它{basis}；{teammate}等待让行。"
             if left_charger:
                 return f"{robot} left the charger and moved {action} under the joint right-of-way plan while the other robot waited."
             return f"{robot} moved {action} under the joint right-of-way plan while the other robot waited."
 
         if reason == "CONTINUE_CHARGING":
             if language == "zh-CN":
-                return f"{robot}等待是为了继续充电至安全离站阈值{release_threshold:g}%；本步电量{before_battery:g}%→{after_battery:g}%。"
+                route_energy = float(charging.get("route_energy", 0.0) or 0.0)
+                hysteresis_energy = float(charging.get("hysteresis_energy", 0.0) or 0.0)
+                return f"{robot}等待是为了继续充电：完整配送及安全返航预计需{route_energy:g}%，另留{hysteresis_energy:g}%防止折返；当前{before_battery:g}%，本步升至{after_battery:g}%。"
             return f"{robot} waited to charge toward the safe release threshold of {release_threshold:g}%; battery rose from {before_battery:g}% to {after_battery:g}%."
 
         if reason == "LEAVE_CHARGER_THRESHOLD_MET":
@@ -142,9 +343,21 @@ class WarehouseExplanationMixin:
                 return f"{robot}{action}离开充电站，因为决策前电量{before_battery:g}%已达到安全离站阈值{release_threshold:g}%。"
             return f"{robot} left the charger by moving {action} because its {before_battery:g}% battery had reached the safe release threshold of {release_threshold:g}%."
 
+        if reason == "PREMATURE_CHARGER_DEPARTURE":
+            if language == "zh-CN":
+                return f"{robot}在电量仅{before_battery:g}%、低于安全离站所需{release_threshold:g}%时仍{action}离开充电站；这是一次过早离站的低效决策。"
+            return f"{robot} moved {action} away from the charger with only {before_battery:g}% battery, below the safe release requirement of {release_threshold:g}%; this was an inefficient premature departure."
+
         if reason == "CHARGER_ROUTE_PROGRESS":
             if language == "zh-CN":
-                return f"{robot}{action}前往充电站，因为当前电量不足以安全完成下一次配送；剩余路线从{before_distance}格缩短到{after_distance}格。"
+                least_required = min(
+                    (
+                        float(item.get("required_energy", 0.0) or 0.0)
+                        for item in feasibility
+                    ),
+                    default=0.0,
+                )
+                return f"{robot}{action}前往充电站，是因为当前电量{current_battery:g}%，最省电的安全配送仍需{least_required:g}%；剩余距离从{before_distance}格缩短到{after_distance}格。"
             return f"{robot} moved {action} toward the charger because its battery was insufficient for a safe delivery; the remaining route fell from {before_distance} to {after_distance} cells."
 
         if reason == "WAIT_FOR_CHARGER_AVAILABILITY":
@@ -154,12 +367,12 @@ class WarehouseExplanationMixin:
 
         if reason == "DELIVERY_ROUTE_PROGRESS":
             if language == "zh-CN":
-                return f"{robot}{action}是为了把{goal_id or '当前货物'}送到B点；剩余路线从{before_distance}格缩短到{after_distance}格。"
+                return f"{robot}{action}是为了把{task_label(goal_id)}的货物送到B点；剩余路线从{before_distance}格缩短到{after_distance}格。"
             return f"{robot} moved {action} to deliver {goal_id or 'its cargo'} at B; the remaining route fell from {before_distance} to {after_distance} cells."
 
         if reason == "PICKUP_ROUTE_PROGRESS":
             if language == "zh-CN":
-                return f"{robot}{action}是为了前往{goal_id or '已锁定任务'}的A点取货；剩余路线从{before_distance}格缩短到{after_distance}格。"
+                return f"{robot}{action}是为了前往{task_label(goal_id)}的A点取货；剩余路线从{before_distance}格缩短到{after_distance}格。"
             return f"{robot} moved {action} toward A for {goal_id or 'its committed task'}; the remaining route fell from {before_distance} to {after_distance} cells."
 
         if reason == "ENERGY_SAFE_TASK_SELECTION":
@@ -172,8 +385,17 @@ class WarehouseExplanationMixin:
                 str(safe_tasks[0].get("task_id", "")) if len(safe_tasks) == 1 else ""
             )
             if language == "zh-CN":
-                target = f"{selected_task}的A点" if selected_task else "电量可安全完成的A点"
-                return f"{robot}{action}是为了前往{target}取货；该任务在移动前已通过完整配送与返航电量检查。"
+                target = f"{task_label(selected_task)}的A点" if selected_task else "电量可安全完成的A点"
+                selected_record = next(
+                    (
+                        item
+                        for item in safe_tasks
+                        if str(item.get("task_id", "")) == selected_task
+                    ),
+                    safe_tasks[0] if safe_tasks else {},
+                )
+                required = float(selected_record.get("required_energy", 0.0) or 0.0)
+                return f"{robot}{action}是为了前往{target}取货；当前电量{current_battery:g}%，完整配送、返航及安全余量预计需{required:g}%，电量足够。"
             target = f"A for {selected_task}" if selected_task else "an energy-feasible pickup"
             return f"{robot} moved {action} toward {target}; the complete delivery-and-return route passed the pre-move energy check."
 
@@ -184,12 +406,22 @@ class WarehouseExplanationMixin:
 
         if reason == "POLICY_WAIT_NO_VERIFIED_COORDINATION_CAUSE":
             if language == "zh-CN":
-                return f"{robot}本帧等待，但DecisionTrace中没有可验证的任务、充电或联合让行原因。"
-            return f"{robot} waited, but its DecisionTrace contains no verified task, charging, or joint-coordination cause."
+                required = (
+                    float(selected_energy.get("required_energy", 0.0) or 0.0)
+                    if selected_energy is not None
+                    else 0.0
+                )
+                energy_text = (
+                    f"，当前电量{current_battery:g}%，安全路线预计需{required:g}%"
+                    if required
+                    else ""
+                )
+                return f"{robot}当前目标是{task_label(goal_id)}{energy_text}；本帧没有充电、让行或避碰需要，因此这次等待是策略的一次低效决策。"
+            return f"{robot}'s goal was {task_label(goal_id)}; no charging, yielding, or collision-avoidance need required this wait, so it was an inefficient policy decision."
 
         if language == "zh-CN":
-            return f"{robot}执行了{action}，是因为DecisionTrace只支持该动作事实，无法确认更具体的原因。"
-        return f"{robot} executed {action}; the DecisionTrace does not support a more specific reason."
+            return f"{robot}执行了{action}；现有状态没有支持更具体的任务、充电或让行原因。"
+        return f"{robot} executed {action}; the current state supports no more specific task, charging, or yielding reason."
 
     def concise_study_explanation(
         self,
@@ -215,6 +447,7 @@ class WarehouseExplanationMixin:
             trace_text = self._decision_trace_explanation(
                 raw_trace,
                 target_agent=target_agent,
+                focus=focus,
                 language=language,
             )
             if trace_text is not None:

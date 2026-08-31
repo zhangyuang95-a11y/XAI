@@ -292,41 +292,113 @@ def charger_reentry_event(
     }
 
 
-def charge_release_energy(environment: Any, state: Any, agent: Any) -> float:
-    """Return the hysteretic energy threshold for leaving charge mode."""
+def charge_release_evidence(
+    environment: Any,
+    state: Any,
+    agent: Any,
+) -> dict[str, Any]:
+    """Return the auditable components of the charger release threshold.
+
+    Participant-facing explanations must not present a derived threshold as a
+    magic constant.  Keep the controlling task, route legs, safety reserve,
+    and anti-oscillation margin together so every consumer verbalizes the same
+    calculation that controls charge mode.
+    """
 
     if agent.carrying_task_id:
         tasks = [state.task_by_id(agent.carrying_task_id)]
     else:
         tasks = [task for task in state.tasks if task.status == "available"]
+    candidates: list[dict[str, Any]] = []
     if tasks:
         # An empty robot's route commitment is not task ownership.  Its peer
         # can still reach that shared A point first, so release with enough
         # energy for every currently available alternative.  This prevents a
         # one-step departure followed by a return when the preferred A point
         # is claimed concurrently.
-        required = max(
-            environment._mission_route_steps(
+        for task in tasks:
+            origin = environment.layout.charger_position
+            pickup_steps = (
+                0
+                if agent.carrying_task_id
+                else shortest_path_distance(
+                    origin,
+                    task.pickup_position,
+                    environment.config.map_layout_id,
+                )
+            )
+            delivery_steps = shortest_path_distance(
+                origin if agent.carrying_task_id else task.pickup_position,
+                task.delivery_position,
+                environment.config.map_layout_id,
+            )
+            return_steps = shortest_path_distance(
+                task.delivery_position,
+                environment.layout.charger_position,
+                environment.config.map_layout_id,
+            )
+            route_steps = environment._mission_route_steps(
                 state,
                 agent,
                 task,
-                origin=environment.layout.charger_position,
+                origin=origin,
             )
-            * environment.config.move_battery_cost
-            for task in tasks
+            candidates.append(
+                {
+                    "task_id": task.task_id,
+                    "pickup_steps": float(pickup_steps),
+                    "delivery_steps": float(delivery_steps),
+                    "return_steps": float(return_steps),
+                    "mission_reserve_steps": float(
+                        environment.config.mission_reserve_steps
+                    ),
+                    "route_steps": float(route_steps),
+                    "route_energy": float(
+                        route_steps * environment.config.move_battery_cost
+                    ),
+                }
+            )
+        controlling = max(
+            candidates,
+            key=lambda item: (float(item["route_energy"]), str(item["task_id"])),
         )
+        required = float(controlling["route_energy"])
     else:
         required = (
             environment.config.mission_reserve_steps
             * environment.config.move_battery_cost
         )
+        controlling = {
+            "task_id": None,
+            "pickup_steps": 0.0,
+            "delivery_steps": 0.0,
+            "return_steps": 0.0,
+            "mission_reserve_steps": float(
+                environment.config.mission_reserve_steps
+            ),
+            "route_steps": float(environment.config.mission_reserve_steps),
+            "route_energy": float(required),
+        }
+    hysteresis_steps = float(environment.config.charge_release_hysteresis_steps)
+    hysteresis_energy = float(
+        hysteresis_steps * environment.config.move_battery_cost
+    )
+    threshold = float(min(100.0, required + hysteresis_energy))
+    return {
+        **controlling,
+        "candidate_tasks": tuple(candidates),
+        "move_battery_cost": float(environment.config.move_battery_cost),
+        "hysteresis_steps": hysteresis_steps,
+        "hysteresis_energy": hysteresis_energy,
+        "release_threshold": threshold,
+    }
+
+
+def charge_release_energy(environment: Any, state: Any, agent: Any) -> float:
+    """Return the hysteretic energy threshold for leaving charge mode."""
+
     return float(
-        min(
-            100.0,
-            required
-            + environment.config.charge_release_hysteresis_steps
-            * environment.config.move_battery_cost,
-        )
+        charge_release_evidence(environment, state, agent)["release_threshold"]
     )
 
 

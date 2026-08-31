@@ -176,6 +176,7 @@ def test_web_client_defaults_the_registration_page_to_english() -> None:
     assert 'id="languageButtonLabel">中</span>' in html
     assert 'data-i18n="participantSetup">Participant setup</span>' in html
     assert 'data-i18n="start">Start study</button>' in html
+    assert '<kbd data-i18n="spaceKey">Space</kbd>' in html
 
 
 def test_web_cli_seed_library_defaults_to_checkpoint_sibling() -> None:

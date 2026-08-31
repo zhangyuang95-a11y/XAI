@@ -19,6 +19,7 @@ from env.warehouse.domain import DeliveryTask
 from env.warehouse.observations import _actor_visible_goal
 from env.warehouse.layouts import CORRIDOR_SHELF_LAYOUT, STAGGERED_AISLES_LAYOUT
 from env.warehouse.coordination import stable_coordination_actions
+from env.warehouse.coordination_plan import frozen_joint_coordination_plan
 from env.warehouse.scenarios import (
     apply_charger_commitment_scenario,
     apply_charger_handoff_scenario,
@@ -524,7 +525,42 @@ def test_teacher_sends_full_robot_up_while_teammate_enters_charger() -> None:
 
     teacher = stable_coordination_actions(environment)
 
-    assert teacher == {"robot_1": "WAIT", "robot_2": "LEFT"}
+    assert teacher == {"robot_1": "UP", "robot_2": "LEFT"}
+
+
+def test_real_same_target_conflict_bypasses_coordination_cooldown() -> None:
+    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment.reset(seed=42042)
+    state = environment.get_state()
+    state.frame = 31
+    state.coordination_plan_cooldown_until = 100
+    robot_one = state.by_id("robot_1")
+    robot_one.position = (4, 4)
+    robot_one.battery = 20.0
+    robot_one.goal_type = "GO_TO_CHARGER"
+    robot_one.goal_id = None
+    robot_one.route_commitment_task_id = None
+    robot_one.navigation_goal_kind = "charge"
+    robot_one.navigation_goal_position = CHARGER_POSITION
+    robot_two = state.by_id("robot_2")
+    robot_two.position = (5, 3)
+    robot_two.battery = 30.0
+    robot_two.goal_type = "GO_TO_PICKUP"
+    robot_two.goal_id = None
+    robot_two.route_commitment_task_id = None
+    robot_two.navigation_goal_kind = "pickup"
+    robot_two.navigation_goal_position = (5, 4)
+
+    plan = frozen_joint_coordination_plan(
+        state,
+        environment.config,
+        requires_charge={"robot_1": True, "robot_2": False},
+    )
+
+    assert plan is not None
+    assert plan["plan_kind"] == "same_target_priority"
+    assert plan["moving_agent_id"] != plan["waiting_agent_id"]
+    assert plan["moving_target"] == (5, 4)
 
 
 def test_v8_records_head_on_risk_right_of_way_and_charger_queue() -> None:
@@ -1711,15 +1747,21 @@ def test_energy_history_and_return_cycle_are_observed_without_action_override() 
         item["event"] == "charger_departure"
         for item in departure_info["energy_events"]
     )
+    departure_trace = departure_info["decision_trace"]
+    assert (
+        departure_trace["agents"]["robot_1"]["primary_reason_code"]
+        == "PREMATURE_CHARGER_DEPARTURE"
+    )
+    assert departure_trace["fact_valid"] is True
     _, _, _, _, return_info = environment.step(
         {"robot_1": "DOWN", "robot_2": "WAIT"}
     )
     assert return_info["executed_actions"]["robot_1"] == "DOWN"
-    assert not any(
+    assert any(
         item["event"] == "charger_return_cycle"
         for item in return_info["energy_events"]
     )
-    assert any(
+    assert not any(
         item["event"] == "charger_productive_return"
         for item in return_info["energy_events"]
     )

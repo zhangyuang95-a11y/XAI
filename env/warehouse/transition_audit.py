@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from .decision_protocol import DECISION_AUDIT_SCHEMA, canonical_sha256
-from .energy_management import charge_release_energy
+from .energy_management import charge_release_evidence
 from .navigation import ACTIONS, MOVE_DELTAS, shortest_path_distance
 
 
@@ -284,12 +284,12 @@ def _decision_reason_code(
         coordination_plan.get("execution_aligned", False)
     ):
         if str(coordination_plan.get("waiting_agent_id")) == agent_id:
-            return (
-                "WAIT_FOR_PRIORITY_PASSAGE"
-                if str(coordination_plan.get("plan_kind"))
-                in {"head_on_priority", "priority_followthrough"}
-                else "WAIT_FOR_OCCUPIED_ROUTE_CLEARANCE"
-            )
+            plan_kind = str(coordination_plan.get("plan_kind"))
+            if plan_kind == "same_target_priority":
+                return "WAIT_FOR_CONFLICTING_TARGET"
+            if plan_kind in {"head_on_priority", "priority_followthrough"}:
+                return "WAIT_FOR_PRIORITY_PASSAGE"
+            return "WAIT_FOR_OCCUPIED_ROUTE_CLEARANCE"
         if (
             str(coordination_plan.get("moving_agent_id")) == agent_id
             and str(coordination_plan.get("plan_kind"))
@@ -325,7 +325,16 @@ def _decision_reason_code(
             or before.goal_type in {"CHARGING", "LEAVE_CHARGER"}
         )
     ):
-        return "LEAVE_CHARGER_THRESHOLD_MET"
+        release_threshold = float(
+            charge_release_evidence(environment, previous, before)[
+                "release_threshold"
+            ]
+        )
+        return (
+            "LEAVE_CHARGER_THRESHOLD_MET"
+            if before.battery + 1e-8 >= release_threshold
+            else "PREMATURE_CHARGER_DEPARTURE"
+        )
     if before.navigation_goal_kind == "charge":
         return (
             "CHARGER_ROUTE_PROGRESS"
@@ -421,6 +430,7 @@ def validate_decision_trace(
         plan = decision.get("joint_coordination_plan")
         if reason in {
             "WAIT_FOR_OCCUPIED_ROUTE_CLEARANCE",
+            "WAIT_FOR_CONFLICTING_TARGET",
             "WAIT_FOR_PRIORITY_PASSAGE",
             "CLEAR_TEAMMATE_ROUTE",
             "PRIORITY_ROUTE_PROGRESS",
@@ -436,6 +446,13 @@ def validate_decision_trace(
                 failures.append(f"{agent_id}:charger_departure_source_mismatch")
             if before.battery + 1e-8 < threshold:
                 failures.append(f"{agent_id}:charger_release_below_threshold")
+        if reason == "PREMATURE_CHARGER_DEPARTURE":
+            charging = decision.get("charging_state", {})
+            threshold = float(charging.get("release_threshold", 101.0))
+            if before.position != environment.layout.charger_position:
+                failures.append(f"{agent_id}:premature_departure_source_mismatch")
+            if before.battery + 1e-8 >= threshold:
+                failures.append(f"{agent_id}:false_premature_departure_claim")
         if reason in {
             "CHARGER_ROUTE_PROGRESS",
             "DELIVERY_ROUTE_PROGRESS",
@@ -555,9 +572,7 @@ def build_decision_trace(
                 "requires_charge": bool(
                     before.navigation_goal_kind == "charge"
                 ),
-                "release_threshold": float(
-                    charge_release_energy(environment, previous, before)
-                ),
+                **charge_release_evidence(environment, previous, before),
                 "reason": before.charging_reason,
             },
             "joint_coordination_plan": (
@@ -609,7 +624,7 @@ def build_decision_trace(
             "frozen_mission": frozen_missions.get(agent_id),
         }
     trace: dict[str, Any] = {
-        "schema_version": "warehouse-decision-trace.v1",
+        "schema_version": "warehouse-decision-trace.v2",
         "episode_id": int(previous.episode_id),
         "decision_frame": int(previous.frame),
         "outcome_frame": int(next_state.frame),
@@ -618,6 +633,16 @@ def build_decision_trace(
         "same_frozen_state_for_all_agents": True,
         "environment_step_calls": 1,
         "decision_source": metadata.get("decision_source", "unspecified"),
+        "tasks": tuple(
+            {
+                "task_id": task.task_id,
+                "status": task.status,
+                "carrier_agent_id": task.carrier_agent_id,
+                "pickup_position": task.pickup_position,
+                "delivery_position": task.delivery_position,
+            }
+            for task in sorted(previous.tasks, key=lambda item: item.task_id)
+        ),
         "agents": agents,
     }
     failures = validate_decision_trace(

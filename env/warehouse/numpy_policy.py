@@ -992,11 +992,21 @@ class NumpyWarehousePolicy:
             & (own_row <= 5.0 + 1e-6)
         ).astype(np.float64)
         ai_ai_mode = (1.0 - local[..., 22]) * (1.0 - local[..., 23])
-        deadlock_escape_gate = (
+        ai_ai_deadlock_escape = (
             local[..., 12]
             * exactly_one_carrying
             * same_horizontal_corridor
             * ai_ai_mode
+        )
+        human_ai_priority_standoff = (
+            local[..., 12]
+            * participant_flag[..., 0]
+            * self_has_priority
+        )
+        deadlock_escape_gate = np.clip(
+            ai_ai_deadlock_escape + human_ai_priority_standoff,
+            0.0,
+            1.0,
         )[..., None]
         deadlock_escape = np.maximum(
             self._linear(local, "deadlock_escape_action_head.0"), 0.0
@@ -1005,7 +1015,7 @@ class NumpyWarehousePolicy:
             deadlock_escape,
             "deadlock_escape_action_head.2",
         )
-        deadlock_escape_logit_limit = 12.0
+        deadlock_escape_logit_limit = 100.0
         deadlock_escape_residual = (
             deadlock_escape_logit_limit
             * np.tanh(

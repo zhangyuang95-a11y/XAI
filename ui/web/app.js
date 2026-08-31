@@ -13,20 +13,13 @@ const state = {
   animationToken: 0,
   animationFrame: null,
   visualFrame: null,
-  referenceTrajectory: null,
-  referenceIndex: 1,
-  referenceSettledIndex: 1,
-  referenceSettledAt: 0,
-  browseEvents: [],
-  scrubTimer: null,
-  scrubbing: false,
   questionTimer: null,
 };
 
 const COPY = {
   zh: {
-    appTitle: "双机器人协作配送实验", workflowDemo: "说明与演示", task1: "任务 1", explanation: "解释", task2: "任务 2", survey: "问卷",
-    warehouse: "8×9 仓库", liveScene: "协作配送现场", step: "步数", score: "总分", deliveries: "配送", collisions: "碰撞", shutdowns: "断电", detours: "绕路单位",
+    appTitle: "双机器人协作配送实验", workflowDemo: "说明与演示", task1: "任务 1", task2: "任务 2", survey: "问卷",
+    warehouse: "6×7 仓库", liveScene: "协作配送现场", step: "步数", score: "总分", deliveries: "配送", collisions: "碰撞", shutdowns: "断电", detours: "绕路单位",
     shelf: "货架", pickup: "取货点", dropoff: "交付点", charger: "充电站", robots: "机器人",
     participantSetup: "参与者登记", welcome: "开始协作配送实验", overview: "你将固定控制机器人 1，与 AI 控制的机器人 2 完成两轮 120 步配送任务。",
     participantId: "参与者编号", agreement: "我已阅读并理解实验说明。", start: "开始实验",
@@ -35,9 +28,9 @@ const COPY = {
     ruleCharge: "成功移动耗电 2；在充电站等待恢复 10；断电会提前结束本轮。", ruleScore: "计分：配送 +100、机器人碰撞 −200、断电 −50、每步 −1、参与者绕路每单位 −2。",
     playDemo: "播放演示", pauseDemo: "暂停演示", beginTask1: "开始任务 1", endDemoEarly: "提前结束演示并开始任务 1", roundInstruction: "控制机器人 1，与机器人 2 协作配送",
     roundHint: "你和机器人 2 都只根据同一移动前状态独立选动作，两个动作随后同时执行。", up: "上", down: "下", left: "左", right: "右", wait: "等待", spaceKey: "空格",
-    task1Complete: "任务 1 已完成", timeLeft: "剩余时间", aiAiExplanationTitle: "AI–AI 解释轨迹", aiAiExplanationScene: "AI–AI 固定参考轨迹", referenceMetrics: "以下为固定 AI–AI 参考轨迹数据，不是您的任务 1 成绩。", explanationTimelineLabel: "AI–AI 参考轨迹帧", explanationHint: "这里显示的是与开场演示相同的固定 AI–AI 参考轨迹，不是您刚完成的任务 1。拖动时间轴选择任意实际动作帧，再选择机器人 1 或机器人 2 并自由提问。每次提问都会使用新的生成种子；可以零次提问并随时结束。",
-    question: "你的问题", questionPlaceholder: "也可以在这里输入自己的问题。", ask: "询问所选机器人", finishExplanation: "结束解释并开始任务 2", answer: "系统解释", emptyExplanation: "本帧未能生成可靠解释，请重试或选择其他动作帧。",
-    presetQuestions: "快捷问题（点击后直接提问）", presetWhyAction: "为什么所选机器人在这一帧执行了这个动作？", presetTaskEffect: "这个动作如何影响当前配送任务？", presetEnergy: "当前电量和充电需求如何影响了这个动作？", presetTeammate: "队友的位置或动作是否影响了这个决定？", presetCollision: "这一步是否存在冲突或碰撞风险？", presetWhyAssignedA1: "为什么任务 1 的 A 点由所选机器人去取？", presetWhyNotAssignedA1: "为什么所选机器人没有去取任务 1 的 A 点？",
+    task1Complete: "任务 1 已完成",
+    askRobot2Title: "询问机器人2", liveExplanationHint: "询问机器人2刚才的行为；生成回答时任务会暂停。", question: "你的问题", questionPlaceholder: "询问机器人2最近几步的行为。", ask: "询问机器人2", answer: "机器人2", emptyExplanation: "暂时无法生成可靠回答，请重试。",
+    presetWhyAction: "机器人2刚才为什么这样做？", presetWhyWait: "机器人2为什么等待？", presetCollision: "我们刚才为什么碰撞？", presetHumanInfluence: "我的动作影响机器人2了吗？", presetGoal: "机器人2当前想做什么？", presetEnergy: "机器人2需要充电吗？",
     surveyTitle: "结束问卷", surveyHint: "请对以下陈述按 1（非常不同意）到 5（非常同意）评分。", comment: "可选意见", submitSurvey: "提交问卷",
     complete: "实验完成", saved: "记录已保存。", task1Score: "任务 1 得分", task2Score: "任务 2 得分", scoreDelta: "得分变化", restart: "开始新的参与者",
     interrupted: "本轮已中断", interruptedHint: "此实验已在另一页面继续，或服务恢复后旧运行被放弃。请重新开始。", desktopRequired: "请使用宽度至少 1024 像素的桌面或笔记本电脑。",
@@ -46,12 +39,12 @@ const COPY = {
     deliveryScore: "配送得分", collisionPenalty: "碰撞扣分", shutdownPenalty: "断电扣分", timePenalty: "步数扣分", detourPenalty: "绕路扣分",
     loading: "处理中…", requiredFields: "请填写参与者编号并确认已阅读说明。", requestFailed: "操作失败", taskLabel: "任务", roundScore: "本轮得分",
     action: "动作", requestedAction: "请求", executedAction: "实际", batteryChange: "电量",
-    transitionActions: "所选帧动作", causalFrameNote: "决策依据：移动前状态 S_t。执行结果：两个动作同时解析后的状态 S_t+1。", workingExplanation: "正在根据所选帧生成解释…", stillWorking: "仍在生成，请稍候…",
+    transitionActions: "动作", causalFrameNote: "双方从同一移动前状态决策并同步执行。", workingExplanation: "正在根据最近的人机交互生成回答…", stillWorking: "仍在生成，请稍候…",
     eventPickup: "取货", eventDelivery: "交付", eventCharging: "充电", eventChargerQueue: "排队", eventYield: "让行", eventConflict: "冲突风险", eventCollision: "碰撞",
   },
   en: {
-    appTitle: "Two-Robot Collaborative Delivery Study", workflowDemo: "Instructions & demo", task1: "Task 1", explanation: "Explanation", task2: "Task 2", survey: "Survey",
-    warehouse: "8×9 warehouse", liveScene: "Collaborative delivery", step: "Steps", score: "Score", deliveries: "Deliveries", collisions: "Collisions", shutdowns: "Shutdowns", detours: "Detour units",
+    appTitle: "Two-Robot Collaborative Delivery Study", workflowDemo: "Instructions & demo", task1: "Task 1", task2: "Task 2", survey: "Survey",
+    warehouse: "6×7 warehouse", liveScene: "Collaborative delivery", step: "Steps", score: "Score", deliveries: "Deliveries", collisions: "Collisions", shutdowns: "Shutdowns", detours: "Detour units",
     shelf: "Shelf", pickup: "Pickup A", dropoff: "Drop-off B", charger: "Charger", robots: "Robots",
     participantSetup: "Participant setup", welcome: "Start the collaborative delivery study", overview: "You will always control robot 1 and complete two 120-step delivery rounds with AI-controlled robot 2.",
     participantId: "Participant ID", agreement: "I have read and understood the study instructions.", start: "Start study",
@@ -60,9 +53,9 @@ const COPY = {
     ruleCharge: "A successful move costs 2 battery; waiting at the charger restores 10; shutdown ends the round.", ruleScore: "Score: +100 delivery, −200 robot collision, −50 shutdown, −1 per step, and −2 per human detour unit.",
     playDemo: "Play demonstration", pauseDemo: "Pause demonstration", beginTask1: "Begin Task 1", endDemoEarly: "Finish demo early and begin Task 1", roundInstruction: "Control robot 1 and collaborate with robot 2",
     roundHint: "You and robot 2 choose independently from the same pre-move state; both actions then execute simultaneously.", up: "Up", down: "Down", left: "Left", right: "Right", wait: "Wait", spaceKey: "Space",
-    task1Complete: "Task 1 complete", timeLeft: "Time left", aiAiExplanationTitle: "AI–AI explanation trajectory", aiAiExplanationScene: "Fixed AI–AI reference trajectory", referenceMetrics: "These are metrics from the fixed AI–AI reference trajectory, not your Task 1 score.", explanationTimelineLabel: "AI–AI reference trajectory frame", explanationHint: "This is the same fixed AI–AI reference trajectory shown in the opening demonstration, not the Task 1 you just completed. Select any executed frame, choose robot 1 or robot 2, and ask a free-form question. Every question uses a fresh generation seed; you may ask zero questions and finish early.",
-    question: "Your question", questionPlaceholder: "Or type your own question here.", ask: "Ask about selected robot", finishExplanation: "Finish explanations and begin Task 2", answer: "System explanation", emptyExplanation: "No grounded explanation was produced for this frame. Please retry or select another action frame.",
-    presetQuestions: "Quick questions (click to ask)", presetWhyAction: "Why did the selected robot execute this action at this frame?", presetTaskEffect: "How did this action affect the current delivery task?", presetEnergy: "How did the battery level and charging needs affect this action?", presetTeammate: "Did the teammate's position or action affect this decision?", presetCollision: "Was there a conflict or collision risk on this step?", presetWhyAssignedA1: "Why is the selected robot assigned to collect task 1 at point A?", presetWhyNotAssignedA1: "Why is the selected robot not collecting task 1 at point A?",
+    task1Complete: "Task 1 complete",
+    askRobot2Title: "Ask Robot 2", liveExplanationHint: "Ask about what Robot 2 just did. The task pauses while the answer is prepared.", question: "Your question", questionPlaceholder: "Ask Robot 2 about the last few steps.", ask: "Ask Robot 2", answer: "Robot 2", emptyExplanation: "No grounded answer was available. Please try again.",
+    presetWhyAction: "Why did Robot 2 do that?", presetWhyWait: "Why did Robot 2 wait?", presetCollision: "Why did we just collide?", presetHumanInfluence: "Did my action affect Robot 2?", presetGoal: "What is Robot 2 trying to do?", presetEnergy: "Does Robot 2 need to charge?",
     surveyTitle: "Final survey", surveyHint: "Rate each statement from 1 (strongly disagree) to 5 (strongly agree).", comment: "Optional comment", submitSurvey: "Submit survey",
     complete: "Study complete", saved: "The record has been saved.", task1Score: "Task 1 score", task2Score: "Task 2 score", scoreDelta: "Score change", restart: "Start a new participant",
     interrupted: "Run interrupted", interruptedHint: "This run continued in another page or was abandoned during recovery. Please restart.", desktopRequired: "Use a desktop or laptop at least 1024 pixels wide.",
@@ -71,13 +64,13 @@ const COPY = {
     deliveryScore: "Delivery points", collisionPenalty: "Collision penalty", shutdownPenalty: "Shutdown penalty", timePenalty: "Step penalty", detourPenalty: "Detour penalty",
     loading: "Working…", requiredFields: "Enter a participant ID and confirm the instructions.", requestFailed: "Request failed", taskLabel: "Task", roundScore: "Round score",
     action: "Action", requestedAction: "Requested", executedAction: "Executed", batteryChange: "Battery",
-    transitionActions: "Selected actions", causalFrameNote: "Decision evidence: pre-move state S_t. Outcome: state S_t+1 after both actions resolve simultaneously.", workingExplanation: "Generating an explanation for the selected frame…", stillWorking: "Still generating—please wait…",
+    transitionActions: "Actions", causalFrameNote: "Both agents decide from the same pre-move state and execute simultaneously.", workingExplanation: "Answering from your recent Human–AI interaction…", stillWorking: "Still generating—please wait…",
     eventPickup: "Pickup", eventDelivery: "Delivery", eventCharging: "Charging", eventChargerQueue: "Queue", eventYield: "Yield", eventConflict: "Conflict risk", eventCollision: "Collision",
   },
 };
 
 Object.assign(COPY.zh, {
-  controlTransitionHint: "本实验流程在两轮任务之间不提供解释或提问环节。任务 2 将从新的机器人状态、电量 100 和不同任务序列开始。",
+  controlTransitionHint: "任务 2 不提供即时提问，将从新的机器人状态、电量 100 和不同任务序列开始。",
   beginTask2: "开始任务 2",
   ruleCharge: "成功移动耗电 2；在充电站等待恢复 10；断电会提前结束本轮。",
   testCondition: "开发测试条件",
@@ -87,19 +80,18 @@ Object.assign(COPY.zh, {
   testConditionHint: "仅用于界面测试；数据写入独立的 development 命名空间。",
   assignedTestCondition: "当前测试条件",
   groupATitle: "您已分配到 A 组（有解释）",
-  groupADescription: "任务 1 结束后，您将进入解释与提问环节，然后再开始任务 2。",
+  groupADescription: "任务 1 进行期间可以随时询问机器人2；任务 2 不提供即时提问。",
   groupBTitle: "您已分配到 B 组（无解释）",
-  groupBDescription: "任务 1 结束后不提供解释或提问环节；确认过渡说明后开始任务 2。",
-  explanationHint: "这里显示的是与开场演示相同的固定 AI–AI 参考轨迹，不是您刚完成的任务 1。拖动时间轴选择任意实际动作帧，再选择机器人 1 或机器人 2。您可以点击快捷问题直接提问，也可以自行输入。每次提问都会使用新的生成种子；可以零次提问并随时结束。",
+  groupBDescription: "两轮任务均不显示即时提问面板。",
   questionTarget: "提问对象",
   robot1Option: "机器人 1（AI）",
   robot2Option: "机器人 2（AI）",
-  questionPlaceholder: "也可以在这里输入自己的问题。",
-  ask: "询问所选机器人",
+  questionPlaceholder: "询问机器人2最近几步的行为。",
+  ask: "询问机器人2",
   temporaryNetworkError: "临时网络连接中断，请重试；当前进度已保留。",
 });
 Object.assign(COPY.en, {
-  controlTransitionHint: "This study flow does not provide an explanation or question period between the two rounds. Task 2 will start with a fresh robot state, 100 battery, and a different task sequence.",
+  controlTransitionHint: "Task 2 has no live questions and starts with a fresh robot state, 100 battery, and a different task sequence.",
   beginTask2: "Begin Task 2",
   ruleCharge: "A successful move costs 2 battery; waiting at the charger restores 10; shutdown ends the round.",
   testCondition: "Development test condition",
@@ -109,15 +101,14 @@ Object.assign(COPY.en, {
   testConditionHint: "For interface testing only; records use the isolated development namespace.",
   assignedTestCondition: "Current test condition",
   groupATitle: "You are assigned to Group A (explanations)",
-  groupADescription: "After Task 1, you will enter the explanation and question period before starting Task 2.",
+  groupADescription: "You can ask Robot 2 questions at any time during Task 1; Task 2 has no live questions.",
   groupBTitle: "You are assigned to Group B (no explanations)",
-  groupBDescription: "There is no explanation or question period after Task 1; Task 2 begins after you acknowledge the transition notice.",
-  explanationHint: "This is the same fixed AI–AI reference trajectory shown in the opening demonstration, not the Task 1 you just completed. Select any executed frame and robot. You can click a quick question to ask immediately or type your own. Every question uses a fresh generation seed; you may ask zero questions and finish early.",
+  groupBDescription: "The live question panel is not shown in either round.",
   questionTarget: "Robot to ask about",
   robot1Option: "Robot 1 (AI)",
   robot2Option: "Robot 2 (AI)",
-  questionPlaceholder: "Or type your own question here.",
-  ask: "Ask about selected robot",
+  questionPlaceholder: "Ask Robot 2 about the last few steps.",
+  ask: "Ask Robot 2",
   temporaryNetworkError: "The temporary tunnel connection was interrupted. Please retry; your current progress is preserved.",
 });
 
@@ -169,134 +160,6 @@ async function api(path, options = {}) {
   }
 
   throw new Error(tr("temporaryNetworkError"));
-}
-
-async function ensureReferenceTrajectory() {
-  if (state.referenceTrajectory) return state.referenceTrajectory;
-  state.referenceTrajectory = await api("/api/study/reference-trajectory");
-  const count = state.referenceTrajectory.frames?.length || 1;
-  // The participant's Task 1 frame is unrelated to the fixed AI-AI reference
-  // material.  Always start at its first executed transition.
-  state.referenceIndex = Math.min(1, count - 1);
-  state.referenceSettledIndex = state.referenceIndex;
-  state.referenceSettledAt = performance.now();
-  return state.referenceTrajectory;
-}
-
-async function synchronizeReferenceTrajectory() {
-  const latest = await api("/api/study/reference-trajectory");
-  if (state.referenceTrajectory?.trajectory_hash === latest.trajectory_hash) {
-    return latest;
-  }
-  state.referenceTrajectory = latest;
-  const count = latest.frames?.length || 1;
-  state.referenceIndex = Math.min(Math.max(1, state.referenceIndex), count - 1);
-  state.referenceSettledIndex = state.referenceIndex;
-  state.referenceSettledAt = performance.now();
-  await render(referenceView(state.view, state.referenceIndex), { skipReferenceLoad: true });
-  return latest;
-}
-
-function referenceView(baseView, index = state.referenceIndex) {
-  const trajectory = state.referenceTrajectory;
-  const frames = trajectory?.frames || [];
-  if (!frames.length) return baseView;
-  const bounded = Math.min(Math.max(1, Number(index) || 1), frames.length - 1);
-  const frame = frames[bounded];
-  return {
-    ...baseView,
-    map: trajectory.map || baseView.map,
-    state: frame.state,
-    transition: frame.transition,
-    timeline: {
-      ...(baseView.timeline || {}),
-      index: bounded,
-      count: frames.length,
-      trajectory_kind: trajectory.trajectory_kind,
-      trajectory_seed: trajectory.trajectory_seed,
-      trajectory_hash: trajectory.trajectory_hash,
-      agent_control: trajectory.agent_control,
-    },
-  };
-}
-
-function queueSettledBrowseEvent() {
-  if (!state.referenceTrajectory || !state.referenceSettledAt) return;
-  const durationMs = Math.max(0, Math.round(performance.now() - state.referenceSettledAt));
-  state.browseEvents.push({
-    timeline_index: state.referenceSettledIndex,
-    dwell_ms: durationMs,
-    trajectory_hash: state.referenceTrajectory.trajectory_hash,
-  });
-  state.referenceSettledAt = 0;
-}
-
-async function flushTimelineEvents() {
-  if (!state.browseEvents.length || !state.view?.study?.run_id) return;
-  const events = state.browseEvents.splice(0, state.browseEvents.length);
-  try {
-    await api("/api/study/timeline-events", {
-      method: "POST",
-      body: JSON.stringify({
-        operation_id: operationId(),
-        run_id: state.view.study.run_id,
-        trajectory_hash: state.referenceTrajectory?.trajectory_hash,
-        events,
-      }),
-    });
-  } catch (_) {
-    state.browseEvents.unshift(...events);
-  }
-}
-
-function renderReferenceEvents() {
-  const eventContainer = $("timelineEvents");
-  const events = {};
-  for (const frame of state.referenceTrajectory?.frames || []) {
-    for (const tag of frame.event_tags || []) {
-      (events[tag] ||= []).push(frame.index);
-    }
-  }
-  const labels = {
-    pickup: "eventPickup", delivery: "eventDelivery", charging: "eventCharging",
-    charger_queue: "eventChargerQueue", queue: "eventChargerQueue",
-    coordination_yield: "eventYield", yield: "eventYield",
-    collision_risk: "eventConflict", conflict: "eventConflict",
-    robot_collision: "eventCollision", collision: "eventCollision",
-  };
-  eventContainer.replaceChildren(...Object.entries(labels).flatMap(([tag, labelKey]) => {
-    const frames = events[tag] || [];
-    if (!frames.length) return [];
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "timeline-event-button";
-    button.textContent = `${tr(labelKey)} (${frames.length})`;
-    button.addEventListener("click", () => {
-      const next = frames.find((frame) => frame > state.referenceIndex) ?? frames[0];
-      selectReferenceFrame(next, false);
-    });
-    return [button];
-  }));
-}
-
-async function selectReferenceFrame(index, scrubbing = false) {
-  if (!state.referenceTrajectory) await ensureReferenceTrajectory();
-  const count = state.referenceTrajectory.frames?.length || 1;
-  state.referenceIndex = Math.min(Math.max(1, Number(index) || 1), count - 1);
-  state.scrubbing = scrubbing;
-  clearTimeout(state.scrubTimer);
-  cancelMotion();
-  await render(referenceView(state.view, state.referenceIndex), { skipReferenceLoad: true });
-  const settle = async () => {
-    queueSettledBrowseEvent();
-    state.referenceSettledIndex = state.referenceIndex;
-    state.referenceSettledAt = performance.now();
-    state.scrubbing = false;
-    await render(referenceView(state.view, state.referenceIndex), { skipReferenceLoad: true });
-    if (state.browseEvents.length >= 10) void flushTimelineEvents();
-  };
-  if (scrubbing) state.scrubTimer = setTimeout(settle, 150);
-  else await settle();
 }
 
 function showError(error) {
@@ -354,7 +217,6 @@ function setLanguage(locale, notify = true, rerender = true) {
   document.documentElement.lang = requestedLocale;
   document.querySelectorAll("[data-i18n]").forEach((node) => { node.textContent = tr(node.dataset.i18n); });
   document.querySelectorAll("[data-i18n-placeholder]").forEach((node) => { node.placeholder = tr(node.dataset.i18nPlaceholder); });
-  $("timelineRange").setAttribute("aria-label", tr("explanationTimelineLabel"));
   $("languageButtonLabel").textContent = state.locale === "zh" ? "EN" : "中";
   buildSurvey();
   if (state.view && rerender) {
@@ -365,6 +227,16 @@ function setLanguage(locale, notify = true, rerender = true) {
     void render(state.view);
   }
   if (notify && allowed("set_language")) command("set_language", { locale: requestedLocale });
+}
+
+// Okabe-Ito-inspired task colors, deliberately separated from the blue and
+// orange robot colors.  Task IDs map deterministically so A/B retain the same
+// color after task refreshes and in both languages.
+const TASK_PALETTE = ["#009E73", "#CC79A7", "#B79F00", "#7A5AF8", "#5D6B7A"];
+function taskColor(taskId, fallbackIndex = 0) {
+  const match = String(taskId || "").match(/(\d+)$/);
+  const index = match ? Math.max(0, Number(match[1]) - 1) : fallbackIndex;
+  return TASK_PALETTE[index % TASK_PALETTE.length];
 }
 
 function drawWarehouse(view, visualFrame = null) {
@@ -388,11 +260,15 @@ function drawWarehouse(view, visualFrame = null) {
   for (const position of view.map.shelves) { const [x,y] = cell(position); ctx.fillStyle = "#9aa8ba"; ctx.fillRect(x + 2, y + 2, size - 4, size - 4); }
   const [cx,cy] = cell(view.map.charger_position); ctx.fillStyle = "#6558e8"; ctx.fillRect(cx + 4, cy + 4, size - 8, size - 8); ctx.fillStyle = "#ffffff"; ctx.font = `bold ${size*.46}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("⚡", cx + size/2, cy + size/2);
   const tasks = view.state.tasks || [];
+  canvas.dataset.taskColors = JSON.stringify(
+    Object.fromEntries(tasks.map((task, index) => [task.task_id, taskColor(task.task_id, index)]))
+  );
   tasks.forEach((task, index) => {
+    const color = taskColor(task.task_id, index);
     if (task.status === "available") {
-      const [x,y] = cell(task.pickup_position); ctx.fillStyle = "#f4b740"; ctx.beginPath(); ctx.arc(x+size/2,y+size/2,size*.31,0,Math.PI*2); ctx.fill(); ctx.fillStyle="#26324a"; ctx.fillText(`A${index+1}`,x+size/2,y+size/2);
+      const [x,y] = cell(task.pickup_position); ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x+size/2,y+size/2,size*.31,0,Math.PI*2); ctx.fill(); ctx.fillStyle="#ffffff"; ctx.fillText(`A${index+1}`,x+size/2,y+size/2);
     }
-    const [x,y] = cell(task.delivery_position); ctx.fillStyle = "#31b883"; ctx.beginPath(); ctx.arc(x+size/2,y+size/2,size*.31,0,Math.PI*2); ctx.fill(); ctx.fillStyle="#ffffff"; ctx.fillText(`B${index+1}`,x+size/2,y+size/2);
+    const [x,y] = cell(task.delivery_position); ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x+size/2,y+size/2,size*.31,0,Math.PI*2); ctx.fill(); ctx.fillStyle="#ffffff"; ctx.fillText(`B${index+1}`,x+size/2,y+size/2);
   });
   (view.state.agents || []).forEach((agent) => {
     const visual = visualFrame?.agents?.[agent.id] || {};
@@ -431,7 +307,8 @@ function drawWarehouse(view, visualFrame = null) {
       const cargoSize = Math.max(17, size * .3);
       const cargoX = x + size * .78;
       const cargoY = y + size * .05;
-      ctx.fillStyle = "#f4b740";
+      const cargoIndex = Math.max(0, Number(String(agent.carrying_label).replace(/\D/g, "")) - 1);
+      ctx.fillStyle = TASK_PALETTE[cargoIndex % TASK_PALETTE.length];
       ctx.beginPath(); ctx.roundRect(cargoX,cargoY,cargoSize,cargoSize,cargoSize*.25); ctx.fill();
       ctx.fillStyle = "#26324a";
       ctx.font = `900 ${Math.max(9, cargoSize * .48)}px sans-serif`;
@@ -610,14 +487,12 @@ function renderScores(snapshot) {
 }
 
 function renderWorkflow(stage, condition) {
-  const order = ["instructions", "task1", "explanation", "task2", "survey"];
+  const order = ["instructions", "task1", "task2", "survey"];
   const normalized = stage === "completed" ? "survey" : stage;
-  const current = stage === "task1_complete" ? -1 : Math.max(0, order.indexOf(normalized));
-  ["workflowInstructions","workflowTask1","workflowExplanation","workflowTask2","workflowSurvey"].forEach((id,index) => {
-    const skipped = condition === "control" && index === 2 && ["task1_complete", "task2", "survey", "completed"].includes(stage);
+  const current = stage === "task1_complete" ? 2 : Math.max(0, order.indexOf(normalized));
+  ["workflowInstructions","workflowTask1","workflowTask2","workflowSurvey"].forEach((id,index) => {
     $(id).classList.toggle("active", index === current);
-    $(id).classList.toggle("done", !skipped && (stage === "task1_complete" ? index <= 1 : index < current || stage === "completed"));
-    $(id).classList.toggle("skipped", skipped);
+    $(id).classList.toggle("done", stage === "task1_complete" ? index <= 1 : index < current || stage === "completed");
   });
 }
 
@@ -625,12 +500,9 @@ function renderStage() {
   if (!state.view) return;
   const study = state.view.study || {};
   const stage = study.stage || "idle";
-  const aiAiReference = stage === "explanation"
-    && state.view.timeline?.trajectory_kind === "ai_ai_reference";
-  $("sceneTitle").textContent = aiAiReference ? tr("aiAiExplanationScene") : tr("liveScene");
-  $("referenceMetricsLabel").classList.toggle("hidden", !aiAiReference);
-  const panels = { idle: "setupPanel", instructions: "instructionsPanel", task1: "roundPanel", task1_complete: "task1CompletePanel", task2: "roundPanel", explanation: "explanationPanel", survey: "surveyPanel", completed: "completePanel", abandoned: "interruptedPanel" };
-  ["setupPanel","instructionsPanel","roundPanel","task1CompletePanel","explanationPanel","surveyPanel","completePanel","interruptedPanel"].forEach((id) => $(id).classList.toggle("hidden", panels[stage] !== id));
+  $("sceneTitle").textContent = tr("liveScene");
+  const panels = { idle: "setupPanel", instructions: "instructionsPanel", task1: "roundPanel", task1_complete: "task1CompletePanel", task2: "roundPanel", survey: "surveyPanel", completed: "completePanel", abandoned: "interruptedPanel" };
+  ["setupPanel","instructionsPanel","roundPanel","task1CompletePanel","surveyPanel","completePanel","interruptedPanel"].forEach((id) => $(id).classList.toggle("hidden", panels[stage] !== id));
   renderWorkflow(stage, study.condition);
   const tutorial = study.tutorial || {};
   $("testConditionField").classList.toggle("hidden", !study.test_condition_selector);
@@ -669,46 +541,23 @@ function renderStage() {
     $("roundBadge").textContent = stage.toUpperCase();
     document.querySelectorAll("#actionPad button").forEach((button) => { button.disabled = state.busy; });
   }
+  const liveExplanationVisible = Boolean(
+    stage === "task1"
+    && study.condition === "explanation"
+    && study.live_explanation_available
+  );
+  $("liveExplanationPanel").classList.toggle("hidden", !liveExplanationVisible);
   if (stage === "task1_complete") {
     const summary = study.round_summaries?.task1;
     $("controlTask1Score").textContent = Math.round(summary?.score ?? 0);
     $("beginTask2Button").disabled = state.busy || !allowed("begin_task2");
     $("beginTask2Button").dataset.locked = allowed("begin_task2") ? "false" : "true";
   }
-  const timelineVisible = stage === "explanation";
-  $("timelinePanel").classList.toggle("hidden", !timelineVisible);
-  $("robotDetailPanel").classList.toggle("hidden", !timelineVisible);
-  if (timelineVisible) {
-    const count = state.referenceTrajectory?.frames?.length || state.view.timeline?.count || 1;
-    const index = state.referenceTrajectory ? state.referenceIndex : (state.view.timeline?.index || 0);
-    $("timelineRange").min = count > 1 ? "1" : "0"; $("timelineRange").max = String(Math.max(0,count-1)); $("timelineRange").value = String(index);
-    $("timelineLabel").textContent = `${index} / ${Math.max(0,count-1)}`;
-    $("timelineBack").disabled = state.busy || index <= 1;
-    $("timelineBack").dataset.locked = index <= 1 ? "true" : "false";
-    $("timelineForward").disabled = state.busy || index >= count - 1;
-    $("timelineForward").dataset.locked = index >= count - 1 ? "true" : "false";
-    renderReferenceEvents();
-    const summary = study.round_summaries?.task1; $("task1Result").textContent = summary ? `${tr("roundScore")}: ${Math.round(summary.score)}` : "";
-    const targets = study.explanation_target_agents || ["robot_1", "robot_2"];
-    const requestedTarget = study.explanation_target_agent || "robot_2";
-    $("questionTarget").value = targets.includes(requestedTarget)
-      ? requestedTarget
-      : "robot_2";
-  }
   if (stage === "completed") {
     $("finalTask1").textContent = Math.round(study.round_summaries?.task1?.score ?? 0);
     $("finalTask2").textContent = Math.round(study.round_summaries?.task2?.score ?? 0);
     $("finalDelta").textContent = Math.round(study.score_delta ?? 0);
   }
-  updateTimer(study.explanation_seconds_remaining);
-}
-
-function updateTimer(seconds) {
-  clearInterval(state.timer); state.timer = null;
-  if (seconds == null || !$("explanationTimer")) return;
-  let remaining = Math.max(0, Math.floor(seconds));
-  const paint = () => { $("explanationTimer").textContent = `${String(Math.floor(remaining/60)).padStart(2,"0")}:${String(remaining%60).padStart(2,"0")}`; };
-  paint(); state.timer = setInterval(() => { remaining = Math.max(0,remaining-1); paint(); },1000);
 }
 
 function renderAnswer(report) {
@@ -741,7 +590,7 @@ function paintView(view, revealOutcome = false) {
   document.body.dataset.studyStage = view.study?.stage || "idle";
   document.body.dataset.stateVersion = String(view.study?.state_version ?? 0);
   const stage = view.study?.stage || "idle";
-  const showActions = ["instructions", "explanation"].includes(stage);
+  const showActions = stage === "instructions";
   renderRobots(
     view.state?.agents || [],
     view.transition,
@@ -754,25 +603,7 @@ function paintView(view, revealOutcome = false) {
 }
 
 async function render(view, options = {}) {
-  const previousStage = state.view?.study?.stage;
-  let renderedView = view;
   const requestedStage = view.study?.stage || "idle";
-  if (requestedStage === "explanation" && !options.skipReferenceLoad) {
-    state.view = view;
-    await ensureReferenceTrajectory();
-    renderedView = referenceView(view, state.referenceIndex);
-  }
-  if (previousStage === "explanation" && requestedStage !== "explanation") {
-    clearTimeout(state.scrubTimer);
-    queueSettledBrowseEvent();
-    void flushTimelineEvents();
-    state.referenceTrajectory = null;
-    state.referenceIndex = 1;
-    state.referenceSettledIndex = 1;
-    state.scrubbing = false;
-    cancelMotion();
-  }
-  view = renderedView;
   if (requestedStage !== "idle" && view.study?.locale) {
     const requestedLocale = view.study.locale === "en" ? "en" : "zh";
     if (requestedLocale !== state.locale) setLanguage(requestedLocale, false, false);
@@ -780,9 +611,7 @@ async function render(view, options = {}) {
   const stage = view.study?.stage || "idle";
   const beforeView = transitionBeforeView(view);
   paintView(beforeView);
-  if (view.transition?.loop && stage === "explanation" && !state.scrubbing) {
-    animateLoop(beforeView, view.transition);
-  } else if (view.transition) {
+  if (view.transition) {
     await animateOnce(beforeView, view.transition, 400);
     paintView(view, true);
     drawWarehouse(view);
@@ -860,19 +689,9 @@ $("beginTask1Button").addEventListener("click", async () => {
 });
 $("beginTask2Button").addEventListener("click", () => command("begin_task2"));
 document.querySelectorAll("#actionPad button").forEach((button) => button.addEventListener("click", () => command("human_action", { action: button.dataset.action })));
-$("timelineBack").addEventListener("click", () => selectReferenceFrame(state.referenceIndex - 1, false));
-$("timelineForward").addEventListener("click", () => selectReferenceFrame(state.referenceIndex + 1, false));
-$("timelineRange").addEventListener("input", (event) => selectReferenceFrame(Number(event.target.value), true));
 async function submitExplanationQuestion(question, questionKind = null) {
   const prompt = String(question || "").trim();
-  if (!prompt) return;
-  clearTimeout(state.scrubTimer);
-  if (state.scrubbing || state.referenceSettledIndex !== state.referenceIndex) {
-    queueSettledBrowseEvent();
-    state.referenceSettledIndex = state.referenceIndex;
-    state.referenceSettledAt = performance.now();
-    state.scrubbing = false;
-  }
+  if (!prompt || state.busy || !allowed("ask_explanation")) return;
   $("questionInput").value = prompt;
   $("questionStatus").textContent = tr("workingExplanation");
   $("questionStatus").classList.remove("hidden");
@@ -880,13 +699,9 @@ async function submitExplanationQuestion(question, questionKind = null) {
   state.questionTimer = setTimeout(() => {
     $("questionStatus").textContent = tr("stillWorking");
   }, 5000);
-  await flushTimelineEvents();
-  await synchronizeReferenceTrajectory();
   const payload = {
     question: prompt,
-    target_agent: $("questionTarget").value,
-    trajectory_hash: state.referenceTrajectory?.trajectory_hash,
-    selected_frame: state.referenceIndex,
+    target_agent: "robot_2",
   };
   if (questionKind) payload.question_kind = questionKind;
   await command("ask_explanation", payload);
@@ -900,11 +715,6 @@ document.querySelectorAll("#presetQuestions button").forEach((button) => {
 });
 $("askButton").addEventListener("click", () => {
   submitExplanationQuestion($("questionInput").value);
-});
-$("finishExplanationButton").addEventListener("click", async () => {
-  queueSettledBrowseEvent();
-  await flushTimelineEvents();
-  await command("finish_explanation");
 });
 $("surveyPanel").addEventListener("submit", (event) => {
   event.preventDefault(); const form = new FormData(event.currentTarget);

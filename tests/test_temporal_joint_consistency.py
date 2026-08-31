@@ -5,11 +5,21 @@ from copy import deepcopy
 from env.warehouse.coordination_plan import frozen_joint_coordination_plan
 from env.warehouse.domain import WarehouseConfig
 from env.warehouse.environment import WarehouseMultiAgentEnv
+from env.warehouse.layouts import COMPACT_STAGGERED_8X9_LAYOUT
 from env.warehouse.navigation import ACTIONS
 
 
+def _legacy_config(**overrides) -> WarehouseConfig:
+    return WarehouseConfig(
+        rows=COMPACT_STAGGERED_8X9_LAYOUT.rows,
+        cols=COMPACT_STAGGERED_8X9_LAYOUT.cols,
+        map_layout_id=COMPACT_STAGGERED_8X9_LAYOUT.layout_id,
+        **overrides,
+    )
+
+
 def _occupied_route_environment() -> WarehouseMultiAgentEnv:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=20))
     environment.reset(seed=31_001)
     state = environment.get_state()
     priority = state.by_id("robot_1")
@@ -91,7 +101,7 @@ def test_followthrough_plan_is_cancelled_when_priority_goal_changes() -> None:
 
 
 def test_critical_charger_handoff_is_one_joint_causal_plan() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=20))
     environment.reset(seed=31_002)
     state = environment.get_state()
     occupant = state.by_id("robot_1")
@@ -128,7 +138,7 @@ def test_critical_charger_handoff_is_one_joint_causal_plan() -> None:
 
 
 def test_immediate_reverse_without_lifecycle_event_is_audited() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=20))
     environment.reset(seed=31_003)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -147,7 +157,7 @@ def test_immediate_reverse_without_lifecycle_event_is_audited() -> None:
 def test_energy_infeasible_pickup_is_rejected_before_first_task_step() -> None:
     """Do not take an A-directed step and discover the charge need later."""
 
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=20))
     environment.reset(seed=31_006)
     state = environment.get_state()
     charging = state.by_id("robot_1")
@@ -177,7 +187,7 @@ def test_energy_infeasible_pickup_is_rejected_before_first_task_step() -> None:
 
 
 def test_persistent_pickup_goals_are_distinct_and_observable() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=20))
     observations, _ = environment.reset(seed=31_004)
     state = environment.get_state()
     goals = [
@@ -197,7 +207,7 @@ def test_persistent_pickup_goals_are_distinct_and_observable() -> None:
 def test_loaded_robot_departing_charger_is_explained_by_delivery_progress() -> None:
     """A charger tile alone must not fabricate a charge-completion reason."""
 
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=20))
     environment.reset(seed=31_005)
     state = environment.get_state()
     loaded = state.by_id("robot_2")

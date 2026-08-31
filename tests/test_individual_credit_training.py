@@ -11,14 +11,24 @@ from env.warehouse.coordination import (
 )
 from env.warehouse.domain import DeliveryTask, WarehouseConfig
 from env.warehouse.environment import WarehouseMultiAgentEnv
+from env.warehouse.layouts import COMPACT_STAGGERED_8X9_LAYOUT
 from env.warehouse.observations import _coordination_features
 from env.warehouse.policy_metrics import EfficiencyMetrics
 from env.warehouse.rewards import RewardConfig
 from env.warehouse.transition_audit import necessary_teammate_route_clearance
 
 
+def _legacy_config(**overrides) -> WarehouseConfig:
+    return WarehouseConfig(
+        rows=COMPACT_STAGGERED_8X9_LAYOUT.rows,
+        cols=COMPACT_STAGGERED_8X9_LAYOUT.cols,
+        map_layout_id=COMPACT_STAGGERED_8X9_LAYOUT.layout_id,
+        **overrides,
+    )
+
+
 def test_loaded_route_clearance_is_not_an_avoidable_detour() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=10))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=10))
     environment.reset(seed=1540)
     state = environment.get_state()
     for task, agent_id, position, pickup, goal in (
@@ -122,7 +132,7 @@ def test_legacy_team_credit_requires_an_explicit_ablation_flag() -> None:
         avoidable_wait_cost=0.01,
         mission_regression_scale=1.0,
     )
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=8, reward=legacy))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=8, reward=legacy))
     environment.reset(seed=7)
     _, rewards, _, _, info = environment.step(
         {"robot_1": "UP", "robot_2": "WAIT"}
@@ -167,7 +177,7 @@ def _install_loaded_delivery_charger_conflict(
 
 
 def test_actor_priority_and_teacher_share_loaded_delivery_precedence() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=120))
     environment.reset(seed=1)
     _install_loaded_delivery_charger_conflict(environment)
     state = environment.get_state()
@@ -195,7 +205,7 @@ def test_actor_priority_and_teacher_share_loaded_delivery_precedence() -> None:
 
 
 def test_joint_wait_credit_detects_state_only_coordinated_escape() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=120))
     environment.reset(seed=2)
     _install_loaded_delivery_charger_conflict(environment)
 
@@ -217,7 +227,7 @@ def test_joint_wait_credit_detects_state_only_coordinated_escape() -> None:
 
 
 def test_critical_charger_survival_precedes_loaded_delivery() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=120))
     environment.reset(seed=3)
     state = environment.get_state()
     state.tasks = [
@@ -267,7 +277,7 @@ def test_critical_charger_survival_precedes_loaded_delivery() -> None:
 
 
 def test_charge_mode_cancels_off_station_when_shared_state_becomes_safe() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=20))
     environment.reset(seed=4)
     state = environment.get_state()
     robot = state.by_id("robot_1")
@@ -286,7 +296,7 @@ def test_charge_mode_cancels_off_station_when_shared_state_becomes_safe() -> Non
 
 def test_teacher_prioritizes_the_more_urgent_empty_charger_entry() -> None:
     environment = WarehouseMultiAgentEnv(
-        WarehouseConfig(participant_detour_scoring=False)
+        _legacy_config(participant_detour_scoring=False)
     )
     environment.reset(seed=15038)
     while environment.get_state().frame < 90:

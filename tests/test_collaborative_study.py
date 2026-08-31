@@ -4,7 +4,6 @@ from collections import Counter
 
 import pytest
 
-import ui.collaborative_study as study_module
 from ui.collaborative_study import (
     CollaborativeConditionAllocator,
     CollaborativeDeliveryStudy,
@@ -64,7 +63,7 @@ def test_block_allocation_is_one_to_one_with_four_parallel_forms(tmp_path) -> No
     )
 
 
-def test_explanation_branch_allows_zero_questions_and_early_finish(tmp_path) -> None:
+def test_group_a_records_live_questions_and_uses_direct_task2_transition(tmp_path) -> None:
     events = []
     config = CollaborativeStudyConfig(event_sink=events.append)
     assignment = next(
@@ -77,14 +76,30 @@ def test_explanation_branch_allows_zero_questions_and_early_finish(tmp_path) -> 
     assert study.stage == "instructions"
     assert study.group_code == "A"
     study.begin_task1()
+    study.record_explanation(
+        question="why?",
+        report={
+            "target_agent": "robot_2",
+            "current_frame": 7,
+            "anchor_frame": 7,
+            "context_frames": [3, 4, 5, 6, 7],
+            "trajectory_kind": "human_ai_task1",
+            "agent_control": {"robot_1": "human", "robot_2": "ai"},
+            "answer_en": "Robot 2 waited to yield.",
+            "answer_zh": "机器人2等待让行。",
+            "structured_evidence": {"reason_code": "WAIT_FOR_PRIORITY_PASSAGE"},
+            "fact_validation": {"passed": True},
+        },
+        response_seconds=0.2,
+    )
     study.finish_round(_summary("task1", assignment.task1_seed, 80))
-    assert study.stage == "explanation"
-    study.finish_explanation()
+    assert study.stage == "task1_complete"
+    study.begin_task2()
     assert study.stage == "task2"
-    assert study.explanation_count == 0
+    assert study.explanation_count == 1
     assert any(
-        item["event"] == "explanation_exploration_completed"
-        and item["explanation_count"] == 0
+        item["event"] == "live_explanation_presented"
+        and item["trajectory_kind"] == "human_ai_task1"
         for item in events
     )
 
@@ -121,7 +136,7 @@ def test_control_branch_waits_for_explicit_task2_confirmation(tmp_path) -> None:
         study.begin_task2()
 
 
-def test_explanation_branch_cannot_use_control_confirmation(tmp_path) -> None:
+def test_group_a_also_uses_task1_complete_confirmation(tmp_path) -> None:
     assignment = next(
         _assignment(tmp_path, index)
         for index in range(8)
@@ -133,14 +148,12 @@ def test_explanation_branch_cannot_use_control_confirmation(tmp_path) -> None:
     study.start(assignment, language="en")
     study.begin_task1()
     study.finish_round(_summary("task1", assignment.task1_seed, 25))
-    assert study.stage == "explanation"
-    with pytest.raises(RuntimeError):
-        study.begin_task2()
+    assert study.stage == "task1_complete"
+    study.begin_task2()
+    assert study.stage == "task2"
 
 
-def test_ten_minute_timeout_and_score_delta(tmp_path, monkeypatch) -> None:
-    clock = iter((100.0, 701.0, 701.0, 701.0))
-    monkeypatch.setattr(study_module.time, "monotonic", lambda: next(clock))
+def test_direct_task2_transition_and_score_delta(tmp_path) -> None:
     assignment = next(
         _assignment(tmp_path, index)
         for index in range(8)
@@ -152,8 +165,8 @@ def test_ten_minute_timeout_and_score_delta(tmp_path, monkeypatch) -> None:
     study.start(assignment, language="en")
     study.begin_task1()
     study.finish_round(_summary("task1", assignment.task1_seed, 10))
-    assert study.explanation_time_expired
-    study.finish_explanation()
+    assert study.stage == "task1_complete"
+    study.begin_task2()
     study.finish_round(_summary("task2", assignment.task2_seed, 65))
     assert study.stage == "survey"
     study.submit_survey(

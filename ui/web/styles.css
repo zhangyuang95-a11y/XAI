@@ -81,7 +81,6 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .score-strip div { min-width: 0; border: 1px solid #e5eaf2; border-radius: 12px; padding: 10px 12px; background: var(--panel-2); }
 .score-strip span { display: block; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .score-strip strong { display: block; margin-top: 4px; font-size: 17px; }
-.reference-metrics { margin: 0 0 9px; padding: 8px 11px; border: 1px solid #d9d4ff; border-radius: 10px; color: #5145c7; background: #f5f3ff; font-size: 12px; font-weight: 750; }
 
 .canvas-wrap {
   width: 100%;
@@ -106,10 +105,6 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .timeline input { width: 100%; accent-color: var(--purple); }
 .icon-button { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: #fff; font-size: 20px; }
 .timeline strong { color: var(--muted); font-size: 12px; min-width: 62px; text-align: right; }
-.timeline-events { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
-.timeline-events button { padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: #fff; font-size: 11px; }
-.timeline-events button.has-events { border-color: rgba(101, 88, 232, .35); color: #5145c7; background: #f5f3ff; }
-.timeline-events button.active { color: #fff; background: var(--purple); }
 
 .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .detail-grid > section { min-width: 0; padding: 14px; border: 1px solid #e6ebf2; border-radius: 15px; background: #fbfcfe; }
@@ -166,7 +161,9 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .action-pad span { display: block; margin-top: 5px; font-size: 12px; }
 .score-breakdown { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
 .score-breakdown div { display: flex; justify-content: space-between; }
-.timer { display: flex; justify-content: space-between; align-items: center; padding: 11px 13px; border: 1px solid rgba(240, 165, 27, .45); border-radius: 10px; color: #9a6500; background: #fff8e8; }
+.live-explanation { margin-top: 16px; padding: 13px; border: 1px solid rgba(101, 88, 232, .28); border-radius: 12px; background: #faf9ff; }
+.live-explanation > p { margin: 5px 0 10px; color: var(--muted); font-size: 12px; }
+.live-explanation .field { margin-top: 10px; }
 .preset-questions { margin: 14px 0; }
 .preset-questions > span { display: block; margin-bottom: 8px; color: var(--muted); font-size: 12px; font-weight: 800; }
 .preset-question-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }

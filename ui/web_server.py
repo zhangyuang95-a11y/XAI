@@ -28,7 +28,7 @@ DEFAULT_ARTIFACTS = CollaborativeArtifactPaths.under(
 )
 DEFAULT_ARTIFACT_ROOT = DEFAULT_ARTIFACTS.root
 DEFAULT_POLICY = (
-    PROJECT_ROOT / "output" / "deployment" / "warehouse_mappo_v66.pt"
+    PROJECT_ROOT / "output" / "deployment" / "warehouse_mappo_v67_6x7.pt"
 )
 DEFAULT_PROGRAM = DEFAULT_ARTIFACTS.rcpd_program
 SESSION_COOKIE = "warehouse_xai_session"
@@ -41,7 +41,6 @@ API_ROUTES = {
     "/api/view": "view",
     "/api/study/command": "study_command",
     "/api/study/reference-trajectory": "reference_trajectory",
-    "/api/study/timeline-events": "timeline_events",
 }
 STATIC_ROUTES = {
     "/": STATIC_ROOT / "index.html",

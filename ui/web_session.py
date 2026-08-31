@@ -10,10 +10,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
-import re
 import threading
 import time
 from typing import Any, Callable, Mapping
@@ -112,6 +110,7 @@ class WarehouseWebSession:
         self.tutorial_complete = False
         self.last_explanation_report: dict[str, Any] | None = None
         self.explanation_question_sequence = 0
+        self._pending_live_question_sequences: list[int] = []
         self._engine_factory = engine_factory
         self._task1_timeline_checkpoint: tuple[Any, int] | None = None
 
@@ -125,6 +124,7 @@ class WarehouseWebSession:
         self._events.clear()
         self.last_explanation_report = None
         self.explanation_question_sequence = 0
+        self._pending_live_question_sequences = []
         self.tutorial_index = 0
         self.tutorial_max_index = 0
         self.tutorial_complete = False
@@ -237,9 +237,8 @@ class WarehouseWebSession:
     def _transition_payload(self) -> dict[str, Any] | None:
         return self._transition_payload_for(
             self.current,
-            reveal_joint_actions=self.human_study.stage
-            in {"instructions", "explanation"},
-            loop=self.human_study.stage == "explanation",
+            reveal_joint_actions=self.human_study.stage == "instructions",
+            loop=False,
         )
 
     @staticmethod
@@ -276,8 +275,8 @@ class WarehouseWebSession:
         finish an in-progress explanation without a false stale-hash error.
         """
 
-        if self.human_study.stage != "explanation":
-            raise RuntimeError("The reference trajectory is available only during explanation.")
+        if self.human_study.stage != "instructions":
+            raise RuntimeError("The demonstration trajectory is available only during instructions.")
         frames: list[dict[str, Any]] = []
         for index, frame in enumerate(self.timeline.frames):
             frames.append(
@@ -332,22 +331,6 @@ class WarehouseWebSession:
             "map": warehouse_map_payload(self.environment.layout),
         }
 
-    def reference_trajectory_hash_is_compatible(self, value: str) -> bool:
-        """Accept only canonical or selection-only legacy hashes."""
-
-        submitted = str(value).strip()
-        if not submitted:
-            return True
-        compatible = {
-            self._reference_identity_hash(
-                self._reference_trajectory_identity(
-                    selected_agent_marker=marker,
-                )
-            )
-            for marker in ("", "robot_1", "robot_2")
-        }
-        return submitted in compatible
-
     def _study_payload(self) -> dict[str, Any]:
         current = (
             int(self.environment.state.frame)
@@ -357,13 +340,6 @@ class WarehouseWebSession:
         )
         total = int(self.human_study.config.horizon)
         completed = self.human_study.stage == "completed"
-        remaining = self.human_study.explanation_seconds_remaining
-        config = getattr(self.human_study, "config", None)
-        deadline = (
-            (datetime.now(timezone.utc) + timedelta(seconds=remaining)).isoformat()
-            if remaining is not None
-            else None
-        )
         return {
             "run_id": getattr(self, "run_id", None),
             "stage": self.human_study.stage,
@@ -389,16 +365,13 @@ class WarehouseWebSession:
             "score_delta": self.human_study.score_delta if completed else None,
             "explanation_presented": self.human_study.explanation_count > 0,
             "explanation_count": self.human_study.explanation_count,
-            "explanation_duration_seconds": int(getattr(config, "explanation_time_limit_seconds", 600)),
-            "explanation_deadline": deadline,
-            "explanation_seconds_remaining": remaining,
-            "controlled_agent": "robot_1",
-            "explanation_target_agent": (
-                self.selected_agent
-                if self.selected_agent in {"robot_1", "robot_2"}
-                else "robot_2"
+            "live_explanation_available": bool(
+                self.human_study.stage == "task1"
+                and self.human_study.condition == "explanation"
             ),
-            "explanation_target_agents": ["robot_1", "robot_2"],
+            "controlled_agent": "robot_1",
+            "explanation_target_agent": "robot_2",
+            "explanation_target_agents": ["robot_2"],
             "tutorial": self._tutorial_payload(),
             "survey_submitted": getattr(self.human_study, "survey", None) is not None,
             "allowed_commands": list(self.allowed_commands()),
@@ -412,15 +385,16 @@ class WarehouseWebSession:
                 "tutorial_advance", "tutorial_restart", "tutorial_select",
                 "begin_task1",
             )
-        elif stage in {"task1", "task2"}:
+        elif stage == "task1":
+            values = (
+                ("human_action", "ask_explanation")
+                if self.human_study.condition == "explanation"
+                else ("human_action",)
+            )
+        elif stage == "task2":
             values = ("human_action",)
         elif stage == "task1_complete":
             values = ("begin_task2",)
-        elif stage == "explanation":
-            values = (
-                "timeline_select", "timeline_back", "timeline_forward",
-                "ask_explanation", "finish_explanation",
-            )
         elif stage == "survey":
             values = ("submit_survey",)
         elif stage == "completed":
@@ -492,6 +466,9 @@ class WarehouseWebSession:
             "trajectory_kind": report.get("trajectory_kind"),
             "trajectory_seed": report.get("trajectory_seed"),
             "agent_control": report.get("agent_control", {}),
+            "anchor_frame": report.get("anchor_frame"),
+            "context_frames": report.get("context_frames", ()),
+            "question_focus": report.get("question_focus"),
             # Claims, verdict provenance, fallback diagnostics, and grounding
             # may encode program-specific source IDs.  They remain in the
             # server log but are withheld from the blinded browser payload.
@@ -548,6 +525,7 @@ class WarehouseWebSession:
             "environment_state": self.environment.get_state(),
             "environment_rng_state": self.environment.get_rng_state(),
             "task1_timeline_checkpoint": self._task1_timeline_checkpoint,
+            "pending_live_question_sequences": list(self._pending_live_question_sequences),
         }
 
     def restore_checkpoint(self, value: Mapping[str, Any]) -> None:
@@ -559,6 +537,9 @@ class WarehouseWebSession:
         self.environment.set_state(value["environment_state"])
         self.environment.set_rng_state(value["environment_rng_state"])
         self._task1_timeline_checkpoint = value["task1_timeline_checkpoint"]
+        self._pending_live_question_sequences = list(
+            value.get("pending_live_question_sequences", ())
+        )
         self.trajectory_kind = str(value["trajectory_kind"])
         self.trajectory_seed = value["trajectory_seed"]
         self.trajectory_agent_control = dict(value["trajectory_agent_control"])
@@ -614,40 +595,19 @@ class WarehouseWebSession:
     def select_frame(self, index: int) -> dict[str, Any]:
         if self._collaborative_round_active():
             raise RuntimeError("The timeline is locked during a collaborative round.")
-        if self.human_study.stage not in {"instructions", "explanation"}:
+        if self.human_study.stage != "instructions":
             raise RuntimeError("The timeline is unavailable during this study stage.")
         if self.human_study.stage == "instructions" and int(index) > self.tutorial_max_index:
             raise RuntimeError("Unplayed tutorial frames cannot be skipped.")
         selected_index = int(index)
-        if self.human_study.stage == "explanation" and self.timeline.count > 1:
-            selected_index = max(1, selected_index)
         self.timeline.select(selected_index)
         if self.human_study.stage == "instructions":
             self.tutorial_index = self.timeline.index
-        elif self.human_study.stage == "explanation":
-            if hasattr(self, "_events"):
-                self._capture_event(
-                    {
-                        "event": "trajectory_frame_browsed",
-                        "timeline_index": int(
-                            getattr(self.timeline, "index", index)
-                        ),
-                        "environment_frame": int(
-                            getattr(self.current.snapshot, "frame", index)
-                        ),
-                        "study_stage": "explanation",
-                        "trajectory_kind": self.trajectory_kind,
-                        "trajectory_seed": self.trajectory_seed,
-                        "agent_control": dict(self.trajectory_agent_control),
-                        "immutable": True,
-                    }
-                )
         self.adapter.restore(self.current.snapshot, self.policy)
         return self.view()
 
     def back(self) -> dict[str, Any]:
-        minimum = 1 if self.human_study.stage == "explanation" else 0
-        return self.select_frame(max(minimum, self.timeline.index - 1))
+        return self.select_frame(max(0, self.timeline.index - 1))
 
     def forward(self) -> dict[str, Any]:
         if self.human_study.stage == "instructions":
@@ -656,12 +616,11 @@ class WarehouseWebSession:
             return self.select_frame(self.timeline.index + 1)
         return self.view()
 
-    def _load_tutorial_timeline(self, *, for_explanation: bool = False) -> None:
+    def _load_tutorial_timeline(self) -> None:
         if self.tutorial is None or not self.tutorial.frames:
             raise RuntimeError("Verified tutorial material is unavailable.")
-        # Explanation uses a fresh runtime around the immutable verified
-        # AI-AI rollout.  The Task 1 adapter and engine are never reused as an
-        # explanation evidence source.
+        # The verified AI-AI rollout is presentation material for instructions
+        # only.  Live explanations never load or read this timeline.
         self.environment = WarehouseMultiAgentEnv(self.policy.environment_config)
         self.environment.reset(seed=int(self.tutorial.seed))
         self.adapter = WarehouseAdapter(self.environment)
@@ -688,33 +647,15 @@ class WarehouseWebSession:
         self.timeline.reset(timeline_frames[0])
         for frame in timeline_frames[1:]:
             self.timeline.append(frame)
-        selected_index = min(1, self.timeline.max_index) if for_explanation else 0
-        self.timeline.select(selected_index)
-        self.trajectory_kind = (
-            "ai_ai_reference" if for_explanation else "ai_ai_demonstration"
-        )
+        self.timeline.select(0)
+        self.trajectory_kind = "ai_ai_demonstration"
         self.trajectory_seed = int(self.tutorial.seed)
         self.trajectory_agent_control = dict(AI_AI_AGENT_CONTROL)
-        if not for_explanation:
-            self.tutorial_index = 0
-            self.tutorial_max_index = 0
-            self.tutorial_complete = len(timeline_frames) == 1
-        self.selected_agent = "robot_2" if for_explanation else self.tutorial.focus_agent
+        self.tutorial_index = 0
+        self.tutorial_max_index = 0
+        self.tutorial_complete = len(timeline_frames) == 1
+        self.selected_agent = self.tutorial.focus_agent
         self.adapter.restore(self.current.snapshot, self.policy)
-
-        if for_explanation:
-            self._capture_event(
-                {
-                    "event": "explanation_reference_loaded",
-                    "trajectory_kind": self.trajectory_kind,
-                    "trajectory_seed": self.trajectory_seed,
-                    "agent_control": dict(self.trajectory_agent_control),
-                    "displayed_frames": self.timeline.count,
-                    "initial_timeline_index": self.timeline.index,
-                    "immutable": True,
-                    "reuses_demonstration": True,
-                }
-            )
 
     def tutorial_advance(self) -> dict[str, Any]:
         if self.human_study.stage != "instructions":
@@ -816,40 +757,226 @@ class WarehouseWebSession:
         )
         return {"trial": None, "view": self.view()}
 
-    def _resolve_query_frame(self, plan: Any) -> tuple[TimelineFrame, Any, Any, Any]:
-        try:
-            requested = (
-                self.timeline.simulator_frame(plan.frame_reference)
-                if plan.frame_reference is not None
-                else self.current
-            )
-        except KeyError:
-            requested = self.current
-        action_focused = (
-            plan.intent.value in {"explanatory", "why_not"}
-            and (
-                plan.requires_program_trace
-                or any(
-                    "action" in str(item).lower()
-                    for item in plan.target_variables
-                )
-                or "program_trace" in plan.evidence_requirements
-            )
-        )
-        execution_snapshot = requested.snapshot
-        execution_plan = plan
-        def resolve_frame(frame_id: int) -> Any:
-            return self.timeline.simulator_frame(frame_id).snapshot
+    def _ask_live_task1(
+        self,
+        question: str,
+        *,
+        question_focus: str,
+        target_agent: str,
+    ) -> dict[str, Any]:
+        """Answer from an event-anchored prefix of the real Task 1 timeline.
 
-        resolver: Callable[[int], Any] | None = resolve_frame
-        if action_focused and requested.decision_snapshot is not None:
-            execution_snapshot = requested.decision_snapshot
-            execution_plan = replace(
-                plan,
-                frame_reference=execution_snapshot.frame,
+        This method is intentionally read-only: it neither selects a replay
+        frame nor restores the adapter.  Consequently a question cannot move
+        the environment, consume battery, or expose any frame after the
+        selected event.
+        """
+
+        if self.human_study.stage != "task1" or self.human_study.condition != "explanation":
+            raise RuntimeError("Live questions are available only to Group A during Task 1.")
+        if target_agent != "robot_2":
+            raise ValueError("Live study questions must target Robot 2.")
+        if self.trajectory_kind != "human_ai_task1" or self.trajectory_agent_control != HUMAN_AI_AGENT_CONTROL:
+            raise RuntimeError("Live explanations require the real Human-AI Task 1 timeline.")
+
+        started_at = time.perf_counter()
+        completed = [
+            frame for frame in self.timeline.frames[: self.timeline.index + 1]
+            if frame.decision_snapshot is not None
+        ]
+        recent = completed[-5:]
+
+        def proposed(frame: TimelineFrame) -> str:
+            return str(frame.actions.get("robot_2", "WAIT"))
+
+        def executed(frame: TimelineFrame) -> str:
+            decision = frame.decision_snapshot
+            return str(
+                (decision.executed_actions if decision is not None else {}).get(
+                    "robot_2", proposed(frame)
+                )
             )
-            resolver = None
-        return requested, execution_snapshot, execution_plan, resolver
+
+        anchor: TimelineFrame | None = recent[-1] if recent else None
+        if question_focus == "wait":
+            anchor = next(
+                (frame for frame in reversed(recent) if proposed(frame) == "WAIT" or executed(frame) == "WAIT"),
+                None,
+            )
+        elif question_focus == "collision":
+            anchor = next(
+                (
+                    frame for frame in reversed(recent)
+                    if bool(frame.info.get("robot_collision_event", False))
+                    or bool(frame.info.get("robot_collision_kind"))
+                ),
+                None,
+            )
+
+        current_frame = int(self.current.snapshot.frame)
+        if anchor is None:
+            anchor_frame = current_frame
+            context_frames = [int(frame.snapshot.frame) for frame in recent]
+            if question_focus == "collision":
+                answer_en = "No collision occurred in the last five steps."
+                answer_zh = "最近五步内没有发生碰撞。"
+            elif question_focus == "wait":
+                answer_en = "Robot 2 did not wait in the last five steps."
+                answer_zh = "机器人2在最近五步内没有等待。"
+            else:
+                answer_en = "Robot 2 has not completed an action in Task 1 yet."
+                answer_zh = "机器人2在任务1中还没有完成任何动作。"
+            evidence: dict[str, Any] = {
+                "event_type": question_focus,
+                "anchor_frame": anchor_frame,
+                "context_frames": context_frames,
+                "reason_code": "NO_MATCHING_RECENT_EVENT",
+                "fact_valid": True,
+            }
+            recent_collision = False
+        else:
+            anchor_frame = int(anchor.snapshot.frame)
+            prefix = [
+                frame for frame in completed
+                if int(frame.snapshot.frame) <= anchor_frame
+            ]
+            context = prefix[-5:]
+            context_frames = [int(frame.snapshot.frame) for frame in context]
+            decision_snapshot = anchor.decision_snapshot
+            assert decision_snapshot is not None
+            trace = decision_snapshot.metadata.get("decision_trace", {})
+            trace = trace if isinstance(trace, Mapping) else {}
+            agents = trace.get("agents", {})
+            agents = agents if isinstance(agents, Mapping) else {}
+            agent_trace = agents.get("robot_2", {})
+            agent_trace = agent_trace if isinstance(agent_trace, Mapping) else {}
+            frozen_goal = agent_trace.get("frozen_goal", {})
+            frozen_goal = frozen_goal if isinstance(frozen_goal, Mapping) else {}
+            charging = agent_trace.get("charging_state", {})
+            charging = charging if isinstance(charging, Mapping) else {}
+            feasibility = [
+                item for item in agent_trace.get("battery_feasibility", ())
+                if isinstance(item, Mapping)
+            ]
+            goal_id = str(
+                frozen_goal.get("goal_id")
+                or agent_trace.get("committed_task")
+                or ""
+            )
+            energy_item = next(
+                (item for item in feasibility if str(item.get("task_id", "")) == goal_id),
+                min(feasibility, key=lambda item: float(item.get("required_energy", 0.0)))
+                if feasibility else {},
+            )
+            plan = agent_trace.get("joint_coordination_plan")
+            plan = plan if isinstance(plan, Mapping) else {}
+            recent_collision = bool(anchor.info.get("robot_collision_event", False))
+            evidence = {
+                "event_type": question_focus,
+                "anchor_frame": anchor_frame,
+                "context_frames": context_frames,
+                "human_action": str(anchor.actions.get("robot_1", "WAIT")),
+                "ai_action": proposed(anchor),
+                "executed_actions": dict(decision_snapshot.executed_actions),
+                "collision_type": anchor.info.get("robot_collision_kind"),
+                "current_goal": frozen_goal.get("navigation_kind") or frozen_goal.get("goal_type"),
+                "current_battery": charging.get("battery"),
+                "required_energy": energy_item.get("required_energy"),
+                "priority_basis": plan.get("priority_basis"),
+                "task_id": goal_id or energy_item.get("task_id"),
+                "reason_code": agent_trace.get("primary_reason_code"),
+                "pre_state_hash": trace.get("pre_state_hash"),
+                "outcome_frame": trace.get("outcome_frame"),
+                "fact_valid": bool(trace.get("fact_valid", False)),
+            }
+            if question_focus == "collision" and recent_collision:
+                human_action = str(anchor.actions.get("robot_1", "WAIT"))
+                ai_action = proposed(anchor)
+                action_en = {"UP": "up", "DOWN": "down", "LEFT": "left", "RIGHT": "right", "WAIT": "wait"}
+                action_zh = {"UP": "上", "DOWN": "下", "LEFT": "左", "RIGHT": "右", "WAIT": "等待"}
+                kind = str(anchor.info.get("robot_collision_kind") or "joint_conflict")
+                kind_en = {
+                    "same_target": "a same-target-cell conflict",
+                    "swap": "a position-swap conflict",
+                    "occupied_stationary": "an occupied-cell conflict",
+                }.get(kind, "a joint movement conflict")
+                kind_zh = {
+                    "same_target": "同一目标格冲突",
+                    "swap": "位置交换冲突",
+                    "occupied_stationary": "进入未释放格子的冲突",
+                }.get(kind, "联合移动冲突")
+                answer_en = (
+                    f"You moved {action_en.get(human_action, human_action.lower())} while Robot 2 simultaneously moved {action_en.get(ai_action, ai_action.lower())}; the joint resolver recorded {kind_en}. "
+                    "Robot 2 decided from the shared pre-move state and did not observe your current action first."
+                )
+                answer_zh = (
+                    f"你向{action_zh.get(human_action, human_action)}移动，机器人2同时向{action_zh.get(ai_action, ai_action)}移动；联合解析器记录为{kind_zh}。"
+                    "机器人2依据共同的移动前状态决策，没有提前看到你的本帧动作。"
+                )
+            else:
+                routed_focus = {
+                    "wait": "action",
+                    "human_influence": "collaboration",
+                    "goal": "task",
+                }.get(question_focus, question_focus)
+                answer_en = self.adapter.concise_study_explanation(
+                    decision_snapshot,
+                    target_agent="robot_2",
+                    policy=self.policy,
+                    focus=routed_focus,
+                    language="en",
+                )
+                answer_zh = self.adapter.concise_study_explanation(
+                    decision_snapshot,
+                    target_agent="robot_2",
+                    policy=self.policy,
+                    focus=routed_focus,
+                    language="zh-CN",
+                )
+
+        sequence = self.explanation_question_sequence + 1
+        self.explanation_question_sequence = sequence
+        latency_ms = (time.perf_counter() - started_at) * 1000.0
+        common = {
+            "target_agent": "robot_2",
+            "question_sequence": sequence,
+            "question_focus": question_focus,
+            "selected_timeline_frame": anchor_frame,
+            "decision_evidence_frame": anchor_frame,
+            "anchor_frame": anchor_frame,
+            "context_frames": context_frames,
+            "current_frame": current_frame,
+            "trajectory_kind": self.trajectory_kind,
+            "trajectory_seed": self.trajectory_seed,
+            "agent_control": dict(self.trajectory_agent_control),
+            "structured_evidence": evidence,
+            "fact_validation": {
+                "passed": bool(evidence.get("fact_valid", False)),
+                "future_frames_used": False,
+                "max_context_frame": max(context_frames, default=anchor_frame),
+            },
+            "recent_collision": recent_collision,
+            "latency_ms": latency_ms,
+            "answer_en": answer_en,
+            "answer_zh": answer_zh,
+        }
+        variants = {
+            "en": {**common, "explanation": answer_en, "explanation_document": {"text": answer_en}},
+            "zh-CN": {**common, "explanation": answer_zh, "explanation_document": {"text": answer_zh}},
+        }
+        report = dict(variants[self.locale])
+        report["_language_variants"] = variants
+        report["language_documents"] = {
+            locale: value["explanation_document"] for locale, value in variants.items()
+        }
+        self.last_explanation_report = report
+        self.human_study.record_explanation(
+            question=question,
+            report=common,
+            response_seconds=latency_ms / 1000.0,
+        )
+        self._pending_live_question_sequences.append(sequence)
+        return {"report": self._public_explanation_report(), "view": self.view()}
 
     def ask(
         self,
@@ -857,7 +984,6 @@ class WarehouseWebSession:
         explanation_mode: str,
         *,
         study_request: bool = False,
-        accepted_before_deadline: bool = False,
         study_target_agent: str | None = None,
         study_question_kind: str | None = None,
     ) -> dict[str, Any]:
@@ -868,7 +994,8 @@ class WarehouseWebSession:
             raise ValueError(f"Unknown explanation mode: {explanation_mode}")
         allowed_focuses = {
             "action", "energy", "charge_threshold", "task",
-            "collaboration", "allocation", "collision",
+            "collaboration", "allocation", "collision", "wait",
+            "human_influence", "goal",
         }
         requested_focus = str(study_question_kind or "").strip().lower()
         if requested_focus and requested_focus not in allowed_focuses:
@@ -879,331 +1006,12 @@ class WarehouseWebSession:
             else "action"
         )
         if study_request:
-            if self.human_study.stage != "explanation":
-                raise RuntimeError(
-                    "The study is not waiting for a free-form question."
-                )
-            if (
-                self.human_study.explanation_time_expired
-                and not accepted_before_deadline
-            ):
-                raise RuntimeError(
-                    "The ten-minute explanation period has ended."
-                )
-            explanation_mode = EXPLANATION_MODE_RCPD_TRACE
-            target_agent = str(study_target_agent or "robot_2")
-            if target_agent not in {"robot_1", "robot_2"}:
-                raise ValueError("Select robot 1 or robot 2 for the explanation.")
-            self.selected_agent = target_agent
-        else:
-            accepted_before_deadline = False
-            target_agent = self.selected_agent
-        if not study_request:
-            raise RuntimeError("Questions are available only in the Task 1 explanation stage.")
-        snapshot = self.current.snapshot
-        started_at = time.perf_counter()
-        plan = self.engine.planner.parse(
-            prompt,
-            selected_frame=snapshot.frame,
-            environment_schema={
-                "observations": dict(self.adapter.observation_schema()),
-                "actions": list(self.adapter.action_schema()),
-                "entities": dict(self.adapter.entity_schema()),
-                **dict(
-                    self.adapter.question_vocabulary()
-                    if hasattr(self.adapter, "question_vocabulary")
-                    else {}
-                ),
-                # The selected entity is part of the question context.  It is
-                # used only when the participant writes an implicit subject
-                # such as "why wait?"; an explicit entity mention wins.
-                "focus_entity": getattr(self, "selected_agent", None),
-            },
-            cache_context=(
-                self.engine.question_cache_context(snapshot)
-                if hasattr(self.engine, "question_cache_context")
-                else {}
-            ),
-        )
-        if study_request:
-            targets = set(plan.prediction_targets)
-            if targets and targets != {target_agent}:
-                raise ValueError(
-                    "The robot named in the question does not match the selected robot."
-                )
-            if plan.requires_scene_edit:
-                raise ValueError(
-                    "Counterfactual edits are disabled during the study; ask why the "
-                    "selected robot executed its recorded action."
-                )
-        if plan.clarification_required:
-            raise ValueError(
-                plan.clarification_reason
-                or "Please specify the target robot or requested action."
+            return self._ask_live_task1(
+                prompt,
+                question_focus=question_focus,
+                target_agent=str(study_target_agent or "robot_2"),
             )
-        if study_request:
-            # The replay slider is authoritative.  Parser intent or a number in
-            # the free-form text must not detach the question from the selected
-            # immutable AI-AI reference transition.
-            requested = self.current
-            if requested.decision_snapshot is None:
-                raise ValueError(
-                    "Select an executed AI-AI reference action frame before asking a question."
-                )
-            execution_snapshot = requested.decision_snapshot
-            execution_plan = replace(
-                plan,
-                frame_reference=execution_snapshot.frame,
-                # Study questions are always about the action visible in the
-                # selected immutable transition.  The free-form parser may
-                # otherwise interpret Chinese phrases such as ``要等待`` as an
-                # objective query, which can yield an empty document when
-                # private navigation goals are intentionally withheld.
-                requires_policy_query=True,
-                requires_program_trace=True,
-                target_variables=(f"{target_agent}.observed_action",),
-                evidence_requirements=tuple(
-                    dict.fromkeys(
-                        (
-                            *(
-                                item
-                                for item in plan.evidence_requirements
-                                if not str(item).startswith("study_focus:")
-                            ),
-                            "state",
-                            "policy",
-                            "program_trace",
-                            f"study_focus:{question_focus}",
-                        )
-                    )
-                ),
-            )
-            resolver = None
-        else:
-            requested, execution_snapshot, execution_plan, resolver = (
-                self._resolve_query_frame(plan)
-            )
-        if study_request and requested.decision_snapshot is None:
-            raise ValueError(
-                "Select an executed AI-AI reference action frame before asking a question."
-            )
-        question_sequence = self.explanation_question_sequence + 1
-        seed_material = (
-            f"{self.seed}:{self.run_id or 'session'}:{question_sequence}"
-        ).encode("utf-8")
-        question_seed = int.from_bytes(
-            sha256(seed_material).digest()[:4], "big"
-        ) & 0x7FFFFFFF
-        self.explanation_question_sequence = question_sequence
-        bilingual = study_request
-        languages = ("en", "zh-CN") if bilingual else (execution_plan.response_language,)
-        reports: dict[str, dict[str, Any]] = {}
-        answer = None
-        for response_language in languages:
-            localized_plan = replace(
-                execution_plan,
-                response_language=response_language,
-            )
-            localized_answer = self.engine.execute_plan(
-                localized_plan,
-                execution_snapshot,
-                language=response_language,
-                seed=question_seed,
-                snapshot_resolver=resolver,
-                explanation_mode=explanation_mode,
-                _parse_diagnostics=dict(self.engine.planner.last_diagnostics),
-            )
-            if not str(localized_answer.user_visible_explanation).strip():
-                raise RuntimeError(
-                    "The explanation system could not produce a grounded "
-                    "answer for the selected action frame."
-                )
-            answer = localized_answer
-            localized_report = localized_answer.to_dict()
-            localized_text = str(
-                localized_report.get("explanation_document", {}).get("text", "")
-            ).strip()
-            semantic_valid = self._validate_study_explanation_text(
-                localized_text,
-                focus=question_focus,
-                language=response_language,
-            )
-            if study_request:
-                localized_text = self._deterministic_study_explanation(
-                    execution_snapshot,
-                    target_agent=target_agent,
-                    focus=question_focus,
-                    language=response_language,
-                )
-                semantic_valid = self._validate_study_explanation_text(
-                    localized_text,
-                    focus=question_focus,
-                    language=response_language,
-                )
-                localized_report["explanation"] = localized_text
-                document = dict(localized_report.get("explanation_document", {}))
-                document["text"] = localized_text
-                localized_report["explanation_document"] = document
-            elif not semantic_valid:
-                localized_text = self._deterministic_study_explanation(
-                    execution_snapshot,
-                    target_agent=target_agent,
-                    focus=question_focus,
-                    language=response_language,
-                )
-                localized_report["explanation"] = localized_text
-                document = dict(localized_report.get("explanation_document", {}))
-                document["text"] = localized_text
-                localized_report["explanation_document"] = document
-            localized_report["semantic_validation"] = {
-                "passed": bool(semantic_valid),
-                "fallback_used": bool(study_request or not semantic_valid),
-                "question_focus": question_focus,
-            }
-            reports[response_language] = localized_report
-        assert answer is not None
-        report = dict(reports.get(self.locale, next(iter(reports.values()))))
-        request_total_ms = (time.perf_counter() - started_at) * 1000.0
-        diagnostics = dict(report.get("generation_diagnostics", {}))
-        diagnostics["request_total_ms"] = request_total_ms
-        report["generation_diagnostics"] = diagnostics
-        report["latency_ms"] = request_total_ms
-        report.update(
-            {
-                "selected_timeline_frame": int(requested.snapshot.frame),
-                "decision_evidence_frame": int(execution_snapshot.frame),
-                "target_agent": target_agent,
-                "question_seed": question_seed,
-                "question_sequence": question_sequence,
-                "question_focus": question_focus,
-                "trajectory_kind": self.trajectory_kind,
-                "trajectory_seed": self.trajectory_seed,
-                "agent_control": dict(self.trajectory_agent_control),
-                "explanation_method_label": (
-                    "Explanation"
-                    if study_request
-                    else "RCPD execution trace"
-                    if explanation_mode == EXPLANATION_MODE_RCPD_TRACE
-                    else "Neural evidence without program trace"
-                ),
-                "edited_state": (
-                    serialize_warehouse_state(
-                        answer.scene_edit.edited_snapshot.state,
-                        selected_agent=self.selected_agent,
-                    )
-                    if answer.scene_edit is not None
-                    else None
-                ),
-            }
-        )
-        if bilingual:
-            for localized in reports.values():
-                localized.update(
-                    {
-                        "selected_timeline_frame": int(requested.snapshot.frame),
-                        "decision_evidence_frame": int(execution_snapshot.frame),
-                        "target_agent": target_agent,
-                        "question_seed": question_seed,
-                        "question_sequence": question_sequence,
-                        "question_focus": question_focus,
-                        "trajectory_kind": self.trajectory_kind,
-                        "trajectory_seed": self.trajectory_seed,
-                        "agent_control": dict(self.trajectory_agent_control),
-                        "explanation_method_label": "Explanation",
-                    }
-                )
-            report["_language_variants"] = reports
-            report["language_documents"] = {
-                locale: value.get("explanation_document", {})
-                for locale, value in reports.items()
-            }
-        self.last_explanation_report = report
-        if (
-            study_request
-            and self.human_study.stage == "explanation"
-            and answer.user_visible_explanation
-        ):
-            self.human_study.record_explanation(
-                question=execution_plan.raw_text,
-                report=report,
-                response_seconds=time.perf_counter() - started_at,
-                accepted_before_deadline=accepted_before_deadline,
-            )
-        return {
-            "report": report,
-            "view": self.view(),
-        }
-
-    @staticmethod
-    def _validate_study_explanation_text(
-        text: str,
-        *,
-        focus: str,
-        language: str,
-    ) -> bool:
-        normalized = " ".join(str(text).split()).casefold()
-        if not normalized or any(
-            token in normalized
-            for token in (
-                "trace_type", "path_index", "candidate.", "action_constraint", "{",
-                "selection probability", "highest probability", "概率最高",
-            )
-        ):
-            return False
-        if language == "en":
-            if len(normalized.split()) > 80:
-                return False
-            if sum(normalized.count(mark) for mark in (".", "?", "!")) > 3:
-                return False
-        elif len(normalized) > 240 or normalized.count("。") > 3:
-            return False
-        has_number = bool(re.search(r"\d+(?:\.\d+)?", normalized))
-        requirements = {
-            "action": (
-                any(token in normalized for token in ("executed", "waited", "moved", "执行", "等待", "移动"))
-                and len(normalized) >= 35
-            ),
-            "energy": has_number and any(
-                token in normalized for token in ("battery", "charge", "电量", "充电")
-            ),
-            "charge_threshold": has_number and all(
-                any(token in normalized for token in group)
-                for group in (
-                    ("minimum", "at least", "最低", "至少"),
-                    ("wait", "等待"),
-                    ("battery", "电量"),
-                )
-            ),
-            "collaboration": any(
-                token in normalized for token in ("direct", "teammate", "直接", "队友")
-            ),
-            "allocation": any(
-                token in normalized for token in ("assignment", "task", "分工", "任务")
-            ),
-            "collision": any(
-                token in normalized for token in ("conflict", "collision", "target", "冲突", "碰撞", "目标格")
-            ),
-            "task": any(
-                token in normalized for token in ("task", "pickup", "deliver", "任务", "取货", "交付")
-            ),
-        }
-        return bool(requirements.get(focus, requirements["action"]))
-
-    def _deterministic_study_explanation(
-        self,
-        snapshot: Any,
-        *,
-        target_agent: str,
-        focus: str,
-        language: str,
-    ) -> str:
-        return self.adapter.concise_study_explanation(
-            snapshot,
-            target_agent=target_agent,
-            policy=self.policy,
-            focus=focus,
-            language=language,
-        )
+        raise RuntimeError("Questions are available only to Group A during Task 1.")
 
     def start_study(
         self,
@@ -1302,6 +1110,11 @@ class WarehouseWebSession:
                 "ai_network_action": proposed.get("robot_2"),
                 "ai_submitted_action": joint_actions.get("robot_2"),
                 "action_execution": "independent_simultaneous_mappo_actor",
+                "shared_decision_state_hash": (
+                    info.get("decision_trace", {}).get("pre_state_hash")
+                    if isinstance(info.get("decision_trace"), Mapping)
+                    else None
+                ),
             },
         )
         self.timeline.append(
@@ -1341,6 +1154,17 @@ class WarehouseWebSession:
                 ),
             }
         )
+        for question_sequence in self._pending_live_question_sequences:
+            self._capture_event(
+                {
+                    "event": "live_explanation_followup_action",
+                    "question_sequence": int(question_sequence),
+                    "round": round_name,
+                    "frame": int(after.frame),
+                    "post_question_action": action,
+                }
+            )
+        self._pending_live_question_sequences = []
         round_complete = bool(terminated or truncated)
         if round_complete:
             assert self.human_study.assignment is not None
@@ -1354,21 +1178,10 @@ class WarehouseWebSession:
             self.human_study.finish_round(
                 self._round_summary(round_name, seed)
             )
-            if round_name == "task1" and self.human_study.stage == "explanation":
-                self._load_tutorial_timeline(for_explanation=True)
         return {
             "round_complete": round_complete,
             "view": self.view(),
         }
-
-    def finish_explanation(self) -> dict[str, Any]:
-        self.human_study.finish_explanation()
-        assert self.human_study.assignment is not None
-        self._start_collaborative_round(
-            "task2",
-            self.human_study.assignment.task2_seed,
-        )
-        return {"view": self.view()}
 
     def begin_task2(self) -> dict[str, Any]:
         self.human_study.begin_task2()
@@ -1401,28 +1214,15 @@ class WarehouseWebSession:
         question: str,
         *,
         target_agent: str = "robot_2",
-        accepted_before_deadline: bool = False,
-        selected_frame: int | None = None,
-        trajectory_hash: str | None = None,
         question_kind: str | None = None,
     ) -> dict[str, Any]:
-        if selected_frame is not None:
-            reference = self.reference_trajectory_payload()
-            if trajectory_hash and not self.reference_trajectory_hash_is_compatible(
-                trajectory_hash
-            ):
-                raise ValueError("The reference trajectory changed; reload it before asking.")
-            requested_index = int(selected_frame)
-            if requested_index < 1 or requested_index > self.timeline.max_index:
-                raise ValueError("Select an executed reference action frame.")
-            self.timeline.select(requested_index)
-            self.adapter.restore(self.current.snapshot, self.policy)
+        if target_agent != "robot_2":
+            raise ValueError("Live study questions must target Robot 2.")
         result = self.ask(
             question,
             EXPLANATION_MODE_RCPD_TRACE,
             study_request=True,
-            accepted_before_deadline=accepted_before_deadline,
-            study_target_agent=target_agent,
+            study_target_agent="robot_2",
             study_question_kind=question_kind,
         )
         result["report"] = self._public_explanation_report()

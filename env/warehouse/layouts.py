@@ -175,6 +175,29 @@ COMPACT_STAGGERED_8X9_LAYOUT = MapLayout(
     pickup_endpoint_exclusions=tuple((row, 4) for row in range(8)),
 )
 
+COMPACT_STAGGERED_6X7_LAYOUT = MapLayout(
+    layout_id="warehouse_staggered_aisles_6x7_v2_three_cell_exit_no_cross",
+    tiles=(
+        "###.###",
+        "....###",
+        "##.....",
+        "...####",
+        "##...##",
+        "##...##",
+    ),
+    robot_start_positions=((5, 2), (5, 4)),
+    charger_position=(5, 3),
+    # The three adjacent apron cells are real passable exits, not a visual
+    # overlay.  The aisle above joins at the left exit instead of the centre,
+    # so even the charger apron contains no four-way crossing.
+    robot_exit_positions=((4, 2), (4, 3), (4, 4)),
+    task_endpoint_exclusions=((4, 2), (4, 3), (4, 4)),
+    # All four graph dead ends are genuine shelf-adjacent work bays.  Keeping
+    # all four eligible also guarantees that a replacement job can be sampled
+    # while one task remains active and both robots occupy other endpoint cells.
+    pickup_endpoint_exclusions=(),
+)
+
 COMPACT_STAGGERED_9X9_LAYOUT = MapLayout(
     layout_id="warehouse_staggered_loop_aisles_9x9_v2_three_cell_exit",
     tiles=(
@@ -224,11 +247,12 @@ CORRIDOR_SHELF_LAYOUT = COMPACT_STAGGERED_9X9_LAYOUT
 MAP_LAYOUTS = {
     STAGGERED_AISLES_LAYOUT.layout_id: STAGGERED_AISLES_LAYOUT,
     COMPACT_STAGGERED_8X9_LAYOUT.layout_id: COMPACT_STAGGERED_8X9_LAYOUT,
+    COMPACT_STAGGERED_6X7_LAYOUT.layout_id: COMPACT_STAGGERED_6X7_LAYOUT,
     COMPACT_STAGGERED_9X9_LAYOUT.layout_id: COMPACT_STAGGERED_9X9_LAYOUT,
     COMPACT_INTERACTION_LAYOUT.layout_id: COMPACT_INTERACTION_LAYOUT,
 }
-DEFAULT_MAP_LAYOUT = COMPACT_STAGGERED_8X9_LAYOUT
-STUDY_MAP_LAYOUT = COMPACT_STAGGERED_8X9_LAYOUT
+DEFAULT_MAP_LAYOUT = COMPACT_STAGGERED_6X7_LAYOUT
+STUDY_MAP_LAYOUT = COMPACT_STAGGERED_6X7_LAYOUT
 
 
 def get_map_layout(layout_id: str) -> MapLayout:

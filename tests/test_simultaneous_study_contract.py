@@ -26,20 +26,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_production_map_uses_staggered_work_aisles_not_aligned_crossroads() -> None:
     layout = STUDY_MAP_LAYOUT
-    assert layout.layout_id == "warehouse_staggered_aisles_8x9_v1_three_cell_exit"
-    assert (layout.rows, layout.cols) == (8, 9)
+    assert layout.layout_id == (
+        "warehouse_staggered_aisles_6x7_v2_three_cell_exit_no_cross"
+    )
+    assert (layout.rows, layout.cols) == (6, 7)
 
-    assert tuple(column for column in range(9) if layout.is_passable((1, column))) == (0, 1, 2, 3, 4)
-    assert tuple(column for column in range(9) if layout.is_passable((2, column))) == (4, 5, 6, 7, 8)
-    assert tuple(column for column in range(9) if layout.is_passable((3, column))) == (0, 1, 2, 3, 4)
-    # The only four-neighbour cell is the centre of the mandated three-cell
-    # robot/charger apron, not a work-aisle crossroads.
-    assert layout.four_way_intersections == ((6, 4),)
+    assert tuple(
+        column for column in range(7) if layout.is_passable((1, column))
+    ) == (0, 1, 2, 3)
+    assert tuple(
+        column for column in range(7) if layout.is_passable((2, column))
+    ) == (2, 3, 4, 5, 6)
+    assert tuple(
+        column for column in range(7) if layout.is_passable((3, column))
+    ) == (0, 1, 2)
+    # The work aisles and the mandated three-cell robot/charger apron contain
+    # no four-neighbour cell at all.
+    assert layout.four_way_intersections == ()
 
 
 def test_production_robot_exit_is_exactly_three_real_passable_cells() -> None:
     layout = STUDY_MAP_LAYOUT
-    assert layout.robot_exit_positions == ((6, 3), (6, 4), (6, 5))
+    assert layout.robot_exit_positions == ((4, 2), (4, 3), (4, 4))
     assert all(layout.is_passable(position) for position in layout.robot_exit_positions)
     assert tuple(
         (layout.rows - 2, column)
@@ -52,7 +60,7 @@ def test_production_robot_exit_is_exactly_three_real_passable_cells() -> None:
         column
         for column in range(layout.cols)
         if layout.is_passable((layout.rows - 1, column))
-    ) == (3, 4, 5)
+    ) == (2, 3, 4)
 
 
 def test_production_map_is_connected_and_ui_uses_the_same_geometry() -> None:
@@ -120,11 +128,11 @@ def test_development_preview_ai_action_is_independent_of_current_human_command()
 
 def test_render_actor_is_the_exported_neural_checkpoint() -> None:
     checkpoint = MAPPOPolicy.load(
-        ROOT / "output" / "deployment" / "warehouse_mappo_v66.pt",
+        ROOT / "output" / "deployment" / "warehouse_mappo_v67_6x7.pt",
         device="cpu",
     )
     exported = NumpyWarehousePolicy.load(
-        ROOT / "output" / "deployment" / "warehouse_mappo_v66_actor.npz"
+        ROOT / "output" / "deployment" / "warehouse_mappo_v67_6x7_actor.npz"
     )
     environment = WarehouseMultiAgentEnv(collaborative_study_config())
     observations, _ = environment.reset(seed=40_221)

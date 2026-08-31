@@ -321,6 +321,10 @@ def fit_actor_supervised(
             list(policy.network.participant_partner_action_head.parameters())
             + list(policy.network.participant_context_predictor.parameters())
         )
+    elif parameter_scope == "deadlock_escape_only":
+        actor_parameters = tuple(
+            policy.network.deadlock_escape_action_head.parameters()
+        )
     elif parameter_scope == "structured":
         actor_parameters = tuple(
             list(policy.network.action_scorer.parameters())
@@ -331,7 +335,8 @@ def fit_actor_supervised(
             "parameter_scope must be 'all', 'structured', or "
             "'actor_without_teammate_predictor', 'action_heads_only', or "
             "'teammate_predictor_only', 'teammate_context_predictor_only', "
-            "'teammate_forecast_only', or 'participant_partner_only'."
+            "'teammate_forecast_only', 'participant_partner_only', or "
+            "'deadlock_escape_only'."
         )
     optimizer = torch.optim.Adam(
         actor_parameters,

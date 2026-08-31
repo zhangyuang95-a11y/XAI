@@ -17,7 +17,6 @@
     <nav class="workflow" aria-label="Experiment workflow">
       <span id="workflowInstructions" class="active" data-i18n="workflowDemo">Instructions &amp; demo</span>
       <i></i><span id="workflowTask1" data-i18n="task1">Task 1</span>
-      <i></i><span id="workflowExplanation" data-i18n="explanation">Explanation</span>
       <i></i><span id="workflowTask2" data-i18n="task2">Task 2</span>
       <i></i><span id="workflowSurvey" data-i18n="survey">Survey</span>
     </nav>
@@ -27,11 +26,10 @@
   <main class="layout">
     <section class="card simulator-card">
       <div class="card-heading">
-        <div><span class="eyebrow" data-i18n="warehouse">8×9 warehouse</span><h1 id="sceneTitle" data-i18n="liveScene">Collaborative delivery</h1></div>
+        <div><span class="eyebrow" data-i18n="warehouse">6×7 warehouse</span><h1 id="sceneTitle" data-i18n="liveScene">Collaborative delivery</h1></div>
         <div class="round-progress"><span data-i18n="step">Steps</span><strong id="stepValue">0 / 120</strong></div>
       </div>
 
-      <p class="reference-metrics hidden" id="referenceMetricsLabel" data-i18n="referenceMetrics">以下为固定 AI–AI 参考轨迹数据，不是您的任务 1 成绩。</p>
       <div class="score-strip">
         <div><span data-i18n="score">Score</span><strong id="scoreValue">0</strong></div>
         <div><span data-i18n="deliveries">Deliveries</span><strong id="deliveryValue">0</strong></div>
@@ -47,18 +45,8 @@
         <span><i class="dropoff">B</i><b data-i18n="dropoff">Drop-off B</b></span>
         <span><i class="charger">⚡</i><b data-i18n="charger">Charger</b></span>
       </div>
+      <div id="robotCards" class="hidden" aria-hidden="true"></div>
 
-      <div class="timeline hidden" id="timelinePanel">
-        <button class="icon-button" id="timelineBack" type="button">‹</button>
-        <input id="timelineRange" type="range" min="0" max="0" value="0" aria-label="AI-AI reference trajectory frame">
-        <button class="icon-button" id="timelineForward" type="button">›</button>
-        <strong id="timelineLabel">0 / 0</strong>
-        <div class="timeline-events" id="timelineEvents" aria-label="Reference events"></div>
-      </div>
-
-      <div class="detail-grid">
-        <section id="robotDetailPanel"><h2 data-i18n="transitionActions">Selected actions</h2><p class="causal-frame-note" data-i18n="causalFrameNote">Decision evidence: pre-move state S_t. Outcome: state S_t+1 after both actions resolve simultaneously.</p><div id="robotCards" class="robot-cards"></div></section>
-      </div>
     </section>
 
     <aside class="card experiment-card">
@@ -86,90 +74,81 @@
       </section>
 
       <section class="hidden" id="instructionsPanel">
-        <span class="phase">DEMO</span><h2 data-i18n="requiredDemo">AI–AI 协作演示（可提前结束）</h2>
-        <p data-i18n="demoText">您可以完整观看演示，也可以随时提前结束并开始任务 1。演示展示两台机器人认领、交付、协调让路和充电。</p>
+        <span class="phase">DEMO</span><h2 data-i18n="requiredDemo">AI–AI collaboration demonstration</h2>
+        <p data-i18n="demoText">You may watch the complete demonstration or finish it early and begin Task 1. It shows claiming, delivery, yielding, and charging.</p>
         <ul class="rules">
-          <li data-i18n="ruleJobs">地图始终有两个未预分配的 A→B 共享任务。</li>
-          <li data-i18n="ruleControl">方向键、WASD 或按钮每次提交一个联合决策步；空格表示等待。</li>
-          <li data-i18n="ruleCharge">成功移动耗电 2；在充电站等待恢复 10；断电会提前结束本轮。</li>
-          <li data-i18n="ruleScore">计分：配送 +100、机器人碰撞 −200、断电 −50、每步 −1、参与者绕路每单位 −2。</li>
+          <li data-i18n="ruleJobs">The map always contains two unassigned shared A-to-B jobs.</li>
+          <li data-i18n="ruleControl">Arrow keys, WASD, or a button submits one joint decision step; Space means wait.</li>
+          <li data-i18n="ruleCharge">A successful move costs 2 battery; waiting at the charger restores 10; shutdown ends the round.</li>
+          <li data-i18n="ruleScore">Score: +100 delivery, −200 robot collision, −50 shutdown, −1 per step, and −2 per human detour unit.</li>
         </ul>
         <div class="demo-progress"><span id="demoProgressBar"></span></div>
         <p id="demoStatus">0 / 0</p>
         <div class="button-row">
-          <button class="secondary" id="demoPlayButton" type="button" data-i18n="playDemo">播放演示</button>
-          <button class="primary" id="beginTask1Button" type="button" data-i18n="endDemoEarly">提前结束演示并开始任务 1</button>
+          <button class="secondary" id="demoPlayButton" type="button" data-i18n="playDemo">Play demonstration</button>
+          <button class="primary" id="beginTask1Button" type="button" data-i18n="endDemoEarly">Finish demo early and begin Task 1</button>
         </div>
       </section>
 
       <section class="hidden" id="roundPanel">
-        <span class="phase" id="roundBadge">TASK 1</span><h2 id="roundTitle" data-i18n="roundInstruction">控制机器人 1，与机器人 2 协作配送</h2>
-        <p data-i18n="roundHint">你和机器人 2 都只根据同一移动前状态独立选动作，两个动作随后同时执行。</p>
+        <span class="phase" id="roundBadge">TASK 1</span><h2 id="roundTitle" data-i18n="roundInstruction">Control robot 1 and collaborate with robot 2</h2>
+        <p data-i18n="roundHint">You and robot 2 choose independently from the same pre-move state; both actions then execute simultaneously.</p>
         <div class="action-pad" id="actionPad">
-          <button data-action="UP" type="button"><kbd>↑</kbd><span data-i18n="up">上</span></button>
-          <button data-action="LEFT" type="button"><kbd>←</kbd><span data-i18n="left">左</span></button>
-          <button data-action="WAIT" type="button"><kbd data-i18n="spaceKey">Space</kbd><span data-i18n="wait">等待</span></button>
-          <button data-action="RIGHT" type="button"><kbd>→</kbd><span data-i18n="right">右</span></button>
-          <button data-action="DOWN" type="button"><kbd>↓</kbd><span data-i18n="down">下</span></button>
+          <button data-action="UP" type="button"><kbd>↑</kbd><span data-i18n="up">Up</span></button>
+          <button data-action="LEFT" type="button"><kbd>←</kbd><span data-i18n="left">Left</span></button>
+          <button data-action="WAIT" type="button"><kbd data-i18n="spaceKey">Space</kbd><span data-i18n="wait">Wait</span></button>
+          <button data-action="RIGHT" type="button"><kbd>→</kbd><span data-i18n="right">Right</span></button>
+          <button data-action="DOWN" type="button"><kbd>↓</kbd><span data-i18n="down">Down</span></button>
         </div>
         <div class="score-breakdown" id="scoreBreakdown"></div>
+        <section class="live-explanation hidden" id="liveExplanationPanel" aria-live="polite">
+          <span class="eyebrow" data-i18n="askRobot2Title">Ask Robot 2</span>
+          <p data-i18n="liveExplanationHint">Ask about what Robot 2 just did. The task pauses while the answer is prepared.</p>
+          <div class="preset-question-list" id="presetQuestions">
+            <button type="button" data-question-kind="action" data-question-key="presetWhyAction" data-i18n="presetWhyAction">Why did Robot 2 do that?</button>
+            <button type="button" data-question-kind="wait" data-question-key="presetWhyWait" data-i18n="presetWhyWait">Why did Robot 2 wait?</button>
+            <button type="button" data-question-kind="collision" data-question-key="presetCollision" data-i18n="presetCollision">Why did we just collide?</button>
+            <button type="button" data-question-kind="human_influence" data-question-key="presetHumanInfluence" data-i18n="presetHumanInfluence">Did my action affect Robot 2?</button>
+            <button type="button" data-question-kind="goal" data-question-key="presetGoal" data-i18n="presetGoal">What is Robot 2 trying to do?</button>
+            <button type="button" data-question-kind="energy" data-question-key="presetEnergy" data-i18n="presetEnergy">Does Robot 2 need to charge?</button>
+          </div>
+          <label class="field"><span data-i18n="question">Your question</span><textarea id="questionInput" rows="2" data-i18n-placeholder="questionPlaceholder" placeholder="Ask Robot 2 about the last few steps."></textarea></label>
+          <button class="primary" id="askButton" type="button" data-i18n="ask">Ask Robot 2</button>
+          <p class="question-status hidden" id="questionStatus" aria-live="polite"></p>
+          <article class="answer hidden" id="answerPanel"><span class="eyebrow" data-i18n="answer">Robot 2</span><div id="answerText"></div></article>
+        </section>
       </section>
 
       <section class="hidden" id="task1CompletePanel">
         <span class="phase">TASK 1 COMPLETE</span>
-        <h2 data-i18n="task1Complete">任务 1 已完成</h2>
+        <h2 data-i18n="task1Complete">Task 1 complete</h2>
         <div class="result-grid single-result">
-          <div><span data-i18n="task1Score">任务 1 得分</span><strong id="controlTask1Score">—</strong></div>
+          <div><span data-i18n="task1Score">Task 1 score</span><strong id="controlTask1Score">—</strong></div>
         </div>
-        <p class="transition-note" data-i18n="controlTransitionHint">本实验流程在两轮任务之间不提供解释或提问环节。任务 2 将从新的机器人状态、电量 100 和不同任务序列开始。</p>
-        <button class="primary" id="beginTask2Button" type="button" data-i18n="beginTask2">开始任务 2</button>
-      </section>
-
-      <section class="hidden" id="explanationPanel">
-        <span class="phase">EXPLANATION</span><h2 data-i18n="aiAiExplanationTitle">AI–AI 解释轨迹</h2>
-        <p id="task1Result"></p>
-        <div class="timer"><span data-i18n="timeLeft">剩余时间</span><strong id="explanationTimer">10:00</strong></div>
-        <p data-i18n="explanationHint">这里显示的是与开场演示相同的固定 AI–AI 参考轨迹，不是您刚完成的任务 1。拖动时间轴选择任意实际动作帧，再选择机器人 1 或机器人 2 并自由提问。</p>
-        <label class="field"><span data-i18n="questionTarget">提问对象</span><select id="questionTarget"><option value="robot_1" data-i18n="robot1Option">机器人 1（AI）</option><option value="robot_2" data-i18n="robot2Option" selected>机器人 2（AI）</option></select></label>
-        <div class="preset-questions" aria-labelledby="presetQuestionsLabel">
-          <span id="presetQuestionsLabel" data-i18n="presetQuestions">快捷问题（点击后直接提问）</span>
-          <div class="preset-question-list" id="presetQuestions">
-            <button type="button" data-question-kind="action" data-question-key="presetWhyAction" data-i18n="presetWhyAction">为什么所选机器人在这一帧执行了这个动作？</button>
-            <button type="button" data-question-kind="task" data-question-key="presetTaskEffect" data-i18n="presetTaskEffect">这个动作如何影响当前配送任务？</button>
-            <button type="button" data-question-kind="energy" data-question-key="presetEnergy" data-i18n="presetEnergy">当前电量和充电需求如何影响了这个动作？</button>
-            <button type="button" data-question-kind="collaboration" data-question-key="presetTeammate" data-i18n="presetTeammate">队友的位置或动作是否影响了这个决定？</button>
-            <button type="button" data-question-kind="collision" data-question-key="presetCollision" data-i18n="presetCollision">这一步是否存在冲突或碰撞风险？</button>
-            <button type="button" data-question-kind="allocation" data-question-key="presetWhyAssignedA1" data-i18n="presetWhyAssignedA1">为什么任务 1 的 A 点由所选机器人去取？</button>
-            <button type="button" data-question-kind="allocation" data-question-key="presetWhyNotAssignedA1" data-i18n="presetWhyNotAssignedA1">为什么所选机器人没有去取任务 1 的 A 点？</button>
-          </div>
-        </div>
-        <label class="field"><span data-i18n="question">你的问题</span><textarea id="questionInput" rows="4" data-i18n-placeholder="questionPlaceholder" placeholder="为什么所选机器人在这一帧采取了这个动作？"></textarea></label>
-        <button class="primary" id="askButton" type="button" data-i18n="ask">询问所选机器人</button>
-        <p class="question-status hidden" id="questionStatus" aria-live="polite"></p>
-        <button class="secondary" id="finishExplanationButton" type="button" data-i18n="finishExplanation">结束解释并开始任务 2</button>
-        <article class="answer hidden" id="answerPanel"><span class="eyebrow" data-i18n="answer">系统解释</span><div id="answerText"></div></article>
+        <p class="transition-note" data-i18n="controlTransitionHint">Task 2 has no live questions and starts with a fresh robot state, 100 battery, and a different task sequence.</p>
+        <button class="primary" id="beginTask2Button" type="button" data-i18n="beginTask2">Begin Task 2</button>
       </section>
 
       <form class="hidden" id="surveyPanel">
-        <span class="phase">SURVEY</span><h2 data-i18n="surveyTitle">结束问卷</h2>
-        <p data-i18n="surveyHint">请对以下陈述按 1（非常不同意）到 5（非常同意）评分。</p>
+        <span class="phase">SURVEY</span><h2 data-i18n="surveyTitle">Final survey</h2>
+        <p data-i18n="surveyHint">Rate each statement from 1 (strongly disagree) to 5 (strongly agree).</p>
         <div id="surveyQuestions"></div>
-        <label class="field"><span data-i18n="comment">可选意见</span><textarea id="surveyComment" rows="3" maxlength="1000"></textarea></label>
-        <button class="primary" id="submitSurveyButton" type="submit" data-i18n="submitSurvey">提交问卷</button>
+        <label class="field"><span data-i18n="comment">Optional comment</span><textarea id="surveyComment" rows="3" maxlength="1000"></textarea></label>
+        <button class="primary" id="submitSurveyButton" type="submit" data-i18n="submitSurvey">Submit survey</button>
       </form>
 
       <section class="hidden" id="completePanel">
-        <span class="phase">DONE</span><h2 data-i18n="complete">实验完成</h2><p data-i18n="saved">记录已保存。</p>
-        <div class="result-grid"><div><span data-i18n="task1Score">任务 1 得分</span><strong id="finalTask1">—</strong></div><div><span data-i18n="task2Score">任务 2 得分</span><strong id="finalTask2">—</strong></div><div><span data-i18n="scoreDelta">得分变化</span><strong id="finalDelta">—</strong></div></div>
-        <button class="secondary" id="restartButton" type="button" data-i18n="restart">开始新的参与者</button>
+        <span class="phase">DONE</span><h2 data-i18n="complete">Study complete</h2><p data-i18n="saved">The record has been saved.</p>
+        <div class="result-grid"><div><span data-i18n="task1Score">Task 1 score</span><strong id="finalTask1">—</strong></div><div><span data-i18n="task2Score">Task 2 score</span><strong id="finalTask2">—</strong></div><div><span data-i18n="scoreDelta">Score change</span><strong id="finalDelta">—</strong></div></div>
+        <button class="secondary" id="restartButton" type="button" data-i18n="restart">Start a new participant</button>
       </section>
 
-      <section class="hidden" id="interruptedPanel"><span class="phase">INTERRUPTED</span><h2 data-i18n="interrupted">本轮已中断</h2><p data-i18n="interruptedHint">此实验已在另一页面继续，或服务恢复后旧运行被放弃。请重新开始。</p><button class="primary" id="interruptedRestartButton" type="button" data-i18n="restart">开始新的参与者</button></section>
+      <section class="hidden" id="interruptedPanel"><span class="phase">INTERRUPTED</span><h2 data-i18n="interrupted">Run interrupted</h2><p data-i18n="interruptedHint">This run continued in another page or was abandoned during recovery. Please restart.</p><button class="primary" id="interruptedRestartButton" type="button" data-i18n="restart">Start a new participant</button></section>
     </aside>
   </main>
 
   <div class="toast hidden" id="toast" role="alert"><span id="toastText"></span><button id="toastClose" type="button">×</button></div>
-  <section class="unsupported hidden" id="unsupported"><strong data-i18n="desktopRequired">请使用宽度至少 1024 像素的桌面或笔记本电脑。</strong></section>
+  <section class="unsupported hidden" id="unsupported"><strong data-i18n="desktopRequired">Use a desktop or laptop at least 1024 pixels wide.</strong></section>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

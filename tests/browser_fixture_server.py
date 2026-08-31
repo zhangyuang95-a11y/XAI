@@ -18,12 +18,12 @@ WEB = ROOT / "ui" / "web"
 
 ROBOT_PATHS = (
     (
-        (7, 3), (6, 3), (6, 4), (5, 4),
-        (5, 3), (5, 2), (5, 1), (5, 0),
+        (5, 2), (4, 2), (3, 2), (3, 1),
+        (3, 0), (3, 1), (3, 2), (4, 2),
     ),
     (
-        (7, 5), (6, 5), (6, 6), (6, 7),
-        (6, 8), (6, 7), (6, 6), (6, 5),
+        (5, 4), (4, 4), (4, 3), (4, 4),
+        (5, 4), (5, 3), (5, 4), (4, 4),
     ),
 )
 
@@ -42,22 +42,18 @@ class FixtureState:
         self.locale = "en"
         self.operations = {}
         self.command_requests = []
-        self.timeline_uploads = 0
         self.reference_requests = 0
 
     def commands(self):
         values = {
             "idle": (),
             "instructions": ("tutorial_advance", "tutorial_select", "begin_task1"),
-            "task1": ("human_action",),
-            "task1_complete": ("begin_task2",),
-            "explanation": (
-                "timeline_select",
-                "timeline_back",
-                "timeline_forward",
-                "ask_explanation",
-                "finish_explanation",
+            "task1": (
+                ("human_action", "ask_explanation")
+                if self.condition == "explanation"
+                else ("human_action",)
             ),
+            "task1_complete": ("begin_task2",),
             "task2": ("human_action",),
             "survey": ("submit_survey",),
             "completed": (),
@@ -116,8 +112,8 @@ class FixtureState:
             "tasks": [
                 {
                     "task_id": "task_1",
-                    "pickup_position": [1, 1],
-                    "delivery_position": [3, 1],
+                    "pickup_position": [1, 0],
+                    "delivery_position": [3, 0],
                     "status": "available",
                     "carrier_agent_id": None,
                     "created_frame": 0,
@@ -125,8 +121,8 @@ class FixtureState:
                 },
                 {
                     "task_id": "task_2",
-                    "pickup_position": [4, 8],
-                    "delivery_position": [2, 7],
+                    "pickup_position": [2, 6],
+                    "delivery_position": [1, 3],
                     "status": "carried",
                     "carrier_agent_id": "robot_2",
                     "created_frame": 0,
@@ -153,11 +149,11 @@ class FixtureState:
             display_frame = self.tutorial_index if self.stage == "instructions" else self.frame
         if display_frame <= 0:
             return None
-        reveal = self.stage in {"instructions", "explanation"}
+        reveal = self.stage == "instructions"
         return {
             "from_frame": display_frame - 1,
             "to_frame": display_frame,
-            "loop": self.stage == "explanation" if loop is None else bool(loop),
+            "loop": False if loop is None else bool(loop),
             "before_stage": self.stage,
             "before_state": self.snapshot(display_frame - 1),
             "agents": [
@@ -204,11 +200,11 @@ class FixtureState:
         }
         return {
             "schema_version": "warehouse-reference-timeline.v2",
-            "trajectory_kind": "ai_ai_reference",
+            "trajectory_kind": "ai_ai_demonstration",
             "trajectory_seed": 42026,
             "trajectory_hash": "fixture-reference-hash",
             "agent_control": {"robot_1": "ai", "robot_2": "ai"},
-            "map_layout_id": "warehouse_staggered_aisles_8x9_v1_three_cell_exit",
+            "map_layout_id": "warehouse_staggered_aisles_6x7_v2_three_cell_exit_no_cross",
             "map": self.map_payload(),
             "frames": [
                 {
@@ -236,8 +232,8 @@ class FixtureState:
             "transition": self.transition(),
             "timeline": {
                 "index": self.tutorial_index if self.stage == "instructions" else self.frame,
-                "max_index": 2 if self.stage in {"task1_complete", "explanation"} else 1,
-                "count": 3 if self.stage in {"task1_complete", "explanation"} else 2,
+                "max_index": 2 if self.stage == "task1_complete" else 1,
+                "count": 3 if self.stage == "task1_complete" else 2,
             },
             "study": {
                 "run_id": "fixture-run" if self.stage != "idle" else None,
@@ -263,11 +259,10 @@ class FixtureState:
                 ),
                 "explanation_presented": False,
                 "explanation_count": 0,
-                "explanation_duration_seconds": 600,
-                "explanation_seconds_remaining": 600 if self.stage == "explanation" else None,
+                "live_explanation_available": self.stage == "task1" and self.condition == "explanation",
                 "controlled_agent": "robot_1",
                 "explanation_target_agent": self.explanation_target_agent,
-                "explanation_target_agents": ["robot_1", "robot_2"],
+                "explanation_target_agents": ["robot_2"],
                 "tutorial": {
                     "index": self.tutorial_index,
                     "max_played_index": self.tutorial_index,
@@ -321,17 +316,12 @@ class FixtureState:
                     "mean_delivery_latency": None,
                     "terminal_reason": "horizon",
                 }
-                self.stage = "task1_complete" if self.condition == "control" else "explanation"
+                self.stage = "task1_complete"
         elif command == "begin_task2" and self.stage == "task1_complete":
             self.stage = "task2"
             self.frame = 0
-        elif command == "finish_explanation":
-            self.stage = "task2"
-            self.frame = 0
-        elif command == "ask_explanation" and self.stage == "explanation":
-            self.explanation_target_agent = str(
-                envelope.get("payload", {}).get("target_agent", "robot_2")
-            )
+        elif command == "ask_explanation" and self.stage == "task1" and self.condition == "explanation":
+            self.explanation_target_agent = "robot_2"
             question = str(envelope.get("payload", {}).get("question", ""))
             text = f"{self.explanation_target_agent}: {question}"
             self.last_explanation = {
@@ -352,12 +342,6 @@ class FixtureState:
             self.stage = "survey"
         elif command == "submit_survey":
             self.stage = "completed"
-        elif command == "timeline_select":
-            self.frame = max(1, int(envelope.get("payload", {}).get("index", 1)))
-        elif command == "timeline_back":
-            self.frame = max(1, self.frame - 1)
-        elif command == "timeline_forward":
-            self.frame = min(2, self.frame + 1)
         self.version += 1
         result = {"run_id": "fixture-run", "state_version": self.version, "view": self.view()}
         self.operations[operation] = result
@@ -376,7 +360,6 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/fixture-metrics":
             return self.send_json({
                 "command_requests": STATE.command_requests,
-                "timeline_uploads": STATE.timeline_uploads,
                 "reference_requests": STATE.reference_requests,
             })
         target = {
@@ -410,9 +393,6 @@ class Handler(BaseHTTPRequestHandler):
         payload = json.loads(self.rfile.read(length) or b"{}")
         if self.path == "/api/study/command":
             return self.send_json(STATE.command(payload))
-        if self.path == "/api/study/timeline-events":
-            STATE.timeline_uploads += 1
-            return self.send_json({"ok": True, "recorded": len(payload.get("events", []))})
         self.send_error(404)
 
     def send_json(self, payload):

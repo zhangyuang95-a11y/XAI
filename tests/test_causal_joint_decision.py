@@ -15,6 +15,7 @@ from env.warehouse.decision_protocol import (
 )
 from env.warehouse.domain import WarehouseConfig
 from env.warehouse.environment import WarehouseMultiAgentEnv
+from env.warehouse.layouts import COMPACT_STAGGERED_8X9_LAYOUT
 from env.warehouse.mappo import MAPPOConfig, MAPPOPolicy
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.partner_policies import (
@@ -27,8 +28,25 @@ from env.warehouse.transition_audit import (
 )
 
 
+def _coordination_config(**overrides: object) -> WarehouseConfig:
+    """Use the archived 8x9 geometry for coordinate-specific unit fixtures.
+
+    These tests exercise coordination invariants with deliberately constructed
+    states.  Production/default-map behavior is covered by the separate 6x7
+    topology and simulation suites.
+    """
+
+    values: dict[str, object] = {
+        "rows": COMPACT_STAGGERED_8X9_LAYOUT.rows,
+        "cols": COMPACT_STAGGERED_8X9_LAYOUT.cols,
+        "map_layout_id": COMPACT_STAGGERED_8X9_LAYOUT.layout_id,
+    }
+    values.update(overrides)
+    return WarehouseConfig(**values)
+
+
 def _policy_and_frozen_state(seed: int = 2_601):
-    config = WarehouseConfig(horizon=8)
+    config = _coordination_config(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     observations, _ = environment.reset(seed=seed)
     state = environment.get_state()
@@ -187,7 +205,7 @@ def test_environment_emits_tamper_resistant_joint_decision_audit() -> None:
 
 
 def test_noncoordinated_partner_profiles_do_not_assume_teammate_vacates() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=8))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=8))
     environment.reset(seed=2_606)
     state = environment.get_state()
     state.by_id("robot_1").position = (7, 3)
@@ -208,7 +226,7 @@ def test_noncoordinated_partner_profiles_do_not_assume_teammate_vacates() -> Non
 
 
 def test_participant_control_mode_is_episode_known_not_current_action() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=8))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=8))
     ai_observations, _ = environment.reset(seed=2_607)
     participant_state = environment.get_state()
     participant_state.participant_controlled_agent_id = "robot_1"
@@ -274,7 +292,7 @@ def test_energy_exhaustion_term_keeps_terminal_moves_below_wait() -> None:
 
 
 def test_charge_first_credit_tracks_charger_not_attached_task() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=20))
     environment.reset(seed=2_613)
     state = environment.get_state()
     agent = state.by_id("robot_2")
@@ -305,7 +323,7 @@ def test_charge_first_credit_tracks_charger_not_attached_task() -> None:
 
 
 def test_dual_charger_approach_clears_exit_before_priority_entry() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=11_811_008)
     state = environment.get_state()
     human = state.by_id("robot_1")
@@ -333,7 +351,7 @@ def test_dual_charger_approach_clears_exit_before_priority_entry() -> None:
 
 
 def test_dual_charger_clearance_priority_does_not_flip_after_yield_cost() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=11_811_012)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -367,7 +385,7 @@ def test_dual_charger_clearance_priority_does_not_flip_after_yield_cost() -> Non
 
 
 def test_robust_partner_label_honors_safe_lower_energy_charger_handoff() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=11_811_009)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -394,7 +412,7 @@ def test_robust_partner_label_honors_safe_lower_energy_charger_handoff() -> None
 
 
 def test_robust_partner_label_completes_second_charger_clearance_phase() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=11_811_010)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -426,7 +444,7 @@ def test_robust_partner_label_completes_second_charger_clearance_phase() -> None
 
 
 def test_recent_charger_departure_cannot_immediately_reverse_the_handoff() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=11_811_011)
     state = environment.get_state()
     state.frame = 50
@@ -456,7 +474,7 @@ def test_recent_charger_departure_cannot_immediately_reverse_the_handoff() -> No
 
 
 def test_loaded_delivery_clearance_persists_until_entry_is_robust() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=2_614)
     state = environment.get_state()
     human = state.by_id("robot_1")
@@ -507,7 +525,7 @@ def test_loaded_delivery_clearance_persists_until_entry_is_robust() -> None:
 
 
 def test_participant_delivery_priority_advances_while_actor_yields() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=2_615)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -538,7 +556,7 @@ def test_participant_delivery_priority_advances_while_actor_yields() -> None:
 
 
 def test_idle_participant_can_claim_pickup_to_clear_delivery_endpoint() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=2_616)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -567,7 +585,7 @@ def test_idle_participant_can_claim_pickup_to_clear_delivery_endpoint() -> None:
 
 
 def test_single_lane_outer_robot_keeps_egress_priority_until_inner_robot_clears() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=2_617)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -608,7 +626,7 @@ def test_single_lane_outer_robot_keeps_egress_priority_until_inner_robot_clears(
 
 
 def test_single_lane_egress_priority_persists_after_peer_leaves_the_row() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=2_619)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -650,7 +668,7 @@ def test_single_lane_egress_priority_persists_after_peer_leaves_the_row() -> Non
 
 @pytest.mark.parametrize("profile", PARTNER_PROFILES)
 def test_every_partner_profile_respects_public_single_lane_egress(profile: str) -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=2_618)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -691,7 +709,7 @@ def test_every_partner_profile_respects_public_single_lane_egress(profile: str) 
 def test_every_partner_profile_respects_public_dual_charger_wait(
     profile: str,
 ) -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=2_620)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -722,7 +740,7 @@ def test_every_partner_profile_respects_public_dual_charger_wait(
 
 
 def test_parallel_charger_progress_preserves_the_leading_robot_priority() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=2_621)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -754,7 +772,7 @@ def test_parallel_charger_progress_preserves_the_leading_robot_priority() -> Non
 def test_every_partner_profile_yields_to_critical_ai_charger_route(
     profile: str,
 ) -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=2_622)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -787,7 +805,7 @@ def test_every_partner_profile_yields_to_critical_ai_charger_route(
 
 
 def test_ai_follows_public_dual_charger_clearance_away_from_station() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=2_623)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -829,7 +847,7 @@ def test_ai_follows_public_dual_charger_clearance_away_from_station() -> None:
 
 
 def test_public_charger_handoff_completes_after_lateral_departure() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=2_625)
     state = environment.get_state()
     state.frame = 20
@@ -890,7 +908,7 @@ def test_public_charger_handoff_completes_after_lateral_departure() -> None:
 
 
 def test_charger_priority_actor_never_enters_participant_current_cell() -> None:
-    config = WarehouseConfig(horizon=120)
+    config = _coordination_config(horizon=120)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=2_626)
     state = environment.get_state()
@@ -940,7 +958,7 @@ def test_charger_priority_actor_never_enters_participant_current_cell() -> None:
 
 
 def test_critical_charger_actor_advances_under_public_participant_wait() -> None:
-    config = WarehouseConfig(horizon=120, battery_safety_margin=4.0)
+    config = _coordination_config(horizon=120, battery_safety_margin=4.0)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=2_627)
     state = environment.get_state()
@@ -1007,7 +1025,7 @@ def test_critical_charger_actor_advances_under_public_participant_wait() -> None
 def test_critical_dual_charger_actor_uses_public_reservation_after_clearance() -> None:
     """A critical AI must not freeze after the participant vacates its route."""
 
-    config = WarehouseConfig(horizon=120, battery_safety_margin=4.0)
+    config = _coordination_config(horizon=120, battery_safety_margin=4.0)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=2_629)
     state = environment.get_state()
@@ -1060,7 +1078,7 @@ def test_critical_dual_charger_actor_uses_public_reservation_after_clearance() -
 def test_critical_dual_charger_actor_uses_safe_single_lane_clearance() -> None:
     """A lower-priority peer clears away, never toward the critical Actor."""
 
-    config = WarehouseConfig(horizon=120, battery_safety_margin=4.0)
+    config = _coordination_config(horizon=120, battery_safety_margin=4.0)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=2_630)
     state = environment.get_state()
@@ -1131,7 +1149,7 @@ def test_critical_dual_charger_actor_uses_safe_single_lane_clearance() -> None:
 
 
 def test_critical_charger_actor_waits_for_loaded_participant_to_clear_station() -> None:
-    config = WarehouseConfig(horizon=120, battery_safety_margin=4.0)
+    config = _coordination_config(horizon=120, battery_safety_margin=4.0)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=2_628)
     state = environment.get_state()
@@ -1179,7 +1197,7 @@ def test_critical_charger_actor_waits_for_loaded_participant_to_clear_station() 
 
 
 def test_charging_actor_cannot_stochastically_leave_uncontested_station() -> None:
-    config = WarehouseConfig(horizon=120)
+    config = _coordination_config(horizon=120)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=2_624)
     state = environment.get_state()
@@ -1214,7 +1232,7 @@ def test_charging_actor_cannot_stochastically_leave_uncontested_station() -> Non
 
 
 def test_recent_return_does_not_penalize_productive_wait_on_station() -> None:
-    config = WarehouseConfig(horizon=120)
+    config = _coordination_config(horizon=120)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=2_629)
     state = environment.get_state()
@@ -1252,7 +1270,7 @@ def test_recent_return_does_not_penalize_productive_wait_on_station() -> None:
 
 
 def test_loaded_actor_cannot_reverse_into_charger_without_a_charge_goal() -> None:
-    config = WarehouseConfig(horizon=120)
+    config = _coordination_config(horizon=120)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=2_625)
     state = environment.get_state()
@@ -1295,7 +1313,7 @@ def test_loaded_actor_cannot_reverse_into_charger_without_a_charge_goal() -> Non
 
 
 def test_one_observed_participant_stall_allows_only_a_robust_retreat() -> None:
-    config = WarehouseConfig(horizon=120)
+    config = _coordination_config(horizon=120)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=2_610)
     state = environment.get_state()
@@ -1338,7 +1356,7 @@ def test_one_observed_participant_stall_allows_only_a_robust_retreat() -> None:
 
 
 def test_cautious_participant_retries_after_one_observed_joint_stall() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=2_611)
     state = environment.get_state()
     robot_one = state.by_id("robot_1")
@@ -1382,7 +1400,7 @@ def test_cautious_participant_retries_after_one_observed_joint_stall() -> None:
 def test_participant_does_not_leave_while_public_charge_mode_is_active(
     profile: str,
 ) -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_coordination_config(horizon=120))
     environment.reset(seed=2_617)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"

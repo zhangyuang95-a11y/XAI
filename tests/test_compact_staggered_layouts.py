@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from env.warehouse.layouts import (
+    COMPACT_STAGGERED_6X7_LAYOUT,
     COMPACT_STAGGERED_8X9_LAYOUT,
     COMPACT_STAGGERED_9X9_LAYOUT,
     STUDY_MAP_LAYOUT,
@@ -21,24 +22,28 @@ def _assert_connected(layout) -> None:
     )
 
 
-def test_required_8x9_candidate_is_registered_as_real_topology() -> None:
-    layout = COMPACT_STAGGERED_8X9_LAYOUT
+def test_required_6x7_map_is_selected_with_staggered_aisles_and_real_exit() -> None:
+    layout = COMPACT_STAGGERED_6X7_LAYOUT
     assert STUDY_MAP_LAYOUT is layout
     assert layout.tiles == (
-        "####.####",
-        ".....####",
-        "####.....",
-        ".....####",
-        "####.....",
-        ".....####",
-        "###......",
-        "###...###",
+        "###.###",
+        "....###",
+        "##.....",
+        "...####",
+        "##...##",
+        "##...##",
     )
-    assert layout.robot_start_positions == ((7, 3), (7, 5))
-    assert layout.charger_position == (7, 4)
-    assert layout.robot_exit_positions == ((6, 3), (6, 4), (6, 5))
+    assert (layout.rows, layout.cols) == (6, 7)
+    assert layout.robot_start_positions == ((5, 2), (5, 4))
+    assert layout.charger_position == (5, 3)
+    assert layout.robot_exit_positions == ((4, 2), (4, 3), (4, 4))
     assert all(layout.is_passable(position) for position in layout.robot_exit_positions)
+    assert layout.four_way_intersections == ()
     _assert_connected(layout)
+
+
+def test_old_8x9_layout_remains_available_for_comparison() -> None:
+    assert (COMPACT_STAGGERED_8X9_LAYOUT.rows, COMPACT_STAGGERED_8X9_LAYOUT.cols) == (8, 9)
 
 
 def test_selected_9x9_layout_preserves_staggered_aisles_and_three_cell_exit() -> None:

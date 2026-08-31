@@ -14,7 +14,6 @@ from typing import Mapping, Sequence
 
 import numpy as np
 import torch
-
 from backend.adapters.warehouse import WAREHOUSE_PROGRAM_VERSION, WarehouseAdapter
 from backend.artifacts import CollaborativeArtifactPaths
 from backend.simulation.trajectory_store import TrajectoryStore
@@ -27,6 +26,7 @@ from backend.training.learner_replay import (
     supervised_category_accuracy,
 )
 from backend.training.learner_dataset import (
+    actor_supported_teacher_action as _actor_supported_teacher_action,
     collect_actor_collision_correction_dataset as _collect_actor_collision_correction_dataset,
     collect_actor_commitment_failure_dataset as _collect_actor_commitment_failure_dataset,
     collect_commitment_curriculum_dataset as _collect_commitment_curriculum_dataset,
@@ -598,7 +598,11 @@ def _collect_behavior_cloning_dataset(
             state = environment.get_state()
             actions = _safe_navigation_teacher_actions(environment)
             for agent in state.agents:
-                teacher_action = actions[agent.agent_id]
+                teacher_action = _actor_supported_teacher_action(
+                    local[agent.agent_id],
+                    actions[agent.agent_id],
+                )
+                actions[agent.agent_id] = teacher_action
                 repetitions = (
                     3
                     if agent.navigation_goal_kind == "charge"
@@ -649,7 +653,11 @@ def _collect_behavior_cloning_dataset(
                 recovery_local = environment.observations()
                 recovery_actions = _safe_navigation_teacher_actions(environment)
                 for agent in environment.get_state().agents:
-                    teacher_action = recovery_actions[agent.agent_id]
+                    teacher_action = _actor_supported_teacher_action(
+                        recovery_local[agent.agent_id],
+                        recovery_actions[agent.agent_id],
+                    )
+                    recovery_actions[agent.agent_id] = teacher_action
                     for _ in range(8 if collision_actions else 0):
                         if len(observations) >= sample_count:
                             break

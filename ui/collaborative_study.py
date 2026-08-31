@@ -6,7 +6,6 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import random
-import time
 from typing import Any, Callable, Literal, Mapping, Sequence
 
 from env.warehouse.seed_calibration import ParallelSeedPair
@@ -19,7 +18,6 @@ StudyStage = Literal[
     "instructions",
     "task1",
     "task1_complete",
-    "explanation",
     "task2",
     "survey",
     "completed",
@@ -30,7 +28,6 @@ StudyStage = Literal[
 @dataclass(frozen=True)
 class CollaborativeStudyConfig:
     horizon: int = 120
-    explanation_time_limit_seconds: int = 10 * 60
     seed: int = 51000
     require_instructions: bool = True
     require_survey: bool = True
@@ -39,8 +36,6 @@ class CollaborativeStudyConfig:
     def __post_init__(self) -> None:
         if self.horizon != 120:
             raise ValueError("The preregistered collaborative rounds use 120 steps.")
-        if self.explanation_time_limit_seconds != 600:
-            raise ValueError("The explanation period must be exactly ten minutes.")
 
 
 @dataclass(frozen=True)
@@ -145,7 +140,11 @@ class CollaborativeConditionAllocator:
         )
 
 class CollaborativeDeliveryStudy:
-    """State and audit log for demo -> task1 -> treatment -> task2."""
+    """State and audit log for demo -> task1 -> task2 -> survey.
+
+    Treatment explanations are collected live during Task 1.  They are not a
+    separate stage and therefore cannot alter the preregistered round order.
+    """
 
     allowed_conditions = ("control", "explanation")
 
@@ -161,7 +160,6 @@ class CollaborativeDeliveryStudy:
         self.language = "en"
         self.round_summaries: dict[str, RoundSummary] = {}
         self.explanation_count = 0
-        self._explanation_started_at = 0.0
         self.survey: dict[str, object] | None = None
 
     @property
@@ -196,13 +194,12 @@ class CollaborativeDeliveryStudy:
         self.language = language
         self.round_summaries = {}
         self.explanation_count = 0
-        self._explanation_started_at = 0.0
         self.survey = None
         self.stage = "instructions" if self.config.require_instructions else "task1"
         self._write_event(
             {
                 "event": "study_started",
-                "study_design": "human_ai_task1_ai_ai_reference_explanation_task2",
+                "study_design": "human_ai_task1_live_explanations_task2_transfer",
                 "assignment": assignment.to_dict(),
                 "group_code": self.group_code,
                 "explanation_available": self.condition == "explanation",
@@ -236,41 +233,19 @@ class CollaborativeDeliveryStudy:
         self.round_summaries[summary.round_name] = summary
         self._write_event({"event": "round_completed", **summary.to_dict()})
         if summary.round_name == "task1":
-            if self.condition == "explanation":
-                self.stage = "explanation"
-                self._explanation_started_at = time.monotonic()
-                self._write_event(
-                    {
-                        "event": "explanation_exploration_started",
-                        "time_limit_seconds": self.config.explanation_time_limit_seconds,
-                    }
-                )
-            else:
-                self.stage = "task1_complete"
-                self._write_event(
-                    {
-                        "event": "task1_completion_presented",
-                        "task1_score": float(summary.score),
-                        "next_stage": "task2",
-                        "explanation_available": False,
-                    }
-                )
+            self.stage = "task1_complete"
+            self._write_event(
+                {
+                    "event": "task1_completion_presented",
+                    "task1_score": float(summary.score),
+                    "next_stage": "task2",
+                    "live_explanation_count": self.explanation_count,
+                }
+            )
         else:
             self.stage = "survey" if self.config.require_survey else "completed"
             if self.stage == "completed":
                 self._complete()
-
-    @property
-    def explanation_seconds_remaining(self) -> int | None:
-        if self.stage != "explanation" or self._explanation_started_at <= 0:
-            return None
-        elapsed = time.monotonic() - self._explanation_started_at
-        return max(0, int(self.config.explanation_time_limit_seconds - elapsed + 0.999))
-
-    @property
-    def explanation_time_expired(self) -> bool:
-        remaining = self.explanation_seconds_remaining
-        return remaining == 0 if remaining is not None else False
 
     def record_explanation(
         self,
@@ -278,18 +253,18 @@ class CollaborativeDeliveryStudy:
         question: str,
         report: Mapping[str, object],
         response_seconds: float,
-        accepted_before_deadline: bool = False,
     ) -> None:
-        if self.stage != "explanation":
-            raise RuntimeError("Explanations are available only to the treatment group.")
-        if self.explanation_time_expired and not accepted_before_deadline:
-            raise RuntimeError("The ten-minute explanation period has ended.")
+        if self.stage != "task1" or self.condition != "explanation":
+            raise RuntimeError("Live explanations are available only to Group A during Task 1.")
         self.explanation_count += 1
         self._write_event(
             {
-                "event": "explanation_presented",
+                "event": "live_explanation_presented",
                 "exposure_index": self.explanation_count,
                 "question": question,
+                "round": "task1",
+                "current_frame": report.get("current_frame"),
+                "question_type": report.get("question_focus"),
                 "target_agent": report.get("target_agent"),
                 "question_seed": report.get("question_seed"),
                 "question_sequence": report.get("question_sequence"),
@@ -298,40 +273,23 @@ class CollaborativeDeliveryStudy:
                 "trajectory_kind": report.get("trajectory_kind"),
                 "trajectory_seed": report.get("trajectory_seed"),
                 "agent_control": report.get("agent_control", {}),
-                "display_explanation": report.get("explanation"),
-                "explanation_document": report.get("explanation_document", {}),
+                "anchor_frame": report.get("anchor_frame"),
+                "context_frames": report.get("context_frames", ()),
+                "answer_en": report.get("answer_en"),
+                "answer_zh": report.get("answer_zh"),
+                "structured_evidence": report.get("structured_evidence", {}),
+                "fact_validation": report.get("fact_validation", {}),
+                "recent_collision": report.get("recent_collision", False),
                 "response_seconds": max(0.0, float(response_seconds)),
-                "seconds_remaining": self.explanation_seconds_remaining,
+                "post_question_action": None,
             }
-        )
-
-    def finish_explanation(self) -> None:
-        if self.stage != "explanation":
-            raise RuntimeError("The explanation period is not active.")
-        duration = min(
-            float(self.config.explanation_time_limit_seconds),
-            max(0.0, time.monotonic() - self._explanation_started_at),
-        )
-        self._write_event(
-            {
-                "event": "explanation_exploration_completed",
-                "explanation_count": self.explanation_count,
-                "duration_seconds": duration,
-                "timed_out": self.explanation_time_expired,
-            }
-        )
-        self.stage = "task2"
-        self._write_event(
-            {"event": "round_started", "round": "task2", "seed": self.assignment.task2_seed}
         )
 
     def begin_task2(self) -> None:
         """Acknowledge the control transition page and start the second round."""
 
-        if self.condition != "control" or self.stage != "task1_complete":
-            raise RuntimeError(
-                "Task 2 can be confirmed only from the control transition page."
-            )
+        if self.stage != "task1_complete":
+            raise RuntimeError("Task 2 can be started only after Task 1 is complete.")
         assert self.assignment is not None
         self._write_event(
             {
@@ -404,7 +362,6 @@ class CollaborativeDeliveryStudy:
             "language": self.language,
             "round_summaries": dict(self.round_summaries),
             "explanation_count": self.explanation_count,
-            "_explanation_started_at": self._explanation_started_at,
             "survey": dict(self.survey) if self.survey is not None else None,
         }
 

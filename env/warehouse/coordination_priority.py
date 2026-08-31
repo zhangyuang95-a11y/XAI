@@ -273,6 +273,12 @@ def coordination_priority(
         and goal_kind(agent.agent_id) == "delivery"
         and goal(agent.agent_id) != layout.charger_position
     )
+    loaded_dead_end_egress = tuple(
+        agent
+        for agent in loaded_delivery
+        if agent.position in layout.dead_end_positions
+        and goal(agent.agent_id) != agent.position
+    )
     charging = tuple(
         agent
         for agent in active
@@ -476,6 +482,14 @@ def coordination_priority(
     elif single_lane_egress_id is not None:
         candidates = (state.by_id(single_lane_egress_id),)
         selection_mode = "single_lane_egress"
+    elif loaded_dead_end_egress:
+        # A loaded robot at a topological dead end has only one exit.  Giving
+        # an approaching loaded peer the ordinary distance tie-break can make
+        # both robots wait forever for the same intermediate cell.  Let the
+        # trapped carrier leave first; this right-of-way fact is visible in
+        # frozen S_t and is shared by the Actor observation and explanations.
+        candidates = loaded_dead_end_egress
+        selection_mode = "loaded_dead_end_egress"
     elif loaded_delivery:
         candidates = loaded_delivery
         selection_mode = "loaded_delivery"
@@ -576,6 +590,8 @@ def coordination_priority(
         basis = "urgent_charger_route"
     elif selection_mode == "single_lane_egress":
         basis = "single_lane_egress"
+    elif selection_mode == "loaded_dead_end_egress":
+        basis = "loaded_delivery_dead_end_egress"
     elif (
         selected.carrying_task_id is not None
         and goal_kind(selected.agent_id) == "delivery"

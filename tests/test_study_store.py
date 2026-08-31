@@ -79,57 +79,6 @@ def test_store_is_idempotent_and_rejects_stale_version(tmp_path: Path) -> None:
     assert calls == 1
 
 
-def test_timeline_event_batch_is_idempotent_without_state_version_change(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "study.sqlite3"
-    store = StudyStore(path, namespace="test")
-    _create(store)
-    store.execute(
-        operation_id="enter-explanation",
-        run_id="run-1",
-        browser_session_id="browser-a",
-        expected_stage="instructions",
-        expected_version=1,
-        command="finish_task1",
-        mutate=lambda: (
-            {"view": {"study": {"stage": "explanation"}}},
-            [],
-            {"stage": "explanation", "locale": "en"},
-        ),
-    )
-    before = store.run_row("run-1")
-    events = [
-        {
-            "timeline_index": 17,
-            "environment_frame": 17,
-            "dwell_ms": 245,
-            "trajectory_kind": "ai_ai_reference",
-            "trajectory_seed": 42026,
-            "trajectory_hash": "hash",
-        }
-    ]
-    first = store.record_timeline_events(
-        operation_id="timeline-batch-1",
-        run_id="run-1",
-        events=events,
-    )
-    replay = store.record_timeline_events(
-        operation_id="timeline-batch-1",
-        run_id="run-1",
-        events=events,
-    )
-    after = store.run_row("run-1")
-    assert first == replay == {"ok": True, "recorded": 1, "run_id": "run-1"}
-    assert before["state_version"] == after["state_version"] == 2
-    with sqlite3.connect(path) as db:
-        count = db.execute(
-            "SELECT COUNT(*) FROM events WHERE namespace=? AND run_id=?",
-            ("test", "run-1"),
-        ).fetchone()[0]
-    assert count == 2  # study_started plus one deduplicated browse event
-
-
 def test_completed_operation_replay_survives_later_stage_progress(tmp_path: Path) -> None:
     store = StudyStore(tmp_path / "study.sqlite3", namespace="test")
     _create(store)
@@ -145,8 +94,8 @@ def test_completed_operation_replay_survives_later_stage_progress(tmp_path: Path
         operation_id="second", run_id="run-1", browser_session_id="browser-a",
         expected_stage="task1", expected_version=2, command="collaborative_step",
         mutate=lambda: (
-            {"view": {"study": {"stage": "explanation"}}}, [],
-            {"stage": "explanation", "locale": "en"},
+            {"view": {"study": {"stage": "task1_complete"}}}, [],
+            {"stage": "task1_complete", "locale": "en"},
         ),
     )
     replay = store.execute(

@@ -20,10 +20,13 @@ def _uses_compact_staggered_layout(
 
     layout = environment.layout
     return (
-        layout.cols == 9
-        and "warehouse_staggered" in layout.layout_id
-        and layout.charger_position[1] == 4
+        ("warehouse_staggered" in layout.layout_id or "staggered_loop" in layout.layout_id)
+        and len(layout.robot_exit_positions) == 3
     )
+
+
+def _uses_six_by_seven_layout(environment: WarehouseMultiAgentEnv) -> bool:
+    return environment.layout.rows == 6 and environment.layout.cols == 7
 
 
 def _loop_layout(environment: WarehouseMultiAgentEnv) -> bool:
@@ -228,12 +231,20 @@ def apply_head_on_scenario(
         # (first position, second position, goal beyond second, goal beyond
         # first, pickup for first carrier, pickup for second carrier).
         compact_encounters = (
-            ((3, 4), (4, 4), (6, 6), (1, 1), (1, 0), (6, 8)),
-            ((4, 4), (4, 5), (4, 7), (3, 1), (1, 0), (6, 8)),
-            ((3, 3), (3, 4), (4, 7), (3, 1), (6, 8), (1, 0)),
-            ((2, 4), (2, 5), (2, 7), (1, 1), (1, 0), (6, 8)),
-            ((5, 3), (5, 4), (4, 7), (5, 1), (6, 8), (1, 0)),
-            ((6, 4), (6, 5), (6, 7), (5, 1), (1, 0), (6, 8)),
+            (
+                ((1, 3), (2, 3), (3, 0), (0, 3), (1, 0), (2, 6)),
+                ((2, 3), (2, 4), (2, 6), (1, 0), (3, 0), (0, 3)),
+                ((4, 2), (4, 3), (4, 4), (3, 0), (1, 0), (2, 6)),
+            )
+            if _uses_six_by_seven_layout(environment)
+            else (
+                ((3, 4), (4, 4), (6, 6), (1, 1), (1, 0), (6, 8)),
+                ((4, 4), (4, 5), (4, 7), (3, 1), (1, 0), (6, 8)),
+                ((3, 3), (3, 4), (4, 7), (3, 1), (6, 8), (1, 0)),
+                ((2, 4), (2, 5), (2, 7), (1, 1), (1, 0), (6, 8)),
+                ((5, 3), (5, 4), (4, 7), (5, 1), (6, 8), (1, 0)),
+                ((6, 4), (6, 5), (6, 7), (5, 1), (1, 0), (6, 8)),
+            )
         )
         (
             first,
@@ -372,7 +383,7 @@ def apply_delivery_goal_clearance_scenario(
     lanes = _DELIVERY_GOAL_CLEARANCE_LANES
     center_column = 5
     compact_triples = None
-    if _loop_layout(environment):
+    if _uses_compact_staggered_layout(environment):
         compact_triples = tuple(
             triple
             for triple in _straight_passable_triples(environment)
@@ -384,14 +395,8 @@ def apply_delivery_goal_clearance_scenario(
             and triple[2] not in environment.layout.dead_end_positions
         )
         if not compact_triples:
-            raise ValueError("Loop layout has no delivery-clearance triples.")
+            raise ValueError("Compact layout has no delivery-clearance triples.")
         lanes = tuple(range(len(compact_triples)))
-    elif _uses_compact_staggered_layout(environment):
-        lanes = tuple(
-            (row, -1 if row % 2 else 1)
-            for row in range(1, min(7, environment.layout.rows - 2))
-        )
-        center_column = environment.layout.charger_position[1]
     lane_index = int(variant) % len(lanes)
     lane = lanes[lane_index]
     battery_index = (
@@ -493,7 +498,13 @@ def apply_empty_delivery_clearance_scenario(
         )
     )
     geometries = _EMPTY_DELIVERY_CLEARANCE_GEOMETRIES
-    if _loop_layout(environment):
+    if _uses_six_by_seven_layout(environment):
+        geometries = (
+            ((3, 1), (3, 2), (3, 0)),
+            ((2, 4), (2, 3), (2, 6)),
+            ((1, 2), (1, 3), (1, 0)),
+        )
+    elif _loop_layout(environment):
         excluded = {
             environment.layout.charger_position,
             *environment.layout.robot_start_positions,
@@ -883,7 +894,25 @@ def apply_critical_charger_approach_scenario(
             }
         )[:8]
     elif _uses_compact_staggered_layout(environment):
-        approach_positions = ((4, 4), (5, 4), (6, 4), (7, 3), (7, 5))
+        charger = environment.layout.charger_position
+        approach_positions = tuple(
+            position
+            for position in sorted(
+                environment.layout.passable_positions,
+                key=lambda item: (
+                    shortest_path_distance(
+                        item,
+                        charger,
+                        environment.config.map_layout_id,
+                    ),
+                    item,
+                ),
+            )
+            if position not in {
+                charger,
+                *environment.layout.robot_start_positions,
+            }
+        )[:8]
     position = approach_positions[
         int(variant) % len(approach_positions)
     ]
@@ -1079,7 +1108,14 @@ def apply_task_commitment_scenario(
     if _loop_layout(environment):
         positions = ((3, 3), (5, 4)) if not ordering else ((5, 4), (3, 3))
     elif _uses_compact_staggered_layout(environment):
-        positions = ((2, 4), (4, 4)) if not ordering else ((4, 4), (2, 4))
+        if _uses_six_by_seven_layout(environment):
+            positions = (
+                ((1, 3), (3, 2))
+                if not ordering
+                else ((3, 2), (1, 3))
+            )
+        else:
+            positions = ((2, 4), (4, 4)) if not ordering else ((4, 4), (2, 4))
     else:
         positions = ((4, 5), (6, 5)) if not ordering else ((6, 5), (4, 5))
     for agent, position in zip(

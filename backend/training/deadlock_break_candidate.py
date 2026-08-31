@@ -50,25 +50,31 @@ def _configure_structural_case(
     state = environment.get_state()
     family_index = case % 3
     if family_index == 0:
-        rows = (1, 2, 3, 4, 5)
-        row = rows[(case // 3) % len(rows)]
-        positions = (
-            [(row, 3), (row, 4)]
-            if row % 2 == 1
-            else [(row, 4), (row, 5)]
+        horizontal_pairs = tuple(
+            ((row, column), (row, column + 1))
+            for row in range(environment.layout.rows)
+            for column in range(environment.layout.cols - 1)
+            if environment.layout.is_passable((row, column))
+            and environment.layout.is_passable((row, column + 1))
+            and (row, column) not in environment.layout.robot_start_positions
+            and (row, column + 1) not in environment.layout.robot_start_positions
         )
+        positions = list(horizontal_pairs[(case // 3) % len(horizontal_pairs)])
         family = "horizontal_single_lane"
     elif family_index == 1:
-        spine_pairs = ((0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6))
-        upper, lower = spine_pairs[(case // 3) % len(spine_pairs)]
-        positions = [(upper, 4), (lower, 4)]
+        spine_column = environment.layout.charger_position[1]
+        spine_pairs = tuple(
+            ((row, spine_column), (row + 1, spine_column))
+            for row in range(environment.layout.rows - 1)
+            if environment.layout.is_passable((row, spine_column))
+            and environment.layout.is_passable((row + 1, spine_column))
+        )
+        positions = list(spine_pairs[(case // 3) % len(spine_pairs)])
         family = "vertical_spine"
     else:
-        positions = (
-            [(6, 3), (6, 4)]
-            if (case // 3) % 2 == 0
-            else [(6, 4), (6, 5)]
-        )
+        exits = tuple(sorted(environment.layout.robot_exit_positions))
+        exit_pairs = tuple(zip(exits, exits[1:], strict=False))
+        positions = list(exit_pairs[(case // 3) % len(exit_pairs)])
         family = "three_cell_exit"
     if (case // 36) % 2:
         positions.reverse()

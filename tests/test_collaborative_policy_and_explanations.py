@@ -95,8 +95,8 @@ def test_actor_mask_does_not_preempt_teammate_occupancy_dynamics() -> None:
     environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=8))
     environment.reset(seed=71)
     state = environment.get_state()
-    state.by_id("robot_1").position = (6, 4)
-    state.by_id("robot_2").position = (7, 4)
+    state.by_id("robot_1").position = (4, 3)
+    state.by_id("robot_2").position = (5, 3)
     environment.set_state(state)
 
     mask = environment.action_masks()["robot_1"]
@@ -109,7 +109,7 @@ def test_actor_mask_does_not_preempt_teammate_occupancy_dynamics() -> None:
     assert not terminated and not truncated
     assert info["robot_collision_event"]
     assert info["robot_collision_kind"] == "occupied_stationary"
-    assert environment.get_state().by_id("robot_1").position == (6, 4)
+    assert environment.get_state().by_id("robot_1").position == (4, 3)
 
 
 def test_commitment_failure_labels_stay_inside_actor_action_support() -> None:
@@ -371,7 +371,7 @@ def test_explanation_evidence_binds_robot_two_live_task_and_frame() -> None:
 
 
 def test_program_version_constant_is_new_shared_contract() -> None:
-    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v59_decision_trace"
+    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v60_live_human_ai_trace"
 
 
 def test_removed_runtime_controller_predicate_has_no_special_verbalizer() -> None:

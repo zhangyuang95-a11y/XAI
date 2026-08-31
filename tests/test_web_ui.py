@@ -59,14 +59,14 @@ def test_web_state_serialization_uses_shared_tasks_and_can_hide_policy() -> None
 def test_web_map_payload_matches_current_fixed_geometry() -> None:
     payload = warehouse_map_payload()
 
-    assert payload["rows"] == 8
-    assert payload["cols"] == 9
+    assert payload["rows"] == 6
+    assert payload["cols"] == 7
     assert "delivery_position" not in payload
-    assert payload["charger_position"] == [7, 4]
+    assert payload["charger_position"] == [5, 3]
     assert "yield_bays" not in payload
-    assert payload["robot_start_positions"] == [[7, 3], [7, 5]]
-    assert payload["robot_exit_positions"] == [[6, 3], [6, 4], [6, 5]]
-    assert len(payload["shelves"]) == 37
+    assert payload["robot_start_positions"] == [[5, 2], [5, 4]]
+    assert payload["robot_exit_positions"] == [[4, 2], [4, 3], [4, 4]]
+    assert len(payload["shelves"]) == 23
     assert payload["shared_delivery_tasks"] is True
 
 
@@ -149,7 +149,6 @@ def test_only_current_study_write_endpoint_is_exposed() -> None:
         "/api/view": "view",
         "/api/study/command": "study_command",
         "/api/study/reference-trajectory": "reference_trajectory",
-        "/api/study/timeline-events": "timeline_events",
     }
 
 
@@ -353,7 +352,7 @@ def test_bundled_page_contains_current_flow_and_no_old_experiment_ui() -> None:
         "双机器人协作配送实验",
         "AI–AI 协作演示",
         "开始任务 1",
-        "结束解释并开始任务 2",
+        "询问机器人2",
         "结束问卷",
     ):
         assert text in html
@@ -362,6 +361,8 @@ def test_bundled_page_contains_current_flow_and_no_old_experiment_ui() -> None:
     assert "posttest" not in lowered
     assert "free exploration" not in lowered
     assert "自由提问模式" not in html
+    assert 'id="workflowExplanation"' not in html
+    assert 'id="explanationPanel"' not in html
 
 
 def test_frontend_uses_one_command_per_action_and_current_controls() -> None:
@@ -389,38 +390,26 @@ def test_frontend_uses_one_command_per_action_and_current_controls() -> None:
     run_source = (root / "run.py").read_text(encoding="utf-8")
     assert 'sys.argv.append("--test-condition-selector")' in run_source
     assert '"--formal-study" in sys.argv' in run_source
-    assert 'id="questionTarget"' in html
-    assert 'target_agent: $("questionTarget").value' in source
+    assert 'id="questionTarget"' not in html
+    assert 'target_agent: "robot_2"' in source
     assert 'id="presetQuestions"' in html
     assert 'data-question-key="presetWhyAction"' in html
-    assert 'data-question-key="presetWhyAssignedA1"' in html
-    assert 'data-question-key="presetWhyNotAssignedA1"' in html
-    assert "快捷问题（点击后直接提问）" in source
-    assert "Quick questions (click to ask)" in source
+    assert 'data-question-key="presetWhyWait"' in html
+    assert 'data-question-key="presetHumanInfluence"' in html
+    assert 'data-question-key="presetGoal"' in html
     assert 'submitExplanationQuestion(tr(button.dataset.questionKey), button.dataset.questionKind)' in source
-    assert '"/api/study/reference-trajectory"' in source
-    assert "async function synchronizeReferenceTrajectory" in source
-    assert "await synchronizeReferenceTrajectory()" in source
-    assert '"/api/study/timeline-events"' in source
     assert "locale: DEFAULT_LOCALE" in source
-    assert 'state.referenceIndex = Math.min(1, count - 1)' in source
-    assert '$("timelineRange").addEventListener("input"' in source
     assert 'command("timeline_select"' not in source
     assert 'document.querySelectorAll("#presetQuestions button")' in source
-    assert "每次提问都会使用新的生成种子" in source
-    assert "AI–AI 解释轨迹" in html
-    assert "固定 AI–AI 参考轨迹" in source
-    assert "机器人 1（AI）" in source
-    assert "Robot 1 (AI)" in source
+    assert "AI–AI 解释轨迹" not in html
     assert "Robot 1 (participant)" not in source
     assert "选择任务 1 的一个实际执行帧" not in source
     assert "Select an executed Task 1 frame" not in source
     assert 'view.timeline?.agent_control || {}' in source
-    assert 'trajectory_kind === "ai_ai_reference"' in source
-    assert 'aria-label="AI-AI reference trajectory frame"' in html
+    assert 'aria-label="AI-AI reference trajectory frame"' not in html
     assert "locale: requestedLocale" in source
-    assert "This study flow does not provide an explanation or question period" in source
-    assert "本实验流程在两轮任务之间不提供解释或提问环节" in source
+    assert "Task 2 has no live questions" in source
+    assert "任务 2 不提供即时提问" in source
     assert "成功移动耗电 2" in source
     assert "A successful move costs 2 battery" in source
     assert "AI–AI 协作演示（可提前结束）" in source
@@ -438,8 +427,8 @@ def test_frontend_uses_one_command_per_action_and_current_controls() -> None:
     assert 'if (state.pendingBeginTask1)' in source
     assert 'await command("begin_task1")' in source
     assert 'id="beginTask1Button" type="button" data-i18n="endDemoEarly"' in html
-    assert "任务 1 已完成" in html
-    assert "开始任务 2" in html
+    assert "Task 1 complete" in html
+    assert "Begin Task 2" in html
     assert "ArrowUp" in source and '" ":"WAIT"' in source
     assert '"/api/study/command"' in source
     assert "/api/study/posttest" not in source

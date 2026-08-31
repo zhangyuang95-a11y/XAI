@@ -4,7 +4,6 @@ import pytest
 import torch
 
 from backend.adapters.warehouse import WarehouseAdapter
-from backend.nlp.schemas import QueryIntent, QueryPlan
 from env.warehouse.environment import ACTIONS, WarehouseConfig, WarehouseMultiAgentEnv
 from env.warehouse.mappo import MAPPOConfig, MAPPOPolicy
 from ui.collaborative_study import CollaborativeConditionAllocator
@@ -15,65 +14,6 @@ from ui.web_runtime import WarehouseWebSession, serialize_warehouse_state
 class _NoopEngine:
     def precompile_frame_irs(self, _snapshot) -> None:
         return None
-
-
-class _ExplanationAnswer:
-    user_visible_explanation = True
-    scene_edit = None
-
-    def __init__(self, target_agent: str, frame: int) -> None:
-        self.target_agent = target_agent
-        self.frame = frame
-
-    def to_dict(self):
-        text = f"{self.target_agent} explanation at decision frame {self.frame}."
-        return {
-            "explanation": text,
-            "explanation_document": {"text": text},
-        }
-
-
-class _ExplanationPlanner:
-    def __init__(self) -> None:
-        self.last_diagnostics = {}
-
-    def parse(self, question, *, selected_frame, environment_schema, cache_context):
-        target = environment_schema["focus_entity"]
-        # FACTUAL deliberately reproduces the old failure mode: the study
-        # layer must still bind it to the selected action transition.
-        return QueryPlan(
-            raw_text=question,
-            intent=QueryIntent.FACTUAL,
-            frame_reference=selected_frame,
-            subjects=(target,),
-            requires_program_trace=False,
-            target_variables=(f"{target}.objective",),
-            response_language="zh-CN",
-        )
-
-
-class _ExplanationEngine(_NoopEngine):
-    def __init__(self) -> None:
-        self.planner = _ExplanationPlanner()
-        self.calls = []
-
-    def question_cache_context(self, _snapshot):
-        return {}
-
-    def execute_plan(self, plan, snapshot, *, language, seed, **_kwargs):
-        self.calls.append(
-            {
-                "target": plan.prediction_targets[0],
-                "frame": snapshot.frame,
-                "language": language,
-                "seed": seed,
-                "requires_program_trace": plan.requires_program_trace,
-                "requires_policy_query": plan.requires_policy_query,
-                "target_variables": plan.target_variables,
-                "evidence_requirements": plan.evidence_requirements,
-            }
-        )
-        return _ExplanationAnswer(plan.prediction_targets[0], snapshot.frame)
 
 
 def _wait_policy() -> MAPPOPolicy:
@@ -209,7 +149,7 @@ def test_completed_tutorial_audit_keeps_tutorial_frame_count_after_task_reset() 
     assert not any(event["event"] == "tutorial_ended_early" for event in events)
 
 
-def test_full_explanation_session_has_exact_round_boundaries_and_immutable_replay(
+def test_group_a_live_questions_preserve_task1_state_and_direct_round_boundaries(
     tmp_path,
 ) -> None:
     policy = _wait_policy()
@@ -243,26 +183,26 @@ def test_full_explanation_session_has_exact_round_boundaries_and_immutable_repla
     assert live_motion["robot_1"]["proposed_action"] == "RIGHT"
     assert live_motion["robot_1"]["battery_delta"] == -2.0
     assert live_motion["robot_2"]["proposed_action"] is None
+    before_question = session.environment.get_state()
+    before_count = session.timeline.count
+    response = session.explain_study(
+        "What is Robot 2 trying to do?",
+        target_agent="robot_2",
+        question_kind="goal",
+    )
+    assert response["report"]["trajectory_kind"] == "human_ai_task1"
+    assert response["report"]["agent_control"] == {
+        "robot_1": "human", "robot_2": "ai",
+    }
+    assert session.environment.get_state() == before_question
+    assert session.timeline.count == before_count
     for _ in range(119):
         session.submit_human_action("WAIT")
-    assert session.human_study.stage == "explanation"
+    assert session.human_study.stage == "task1_complete"
     assert session.human_study.round_summaries["task1"].steps == 120
-    frame_count = session.timeline.count
-    replay = session.select_frame(40)
-    assert replay["transition"]["loop"] is True
-    assert {
-        item["id"] for item in replay["transition"]["agents"]
-    } == {"robot_1", "robot_2"}
-    assert all(
-        item["proposed_action"] is not None
-        for item in replay["transition"]["agents"]
-    )
-    session.select_frame(0)
-    assert session.timeline.index == 1
-    session.select_frame(80)
-    assert session.timeline.count == frame_count
-    session.finish_explanation()
-    assert session.human_study.explanation_count == 0
+    assert session.timeline.count == 121
+    assert session.human_study.explanation_count == 1
+    session.begin_task2()
     for _ in range(120):
         session.submit_human_action("WAIT")
     assert session.human_study.stage == "survey"
@@ -343,7 +283,7 @@ def test_control_transition_preserves_task1_until_task2_is_confirmed(tmp_path) -
     assert session.human_study.round_summaries["task1"].seed == assignment.task1_seed
 
 
-def test_explanation_questions_bind_any_action_frame_and_either_robot() -> None:
+def test_explanation_questions_bind_recent_task1_action_and_robot2_only() -> None:
     policy = _wait_policy()
     allocator = CollaborativeConditionAllocator(randomization_seed=91)
     assignment = next(
@@ -364,124 +304,31 @@ def test_explanation_questions_bind_any_action_frame_and_either_robot() -> None:
     for _ in range(4):
         session.tutorial_advance()
     session.begin_task1()
-    task1_environment = session.environment
-    for _ in range(120):
+    for _ in range(4):
         session.submit_human_action("WAIT")
-    assert session.human_study.stage == "explanation"
-    assert session.environment is not task1_environment
-    assert session.timeline.count == 5
-    assert session.timeline.index == 1
-    explanation_view = session.view()
-    assert explanation_view["timeline"]["trajectory_kind"] == "ai_ai_reference"
-    assert explanation_view["timeline"]["trajectory_seed"] == 40_221
-    assert explanation_view["timeline"]["agent_control"] == {
-        "robot_1": "ai",
-        "robot_2": "ai",
-    }
-    assert explanation_view["state"]["frame"] == 1
-    assert session.current.snapshot == tutorial.frames[0].next_snapshot
-    assert explanation_view["state"]["policy_hidden"] is False
-    assert explanation_view["study"]["round_summaries"]["task1"]["steps"] == 120
-    assert 40_221 not in {assignment.task1_seed, assignment.task2_seed}
-    engine = _ExplanationEngine()
-    session.engine = engine
-    transition_events = session.drain_events()
-    reference_event = next(
-        event
-        for event in transition_events
-        if event["event"] == "explanation_reference_loaded"
+    before = session.environment.get_state()
+    response = session.explain_study(
+        "机器人2为什么等待？",
+        target_agent="robot_2",
+        question_kind="wait",
     )
-    assert reference_event["trajectory_seed"] == 40_221
-    assert reference_event["agent_control"] == {
-        "robot_1": "ai",
-        "robot_2": "ai",
-    }
-
-    session.select_frame(4)
-    last_frame = session.explain_study(
-        "队友的位置或动作是否影响了这个决定？", target_agent="robot_2"
-    )
-    first_report = last_frame["report"]
-    assert first_report["selected_timeline_frame"] == 4
-    assert first_report["decision_evidence_frame"] == 3
-    assert first_report["target_agent"] == "robot_2"
-    assert first_report["trajectory_kind"] == "ai_ai_reference"
-    assert first_report["trajectory_seed"] == 40_221
-    assert first_report["agent_control"] == {
-        "robot_1": "ai",
-        "robot_2": "ai",
-    }
-    assert last_frame["view"]["study"]["explanation_target_agent"] == "robot_2"
-
-    session.select_frame(1)
-    first_frame = session.explain_study(
-        "为什么在这里采取这个动作？", target_agent="robot_1"
-    )
-    second_report = first_frame["report"]
-    assert second_report["selected_timeline_frame"] == 1
-    assert second_report["decision_evidence_frame"] == 0
-    assert second_report["target_agent"] == "robot_1"
-    assert second_report["question_seed"] != first_report["question_seed"]
-    assert second_report["question_sequence"] == 2
-    assert first_frame["view"]["study"]["explanation_target_agent"] == "robot_1"
-    assert first_frame["view"]["last_explanation"]["target_agent"] == "robot_1"
-
-    assert len(engine.calls) == 4  # English and Chinese for each question.
-    assert {call["target"] for call in engine.calls[:2]} == {"robot_2"}
-    assert {call["target"] for call in engine.calls[2:]} == {"robot_1"}
-    assert {call["frame"] for call in engine.calls[:2]} == {3}
-    assert {call["frame"] for call in engine.calls[2:]} == {0}
-    assert all(call["requires_program_trace"] for call in engine.calls)
-    assert all(call["requires_policy_query"] for call in engine.calls)
-    assert {
-        call["target_variables"] for call in engine.calls[:2]
-    } == {("robot_2.observed_action",)}
-    assert {
-        call["target_variables"] for call in engine.calls[2:]
-    } == {("robot_1.observed_action",)}
-    assert all(
-        {"state", "policy", "program_trace"}.issubset(
-            call["evidence_requirements"]
+    report = response["report"]
+    assert report["target_agent"] == "robot_2"
+    assert report["trajectory_kind"] == "human_ai_task1"
+    assert report["agent_control"] == {"robot_1": "human", "robot_2": "ai"}
+    assert report["anchor_frame"] <= session.current.snapshot.frame
+    assert max(report["context_frames"]) <= report["anchor_frame"]
+    assert len(report["context_frames"]) <= 5
+    assert session.environment.get_state() == before
+    with pytest.raises(ValueError, match="Robot 2"):
+        session.explain_study(
+            "Why?", target_agent="robot_1", question_kind="action"
         )
-        for call in engine.calls
-    )
-    assert all(
-        "study_focus:collaboration" in call["evidence_requirements"]
-        for call in engine.calls[:2]
-    )
-    assert all(
-        "study_focus:action" in call["evidence_requirements"]
-        for call in engine.calls[2:]
-    )
-    assert len({call["seed"] for call in engine.calls[:2]}) == 1
-    assert len({call["seed"] for call in engine.calls[2:]}) == 1
-
-    audit_events = session.drain_events()
-    explanation_events = [
-        event for event in audit_events
-        if event["event"] == "explanation_presented"
-    ]
-    assert [event["target_agent"] for event in explanation_events] == [
-        "robot_2", "robot_1",
-    ]
-    assert len({event["question_seed"] for event in explanation_events}) == 2
-    assert all(
-        event["trajectory_kind"] == "ai_ai_reference"
-        and event["trajectory_seed"] == 40_221
-        and event["agent_control"] == {"robot_1": "ai", "robot_2": "ai"}
-        for event in explanation_events
-    )
-    browse_events = [
-        event for event in audit_events
-        if event["event"] == "trajectory_frame_browsed"
-    ]
-    assert [event["environment_frame"] for event in browse_events] == [4, 1]
-    assert all(
-        event["study_stage"] == "explanation"
-        and event["trajectory_kind"] == "ai_ai_reference"
-        and event["trajectory_seed"] == 40_221
-        and "round" not in event
-        for event in browse_events
+    events = session.drain_events()
+    assert any(
+        event["event"] == "live_explanation_presented"
+        and event["trajectory_kind"] == "human_ai_task1"
+        for event in events
     )
 
 
@@ -503,89 +350,10 @@ def test_reference_trajectory_is_one_immutable_public_121_frame_payload() -> Non
     )
     session.run_id = "reference-payload-test"
     session.start_study(assignment=assignment, language="en")
+    demonstration = session.reference_trajectory_payload()
+    assert demonstration["trajectory_kind"] == "ai_ai_demonstration"
+    assert demonstration["agent_control"] == {"robot_1": "ai", "robot_2": "ai"}
     session.begin_task1()
-    for _ in range(120):
-        session.submit_human_action("WAIT")
-    assert session.human_study.stage == "explanation"
-
-    first = session.reference_trajectory_payload()
-    second = session.reference_trajectory_payload()
-    assert first["trajectory_hash"] == second["trajectory_hash"]
-    session.selected_agent = "robot_1"
-    after_robot_selection = session.reference_trajectory_payload()
-    session.selected_agent = "robot_2"
-    after_other_selection = session.reference_trajectory_payload()
-    assert after_robot_selection == first
-    assert after_other_selection == first
-    assert len(first["frames"]) == 121
-    assert [frame["index"] for frame in first["frames"]] == list(range(121))
-    assert first["agent_control"] == {"robot_1": "ai", "robot_2": "ai"}
-    assert first["trajectory_seed"] == 40_221
-    public_text = str(first)
-    assert "goal_kind" not in public_text
-    assert "goal_position" not in public_text
-    assert "action_probabilities" not in public_text
-
-    engine = _ExplanationEngine()
-    session.engine = engine
-    response = session.explain_study(
-        "Why did robot 1 execute that action?",
-        target_agent="robot_1",
-        selected_frame=73,
-        trajectory_hash=first["trajectory_hash"],
-        question_kind="action",
-    )
-    assert response["report"]["selected_timeline_frame"] == 73
-    assert response["report"]["target_agent"] == "robot_1"
-    assert session.reference_trajectory_payload()["trajectory_hash"] == first["trajectory_hash"]
-    assert all(
-        "study_focus:action" in call["evidence_requirements"]
-        for call in engine.calls
-    )
-    with pytest.raises(ValueError, match="changed"):
-        session.explain_study(
-            "Why did robot 2 wait?",
-            target_agent="robot_2",
-            selected_frame=1,
-            trajectory_hash="stale",
-            question_kind="action",
-        )
-
-
-def test_reference_trajectory_accepts_only_selection_only_legacy_hashes() -> None:
-    policy = _wait_policy()
-    allocator = CollaborativeConditionAllocator(randomization_seed=92)
-    assignment = next(
-        allocator._assignment_for_index(f"legacy-reference-{index}", index)
-        for index in range(8)
-        if allocator._assignment_for_index(
-            f"legacy-reference-{index}", index
-        ).condition == "explanation"
-    )
-    session = WarehouseWebSession(
-        policy=policy,
-        engine_factory=lambda adapter, actor: _NoopEngine(),
-        seed=13,
-        tutorial=_tutorial(policy, horizon=120),
-    )
-    session.run_id = "legacy-reference-hash-test"
-    session.start_study(assignment=assignment, language="en")
-    session.begin_task1()
-    for _ in range(120):
-        session.submit_human_action("WAIT")
-
-    canonical = session.reference_trajectory_payload()["trajectory_hash"]
-    legacy = {
-        session._reference_identity_hash(
-            session._reference_trajectory_identity(
-                selected_agent_marker=agent_id,
-            )
-        )
-        for agent_id in ("robot_1", "robot_2")
-    }
-    assert session.reference_trajectory_hash_is_compatible(canonical)
-    assert all(
-        session.reference_trajectory_hash_is_compatible(value)
-        for value in legacy
-    )
-    assert not session.reference_trajectory_hash_is_compatible("unrelated")
+    assert session.view()["timeline"]["trajectory_kind"] == "human_ai_task1"
+    with pytest.raises(RuntimeError, match="instructions"):
+        session.reference_trajectory_payload()

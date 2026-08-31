@@ -11,14 +11,24 @@ from backend.simulation.query_engine import _common_ir_cache_key
 from core.rcpd import RCPD, RCPDConfig
 from env.warehouse.environment import WarehouseConfig, WarehouseMultiAgentEnv
 from env.warehouse.mappo import MAPPOConfig, MAPPOPolicy
+from env.warehouse.layouts import COMPACT_STAGGERED_8X9_LAYOUT
 from env.warehouse.observations import observation_dim
 from ui.web_runtime import _study_question_focus
+
+
+def _legacy_config(**overrides) -> WarehouseConfig:
+    return WarehouseConfig(
+        rows=COMPACT_STAGGERED_8X9_LAYOUT.rows,
+        cols=COMPACT_STAGGERED_8X9_LAYOUT.cols,
+        map_layout_id=COMPACT_STAGGERED_8X9_LAYOUT.layout_id,
+        **overrides,
+    )
 
 
 def _system(
     seed: int = 17,
 ) -> tuple[WarehouseMultiAgentEnv, WarehouseAdapter, MAPPOPolicy]:
-    config = WarehouseConfig(horizon=12, seed=seed)
+    config = _legacy_config(horizon=12, seed=seed)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=seed)
     adapter = WarehouseAdapter(environment)
@@ -1040,7 +1050,7 @@ def test_current_intervention_contract_recomputes_observations_and_evidence() ->
     assert edited.metadata["decision_evidence_aligned"] is False
     assert edited.action_distributions == {}
     assert edited.observations["robot_2"].shape == (
-        observation_dim(WarehouseConfig()),
+        observation_dim(_legacy_config()),
     )
 
 

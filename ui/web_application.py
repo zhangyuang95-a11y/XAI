@@ -423,8 +423,6 @@ class WarehouseWebApplication:
         payload = dict(envelope["payload"])
         checkpoint = session.checkpoint()
 
-        explanation_was_accepted = False
-
         def mutate():
             if command == "set_language":
                 result = session.set_language(str(payload.get("locale", "")))
@@ -443,45 +441,22 @@ class WarehouseWebApplication:
             elif command == "ask_explanation":
                 result = session.explain_study(
                     str(payload.get("question", "")),
-                    target_agent=str(payload.get("target_agent", "robot_2")),
-                    accepted_before_deadline=explanation_was_accepted,
-                    selected_frame=(
-                        int(payload["selected_frame"])
-                        if payload.get("selected_frame") is not None
-                        else None
-                    ),
-                    trajectory_hash=(
-                        str(payload["trajectory_hash"])
-                        if payload.get("trajectory_hash")
-                        else None
-                    ),
+                    target_agent="robot_2",
                     question_kind=(
                         str(payload["question_kind"])
                         if payload.get("question_kind")
                         else None
                     ),
                 )
-            elif command == "finish_explanation":
-                result = session.finish_explanation()
             elif command == "begin_task2":
                 result = session.begin_task2()
             elif command == "submit_survey":
                 result = session.submit_survey(payload)
-            elif command == "timeline_select":
-                result = {"view": session.select_frame(int(payload["index"]))}
-            elif command == "timeline_back":
-                result = {"view": session.back()}
-            elif command == "timeline_forward":
-                result = {"view": session.forward()}
             else:
                 raise KeyError(f"Unknown study command: {command}")
             return result, session.drain_events(), self._persisted_session(session)
 
         if command == "ask_explanation":
-            explanation_was_accepted = bool(
-                session.human_study.stage == "explanation"
-                and not session.human_study.explanation_time_expired
-            )
             cached = self.study_store.reserve_long_operation(
                 operation_id=operation_id,
                 run_id=str(envelope["run_id"]),
@@ -638,45 +613,6 @@ class WarehouseWebApplication:
                     )
             elif operation == "reference_trajectory":
                 result = session.reference_trajectory_payload()
-            elif operation == "timeline_events":
-                operation_id = str(data.get("operation_id", "")).strip()
-                run_id = str(data.get("run_id", "")).strip()
-                if not session.run_id or run_id != session.run_id:
-                    raise ValueError("Timeline events do not match the active run.")
-                reference = session.reference_trajectory_payload()
-                if not session.reference_trajectory_hash_is_compatible(
-                    str(data.get("trajectory_hash", ""))
-                ):
-                    raise ValueError("Timeline events reference a stale trajectory.")
-                raw_events = data.get("events", ())
-                if not isinstance(raw_events, list):
-                    raise ValueError("events must be a list.")
-                cleaned: list[dict[str, Any]] = []
-                for raw in raw_events:
-                    if not isinstance(raw, Mapping):
-                        raise ValueError("Each timeline event must be an object.")
-                    index = int(raw.get("timeline_index", -1))
-                    if index < 1 or index > session.timeline.max_index:
-                        raise ValueError("Timeline event index is outside the reference trajectory.")
-                    cleaned.append(
-                        {
-                            "timeline_index": index,
-                            "environment_frame": int(
-                                session.timeline.frames[index].snapshot.frame
-                            ),
-                            "dwell_ms": max(0, int(raw.get("dwell_ms", 0))),
-                            "trajectory_kind": session.trajectory_kind,
-                            "trajectory_seed": session.trajectory_seed,
-                            "trajectory_hash": reference["trajectory_hash"],
-                            "agent_control": dict(session.trajectory_agent_control),
-                            "immutable": True,
-                        }
-                    )
-                result = self.study_store.record_timeline_events(
-                    operation_id=operation_id,
-                    run_id=run_id,
-                    events=cleaned,
-                )
             else:
                 raise KeyError(f"Unknown API operation: {operation}")
             return resolved_id, result

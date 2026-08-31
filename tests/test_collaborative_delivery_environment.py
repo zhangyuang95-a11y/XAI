@@ -17,7 +17,11 @@ from env.warehouse.environment import (
 )
 from env.warehouse.domain import DeliveryTask
 from env.warehouse.observations import _actor_visible_goal
-from env.warehouse.layouts import CORRIDOR_SHELF_LAYOUT, STAGGERED_AISLES_LAYOUT
+from env.warehouse.layouts import (
+    COMPACT_STAGGERED_8X9_LAYOUT,
+    CORRIDOR_SHELF_LAYOUT,
+    STAGGERED_AISLES_LAYOUT,
+)
 from env.warehouse.coordination import stable_coordination_actions
 from env.warehouse.coordination_plan import frozen_joint_coordination_plan
 from env.warehouse.scenarios import (
@@ -38,6 +42,16 @@ def _legacy_config(**overrides) -> WarehouseConfig:
         "rows": STAGGERED_AISLES_LAYOUT.rows,
         "cols": STAGGERED_AISLES_LAYOUT.cols,
         "map_layout_id": STAGGERED_AISLES_LAYOUT.layout_id,
+    }
+    values.update(overrides)
+    return WarehouseConfig(**values)
+
+
+def _compact_legacy_config(**overrides) -> WarehouseConfig:
+    values = {
+        "rows": COMPACT_STAGGERED_8X9_LAYOUT.rows,
+        "cols": COMPACT_STAGGERED_8X9_LAYOUT.cols,
+        "map_layout_id": COMPACT_STAGGERED_8X9_LAYOUT.layout_id,
     }
     values.update(overrides)
     return WarehouseConfig(**values)
@@ -103,7 +117,7 @@ def test_executed_neural_progress_creates_nonbinding_route_commitment() -> None:
 
 
 def test_charger_route_progress_does_not_create_task_commitment() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig())
+    environment = WarehouseMultiAgentEnv(_compact_legacy_config())
     environment.reset(seed=17)
     state = environment.get_state()
     robot = state.by_id("robot_1")
@@ -129,7 +143,7 @@ def test_charger_route_progress_does_not_create_task_commitment() -> None:
 
 
 def test_shared_prefix_move_preserves_the_predecision_persistent_goal() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=12))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=12))
     environment.reset(seed=54)
     state = environment.get_state()
     state.tasks = [
@@ -257,7 +271,7 @@ def test_committed_task_controls_safe_charger_departure_energy() -> None:
 
 def test_defaults_and_shared_task_endpoint_constraints() -> None:
     config = WarehouseConfig()
-    assert (config.rows, config.cols) == (8, 9)
+    assert (config.rows, config.cols) == (6, 7)
     assert (config.num_agents, config.max_agents) == (2, 2)
     assert config.horizon == 120
     assert config.active_task_count == 2
@@ -309,7 +323,7 @@ def test_defaults_and_shared_task_endpoint_constraints() -> None:
 
 
 def test_offline_teacher_freezes_goals_without_environment_task_assignment() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_compact_legacy_config(horizon=20))
     environment.reset(seed=42027)
     before = environment.get_state()
     assert all(agent.navigation_goal_kind == "wait" for agent in before.agents)
@@ -529,7 +543,7 @@ def test_teacher_sends_full_robot_up_while_teammate_enters_charger() -> None:
 
 
 def test_real_same_target_conflict_bypasses_coordination_cooldown() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=120))
     environment.reset(seed=42042)
     state = environment.get_state()
     state.frame = 31
@@ -622,7 +636,7 @@ def test_v8_records_head_on_risk_right_of_way_and_charger_queue() -> None:
 
 @pytest.mark.parametrize("agent_id", ["robot_1", "robot_2"])
 def test_either_robot_can_claim_and_only_carrier_can_deliver(agent_id: str) -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=20))
     environment.reset(seed=81)
     state = environment.get_state()
     task = state.tasks[0]
@@ -695,7 +709,7 @@ def test_robot_conflicts_block_both_and_charge_one_collision(
     positions,
     actions,
 ) -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_compact_legacy_config(horizon=20))
     environment.reset(seed=3)
     _set_agent_positions(environment, *positions)
     batteries = {
@@ -714,7 +728,7 @@ def test_robot_conflicts_block_both_and_charge_one_collision(
 
 
 def test_static_obstacle_is_wait_without_collision_or_energy_cost() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=20))
     environment.reset(seed=4)
     _set_agent_positions(environment, (1, 1), (7, 5))
     before = environment.get_state().by_id("robot_1").battery
@@ -764,7 +778,7 @@ def test_ineffective_joint_wait_streak_is_observable_and_resets_on_motion() -> N
 
 
 def test_each_successful_move_costs_exactly_two_battery_for_both_robots() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=20))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=20))
     environment.reset(seed=41)
     _set_agent_positions(environment, (1, 1), (1, 4))
 
@@ -778,16 +792,16 @@ def test_each_successful_move_costs_exactly_two_battery_for_both_robots() -> Non
 
 
 def test_charging_and_shutdown_score_components() -> None:
-    charging = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    charging = WarehouseMultiAgentEnv(_compact_legacy_config(horizon=120))
     charging.reset(seed=5)
     state = charging.get_state()
-    state.by_id("robot_1").position = CHARGER_POSITION
+    state.by_id("robot_1").position = charging.layout.charger_position
     state.by_id("robot_1").battery = 50
     charging.set_state(state)
     charging.step({"robot_1": "WAIT", "robot_2": "WAIT"})
     assert charging.get_state().by_id("robot_1").battery == 60
 
-    shutdown = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    shutdown = WarehouseMultiAgentEnv(_legacy_config(horizon=120))
     shutdown.reset(seed=6)
     state = shutdown.get_state()
     state.by_id("robot_1").position = (1, 1)
@@ -939,7 +953,7 @@ def test_delivery_goal_clearance_scenario_is_valid_follow_through_state(
 
 
 def test_nonavoidable_participant_uncertainty_wait_extends_safe_path() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_compact_legacy_config(horizon=120))
     environment.reset(seed=17_900)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -976,7 +990,7 @@ def test_nonavoidable_participant_uncertainty_wait_extends_safe_path() -> None:
 
 
 def test_nonavoidable_loaded_clearance_move_extends_safe_path() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_compact_legacy_config(horizon=120))
     environment.reset(seed=17_901)
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -1020,7 +1034,7 @@ def test_empty_robot_causally_clears_loaded_teammate_delivery(
     environment.reset(seed=18_000 + variant)
     apply_empty_delivery_clearance_scenario(environment, variant=variant)
     state = environment.get_state()
-    occupant_id = "robot_2" if variant >= 4 else "robot_1"
+    occupant_id = "robot_2" if (variant // 3) % 2 else "robot_1"
     loaded_id = "robot_1" if occupant_id == "robot_2" else "robot_2"
     occupant = state.by_id(occupant_id)
     loaded = state.by_id(loaded_id)
@@ -1179,29 +1193,24 @@ def test_mask_representable_two_step_yield_keeps_positive_progress_signal() -> N
     environment.reset(seed=7003)
     apply_head_on_scenario(environment, reverse=False)
 
-    first_actions = stable_coordination_actions(environment)
-    _, _, _, _, first_info = environment.step(first_actions)
-    second_actions = stable_coordination_actions(environment)
-    _, _, _, _, second_info = environment.step(second_actions)
-    third_actions = stable_coordination_actions(environment)
-    _, _, _, _, third_info = environment.step(third_actions)
-    fourth_actions = stable_coordination_actions(environment)
-    _, _, _, _, fourth_info = environment.step(fourth_actions)
+    infos = []
+    for _ in range(4):
+        actions = stable_coordination_actions(environment)
+        _, _, _, _, info = environment.step(actions)
+        infos.append(info)
 
-    assert first_info["coordination_events"]
     # Conservative decentralized clearance takes multiple frozen states: the
     # follower never enters the peer's S_t cell in the same frame it vacates.
-    assert second_info["coordination_events"]
-    assert third_info["coordination_events"]
+    # The exact number of later ordinary progress frames depends on compact
+    # topology and is not part of the contract.
+    assert infos[0]["coordination_events"]
+    assert infos[1]["coordination_events"]
     assert any(
         event.get("event") == "coordination_yield"
-        for event in fourth_info["coordination_events"]
+        for info in infos
+        for event in info["coordination_events"]
     )
-    assert not first_info["robot_collision_event"]
-    assert not second_info["robot_collision_event"]
-    assert not third_info["robot_collision_event"]
-    assert not fourth_info["robot_collision_event"]
-    infos = (first_info, second_info, third_info, fourth_info)
+    assert all(not info["robot_collision_event"] for info in infos)
     assert all(info["potential_shaping_reward"] >= 0.0 for info in infos)
     assert sum(info["potential_shaping_reward"] for info in infos) > 0.0
 
@@ -1416,7 +1425,7 @@ def test_old_task_priority_cannot_retarget_valid_pickup_commitment() -> None:
     """Reward and teacher must use the pickup visible to the Actor."""
 
     environment = WarehouseMultiAgentEnv(
-        WarehouseConfig(horizon=120, participant_detour_scoring=False)
+        _compact_legacy_config(horizon=120, participant_detour_scoring=False)
     )
     environment.reset(seed=40_786)
     state = environment.get_state()
@@ -1464,7 +1473,7 @@ def test_old_task_priority_cannot_retarget_valid_pickup_commitment() -> None:
 
 
 def test_valid_commitment_outranks_matching_an_extra_robot() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=120))
     environment.reset(seed=26_210_004)
     state = environment.get_state()
     state.frame = 46

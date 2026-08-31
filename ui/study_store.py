@@ -21,7 +21,6 @@ ACTIVE_STAGES = {
     "instructions",
     "task1",
     "task1_complete",
-    "explanation",
     "task2",
     "survey",
 }
@@ -315,80 +314,6 @@ class StudyStore:
             return None
         response = json.loads(row["response_json"])
         response.setdefault("run_id", str(row["run_id"]))
-        return response
-
-    def record_timeline_events(
-        self,
-        *,
-        operation_id: str,
-        run_id: str,
-        events: Iterable[Mapping[str, Any]],
-    ) -> dict[str, Any]:
-        """Append idempotent explanation browsing telemetry without a state bump."""
-
-        if not operation_id or len(operation_id) > 128:
-            raise ValueError("operation_id must contain 1-128 characters.")
-        normalized = [dict(item) for item in events]
-        if len(normalized) > 256:
-            raise ValueError("At most 256 timeline events may be uploaded at once.")
-        with self.transaction() as db:
-            cached = db.execute(
-                "SELECT run_id, response_json FROM operations "
-                "WHERE namespace=? AND operation_id=?",
-                (self.namespace, operation_id),
-            ).fetchone()
-            if cached is not None:
-                if str(cached["run_id"]) != str(run_id):
-                    raise StudyConflict(
-                        "operation_id was already used by a different run.",
-                        code="operation_id_reused",
-                        current={},
-                    )
-                return json.loads(cached["response_json"])
-            run = db.execute(
-                "SELECT stage FROM runs WHERE namespace=? AND run_id=?",
-                (self.namespace, run_id),
-            ).fetchone()
-            if run is None or str(run["stage"]) != "explanation":
-                raise StudyConflict(
-                    "Timeline telemetry is accepted only during explanation.",
-                    code="timeline_unavailable",
-                    current={},
-                )
-            now = utc_now()
-            sequence = self._next_event_sequence(db, run_id)
-            for offset, event in enumerate(normalized):
-                payload = {
-                    "schema_version": STUDY_LOG_VERSION,
-                    "timestamp": now,
-                    "event": "trajectory_frame_browsed",
-                    "run_id": run_id,
-                    **event,
-                }
-                db.execute(
-                    "INSERT INTO events(namespace, run_id, sequence, payload_json, created_at) "
-                    "VALUES(?,?,?,?,?)",
-                    (
-                        self.namespace,
-                        run_id,
-                        sequence + offset,
-                        json.dumps(payload, ensure_ascii=False),
-                        now,
-                    ),
-                )
-            response = {"ok": True, "recorded": len(normalized), "run_id": run_id}
-            db.execute(
-                "INSERT INTO operations(namespace, operation_id, run_id, command, "
-                "response_json, created_at) VALUES(?,?,?,?,?,?)",
-                (
-                    self.namespace,
-                    operation_id,
-                    run_id,
-                    "timeline_events",
-                    json.dumps(response, ensure_ascii=False),
-                    now,
-                ),
-            )
         return response
 
     def reserve_long_operation(

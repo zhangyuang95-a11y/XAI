@@ -43,6 +43,31 @@ from env.warehouse.scenarios import (
 )
 
 
+def actor_supported_teacher_action(
+    observation: np.ndarray,
+    proposed_action: str,
+) -> str:
+    """Project an offline label into the Actor's frozen-state support.
+
+    The final observation fields are the exact mask used by the deployed
+    Actor.  A supervised target outside that support is both unlearnable and
+    can encode a different coordination assumption from the policy input.
+    """
+
+    mask = np.asarray(observation, dtype=np.float32)[-len(ACTIONS) :]
+    proposed_index = ACTIONS.index(str(proposed_action))
+    if mask[proposed_index] > 0.5:
+        return str(proposed_action)
+    allowed = [
+        action
+        for action, enabled in zip(ACTIONS, mask)
+        if enabled > 0.5
+    ]
+    if not allowed:
+        raise RuntimeError("Actor observation contains no supported action.")
+    return "WAIT" if "WAIT" in allowed else allowed[0]
+
+
 def safe_navigation_teacher_actions(
     environment: WarehouseMultiAgentEnv,
 ) -> dict[str, str]:
@@ -221,6 +246,10 @@ def collect_critical_coordination_dataset(
             for agent in state.agents:
                 if participant_mode and agent.agent_id == "robot_1":
                     continue
+                labels[agent.agent_id] = actor_supported_teacher_action(
+                    local[agent.agent_id],
+                    labels[agent.agent_id],
+                )
                 rows.append(
                     independent_actor_input(local[agent.agent_id])
                 )

@@ -1,13 +1,13 @@
 # 双机器人协作配送 XAI 用户实验
 
-参与者固定控制 `robot_1`，与 MAPPO 控制的 `robot_2` 在 8×9 紧凑错位货架仓库中完成两个持续补充的共享 A→B 配送任务。服务器分配后、演示与任务开始前，界面会明确告知参与者属于 A 组（Task 1 后有解释）或 B 组（Task 1 后无解释）。实验流程为：AI–AI 演示（可完整观看或提前结束）→ Task 1 → A 组查看固定 AI–AI 解释轨迹/B 组确认过渡说明 → Task 2 → 简短问卷。提前结束演示会记录已观看帧数、剩余帧数和完成比例，然后以独立 seed、新状态和双方满电开始 Task 1。
+参与者固定控制 `robot_1`，与 MAPPO 控制的 `robot_2` 在 6×7 紧凑错位货架仓库中完成两个持续补充的共享 A→B 配送任务。服务器分配后、演示与任务开始前，界面会明确告知参与者属于 A 组（Task 1 可即时询问 Robot 2）或 B 组（无即时解释）。实验流程为：AI–AI 操作演示（可完整观看或提前结束）→ Task 1 → Task 2 → 简短问卷；不存在独立解释阶段。提前结束演示会记录已观看帧数、剩余帧数和完成比例，然后以独立 seed、新状态和双方满电开始 Task 1。
 
 ## 当前实验契约
 
 - 两台机器人、120 个联合决策步，初始电量均为 100。
 - 任一空载机器人进入 A 点后认领任务；只有承运机器人能在 B 点完成交付。
 - 成功移动消耗 2 电量；在充电站执行等待恢复 10；阻塞动作不耗电。
-- 正式地图是 `warehouse_staggered_aisles_8x9_v1_three_cell_exit`：左右作业通道逐层错开，不形成贯通十字路口。机器人从 `(7,3)`、`(7,5)` 出发，充电站位于 `(7,4)`；正上方 `(6,3)`、`(6,4)`、`(6,5)` 是三个连续且真实可通行的出口格。取货点、交付点、充电站、路径规划、观测、碰撞判定和浏览器全部读取同一个 `MapLayout`。
+- 正式地图是 `warehouse_staggered_aisles_6x7_v2_three_cell_exit_no_cross`：左右作业通道错位，不形成四向十字路口。机器人从 `(5,2)`、`(5,4)` 出发，充电站位于 `(5,3)`；正上方 `(4,2)`、`(4,3)`、`(4,4)` 是三个连续且真实可通行的出口格。取货点、交付点、充电站、路径规划、观测、碰撞判定和浏览器全部读取同一个 `MapLayout`。
 - 每一步先冻结共同状态 `S_t`，两个共享参数 Actor 分别只读取各自的 `S_t` 本地观察并独立产生动作，最后只调用一次 `env.step({robot_1: a1, robot_2: a2})`。参与者命令只在两个分布都计算完成后替换 `robot_1`；`robot_2` 永远看不到 `robot_1` 本帧动作。
 - 机器人冲突时双方本步均等待，计一次碰撞但不终止。除参与者在 Task 1/2 中替换 `robot_1` 的输入外，AI 命令由共享 MAPPO Actor 直接输出并原样提交给环境；系统不存在运行时通行权规则、coordination shield、教师策略或决策树动作改写。撞墙、货架阻塞、同格争抢、交换位置和进入未离开的队友位置，均只由环境动力学解析。网络必须自行学习任务分工、充电、让行和避免绕路。
 - 用户得分保持为：`100×配送数 − 200×机器人碰撞事件 − 50×断电事件 − 步数 − 2×参与者绕路单位`。断电提前结束时补扣到 120 步。
@@ -45,28 +45,28 @@ reward_i = user_score_delta / 100
 
 当前部署版本：
 
-- 模型：`warehouse_mappo_v66_temporal_joint_actor`
-- 环境：`warehouse_collaborative_delivery_v42_persistent_joint_plan`
+- 模型：`warehouse_mappo_v67_human_ai_live_6x7_actor`
+- 环境：`warehouse_collaborative_delivery_v43_compact6_live_human_ai`
 - Reward：`warehouse_safe_mission_reward_v29_temporal_consistency`
 - 观测：`collaborative_observation_v38_frozen_plan_mask`
-- 训练 checkpoint：`warehouse_mappo_training_v58_temporal_joint`
-- RCPD 合同：`warehouse_rcpd_v59_decision_trace`
-- 地图：`warehouse_staggered_aisles_8x9_v1_three_cell_exit`
-- seed 库合同：`warehouse_parallel_seed_pairs_v59_compact8`
-- 参考轨迹合同：`warehouse_reference_trajectory_v59_temporal_joint`
+- 训练 checkpoint：`warehouse_mappo_training_v59_human_ai_live_6x7`
+- RCPD 合同：`warehouse_rcpd_v60_live_human_ai_trace`
+- 地图：`warehouse_staggered_aisles_6x7_v2_three_cell_exit_no_cross`
+- seed 库合同：`warehouse_parallel_seed_pairs_v60_compact6`
+- 人机时间线合同：`warehouse_human_ai_timeline_v60`
 - 动作执行：`frozen_joint_plan_atomic_actor_v14`
 - 运行时控制器：`mappo_frozen_state_actor_atomic_joint_execution`
-- 日志：`human-study-log.v29`
+- 日志：`human-study-log.v30`
 
-PyTorch checkpoint 位于 `output/deployment/warehouse_mappo_v66.pt`。Render 使用从该 checkpoint 精确导出的 `output/deployment/warehouse_mappo_v66_actor.npz`，以 NumPy 执行同一神经网络；测试逐 logit 比对两种运行时，允许误差不超过 `1e-4`。两个 Actor 只读取同一个冻结决策前状态；同格、换位和通道冲突由一次联合审计原子解析。v66 增加持久目标、完整能源可行性、两阶段通道计划、跨帧循环审计和可事实校验的 DecisionTrace。独立开发验证覆盖各 100 局确定性与随机采样轨迹，碰撞、关机、死锁、可避免绕路、无效等待、无理由折返、短循环、非法目标切换、解释事实失败和同步语义违规均为零。完整指标见 `output/deployment/warehouse_mappo_v66_evaluation.json`。
+PyTorch checkpoint 位于 `output/deployment/warehouse_mappo_v67_6x7.pt`。Render 使用从该 checkpoint 精确导出的 `output/deployment/warehouse_mappo_v67_6x7_actor.npz`，以 NumPy 执行同一神经网络；测试逐 logit 比对两种运行时，允许误差不超过 `1e-4`。两个 Actor 只读取同一个冻结决策前状态；同格、换位和通道冲突由一次联合审计原子解析。v67 使用无四向十字的 6×7 错位通道、三格机器人出口、真实 Task 1 人机轨迹即时解释和基于已完成等待历史的因果僵局恢复。开发验收覆盖100个固定种子与100个随机种子；完整指标见 `output/deployment/warehouse_mappo_v67_6x7_acceptance.json`。
 
 共享 Actor 内部包含五类神经任务意图（两个任务槽、交付、充电、等待）。任务所有权仍只在到达 A 点后产生；持久目标仅锁定跨帧规划意图。冻结状态导出的安全/联合计划掩码直接进入 Actor 的 masked logits，不在 Actor 输出后重写动作。离线关键状态覆盖充电离站、任务连续未认领、两机器人同目标、狭窄通道避让和碰撞后恢复；评估 rollout、参考轨迹和 UI 使用相同执行路径。
 
 成功移动固定消耗 2 点电量；撞墙、货架阻塞、机器人冲突和普通等待不耗电；在充电站等待仍恢复 10 点。错位地图的正式配置使用四步安全余量，避免两台低电量机器人排队时以 0 电量到站。新增的可避免等待和任务成本回退项仅用于训练，参与者最终得分不包含任何训练塑形。
 
-浏览器使用连续插值动画，在同一动画帧插值两个机器人的联合移动结果。地图机器人图标直接显示电量和承运货物。A 组解释阶段不公开参与者的 Task 1 轨迹，而是载入冻结的 AI–AI 参考轨迹。当前公共 NumPy 教程完整运行 120 步，完成 10 次配送，包含取货、交付、充电、排队和协作让行事件，且无碰撞、断电、无效等待或跨帧折返，并记录 Actor 分布、零干预和内容哈希。
+浏览器使用连续插值动画，在同一动画帧插值两个机器人的联合移动结果。地图机器人图标直接显示电量和承运货物。AI–AI 轨迹只用于最开始的操作演示；Task 1 的 A 组即时解释直接读取参与者刚产生的真实 Human–AI 时间线，Task 2 与 B 组均不显示提问面板。
 
-参考轨迹的 121 帧和事件标签只读取一次。拖动、上一帧、下一帧和事件跳转均在浏览器本地完成，拖动时不访问服务器；稳定 150 ms 后才循环播放选中动作。提问显式携带轨迹哈希、帧、机器人和问题类型。回答只保留与动作、电量、队友、分工或碰撞问题直接相关的证据，语义校验失败时使用确定性简短模板；公共载荷继续隐藏策略目标、神经分布和内部特征。
+即时提问先锚定最近动作、等待或碰撞事件，再读取该事件及之前最多四步；不得读取未来帧。语言无关的结构化证据同时渲染英文和中文，切换语言不推进环境、不重置状态也不丢失回答。回答只保留与动作、电量、队友、分工或碰撞问题直接相关的事实，公共载荷继续隐藏策略目标、神经分布和内部字段。
 
 ## 环境安装
 

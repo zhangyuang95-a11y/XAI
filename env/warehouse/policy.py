@@ -113,7 +113,12 @@ class SharedActorCentralCritic(nn.Module):
         # stand-off without changing ordinary navigation.  Its exact S_t gate
         # is evaluated inside the Actor forward pass and the final layer is
         # zero-initialised, so legacy checkpoints retain bit-identical logits.
-        self.deadlock_escape_logit_limit = 12.0
+        # Ordinary safety/energy terms can exceed 50 logits.  A 12-logit
+        # residual could never overturn a proven multi-frame standoff even
+        # when the dedicated head learned the correct public-priority move.
+        # The 100-logit ceiling is safe because the residual remains isolated
+        # behind the causal, three-completed-waits gate below.
+        self.deadlock_escape_logit_limit = 100.0
         # A robot whose public goal is still charging must not stochastically
         # leave an uncontested station. Two bounded learned heads can differ
         # by as much as 32 logits, so retain a larger monotone floor for this
@@ -1219,11 +1224,28 @@ class SharedActorCentralCritic(nn.Module):
             & (own_row <= 5.0 + 1e-6)
         ).to(local.dtype)
         ai_ai_mode = (1.0 - local[..., 22]) * (1.0 - local[..., 23])
-        deadlock_escape_gate = (
+        ai_ai_deadlock_escape = (
             local[..., 12]
             * exactly_one_carrying
             * same_horizontal_corridor
             * ai_ai_mode
+        )
+        # In Human-AI episodes Robot 2 must remain robust to the participant's
+        # *unknown current* command.  Pure one-step worst-case robustness can,
+        # however, wait forever even after the participant has demonstrably
+        # yielded for several completed frames.  Once that history is visible
+        # in frozen S_t and the public coordination contract gives this Actor
+        # priority, enable the isolated escape head.  This gate contains no
+        # current-frame participant action or post-decision state.
+        human_ai_priority_standoff = (
+            local[..., 12]
+            * participant_teammate.squeeze(-1)
+            * self_has_priority
+        )
+        deadlock_escape_gate = torch.clamp(
+            ai_ai_deadlock_escape + human_ai_priority_standoff,
+            min=0.0,
+            max=1.0,
         ).unsqueeze(-1)
         raw_deadlock_escape_residual = self.deadlock_escape_action_head(
             observations

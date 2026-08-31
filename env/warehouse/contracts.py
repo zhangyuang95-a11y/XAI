@@ -27,18 +27,18 @@ class WarehouseContractVersions:
 
 
 CURRENT_VERSIONS = WarehouseContractVersions(
-    environment="warehouse_collaborative_delivery_v42_persistent_joint_plan",
+    environment="warehouse_collaborative_delivery_v43_compact6_live_human_ai",
     observation="collaborative_observation_v38_frozen_plan_mask",
     reward="warehouse_safe_mission_reward_v29_temporal_consistency",
-    model="warehouse_mappo_v66_temporal_joint_actor",
-    training_checkpoint="warehouse_mappo_training_v58_temporal_joint",
-    rcpd_program="warehouse_rcpd_v59_decision_trace",
-    seed_library="warehouse_parallel_seed_pairs_v59_compact8",
-    reference_trajectory="warehouse_reference_trajectory_v59_temporal_joint",
-    study_log="human-study-log.v29",
+    model="warehouse_mappo_v67_human_ai_live_6x7_actor",
+    training_checkpoint="warehouse_mappo_training_v59_human_ai_live_6x7",
+    rcpd_program="warehouse_rcpd_v60_live_human_ai_trace",
+    seed_library="warehouse_parallel_seed_pairs_v60_compact6",
+    reference_trajectory="warehouse_human_ai_timeline_v60",
+    study_log="human-study-log.v30",
     action_execution="frozen_joint_plan_atomic_actor_v14",
     runtime_controller="mappo_frozen_state_actor_atomic_joint_execution",
-    artifact_namespace="simultaneous_compact8_v59_temporal_joint",
+    artifact_namespace="simultaneous_compact6_v60_live_human_ai",
 )
 
 

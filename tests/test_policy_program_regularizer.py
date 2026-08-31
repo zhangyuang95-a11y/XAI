@@ -22,7 +22,10 @@ from env.warehouse.mappo import MAPPOConfig, MAPPOPolicy, MAPPOTrainer
 from env.warehouse import scenario_evaluation as scenario_evaluation_module
 from env.warehouse.observations import _coordination_features, observation_dim
 from env.warehouse.navigation import ACTIONS
-from env.warehouse.layouts import STAGGERED_AISLES_LAYOUT
+from env.warehouse.layouts import (
+    COMPACT_STAGGERED_8X9_LAYOUT,
+    STAGGERED_AISLES_LAYOUT,
+)
 from env.warehouse.contracts import RUNTIME_CONTROLLER
 from env.warehouse.scenarios import (
     apply_charger_handoff_scenario,
@@ -38,8 +41,17 @@ from env.warehouse.energy_management import (
 )
 
 
+def _legacy_config(**overrides) -> WarehouseConfig:
+    return WarehouseConfig(
+        rows=COMPACT_STAGGERED_8X9_LAYOUT.rows,
+        cols=COMPACT_STAGGERED_8X9_LAYOUT.cols,
+        map_layout_id=COMPACT_STAGGERED_8X9_LAYOUT.layout_id,
+        **overrides,
+    )
+
+
 def test_goal_clearance_curriculum_labels_two_step_follow_through() -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=819)
     apply_delivery_goal_clearance_scenario(environment, variant=17)
@@ -78,7 +90,7 @@ from backend.training.learner_dataset import (
 
 
 def test_partner_risk_all_scope_updates_participant_forecast_parameters() -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     policy = MAPPOPolicy(
         config,
         MAPPOConfig(hidden_dim=16, intent_dim=8, seed=2_621),
@@ -103,7 +115,7 @@ def test_partner_risk_all_scope_updates_participant_forecast_parameters() -> Non
 
 
 def test_rcpd_has_no_synthetic_probe_rows_and_training_states_are_passable() -> None:
-    config = WarehouseConfig(horizon=16)
+    config = _legacy_config(horizon=16)
     policy = MAPPOPolicy(
         config,
         MAPPOConfig(hidden_dim=16, update_epochs=1, minibatch_size=64, seed=31),
@@ -133,7 +145,7 @@ def test_rcpd_has_no_synthetic_probe_rows_and_training_states_are_passable() -> 
 
 
 def test_learner_relabel_can_return_same_state_teammate_labels() -> None:
-    config = WarehouseConfig(horizon=12)
+    config = _legacy_config(horizon=12)
     policy = MAPPOPolicy(
         config,
         MAPPOConfig(hidden_dim=16, update_epochs=1, minibatch_size=32, seed=311),
@@ -167,7 +179,7 @@ def test_relabel_schedule_is_independent_of_episode_batch_size() -> None:
 def test_learner_state_relabel_rollouts_submit_only_actor_actions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     policy = MAPPOPolicy(
         config,
         MAPPOConfig(hidden_dim=16, update_epochs=1, minibatch_size=32, seed=32),
@@ -211,7 +223,7 @@ def test_learner_state_relabel_rollouts_submit_only_actor_actions(
 def test_targeted_detour_miner_labels_mistake_but_executes_actor_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     original_reset = environment.reset
     original_step = environment.step
@@ -269,7 +281,7 @@ def test_targeted_detour_miner_labels_mistake_but_executes_actor_action(
 def test_collision_miner_labels_pair_but_executes_actor_collision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = WarehouseConfig(horizon=4)
+    config = _legacy_config(horizon=4)
     environment = WarehouseMultiAgentEnv(config)
     original_reset = environment.reset
     original_step = environment.step
@@ -340,7 +352,7 @@ def test_collision_miner_labels_pair_but_executes_actor_collision(
 def test_commitment_failure_miner_replays_causal_rows_without_intervention(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     original_reset = environment.reset
     original_step = environment.step
@@ -400,7 +412,7 @@ def test_commitment_failure_miner_replays_causal_rows_without_intervention(
 
 
 def test_commitment_curriculum_covers_energy_and_old_task_geometry() -> None:
-    config = WarehouseConfig(horizon=16)
+    config = _legacy_config(horizon=16)
     rows, labels, categories, coverage = (
         train_module._collect_commitment_curriculum_dataset(
             config,
@@ -428,7 +440,7 @@ def test_commitment_curriculum_covers_energy_and_old_task_geometry() -> None:
 def test_wait_stall_gets_offline_progress_label_without_action_intervention(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     policy = MAPPOPolicy(
         config,
         MAPPOConfig(hidden_dim=16, update_epochs=1, minibatch_size=32, seed=132),
@@ -467,7 +479,7 @@ def test_wait_stall_gets_offline_progress_label_without_action_intervention(
 
 
 def test_unilateral_mission_correction_never_enters_peer_frozen_cell() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig())
+    environment = WarehouseMultiAgentEnv(_legacy_config())
     environment.reset(seed=100091)
     state = environment.get_state()
     carried, available = state.tasks
@@ -497,7 +509,7 @@ def test_unilateral_mission_correction_never_enters_peer_frozen_cell() -> None:
 
 
 def test_pickup_commitment_detour_receives_offline_left_correction() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=120))
     environment.reset(seed=40_786)
     state = environment.get_state()
     state.frame = 62
@@ -538,7 +550,7 @@ def test_pickup_commitment_detour_receives_offline_left_correction() -> None:
 
 
 def test_learner_state_replay_balances_rare_collision_rows() -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     policy = MAPPOPolicy(
         config,
         MAPPOConfig(hidden_dim=16, update_epochs=1, minibatch_size=32, seed=33),
@@ -642,7 +654,7 @@ def test_rare_replay_category_has_bounded_oversampling() -> None:
 def test_same_target_curriculum_state_has_collision_free_teacher_label(
     variant: int,
 ) -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=8))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=8))
     environment.reset(seed=920 + variant)
     apply_same_target_conflict_scenario(environment, variant=variant)
 
@@ -661,7 +673,7 @@ def test_same_target_curriculum_state_has_collision_free_teacher_label(
 def test_critical_charger_approach_has_safe_training_label(
     variant: int,
 ) -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=8))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=8))
     environment.reset(seed=1200 + variant)
     approaching_agent_id = environment.agent_ids[variant % 2]
     apply_critical_charger_approach_scenario(
@@ -681,7 +693,7 @@ def test_critical_charger_approach_has_safe_training_label(
 
 
 def test_low_battery_charger_occupant_charges_while_teammate_queues_safely() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=8))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=8))
     environment.reset(seed=940)
     apply_charger_handoff_scenario(
         environment,
@@ -708,7 +720,7 @@ def test_low_battery_charger_occupant_charges_while_teammate_queues_safely() -> 
 
 def test_lower_battery_waiter_receives_two_phase_charger_handoff() -> None:
     environment = WarehouseMultiAgentEnv(
-        WarehouseConfig(horizon=8, participant_detour_scoring=False)
+        _legacy_config(horizon=8, participant_detour_scoring=False)
     )
     environment.reset(seed=940)
     apply_charger_handoff_scenario(
@@ -746,7 +758,7 @@ def test_lower_battery_waiter_receives_two_phase_charger_handoff() -> None:
     assert targets["robot_1"] == before.by_id("robot_1").position
 
     waiting = WarehouseMultiAgentEnv(
-        WarehouseConfig(horizon=8, participant_detour_scoring=False)
+        _legacy_config(horizon=8, participant_detour_scoring=False)
     )
     waiting.reset(seed=940)
     waiting.set_state(before)
@@ -772,7 +784,7 @@ def test_lower_battery_waiter_receives_two_phase_charger_handoff() -> None:
 
 
 def test_lower_battery_charger_occupant_retains_station() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=8))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=8))
     environment.reset(seed=940)
     apply_charger_handoff_scenario(
         environment,
@@ -807,7 +819,7 @@ def test_lower_battery_charger_occupant_retains_station() -> None:
 
 
 def test_small_charger_energy_gap_does_not_create_one_wait_ping_pong() -> None:
-    environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=120))
+    environment = WarehouseMultiAgentEnv(_legacy_config(horizon=120))
     environment.reset(seed=940)
     apply_charger_handoff_scenario(
         environment,
@@ -832,7 +844,7 @@ def test_small_charger_energy_gap_does_not_create_one_wait_ping_pong() -> None:
 
 def test_hysteretic_charging_wait_is_not_relabelled_as_joint_escape() -> None:
     environment = WarehouseMultiAgentEnv(
-        WarehouseConfig(horizon=120, participant_detour_scoring=False)
+        _legacy_config(horizon=120, participant_detour_scoring=False)
     )
     environment.reset(seed=1)
     state = environment.get_state()
@@ -878,7 +890,7 @@ def test_hysteretic_charging_wait_is_not_relabelled_as_joint_escape() -> None:
 
 
 def test_actor_leaves_charger_after_charge_goal_releases() -> None:
-    config = WarehouseConfig(horizon=120)
+    config = _legacy_config(horizon=120)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=941)
     state = environment.get_state()
@@ -919,7 +931,7 @@ def test_actor_leaves_charger_after_charge_goal_releases() -> None:
 
 
 def test_actor_enters_empty_charger_after_productive_causal_handoff() -> None:
-    config = WarehouseConfig(horizon=120)
+    config = _legacy_config(horizon=120)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=942)
     state = environment.get_state()
@@ -966,7 +978,7 @@ def test_actor_enters_empty_charger_after_productive_causal_handoff() -> None:
 
 
 def test_actor_does_not_immediately_reverse_into_charger_without_progress() -> None:
-    config = WarehouseConfig(horizon=120)
+    config = _legacy_config(horizon=120)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=944)
     state = environment.get_state()
@@ -1060,7 +1072,7 @@ def test_offline_teacher_clears_a_delivery_goal_without_blocking_the_loaded_robo
 
 
 def test_non_wait_margin_teaches_actor_to_leave_an_ineffective_wait() -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     observations, _ = environment.reset(seed=914)
     policy = MAPPOPolicy(
@@ -1110,7 +1122,7 @@ def test_non_wait_margin_teaches_actor_to_leave_an_ineffective_wait() -> None:
 
 
 def test_supervised_actor_fit_updates_the_neural_intent_encoder() -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     observations, _ = environment.reset(seed=1914)
     policy = MAPPOPolicy(
@@ -1163,7 +1175,7 @@ def test_supervised_actor_fit_updates_the_neural_intent_encoder() -> None:
 
 
 def test_structured_relabel_scope_preserves_base_actor_and_intent() -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=2214)
     state = environment.get_state()
@@ -1236,7 +1248,7 @@ def test_structured_relabel_scope_preserves_base_actor_and_intent() -> None:
 
 
 def test_supervised_actor_fit_updates_structured_neural_action_modules() -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=2914)
     state = environment.get_state()
@@ -1301,7 +1313,7 @@ def test_supervised_actor_fit_updates_structured_neural_action_modules() -> None
 
 
 def test_ppo_update_preserves_supervised_peer_forecast_parameters() -> None:
-    config = WarehouseConfig(horizon=6)
+    config = _legacy_config(horizon=6)
     policy = MAPPOPolicy(
         config,
         MAPPOConfig(hidden_dim=16, update_epochs=1, minibatch_size=32, seed=235),
@@ -1337,7 +1349,7 @@ def test_ppo_update_preserves_supervised_peer_forecast_parameters() -> None:
 
 
 def test_joint_wait_escape_margin_strongly_separates_motion_from_wait() -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=918)
     state = environment.get_state()
@@ -1389,7 +1401,7 @@ def test_joint_wait_escape_margin_strongly_separates_motion_from_wait() -> None:
 
 
 def test_loaded_detour_correction_margin_beats_every_alternative_action() -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     observations, _ = environment.reset(seed=921)
     policy = MAPPOPolicy(
@@ -1438,7 +1450,7 @@ def test_loaded_detour_correction_margin_beats_every_alternative_action() -> Non
 
 
 def test_wait_margin_teaches_actor_to_keep_charging_at_critical_battery() -> None:
-    config = WarehouseConfig(horizon=8)
+    config = _legacy_config(horizon=8)
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=916)
     apply_charger_handoff_scenario(
@@ -1492,7 +1504,7 @@ def test_wait_margin_teaches_actor_to_keep_charging_at_critical_battery() -> Non
 
 
 def test_corridor_priority_matches_loaded_distance_rule_from_both_views() -> None:
-    config = WarehouseConfig()
+    config = _legacy_config()
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=919)
     train_module._configure_learner_state_head_on(environment, reverse=False)
@@ -1512,7 +1524,7 @@ def test_corridor_priority_matches_loaded_distance_rule_from_both_views() -> Non
 
 
 def test_periodic_head_on_evaluation_uses_current_alternating_shelf_map() -> None:
-    config = WarehouseConfig(horizon=16)
+    config = _legacy_config(horizon=16)
     policy = MAPPOPolicy(
         config,
         MAPPOConfig(hidden_dim=16, update_epochs=1, minibatch_size=32, seed=44),
@@ -1539,7 +1551,7 @@ def test_periodic_head_on_evaluation_uses_current_alternating_shelf_map() -> Non
 def test_formal_compact_coordination_scenarios_measure_completed_outcomes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = WarehouseConfig(horizon=120)
+    config = _legacy_config(horizon=120)
     active_environments: list[WarehouseMultiAgentEnv] = []
     real_environment = WarehouseMultiAgentEnv
 
@@ -1679,7 +1691,7 @@ def test_complexity_loss_counts_depth_leaves_and_predicates() -> None:
 
 
 def test_lambda_extract_zero_matches_baseline_actor_update() -> None:
-    environment_config = WarehouseConfig(horizon=3)
+    environment_config = _legacy_config(horizon=3)
     algorithm_config = MAPPOConfig(
         hidden_dim=16,
         update_epochs=1,
@@ -1739,7 +1751,7 @@ def test_lambda_extract_zero_matches_baseline_actor_update() -> None:
 
 
 def test_mappo_backpropagates_forward_program_kl_when_lambda_is_positive() -> None:
-    environment_config = WarehouseConfig(horizon=3)
+    environment_config = _legacy_config(horizon=3)
     algorithm_config = MAPPOConfig(
         hidden_dim=16,
         update_epochs=1,

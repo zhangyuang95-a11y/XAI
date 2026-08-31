@@ -53,7 +53,7 @@ TUTORIAL_SEED = 40_786
 TASK1_SEED = 51_000
 TASK2_SEED = 51_500
 DEPLOYED_ACTOR_PATH = (
-    ROOT / "output" / "deployment" / "warehouse_mappo_v66_actor.npz"
+    ROOT / "output" / "deployment" / "warehouse_mappo_v67_6x7_actor.npz"
 )
 DEPLOYED_ACTOR = (
     NumpyWarehousePolicy.load(DEPLOYED_ACTOR_PATH)
@@ -65,7 +65,7 @@ DEPLOYED_ACTOR = (
 def _require_deployed_actor() -> NumpyWarehousePolicy:
     if DEPLOYED_ACTOR is None:
         raise RuntimeError(
-            "The temporal-joint v66 NumPy Actor has not been exported. "
+            "The live Human-AI v67 6x7 NumPy Actor has not been exported. "
             "Train and pass the release gates before starting the public study."
         )
     return DEPLOYED_ACTOR
@@ -297,15 +297,15 @@ class DevelopmentPreviewState:
         self.participant_id = ""
         self.tutorial_index = 0
         self.tutorial_max_index = 0
-        self.reference_index = 1
         self.task1: dict[str, Any] | None = None
         self.task2: dict[str, Any] | None = None
         self.last_explanation: dict[str, Any] | None = None
-        self.explanation_target_agent = "robot_2"
         self.explanation_count = 0
+        self.round_frames: list[PreviewFrame] = [self.round_frame]
+        self.question_log: list[dict[str, Any]] = []
+        self.pending_question_sequences: list[int] = []
         self.operations: dict[str, dict[str, Any]] = {}
         self.command_requests: list[str] = []
-        self.timeline_uploads = 0
         self.reference_requests = 0
         self.reference_payload = (
             reference_payload
@@ -337,7 +337,7 @@ class DevelopmentPreviewState:
         ]
         identity = {
             "schema_version": "warehouse-reference-timeline.v2",
-            "trajectory_kind": "ai_ai_reference",
+            "trajectory_kind": "ai_ai_demonstration",
             "trajectory_seed": TUTORIAL_SEED,
             "agent_control": {"robot_1": "ai", "robot_2": "ai"},
             "policy_model_version": actor.metadata.model_version,
@@ -355,6 +355,11 @@ class DevelopmentPreviewState:
         return {**identity, "trajectory_hash": sha256(encoded).hexdigest()}
 
     def commands(self) -> tuple[str, ...]:
+        task1_commands = (
+            ("human_action", "ask_explanation")
+            if self.condition == "explanation"
+            else ("human_action",)
+        )
         values = {
             "idle": (),
             "instructions": (
@@ -363,15 +368,8 @@ class DevelopmentPreviewState:
                 "tutorial_select",
                 "begin_task1",
             ),
-            "task1": ("human_action",),
+            "task1": task1_commands,
             "task1_complete": ("begin_task2",),
-            "explanation": (
-                "timeline_select",
-                "timeline_back",
-                "timeline_forward",
-                "ask_explanation",
-                "finish_explanation",
-            ),
             "task2": ("human_action",),
             "survey": ("submit_survey",),
             "completed": (),
@@ -388,8 +386,10 @@ class DevelopmentPreviewState:
         self.environment.set_state(participant_state)
         self.policy_seed = int(seed)
         self.round_frame = _initial_frame(self.environment)
+        self.round_frames = [self.round_frame]
         self.stage = stage
         self.last_explanation = None
+        self.pending_question_sequences = []
 
     @staticmethod
     def _summary(round_name: str, seed: int, state: WarehouseState) -> dict[str, Any]:
@@ -455,12 +455,19 @@ class DevelopmentPreviewState:
             transition=transition_payload,
             action_distributions=dict(distributions),
         )
+        self.round_frames.append(self.round_frame)
+        for sequence in self.pending_question_sequences:
+            for record in reversed(self.question_log):
+                if int(record.get("question_sequence", -1)) == sequence:
+                    record["post_question_action"] = action
+                    record["post_question_frame"] = int(after.frame)
+                    break
+        self.pending_question_sequences = []
         if not (terminated or truncated):
             return
         if round_name == "task1":
             self.task1 = self._summary("task1", TASK1_SEED, after)
-            self.stage = "explanation" if self.condition == "explanation" else "task1_complete"
-            self.reference_index = 1
+            self.stage = "task1_complete"
         else:
             self.task2 = self._summary("task2", TASK2_SEED, after)
             self.stage = "survey"
@@ -468,9 +475,12 @@ class DevelopmentPreviewState:
     def _display_frame(self) -> tuple[PreviewFrame, bool, str]:
         if self.stage == "instructions":
             return self.tutorial_frames[self.tutorial_index], True, "ai_ai_demonstration"
-        if self.stage == "explanation":
-            return self.tutorial_frames[self.reference_index], True, "ai_ai_reference"
-        return self.round_frame, self.stage not in {"task1", "task2"}, f"human_ai_{self.stage}"
+        trajectory_kind = (
+            "human_ai_task1"
+            if self.stage in {"task1", "task1_complete"}
+            else "human_ai_task2"
+        )
+        return self.round_frame, self.stage not in {"task1", "task2"}, trajectory_kind
 
     def view(self) -> dict[str, Any]:
         actor = _require_deployed_actor()
@@ -489,13 +499,8 @@ class DevelopmentPreviewState:
             if value is not None
         }
         tutorial_count = len(self.tutorial_frames)
-        timeline_index = (
-            self.tutorial_index
-            if self.stage == "instructions"
-            else self.reference_index
-            if self.stage == "explanation"
-            else frame.state.frame
-        )
+        timeline_index = self.tutorial_index if self.stage == "instructions" else frame.state.frame
+        timeline_count = tutorial_count if self.stage == "instructions" else len(self.round_frames)
         return {
             "map": warehouse_map_payload(self.environment.layout),
             "state": state_payload,
@@ -504,18 +509,18 @@ class DevelopmentPreviewState:
             "agent_ids": list(self.environment.agent_ids),
             "timeline": {
                 "index": int(timeline_index),
-                "max_index": tutorial_count - 1,
-                "count": tutorial_count,
+                "max_index": timeline_count - 1,
+                "count": timeline_count,
                 "simulator_frame": int(frame.state.frame),
                 "trajectory_kind": trajectory_kind,
                 "trajectory_seed": (
                     TUTORIAL_SEED
-                    if self.stage in {"instructions", "explanation"}
-                    else TASK1_SEED if self.stage == "task1" else TASK2_SEED
+                    if self.stage == "instructions"
+                    else TASK1_SEED if self.stage in {"task1", "task1_complete"} else TASK2_SEED
                 ),
                 "agent_control": (
                     {"robot_1": "ai", "robot_2": "ai"}
-                    if self.stage in {"instructions", "explanation"}
+                    if self.stage == "instructions"
                     else {"robot_1": "human", "robot_2": "ai"}
                 ),
             },
@@ -556,13 +561,12 @@ class DevelopmentPreviewState:
                 ),
                 "explanation_presented": self.explanation_count > 0,
                 "explanation_count": self.explanation_count,
-                "explanation_duration_seconds": 600,
-                "explanation_seconds_remaining": (
-                    600 if self.stage == "explanation" else None
+                "live_explanation_available": bool(
+                    self.stage == "task1" and self.condition == "explanation"
                 ),
                 "controlled_agent": "robot_1",
-                "explanation_target_agent": self.explanation_target_agent,
-                "explanation_target_agents": ["robot_1", "robot_2"],
+                "explanation_target_agent": "robot_2",
+                "explanation_target_agents": ["robot_2"],
                 "tutorial": {
                     "frame_index": self.tutorial_index,
                     "index": self.tutorial_index,
@@ -578,27 +582,37 @@ class DevelopmentPreviewState:
                 "allowed_commands": list(self.commands()),
             },
             "trial": None,
-            "last_explanation": self.last_explanation,
+            "last_explanation": self._localized_explanation(),
         }
 
+    def _localized_explanation(self) -> dict[str, Any] | None:
+        if self.last_explanation is None:
+            return None
+        variants = self.last_explanation.get("_language_variants", {})
+        locale = "zh-CN" if self.locale != "en" else "en"
+        selected = variants.get(locale) if isinstance(variants, Mapping) else None
+        return dict(selected) if isinstance(selected, Mapping) else dict(self.last_explanation)
+
     def reference_trajectory(self) -> dict[str, Any]:
+        if self.stage != "instructions":
+            raise RuntimeError(
+                "The AI-AI trajectory is available only as the instructions demonstration."
+            )
         self.reference_requests += 1
         return self.reference_payload
 
-    def _explanation_snapshot(
+    def _round_explanation_snapshot(
         self,
         index: int,
     ) -> tuple[WarehouseAdapter, Any]:
-        """Rebuild decision-aligned adapter evidence for one tutorial step."""
+        """Rebuild evidence for one executed Human-AI Task 1 transition."""
 
-        if index < 1 or index >= len(self.tutorial_frames):
-            raise ValueError("Select an executed reference action frame.")
-        before = self.tutorial_frames[index - 1]
-        outcome = self.tutorial_frames[index]
-        environment = WarehouseMultiAgentEnv(
-            replace(collaborative_study_config(), participant_detour_scoring=False)
-        )
-        environment.reset(seed=TUTORIAL_SEED)
+        if index < 1 or index >= len(self.round_frames):
+            raise ValueError("The requested Task 1 action has not been executed.")
+        before = self.round_frames[index - 1]
+        outcome = self.round_frames[index]
+        environment = WarehouseMultiAgentEnv(collaborative_study_config())
+        environment.reset(seed=TASK1_SEED)
         environment.set_state(before.state)
         actor = _require_deployed_actor()
         adapter = WarehouseAdapter(environment)
@@ -632,24 +646,282 @@ class DevelopmentPreviewState:
             },
         )
 
-    def _grounded_development_explanation(
+    @staticmethod
+    def _action_words(action: str) -> tuple[str, str]:
+        en = {
+            "UP": "up",
+            "DOWN": "down",
+            "LEFT": "left",
+            "RIGHT": "right",
+            "WAIT": "wait",
+        }
+        zh = {
+            "UP": "上",
+            "DOWN": "下",
+            "LEFT": "左",
+            "RIGHT": "右",
+            "WAIT": "等待",
+        }
+        return en.get(action, action.lower()), zh.get(action, action)
+
+    def _ask_live_task1(
         self,
         *,
-        index: int,
-        target_agent: str,
+        question: str,
         focus: str,
-        language: str,
-    ) -> str:
-        """Render only facts derivable from the selected real transition."""
+    ) -> None:
+        """Answer from at most five completed Task 1 transitions, never the future."""
 
-        adapter, snapshot = self._explanation_snapshot(index)
-        return adapter.concise_study_explanation(
-            snapshot,
-            target_agent=target_agent,
-            policy=None,
-            focus=focus,
-            language=language,
+        if self.stage != "task1" or self.condition != "explanation":
+            raise RuntimeError("Live questions are available only to Group A during Task 1.")
+
+        completed = list(enumerate(self.round_frames))[1:]
+        recent = completed[-5:]
+
+        def proposed(frame: PreviewFrame, agent_id: str) -> str:
+            return str(frame.actions.get(agent_id, "WAIT"))
+
+        def executed(frame: PreviewFrame, agent_id: str) -> str:
+            values = frame.info.get("executed_actions", {})
+            values = values if isinstance(values, Mapping) else {}
+            return str(values.get(agent_id, proposed(frame, agent_id)))
+
+        anchor: tuple[int, PreviewFrame] | None = recent[-1] if recent else None
+        if focus == "wait":
+            anchor = next(
+                (
+                    item
+                    for item in reversed(recent)
+                    if proposed(item[1], "robot_2") == "WAIT"
+                    or executed(item[1], "robot_2") == "WAIT"
+                ),
+                None,
+            )
+        elif focus == "collision":
+            anchor = next(
+                (
+                    item
+                    for item in reversed(recent)
+                    if bool(item[1].info.get("robot_collision_event", False))
+                    or bool(item[1].info.get("robot_collision_kind"))
+                ),
+                None,
+            )
+
+        current_frame = int(self.round_frame.state.frame)
+        if anchor is None:
+            anchor_index = current_frame
+            anchor_frame = current_frame
+            context_frames = [int(frame.state.frame) for _, frame in recent]
+            if focus == "collision":
+                answer_en = "No collision occurred in the last five steps."
+                answer_zh = "最近五步内没有发生碰撞。"
+            elif focus == "wait":
+                answer_en = "Robot 2 did not wait in the last five steps."
+                answer_zh = "机器人2在最近五步内没有等待。"
+            else:
+                answer_en = "Robot 2 has not completed an action in Task 1 yet."
+                answer_zh = "机器人2在任务1中还没有完成任何动作。"
+            evidence: dict[str, Any] = {
+                "event_type": focus,
+                "anchor_frame": anchor_frame,
+                "context_frames": context_frames,
+                "reason_code": "NO_MATCHING_RECENT_EVENT",
+                "fact_valid": True,
+            }
+            recent_collision = False
+        else:
+            anchor_index, outcome = anchor
+            anchor_frame = int(outcome.state.frame)
+            context = [
+                item
+                for item in completed
+                if int(item[1].state.frame) <= anchor_frame
+            ][-5:]
+            context_frames = [int(frame.state.frame) for _, frame in context]
+            adapter, snapshot = self._round_explanation_snapshot(anchor_index)
+            trace = snapshot.metadata.get("decision_trace", {})
+            trace = trace if isinstance(trace, Mapping) else {}
+            agents = trace.get("agents", {})
+            agents = agents if isinstance(agents, Mapping) else {}
+            agent_trace = agents.get("robot_2", {})
+            agent_trace = agent_trace if isinstance(agent_trace, Mapping) else {}
+            frozen_goal = agent_trace.get("frozen_goal", {})
+            frozen_goal = frozen_goal if isinstance(frozen_goal, Mapping) else {}
+            charging = agent_trace.get("charging_state", {})
+            charging = charging if isinstance(charging, Mapping) else {}
+            feasibility = [
+                item
+                for item in agent_trace.get("battery_feasibility", ())
+                if isinstance(item, Mapping)
+            ]
+            goal_id = str(
+                frozen_goal.get("goal_id")
+                or agent_trace.get("committed_task")
+                or ""
+            )
+            energy_item = next(
+                (
+                    item
+                    for item in feasibility
+                    if str(item.get("task_id", "")) == goal_id
+                ),
+                min(
+                    feasibility,
+                    key=lambda item: float(item.get("required_energy", 0.0)),
+                )
+                if feasibility
+                else {},
+            )
+            plan = agent_trace.get("joint_coordination_plan")
+            plan = plan if isinstance(plan, Mapping) else {}
+            recent_collision = bool(
+                outcome.info.get("robot_collision_event", False)
+                or outcome.info.get("robot_collision_kind")
+            )
+            evidence = {
+                "event_type": focus,
+                "anchor_frame": anchor_frame,
+                "context_frames": context_frames,
+                "human_action": proposed(outcome, "robot_1"),
+                "ai_action": proposed(outcome, "robot_2"),
+                "executed_actions": dict(snapshot.executed_actions),
+                "collision_type": outcome.info.get("robot_collision_kind"),
+                "current_goal": (
+                    frozen_goal.get("navigation_kind")
+                    or frozen_goal.get("goal_type")
+                ),
+                "current_battery": charging.get("battery"),
+                "required_energy": energy_item.get("required_energy"),
+                "priority_basis": plan.get("priority_basis"),
+                "task_id": goal_id or energy_item.get("task_id"),
+                "reason_code": agent_trace.get("primary_reason_code"),
+                "pre_state_hash": trace.get("pre_state_hash"),
+                "outcome_frame": trace.get("outcome_frame"),
+                "fact_valid": bool(trace.get("fact_valid", False)),
+            }
+            if focus == "collision" and recent_collision:
+                human_action = proposed(outcome, "robot_1")
+                ai_action = proposed(outcome, "robot_2")
+                human_en, human_zh = self._action_words(human_action)
+                ai_en, ai_zh = self._action_words(ai_action)
+                kind = str(
+                    outcome.info.get("robot_collision_kind") or "joint_conflict"
+                )
+                kind_en = {
+                    "same_target": "a same-target-cell conflict",
+                    "swap": "a position-swap conflict",
+                    "occupied_stationary": "an occupied-cell conflict",
+                }.get(kind, "a joint movement conflict")
+                kind_zh = {
+                    "same_target": "同一目标格冲突",
+                    "swap": "位置交换冲突",
+                    "occupied_stationary": "进入未释放格子的冲突",
+                }.get(kind, "联合移动冲突")
+                answer_en = (
+                    f"You moved {human_en} while Robot 2 simultaneously moved {ai_en}; "
+                    f"the joint resolver recorded {kind_en}. Robot 2 decided from the "
+                    "shared pre-move state and did not observe your current action first."
+                )
+                answer_zh = (
+                    f"你向{human_zh}移动，机器人2同时向{ai_zh}移动；联合解析器记录为{kind_zh}。"
+                    "机器人2依据共同的移动前状态决策，没有提前看到你的本帧动作。"
+                )
+            else:
+                routed_focus = {
+                    "wait": "action",
+                    "human_influence": "collaboration",
+                    "goal": "task",
+                }.get(focus, focus)
+                answer_en = adapter.concise_study_explanation(
+                    snapshot,
+                    target_agent="robot_2",
+                    policy=None,
+                    focus=routed_focus,
+                    language="en",
+                )
+                answer_zh = adapter.concise_study_explanation(
+                    snapshot,
+                    target_agent="robot_2",
+                    policy=None,
+                    focus=routed_focus,
+                    language="zh-CN",
+                )
+
+        self.explanation_count += 1
+        sequence = self.explanation_count
+        common = {
+            "target_agent": "robot_2",
+            "question": question,
+            "question_sequence": sequence,
+            "question_focus": focus,
+            "selected_timeline_frame": anchor_frame,
+            "decision_evidence_frame": anchor_frame,
+            "anchor_frame": anchor_frame,
+            "context_frames": context_frames,
+            "current_frame": current_frame,
+            "trajectory_kind": "human_ai_task1",
+            "trajectory_seed": TASK1_SEED,
+            "agent_control": {"robot_1": "human", "robot_2": "ai"},
+            "structured_evidence": evidence,
+            "fact_validation": {
+                "passed": bool(evidence.get("fact_valid", False)),
+                "future_frames_used": False,
+                "max_context_frame": max(context_frames, default=anchor_frame),
+            },
+            "recent_collision": recent_collision,
+            "answer_en": answer_en,
+            "answer_zh": answer_zh,
+        }
+        variants = {
+            "en": {
+                **common,
+                "explanation": answer_en,
+                "explanation_document": {
+                    "schema_version": "live-human-ai-explanation.v1",
+                    "text": answer_en,
+                },
+            },
+            "zh-CN": {
+                **common,
+                "explanation": answer_zh,
+                "explanation_document": {
+                    "schema_version": "live-human-ai-explanation.v1",
+                    "text": answer_zh,
+                },
+            },
+        }
+        selected_locale = "zh-CN" if self.locale != "en" else "en"
+        report = dict(variants[selected_locale])
+        report["_language_variants"] = variants
+        report["language_documents"] = {
+            language: variant["explanation_document"]
+            for language, variant in variants.items()
+        }
+        self.last_explanation = report
+        self.question_log.append(
+            {
+                "participant_id": self.participant_id,
+                "condition": self.condition,
+                "round": "task1",
+                "question_sequence": sequence,
+                "question": question,
+                "question_focus": focus,
+                "target_agent": "robot_2",
+                "current_frame": current_frame,
+                "anchor_frame": anchor_frame,
+                "context_frames": context_frames,
+                "trajectory_kind": "human_ai_task1",
+                "agent_control": {"robot_1": "human", "robot_2": "ai"},
+                "answer_en": answer_en,
+                "answer_zh": answer_zh,
+                "structured_evidence": deepcopy(evidence),
+                "fact_validation": deepcopy(common["fact_validation"]),
+                "post_question_action": None,
+                "post_question_frame": None,
+            }
         )
+        self.pending_question_sequences.append(sequence)
 
     def command(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
         operation = str(envelope["operation_id"])
@@ -671,11 +943,12 @@ class DevelopmentPreviewState:
             self.stage = "instructions"
             self.tutorial_index = 0
             self.tutorial_max_index = 0
-            self.reference_index = 1
             self.task1 = None
             self.task2 = None
             self.last_explanation = None
             self.explanation_count = 0
+            self.question_log = []
+            self.pending_question_sequences = []
             self._start_round("instructions", TASK1_SEED)
         elif command == "set_language":
             self.locale = str(payload.get("locale", self.locale))
@@ -702,14 +975,21 @@ class DevelopmentPreviewState:
             self._advance_round(str(payload.get("action", "")))
         elif command == "begin_task2" and self.stage == "task1_complete":
             self._start_round("task2", TASK2_SEED)
-        elif command == "finish_explanation" and self.stage == "explanation":
-            self._start_round("task2", TASK2_SEED)
-        elif command == "ask_explanation" and self.stage == "explanation":
-            self.explanation_target_agent = str(payload.get("target_agent", "robot_2"))
-            if self.explanation_target_agent not in {"robot_1", "robot_2"}:
-                raise ValueError("Select robot 1 or robot 2 for the explanation.")
-            selected = int(payload.get("selected_frame", self.reference_index))
-            self.reference_index = max(1, min(len(self.tutorial_frames) - 1, selected))
+        elif (
+            command == "ask_explanation"
+            and self.stage == "task1"
+            and self.condition == "explanation"
+        ):
+            if any(
+                key in payload
+                for key in ("selected_frame", "trajectory_hash", "reference_index")
+            ):
+                raise ValueError(
+                    "Live Task 1 questions cannot select an AI-AI replay frame."
+                )
+            target_agent = str(payload.get("target_agent", "robot_2"))
+            if target_agent != "robot_2":
+                raise ValueError("Live study questions must target Robot 2.")
             question = str(payload.get("question", "")).strip()
             if not question:
                 raise ValueError("Question cannot be empty.")
@@ -722,44 +1002,16 @@ class DevelopmentPreviewState:
                 "collaboration",
                 "allocation",
                 "collision",
+                "wait",
+                "human_influence",
+                "goal",
             }
             if requested_focus and requested_focus not in allowed_focuses:
                 raise ValueError("Unknown explanation question kind.")
             focus = requested_focus or _study_question_focus(question)
-            language = "zh-CN" if self.locale != "en" else "en"
-            text = self._grounded_development_explanation(
-                index=self.reference_index,
-                target_agent=self.explanation_target_agent,
+            self._ask_live_task1(
+                question=question,
                 focus=focus,
-                language=language,
-            )
-            self.explanation_count += 1
-            self.last_explanation = {
-                "explanation": text,
-                "explanation_document": {
-                    "schema_version": "development-evidence-explanation.v1",
-                    "text": text,
-                },
-                "explanation_mode": "deterministic_environment_evidence",
-                "explanation_method_label": "Development evidence explanation",
-                "target_agent": self.explanation_target_agent,
-                "question": question,
-                "question_focus": focus,
-                "selected_timeline_frame": self.reference_index,
-                "decision_evidence_frame": self.reference_index - 1,
-                "question_seed": 120_000 + self.explanation_count,
-            }
-        elif command == "timeline_select" and self.stage == "explanation":
-            self.reference_index = max(
-                1,
-                min(len(self.tutorial_frames) - 1, int(payload.get("index", 1))),
-            )
-        elif command == "timeline_back" and self.stage == "explanation":
-            self.reference_index = max(1, self.reference_index - 1)
-        elif command == "timeline_forward" and self.stage == "explanation":
-            self.reference_index = min(
-                len(self.tutorial_frames) - 1,
-                self.reference_index + 1,
             )
         elif command == "submit_survey" and self.stage == "survey":
             self.stage = "completed"
@@ -841,7 +1093,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(
                     {
                         "command_requests": state.command_requests,
-                        "timeline_uploads": state.timeline_uploads,
                         "reference_requests": state.reference_requests,
                     }
                 )
@@ -880,11 +1131,6 @@ class Handler(BaseHTTPRequestHandler):
             with state.lock:
                 if self.path == "/api/study/command":
                     return self.send_json(state.command(payload))
-                if self.path == "/api/study/timeline-events":
-                    state.timeline_uploads += 1
-                    return self.send_json(
-                        {"ok": True, "recorded": len(payload.get("events", []))}
-                    )
             self.send_error(404)
         except (KeyError, RuntimeError, TypeError, ValueError) as exc:
             self.send_json({"error": str(exc)}, status=400)

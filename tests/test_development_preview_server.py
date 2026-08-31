@@ -478,6 +478,68 @@ def test_tutorial_explanations_route_question_focus_and_show_energy_math() -> No
     assert len(set(focused.values())) == len(focused)
 
 
+def test_default_english_explanations_preserve_causal_and_numeric_evidence() -> None:
+    state = DevelopmentPreviewState()
+
+    charger_route = state._grounded_development_explanation(
+        index=1,
+        target_agent="robot_2",
+        focus="action",
+        language="en",
+    )
+    assert all(fragment in charger_route for fragment in ("35%", "54%", "charger"))
+
+    charging = state._grounded_development_explanation(
+        index=2,
+        target_agent="robot_2",
+        focus="energy",
+        language="en",
+    )
+    assert all(fragment in charging for fragment in ("33%", "64%", "4%", "68%", "43%"))
+
+    task_departure = state._grounded_development_explanation(
+        index=6,
+        target_agent="robot_2",
+        focus="energy",
+        language="en",
+    )
+    assert all(fragment in task_departure for fragment in ("73%", "64%", "enough"))
+
+    allocation = state._grounded_development_explanation(
+        index=23,
+        target_agent="robot_1",
+        focus="allocation",
+        language="en",
+    )
+    assert all(fragment in allocation for fragment in ("Robot 2", "task 1", "task 3"))
+
+    loaded_priority = state._grounded_development_explanation(
+        index=37,
+        target_agent="robot_2",
+        focus="action",
+        language="en",
+    )
+    assert "carrying task 3 to point B" in loaded_priority
+
+    occupied_route = state._grounded_development_explanation(
+        index=38,
+        target_agent="robot_2",
+        focus="action",
+        language="en",
+    )
+    assert "next cell (5, 4)" in occupied_route
+    assert "carrying task 3 to point B" in occupied_route
+
+    independent_progress = state._grounded_development_explanation(
+        index=40,
+        target_agent="robot_2",
+        focus="action",
+        language="en",
+    )
+    assert "task 4" in independent_progress
+    assert "task_4" not in independent_progress
+
+
 def test_tutorial_coordination_explains_loaded_priority_and_only_real_waits() -> None:
     state = DevelopmentPreviewState()
 

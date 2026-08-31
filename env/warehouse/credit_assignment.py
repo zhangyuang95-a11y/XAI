@@ -29,6 +29,11 @@ from .transition_audit import (
 )
 
 
+_CAUSAL_6X7_LAYOUT_ID = (
+    "warehouse_staggered_aisles_6x7_v2_three_cell_exit_no_cross"
+)
+
+
 @dataclass(frozen=True)
 class FrozenMission:
     """One transition-local mission used for stable efficiency credit."""
@@ -63,16 +68,24 @@ def frozen_training_missions(
         if agent.carrying_task_id is not None:
             task = state.task_by_id(agent.carrying_task_id)
         else:
-            task = assignments.get(agent.agent_id)
-            if task is None and agent.route_commitment_task_id in available:
-                committed = available[agent.route_commitment_task_id]
-                assigned_elsewhere = {
-                    item.task_id
-                    for other_id, item in assignments.items()
-                    if other_id != agent.agent_id
-                }
-                if committed.task_id not in assigned_elsewhere:
-                    task = committed
+            # A route commitment is public state created by this robot's
+            # previous executed movement.  Re-running the global matching and
+            # silently replacing it for one audit frame makes the teacher,
+            # reward, and explanation disagree about the frozen task and was
+            # the source of the task-9 -> task-8 -> charger oscillation.
+            task = (
+                available.get(agent.route_commitment_task_id)
+                if agent.route_commitment_task_id is not None
+                else None
+            )
+            if (
+                task is None
+                and agent.goal_type == "GO_TO_PICKUP"
+                and agent.goal_id is not None
+            ):
+                task = available.get(agent.goal_id)
+            if task is None:
+                task = assignments.get(agent.agent_id)
             if task is None and charger_service_required(
                 environment,
                 state,
@@ -517,9 +530,20 @@ def counterfactual_action_regrets(
     """Compute per-robot one-step regret with the teammate action fixed."""
 
     exempt_agents: set[str] = set()
+    coordination_yield_agents: set[str] = set()
+    verified_plan_yield_agents: set[str] = set()
     for event in coordination_events:
         kind = str(event.get("event", ""))
-        if kind == "coordination_yield":
+        if kind == "joint_coordination_plan":
+            individually_aligned = event.get("agent_request_aligned", {})
+            if not isinstance(individually_aligned, Mapping):
+                individually_aligned = event.get("agent_execution_aligned", {})
+            if isinstance(individually_aligned, Mapping):
+                for agent_id, aligned in individually_aligned.items():
+                    if bool(aligned):
+                        exempt_agents.add(str(agent_id))
+                        verified_plan_yield_agents.add(str(agent_id))
+        elif kind == "coordination_yield":
             yielding_id = str(event.get("yielding_agent_id", ""))
             passing_id = str(event.get("passing_agent_id", ""))
             if (
@@ -528,6 +552,9 @@ def counterfactual_action_regrets(
                 in MOVE_DELTAS
             ):
                 exempt_agents.add(yielding_id)
+                coordination_yield_agents.add(yielding_id)
+                if event.get("plan_id"):
+                    verified_plan_yield_agents.add(yielding_id)
         elif kind == "charger_queue":
             exempt_agents.add(str(event.get("waiting_agent_id", "")))
 
@@ -540,6 +567,21 @@ def counterfactual_action_regrets(
         mission = missions.get(agent.agent_id)
         if not agent.active or mission is None:
             continue
+        actor_mask: list[float] | None = None
+        if environment.config.map_layout_id == _CAUSAL_6X7_LAYOUT_ID:
+            # Production regret compares only actions the deployed Actor can
+            # actually submit from this frozen observation. A public joint
+            # reservation may intentionally make WAIT the sole safe choice;
+            # treating masked actions as alternatives falsely labels that
+            # causal wait as inefficient. Archived layouts retain their
+            # historical geometry-only audit below.
+            from .observations import _actor_action_mask
+
+            actor_mask = _actor_action_mask(
+                state,
+                agent,
+                environment.config,
+            )
         current_distance = mission_goal_distance(
             environment, state, agent, mission, agent.position
         )
@@ -552,6 +594,11 @@ def counterfactual_action_regrets(
         )
         candidate_distances: list[float] = []
         for candidate_action in ACTIONS:
+            if (
+                actor_mask is not None
+                and actor_mask[ACTIONS.index(candidate_action)] <= 0.5
+            ):
+                continue
             trial = dict(requested_actions)
             trial[agent.agent_id] = candidate_action
             targets, _, invalid, collision, _, _ = environment._resolve_motion(
@@ -559,6 +606,42 @@ def counterfactual_action_regrets(
                 trial,
             )
             if agent.agent_id in invalid or collision:
+                continue
+            candidate_target = targets[agent.agent_id]
+            remaining_battery = (
+                agent.battery - environment.config.move_battery_cost
+                if candidate_action in MOVE_DELTAS
+                else agent.battery
+            )
+            if mission.goal_kind == "charge":
+                required_energy = (
+                    shortest_path_distance(
+                        candidate_target,
+                        mission.goal_position,
+                        environment.config.map_layout_id,
+                    )
+                    * environment.config.move_battery_cost
+                )
+            elif mission.task is not None:
+                required_energy = (
+                    environment._mission_route_steps(
+                        state,
+                        agent,
+                        mission.task,
+                        origin=candidate_target,
+                    )
+                    * environment.config.move_battery_cost
+                )
+            else:
+                required_energy = (
+                    shortest_path_distance(
+                        candidate_target,
+                        mission.goal_position,
+                        environment.config.map_layout_id,
+                    )
+                    * environment.config.move_battery_cost
+                )
+            if remaining_battery + 1e-8 < required_energy:
                 continue
             candidate_distances.append(
                 mission_goal_distance(
@@ -592,6 +675,11 @@ def counterfactual_action_regrets(
         if action == "WAIT":
             robust_distances: list[float] = []
             for candidate_action in ACTIONS:
+                if (
+                    actor_mask is not None
+                    and actor_mask[ACTIONS.index(candidate_action)] <= 0.5
+                ):
+                    continue
                 if not action_is_robustly_safe(
                     environment,
                     state,
@@ -603,6 +691,42 @@ def counterfactual_action_regrets(
                 trial = dict(requested_actions)
                 trial[agent.agent_id] = candidate_action
                 targets = environment._resolve_motion(state, trial)[0]
+                candidate_target = targets[agent.agent_id]
+                remaining_battery = (
+                    agent.battery - environment.config.move_battery_cost
+                    if candidate_action in MOVE_DELTAS
+                    else agent.battery
+                )
+                if mission.goal_kind == "charge":
+                    required_energy = (
+                        shortest_path_distance(
+                            candidate_target,
+                            mission.goal_position,
+                            environment.config.map_layout_id,
+                        )
+                        * environment.config.move_battery_cost
+                    )
+                elif mission.task is not None:
+                    required_energy = (
+                        environment._mission_route_steps(
+                            state,
+                            agent,
+                            mission.task,
+                            origin=candidate_target,
+                        )
+                        * environment.config.move_battery_cost
+                    )
+                else:
+                    required_energy = (
+                        shortest_path_distance(
+                            candidate_target,
+                            mission.goal_position,
+                            environment.config.map_layout_id,
+                        )
+                        * environment.config.move_battery_cost
+                    )
+                if remaining_battery + 1e-8 < required_energy:
+                    continue
                 robust_distances.append(
                     mission_goal_distance(
                         environment,
@@ -617,6 +741,16 @@ def counterfactual_action_regrets(
             else:
                 best_distance = min(robust_distances)
                 best_distances[agent.agent_id] = best_distance
+                if (
+                    agent.agent_id in coordination_yield_agents
+                    and agent.agent_id not in verified_plan_yield_agents
+                ):
+                    # A same-target conflict with one candidate action does
+                    # not justify WAIT when another action is safe against
+                    # every legal teammate move and advances the same frozen
+                    # mission.  Keeping the exemption here created the extra
+                    # wait after a channel had already separated.
+                    exempt = False
         if (
             action == "WAIT"
             and agent.position == environment.layout.charger_position
@@ -641,6 +775,15 @@ def counterfactual_action_regrets(
             )
         ):
             exempt = True
+        if not exempt and action in MOVE_DELTAS:
+            exempt = bool(
+                necessary_participant_standoff_clearance(
+                    environment,
+                    state,
+                    agent,
+                    candidate_action=action,
+                )
+            )
         if (
             not exempt
             and action in MOVE_DELTAS
@@ -656,12 +799,6 @@ def counterfactual_action_regrets(
                     environment,
                     state,
                     agent,
-                )
-                or necessary_participant_standoff_clearance(
-                    environment,
-                    state,
-                    agent,
-                    candidate_action=action,
                 )
             )
         if (

@@ -33,10 +33,17 @@ def transition_temporal_violations(
     delivery = set(delivery_agents)
     coordinated: set[str] = set()
     for event in coordination_events:
-        if (
-            str(event.get("event", "")) == "joint_coordination_plan"
-            and bool(event.get("execution_aligned", False))
-        ):
+        if str(event.get("event", "")) != "joint_coordination_plan":
+            continue
+        individually_aligned = event.get("agent_execution_aligned", {})
+        if isinstance(individually_aligned, Mapping):
+            coordinated.update(
+                str(agent_id)
+                for agent_id, aligned in individually_aligned.items()
+                if bool(aligned)
+            )
+        elif bool(event.get("execution_aligned", False)):
+            # Backward-compatible support for archived traces.
             coordinated.update(
                 str(event.get(key, ""))
                 for key in (
@@ -46,6 +53,11 @@ def transition_temporal_violations(
                 )
                 if str(event.get(key, ""))
             )
+    prior_participant_clearance_agents = {
+        str(event.get("agent_id", ""))
+        for event in previous.last_coordination_events
+        if str(event.get("event", "")) == "participant_standoff_clearance"
+    }
     energy_progress = {
         str(event.get("agent_id", ""))
         for event in energy_events
@@ -60,6 +72,24 @@ def transition_temporal_violations(
         after = next_state.by_id(agent_id)
         action = str(executed_actions.get(agent_id, "WAIT"))
         requested = str(requested_actions.get(agent_id, action))
+        participant_standoff_clearance = False
+        if action in MOVE_DELTAS:
+            # This import stays local because transition_audit also owns the
+            # frozen-state robust-action helper.  A retreat after an observed
+            # participant WAIT is an explained response to public S_t, not a
+            # policy cycle caused by seeing the participant's new command.
+            from .transition_audit import (
+                necessary_participant_standoff_clearance,
+            )
+
+            participant_standoff_clearance = bool(
+                necessary_participant_standoff_clearance(
+                    environment,
+                    previous,
+                    before,
+                    candidate_action=action,
+                )
+            )
         recent_lifecycle_switch = bool(
             before.goal_since == previous.frame
             and before.goal_switch_reason
@@ -78,6 +108,11 @@ def transition_temporal_violations(
             or agent_id in energy_progress
             or requested != action
             or recent_lifecycle_switch
+            or participant_standoff_clearance
+            or (
+                action == OPPOSITE_ACTION.get(before.last_executed_action)
+                and agent_id in prior_participant_clearance_agents
+            )
         )
         immediate_reverse = bool(
             action == OPPOSITE_ACTION.get(before.last_executed_action)
@@ -165,6 +200,7 @@ def transition_temporal_violations(
             and before.navigation_goal_kind != "charge"
             and not environment._requires_charge(previous, before)
             and action in MOVE_DELTAS
+            and not allowed_event
         ):
             invalid = True
         if invalid:

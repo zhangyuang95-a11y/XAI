@@ -130,13 +130,148 @@ def teacher_efficiency_guard(
             events,
         )
 
-    _, diagnosis = diagnose(actions)
-    for agent_id in diagnosis[3]:
-        held = dict(actions)
-        held[agent_id] = "WAIT"
-        _, _, invalid, collision, _, _ = environment._resolve_motion(state, held)
+    def best_robust_progress_action(
+        current: Mapping[str, str],
+        agent_id: str,
+        mission: credit.FrozenMission,
+    ) -> str | None:
+        """Return a decentralized-safe action that strictly advances mission.
+
+        The teacher may know the complete joint label, but the independent
+        Actor does not observe its teammate's private action for the current
+        frame.  Candidate supervision therefore has to remain safe for every
+        legal simultaneous teammate action from the same frozen state S_t.
+        """
+
+        agent = state.by_id(agent_id)
+        reserved_charger_cells: set[tuple[int, int]] = set()
+        for teammate in state.agents:
+            if (
+                teammate.agent_id == agent_id
+                or not environment._requires_charge(state, teammate)
+            ):
+                continue
+            teammate_distance = shortest_path_distance(
+                teammate.position,
+                environment.layout.charger_position,
+                environment.config.map_layout_id,
+            )
+            reserved_charger_cells.add(environment.layout.charger_position)
+            for action_delta in MOVE_DELTAS.values():
+                candidate = (
+                    teammate.position[0] + action_delta[0],
+                    teammate.position[1] + action_delta[1],
+                )
+                if (
+                    shortest_path_distance(
+                        teammate.position,
+                        candidate,
+                        environment.config.map_layout_id,
+                    )
+                    + shortest_path_distance(
+                        candidate,
+                        environment.layout.charger_position,
+                        environment.config.map_layout_id,
+                    )
+                    == teammate_distance
+                ):
+                    reserved_charger_cells.add(candidate)
+        before = credit.mission_goal_distance(
+            environment,
+            state,
+            agent,
+            mission,
+            agent.position,
+        )
+        candidates: list[tuple[float, int, str]] = []
+        for action_index, action in enumerate(ACTIONS):
+            if action == "WAIT" or not credit.action_is_robustly_safe(
+                environment,
+                state,
+                current,
+                agent_id,
+                action,
+            ):
+                continue
+            trial = dict(current)
+            trial[agent_id] = action
+            targets, _, invalid, collision, _, _ = environment._resolve_motion(
+                state,
+                trial,
+            )
+            if collision or agent_id in invalid:
+                continue
+            if (
+                mission.goal_kind != "charge"
+                and targets[agent_id] in reserved_charger_cells
+            ):
+                continue
+            remaining_battery = agent.battery - environment.config.move_battery_cost
+            if remaining_battery <= 0.0:
+                # Reaching zero ends the round before a robot can receive a
+                # charge.  A geometrically shorter action is therefore not a
+                # feasible counterfactual.
+                continue
+            if mission.goal_kind == "charge":
+                required_after = (
+                    shortest_path_distance(
+                        targets[agent_id],
+                        environment.layout.charger_position,
+                        environment.config.map_layout_id,
+                    )
+                    * environment.config.move_battery_cost
+                )
+            elif mission.task is not None:
+                required_after = (
+                    environment._mission_route_steps(
+                        state,
+                        agent,
+                        mission.task,
+                        origin=targets[agent_id],
+                    )
+                    * environment.config.move_battery_cost
+                )
+            else:
+                required_after = (
+                    shortest_path_distance(
+                        targets[agent_id],
+                        mission.goal_position,
+                        environment.config.map_layout_id,
+                    )
+                    * environment.config.move_battery_cost
+                )
+            if remaining_battery + 1e-8 < required_after:
+                # Do not replace a necessary hold with a move that makes the
+                # frozen mission energetically impossible on the next frame.
+                continue
+            after = credit.mission_goal_distance(
+                environment,
+                state,
+                agent,
+                mission,
+                targets[agent_id],
+            )
+            if after + 1e-9 < before:
+                candidates.append((after, action_index, action))
+        return min(candidates)[2] if candidates else None
+
+    missions, diagnosis = diagnose(actions)
+    # Correct every geometric detour, not just the loaded subset.  Prefer a
+    # robust mission-progressing move; otherwise hold when WAIT is safe.  The
+    # previous implementation merely counted ordinary empty-robot detours,
+    # allowing them to leak into the imitation labels.
+    for agent_id in (*diagnosis[2], *diagnosis[3]):
+        mission = missions.get(agent_id)
+        replacement = (
+            best_robust_progress_action(actions, agent_id, mission)
+            if mission is not None
+            else None
+        )
+        trial = dict(actions)
+        trial[agent_id] = replacement or "WAIT"
+        _, _, invalid, collision, _, _ = environment._resolve_motion(state, trial)
         if not collision and agent_id not in invalid:
-            actions = held
+            actions = trial
 
     # Replace WAIT only when the exact teammate-conditioned resolver has a
     # collision-free move with strictly lower frozen-goal distance.
@@ -144,37 +279,16 @@ def teacher_efficiency_guard(
         missions, diagnosis = diagnose(actions)
         changed = False
         for agent_id in diagnosis[1]:
-            agent = state.by_id(agent_id)
             mission = missions.get(agent_id)
             if mission is None:
                 continue
-            candidates: list[tuple[float, int, str]] = []
-            for action_index, action in enumerate(ACTIONS):
-                if action == "WAIT":
-                    continue
-                trial = dict(actions)
-                trial[agent_id] = action
-                targets, _, invalid, collision, _, _ = environment._resolve_motion(
-                    state,
-                    trial,
-                )
-                if collision or agent_id in invalid:
-                    continue
-                candidates.append(
-                    (
-                        credit.mission_goal_distance(
-                            environment,
-                            state,
-                            agent,
-                            mission,
-                            targets[agent_id],
-                        ),
-                        action_index,
-                        action,
-                    )
-                )
-            if candidates:
-                actions[agent_id] = min(candidates)[2]
+            replacement = best_robust_progress_action(
+                actions,
+                agent_id,
+                mission,
+            )
+            if replacement is not None:
+                actions[agent_id] = replacement
                 changed = True
         if not changed:
             break
@@ -197,6 +311,22 @@ def teacher_efficiency_guard(
                     candidate,
                 )
                 if collision or invalid:
+                    continue
+                charging_ids = {
+                    agent.agent_id
+                    for agent in state.agents
+                    if environment._requires_charge(state, agent)
+                }
+                if charging_ids and any(
+                    agent.agent_id not in charging_ids
+                    and agent.position != environment.layout.charger_position
+                    and targets[agent.agent_id]
+                    == environment.layout.charger_position
+                    for agent in state.agents
+                ):
+                    # The single charger is a reserved resource while a peer
+                    # has a verified charging mission.  An unrelated robot
+                    # may use the apron but may not steal the charger cell.
                     continue
                 if any(
                     agent.position != environment.layout.charger_position
@@ -345,4 +475,33 @@ def teacher_efficiency_guard(
         _, _, _, collision, _, _ = environment._resolve_motion(state, actions)
     if collision:
         actions = {agent_id: "WAIT" for agent_id in environment.agent_ids}
+
+    # The occupied-follower and invalid-label protections above intentionally
+    # run after the main efficiency pass.  They can introduce a new WAIT, so
+    # the completed label must be audited once more.  Replace only waits for
+    # which a strictly progressing action is robust to every legal teammate
+    # action; this preserves the no-future-observation contract.
+    for _ in range(2):
+        missions, diagnosis = diagnose(actions)
+        changed = False
+        for agent_id in diagnosis[1]:
+            mission = missions.get(agent_id)
+            if mission is None:
+                continue
+            replacement = best_robust_progress_action(
+                actions,
+                agent_id,
+                mission,
+            )
+            if replacement is None:
+                continue
+            trial = dict(actions)
+            trial[agent_id] = replacement
+            _, _, invalid, collision, _, _ = environment._resolve_motion(state, trial)
+            if collision or agent_id in invalid:
+                continue
+            actions = trial
+            changed = True
+        if not changed:
+            break
     return actions

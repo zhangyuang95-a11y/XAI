@@ -128,11 +128,11 @@ def test_development_preview_ai_action_is_independent_of_current_human_command()
 
 def test_render_actor_is_the_exported_neural_checkpoint() -> None:
     checkpoint = MAPPOPolicy.load(
-        ROOT / "output" / "deployment" / "warehouse_mappo_v67_6x7.pt",
+        ROOT / "output" / "deployment" / "warehouse_mappo_v68_6x7.pt",
         device="cpu",
     )
     exported = NumpyWarehousePolicy.load(
-        ROOT / "output" / "deployment" / "warehouse_mappo_v67_6x7_actor.npz"
+        ROOT / "output" / "deployment" / "warehouse_mappo_v68_6x7_actor.npz"
     )
     environment = WarehouseMultiAgentEnv(collaborative_study_config())
     observations, _ = environment.reset(seed=40_221)

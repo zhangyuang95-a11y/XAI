@@ -27,18 +27,18 @@ class WarehouseContractVersions:
 
 
 CURRENT_VERSIONS = WarehouseContractVersions(
-    environment="warehouse_collaborative_delivery_v43_compact6_live_human_ai",
-    observation="collaborative_observation_v38_frozen_plan_mask",
-    reward="warehouse_safe_mission_reward_v29_temporal_consistency",
-    model="warehouse_mappo_v67_human_ai_live_6x7_actor",
-    training_checkpoint="warehouse_mappo_training_v59_human_ai_live_6x7",
-    rcpd_program="warehouse_rcpd_v60_live_human_ai_trace",
-    seed_library="warehouse_parallel_seed_pairs_v60_compact6",
-    reference_trajectory="warehouse_human_ai_timeline_v60",
-    study_log="human-study-log.v30",
-    action_execution="frozen_joint_plan_atomic_actor_v14",
+    environment="warehouse_collaborative_delivery_v44_causal_horizon_priority",
+    observation="collaborative_observation_v39_joint_reservation_mask",
+    reward="warehouse_safe_mission_reward_v30_verified_temporal_regret",
+    model="warehouse_mappo_v68_causal_coordination_6x7_actor",
+    training_checkpoint="warehouse_mappo_training_v60_causal_coordination_6x7",
+    rcpd_program="warehouse_rcpd_v61_verified_joint_evidence",
+    seed_library="warehouse_parallel_seed_pairs_v61_causal_compact6",
+    reference_trajectory="warehouse_human_ai_timeline_v61",
+    study_log="human-study-log.v31",
+    action_execution="frozen_joint_plan_atomic_actor_v15",
     runtime_controller="mappo_frozen_state_actor_atomic_joint_execution",
-    artifact_namespace="simultaneous_compact6_v60_live_human_ai",
+    artifact_namespace="simultaneous_compact6_v61_causal_coordination",
 )
 
 

@@ -310,11 +310,12 @@ def prepare_coordination_plan(
     environment: Any,
     state: WarehouseState,
 ) -> dict[str, Any] | None:
-    """Freeze a newly derived plan before either actor is evaluated."""
+    """Freeze a newly derived plan before either actor is evaluated.
 
-    if state.participant_controlled_agent_id is not None:
-        state.active_coordination_plan = None
-        return None
+    Human-AI rounds still publish the plan in ``S_t``.  The participant is
+    never action-masked by it, while the AI can obey its own causal side
+    without observing the participant's private current-frame command.
+    """
     plan = frozen_coordination_plan(environment, state)
     if plan is None:
         state.active_coordination_plan = None

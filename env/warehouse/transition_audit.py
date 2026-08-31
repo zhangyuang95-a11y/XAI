@@ -96,7 +96,13 @@ def necessary_participant_standoff_clearance(
         if candidate_action is not None
         else tuple(MOVE_DELTAS)
     )
-    own_mask = environment.action_masks()[clearing_agent.agent_id]
+    from .observations import _actor_action_mask
+
+    own_mask = _actor_action_mask(
+        state,
+        clearing_agent,
+        environment.config,
+    )
     for action in actions:
         if action not in MOVE_DELTAS:
             continue
@@ -267,6 +273,128 @@ def _best_alternative_action(
     return next((action for _, action in ranked if action != selected), None)
 
 
+def _verified_wait_progress_alternative(
+    environment: Any,
+    previous: Any,
+    agent_id: str,
+    executed_actions: Mapping[str, str],
+    coordination_plan: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Prove one safe progress move before calling a WAIT avoidable."""
+
+    before = previous.by_id(agent_id)
+    if str(executed_actions.get(agent_id, "WAIT")) != "WAIT":
+        return None
+    if coordination_plan is not None and bool(
+        coordination_plan.get("execution_aligned", False)
+    ):
+        return None
+    if before.position == environment.layout.charger_position and before.battery < 100.0:
+        return None
+
+    task = None
+    if before.carrying_task_id is not None:
+        task = previous.task_by_id(before.carrying_task_id)
+        goal = task.delivery_position
+    elif before.route_commitment_task_id is not None:
+        task = next(
+            (
+                item
+                for item in previous.tasks
+                if item.task_id == before.route_commitment_task_id
+                and item.status == "available"
+            ),
+            None,
+        )
+        goal = task.pickup_position if task is not None else before.navigation_goal_position
+    elif before.navigation_goal_kind == "charge":
+        goal = environment.layout.charger_position
+    else:
+        return None
+    current_distance = shortest_path_distance(
+        before.position,
+        goal,
+        environment.config.map_layout_id,
+    )
+    from .observations import _actor_action_mask
+
+    actor_mask = _actor_action_mask(
+        previous,
+        before,
+        environment.config,
+    )
+    candidates: list[tuple[int, int, str, tuple[int, int], float]] = []
+    for action_index, action in enumerate(ACTIONS):
+        if actor_mask[action_index] <= 0.5:
+            continue
+        delta = MOVE_DELTAS.get(action)
+        if delta is None or before.battery <= environment.config.move_battery_cost:
+            continue
+        trial = dict(executed_actions)
+        trial[agent_id] = action
+        # A past joint outcome is known when explaining it, but the Actor did
+        # not know the teammate's private current-frame action at decision
+        # time.  Calling WAIT avoidable therefore requires an alternative
+        # that would have remained safe for every legal simultaneous peer
+        # action from the same frozen state S_t.
+        if not action_is_robustly_safe(
+            environment,
+            previous,
+            executed_actions,
+            agent_id,
+            action,
+        ):
+            continue
+        targets, _, invalid, collision, _, _ = environment._resolve_motion(
+            previous, trial
+        )
+        if collision or invalid:
+            continue
+        target = targets[agent_id]
+        next_distance = shortest_path_distance(
+            target,
+            goal,
+            environment.config.map_layout_id,
+        )
+        if next_distance >= current_distance:
+            continue
+        remaining = before.battery - environment.config.move_battery_cost
+        if task is not None:
+            required = (
+                environment._mission_route_steps(
+                    previous,
+                    before,
+                    task,
+                    origin=target,
+                )
+                * environment.config.move_battery_cost
+            )
+        else:
+            required = (
+                next_distance + environment.config.mission_reserve_steps
+            ) * environment.config.move_battery_cost
+        if remaining + 1e-8 < required:
+            continue
+        candidates.append(
+            (next_distance, action_index, action, target, float(required))
+        )
+    if not candidates:
+        return None
+    next_distance, _, action, target, required = min(candidates)
+    return {
+        "verified": True,
+        "action": action,
+        "target": target,
+        "distance_before": int(current_distance),
+        "distance_after": int(next_distance),
+        "battery_before": float(before.battery),
+        "battery_after": float(
+            before.battery - environment.config.move_battery_cost
+        ),
+        "required_energy_after": required,
+    }
+
+
 def _decision_reason_code(
     environment: Any,
     previous: Any,
@@ -275,14 +403,34 @@ def _decision_reason_code(
     requested_action: str,
     executed_action: str,
     coordination_plan: Mapping[str, Any] | None,
+    wait_counterfactual: Mapping[str, Any] | None = None,
 ) -> str:
     before = previous.by_id(agent_id)
     after = next_state.by_id(agent_id)
     if requested_action != executed_action:
         return "SAFETY_RULE_BLOCKED"
-    if coordination_plan is not None and bool(
-        coordination_plan.get("execution_aligned", False)
-    ):
+    plan_aligned_for_agent = bool(
+        coordination_plan is not None
+        and (
+            bool(coordination_plan.get("execution_aligned", False))
+            or bool(
+                dict(coordination_plan.get("agent_execution_aligned", {})).get(
+                    agent_id, False
+                )
+            )
+        )
+    )
+    if coordination_plan is not None and plan_aligned_for_agent:
+        if str(coordination_plan.get("plan_kind")) == (
+            "short_horizon_charger_reservation"
+        ):
+            if str(coordination_plan.get("priority_agent_id")) == agent_id:
+                return "PRIORITY_ROUTE_PROGRESS"
+            return (
+                "WAIT_FOR_PRIORITY_PASSAGE"
+                if executed_action == "WAIT"
+                else "CLEAR_TEAMMATE_ROUTE"
+            )
         if str(coordination_plan.get("waiting_agent_id")) == agent_id:
             plan_kind = str(coordination_plan.get("plan_kind"))
             if plan_kind == "same_target_priority":
@@ -351,7 +499,12 @@ def _decision_reason_code(
             else "CHARGER_ROUTE_WAIT_OR_DETOUR"
         )
     if executed_action == "WAIT":
-        return "POLICY_WAIT_NO_VERIFIED_COORDINATION_CAUSE"
+        return (
+            "AVOIDABLE_WAIT_SAFE_PROGRESS_AVAILABLE"
+            if wait_counterfactual is not None
+            and bool(wait_counterfactual.get("verified", False))
+            else "WAIT_NO_VERIFIED_CAUSE"
+        )
     if before.carrying_task_id is not None:
         task = previous.task_by_id(before.carrying_task_id)
         return (
@@ -436,7 +589,14 @@ def validate_decision_trace(
             "PRIORITY_ROUTE_PROGRESS",
         } and not (
             isinstance(plan, Mapping)
-            and bool(plan.get("execution_aligned", False))
+            and (
+                bool(plan.get("execution_aligned", False))
+                or bool(
+                    dict(plan.get("agent_execution_aligned", {})).get(
+                        agent_id, False
+                    )
+                )
+            )
         ):
             failures.append(f"{agent_id}:coordination_reason_without_plan")
         if reason == "LEAVE_CHARGER_THRESHOLD_MET":
@@ -551,6 +711,13 @@ def build_decision_trace(
             environment.config.map_layout_id,
         )
         selected = str(raw_actions.get(agent_id, "WAIT"))
+        wait_counterfactual = _verified_wait_progress_alternative(
+            environment,
+            previous,
+            agent_id,
+            executed_actions,
+            coordination_plan,
+        )
         agents[agent_id] = {
             "frozen_goal": {
                 "goal_type": before.goal_type,
@@ -601,7 +768,9 @@ def build_decision_trace(
                 selected,
                 str(executed_actions.get(agent_id, "WAIT")),
                 coordination_plan,
+                wait_counterfactual,
             ),
+            "wait_counterfactual": wait_counterfactual,
             "alternative_action": _best_alternative_action(
                 selected,
                 distribution,

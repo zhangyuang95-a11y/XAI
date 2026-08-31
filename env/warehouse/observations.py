@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Mapping
 
 import numpy as np
 
@@ -145,12 +145,180 @@ def _actor_action_mask(
 
     static = legal_action_mask(state, agent, config.map_layout_id)
     plan = state.active_coordination_plan
+    if state.participant_controlled_agent_id == agent.agent_id:
+        # Human actions remain unconstrained by an AI reservation.
+        return static
+    own_goal_kind, _ = _actor_visible_goal(state, agent)
+    other = next(
+        item for item in state.agents if item.agent_id != agent.agent_id
+    )
+    other_goal_kind, other_goal = _actor_visible_goal(state, other)
+    charger = get_map_layout(config.map_layout_id).charger_position
+    if (
+        own_goal_kind != "charge"
+        and other_goal_kind == "charge"
+        and other_goal == charger
+    ):
+        # A current-state charging intent reserves the single charger cell,
+        # but not the surrounding apron.  This is derivable from S_t for both
+        # AI-AI and Human-AI rounds and never observes the peer's current move.
+        reserved_static = list(static)
+        for action_index, action in enumerate(ACTIONS):
+            delta = MOVE_DELTAS.get(action)
+            if delta is None:
+                continue
+            target = (
+                agent.position[0] + delta[0],
+                agent.position[1] + delta[1],
+            )
+            if target == charger:
+                reserved_static[action_index] = 0.0
+        static = reserved_static
     if state.participant_controlled_agent_id is not None:
+        # A participant's private current-frame command is never used here.
+        # The AI must nevertheless follow *its own* side of a coordination
+        # plan that was already public in S_t.  Requiring the participant's
+        # side as well would create future leakage; ignoring the AI side made
+        # stochastic sampling step away from a blocked route and immediately
+        # reverse on the next frame.
+        if (
+            int(getattr(state, "ineffective_joint_wait_streak", 0)) >= 1
+            and other.last_executed_action == "WAIT"
+            and shortest_path_distance(
+                agent.position,
+                other.position,
+                config.map_layout_id,
+            )
+            <= 2
+        ):
+            # After one observed participant stall, retain every geometrically
+            # legal escape so the Actor can choose a robust retreat instead of
+            # perpetuating a public stand-off.
+            return static
+        expected: str | None = None
+        if plan is not None and isinstance(plan.get("joint_actions"), Mapping):
+            expected = str(plan["joint_actions"].get(agent.agent_id, ""))
+        elif plan is not None:
+            phase = str(plan.get("phase", ""))
+            if phase == "CLEAR_CELL":
+                if str(plan.get("priority_agent_id")) == agent.agent_id:
+                    expected = "WAIT"
+                elif str(plan.get("clearing_agent_id")) == agent.agent_id:
+                    expected = str(plan.get("moving_action", ""))
+            elif phase in {"PASS_THROUGH", "SINGLE_STEP"}:
+                if str(plan.get("moving_agent_id")) == agent.agent_id:
+                    expected = str(plan.get("moving_action", ""))
+                elif str(plan.get("waiting_agent_id")) == agent.agent_id:
+                    expected = "WAIT"
+        if expected in ACTIONS:
+            expected_index = ACTIONS.index(expected)
+            if static[expected_index] > 0.5:
+                return [
+                    1.0 if index == expected_index else 0.0
+                    for index in range(len(ACTIONS))
+                ]
+        if (
+            own_goal_kind == "charge"
+            and agent.position != charger
+            and other.position == charger
+            and other_goal_kind == "charge"
+        ):
+            # The participant visibly occupies and is still servicing the
+            # single charger in S_t.  The AI therefore holds its queue cell;
+            # sampling a side step merely to return one frame later creates
+            # the observed 4,3 -> 4,4 -> 4,3 cycle without improving safety or
+            # energy.  A public clearance/departure plan above still takes
+            # precedence when the station is actually being handed over.
+            wait_index = ACTIONS.index("WAIT")
+            if static[wait_index] > 0.5:
+                return [
+                    1.0 if index == wait_index else 0.0
+                    for index in range(len(ACTIONS))
+                ]
+        if own_goal_kind == "charge" and agent.position != charger:
+            current_distance = shortest_path_distance(
+                agent.position,
+                charger,
+                config.map_layout_id,
+            )
+            participant_static = legal_action_mask(
+                state,
+                other,
+                config.map_layout_id,
+            )
+            participant_targets = tuple(
+                other.position
+                if action == "WAIT"
+                else (
+                    other.position[0] + MOVE_DELTAS[action][0],
+                    other.position[1] + MOVE_DELTAS[action][1],
+                )
+                for action, allowed in zip(ACTIONS, participant_static)
+                if allowed > 0.5
+            )
+            robust_charge_progress: set[str] = set()
+            for action, allowed in zip(ACTIONS, static):
+                if action not in MOVE_DELTAS or allowed <= 0.5:
+                    continue
+                target = (
+                    agent.position[0] + MOVE_DELTAS[action][0],
+                    agent.position[1] + MOVE_DELTAS[action][1],
+                )
+                remaining = agent.battery - config.move_battery_cost
+                required = (
+                    shortest_path_distance(
+                        target,
+                        charger,
+                        config.map_layout_id,
+                    )
+                    * config.move_battery_cost
+                )
+                if remaining + 1e-8 < required:
+                    continue
+                if shortest_path_distance(
+                    target,
+                    charger,
+                    config.map_layout_id,
+                ) >= current_distance:
+                    continue
+                if any(
+                    target == participant_target
+                    or (
+                        target == other.position
+                        and participant_target == agent.position
+                    )
+                    for participant_target in participant_targets
+                ):
+                    continue
+                robust_charge_progress.add(action)
+            if robust_charge_progress:
+                # Once charge is the frozen mission, a move that progresses
+                # to the station and is safe against every legal participant
+                # command must not be replaced by a stochastic WAIT.
+                return [
+                    1.0 if action in robust_charge_progress else 0.0
+                    for action in ACTIONS
+                ]
+        return static
+    if plan is not None and isinstance(plan.get("joint_actions"), Mapping):
+        required = str(plan["joint_actions"].get(agent.agent_id, "WAIT"))
+        required_mask = [
+            float(action == required and allowed > 0.5)
+            for action, allowed in zip(ACTIONS, static)
+        ]
+        if any(required_mask):
+            return required_mask
+        wait_index = ACTIONS.index("WAIT")
+        if static[wait_index] > 0.5:
+            # A newly visible charger reservation can invalidate a stale
+            # multi-frame instruction.  Holding is the only causal fallback;
+            # emitting an all-zero mask makes the neural policy undefined.
+            return [
+                1.0 if index == wait_index else 0.0
+                for index in range(len(ACTIONS))
+            ]
         return static
     if plan is None:
-        other = next(
-            item for item in state.agents if item.agent_id != agent.agent_id
-        )
         _, goal = _actor_visible_goal(state, agent)
         current_distance = shortest_path_distance(
             agent.position,

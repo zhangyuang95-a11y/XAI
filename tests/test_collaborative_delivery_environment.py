@@ -1544,8 +1544,11 @@ def test_counterfactual_regret_is_symmetric_and_individual() -> None:
 
     assert info["mission_regression_units"] == 0.0
     assert info["mission_regression_penalty_reward"] == 0.0
+    # Robot 1's public pickup commitment is task 1, and RIGHT is tied with UP
+    # as a shortest first step to that task. The audit must not silently
+    # rematch it to another task merely to manufacture counterfactual regret.
     assert info["counterfactual_regret_units"] == {
-        "robot_1": pytest.approx(2.0),
+        "robot_1": pytest.approx(0.0),
         "robot_2": pytest.approx(1.0),
     }
     for agent_id in environment.agent_ids:

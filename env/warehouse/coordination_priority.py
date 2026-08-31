@@ -108,7 +108,19 @@ def imminent_head_on_encounter(
             for target in progress_targets[right.agent_id]
         )
     )
-    return bool(coordinate_approach or topology_approach)
+    # Goal coordinates alone are insufficient evidence of an imminent
+    # head-on conflict.  On the staggered map two goals can lie beyond the
+    # peer while one robot's actual shortest next step has already turned
+    # into a different aisle.  Treating that geometry as head-on created the
+    # observed UP->DOWN retreat.  A yield is justified only when *all* actual
+    # shortest-progress next cells still approach one another on the shared
+    # axis; otherwise the routes are already separated and both may move.
+    if (
+        config.map_layout_id
+        == "warehouse_staggered_aisles_8x9_v1_three_cell_exit"
+    ):
+        return bool(coordinate_approach or topology_approach)
+    return topology_approach
 
 
 def single_lane_egress_agent_id(
@@ -439,6 +451,10 @@ def coordination_priority(
                 )
             ):
                 charger_clearance_commitments.append(priority)
+    archived_8x9 = (
+        config.map_layout_id
+        == "warehouse_staggered_aisles_8x9_v1_three_cell_exit"
+    )
     if lower_energy_charger_waiters:
         # This priority is observable from S_t and matches the two-phase
         # occupied-station handoff used by reward and offline supervision.
@@ -447,10 +463,50 @@ def coordination_priority(
         # says to clear for the lower-energy teammate.
         candidates = lower_energy_charger_waiters
         selection_mode = "lower_energy_charger_waiter"
-    elif charger_exit:
+    elif archived_8x9 and charger_exit:
+        # Preserve the published archived-layout hand-off protocol.  The old
+        # 8x9 fixture has a different one-cell approach topology from the
+        # production 6x7 map, so an occupant clearing the station must retain
+        # precedence over an approaching critical robot for this first phase.
         candidates = charger_exit
         selection_mode = "charger_exit"
-    elif charger_occupant in charging and any(
+    elif archived_8x9 and charger_occupant in charging and any(
+        agent.agent_id != charger_occupant.agent_id
+        and shortest_path_distance(
+            agent.position,
+            layout.charger_position,
+            config.map_layout_id,
+        )
+        == 1
+        for agent in charging
+    ):
+        candidates = (charger_occupant,)
+        selection_mode = "charger_occupant"
+    elif archived_8x9 and len(charger_clearance_commitments) == 1:
+        candidates = tuple(charger_clearance_commitments)
+        selection_mode = "charger_clearance_commitment"
+    elif critical_charging:
+        # A robot with no clearance reserve left cannot safely retreat for a
+        # loaded peer.  Give it the route before the conflict becomes an
+        # unrecoverable zero-battery queue; ordinary charging still yields to
+        # an energy-safe loaded delivery below.
+        candidates = critical_charging
+        selection_mode = "critical_charger_route"
+    elif not archived_8x9 and loaded_dead_end_egress:
+        # A loaded robot at a topological dead end has only one exit.  Giving
+        # an approaching loaded peer the ordinary distance tie-break can make
+        # both robots wait forever for the same intermediate cell.  Let the
+        # trapped carrier leave first; this right-of-way fact is visible in
+        # frozen S_t and is shared by the Actor observation and explanations.
+        candidates = loaded_dead_end_egress
+        selection_mode = "loaded_dead_end_egress"
+    elif not archived_8x9 and loaded_delivery:
+        candidates = loaded_delivery
+        selection_mode = "loaded_delivery"
+    elif not archived_8x9 and charger_exit:
+        candidates = charger_exit
+        selection_mode = "charger_exit"
+    elif not archived_8x9 and charger_occupant in charging and any(
         agent.agent_id != charger_occupant.agent_id
         and shortest_path_distance(
             agent.position,
@@ -465,34 +521,33 @@ def coordination_priority(
         # difference swaps both robots after every single charge wait.
         candidates = (charger_occupant,)
         selection_mode = "charger_occupant"
-    elif len(charger_clearance_commitments) == 1:
+    elif not archived_8x9 and len(charger_clearance_commitments) == 1:
         # A visible clearance move in S_t commits the same charger priority
         # until it passes the yielding robot. Re-ranking by battery slack
         # after every two-unit move otherwise flips the roles and creates a
         # three-state energy-draining oscillation.
         candidates = tuple(charger_clearance_commitments)
         selection_mode = "charger_clearance_commitment"
-    elif critical_charging:
-        # A robot with no clearance reserve left cannot safely retreat for a
-        # loaded peer.  Give it the route before the conflict becomes an
-        # unrecoverable zero-battery queue; ordinary charging still yields to
-        # an energy-safe loaded delivery below.
-        candidates = critical_charging
-        selection_mode = "critical_charger_route"
-    elif single_lane_egress_id is not None:
+    elif archived_8x9 and single_lane_egress_id is not None:
+        # The archived map's long one-cell shelf aisles need egress to remain
+        # ahead of ordinary loaded-delivery priority until the inner robot has
+        # completely cleared the row.  Production 6x7 deliberately reverses
+        # that order so a loaded, energy-tight delivery cannot be displaced.
         candidates = (state.by_id(single_lane_egress_id),)
         selection_mode = "single_lane_egress"
-    elif loaded_dead_end_egress:
-        # A loaded robot at a topological dead end has only one exit.  Giving
-        # an approaching loaded peer the ordinary distance tie-break can make
-        # both robots wait forever for the same intermediate cell.  Let the
-        # trapped carrier leave first; this right-of-way fact is visible in
-        # frozen S_t and is shared by the Actor observation and explanations.
+    elif archived_8x9 and loaded_dead_end_egress:
         candidates = loaded_dead_end_egress
         selection_mode = "loaded_dead_end_egress"
-    elif loaded_delivery:
+    elif archived_8x9 and loaded_delivery:
         candidates = loaded_delivery
         selection_mode = "loaded_delivery"
+    elif single_lane_egress_id is not None:
+        # Topological egress is an ordinary right-of-way tie-break.  It must
+        # never displace a loaded delivery whose remaining energy is already
+        # committed to B; doing so was the direct cause of the frame-116
+        # delivery-to-charge goal flip in the 6x7 tutorial.
+        candidates = (state.by_id(single_lane_egress_id),)
+        selection_mode = "single_lane_egress"
     elif charging:
         # Two robots committed to the same single-cell station form a queue
         # even when the staggered apron means they are not geometrically

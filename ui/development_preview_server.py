@@ -53,7 +53,7 @@ TUTORIAL_SEED = 40_786
 TASK1_SEED = 51_000
 TASK2_SEED = 51_500
 DEPLOYED_ACTOR_PATH = (
-    ROOT / "output" / "deployment" / "warehouse_mappo_v67_6x7_actor.npz"
+    ROOT / "output" / "deployment" / "warehouse_mappo_v68_6x7_actor.npz"
 )
 DEPLOYED_ACTOR = (
     NumpyWarehousePolicy.load(DEPLOYED_ACTOR_PATH)
@@ -65,7 +65,7 @@ DEPLOYED_ACTOR = (
 def _require_deployed_actor() -> NumpyWarehousePolicy:
     if DEPLOYED_ACTOR is None:
         raise RuntimeError(
-            "The live Human-AI v67 6x7 NumPy Actor has not been exported. "
+            "The causal-coordination v68 6x7 NumPy Actor has not been exported. "
             "Train and pass the release gates before starting the public study."
         )
     return DEPLOYED_ACTOR

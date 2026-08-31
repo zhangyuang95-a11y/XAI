@@ -302,9 +302,17 @@ def test_critical_skill_anchor_updates_actor_without_runtime_intervention() -> N
             policy.network.intent_encoder.parameters(),
         )
     )
-    assert np.count_nonzero(batch.trainable_mask <= 0.5) == (
-        batch.proxy_human_overrides
-    )
+    # Proxy-human actions are never Actor-training rows. A neural row whose
+    # frozen safety mask has only one legal action is critic-only as well,
+    # because its policy gradient contains no decision signal.
+    critic_only = np.flatnonzero(batch.trainable_mask <= 0.5)
+    assert len(critic_only) >= batch.proxy_human_overrides
+    for row_index in critic_only:
+        if row_index % len(environment.agent_ids) == 0:
+            continue
+        assert np.count_nonzero(
+            batch.observations[row_index, -len(ACTIONS) :] > 0.5
+        ) <= 1
 
 
 def test_critical_skill_anchor_rejects_misaligned_training_rows() -> None:
@@ -371,7 +379,7 @@ def test_explanation_evidence_binds_robot_two_live_task_and_frame() -> None:
 
 
 def test_program_version_constant_is_new_shared_contract() -> None:
-    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v60_live_human_ai_trace"
+    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v61_verified_joint_evidence"
 
 
 def test_removed_runtime_controller_predicate_has_no_special_verbalizer() -> None:

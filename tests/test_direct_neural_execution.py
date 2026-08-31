@@ -115,7 +115,7 @@ def test_wait_memory_contract_rejects_previous_direct_neural_model() -> None:
 
 def test_execution_contract_is_explicitly_direct_neural() -> None:
     assert ACTION_EXECUTION_VERSION == (
-        "frozen_joint_plan_atomic_actor_v14"
+        "frozen_joint_plan_atomic_actor_v15"
     )
     assert RUNTIME_CONTROLLER == (
         "mappo_frozen_state_actor_atomic_joint_execution"

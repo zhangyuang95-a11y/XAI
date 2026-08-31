@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from backend.training.learner_replay import fit_actor_supervised
+from backend.training.learner_dataset import actor_supported_teacher_action
 from env.warehouse.coordination import stable_coordination_actions
 from env.warehouse.decision_protocol import distribution_decision_metadata
 from env.warehouse.environment import WarehouseMultiAgentEnv
@@ -30,6 +31,9 @@ class FailureSeedConfig:
     margin: float = 4.0
     margin_weight: float = 2.0
     seed: int = 10_700_000
+    human_ai: bool = False
+    participant_noise_probability: float = 0.35
+    stochastic_actor: bool = False
 
 
 def _parse_seeds(value: str) -> tuple[int, ...]:
@@ -56,6 +60,10 @@ def _event_category(info: dict[str, Any]) -> str | None:
 def collect_failure_rows(
     policy: MAPPOPolicy,
     seeds: Iterable[int],
+    *,
+    human_ai: bool = False,
+    participant_noise_probability: float = 0.35,
+    stochastic_actor: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
     """Relabel only causal precursors of observed Actor failures."""
 
@@ -68,41 +76,113 @@ def collect_failure_rows(
         "charger_cycle": 0,
         "loaded_detour": 0,
         "collision": 0,
+        "avoidable_detour": 0,
+        "reversal": 0,
+        "short_cycle": 0,
+        "invalid_goal_switch": 0,
     }
     actor_steps = 0
     for seed in seed_values:
         environment = WarehouseMultiAgentEnv(policy.environment_config)
         observations, _ = environment.reset(seed=int(seed))
-        inference = policy.fork_for_inference(seed=int(seed) + 29_000_000)
+        if human_ai:
+            participant_state = environment.get_state()
+            participant_state.participant_controlled_agent_id = (
+                policy.environment_config.human_agent_id
+            )
+            environment.set_state(participant_state)
+            observations = environment.observations()
+        inference = policy.fork_for_inference(
+            seed=int(seed) + (13_000_000 if human_ai else 29_000_000)
+        )
+        participant_rng = np.random.default_rng(int(seed) + 999)
         history: deque[tuple[np.ndarray, np.ndarray]] = deque(maxlen=8)
         while True:
             state = environment.get_state()
             actor_actions, distributions = inference.act(
                 observations,
                 environment.global_state(),
-                deterministic=True,
+                deterministic=not stochastic_actor,
                 decision_key=(state.episode_id, state.frame),
             )
             teacher = stable_coordination_actions(environment)
+            audited_agent_ids = (
+                ("robot_2",) if human_ai else environment.agent_ids
+            )
             frame_rows = np.stack(
                 [
                     independent_actor_input(observations[agent_id])
-                    for agent_id in environment.agent_ids
+                    for agent_id in audited_agent_ids
                 ]
             ).astype(np.float32, copy=False)
             frame_labels = np.asarray(
-                [ACTIONS.index(teacher[agent_id]) for agent_id in environment.agent_ids],
+                [
+                    ACTIONS.index(
+                        actor_supported_teacher_action(
+                            observations[agent_id],
+                            teacher[agent_id],
+                        )
+                    )
+                    for agent_id in audited_agent_ids
+                ],
                 dtype=np.int64,
             )
             history.append((frame_rows, frame_labels))
+            participant_action: str | None = None
+            if human_ai:
+                participant_action = teacher["robot_1"]
+                if participant_rng.random() < participant_noise_probability:
+                    participant_mask = environment.action_masks()["robot_1"]
+                    legal = [
+                        action
+                        for action, allowed in zip(ACTIONS, participant_mask)
+                        if allowed > 0.5
+                    ]
+                    participant_action = str(participant_rng.choice(legal))
+                actor_actions["robot_1"] = participant_action
             observations, _, terminated, truncated, info = environment.step(
                 actor_actions,
                 decision_metadata=distribution_decision_metadata(
                     distributions,
-                    decision_source="rejected_seed_actor_failure_mining",
+                    decision_source=(
+                        "rejected_human_ai_seed_actor_failure_mining"
+                        if human_ai
+                        else "rejected_seed_actor_failure_mining"
+                    ),
+                    participant_overrides=(
+                        {"robot_1": participant_action}
+                        if participant_action is not None
+                        else None
+                    ),
                 ),
             )
             actor_steps += 1
+            if human_ai:
+                temporal_categories = (
+                    ("joint_wait", "avoidable_wait_agents"),
+                    ("avoidable_detour", "avoidable_detour_agents"),
+                    ("reversal", "unexplained_reversal_agents"),
+                    ("short_cycle", "short_cycle_agents"),
+                    ("invalid_goal_switch", "invalid_goal_switch_agents"),
+                )
+                for category_name, info_key in temporal_categories:
+                    if "robot_2" not in info.get(info_key, ()):
+                        continue
+                    source = (
+                        tuple(history)
+                        if category_name in {"reversal", "short_cycle"}
+                        else ((frame_rows, frame_labels),)
+                    )
+                    for historical_rows, historical_labels in source:
+                        rows.extend(historical_rows)
+                        labels.extend(historical_labels)
+                        categories.extend(
+                            (category_name,) * len(historical_rows)
+                        )
+                    event_counts[category_name] += 1
+                if terminated or truncated:
+                    break
+                continue
             ineffective_joint_wait = bool(
                 all(
                     action == "WAIT"
@@ -151,6 +231,11 @@ def collect_failure_rows(
         "ambiguous_inputs_removed": len(ambiguous),
         "events": event_counts,
         "teacher_actions_submitted_to_environment": 0,
+        "human_ai": bool(human_ai),
+        "participant_noise_probability": float(
+            participant_noise_probability if human_ai else 0.0
+        ),
+        "stochastic_actor": bool(stochastic_actor),
     }
 
 
@@ -168,6 +253,9 @@ def main() -> None:
     parser.add_argument("--margin", type=float, default=4.0)
     parser.add_argument("--margin-weight", type=float, default=2.0)
     parser.add_argument("--seed", type=int, default=10_700_000)
+    parser.add_argument("--human-ai", action="store_true")
+    parser.add_argument("--participant-noise", type=float, default=0.35)
+    parser.add_argument("--stochastic-actor", action="store_true")
     args = parser.parse_args()
     config = FailureSeedConfig(
         seeds=_parse_seeds(args.seeds),
@@ -178,12 +266,19 @@ def main() -> None:
         margin=float(args.margin),
         margin_weight=float(args.margin_weight),
         seed=int(args.seed),
+        human_ai=bool(args.human_ai),
+        participant_noise_probability=float(args.participant_noise),
+        stochastic_actor=bool(args.stochastic_actor),
     )
     if config.anchor_rows < 0 or config.failure_repeat <= 0 or config.epochs <= 0:
         parser.error("anchor rows cannot be negative; repeat and epochs must be positive")
     policy = MAPPOPolicy.load(args.checkpoint, device=args.device)
     failure_rows, failure_labels, failure_categories, coverage = collect_failure_rows(
-        policy, config.seeds
+        policy,
+        config.seeds,
+        human_ai=config.human_ai,
+        participant_noise_probability=config.participant_noise_probability,
+        stochastic_actor=config.stochastic_actor,
     )
     anchor = np.load(args.anchor_dataset, allow_pickle=False)
     anchor_rows = np.asarray(anchor["rows"], dtype=np.float32)

@@ -32,7 +32,7 @@ from env.warehouse.numpy_policy import NumpyWarehousePolicy
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ACTOR = (
-    ROOT / "output" / "deployment" / "warehouse_mappo_v67_6x7_actor.npz"
+    ROOT / "output" / "deployment" / "warehouse_mappo_v68_6x7_actor.npz"
 )
 
 
@@ -57,6 +57,8 @@ class EpisodeAudit:
     path_shortest_safe_steps: int
     simultaneous_violations: int
     explanation_fact_failures: int
+    ai_wait_actions: int
+    ai_decisions: int
 
     @property
     def path_efficiency(self) -> float:
@@ -101,11 +103,14 @@ def _run_episode(
     *,
     seed: int,
     participant_noise_probability: float,
+    participant_controlled: bool,
 ) -> EpisodeAudit:
     environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=seed)
     initial = environment.get_state()
-    initial.participant_controlled_agent_id = config.human_agent_id
+    initial.participant_controlled_agent_id = (
+        config.human_agent_id if participant_controlled else None
+    )
     environment.set_state(initial)
     rng = np.random.default_rng(seed + 999)
 
@@ -114,6 +119,10 @@ def _run_episode(
     invalid_switches = shutdowns = simultaneous_violations = fact_failures = 0
     ineffective_wait_streak = 0
     longest_ineffective_wait_streak = 0
+    ai_wait_actions = ai_decisions = 0
+    audited_agent_ids = (
+        ("robot_2",) if participant_controlled else environment.agent_ids
+    )
 
     while True:
         before = environment.get_state()
@@ -132,23 +141,35 @@ def _run_episode(
             base_seed=seed + 13_000_000,
             decision_key=(before.episode_id, before.frame),
         )
-        participant_action = stable_coordination_actions(environment)["robot_1"]
-        if rng.random() < participant_noise_probability:
-            mask = environment.action_masks()["robot_1"]
-            legal = [
-                action
-                for action, allowed in zip(ACTIONS, mask)
-                if allowed > 0.5
-            ]
-            participant_action = str(rng.choice(legal))
-        actions["robot_1"] = participant_action
+        participant_action: str | None = None
+        if participant_controlled:
+            participant_action = stable_coordination_actions(environment)["robot_1"]
+            if rng.random() < participant_noise_probability:
+                mask = environment.action_masks()["robot_1"]
+                legal = [
+                    action
+                    for action, allowed in zip(ACTIONS, mask)
+                    if allowed > 0.5
+                ]
+                participant_action = str(rng.choice(legal))
+            actions["robot_1"] = participant_action
+        ai_wait_actions += sum(actions[agent_id] == "WAIT" for agent_id in audited_agent_ids)
+        ai_decisions += len(audited_agent_ids)
 
         _, _, terminated, truncated, info = environment.step(
             actions,
             decision_metadata=distribution_decision_metadata(
                 distributions,
-                decision_source="simulated_participant_plus_numpy_actor",
-                participant_overrides={"robot_1": participant_action},
+                decision_source=(
+                    "simulated_participant_plus_numpy_actor"
+                    if participant_controlled
+                    else "independent_numpy_actors_same_frozen_state"
+                ),
+                participant_overrides=(
+                    {"robot_1": participant_action}
+                    if participant_action is not None
+                    else None
+                ),
             ),
         )
         collisions += int(bool(info.get("robot_collision_event", False)))
@@ -157,16 +178,30 @@ def _run_episode(
             for event in info.get("coordination_events", ())
             if isinstance(event, Mapping)
         )
-        avoidable_waits += int("robot_2" in info.get("avoidable_wait_agents", ()))
-        avoidable_detours += int(
-            "robot_2" in info.get("avoidable_detour_agents", ())
+        avoidable_waits += sum(
+            agent_id in info.get("avoidable_wait_agents", ())
+            for agent_id in audited_agent_ids
         )
-        reversals += int("robot_2" in info.get("unexplained_reversal_agents", ()))
-        short_cycles += int("robot_2" in info.get("short_cycle_agents", ()))
-        invalid_switches += int(
-            "robot_2" in info.get("invalid_goal_switch_agents", ())
+        avoidable_detours += sum(
+            agent_id in info.get("avoidable_detour_agents", ())
+            for agent_id in audited_agent_ids
         )
-        shutdowns += int("robot_2" in info.get("shutdowns", ()))
+        reversals += sum(
+            agent_id in info.get("unexplained_reversal_agents", ())
+            for agent_id in audited_agent_ids
+        )
+        short_cycles += sum(
+            agent_id in info.get("short_cycle_agents", ())
+            for agent_id in audited_agent_ids
+        )
+        invalid_switches += sum(
+            agent_id in info.get("invalid_goal_switch_agents", ())
+            for agent_id in audited_agent_ids
+        )
+        shutdowns += sum(
+            agent_id in info.get("shutdowns", ())
+            for agent_id in audited_agent_ids
+        )
         simultaneous_violations += int(_simultaneous_violation(info))
         fact_failures += len(
             info.get("decision_trace", {}).get("fact_validation_failures", ())
@@ -193,7 +228,7 @@ def _run_episode(
     completed_by_ai = tuple(
         task
         for task in final.completed_tasks
-        if task.carrier_agent_id == "robot_2"
+        if task.carrier_agent_id in audited_agent_ids
         and task.claimed_frame is not None
         and task.delivered_frame is not None
         and task.shortest_safe_delivery_steps is not None
@@ -226,6 +261,8 @@ def _run_episode(
         ),
         simultaneous_violations=simultaneous_violations,
         explanation_fact_failures=fact_failures,
+        ai_wait_actions=ai_wait_actions,
+        ai_decisions=ai_decisions,
     )
 
 
@@ -248,6 +285,8 @@ def _summarize(episodes: Iterable[EpisodeAudit]) -> dict[str, Any]:
         "shutdowns",
         "simultaneous_violations",
         "explanation_fact_failures",
+        "ai_wait_actions",
+        "ai_decisions",
     )
     actual = sum(row.path_actual_steps for row in rows)
     shortest = sum(row.path_shortest_safe_steps for row in rows)
@@ -270,6 +309,10 @@ def _summarize(episodes: Iterable[EpisodeAudit]) -> dict[str, Any]:
         "delivery_episode_rate": sum(row.deliveries > 0 for row in rows) / count,
         "collision_episode_rate": (
             sum(row.robot_collisions > 0 for row in rows) / count
+        ),
+        "ai_wait_action_rate": (
+            sum(row.ai_wait_actions for row in rows)
+            / max(1, sum(row.ai_decisions for row in rows))
         ),
         "seeds": [row.seed for row in rows],
         "per_episode": [asdict(row) | {"path_efficiency": row.path_efficiency} for row in rows],
@@ -345,21 +388,43 @@ def run_acceptance(
         )
     )
 
-    fixed = tuple(
+    human_fixed = tuple(
         _run_episode(
             actor,
             config,
             seed=seed,
             participant_noise_probability=participant_noise_probability,
+            participant_controlled=True,
         )
         for seed in fixed_seeds
     )
-    random = tuple(
+    human_random = tuple(
         _run_episode(
             actor,
             config,
             seed=seed,
             participant_noise_probability=participant_noise_probability,
+            participant_controlled=True,
+        )
+        for seed in random_seeds
+    )
+    ai_ai_fixed = tuple(
+        _run_episode(
+            actor,
+            config,
+            seed=seed,
+            participant_noise_probability=0.0,
+            participant_controlled=False,
+        )
+        for seed in fixed_seeds
+    )
+    ai_ai_random = tuple(
+        _run_episode(
+            actor,
+            config,
+            seed=seed,
+            participant_noise_probability=0.0,
+            participant_controlled=False,
         )
         for seed in random_seeds
     )
@@ -381,7 +446,20 @@ def run_acceptance(
         participant_noise_probability=participant_noise_probability,
     )
     conflict_scripts = _conflict_scripts(config)
-    combined = _summarize((*fixed, *random))
+    human_combined = _summarize((*human_fixed, *human_random))
+    ai_ai_combined = _summarize((*ai_ai_fixed, *ai_ai_random))
+    combined = _summarize(
+        (*human_fixed, *human_random, *ai_ai_fixed, *ai_ai_random)
+    )
+    zero_trace_fields = (
+        "avoidable_waits",
+        "avoidable_detours",
+        "unexplained_reversals",
+        "short_cycles",
+        "invalid_goal_switches",
+        "simultaneous_violations",
+        "explanation_fact_failures",
+    )
     gates = {
         "map_is_exactly_6x7": (config.rows, config.cols) == (6, 7),
         "map_has_no_four_way_cross": not bool(
@@ -391,19 +469,34 @@ def run_acceptance(
             WarehouseMultiAgentEnv(config).layout.robot_exit_positions
         )
         == 3,
-        "mean_deliveries_at_least_5": combined["mean"]["deliveries"] >= 5.0,
+        "human_ai_mean_deliveries_not_below_v67_baseline": (
+            human_combined["mean"]["deliveries"] >= 7.345
+        ),
+        "ai_ai_mean_deliveries_at_least_v67_human_ai_baseline": (
+            ai_ai_combined["mean"]["deliveries"] >= 7.345
+        ),
         "real_proximity_observed": combined["total"]["proximity_frames"] > 0,
         "real_potential_conflicts_observed": (
             combined["total"]["potential_conflict_frames"] > 0
         ),
-        "real_collisions_observed": combined["total"]["robot_collisions"] > 0,
         "real_yields_observed": combined["total"]["yield_events"] > 0,
-        "no_permanent_deadlock": combined["deadlock_episodes"] == 0,
-        "no_simultaneous_semantics_violation": (
-            combined["total"]["simultaneous_violations"] == 0
+        "ai_ai_no_robot_collision": (
+            ai_ai_combined["total"]["robot_collisions"] == 0
         ),
-        "no_explanation_fact_failure": (
-            combined["total"]["explanation_fact_failures"] == 0
+        "ai_ai_no_trace_regression": all(
+            ai_ai_combined["total"][field] == 0
+            for field in zero_trace_fields
+        ),
+        "human_ai_ai_has_no_trace_regression": all(
+            human_combined["total"][field] == 0
+            for field in zero_trace_fields
+        ),
+        "no_permanent_deadlock": (
+            human_combined["deadlock_episodes"] == 0
+            and ai_ai_combined["deadlock_episodes"] == 0
+        ),
+        "ai_ai_wait_rate_below_half": (
+            ai_ai_combined["ai_wait_action_rate"] < 0.5
         ),
         "six_by_seven_has_more_conflict_opportunities": (
             production_calibration["mean"]["collision_opportunity_frames"]
@@ -414,7 +507,7 @@ def run_acceptance(
         ),
     }
     return {
-        "schema_version": "warehouse-study-acceptance.v2",
+        "schema_version": "warehouse-study-acceptance.v3",
         "actor": {
             "path": str(actor_path.resolve()),
             "artifact_sha256": actor.artifact_sha256,
@@ -423,8 +516,12 @@ def run_acceptance(
         },
         "production_map_layout_id": config.map_layout_id,
         "participant_noise_probability": participant_noise_probability,
-        "fixed_seed_audit": _summarize(fixed),
-        "random_seed_audit": _summarize(random),
+        "human_ai_fixed_seed_audit": _summarize(human_fixed),
+        "human_ai_random_seed_audit": _summarize(human_random),
+        "human_ai_combined_audit": human_combined,
+        "ai_ai_fixed_seed_audit": _summarize(ai_ai_fixed),
+        "ai_ai_random_seed_audit": _summarize(ai_ai_random),
+        "ai_ai_combined_audit": ai_ai_combined,
         "combined_audit": combined,
         "interaction_calibration": {
             "production_6x7": production_calibration,

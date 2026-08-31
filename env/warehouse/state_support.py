@@ -130,7 +130,12 @@ def validate_warehouse_state(
             )
         else:
             phase = str(plan["phase"])
-            if phase not in {"CLEAR_CELL", "PASS_THROUGH", "SINGLE_STEP"}:
+            if phase not in {
+                "CLEAR_CELL",
+                "PASS_THROUGH",
+                "SINGLE_STEP",
+                "JOINT_STEP",
+            }:
                 errors.append("active coordination plan has an invalid phase")
             priority_id = str(plan["priority_agent_id"])
             waiting_id = str(plan["waiting_agent_id"])

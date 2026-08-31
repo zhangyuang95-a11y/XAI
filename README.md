@@ -45,7 +45,7 @@ reward_i = user_score_delta / 100
 
 当前部署版本：
 
-- 模型：`warehouse_mappo_v67_human_ai_live_6x7_actor`
+- 模型：`warehouse_mappo_v68_causal_coordination_6x7_actor`
 - 环境：`warehouse_collaborative_delivery_v43_compact6_live_human_ai`
 - Reward：`warehouse_safe_mission_reward_v29_temporal_consistency`
 - 观测：`collaborative_observation_v38_frozen_plan_mask`
@@ -58,7 +58,7 @@ reward_i = user_score_delta / 100
 - 运行时控制器：`mappo_frozen_state_actor_atomic_joint_execution`
 - 日志：`human-study-log.v30`
 
-PyTorch checkpoint 位于 `output/deployment/warehouse_mappo_v67_6x7.pt`。Render 使用从该 checkpoint 精确导出的 `output/deployment/warehouse_mappo_v67_6x7_actor.npz`，以 NumPy 执行同一神经网络；测试逐 logit 比对两种运行时，允许误差不超过 `1e-4`。两个 Actor 只读取同一个冻结决策前状态；同格、换位和通道冲突由一次联合审计原子解析。v67 使用无四向十字的 6×7 错位通道、三格机器人出口、真实 Task 1 人机轨迹即时解释和基于已完成等待历史的因果僵局恢复。开发验收覆盖100个固定种子与100个随机种子；完整指标见 `output/deployment/warehouse_mappo_v67_6x7_acceptance.json`。
+PyTorch checkpoint 位于 `output/deployment/warehouse_mappo_v68_6x7.pt`。Render 使用从该 checkpoint 精确导出的 `output/deployment/warehouse_mappo_v68_6x7_actor.npz`，以 NumPy 执行同一神经网络；测试逐 logit 比对两种运行时，允许误差不超过 `1e-4`。两个 Actor 只读取同一个冻结决策前状态；同格、换位和通道冲突由一次联合审计原子解析。v68 使用无四向十字的 6×7 错位通道、三格机器人出口、2–4步瓶颈预约、载货优先和经反事实验证的精简解释。正式验收分别覆盖 AI–AI 与 Human–AI 的100个固定种子和100个随机种子；完整指标见 `output/deployment/warehouse_mappo_v68_6x7_acceptance.json`。
 
 共享 Actor 内部包含五类神经任务意图（两个任务槽、交付、充电、等待）。任务所有权仍只在到达 A 点后产生；持久目标仅锁定跨帧规划意图。冻结状态导出的安全/联合计划掩码直接进入 Actor 的 masked logits，不在 Actor 输出后重写动作。离线关键状态覆盖充电离站、任务连续未认领、两机器人同目标、狭窄通道避让和碰撞后恢复；评估 rollout、参考轨迹和 UI 使用相同执行路径。
 

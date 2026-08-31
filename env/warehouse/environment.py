@@ -48,8 +48,10 @@ from .transition_audit import (
     build_decision_trace,
     environment_info,
     joint_decision_audit,
+    necessary_participant_standoff_clearance,
 )
 from .state_support import render_ascii_state, validate_warehouse_state
+from .route_goals import frozen_route_goal
 
 
 class WarehouseMultiAgentEnv:
@@ -1223,48 +1225,14 @@ class WarehouseMultiAgentEnv:
         *,
         prioritize_old_tasks: bool = False,
     ) -> tuple[int, int] | None:
-        """Choose an agent route goal once from the transition-start snapshot.
+        """Choose an agent route goal once from the frozen pre-move state."""
 
-        The method reads shared tasks and carrier ownership without mutating the
-        environment.  It is used only for participant scoring; training shaping
-        continues to use the separate safe-mission team potential.
-        """
-
-        agent = state.by_id(agent_id)
-        if not agent.active:
-            return None
-        if agent.carrying_task_id:
-            task = state.task_by_id(agent.carrying_task_id)
-            return (
-                task.delivery_position
-                if self._task_is_directly_energy_safe(state, agent, task)
-                else self.layout.charger_position
-            )
-
-        available = sorted(
-            (task for task in state.tasks if task.status == "available"),
-            key=lambda task: task.task_id,
-        )
-        if not available:
-            return None
-        assignments = self._frozen_task_assignments(
+        return frozen_route_goal(
+            self,
             state,
+            agent_id,
             prioritize_old_tasks=prioritize_old_tasks,
         )
-        assigned = assignments.get(agent_id)
-        if assigned is not None:
-            return assigned.pickup_position
-
-        assigned_task_ids = {task.task_id for task in assignments.values()}
-        remaining = [
-            task for task in available if task.task_id not in assigned_task_ids
-        ]
-        if remaining and not any(
-            self._task_is_directly_energy_safe(state, agent, task)
-            for task in remaining
-        ):
-            return self.layout.charger_position
-        return None
 
 
     def step(
@@ -1358,6 +1326,25 @@ class WarehouseMultiAgentEnv:
                         "proposed_actions": dict(raw_actions),
                         "executed_actions": dict(executed),
                         "intended_targets": dict(intended_targets),
+                    },
+                )
+        for agent in previous.agents:
+            action = str(executed.get(agent.agent_id, "WAIT"))
+            if action not in MOVE_DELTAS:
+                continue
+            if necessary_participant_standoff_clearance(
+                self,
+                previous,
+                agent,
+                candidate_action=action,
+            ):
+                coordination_events += (
+                    {
+                        "event": "participant_standoff_clearance",
+                        "agent_id": agent.agent_id,
+                        "action": action,
+                        "derived_from_frame": previous.frame,
+                        "reason_code": "observed_participant_stall_clearance",
                     },
                 )
         coordination_events += credit.occupied_cell_clearance_events(

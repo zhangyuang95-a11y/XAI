@@ -89,6 +89,283 @@ def _independent_parallel_progress_exists(
     return False
 
 
+def _canonical_short_route(
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    config: WarehouseConfig,
+    *,
+    horizon: int,
+) -> tuple[tuple[int, int], ...]:
+    layout = get_map_layout(config.map_layout_id)
+    current = start
+    route: list[tuple[int, int]] = [current]
+    for _ in range(max(0, int(horizon))):
+        distance = shortest_path_distance(current, goal, config.map_layout_id)
+        candidates: list[tuple[int, tuple[int, int]]] = []
+        for action_index, action in enumerate(ACTIONS):
+            delta = MOVE_DELTAS.get(action)
+            if delta is None:
+                continue
+            target = (current[0] + delta[0], current[1] + delta[1])
+            if (
+                layout.is_passable(target)
+                and shortest_path_distance(target, goal, config.map_layout_id)
+                < distance
+            ):
+                candidates.append((action_index, target))
+        if not candidates:
+            break
+        _, current = min(candidates)
+        route.append(current)
+        if current == goal:
+            break
+    return tuple(route)
+
+
+def _task_energy_after(
+    state: WarehouseState,
+    config: WarehouseConfig,
+    agent: Any,
+    position: tuple[int, int],
+) -> float | None:
+    task_id = agent.route_commitment_task_id or agent.goal_id
+    task = next(
+        (
+            item
+            for item in state.tasks
+            if item.task_id == task_id and item.status == "available"
+        ),
+        None,
+    )
+    if task is None:
+        return None
+    layout = get_map_layout(config.map_layout_id)
+    steps = (
+        shortest_path_distance(position, task.pickup_position, config.map_layout_id)
+        + shortest_path_distance(
+            task.pickup_position, task.delivery_position, config.map_layout_id
+        )
+        + shortest_path_distance(
+            task.delivery_position,
+            layout.charger_position,
+            config.map_layout_id,
+        )
+        + config.mission_reserve_steps
+    )
+    return float(steps * config.move_battery_cost)
+
+
+def _short_horizon_charger_plan(
+    state: WarehouseState,
+    config: WarehouseConfig,
+    *,
+    goals: Mapping[str, tuple[int, int]],
+    priority: Any,
+    horizon: int = 4,
+) -> dict[str, Any] | None:
+    """Return one joint reservation step before a charger-route conflict."""
+
+    layout = get_map_layout(config.map_layout_id)
+    priority_agent = state.by_id(priority.agent_id)
+    priority_basis = str(priority.basis)
+    if priority_basis == "charger_exit":
+        approaching = tuple(
+            agent
+            for agent in state.agents
+            if agent.agent_id != priority_agent.agent_id
+            and goals.get(agent.agent_id) == layout.charger_position
+            and shortest_path_distance(
+                agent.position, layout.charger_position, config.map_layout_id
+            )
+            <= horizon + 1
+        )
+        if len(approaching) != 1:
+            return None
+        priority_agent = approaching[0]
+        priority_basis = "urgent_charger_route"
+    if priority_basis not in {
+        "critical_charger_route",
+        "urgent_charger_route",
+        "charger_route",
+        "lower_energy_charger_waiter",
+        "charger_clearance_commitment",
+    }:
+        return None
+    if (
+        goals.get(priority_agent.agent_id) != layout.charger_position
+        or priority_agent.position == layout.charger_position
+    ):
+        return None
+    yielding = next(
+        agent for agent in state.agents if agent.agent_id != priority_agent.agent_id
+    )
+    if (
+        yielding.carrying_task_id is not None
+        and priority_basis != "critical_charger_route"
+    ):
+        return None
+    yielding_goal = goals[yielding.agent_id]
+    priority_route = _canonical_short_route(
+        priority_agent.position,
+        layout.charger_position,
+        config,
+        horizon=horizon + 1,
+    )
+    yielding_route = _canonical_short_route(
+        yielding.position, yielding_goal, config, horizon=horizon
+    )
+    reserved = set(priority_route[1:])
+    if not reserved.intersection(yielding_route[1:]):
+        return None
+
+    current_priority_distance = shortest_path_distance(
+        priority_agent.position, layout.charger_position, config.map_layout_id
+    )
+    priority_actions: list[tuple[int, str, tuple[int, int]]] = []
+    for action_index, action in enumerate(ACTIONS):
+        delta = MOVE_DELTAS.get(action)
+        if delta is None:
+            continue
+        target = (
+            priority_agent.position[0] + delta[0],
+            priority_agent.position[1] + delta[1],
+        )
+        if (
+            layout.is_passable(target)
+            and shortest_path_distance(
+                target, layout.charger_position, config.map_layout_id
+            )
+            < current_priority_distance
+        ):
+            remaining = priority_agent.battery - config.move_battery_cost
+            required = (
+                shortest_path_distance(
+                    target,
+                    layout.charger_position,
+                    config.map_layout_id,
+                )
+                * config.move_battery_cost
+            )
+            if remaining <= 0.0 or remaining + 1e-8 < required:
+                continue
+            priority_actions.append((action_index, action, target))
+    if not priority_actions:
+        return None
+    _, priority_action, priority_target = min(priority_actions)
+
+    candidates: list[tuple[int, int, int, str, tuple[int, int]]] = []
+    for action_index, action in enumerate(ACTIONS):
+        delta = MOVE_DELTAS.get(action)
+        target = yielding.position
+        if delta is not None:
+            target = (
+                yielding.position[0] + delta[0],
+                yielding.position[1] + delta[1],
+            )
+            if not layout.is_passable(target) or yielding.battery <= config.move_battery_cost:
+                continue
+        if (
+            target == priority_target
+            or target == priority_agent.position
+            or (
+                priority_target == yielding.position
+                and target == priority_agent.position
+            )
+        ):
+            continue
+        if target == layout.charger_position and yielding_goal != layout.charger_position:
+            # The charger is the reserved destination, not a clearance cell.
+            # Allow the yielding robot to use either apron, never the single
+            # station itself.
+            continue
+        required = _task_energy_after(state, config, yielding, target)
+        remaining = yielding.battery - (
+            config.move_battery_cost if action in MOVE_DELTAS else 0.0
+        )
+        if required is not None and remaining + 1e-8 < required:
+            continue
+        candidate_route = _canonical_short_route(
+            target, yielding_goal, config, horizon=horizon
+        )
+        first_overlap = next(
+            (
+                index
+                for index, position in enumerate(candidate_route)
+                if position in reserved
+            ),
+            horizon + 2,
+        )
+        candidates.append(
+            (
+                -first_overlap,
+                shortest_path_distance(target, yielding_goal, config.map_layout_id),
+                action_index,
+                action,
+                target,
+            )
+        )
+    if not candidates:
+        return None
+    _, _, _, yielding_action, yielding_target = min(candidates)
+    # Frozen-state simultaneous motion never assumes that a currently
+    # occupied cell will be released later in the same joint command.  This
+    # matters especially in Human-AI rounds: the participant's current-frame
+    # action is private, so an AI may not enter the participant's cell merely
+    # because the public plan asked the participant to leave it.  Split that
+    # hand-off into a visible clearance step followed by charger progress.
+    occupied_handoff = priority_target == yielding.position
+    joint_actions = {
+        priority_agent.agent_id: "WAIT" if occupied_handoff else priority_action,
+        yielding.agent_id: yielding_action,
+    }
+    moving_agent = yielding if occupied_handoff else priority_agent
+    moving_action = yielding_action if occupied_handoff else priority_action
+    moving_target = yielding_target if occupied_handoff else priority_target
+    return {
+        "plan_id": (
+            f"coord:{state.episode_id}:{state.frame}:horizon-charge:"
+            f"{priority_agent.agent_id}:{yielding.agent_id}"
+        ),
+        "plan_kind": "short_horizon_charger_reservation",
+        "phase": "CLEAR_CELL" if occupied_handoff else "JOINT_STEP",
+        "priority_agent_id": priority_agent.agent_id,
+        "yielding_agent_id": yielding.agent_id,
+        "waiting_agent_id": (
+            priority_agent.agent_id if occupied_handoff else yielding.agent_id
+        ),
+        "moving_agent_id": moving_agent.agent_id,
+        "moving_action": moving_action,
+        "moving_target": moving_target,
+        "reserved_agent_action": yielding_action,
+        "reserved_agent_target": yielding_target,
+        "joint_actions": joint_actions,
+        **(
+            {
+                "clearing_agent_id": yielding.agent_id,
+                "occupied_position": yielding.position,
+                "clearing_action": yielding_action,
+                "clearing_target": yielding_target,
+                "allowed_clearing_actions": (yielding_action,),
+                "allowed_clearing_targets": (yielding_target,),
+            }
+            if occupied_handoff
+            else {}
+        ),
+        "priority_basis": priority_basis,
+        "priority_goal_id": None,
+        "reason_code": "anticipated_charger_corridor_reservation",
+        "lookahead_steps": horizon,
+        "expected_duration_frames": 1,
+        "completion_condition": (
+            "priority_route_cell_cleared"
+            if occupied_handoff
+            else "joint_reservation_step_completed"
+        ),
+        "resume_condition": "short_routes_no_longer_overlap",
+        "derived_from_frame": state.frame,
+    }
+
+
 def frozen_joint_coordination_plan(
     state: WarehouseState,
     config: WarehouseConfig,
@@ -119,7 +396,7 @@ def frozen_joint_coordination_plan(
         phase = str(stored.get("phase", "CLEAR_CELL"))
         if phase == "CLEAR_CELL":
             return dict(stored)
-        if phase == "SINGLE_STEP":
+        if phase in {"SINGLE_STEP", "JOINT_STEP"}:
             return dict(stored)
         if phase == "PASS_THROUGH":
             priority_id = str(stored["priority_agent_id"])
@@ -225,10 +502,13 @@ def frozen_joint_coordination_plan(
     shared_progress_targets = set.intersection(
         *(active_progress_targets[agent.agent_id] for agent in active)
     )
-    # Do not manufacture a single-lane conflict from mere proximity.  If
-    # both frozen goals have progress moves into different free cells, both
-    # Actors can advance simultaneously without a right-of-way handshake.
-    if _independent_parallel_progress_exists(state, progress_actions):
+    archived_8x9 = (
+        config.map_layout_id
+        == "warehouse_staggered_aisles_8x9_v1_three_cell_exit"
+    )
+    if archived_8x9 and _independent_parallel_progress_exists(
+        state, progress_actions
+    ):
         return None
     priority = coordination_priority(
         state,
@@ -238,6 +518,23 @@ def frozen_joint_coordination_plan(
         requires_charge=requires_charge,
         imminent_head_on=imminent_head_on_encounter(state, config, goals),
     )
+    horizon_plan = (
+        None
+        if archived_8x9
+        else _short_horizon_charger_plan(
+            state,
+            config,
+            goals=goals,
+            priority=priority,
+        )
+    )
+    if horizon_plan is not None:
+        return horizon_plan
+    # Do not manufacture a single-lane conflict from mere proximity.  If
+    # both frozen goals have progress moves into different free cells, both
+    # Actors can advance simultaneously without a right-of-way handshake.
+    if _independent_parallel_progress_exists(state, progress_actions):
+        return None
     # A robot whose only progress cell is occupied must wait until that cell
     # is visibly cleared.  When the occupant is also the frozen priority robot
     # and can progress away, retain the causal plan for exactly that clearing
@@ -493,7 +790,23 @@ def coordination_plan_execution_event(
     waiting_id = str(plan["waiting_agent_id"])
     moving_id = str(plan["moving_agent_id"])
     expected_move = str(plan["moving_action"])
-    if str(plan.get("phase")) == "CLEAR_CELL":
+    agent_execution_aligned: dict[str, bool] = {}
+    agent_request_aligned: dict[str, bool] = {}
+    if isinstance(plan.get("joint_actions"), Mapping):
+        expected_joint = {
+            str(agent_id): str(action)
+            for agent_id, action in dict(plan["joint_actions"]).items()
+        }
+        agent_execution_aligned = {
+            agent_id: str(executed_actions.get(agent_id, "WAIT")) == action
+            for agent_id, action in expected_joint.items()
+        }
+        agent_request_aligned = {
+            agent_id: str(requested_actions.get(agent_id, "WAIT")) == action
+            for agent_id, action in expected_joint.items()
+        }
+        aligned = all(agent_execution_aligned.values())
+    elif str(plan.get("phase")) == "CLEAR_CELL":
         allowed_actions = {
             str(action)
             for action in plan.get(
@@ -508,23 +821,45 @@ def coordination_plan_execution_event(
                 (plan["moving_target"],),
             )
         }
-        aligned = bool(
-            str(executed_actions.get(waiting_id, "WAIT")) == "WAIT"
-            and str(executed_actions.get(moving_id, "WAIT")) in allowed_actions
-            and tuple(intended_targets.get(moving_id, ())) in allowed_targets
-        )
+        agent_execution_aligned = {
+            waiting_id: str(executed_actions.get(waiting_id, "WAIT")) == "WAIT",
+            moving_id: bool(
+                str(executed_actions.get(moving_id, "WAIT")) in allowed_actions
+                and tuple(intended_targets.get(moving_id, ())) in allowed_targets
+            ),
+        }
+        agent_request_aligned = {
+            waiting_id: str(requested_actions.get(waiting_id, "WAIT")) == "WAIT",
+            moving_id: str(requested_actions.get(moving_id, "WAIT"))
+            in allowed_actions,
+        }
+        aligned = all(agent_execution_aligned.values())
     else:
-        aligned = bool(
-            str(executed_actions.get(waiting_id, "WAIT")) == "WAIT"
-            and str(executed_actions.get(moving_id, "WAIT")) == expected_move
-            and tuple(intended_targets.get(moving_id, ()))
-            == tuple(plan["moving_target"])
-        )
+        agent_execution_aligned = {
+            waiting_id: str(executed_actions.get(waiting_id, "WAIT")) == "WAIT",
+            moving_id: bool(
+                str(executed_actions.get(moving_id, "WAIT")) == expected_move
+                and tuple(intended_targets.get(moving_id, ()))
+                == tuple(plan["moving_target"])
+            ),
+        }
+        agent_request_aligned = {
+            waiting_id: str(requested_actions.get(waiting_id, "WAIT")) == "WAIT",
+            moving_id: str(requested_actions.get(moving_id, "WAIT"))
+            == expected_move,
+        }
+        aligned = all(agent_execution_aligned.values())
     return {
         "event": "joint_coordination_plan",
         **dict(plan),
         "requested_actions": dict(requested_actions),
         "executed_actions": dict(executed_actions),
+        # Human-AI decisions are sampled before the participant's private
+        # current-frame action exists.  Preserve whether each robot followed
+        # its own causal instruction even when the other party deviates; the
+        # joint flag remains the stricter all-parties contract.
+        "agent_execution_aligned": agent_execution_aligned,
+        "agent_request_aligned": agent_request_aligned,
         "execution_aligned": aligned,
         "completed": bool(
             aligned and str(plan.get("phase")) != "CLEAR_CELL"

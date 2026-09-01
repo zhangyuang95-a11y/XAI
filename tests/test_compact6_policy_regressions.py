@@ -472,7 +472,35 @@ def test_human_ai_unknown_action_wait_records_specific_counterfactual() -> None:
     assert "trace" not in explanation.lower()
 
 
-def test_loaded_ai_uses_public_priority_cell_without_seeing_human_action() -> None:
+def test_participant_collision_action_reaches_environment_and_costs_200() -> None:
+    environment = _compact_environment()
+    state = environment.get_state()
+    state.participant_controlled_agent_id = "robot_1"
+    state.by_id("robot_1").position = (4, 2)
+    state.by_id("robot_2").position = (4, 4)
+    environment.set_state(state)
+
+    submitted, guard = guard_participant_action(environment, "RIGHT")
+
+    assert submitted == "RIGHT"
+    assert guard["requested_action"] == "RIGHT"
+    assert guard["selected_action"] == "RIGHT"
+    assert guard["blocked"] is False
+    assert guard["collision_protection_applied"] is False
+
+    _, _, _, _, info = environment.step(
+        {"robot_1": submitted, "robot_2": "LEFT"}
+    )
+    after = environment.get_state()
+
+    assert info["robot_collision_event"] is True
+    assert info["robot_collision_kind"] == "same_target"
+    assert info["reward_breakdown"]["robot_collision"] == -200
+    assert after.robot_collision_events == 1
+    assert after.score_breakdown["robot_collision"] == -200
+
+
+def test_loaded_ai_priority_does_not_intercept_participant_action() -> None:
     environment = _compact_environment()
     state = environment.get_state()
     state.participant_controlled_agent_id = "robot_1"
@@ -496,17 +524,25 @@ def test_loaded_ai_uses_public_priority_cell_without_seeing_human_action() -> No
     assert plan["plan_kind"] == "participant_avoids_priority_cell"
     assert plan["priority_basis"] == "loaded_delivery"
     assert plan["moving_target"] == (4, 3)
-    assert "RIGHT" not in causal_participant_actions(environment)
-    blocked, evidence = guard_participant_action(environment, "RIGHT")
-    assert blocked == "WAIT"
-    assert evidence["blocked_reason"] == (
-        "reserved_priority_cell_requires_prior_clearance"
-    )
+    assert "RIGHT" in causal_participant_actions(environment)
+    submitted, evidence = guard_participant_action(environment, "RIGHT")
+    assert submitted == "RIGHT"
+    assert evidence["blocked"] is False
+    assert evidence["blocked_reason"] is None
+    assert evidence["collision_protection_applied"] is False
 
     selected, runtime = select_human_ai_action(environment, "LEFT")
-    assert selected == "LEFT"
     assert runtime["participant_action_known_at_decision_time"] is False
-    assert runtime["selected_ai_action"]["safe_for_all_participant_actions"] is True
+    risky_left = next(
+        item
+        for item in runtime["ai_action_candidates"]
+        if item["action"] == "LEFT"
+    )
+    assert {
+        "participant_action": "RIGHT",
+        "kind": "same_target",
+    } in risky_left["collision_counterfactuals"]
+    assert selected in ACTIONS
 
 
 def test_joint_runtime_rejects_a_teacher_action_when_pareto_dominated() -> None:
@@ -609,14 +645,14 @@ def test_human_ai_charger_handoff_is_public_causal_and_two_phase() -> None:
         "PASS_THROUGH",
     ]
 
-    # The participant cannot enter Robot 2's currently occupied cell before
-    # observing a completed clearance transition.
-    assert "LEFT" not in causal_participant_actions(environment)
-    guarded, guard = guard_participant_action(environment, "LEFT")
-    assert guarded == "WAIT"
-    assert guard["blocked_reason"] == (
-        "occupied_peer_cell_requires_unobserved_current_action"
-    )
+    # The interface may recommend waiting, but it must not replace a
+    # participant command. Any resulting robot conflict is scored by the
+    # atomic environment transition.
+    assert "LEFT" in causal_participant_actions(environment)
+    submitted, guard = guard_participant_action(environment, "LEFT")
+    assert submitted == "LEFT"
+    assert guard["blocked"] is False
+    assert guard["collision_protection_applied"] is False
 
     selected, runtime = select_human_ai_action(environment, "WAIT")
     assert selected == "LEFT"

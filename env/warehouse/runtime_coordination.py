@@ -34,48 +34,26 @@ def _target(agent: Any, action: str) -> tuple[int, int]:
 
 
 def causal_participant_actions(environment: Any) -> tuple[str, ...]:
-    """Actions a participant can submit without assuming a private AI move.
+    """Statically legal actions a participant may choose from ``S_t``.
 
-    Entering Robot 2's currently occupied cell is not causal in a simultaneous
-    Human-AI round: it is safe only if the participant already knows that the
-    AI will vacate.  AI-AI joint optimization does not use this restriction
-    and may still select a safe same-frame hand-off.
+    Teammate occupancy and right-of-way reservations deliberately do not mask
+    participant commands.  In a simultaneous Human-AI round, the participant
+    owns Robot 1's decision: a command that conflicts with Robot 2 must reach
+    the environment unchanged so the atomic joint-motion resolver can record
+    the collision and apply its score penalty.  Only walls and map boundaries
+    are excluded here when Robot 2 evaluates counterfactual human actions.
     """
 
     state = environment.get_state()
     participant_id = environment.config.human_agent_id
-    participant = state.by_id(participant_id)
-    teammate = next(
-        agent for agent in state.agents if agent.agent_id != participant_id
-    )
-    plan = state.active_coordination_plan or {}
-    reserved_priority_target: tuple[int, int] | None = None
-    if (
-        str(plan.get("priority_agent_id", "")) == teammate.agent_id
-        and str(plan.get("yielding_agent_id", "")) == participant_id
-        and str(plan.get("moving_agent_id", "")) == teammate.agent_id
-        and str(plan.get("phase", "")) in {"PASS_THROUGH", "SINGLE_STEP"}
-    ):
-        raw_target = tuple(plan.get("moving_target", ()))
-        if len(raw_target) == 2:
-            reserved_priority_target = (int(raw_target[0]), int(raw_target[1]))
-    result: list[str] = []
-    for action, allowed in zip(ACTIONS, environment.action_masks()[participant_id]):
-        if allowed <= 0.5:
-            continue
-        if _target(participant, action) == teammate.position and action != "WAIT":
-            continue
-        if (
-            reserved_priority_target is not None
-            and _target(participant, action) == reserved_priority_target
-            and action != "WAIT"
-        ):
-            # The right-of-way reservation is public in S_t.  Disabling the
-            # one command that would enter the AI's reserved next cell lets
-            # the AI prove safety against every action the participant can
-            # actually submit, without observing their current choice.
-            continue
-        result.append(action)
+    result = [
+        action
+        for action, allowed in zip(
+            ACTIONS,
+            environment.action_masks()[participant_id],
+        )
+        if allowed > 0.5
+    ]
     return tuple(result or ("WAIT",))
 
 
@@ -83,43 +61,27 @@ def guard_participant_action(
     environment: Any,
     requested_action: str,
 ) -> tuple[str, dict[str, Any]]:
-    """Apply the public S_t-only participant submission contract."""
+    """Preserve every recognized participant command for atomic resolution.
+
+    This function remains as an evidence boundary for callers, but it is not
+    a collision-avoidance filter.  Static impossibilities are resolved by the
+    environment (and reported as invalid moves); robot conflicts are resolved
+    as collisions with the configured score penalty.
+    """
 
     requested = str(requested_action)
-    allowed = causal_participant_actions(environment)
-    selected = requested if requested in allowed else "WAIT"
+    selected = requested if requested in ACTIONS else "WAIT"
+    statically_legal = causal_participant_actions(environment)
     state = environment.get_state()
-    participant = state.by_id(environment.config.human_agent_id)
-    teammate = next(
-        agent
-        for agent in state.agents
-        if agent.agent_id != environment.config.human_agent_id
-    )
-    plan = state.active_coordination_plan or {}
-    raw_reserved_target = tuple(plan.get("moving_target", ()))
-    reserved_target = (
-        (int(raw_reserved_target[0]), int(raw_reserved_target[1]))
-        if len(raw_reserved_target) == 2
-        and str(plan.get("priority_agent_id", "")) == teammate.agent_id
-        and str(plan.get("yielding_agent_id", "")) == participant.agent_id
-        and str(plan.get("moving_agent_id", "")) == teammate.agent_id
-        and str(plan.get("phase", "")) in {"PASS_THROUGH", "SINGLE_STEP"}
-        else None
-    )
     return selected, {
         "requested_action": requested,
         "selected_action": selected,
-        "legal_actions": list(allowed),
+        "legal_actions": list(statically_legal),
+        "statically_legal": requested in statically_legal,
+        "collision_protection_applied": False,
         "blocked": selected != requested,
         "blocked_reason": (
-            "occupied_peer_cell_requires_unobserved_current_action"
-            if selected != requested
-            and _target(participant, requested) == teammate.position
-            else "reserved_priority_cell_requires_prior_clearance"
-            if selected != requested
-            and reserved_target is not None
-            and _target(participant, requested) == reserved_target
-            else "invalid_or_noncausal_participant_action"
+            "unknown_participant_action"
             if selected != requested
             else None
         ),

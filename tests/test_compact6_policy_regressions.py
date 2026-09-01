@@ -500,6 +500,97 @@ def test_participant_collision_action_reaches_environment_and_costs_200() -> Non
     assert after.score_breakdown["robot_collision"] == -200
 
 
+def test_participant_standoff_retreat_is_explained_as_yield_not_detour() -> None:
+    environment = _compact_environment()
+    state = environment.get_state()
+    state.participant_controlled_agent_id = "robot_1"
+    state.ineffective_joint_wait_streak = 1
+    participant = state.by_id("robot_1")
+    participant.position = (2, 3)
+    participant.last_executed_action = "WAIT"
+    participant.navigation_goal_kind = "delivery"
+    participant.navigation_goal_position = (1, 0)
+    ai = state.by_id("robot_2")
+    ai.position = (2, 4)
+    ai.battery = 74.0
+    ai.carrying_task_id = "task_x"
+    ai.route_commitment_task_id = "task_x"
+    ai.goal_type = "GO_TO_DROPOFF"
+    ai.goal_id = "task_x"
+    ai.navigation_goal_kind = "delivery"
+    ai.navigation_goal_position = (1, 0)
+    state.tasks = [
+        DeliveryTask(
+            "task_x",
+            (0, 3),
+            (1, 0),
+            status="carried",
+            carrier_agent_id="robot_2",
+            created_frame=0,
+            claimed_frame=0,
+        ),
+        DeliveryTask("task_y", (2, 6), (3, 0), created_frame=0),
+    ]
+    environment.set_state(state)
+
+    selected, runtime = select_human_ai_action(environment, "WAIT")
+    assert selected == "RIGHT"
+    actions = {"robot_1": "WAIT", "robot_2": selected}
+    distribution = ActionDistribution(
+        agent_id="robot_2",
+        actions=tuple(ACTIONS),
+        probabilities=(0.1, 0.1, 0.1, 0.1, 0.6),
+        logits=(0.0, 0.0, 0.0, 0.0, 1.0),
+        action_mask=(1.0, 1.0, 1.0, 1.0, 1.0),
+        proposed_action="WAIT",
+    )
+    _, _, _, _, info = environment.step(
+        actions,
+        decision_metadata=distribution_decision_metadata(
+            {"robot_1": distribution, "robot_2": distribution},
+            decision_source="test_participant_standoff_clearance",
+            participant_overrides={"robot_1": "WAIT"},
+            policy_actions={"robot_1": "WAIT", "robot_2": "WAIT"},
+            selected_actions=actions,
+            runtime_decision={**runtime, "selected_actions": actions},
+        ),
+    )
+    trace = info["decision_trace"]
+    decision = trace["agents"]["robot_2"]
+
+    assert decision["primary_reason_code"] == "CLEAR_PARTICIPANT_STANDOFF"
+    assert any(
+        event["event"] == "participant_standoff_clearance"
+        for event in decision["coordination_evidence"]
+    )
+    assert trace["fact_valid"] is True
+
+    explainer = _Explainer()
+    chinese = explainer._decision_trace_explanation(
+        trace,
+        target_agent="robot_2",
+        focus="action",
+        language="zh-CN",
+    )
+    english = explainer._decision_trace_explanation(
+        trace,
+        target_agent="robot_2",
+        focus="action",
+        language="en",
+    )
+
+    assert chinese is not None
+    assert "给机器人1让路" in chinese
+    assert "狭窄通道" in chinese
+    assert "继续前往B1交付" in chinese
+    assert "绕路" not in chinese
+    assert english is not None
+    assert "yield to Robot 1" in english
+    assert "narrow aisle" in english
+    assert "continue toward B1" in english
+    assert "detour" not in english
+
+
 def test_loaded_ai_priority_does_not_intercept_participant_action() -> None:
     environment = _compact_environment()
     state = environment.get_state()

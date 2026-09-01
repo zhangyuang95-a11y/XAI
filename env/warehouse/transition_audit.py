@@ -478,6 +478,22 @@ def _decision_reason_code(
         if str(coordination_plan.get("moving_agent_id")) == agent_id:
             return "PRIORITY_ROUTE_PROGRESS"
     if (
+        executed_action in MOVE_DELTAS
+        and any(
+            str(event.get("event", "")) == "participant_standoff_clearance"
+            and str(event.get("agent_id", "")) == agent_id
+            and str(event.get("action", "")) == executed_action
+            for event in getattr(next_state, "last_coordination_events", ())
+            if isinstance(event, Mapping)
+        )
+    ):
+        # This evidence is derived entirely from the completed state before
+        # the decision: after an observed participant WAIT, the AI makes one
+        # robust retreat to open aisle space.  It may temporarily increase
+        # mission distance, but it is necessary yielding rather than a policy
+        # detour.
+        return "CLEAR_PARTICIPANT_STANDOFF"
+    if (
         executed_action == "WAIT"
         and before.position == environment.layout.charger_position
         and after.battery > before.battery
@@ -639,6 +655,19 @@ def validate_decision_trace(
                 and bool(uncertainty.get("collision_counterfactuals"))
             ):
                 failures.append(f"{agent_id}:human_wait_without_counterfactual")
+        if reason == "CLEAR_PARTICIPANT_STANDOFF":
+            evidence = decision.get("coordination_evidence", ())
+            if not any(
+                isinstance(event, Mapping)
+                and str(event.get("event", ""))
+                == "participant_standoff_clearance"
+                and str(event.get("agent_id", "")) == agent_id
+                and str(event.get("action", "")) == action
+                for event in evidence
+            ):
+                failures.append(
+                    f"{agent_id}:standoff_clearance_without_evidence"
+                )
         if reason == "LEAVE_CHARGER_THRESHOLD_MET":
             charging = decision.get("charging_state", {})
             threshold = float(charging.get("release_threshold", 101.0))
@@ -896,6 +925,19 @@ def build_decision_trace(
                 ),
                 "collision_counterfactuals": list(collision_counterfactuals),
             },
+            "coordination_evidence": [
+                dict(event)
+                for event in getattr(next_state, "last_coordination_events", ())
+                if isinstance(event, Mapping)
+                and (
+                    str(event.get("agent_id", "")) == agent_id
+                    or str(event.get("yielding_agent_id", "")) == agent_id
+                    or str(event.get("passing_agent_id", "")) == agent_id
+                    or str(event.get("priority_agent_id", "")) == agent_id
+                    or str(event.get("waiting_agent_id", "")) == agent_id
+                    or str(event.get("moving_agent_id", "")) == agent_id
+                )
+            ],
             "rejected_action_reasons": [
                 {
                     "action": str(item.get("action", "")),

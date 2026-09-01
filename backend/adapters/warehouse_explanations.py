@@ -269,6 +269,10 @@ class WarehouseExplanationMixin:
                 return f"{robot} had {current_battery:g}% battery, while even the least costly safe delivery required {least_required:g}%, so it needed to charge first."
 
         if focus == "collaboration":
+            if reason == "CLEAR_PARTICIPANT_STANDOFF":
+                if language == "zh-CN":
+                    return f"队友影响了本步：{robot}{action}为{teammate}让出通道空间，避免双方在狭窄区域发生冲突。"
+                return f"The teammate affected this step: {robot} moved {action} to leave aisle space for {teammate} and avoid a conflict in the narrow area."
             if plan:
                 priority, basis = priority_clause()
                 if str(plan.get("waiting_agent_id", "")) == target_agent:
@@ -356,6 +360,25 @@ class WarehouseExplanationMixin:
                     return f"{robot}{action}离开充电站，是为了给低电量的{priority}清空{purpose}的下一格。"
                 return f"{robot}{action}是为了给{priority}清空{purpose}的下一格。"
             return f"{robot} moved {action} to clear the next cell on {priority}'s route."
+
+        if reason == "CLEAR_PARTICIPANT_STANDOFF":
+            goal_type = str(frozen_goal.get("goal_type", ""))
+            if goal_type == "GO_TO_DROPOFF" or decision.get("carrying_task_id"):
+                target_zh = delivery_label(goal_id)
+                target_en = delivery_label(goal_id)
+                continuation_zh = f"继续前往{target_zh}交付"
+                continuation_en = f"continue toward {target_en} to deliver the cargo"
+            elif goal_type == "GO_TO_PICKUP":
+                target_zh = pickup_label(goal_id)
+                target_en = pickup_label(goal_id)
+                continuation_zh = f"继续前往{target_zh}取货"
+                continuation_en = f"continue toward {target_en} to collect the cargo"
+            else:
+                continuation_zh = "继续执行当前任务"
+                continuation_en = "continue its current task"
+            if language == "zh-CN":
+                return f"{robot}{action}是为了给{teammate}让路，避免双方在狭窄通道发生冲突。虽然这一步暂时远离当前目标，但避让后它会{continuation_zh}。"
+            return f"{robot} moved {action} to yield to {teammate} and avoid a conflict in the narrow aisle. Although this temporarily moved it away from its current goal, it will {continuation_en} after yielding."
 
         if reason == "WAIT_FOR_PRIORITY_PASSAGE":
             priority, basis = priority_clause()

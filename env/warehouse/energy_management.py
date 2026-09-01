@@ -383,13 +383,55 @@ def charge_release_evidence(
     hysteresis_energy = float(
         hysteresis_steps * environment.config.move_battery_cost
     )
-    threshold = float(min(100.0, required + hysteresis_energy))
+    # In Human-AI play, an AI leaving the station on the exact ordinary
+    # threshold can immediately meet a low-energy participant on the only
+    # approach lane.  One public two-phase clearance then consumes the whole
+    # ordinary coordination reserve and forces a return.  When that conflict
+    # is already visible in S_t, retain exactly one additional charging wait
+    # before departure.  This is state-derived energy planning—not an action
+    # override—and is exposed verbatim in DecisionTrace/explanations.
+    coordination_contention_energy = 0.0
+    participant_id = state.participant_controlled_agent_id
+    if (
+        participant_id is not None
+        and agent.agent_id != participant_id
+        and agent.position == environment.layout.charger_position
+    ):
+        participant = state.by_id(participant_id)
+        participant_distance = shortest_path_distance(
+            participant.position,
+            environment.layout.charger_position,
+            environment.config.map_layout_id,
+        )
+        if (
+            participant.position != environment.layout.charger_position
+            and participant_distance
+            <= int(environment.config.coordination_energy_reserve_steps) + 2
+            and environment._requires_charge(state, participant)
+        ):
+            coordination_contention_energy = float(
+                environment.config.charge_per_wait
+            )
+    coordination_contention_steps = float(
+        coordination_contention_energy
+        / environment.config.move_battery_cost
+    )
+    threshold = float(
+        min(
+            100.0,
+            required
+            + hysteresis_energy
+            + coordination_contention_energy,
+        )
+    )
     return {
         **controlling,
         "candidate_tasks": tuple(candidates),
         "move_battery_cost": float(environment.config.move_battery_cost),
         "hysteresis_steps": hysteresis_steps,
         "hysteresis_energy": hysteresis_energy,
+        "coordination_contention_steps": coordination_contention_steps,
+        "coordination_contention_energy": coordination_contention_energy,
         "release_threshold": threshold,
     }
 

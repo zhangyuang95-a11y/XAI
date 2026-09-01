@@ -35,10 +35,19 @@ from env.warehouse.environment import (
     WarehouseMultiAgentEnv,
     WarehouseState,
 )
-from env.warehouse.contracts import ACTION_EXECUTION_VERSION, RUNTIME_CONTROLLER
+from env.warehouse.contracts import (
+    ACTION_EXECUTION_VERSION,
+    RUNTIME_ACTION_SOURCE,
+    RUNTIME_CONTROLLER,
+)
 from env.warehouse.decision_protocol import distribution_decision_metadata
 from env.warehouse.layouts import DEFAULT_MAP_LAYOUT, MapLayout
 from env.warehouse.policy import MAPPOPolicy
+from env.warehouse.runtime_coordination import (
+    causal_participant_actions,
+    guard_participant_action,
+    select_human_ai_action,
+)
 
 from .timeline import Timeline, TimelineFrame
 
@@ -298,14 +307,27 @@ class WarehouseWebSession:
                     "event_tags": self._event_tags(frame),
                 }
             )
+        runtime_overrides = sum(
+            str(
+                (
+                    frame.decision_snapshot.proposed_actions
+                    if frame.decision_snapshot is not None
+                    else {}
+                ).get(agent_id, "WAIT")
+            )
+            != str(frame.actions.get(agent_id, "WAIT"))
+            for frame in self.timeline.frames
+            if frame.decision_snapshot is not None
+            for agent_id in frame.actions
+        )
         return {
             "schema_version": "warehouse-reference-timeline.v2",
             "trajectory_kind": self.trajectory_kind,
             "trajectory_seed": self.trajectory_seed,
             "action_execution_version": ACTION_EXECUTION_VERSION,
             "runtime_controller": RUNTIME_CONTROLLER,
-            "rollout_action_source": "mappo_actor",
-            "post_policy_action_interventions": 0,
+            "rollout_action_source": RUNTIME_ACTION_SOURCE,
+            "post_policy_action_interventions": int(runtime_overrides),
             "agent_control": dict(self.trajectory_agent_control),
             "map_layout_id": self.environment.layout.layout_id,
             "frames": frames,
@@ -340,6 +362,11 @@ class WarehouseWebSession:
         )
         total = int(self.human_study.config.horizon)
         completed = self.human_study.stage == "completed"
+        allowed_human_actions = (
+            list(causal_participant_actions(self.environment))
+            if self.human_study.stage in {"task1", "task2"}
+            else []
+        )
         return {
             "run_id": getattr(self, "run_id", None),
             "stage": self.human_study.stage,
@@ -370,6 +397,7 @@ class WarehouseWebSession:
                 and self.human_study.condition == "explanation"
             ),
             "controlled_agent": "robot_1",
+            "allowed_human_actions": allowed_human_actions,
             "explanation_target_agent": "robot_2",
             "explanation_target_agents": ["robot_2"],
             "tutorial": self._tutorial_payload(),
@@ -1076,20 +1104,37 @@ class WarehouseWebSession:
             deterministic=False,
             decision_key=(decision_state.episode_id, decision_state.frame),
         )
+        ai_action, runtime_decision = select_human_ai_action(
+            self.environment,
+            proposed["robot_2"],
+        )
+        participant_action, participant_guard = guard_participant_action(
+            self.environment,
+            action,
+        )
         requested_joint_actions = {
             **dict(proposed),
-            "robot_1": action,
+            "robot_1": participant_action,
+            "robot_2": ai_action,
         }
-        # Robot 1 is the participant command. Robot 2 is the unmodified,
-        # sampled MAPPO Actor command. Environment dynamics alone may
-        # subsequently block a move or resolve a robot conflict.
+        # Robot 2 is selected from S_t before the participant command is
+        # consulted.  The runtime evidence above proves it against every
+        # causally submit-able human action; both selected actions are still
+        # resolved atomically by one environment step.
         joint_actions = dict(requested_joint_actions)
         _, rewards, terminated, truncated, info = self.environment.step(
             joint_actions,
             decision_metadata=distribution_decision_metadata(
                 distributions,
-                decision_source="participant_plus_pytorch_actor",
+                decision_source="participant_plus_robust_pytorch_actor",
                 participant_overrides={self.environment.config.human_agent_id: action},
+                policy_actions=proposed,
+                selected_actions=joint_actions,
+                runtime_decision={
+                    **runtime_decision,
+                    "participant_action_guard": participant_guard,
+                    "selected_actions": dict(joint_actions),
+                },
             ),
         )
         after = self.adapter.snapshot(self.policy)
@@ -1109,7 +1154,7 @@ class WarehouseWebSession:
                 "human_requested_action": action,
                 "ai_network_action": proposed.get("robot_2"),
                 "ai_submitted_action": joint_actions.get("robot_2"),
-                "action_execution": "independent_simultaneous_mappo_actor",
+                "action_execution": "causal_robust_simultaneous_human_ai",
                 "shared_decision_state_hash": (
                     info.get("decision_trace", {}).get("pre_state_hash")
                     if isinstance(info.get("decision_trace"), Mapping)
@@ -1131,9 +1176,10 @@ class WarehouseWebSession:
             {
                 "frame": int(after.frame),
                 "human_requested_action": action,
+                "human_submitted_action": participant_action,
                 "ai_network_action": proposed.get("robot_2"),
                 "ai_submitted_action": joint_actions.get("robot_2"),
-                "action_execution": "independent_simultaneous_mappo_actor",
+                "action_execution": "causal_robust_simultaneous_human_ai",
                 "executed_actions": dict(info.get("executed_actions", {})),
                 "task_changes": list(info.get("task_changes", ())),
                 "robot_collision_event": bool(info.get("robot_collision_event", False)),

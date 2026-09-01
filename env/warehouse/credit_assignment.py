@@ -8,7 +8,6 @@ does not become a runtime dependency of the environment.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
 from itertools import product
 import math
 from typing import Any, Mapping
@@ -16,11 +15,13 @@ from typing import Any, Mapping
 from .domain import AgentState, DeliveryTask, WarehouseState
 from .coordination_priority import single_lane_egress_agent_id
 from .energy_management import (
+    charger_departure_progress,
     charger_handoff_clearance_action,
     charger_route_is_critical,
     charger_service_required,
 )
 from .navigation import ACTIONS, MOVE_DELTAS, shortest_path_distance
+from .frozen_missions import FrozenMission, frozen_training_missions
 from .transition_audit import (
     action_is_robustly_safe,
     necessary_participant_standoff_clearance,
@@ -32,111 +33,6 @@ from .transition_audit import (
 _CAUSAL_6X7_LAYOUT_ID = (
     "warehouse_staggered_aisles_6x7_v2_three_cell_exit_no_cross"
 )
-
-
-@dataclass(frozen=True)
-class FrozenMission:
-    """One transition-local mission used for stable efficiency credit."""
-
-    goal_kind: str
-    goal_position: tuple[int, int]
-    task: DeliveryTask | None = None
-
-
-def frozen_training_missions(
-    environment: Any,
-    state: WarehouseState,
-) -> dict[str, FrozenMission | None]:
-    """Match each robot once at transition start and freeze that mission."""
-
-    assignments = environment._frozen_task_assignments(
-        state,
-        prioritize_old_tasks=True,
-    )
-    available = {
-        task.task_id: task
-        for task in state.tasks
-        if task.status == "available"
-    }
-    reserved_task_ids = {task.task_id for task in assignments.values()}
-    fallback_task_ids: set[str] = set()
-    missions: dict[str, FrozenMission | None] = {}
-    for agent in state.agents:
-        if not agent.active:
-            missions[agent.agent_id] = None
-            continue
-        if agent.carrying_task_id is not None:
-            task = state.task_by_id(agent.carrying_task_id)
-        else:
-            # A route commitment is public state created by this robot's
-            # previous executed movement.  Re-running the global matching and
-            # silently replacing it for one audit frame makes the teacher,
-            # reward, and explanation disagree about the frozen task and was
-            # the source of the task-9 -> task-8 -> charger oscillation.
-            task = (
-                available.get(agent.route_commitment_task_id)
-                if agent.route_commitment_task_id is not None
-                else None
-            )
-            if (
-                task is None
-                and agent.goal_type == "GO_TO_PICKUP"
-                and agent.goal_id is not None
-            ):
-                task = available.get(agent.goal_id)
-            if task is None:
-                task = assignments.get(agent.agent_id)
-            if task is None and charger_service_required(
-                environment,
-                state,
-                agent,
-            ):
-                task = min(
-                    (
-                        item
-                        for item in available.values()
-                        if item.task_id not in reserved_task_ids
-                        and item.task_id not in fallback_task_ids
-                    ),
-                    key=lambda item: (
-                        environment._safe_task_cost(state, agent, item),
-                        item.task_id,
-                    ),
-                    default=None,
-                )
-                if task is None:
-                    task = min(
-                        available.values(),
-                        key=lambda item: (
-                            environment._safe_task_cost(state, agent, item),
-                            item.task_id,
-                        ),
-                        default=None,
-                    )
-                if task is not None:
-                    fallback_task_ids.add(task.task_id)
-        if task is None:
-            missions[agent.agent_id] = None
-            continue
-        if charger_service_required(environment, state, agent):
-            missions[agent.agent_id] = FrozenMission(
-                "charge",
-                environment.layout.charger_position,
-                task,
-            )
-        elif agent.carrying_task_id is not None:
-            missions[agent.agent_id] = FrozenMission(
-                "delivery",
-                task.delivery_position,
-                task,
-            )
-        else:
-            missions[agent.agent_id] = FrozenMission(
-                "pickup",
-                task.pickup_position,
-                task,
-            )
-    return missions
 
 
 def frozen_mission_cost(
@@ -529,20 +425,13 @@ def counterfactual_action_regrets(
 ]:
     """Compute per-robot one-step regret with the teammate action fixed."""
 
-    exempt_agents: set[str] = set()
     coordination_yield_agents: set[str] = set()
-    verified_plan_yield_agents: set[str] = set()
     for event in coordination_events:
         kind = str(event.get("event", ""))
         if kind == "joint_coordination_plan":
-            individually_aligned = event.get("agent_request_aligned", {})
-            if not isinstance(individually_aligned, Mapping):
-                individually_aligned = event.get("agent_execution_aligned", {})
-            if isinstance(individually_aligned, Mapping):
-                for agent_id, aligned in individually_aligned.items():
-                    if bool(aligned):
-                        exempt_agents.add(str(agent_id))
-                        verified_plan_yield_agents.add(str(agent_id))
+            # A plan is audited below like any other action. Alignment alone
+            # cannot excuse a dominated WAIT or mission regression.
+            continue
         elif kind == "coordination_yield":
             yielding_id = str(event.get("yielding_agent_id", ""))
             passing_id = str(event.get("passing_agent_id", ""))
@@ -551,12 +440,7 @@ def counterfactual_action_regrets(
                 or str(requested_actions.get(passing_id, "WAIT"))
                 in MOVE_DELTAS
             ):
-                exempt_agents.add(yielding_id)
                 coordination_yield_agents.add(yielding_id)
-                if event.get("plan_id"):
-                    verified_plan_yield_agents.add(yielding_id)
-        elif kind == "charger_queue":
-            exempt_agents.add(str(event.get("waiting_agent_id", "")))
 
     regrets = {agent.agent_id: 0.0 for agent in state.agents}
     best_distances: dict[str, float] = {}
@@ -608,6 +492,17 @@ def counterfactual_action_regrets(
             if agent.agent_id in invalid or collision:
                 continue
             candidate_target = targets[agent.agent_id]
+            if (
+                candidate_target == environment.layout.charger_position
+                and agent.position != environment.layout.charger_position
+                and agent.last_charger_departure_frame is not None
+                and 0 <= state.frame - agent.last_charger_departure_frame <= 6
+                and not any(charger_departure_progress(state, agent))
+            ):
+                # Re-entering before mission or coordination progress is the
+                # exact departure/return cycle the temporal contract forbids;
+                # it cannot serve as a counterfactual proving WAIT avoidable.
+                continue
             remaining_battery = (
                 agent.battery - environment.config.move_battery_cost
                 if candidate_action in MOVE_DELTAS
@@ -658,7 +553,7 @@ def counterfactual_action_regrets(
         best_distance = min(candidate_distances)
         best_distances[agent.agent_id] = best_distance
         action = str(requested_actions.get(agent.agent_id, "WAIT"))
-        exempt = agent.agent_id in exempt_agents
+        exempt = False
         charger_handoff_action = None
         if action == "WAIT" and agent.position == environment.layout.charger_position:
             teammate = next(
@@ -692,6 +587,14 @@ def counterfactual_action_regrets(
                 trial[agent.agent_id] = candidate_action
                 targets = environment._resolve_motion(state, trial)[0]
                 candidate_target = targets[agent.agent_id]
+                if (
+                    candidate_target == environment.layout.charger_position
+                    and agent.position != environment.layout.charger_position
+                    and agent.last_charger_departure_frame is not None
+                    and 0 <= state.frame - agent.last_charger_departure_frame <= 6
+                    and not any(charger_departure_progress(state, agent))
+                ):
+                    continue
                 remaining_battery = (
                     agent.battery - environment.config.move_battery_cost
                     if candidate_action in MOVE_DELTAS
@@ -741,10 +644,7 @@ def counterfactual_action_regrets(
             else:
                 best_distance = min(robust_distances)
                 best_distances[agent.agent_id] = best_distance
-                if (
-                    agent.agent_id in coordination_yield_agents
-                    and agent.agent_id not in verified_plan_yield_agents
-                ):
+                if agent.agent_id in coordination_yield_agents:
                     # A same-target conflict with one candidate action does
                     # not justify WAIT when another action is safe against
                     # every legal teammate move and advances the same frozen

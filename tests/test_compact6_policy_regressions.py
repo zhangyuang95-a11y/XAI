@@ -9,6 +9,15 @@ from env.warehouse.domain import DeliveryTask, collaborative_study_config
 from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.observations import _actor_action_mask
+from env.warehouse.runtime_coordination import (
+    causal_participant_actions,
+    guard_participant_action,
+    select_ai_ai_joint_actions,
+    select_human_ai_action,
+)
+from env.warehouse.energy_management import charge_release_evidence
+from env.warehouse.decision_protocol import distribution_decision_metadata
+from core.policy_contracts import ActionDistribution
 from backend.adapters.warehouse_explanations import WarehouseExplanationMixin
 
 
@@ -144,26 +153,44 @@ def _priority(environment: WarehouseMultiAgentEnv):
     )
 
 
-def test_charger_route_is_reserved_before_both_robots_enter_bottleneck() -> None:
+def test_future_charger_route_overlap_does_not_serialize_safe_progress() -> None:
     environment = _compact_environment()
     _install_frame_101_charger_reservation(environment)
 
-    # Robot 1 parks on the right apron while robot 2 makes simultaneous
-    # charger progress. It must not enter (5,2)->(4,2) and reverse later.
-    assert stable_coordination_actions(environment) == {
-        "robot_1": "RIGHT",
+    selected, evidence = select_ai_ai_joint_actions(
+        environment,
+        stable_coordination_actions(environment),
+    )
+    # A possible overlap several frames later is not an immediate conflict.
+    # Both robots advance now; the atomic selector will re-evaluate the real
+    # bottleneck from the next frozen state instead of parking Robot 1 early.
+    assert selected == {
+        "robot_1": "LEFT",
         "robot_2": "DOWN",
     }
+    assert evidence["selected_joint_action"]["score_breakdown"][
+        "progressing_agents"
+    ] == 2
+    assert evidence["selected_joint_action"]["score_breakdown"][
+        "short_cycles"
+    ] == 0
 
 
-def test_parked_robot_holds_until_charger_route_no_longer_conflicts() -> None:
+def test_robot_does_not_remain_parked_for_speculative_charger_overlap() -> None:
     environment = _compact_environment()
     _install_frame_101_charger_reservation(environment, parked=True)
 
-    assert stable_coordination_actions(environment) == {
-        "robot_1": "WAIT",
+    selected, evidence = select_ai_ai_joint_actions(
+        environment,
+        stable_coordination_actions(environment),
+    )
+    assert selected == {
+        "robot_1": "UP",
         "robot_2": "DOWN",
     }
+    assert evidence["selected_joint_action"]["score_breakdown"][
+        "noncharging_waits"
+    ] == 0
 
 
 def test_ai_holds_queue_cell_while_participant_is_charging() -> None:
@@ -341,7 +368,7 @@ def test_loaded_priority_explanation_names_cargo_priority_and_exact_energy() -> 
     assert "预计需30%" in energy
 
 
-def test_wait_without_counterfactual_proof_is_not_called_inefficient() -> None:
+def test_wait_without_counterfactual_proof_is_honestly_called_inefficient() -> None:
     environment = _compact_environment()
     state = environment.get_state()
     robot_one = state.by_id("robot_1")
@@ -375,5 +402,293 @@ def test_wait_without_counterfactual_proof_is_not_called_inefficient() -> None:
     assert decision["primary_reason_code"] != (
         "AVOIDABLE_WAIT_SAFE_PROGRESS_AVAILABLE"
     )
-    assert explanation is not None and "没有支持" in explanation
-    assert "低效" not in explanation
+    assert explanation is not None and "没有可验证" in explanation
+    assert "低效" in explanation
+
+
+def test_human_ai_unknown_action_wait_records_specific_counterfactual() -> None:
+    environment = _compact_environment()
+    state = environment.get_state()
+    state.participant_controlled_agent_id = "robot_1"
+    human = state.by_id("robot_1")
+    human.position = (4, 2)
+    ai = state.by_id("robot_2")
+    ai.position = (4, 4)
+    task = state.tasks[1]
+    ai.carrying_task_id = None
+    ai.navigation_goal_kind = "pickup"
+    ai.navigation_goal_position = task.pickup_position
+    ai.goal_type = "GO_TO_PICKUP"
+    ai.goal_id = task.task_id
+    ai.route_commitment_task_id = task.task_id
+    environment.set_state(state)
+
+    selected, runtime = select_human_ai_action(environment, "LEFT")
+    assert selected == "WAIT"
+    risky_left = next(
+        item
+        for item in runtime["ai_action_candidates"]
+        if item["action"] == "LEFT"
+    )
+    assert {
+        "participant_action": "RIGHT",
+        "kind": "same_target",
+    } in risky_left["collision_counterfactuals"]
+
+    distribution = ActionDistribution(
+        agent_id="robot_2",
+        actions=tuple(ACTIONS),
+        probabilities=(0.1, 0.1, 0.6, 0.1, 0.1),
+        logits=(0.0, 0.0, 1.0, 0.0, 0.0),
+        action_mask=(1.0, 1.0, 1.0, 1.0, 1.0),
+        proposed_action="LEFT",
+    )
+    _, _, _, _, info = environment.step(
+        {"robot_1": "UP", "robot_2": selected},
+        decision_metadata=distribution_decision_metadata(
+            {"robot_1": distribution, "robot_2": distribution},
+            decision_source="test_human_ai_robust_selection",
+            participant_overrides={"robot_1": "UP"},
+            policy_actions={"robot_1": "UP", "robot_2": "LEFT"},
+            selected_actions={"robot_1": "UP", "robot_2": selected},
+            runtime_decision=runtime,
+        ),
+    )
+    trace = info["decision_trace"]
+    decision = trace["agents"]["robot_2"]
+    assert decision["primary_reason_code"] == (
+        "WAIT_FOR_UNKNOWN_PARTICIPANT_ACTION"
+    )
+    assert decision["human_action_uncertainty"]["collision_counterfactuals"]
+    assert trace["fact_valid"] is True
+    explanation = _Explainer()._decision_trace_explanation(
+        trace,
+        target_agent="robot_2",
+        focus="action",
+        language="en",
+    )
+    assert explanation is not None
+    assert "did not know your current move" in explanation
+    assert "trace" not in explanation.lower()
+
+
+def test_loaded_ai_uses_public_priority_cell_without_seeing_human_action() -> None:
+    environment = _compact_environment()
+    state = environment.get_state()
+    state.participant_controlled_agent_id = "robot_1"
+    state.by_id("robot_1").position = (4, 2)
+    ai = state.by_id("robot_2")
+    ai.position = (4, 4)
+    task = state.tasks[1]
+    task.status = "carried"
+    task.carrier_agent_id = ai.agent_id
+    task.claimed_frame = 0
+    ai.carrying_task_id = task.task_id
+    ai.navigation_goal_kind = "delivery"
+    ai.navigation_goal_position = task.delivery_position
+    ai.goal_type = "GO_TO_DROPOFF"
+    ai.goal_id = task.task_id
+    ai.route_commitment_task_id = task.task_id
+    environment.set_state(state)
+
+    plan = environment.get_state().active_coordination_plan
+    assert plan is not None
+    assert plan["plan_kind"] == "participant_avoids_priority_cell"
+    assert plan["priority_basis"] == "loaded_delivery"
+    assert plan["moving_target"] == (4, 3)
+    assert "RIGHT" not in causal_participant_actions(environment)
+    blocked, evidence = guard_participant_action(environment, "RIGHT")
+    assert blocked == "WAIT"
+    assert evidence["blocked_reason"] == (
+        "reserved_priority_cell_requires_prior_clearance"
+    )
+
+    selected, runtime = select_human_ai_action(environment, "LEFT")
+    assert selected == "LEFT"
+    assert runtime["participant_action_known_at_decision_time"] is False
+    assert runtime["selected_ai_action"]["safe_for_all_participant_actions"] is True
+
+
+def test_joint_runtime_rejects_a_teacher_action_when_pareto_dominated() -> None:
+    environment = _compact_environment()
+    _install_frame_101_charger_reservation(environment, parked=True)
+    policy_actions = {"robot_1": "RIGHT", "robot_2": "DOWN"}
+    selected, runtime = select_ai_ai_joint_actions(environment, policy_actions)
+
+    assert runtime["safe_joint_actions"]
+    assert runtime["rejected_joint_actions"]
+    assert all(
+        item["reason"].startswith("collision:")
+        or item["reason"] == "invalid_static_move"
+        for item in runtime["rejected_joint_actions"]
+    )
+    assert selected == runtime["selected_actions"]
+
+
+def test_exact_zero_energy_arrival_at_charger_remains_active_and_can_charge() -> None:
+    environment = _compact_environment()
+    state = environment.get_state()
+    robot_one = state.by_id("robot_1")
+    robot_two = state.by_id("robot_2")
+    robot_one.position = (5, 2)
+    robot_one.battery = environment.config.move_battery_cost
+    robot_one.navigation_goal_kind = "charge"
+    robot_one.navigation_goal_position = environment.layout.charger_position
+    robot_one.goal_type = "GO_TO_CHARGER"
+    robot_one.goal_id = None
+    robot_one.charge_mode_active = True
+    robot_two.position = (0, 3)
+    robot_two.battery = 100.0
+    environment.set_state(state)
+
+    _, _, terminated, truncated, info = environment.step(
+        {"robot_1": "RIGHT", "robot_2": "WAIT"}
+    )
+    arrived = environment.get_state().by_id("robot_1")
+
+    assert arrived.position == environment.layout.charger_position
+    assert arrived.battery == 0.0
+    assert arrived.active is True
+    assert terminated is False
+    assert truncated is False
+    assert environment.get_state().shutdown_count == 0
+
+    environment.step({"robot_1": "WAIT", "robot_2": "WAIT"})
+    charged = environment.get_state().by_id("robot_1")
+    assert charged.battery == environment.config.charge_per_wait
+    assert charged.active is True
+
+
+def _install_human_ai_charger_handoff(
+    environment: WarehouseMultiAgentEnv,
+) -> None:
+    state = environment.get_state()
+    state.participant_controlled_agent_id = "robot_1"
+    human = state.by_id("robot_1")
+    human.position = (5, 4)
+    human.battery = 20.0
+    human.carrying_task_id = None
+    human.route_commitment_task_id = None
+    human.navigation_goal_kind = "charge"
+    human.navigation_goal_position = environment.layout.charger_position
+    human.goal_type = "GO_TO_CHARGER"
+    human.goal_id = None
+    human.charge_mode_active = True
+
+    ai = state.by_id("robot_2")
+    ai.position = environment.layout.charger_position
+    ai.battery = 40.0
+    ai.carrying_task_id = None
+    ai.route_commitment_task_id = None
+    ai.navigation_goal_kind = "charge"
+    ai.navigation_goal_position = environment.layout.charger_position
+    ai.goal_type = "GO_TO_CHARGER"
+    ai.goal_id = None
+    ai.charge_mode_active = True
+    state.active_coordination_plan = None
+    environment.set_state(state)
+
+
+def test_human_ai_charger_handoff_is_public_causal_and_two_phase() -> None:
+    environment = _compact_environment()
+    _install_human_ai_charger_handoff(environment)
+    before = environment.get_state()
+    plan = before.active_coordination_plan
+
+    assert plan is not None
+    assert plan["plan_kind"] == "charger_handoff_clearance"
+    assert plan["phase"] == "CLEAR_CELL"
+    assert plan["priority_agent_id"] == "robot_1"
+    assert plan["moving_agent_id"] == "robot_2"
+    assert plan["joint_actions"] == {
+        "robot_1": "WAIT",
+        "robot_2": "LEFT",
+    }
+    assert [step["phase"] for step in plan["planned_action_sequence"]] == [
+        "CLEAR_CELL",
+        "PASS_THROUGH",
+    ]
+
+    # The participant cannot enter Robot 2's currently occupied cell before
+    # observing a completed clearance transition.
+    assert "LEFT" not in causal_participant_actions(environment)
+    guarded, guard = guard_participant_action(environment, "LEFT")
+    assert guarded == "WAIT"
+    assert guard["blocked_reason"] == (
+        "occupied_peer_cell_requires_unobserved_current_action"
+    )
+
+    selected, runtime = select_human_ai_action(environment, "WAIT")
+    assert selected == "LEFT"
+    assert runtime["ai_is_planned_clearer"] is True
+    plan_id = str(plan["plan_id"])
+    environment.step({"robot_1": "WAIT", "robot_2": selected})
+
+    middle = environment.get_state()
+    ai = middle.by_id("robot_2")
+    assert ai.position == (5, 2)
+    assert ai.last_charger_departure_was_coordination is True
+    assert ai.last_charger_departure_plan_id == plan_id
+    assert middle.active_coordination_plan is not None
+    assert middle.active_coordination_plan["phase"] == "PASS_THROUGH"
+
+    selected, runtime = select_human_ai_action(environment, "UP")
+    assert selected == "WAIT"
+    assert runtime["ai_is_planned_waiter"] is True
+    assert "LEFT" in causal_participant_actions(environment)
+    environment.step({"robot_1": "LEFT", "robot_2": selected})
+    after = environment.get_state()
+    assert after.by_id("robot_1").position == environment.layout.charger_position
+    assert after.active_coordination_plan is None
+
+
+def test_visible_charger_contention_is_part_of_threshold_and_explanation() -> None:
+    environment = _compact_environment()
+    _install_human_ai_charger_handoff(environment)
+    state = environment.get_state()
+    ai = state.by_id("robot_2")
+    evidence = charge_release_evidence(environment, state, ai)
+
+    assert evidence["coordination_contention_energy"] == (
+        environment.config.charge_per_wait
+    )
+    assert evidence["coordination_contention_steps"] == (
+        environment.config.charge_per_wait
+        / environment.config.move_battery_cost
+    )
+    assert evidence["release_threshold"] == min(
+        100.0,
+        evidence["route_energy"]
+        + evidence["hysteresis_energy"]
+        + evidence["coordination_contention_energy"],
+    )
+
+    # Use a stationary charger state to exercise the participant-facing
+    # explanation independently from the handoff clearance action.
+    state.active_coordination_plan = None
+    state.by_id("robot_1").position = (4, 3)
+    state.by_id("robot_2").position = environment.layout.charger_position
+    state.by_id("robot_2").battery = 30.0
+    environment.set_state(state)
+    _, _, _, _, info = environment.step(
+        {"robot_1": "WAIT", "robot_2": "WAIT"}
+    )
+    trace = info["decision_trace"]
+    explainer = _Explainer()
+    chinese = explainer._decision_trace_explanation(
+        trace,
+        target_agent="robot_2",
+        focus="energy",
+        language="zh-CN",
+    )
+    english = explainer._decision_trace_explanation(
+        trace,
+        target_agent="robot_2",
+        focus="energy",
+        language="en",
+    )
+
+    assert chinese is not None and "充电通道交接" in chinese
+    assert "10%" in chinese
+    assert english is not None and "visible charger handoff" in english
+    assert "10%" in english

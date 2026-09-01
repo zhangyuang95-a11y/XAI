@@ -417,6 +417,14 @@ def frozen_joint_coordination_plan(
             )
             if moving_action is None:
                 return None
+            joint_actions = {
+                agent.agent_id: (
+                    moving_action
+                    if agent.agent_id == priority_id
+                    else "WAIT"
+                )
+                for agent in state.agents
+            }
             return {
                 **dict(stored),
                 "plan_kind": "priority_followthrough",
@@ -426,6 +434,12 @@ def frozen_joint_coordination_plan(
                 "moving_action": moving_action,
                 "moving_target": occupied_position,
                 "yielding_agent_id": clearing_id,
+                # A stored CLEAR_CELL plan carries the previous phase's
+                # joint action.  Replace it atomically when roles change;
+                # otherwise every consumer that correctly prioritizes the
+                # public joint contract repeats the clearing move and the
+                # supposed waiter walks away again.
+                "joint_actions": joint_actions,
                 "reason_code": "priority_route_followthrough",
                 "expected_duration_frames": 1,
                 "completion_condition": "priority_robot_enters_cleared_route",
@@ -518,18 +532,103 @@ def frozen_joint_coordination_plan(
         requires_charge=requires_charge,
         imminent_head_on=imminent_head_on_encounter(state, config, goals),
     )
-    horizon_plan = (
-        None
-        if archived_8x9
-        else _short_horizon_charger_plan(
-            state,
-            config,
-            goals=goals,
-            priority=priority,
+    participant_id = state.participant_controlled_agent_id
+    if participant_id is not None and not archived_8x9:
+        # Human-AI decisions cannot condition on the participant's private
+        # current command.  When a loaded (or genuinely charger-critical) AI
+        # has priority but every mission-progress cell could also be entered
+        # by a currently submittable participant action, publish a one-step
+        # right-of-way reservation from S_t.  The UI/guard removes only that
+        # contested target from this frame's participant choices; all other
+        # actions remain available.  Without this causal public reservation a
+        # loaded AI can WAIT forever under worst-case safety even while the
+        # participant visibly waits, as happened in acceptance seed 51054.
+        ai_agent = next(
+            (
+                agent
+                for agent in active
+                if agent.agent_id != participant_id
+            ),
+            None,
         )
-    )
-    if horizon_plan is not None:
-        return horizon_plan
+        participant = state.by_id(participant_id)
+        priority_bases = {
+            "loaded_delivery",
+            "critical_charger_route",
+            "urgent_charger_route",
+            "lower_energy_charger_waiter",
+            "charger_clearance_commitment",
+        }
+        if (
+            ai_agent is not None
+            and priority.agent_id == ai_agent.agent_id
+            and (
+                ai_agent.carrying_task_id is not None
+                or str(priority.basis) in priority_bases
+            )
+        ):
+            participant_mask = legal_action_mask(
+                state,
+                participant,
+                config.map_layout_id,
+            )
+            participant_targets = {
+                (
+                    participant.position
+                    if action == "WAIT"
+                    else (
+                        participant.position[0] + MOVE_DELTAS[action][0],
+                        participant.position[1] + MOVE_DELTAS[action][1],
+                    )
+                )
+                for action, allowed in zip(ACTIONS, participant_mask)
+                if allowed > 0.5
+            }
+            ai_progress = tuple(
+                item
+                for item in progress_actions.get(ai_agent.agent_id, ())
+                if item[2] != participant.position
+            )
+            uncontested = tuple(
+                item for item in ai_progress if item[2] not in participant_targets
+            )
+            if ai_progress and not uncontested:
+                _, moving_action, moving_target = min(ai_progress)
+                priority_goal_id = (
+                    ai_agent.carrying_task_id
+                    or ai_agent.route_commitment_task_id
+                    or ai_agent.goal_id
+                )
+                return {
+                    "plan_id": (
+                        f"coord:{state.episode_id}:{state.frame}:human-reserve:"
+                        f"{ai_agent.agent_id}:{participant.agent_id}:"
+                        f"{moving_target[0]}:{moving_target[1]}"
+                    ),
+                    "plan_kind": "participant_avoids_priority_cell",
+                    "phase": "SINGLE_STEP",
+                    "priority_agent_id": ai_agent.agent_id,
+                    "waiting_agent_id": participant.agent_id,
+                    "moving_agent_id": ai_agent.agent_id,
+                    "moving_action": moving_action,
+                    "moving_target": moving_target,
+                    "yielding_agent_id": participant.agent_id,
+                    "priority_basis": priority.basis,
+                    "priority_goal_id": priority_goal_id,
+                    "reason_code": "public_priority_cell_reservation",
+                    "expected_duration_frames": 1,
+                    "completion_condition": "priority_robot_advances",
+                    "resume_condition": "reserved_cell_released_next_frame",
+                    "derived_from_frame": state.frame,
+                }
+    # Do not turn a predicted route overlap into a one-frame right-of-way
+    # contract.  Those speculative reservations were recreated on every
+    # frame and could force a robot to leave its committed route, producing
+    # exactly the DOWN->UP / LEFT->RIGHT cycles the public audit is meant to
+    # reject.  The authoritative runtime evaluates all 25 atomic joint
+    # actions and scores the resulting next-state bottleneck directly.  A
+    # persistent plan is reserved for an occupied unique next cell or an
+    # immediate same-target/head-on conflict below.
     # Do not manufacture a single-lane conflict from mere proximity.  If
     # both frozen goals have progress moves into different free cells, both
     # Actors can advance simultaneously without a right-of-way handshake.
@@ -612,27 +711,35 @@ def frozen_joint_coordination_plan(
     ):
         return None
     if not uniquely_blocked:
-        clearing_static_mask = legal_action_mask(
-            state,
-            clearing,
-            config.map_layout_id,
-        )
-        clearing_reachable_targets = {
-            (
-                clearing.position
-                if action == "WAIT"
-                else (
-                    clearing.position[0] + MOVE_DELTAS[action][0],
-                    clearing.position[1] + MOVE_DELTAS[action][1],
-                )
+        if archived_8x9:
+            # Preserve the archived study artifact's conservative contract;
+            # it is not served by the new 6x7 causal joint runtime.
+            clearing_static_mask = legal_action_mask(
+                state,
+                clearing,
+                config.map_layout_id,
             )
-            for action, allowed in zip(ACTIONS, clearing_static_mask)
-            if allowed > 0.5
-        }
-        potential_same_target_conflict = bool(
-            progress_cells & clearing_reachable_targets
-        )
-        if not head_on and not potential_same_target_conflict:
+            clearing_reachable_targets = {
+                (
+                    clearing.position
+                    if action == "WAIT"
+                    else (
+                        clearing.position[0] + MOVE_DELTAS[action][0],
+                        clearing.position[1] + MOVE_DELTAS[action][1],
+                    )
+                )
+                for action, allowed in zip(ACTIONS, clearing_static_mask)
+                if allowed > 0.5
+            }
+            real_shared_target = bool(
+                progress_cells & clearing_reachable_targets
+            )
+        else:
+            # A peer merely *could* enter one of these cells; that is not
+            # evidence that the 6x7 frozen joint decision competes for it.
+            # Only shared mission-progress targets warrant priority.
+            real_shared_target = bool(shared_progress_targets)
+        if not head_on and not real_shared_target:
             return None
         progress_actions: list[tuple[int, str, tuple[int, int]]] = []
         for action_index, action in enumerate(ACTIONS):
@@ -648,6 +755,97 @@ def frozen_joint_coordination_plan(
         if not progress_actions:
             return None
         _, moving_action, moving_target = min(progress_actions)
+        participant_id = state.participant_controlled_agent_id
+        if (
+            not archived_8x9
+            and
+            participant_id is not None
+            and clearing.agent_id == participant_id
+            and waiting.agent_id != participant_id
+        ):
+            # In Human-AI play the AI cannot assume that the participant will
+            # obey a same-frame WAIT while it enters a contested cell.  Make
+            # the clearance an observable first phase instead: the human
+            # leaves every target that could conflict with the AI's next
+            # move, then the AI passes on the following frame.  This preserves
+            # S_t causality without trapping both sides in repeated WAITs.
+            participant_clearance: list[
+                tuple[int, int, int, str, tuple[int, int]]
+            ] = []
+            clearing_goal = goals[clearing.agent_id]
+            for action_index, action in enumerate(ACTIONS):
+                delta = MOVE_DELTAS.get(action)
+                if delta is None:
+                    continue
+                target = (
+                    clearing.position[0] + delta[0],
+                    clearing.position[1] + delta[1],
+                )
+                if (
+                    not layout.is_passable(target)
+                    or target == waiting.position
+                    or target == moving_target
+                    or clearing.battery <= config.move_battery_cost
+                    or (
+                        target == layout.charger_position
+                        and clearing_goal != layout.charger_position
+                    )
+                ):
+                    continue
+                participant_clearance.append(
+                    (
+                        shortest_path_distance(
+                            target,
+                            clearing_goal,
+                            config.map_layout_id,
+                        ),
+                        -shortest_path_distance(
+                            target,
+                            waiting.position,
+                            config.map_layout_id,
+                        ),
+                        action_index,
+                        action,
+                        target,
+                    )
+                )
+            if participant_clearance:
+                _, _, _, clearing_action, clearing_target = min(
+                    participant_clearance
+                )
+                plan_id = (
+                    f"coord:{state.episode_id}:{state.frame}:human-clear:"
+                    f"{waiting.agent_id}:{clearing.agent_id}"
+                )
+                return {
+                    "plan_id": plan_id,
+                    "plan_kind": "participant_clearance_before_ai_pass",
+                    "phase": "CLEAR_CELL",
+                    "priority_agent_id": waiting.agent_id,
+                    "waiting_agent_id": waiting.agent_id,
+                    "clearing_agent_id": clearing.agent_id,
+                    "yielding_agent_id": clearing.agent_id,
+                    "moving_agent_id": clearing.agent_id,
+                    # The contested next cell is intentionally recorded here;
+                    # PASS_THROUGH will move the AI into it only after the
+                    # participant's clearance is visible in the next S_t.
+                    "occupied_position": moving_target,
+                    "clearing_action": clearing_action,
+                    "clearing_target": clearing_target,
+                    "allowed_clearing_actions": (clearing_action,),
+                    "allowed_clearing_targets": (clearing_target,),
+                    "moving_action": clearing_action,
+                    "moving_target": clearing_target,
+                    "priority_basis": priority.basis,
+                    "priority_goal_id": priority_goal_id,
+                    "reason_code": "unknown_participant_action_clearance",
+                    "expected_duration_frames": 2,
+                    "completion_condition": (
+                        "participant_clears_contested_next_cell"
+                    ),
+                    "resume_condition": "ai_enters_observably_cleared_cell",
+                    "derived_from_frame": state.frame,
+                }
         plan_id = (
             f"coord:{state.episode_id}:{state.frame}:head_on:"
             f"{waiting.agent_id}:{clearing.agent_id}"

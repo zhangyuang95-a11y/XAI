@@ -31,28 +31,9 @@ def transition_temporal_violations(
 
     pickup = set(pickup_agents)
     delivery = set(delivery_agents)
-    coordinated: set[str] = set()
-    for event in coordination_events:
-        if str(event.get("event", "")) != "joint_coordination_plan":
-            continue
-        individually_aligned = event.get("agent_execution_aligned", {})
-        if isinstance(individually_aligned, Mapping):
-            coordinated.update(
-                str(agent_id)
-                for agent_id, aligned in individually_aligned.items()
-                if bool(aligned)
-            )
-        elif bool(event.get("execution_aligned", False)):
-            # Backward-compatible support for archived traces.
-            coordinated.update(
-                str(event.get(key, ""))
-                for key in (
-                    "waiting_agent_id",
-                    "moving_agent_id",
-                    "clearing_agent_id",
-                )
-                if str(event.get(key, ""))
-            )
+    # Coordination records are hypotheses, not exemptions.  The physical
+    # checks below must independently prove that a detour or reversal cleared
+    # a route from S_t.
     prior_participant_clearance_agents = {
         str(event.get("agent_id", ""))
         for event in previous.last_coordination_events
@@ -73,6 +54,7 @@ def transition_temporal_violations(
         action = str(executed_actions.get(agent_id, "WAIT"))
         requested = str(requested_actions.get(agent_id, action))
         participant_standoff_clearance = False
+        teammate_route_clearance = False
         if action in MOVE_DELTAS:
             # This import stays local because transition_audit also owns the
             # frozen-state robust-action helper.  A retreat after an observed
@@ -90,8 +72,17 @@ def transition_temporal_violations(
                     candidate_action=action,
                 )
             )
+            from .transition_audit import necessary_teammate_route_clearance
+
+            teammate_route_clearance = bool(
+                necessary_teammate_route_clearance(
+                    environment,
+                    previous,
+                    before,
+                )
+            )
         recent_lifecycle_switch = bool(
-            before.goal_since == previous.frame
+            before.goal_since >= previous.frame - 1
             and before.goal_switch_reason
             in {
                 "pickup_completed",
@@ -99,16 +90,18 @@ def transition_temporal_violations(
                 "charge_release_threshold_met",
                 "joint_coordination_plan_completed",
                 "task_claimed_by_teammate",
+                "energy_route_infeasible",
+                "energy_safe_task_committed",
             }
         )
         allowed_event = bool(
             agent_id in pickup
             or agent_id in delivery
-            or agent_id in coordinated
             or agent_id in energy_progress
             or requested != action
             or recent_lifecycle_switch
             or participant_standoff_clearance
+            or teammate_route_clearance
             or (
                 action == OPPOSITE_ACTION.get(before.last_executed_action)
                 and agent_id in prior_participant_clearance_agents

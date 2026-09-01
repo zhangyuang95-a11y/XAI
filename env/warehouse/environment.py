@@ -50,6 +50,7 @@ from .transition_audit import (
     joint_decision_audit,
     necessary_participant_standoff_clearance,
 )
+from .transition_outcome import finalize_transition_outcome
 from .state_support import render_ascii_state, validate_warehouse_state
 from .route_goals import frozen_route_goal
 
@@ -1435,6 +1436,32 @@ class WarehouseMultiAgentEnv:
                 previous_position == self.layout.charger_position
                 and agent.position != self.layout.charger_position
             ):
+                coordinated_departure = bool(
+                    plan_execution is not None
+                    and str(plan_execution.get("phase", "")) == "CLEAR_CELL"
+                    and str(plan_execution.get("moving_agent_id", ""))
+                    == agent.agent_id
+                    and tuple(plan_execution.get("occupied_position", ()))
+                    == self.layout.charger_position
+                    and (
+                        # In Human-AI play the participant may deviate from a
+                        # public plan after Robot 2 was already selected, so
+                        # attribute only the departing AI's aligned action.
+                        # In AI-AI play both actions are controlled together;
+                        # require the complete joint plan to align so a mere
+                        # coordinator label cannot exempt arbitrary motion.
+                        bool(
+                            dict(
+                                plan_execution.get(
+                                    "agent_execution_aligned",
+                                    {},
+                                )
+                            ).get(agent.agent_id, False)
+                        )
+                        if previous.participant_controlled_agent_id is not None
+                        else bool(plan_execution.get("execution_aligned", False))
+                    )
+                )
                 agent.last_charger_departure_frame = next_state.frame
                 agent.deliveries_at_last_charger_departure = (
                     previous_agent.deliveries_completed
@@ -1444,6 +1471,14 @@ class WarehouseMultiAgentEnv:
                 )
                 agent.carrying_task_at_last_charger_departure = (
                     previous_agent.carrying_task_id
+                )
+                agent.last_charger_departure_was_coordination = (
+                    coordinated_departure
+                )
+                agent.last_charger_departure_plan_id = (
+                    str(plan_execution.get("plan_id"))
+                    if coordinated_departure and plan_execution is not None
+                    else None
                 )
                 energy_events.append(
                     {
@@ -1456,24 +1491,10 @@ class WarehouseMultiAgentEnv:
                                 previous_agent,
                                 position=self.layout.charger_position,
                             )
-                            and not (
-                                plan_execution is not None
-                                and bool(
-                                    plan_execution.get(
-                                        "execution_aligned",
-                                        False,
-                                    )
-                                )
-                                and str(
-                                    plan_execution.get("phase", "")
-                                ) == "CLEAR_CELL"
-                                and str(
-                                    plan_execution.get(
-                                        "moving_agent_id",
-                                        "",
-                                    )
-                                ) == agent.agent_id
-                            )
+                            and not coordinated_departure
+                        ),
+                        "coordination_plan_id": (
+                            agent.last_charger_departure_plan_id
                         ),
                     }
                 )
@@ -1517,6 +1538,9 @@ class WarehouseMultiAgentEnv:
                     ),
                     completed_coordination_progress=(
                         completed_coordination_progress
+                        or bool(
+                            previous_agent.last_charger_departure_was_coordination
+                        )
                         or bool(
                             plan_execution is not None
                             and plan_execution.get(
@@ -1624,37 +1648,26 @@ class WarehouseMultiAgentEnv:
                 else 0
             )
 
-        shutdown_agents = [
-            agent.agent_id
-            for agent in next_state.agents
-            if agent.active and agent.battery <= 0.0
-        ]
-        for agent_id in shutdown_agents:
-            next_state.by_id(agent_id).active = False
-        next_state.shutdown_count += len(shutdown_agents)
-
-        score_components = {
-            "delivery": self.config.delivery_points * len(delivered_tasks),
-            "robot_collision": (
-                self.config.robot_collision_points if robot_collision else 0.0
-            ),
-            "shutdown": self.config.shutdown_points * len(shutdown_agents),
-            "time": self.config.step_points,
-            "human_detour": self.config.human_detour_points_per_unit * route_regret,
-        }
-        if shutdown_agents and next_state.frame < self.config.horizon:
-            score_components["time"] += self.config.step_points * (
-                self.config.horizon - next_state.frame
-            )
-        score_delta = float(sum(score_components.values()))
+        (
+            shutdown_agents,
+            score_components,
+            score_delta,
+            terminated,
+            truncated,
+            reason,
+        ) = finalize_transition_outcome(
+            self.config,
+            self.layout,
+            next_state,
+            delivered_count=len(delivered_tasks),
+            robot_collision=robot_collision,
+            route_regret=route_regret,
+        )
         next_state.user_score += score_delta
         for name, value in score_components.items():
             next_state.score_breakdown[name] += float(value)
         next_state.human_route_regret_units += route_regret
 
-        terminated = bool(shutdown_agents)
-        truncated = bool(next_state.frame >= self.config.horizon and not terminated)
-        reason = "battery_shutdown" if terminated else "horizon" if truncated else None
         next_state.terminated = terminated
         next_state.truncated = truncated
         next_state.terminal_reason = reason

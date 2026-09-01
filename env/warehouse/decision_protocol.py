@@ -82,6 +82,9 @@ def distribution_decision_metadata(
     *,
     decision_source: str,
     participant_overrides: Mapping[str, str] | None = None,
+    policy_actions: Mapping[str, str] | None = None,
+    selected_actions: Mapping[str, str] | None = None,
+    runtime_decision: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = serialized_action_distributions(distributions)
     return {
@@ -94,4 +97,13 @@ def distribution_decision_metadata(
                 (participant_overrides or {}).items()
             )
         },
+        "policy_actions": {
+            str(agent_id): str(action)
+            for agent_id, action in sorted((policy_actions or {}).items())
+        },
+        "selected_actions": {
+            str(agent_id): str(action)
+            for agent_id, action in sorted((selected_actions or {}).items())
+        },
+        "runtime_decision": dict(runtime_decision or {}),
     }

@@ -539,7 +539,10 @@ function renderStage() {
   }
   if (stage === "task1" || stage === "task2") {
     $("roundBadge").textContent = stage.toUpperCase();
-    document.querySelectorAll("#actionPad button").forEach((button) => { button.disabled = state.busy; });
+    const permitted = new Set(study.allowed_human_actions || []);
+    document.querySelectorAll("#actionPad button").forEach((button) => {
+      button.disabled = state.busy || (permitted.size > 0 && !permitted.has(button.dataset.action));
+    });
   }
   const liveExplanationVisible = Boolean(
     stage === "task1"

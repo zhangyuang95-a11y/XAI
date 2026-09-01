@@ -9,11 +9,13 @@ from typing import Iterable, Sequence
 
 from .contracts import (
     ACTION_EXECUTION_VERSION,
+    RUNTIME_ACTION_SOURCE,
     RUNTIME_CONTROLLER,
     SEED_LIBRARY_VERSION,
 )
 from .environment import WarehouseMultiAgentEnv, shortest_path_distance
 from .policy import MAPPOPolicy
+from .runtime_coordination import select_ai_ai_joint_actions
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,7 @@ class SeedBaseline:
     ai_ai_score: float
     shutdowns: int
     robot_collisions: int
+    runtime_selection_overrides: int
 
 
 @dataclass(frozen=True)
@@ -76,11 +79,17 @@ def evaluate_ai_ai_seed(policy: MAPPOPolicy, seed: int) -> SeedBaseline:
     environment = WarehouseMultiAgentEnv(inference.environment_config)
     observations, _ = environment.reset(seed=int(seed))
     workload = _initial_workload(environment)
+    runtime_selection_overrides = 0
     while True:
-        actions, _ = inference.act(
+        policy_actions, _ = inference.act(
             observations,
             environment.global_state(),
             deterministic=True,
+        )
+        actions, _ = select_ai_ai_joint_actions(environment, policy_actions)
+        runtime_selection_overrides += sum(
+            str(policy_actions.get(agent_id, "WAIT")) != str(action)
+            for agent_id, action in actions.items()
         )
         observations, _, terminated, truncated, _ = environment.step(actions)
         if terminated or truncated:
@@ -93,6 +102,7 @@ def evaluate_ai_ai_seed(policy: MAPPOPolicy, seed: int) -> SeedBaseline:
         ai_ai_score=float(state.user_score),
         shutdowns=int(state.shutdown_count),
         robot_collisions=int(state.robot_collision_events),
+        runtime_selection_overrides=int(runtime_selection_overrides),
     )
 
 
@@ -165,8 +175,12 @@ def save_parallel_seed_library(
         "version": SEED_LIBRARY_VERSION,
         "action_execution_version": ACTION_EXECUTION_VERSION,
         "runtime_controller": RUNTIME_CONTROLLER,
-        "rollout_action_source": "mappo_actor",
-        "post_policy_action_interventions": 0,
+        "rollout_action_source": RUNTIME_ACTION_SOURCE,
+        "post_policy_action_interventions": sum(
+            baseline.runtime_selection_overrides
+            for pair in pairs
+            for baseline in (pair.task1, pair.task2)
+        ),
         "maximum_delivery_gap": 1,
         "maximum_score_gap": 50.0,
         "pairs": [
@@ -202,10 +216,10 @@ def load_parallel_seed_library(
         raise ValueError("Incompatible collaborative action-execution contract.")
     if payload.get("runtime_controller") != RUNTIME_CONTROLLER:
         raise ValueError("Incompatible collaborative runtime controller.")
-    if payload.get("rollout_action_source") != "mappo_actor":
-        raise ValueError("Parallel seeds were not calibrated by the MAPPO Actor.")
-    if int(payload.get("post_policy_action_interventions", -1)) != 0:
-        raise ValueError("Parallel seeds contain post-policy action interventions.")
+    if payload.get("rollout_action_source") != RUNTIME_ACTION_SOURCE:
+        raise ValueError("Parallel seeds were not calibrated by the causal runtime.")
+    if int(payload.get("post_policy_action_interventions", -1)) < 0:
+        raise ValueError("Parallel seeds omit runtime selection provenance.")
     pairs: list[ParallelSeedPair] = []
     for raw in payload.get("pairs", ()):  # type: ignore[union-attr]
         pair = ParallelSeedPair(

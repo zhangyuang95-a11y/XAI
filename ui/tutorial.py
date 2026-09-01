@@ -13,6 +13,7 @@ from backend.adapters.warehouse import WAREHOUSE_PROGRAM_VERSION, WarehouseAdapt
 from env.warehouse.contracts import (
     ACTION_EXECUTION_VERSION,
     REFERENCE_TRAJECTORY_FORMAT,
+    RUNTIME_ACTION_SOURCE,
     RUNTIME_CONTROLLER,
 )
 from env.warehouse.environment import WarehouseMultiAgentEnv
@@ -199,6 +200,12 @@ def save_reference_trajectory_manifest(
     policy: MAPPOPolicy,
 ) -> Path:
     events = reference_event_frames(trajectory)
+    runtime_overrides = sum(
+        str(frame.proposed_actions.get(agent_id, "WAIT"))
+        != str(frame.actions.get(agent_id, "WAIT"))
+        for frame in trajectory.frames
+        for agent_id in frame.actions
+    )
     identity = {
         "format": REFERENCE_TRAJECTORY_FORMAT,
         "seed": int(trajectory.seed),
@@ -209,8 +216,8 @@ def save_reference_trajectory_manifest(
         "map_layout_id": policy.environment_config.map_layout_id,
         "action_execution_version": ACTION_EXECUTION_VERSION,
         "runtime_controller": RUNTIME_CONTROLLER,
-        "rollout_action_source": "mappo_actor",
-        "post_policy_action_interventions": 0,
+        "rollout_action_source": RUNTIME_ACTION_SOURCE,
+        "post_policy_action_interventions": int(runtime_overrides),
         "agent_control": {"robot_1": "ai", "robot_2": "ai"},
         "event_frames": events,
         "battery_shutdown": False,

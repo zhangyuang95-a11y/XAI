@@ -10,6 +10,7 @@ from env.warehouse.contracts import (
     ACTION_EXECUTION_VERSION,
     REFERENCE_TRAJECTORY_FORMAT,
     RCPD_PROGRAM_VERSION,
+    RUNTIME_ACTION_SOURCE,
     RUNTIME_CONTROLLER,
 )
 
@@ -67,8 +68,8 @@ def validate_reference_trajectory_manifest(
         or payload.get("map_layout_id") != map_layout_id
         or payload.get("action_execution_version") != ACTION_EXECUTION_VERSION
         or payload.get("runtime_controller") != RUNTIME_CONTROLLER
-        or payload.get("rollout_action_source") != "mappo_actor"
-        or int(payload.get("post_policy_action_interventions", -1)) != 0
+        or payload.get("rollout_action_source") != RUNTIME_ACTION_SOURCE
+        or int(payload.get("post_policy_action_interventions", -1)) < 0
         or int(payload.get("frame_count", 0)) != int(frame_count)
         or not bool(payload.get("frozen", False))
         or bool(payload.get("battery_shutdown", True))
@@ -77,6 +78,6 @@ def validate_reference_trajectory_manifest(
         or not manifest_hash_valid
     ):
         raise ValueError(
-            "The reference trajectory is not a frozen, pure-neural AI-AI "
+            "The reference trajectory is not a frozen causal-runtime AI-AI "
             "trajectory for the current artifact contract."
         )

@@ -379,7 +379,7 @@ def test_explanation_evidence_binds_robot_two_live_task_and_frame() -> None:
 
 
 def test_program_version_constant_is_new_shared_contract() -> None:
-    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v61_verified_joint_evidence"
+    assert WAREHOUSE_PROGRAM_VERSION == "warehouse_rcpd_v62_decision_trace_v3"
 
 
 def test_removed_runtime_controller_predicate_has_no_special_verbalizer() -> None:

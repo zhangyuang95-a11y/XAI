@@ -27,18 +27,18 @@ class WarehouseContractVersions:
 
 
 CURRENT_VERSIONS = WarehouseContractVersions(
-    environment="warehouse_collaborative_delivery_v44_causal_horizon_priority",
+    environment="warehouse_collaborative_delivery_v45_unified_causal_joint_runtime",
     observation="collaborative_observation_v39_joint_reservation_mask",
-    reward="warehouse_safe_mission_reward_v30_verified_temporal_regret",
+    reward="warehouse_safe_mission_reward_v31_joint_dominance_audit",
     model="warehouse_mappo_v68_causal_coordination_6x7_actor",
-    training_checkpoint="warehouse_mappo_training_v60_causal_coordination_6x7",
-    rcpd_program="warehouse_rcpd_v61_verified_joint_evidence",
-    seed_library="warehouse_parallel_seed_pairs_v61_causal_compact6",
-    reference_trajectory="warehouse_human_ai_timeline_v61",
-    study_log="human-study-log.v31",
-    action_execution="frozen_joint_plan_atomic_actor_v15",
-    runtime_controller="mappo_frozen_state_actor_atomic_joint_execution",
-    artifact_namespace="simultaneous_compact6_v61_causal_coordination",
+    training_checkpoint="warehouse_mappo_training_v61_causal_joint_runtime_6x7",
+    rcpd_program="warehouse_rcpd_v62_decision_trace_v3",
+    seed_library="warehouse_parallel_seed_pairs_v62_causal_joint_runtime",
+    reference_trajectory="warehouse_human_ai_timeline_v62",
+    study_log="human-study-log.v32",
+    action_execution="causal_joint_optimizer_atomic_v16",
+    runtime_controller="mappo_actor_causal_joint_runtime_v2",
+    artifact_namespace="simultaneous_compact6_v62_decision_trace_v3",
 )
 
 
@@ -54,6 +54,7 @@ STUDY_LOG_VERSION = CURRENT_VERSIONS.study_log
 ACTION_EXECUTION_VERSION = CURRENT_VERSIONS.action_execution
 RUNTIME_CONTROLLER = CURRENT_VERSIONS.runtime_controller
 ARTIFACT_NAMESPACE = CURRENT_VERSIONS.artifact_namespace
+RUNTIME_ACTION_SOURCE = "mappo_actor_plus_causal_joint_optimizer"
 
 FORMAL_ACCEPTANCE_CHECKS = frozenset(
     {

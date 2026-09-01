@@ -67,7 +67,20 @@ def test_tutorial_transition_detection_uses_shared_task_ownership() -> None:
     environment = WarehouseMultiAgentEnv(WarehouseConfig(horizon=4))
     environment.reset(seed=12)
     state = environment.get_state()
-    state.by_id("robot_2").position = state.tasks[0].pickup_position
+    task_1, task_2 = state.tasks[:2]
+    robot_1 = state.by_id("robot_1")
+    robot_2 = state.by_id("robot_2")
+    robot_2.position = task_1.pickup_position
+    # A restored scene must include the persistent intent that causally owns
+    # the pickup.  Teleporting a robot while leaving its reset-time goal on a
+    # different task asks the joint runtime to leave the cell, so it is not a
+    # valid ownership fixture.
+    robot_2.route_commitment_task_id = task_1.task_id
+    robot_2.goal_type = "GO_TO_PICKUP"
+    robot_2.goal_id = task_1.task_id
+    robot_1.route_commitment_task_id = task_2.task_id
+    robot_1.goal_type = "GO_TO_PICKUP"
+    robot_1.goal_id = task_2.task_id
     state.participant_controlled_agent_id = "robot_1"
     environment.set_state(state)
     rollout = WarehouseAdapter(environment).rollout(

@@ -675,24 +675,11 @@ def stable_coordination_actions(
         imminent_head_on=imminent_head_on,
         goal_overrides=overrides,
     )
-    short_horizon_reservation = (
-        None
-        if layout_id == _ARCHIVED_8X9_LAYOUT_ID
-        else _short_horizon_charger_reservation_actions(
-            environment,
-            goal_overrides=overrides,
-            priority_agent=priority_agent,
-            priority_basis=priority_basis,
-        )
-    )
-    if short_horizon_reservation is not None:
-        # The efficiency guard understands the reserved charger cells and is
-        # therefore safe to run here.  No early-return supervision row may
-        # bypass the final counterfactual audit.
-        return _teacher_efficiency_guard(
-            environment,
-            short_horizon_reservation,
-        )
+    # A future route overlap is not an immediate conflict and must not become
+    # a fresh single-step reservation on every frame.  Production runtime
+    # performs exhaustive atomic joint-action lookahead; the teacher below
+    # only establishes right-of-way for concrete occupied/same-target/head-on
+    # conflicts.
     # Finish the second half of an observed delivery-cell clearance before a
     # fresh single-lane tie-break can assign right-of-way back to the robot
     # that just vacated B.  Both Actors can derive this reservation from S_t

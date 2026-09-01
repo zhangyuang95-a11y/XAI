@@ -23,7 +23,7 @@ from backend.training import warehouse as train_module
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_production_action_paths_do_not_import_or_call_coordination_shield() -> None:
+def test_production_action_paths_use_causal_runtime_not_legacy_shields() -> None:
     action_paths = (
         "backend/adapters/warehouse.py",
         "ui/web_session.py",
@@ -47,9 +47,17 @@ def test_production_action_paths_do_not_import_or_call_coordination_shield() -> 
             assert token not in source, f"{token} remains in {relative_path}"
         if relative_path != "env/warehouse/mappo.py":
             assert "program_regularizer=" not in source
+    for relative_path, selector in (
+        ("backend/adapters/warehouse.py", "select_ai_ai_joint_actions"),
+        ("env/warehouse/seed_calibration.py", "select_ai_ai_joint_actions"),
+        ("ui/web_session.py", "select_human_ai_action"),
+        ("ui/development_preview_server.py", "select_human_ai_action"),
+    ):
+        source = (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+        assert selector in source
 
 
-def test_deterministic_ai_ai_rollout_submits_actor_actions_unchanged() -> None:
+def test_deterministic_ai_ai_rollout_preserves_actor_proposal_and_submits_joint_choice() -> None:
     config = WarehouseConfig(horizon=1)
     policy = MAPPOPolicy(
         config,
@@ -73,10 +81,14 @@ def test_deterministic_ai_ai_rollout_submits_actor_actions_unchanged() -> None:
 
     frame = rollout.frames[0]
     assert frame.proposed_actions == actor_actions
-    assert frame.actions == actor_actions
-    assert frame.snapshot.metadata["submitted_actions"] == actor_actions
+    assert frame.actions == frame.snapshot.metadata["submitted_actions"]
+    assert frame.actions != actor_actions
+    trace = frame.info["decision_trace"]
+    assert trace["policy_actions"] == actor_actions
+    assert trace["selected_actions"] == frame.actions
+    assert trace["same_frozen_state_for_all_agents"] is True
     assert frame.snapshot.metadata["action_execution"] == (
-        "independent_simultaneous_mappo_actor"
+        "causal_joint_optimizer_atomic_execution"
     )
 
 
@@ -113,12 +125,12 @@ def test_wait_memory_contract_rejects_previous_direct_neural_model() -> None:
         MAPPOPolicy.from_payload(payload)
 
 
-def test_execution_contract_is_explicitly_direct_neural() -> None:
+def test_execution_contract_is_explicitly_causal_joint_runtime() -> None:
     assert ACTION_EXECUTION_VERSION == (
-        "frozen_joint_plan_atomic_actor_v15"
+        "causal_joint_optimizer_atomic_v16"
     )
     assert RUNTIME_CONTROLLER == (
-        "mappo_frozen_state_actor_atomic_joint_execution"
+        "mappo_actor_causal_joint_runtime_v2"
     )
 
 
@@ -307,7 +319,7 @@ def test_rcpd_training_source_is_only_executed_neural_rollout_rows() -> None:
     ]
 
 
-def test_reference_and_seed_artifacts_declare_zero_action_intervention() -> None:
+def test_reference_and_seed_artifacts_declare_causal_runtime_provenance() -> None:
     tutorial = (PROJECT_ROOT / "ui/tutorial.py").read_text(encoding="utf-8")
     seed_calibration = (
         PROJECT_ROOT / "env/warehouse/seed_calibration.py"
@@ -316,11 +328,11 @@ def test_reference_and_seed_artifacts_declare_zero_action_intervention() -> None
         PROJECT_ROOT / "backend/artifact_contracts.py"
     ).read_text(encoding="utf-8")
 
-    assert '"rollout_action_source": "mappo_actor"' in tutorial
-    assert '"post_policy_action_interventions": 0' in tutorial
+    assert '"rollout_action_source": RUNTIME_ACTION_SOURCE' in tutorial
+    assert '"post_policy_action_interventions": int(runtime_overrides)' in tutorial
     assert '"runtime_controller": RUNTIME_CONTROLLER' in tutorial
-    assert '"rollout_action_source": "mappo_actor"' in seed_calibration
-    assert '"post_policy_action_interventions": 0' in seed_calibration
+    assert '"rollout_action_source": RUNTIME_ACTION_SOURCE' in seed_calibration
+    assert '"post_policy_action_interventions": sum(' in seed_calibration
     assert '"runtime_controller": RUNTIME_CONTROLLER' in seed_calibration
     assert 'payload.get("rollout_action_source")' in artifact_contracts
     assert 'payload.get("post_policy_action_interventions", -1)' in (

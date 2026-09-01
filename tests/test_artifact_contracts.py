@@ -17,6 +17,7 @@ from env.warehouse.contracts import (
     ACTION_EXECUTION_VERSION,
     REFERENCE_TRAJECTORY_FORMAT,
     RCPD_PROGRAM_VERSION,
+    RUNTIME_ACTION_SOURCE,
     RUNTIME_CONTROLLER,
     MODEL_VERSION,
 )
@@ -46,8 +47,8 @@ def _reference_manifest() -> dict[str, object]:
         "map_layout_id": "test-map",
         "action_execution_version": ACTION_EXECUTION_VERSION,
         "runtime_controller": RUNTIME_CONTROLLER,
-        "rollout_action_source": "mappo_actor",
-        "post_policy_action_interventions": 0,
+        "rollout_action_source": RUNTIME_ACTION_SOURCE,
+        "post_policy_action_interventions": 17,
         "frame_count": 121,
         "frozen": True,
         "battery_shutdown": False,
@@ -87,7 +88,7 @@ def test_posthoc_program_contract_rejects_control_or_feedback_roles(
         validate_posthoc_rcpd_metadata(metadata)
 
 
-def test_reference_contract_accepts_frozen_pure_actor_ai_ai_trajectory() -> None:
+def test_reference_contract_accepts_frozen_causal_runtime_ai_ai_trajectory() -> None:
     validate_reference_trajectory_manifest(
         _reference_manifest(),
         model_version="test-model",
@@ -100,7 +101,7 @@ def test_reference_contract_accepts_frozen_pure_actor_ai_ai_trajectory() -> None
     ("field", "unsafe_value"),
     (
         ("rollout_action_source", "coordination_teacher"),
-        ("post_policy_action_interventions", 1),
+        ("post_policy_action_interventions", -1),
         ("runtime_controller", "coordination_shield"),
         ("agent_control", {"robot_1": "human", "robot_2": "ai"}),
         ("frozen", False),
@@ -114,7 +115,7 @@ def test_reference_contract_rejects_non_neural_or_mutable_trajectory(
 ) -> None:
     payload = _reference_manifest()
     payload[field] = unsafe_value
-    with pytest.raises(ValueError, match="pure-neural AI-AI"):
+    with pytest.raises(ValueError, match="causal-runtime AI-AI"):
         validate_reference_trajectory_manifest(
             payload,
             model_version="test-model",

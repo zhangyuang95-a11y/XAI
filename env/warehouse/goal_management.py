@@ -12,7 +12,10 @@ from typing import Any, Mapping
 
 from .coordination_plan import frozen_joint_coordination_plan
 from .domain import WarehouseState
-from .energy_management import should_continue_charge_mode
+from .energy_management import (
+    charger_handoff_clearance_action,
+    should_continue_charge_mode,
+)
 from .navigation import MOVE_DELTAS, shortest_path_distance
 
 
@@ -306,25 +309,193 @@ def frozen_coordination_plan(
     )
 
 
+def _human_ai_charger_handoff_plan(
+    environment: Any,
+    state: WarehouseState,
+) -> dict[str, Any] | None:
+    """Publish a two-phase charger handoff before either side acts.
+
+    Human-AI motion cannot use an atomic occupied-cell handoff because the AI
+    must be selected without observing the participant's current command.  A
+    sufficiently charged station occupant therefore clears in one public
+    frame, and the more depleted waiter enters only from the following
+    frozen state.  The shared energy helper is deliberately authoritative:
+    ordinary route-clearance heuristics must not evict a robot that still
+    needs the charger itself.
+    """
+
+    participant_id = state.participant_controlled_agent_id
+    if participant_id is None:
+        return None
+    occupant = next(
+        (
+            agent
+            for agent in state.agents
+            if agent.active
+            and agent.position == environment.layout.charger_position
+        ),
+        None,
+    )
+    if occupant is None:
+        return None
+    waiter = next(
+        (
+            agent
+            for agent in state.agents
+            if agent.active and agent.agent_id != occupant.agent_id
+        ),
+        None,
+    )
+    if waiter is None:
+        return None
+    clearing_action = charger_handoff_clearance_action(
+        environment,
+        state,
+        occupant,
+        waiter,
+    )
+    delta = MOVE_DELTAS.get(str(clearing_action))
+    if delta is None:
+        return None
+    clearing_target = (
+        occupant.position[0] + delta[0],
+        occupant.position[1] + delta[1],
+    )
+    priority_goal_id = (
+        waiter.carrying_task_id
+        or waiter.route_commitment_task_id
+        or waiter.goal_id
+    )
+    return {
+        "plan_id": (
+            f"coord:{state.episode_id}:{state.frame}:charger-handoff:"
+            f"{waiter.agent_id}:{occupant.agent_id}"
+        ),
+        "plan_kind": "charger_handoff_clearance",
+        "phase": "CLEAR_CELL",
+        "priority_agent_id": waiter.agent_id,
+        "waiting_agent_id": waiter.agent_id,
+        "clearing_agent_id": occupant.agent_id,
+        "yielding_agent_id": occupant.agent_id,
+        "moving_agent_id": occupant.agent_id,
+        "occupied_position": occupant.position,
+        "clearing_action": str(clearing_action),
+        "clearing_target": clearing_target,
+        "allowed_clearing_actions": (str(clearing_action),),
+        "allowed_clearing_targets": (clearing_target,),
+        "moving_action": str(clearing_action),
+        "moving_target": clearing_target,
+        "joint_actions": {
+            agent.agent_id: (
+                str(clearing_action)
+                if agent.agent_id == occupant.agent_id
+                else "WAIT"
+            )
+            for agent in state.agents
+        },
+        "priority_basis": "lower_energy_charger_waiter",
+        "priority_goal_id": priority_goal_id,
+        "reason_code": "charger_handoff_clearance",
+        "expected_duration_frames": 2,
+        "completion_condition": "charger_cell_cleared",
+        "resume_condition": "priority_robot_enters_charger",
+        "derived_from_frame": state.frame,
+    }
+
+
 def prepare_coordination_plan(
     environment: Any,
     state: WarehouseState,
 ) -> dict[str, Any] | None:
     """Freeze a newly derived plan before either actor is evaluated.
 
-    Human-AI rounds still publish the plan in ``S_t``.  The participant is
-    never action-masked by it, while the AI can obey its own causal side
-    without observing the participant's private current-frame command.
+    Human-AI rounds publish the plan in ``S_t``.  A public priority target may
+    disable only the participant command that would enter that reserved cell;
+    the AI still never observes the participant's private current-frame
+    command.
     """
-    plan = frozen_coordination_plan(environment, state)
+    # Preserve an already-published plan verbatim.  For a fresh Human-AI
+    # state, however, the energy-authoritative charger handoff must outrank
+    # generic occupied-route clearance.  The latter sees the same occupied
+    # cell but does not know whether the occupant has enough energy to leave
+    # and return, which previously evicted an equally depleted AI from the
+    # station and created an UP->DOWN cycle.
+    plan = (
+        frozen_coordination_plan(environment, state)
+        if state.active_coordination_plan is not None
+        else _human_ai_charger_handoff_plan(environment, state)
+    )
+    if plan is None:
+        plan = frozen_coordination_plan(environment, state)
     if plan is None:
         state.active_coordination_plan = None
         return None
     if state.active_coordination_plan is None:
+        first_actions = dict(plan.get("joint_actions", {}))
+        if not first_actions:
+            first_actions = {
+                agent.agent_id: (
+                    str(plan.get("moving_action", "WAIT"))
+                    if agent.agent_id == str(plan.get("moving_agent_id", ""))
+                    else "WAIT"
+                )
+                for agent in state.agents
+            }
+        sequence = [
+            {
+                "step": 0,
+                "phase": str(plan.get("phase", "CLEAR_CELL")),
+                "joint_actions": first_actions,
+                "completion_condition": str(
+                    plan.get("completion_condition", "joint_step_completed")
+                ),
+            }
+        ]
+        if str(plan.get("phase", "")) == "CLEAR_CELL":
+            priority = state.by_id(str(plan.get("priority_agent_id")))
+            occupied = tuple(plan.get("occupied_position", ()))
+            delta = (
+                occupied[0] - priority.position[0],
+                occupied[1] - priority.position[1],
+            )
+            pass_action = next(
+                (
+                    action
+                    for action, action_delta in MOVE_DELTAS.items()
+                    if action_delta == delta
+                ),
+                "WAIT",
+            )
+            sequence.append(
+                {
+                    "step": 1,
+                    "phase": "PASS_THROUGH",
+                    "joint_actions": {
+                        agent.agent_id: (
+                            pass_action
+                            if agent.agent_id == priority.agent_id
+                            else "WAIT"
+                        )
+                        for agent in state.agents
+                    },
+                    "completion_condition": "priority_robot_enters_cleared_route",
+                }
+            )
         plan = {
             **plan,
             "phase": str(plan.get("phase", "CLEAR_CELL")),
             "started_frame": state.frame,
+            "current_plan_step": 0,
+            "planned_action_sequence": sequence,
+            "release_condition": str(
+                plan.get("resume_condition", "required_route_cell_released")
+            ),
+            "invalidation_conditions": (
+                "priority_goal_changed",
+                "planned_action_became_unsafe",
+                "required_cell_already_released",
+                "participant_deviated_from_public_plan",
+            ),
         }
     state.active_coordination_plan = dict(plan)
     return dict(plan)
@@ -349,6 +520,7 @@ def advance_coordination_plan(
             **dict(active),
             "phase": "PASS_THROUGH",
             "phase_started_frame": next_state.frame,
+            "current_plan_step": int(active.get("current_plan_step", 0)) + 1,
         }
         return
     next_state.coordination_plan_cooldown_until = next_state.frame + 2

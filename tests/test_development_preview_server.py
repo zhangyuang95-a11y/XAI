@@ -9,10 +9,15 @@ import threading
 import pytest
 
 from core.policy_contracts import ActionDistribution
+from backend.adapters.warehouse_explanations import WarehouseExplanationMixin
+from backend.training.warehouse_study_acceptance import (
+    _pareto_dominating_joint_actions,
+)
 from env.warehouse.layouts import STUDY_MAP_LAYOUT
 from env.warehouse.domain import collaborative_study_config
 from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.navigation import ACTIONS
+from env.warehouse.runtime_coordination import select_ai_ai_joint_actions
 import ui.development_preview_server as preview_server
 from ui.development_preview_server import (
     DevelopmentPreviewSessions,
@@ -108,6 +113,144 @@ def test_development_tutorial_is_one_productive_real_environment_round() -> None
         str(event.get("event", "")) for frame in frames for event in frame.events
     }
     assert {"claimed", "delivered", "charging", "coordination_yield"} <= observed_events
+
+
+def test_seed_40786_reported_segments_use_undominated_atomic_joint_decisions() -> None:
+    """Lock the reported failure windows to the shared causal runtime.
+
+    The assertions deliberately inspect evidence, not a hard-coded action for
+    a frame number.  Task replacement and lifecycle fixes can legitimately
+    change the exact move while the invariant must remain: all 25 joint
+    candidates are resolved from S_t, the selected safe move is undominated,
+    and the physical/audit/explanation chain reports no regression.
+    """
+
+    frames = build_development_tutorial()
+    reported_frames = (
+        36,
+        37,
+        38,
+        52,
+        53,
+        54,
+        60,
+        61,
+        62,
+        63,
+        64,
+        66,
+        67,
+        68,
+        69,
+        74,
+        75,
+        76,
+        80,
+        81,
+        82,
+        113,
+        114,
+        115,
+    )
+    explainer = WarehouseExplanationMixin()
+    forbidden = (
+        "decisiontrace",
+        "decision trace",
+        "reason_code",
+        "日志缺失",
+        "内部字段",
+        "原因码",
+    )
+
+    for frame_index in reported_frames:
+        frame = frames[frame_index]
+        info = frame.info
+        trace = info["decision_trace"]
+        runtime = trace["runtime_decision"]
+        considered = tuple(runtime["safe_joint_actions"]) + tuple(
+            runtime["rejected_joint_actions"]
+        )
+
+        assert len(considered) == len(ACTIONS) ** 2
+        assert runtime["same_frozen_state"] is True
+        assert _pareto_dominating_joint_actions(runtime) == ()
+        assert runtime["selected_actions"] == info["executed_actions"]
+        assert trace["fact_valid"] is True
+        assert trace["fact_validation_failures"] == ()
+        assert info["robot_collision_event"] is False
+        assert info["avoidable_wait_agents"] == ()
+        assert info["avoidable_detour_agents"] == ()
+        assert info["unexplained_reversal_agents"] == ()
+        assert info["short_cycle_agents"] == ()
+        assert info["invalid_goal_switch_agents"] == ()
+        assert info["decision_audit"]["same_pre_move_state"] is True
+        assert info["decision_audit"]["environment_step_calls"] == 1
+
+        for agent_id in ("robot_1", "robot_2"):
+            for language in ("en", "zh-CN"):
+                text = explainer._decision_trace_explanation(
+                    trace,
+                    target_agent=agent_id,
+                    focus="action",
+                    language=language,
+                )
+                assert text is not None
+                normalized = text.casefold()
+                assert not any(token in normalized for token in forbidden)
+
+
+@pytest.mark.parametrize(
+    ("reported_frame", "positions", "safe_alternative"),
+    (
+        (36, ((2, 3), (1, 2)), ("LEFT", "RIGHT")),
+        (37, ((2, 3), (1, 3)), ("LEFT", "DOWN")),
+        (52, ((3, 1), (4, 2)), ("RIGHT", "DOWN")),
+        (64, ((2, 2), (3, 2)), ("DOWN", "DOWN")),
+        (66, ((3, 2), (3, 1)), ("DOWN", "RIGHT")),
+        (67, ((4, 2), (3, 1)), ("DOWN", "RIGHT")),
+        (74, ((4, 3), (5, 2)), ("LEFT", "RIGHT")),
+        (80, ((3, 1), (3, 2)), ("RIGHT", "UP")),
+        (82, ((3, 2), (4, 2)), ("UP", "UP")),
+        (113, ((2, 3), (1, 3)), ("RIGHT", "DOWN")),
+        (115, ((2, 2), (2, 3)), ("RIGHT", "RIGHT")),
+    ),
+)
+def test_reported_prefix_joint_alternatives_are_recognized_as_atomically_safe(
+    reported_frame: int,
+    positions: tuple[tuple[int, int], tuple[int, int]],
+    safe_alternative: tuple[str, str],
+) -> None:
+    """Preserve the original failure-state geometry after trajectory repair.
+
+    Correcting an early decision changes every later position, so the old
+    frame number cannot be asserted against the repaired trajectory itself.
+    These are the pre-fix S_t positions reconstructed from seed 40786.  The
+    test proves the public selector still enumerates the reported pipeline
+    move as safe; no production branch reads the frame label or this fixture.
+    """
+
+    environment = WarehouseMultiAgentEnv(collaborative_study_config())
+    environment.reset(seed=reported_frame)
+    state = environment.get_state()
+    for agent, position in zip(state.agents, positions):
+        agent.position = position
+        agent.battery = 100.0
+        agent.active = True
+    environment.set_state(state)
+
+    _, runtime = select_ai_ai_joint_actions(
+        environment,
+        {"robot_1": "WAIT", "robot_2": "WAIT"},
+    )
+    safe_pairs = {
+        (
+            str(item["actions"]["robot_1"]),
+            str(item["actions"]["robot_2"]),
+        )
+        for item in runtime["safe_joint_actions"]
+    }
+
+    assert safe_alternative in safe_pairs
 
 
 def test_development_preview_uses_six_by_seven_production_geometry() -> None:

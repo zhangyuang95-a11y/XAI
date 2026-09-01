@@ -158,6 +158,12 @@ class AgentState:
     deliveries_at_last_charger_departure: int = 0
     team_deliveries_at_last_charger_departure: int = 0
     carrying_task_at_last_charger_departure: str | None = None
+    # A public two-phase charger handoff can require this robot to vacate the
+    # station even when the participant later deviates.  Persist that causal
+    # evidence across the short absence so a safe recovery is not mislabeled
+    # as an unproductive charger oscillation.
+    last_charger_departure_was_coordination: bool = False
+    last_charger_departure_plan_id: str | None = None
     deliveries_completed: int = 0
     navigation_goal_kind: str = "pickup"
     navigation_goal_position: tuple[int, int] = (0, 0)

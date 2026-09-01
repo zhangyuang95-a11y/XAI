@@ -37,6 +37,11 @@ from env.warehouse.decision_protocol import distribution_decision_metadata
 from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.navigation import ACTIONS, MOVE_DELTAS
 from env.warehouse.numpy_policy import NumpyWarehousePolicy
+from env.warehouse.runtime_coordination import (
+    guard_participant_action,
+    select_ai_ai_joint_actions,
+    select_human_ai_action,
+)
 from ui.warehouse_view import (
     _study_question_focus,
     serialize_warehouse_state,
@@ -88,16 +93,29 @@ def _neural_actions(
     *,
     base_seed: int,
     deterministic: bool,
-) -> tuple[dict[str, str], dict[str, ActionDistribution]]:
-    """Run both independent Actors against one frozen pre-move observation."""
+    participant_controlled: bool = False,
+) -> tuple[
+    dict[str, str],
+    dict[str, ActionDistribution],
+    dict[str, Any],
+]:
+    """Propose neural actions, then apply the frozen-state runtime protocol."""
 
     state = environment.get_state()
-    return _require_deployed_actor().act(
+    policy_actions, distributions = _require_deployed_actor().act(
         environment.observations(),
         deterministic=deterministic,
         base_seed=base_seed,
         decision_key=(state.episode_id, state.frame),
     )
+    if participant_controlled:
+        robot_two, runtime = select_human_ai_action(
+            environment,
+            policy_actions["robot_2"],
+        )
+        return {**dict(policy_actions), "robot_2": robot_two}, distributions, runtime
+    selected, runtime = select_ai_ai_joint_actions(environment, policy_actions)
+    return selected, distributions, runtime
 
 
 def _transition_payload(
@@ -191,7 +209,7 @@ def build_development_tutorial() -> tuple[PreviewFrame, ...]:
     frames = [_initial_frame(environment)]
     for _ in range(environment.config.horizon):
         before = environment.get_state()
-        actions, distributions = _neural_actions(
+        actions, distributions, runtime_decision = _neural_actions(
             environment,
             base_seed=TUTORIAL_SEED,
             deterministic=False,
@@ -200,7 +218,10 @@ def build_development_tutorial() -> tuple[PreviewFrame, ...]:
             actions,
             decision_metadata=distribution_decision_metadata(
                 distributions,
-                decision_source="numpy_actor_ai_ai",
+                decision_source="numpy_actor_plus_joint_optimizer_ai_ai",
+                policy_actions=runtime_decision.get("policy_actions", {}),
+                selected_actions=actions,
+                runtime_decision=runtime_decision,
             ),
         )
         after = environment.get_state()
@@ -418,21 +439,34 @@ class DevelopmentPreviewState:
             raise ValueError(f"Unknown participant action: {action}")
         round_name = self.stage
         before = self.environment.get_state()
-        actions, distributions = _neural_actions(
+        actions, distributions, runtime_decision = _neural_actions(
             self.environment,
             base_seed=self.policy_seed,
             deterministic=False,
+            participant_controlled=True,
         )
         # The preview AI chooses from the frozen pre-move state without the
         # participant's current command. Replace robot 1 only after robot 2's
         # action has been selected, then resolve the pair simultaneously.
-        actions["robot_1"] = action
+        participant_action, participant_guard = guard_participant_action(
+            self.environment,
+            action,
+        )
+        actions["robot_1"] = participant_action
+        runtime_decision = {
+            **runtime_decision,
+            "participant_action_guard": participant_guard,
+            "selected_actions": dict(actions),
+        }
         _, rewards, terminated, truncated, info = self.environment.step(
             actions,
             decision_metadata=distribution_decision_metadata(
                 distributions,
-                decision_source="participant_plus_numpy_actor",
+                decision_source="participant_plus_robust_numpy_actor",
                 participant_overrides={"robot_1": action},
+                policy_actions=runtime_decision.get("policy_actions", {}),
+                selected_actions=actions,
+                runtime_decision=runtime_decision,
             ),
         )
         after = self.environment.get_state()

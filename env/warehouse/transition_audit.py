@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any, Mapping
 
 from .decision_protocol import DECISION_AUDIT_SCHEMA, canonical_sha256
 from .energy_management import charge_release_evidence
+from .frozen_missions import frozen_training_missions
 from .navigation import ACTIONS, MOVE_DELTAS, shortest_path_distance
 
 
@@ -22,10 +24,21 @@ def necessary_teammate_route_clearance(
     its present cell is the teammate's only shortest-path progress cell.
     """
 
+    # Use the same frozen mission consumed by the runtime joint selector,
+    # reward audit, and DecisionTrace.  ``navigation_goal_position`` can be
+    # temporarily replaced by the robot's current cell while a public
+    # YIELDING plan is active; using that display goal here made a physically
+    # necessary retreat look like an unexplained reversal/short cycle.
+    missions = frozen_training_missions(environment, state)
     for teammate in state.agents:
         if teammate.agent_id == clearing_agent.agent_id or not teammate.active:
             continue
-        goal = teammate.navigation_goal_position
+        mission = missions.get(teammate.agent_id)
+        goal = (
+            mission.goal_position
+            if mission is not None
+            else teammate.navigation_goal_position
+        )
         current_distance = shortest_path_distance(
             teammate.position,
             goal,
@@ -285,10 +298,8 @@ def _verified_wait_progress_alternative(
     before = previous.by_id(agent_id)
     if str(executed_actions.get(agent_id, "WAIT")) != "WAIT":
         return None
-    if coordination_plan is not None and bool(
-        coordination_plan.get("execution_aligned", False)
-    ):
-        return None
+    # A plan is evidence to inspect, never a blanket exemption.  The physical
+    # counterfactual below still audits plan-aligned WAITs against S_t.
     if before.position == environment.layout.charger_position and before.battery < 100.0:
         return None
 
@@ -404,9 +415,29 @@ def _decision_reason_code(
     executed_action: str,
     coordination_plan: Mapping[str, Any] | None,
     wait_counterfactual: Mapping[str, Any] | None = None,
+    runtime_decision: Mapping[str, Any] | None = None,
 ) -> str:
     before = previous.by_id(agent_id)
     after = next_state.by_id(agent_id)
+    runtime = dict(runtime_decision or {})
+    if (
+        executed_action == "WAIT"
+        and str(runtime.get("mode", "")) == "human_ai_robust_selection"
+        and agent_id == "robot_2"
+    ):
+        candidates = tuple(
+            item
+            for item in runtime.get("ai_action_candidates", ())
+            if isinstance(item, Mapping)
+        )
+        if any(
+            str(item.get("action", "")) in MOVE_DELTAS
+            and int(item.get("distance_after", 0))
+            < int(item.get("distance_before", 0))
+            and bool(item.get("collision_counterfactuals"))
+            for item in candidates
+        ):
+            return "WAIT_FOR_UNKNOWN_PARTICIPANT_ACTION"
     if requested_action != executed_action:
         return "SAFETY_RULE_BLOCKED"
     plan_aligned_for_agent = bool(
@@ -599,6 +630,15 @@ def validate_decision_trace(
             )
         ):
             failures.append(f"{agent_id}:coordination_reason_without_plan")
+        if reason == "WAIT_FOR_UNKNOWN_PARTICIPANT_ACTION":
+            uncertainty = decision.get("human_action_uncertainty", {})
+            if not (
+                isinstance(uncertainty, Mapping)
+                and uncertainty.get("participant_action_known_at_decision_time")
+                is False
+                and bool(uncertainty.get("collision_counterfactuals"))
+            ):
+                failures.append(f"{agent_id}:human_wait_without_counterfactual")
         if reason == "LEAVE_CHARGER_THRESHOLD_MET":
             charging = decision.get("charging_state", {})
             threshold = float(charging.get("release_threshold", 101.0))
@@ -642,6 +682,19 @@ def build_decision_trace(
 
     metadata = dict(decision_metadata or {})
     distributions = dict(metadata.get("action_distributions", {}))
+    policy_actions = dict(metadata.get("policy_actions", {}))
+    selected_actions = dict(metadata.get("selected_actions", {}))
+    runtime_decision = dict(metadata.get("runtime_decision", {}))
+    safe_joint_actions = tuple(
+        item
+        for item in runtime_decision.get("safe_joint_actions", ())
+        if isinstance(item, Mapping)
+    )
+    rejected_joint_actions = tuple(
+        item
+        for item in runtime_decision.get("rejected_joint_actions", ())
+        if isinstance(item, Mapping)
+    )
     agents: dict[str, Any] = {}
     for before in previous.agents:
         agent_id = before.agent_id
@@ -670,36 +723,15 @@ def build_decision_trace(
                     "safe": bool(before.battery + 1e-8 >= required),
                 }
             )
-        goal_position = before.navigation_goal_position
-        if before.navigation_goal_kind == "charge":
-            goal_position = environment.layout.charger_position
-        elif before.carrying_task_id is not None:
-            goal_position = previous.task_by_id(
-                before.carrying_task_id
-            ).delivery_position
-        elif before.route_commitment_task_id is not None:
-            committed = next(
-                (
-                    task
-                    for task in previous.tasks
-                    if task.task_id == before.route_commitment_task_id
-                ),
-                None,
-            )
-            if committed is not None:
-                goal_position = committed.pickup_position
-        elif before.goal_type == "GO_TO_PICKUP" and before.goal_id is not None:
-            selected_goal = next(
-                (
-                    task
-                    for task in previous.tasks
-                    if task.task_id == before.goal_id
-                    and task.status == "available"
-                ),
-                None,
-            )
-            if selected_goal is not None:
-                goal_position = selected_goal.pickup_position
+        frozen_mission = frozen_missions.get(agent_id)
+        if isinstance(frozen_mission, Mapping):
+            goal_position = tuple(frozen_mission.get("goal_position", before.position))
+            resolved_goal_kind = str(frozen_mission.get("goal_kind", "wait"))
+            resolved_goal_id = frozen_mission.get("task_id")
+        else:
+            goal_position = before.navigation_goal_position
+            resolved_goal_kind = before.navigation_goal_kind
+            resolved_goal_id = before.route_commitment_task_id or before.goal_id
         distance_before = shortest_path_distance(
             before.position,
             goal_position,
@@ -710,7 +742,8 @@ def build_decision_trace(
             goal_position,
             environment.config.map_layout_id,
         )
-        selected = str(raw_actions.get(agent_id, "WAIT"))
+        policy_action = str(policy_actions.get(agent_id, raw_actions.get(agent_id, "WAIT")))
+        selected = str(selected_actions.get(agent_id, raw_actions.get(agent_id, "WAIT")))
         wait_counterfactual = _verified_wait_progress_alternative(
             environment,
             previous,
@@ -718,7 +751,59 @@ def build_decision_trace(
             executed_actions,
             coordination_plan,
         )
+        distribution_actions = tuple(
+            str(action) for action in distribution.get("actions", ACTIONS)
+        )
+        distribution_mask = tuple(
+            float(allowed)
+            for allowed in distribution.get(
+                "action_mask", (1.0,) * len(distribution_actions)
+            )
+        )
+        legal_actions = tuple(
+            action
+            for action, allowed in zip(distribution_actions, distribution_mask)
+            if allowed > 0.5
+        )
+        ai_candidates = tuple(
+            item
+            for item in runtime_decision.get("ai_action_candidates", ())
+            if isinstance(item, Mapping)
+        )
+        if str(runtime_decision.get("mode", "")) == "human_ai_robust_selection" and agent_id == "robot_2":
+            safe_actions = tuple(
+                str(item.get("action"))
+                for item in ai_candidates
+                if bool(item.get("safe_for_all_participant_actions", False))
+            )
+            collision_counterfactuals = tuple(
+                {
+                    "ai_action": str(item.get("action", "")),
+                    **dict(counterfactual),
+                }
+                for item in ai_candidates
+                for counterfactual in item.get("collision_counterfactuals", ())
+                if isinstance(counterfactual, Mapping)
+            )
+        elif safe_joint_actions:
+            safe_actions = tuple(sorted({
+                str(item.get("actions", {}).get(agent_id, "WAIT"))
+                for item in safe_joint_actions
+                if isinstance(item.get("actions"), Mapping)
+            }))
+            collision_counterfactuals = ()
+        else:
+            safe_actions = legal_actions
+            collision_counterfactuals = ()
         agents[agent_id] = {
+            "base_goal": {
+                "goal_type": before.goal_type,
+                "goal_id": before.goal_id,
+                "goal_since": int(before.goal_since),
+                "navigation_kind": before.navigation_goal_kind,
+                "position": before.navigation_goal_position,
+            },
+            # Backward-compatible alias for archived explanation consumers.
             "frozen_goal": {
                 "goal_type": before.goal_type,
                 "goal_id": before.goal_id,
@@ -726,9 +811,15 @@ def build_decision_trace(
                 "navigation_kind": before.navigation_goal_kind,
                 "position": before.navigation_goal_position,
             },
+            "resolved_goal": {
+                "goal_type": resolved_goal_kind,
+                "goal_id": resolved_goal_id,
+                "position": goal_position,
+            },
             "committed_task": (
                 before.route_commitment_task_id or before.goal_id
             ),
+            "carrying_task_id": before.carrying_task_id,
             "battery_feasibility": battery_feasibility,
             "charging_state": {
                 "active": bool(before.charge_mode_active),
@@ -748,6 +839,8 @@ def build_decision_trace(
             "candidate_actions": list(
                 distribution.get("actions", ACTIONS)
             ),
+            "legal_actions": list(legal_actions),
+            "safe_actions": list(safe_actions),
             "policy_logits": list(distribution.get("logits", ())),
             "policy_probabilities": list(
                 distribution.get("probabilities", ())
@@ -755,7 +848,9 @@ def build_decision_trace(
             "safety_mask": list(
                 distribution.get("action_mask", ())
             ),
+            "policy_action": policy_action,
             "selected_action": selected,
+            "executed_action": str(executed_actions.get(agent_id, "WAIT")),
             "resolved_action": str(
                 executed_actions.get(agent_id, "WAIT")
             ),
@@ -769,6 +864,7 @@ def build_decision_trace(
                 str(executed_actions.get(agent_id, "WAIT")),
                 coordination_plan,
                 wait_counterfactual,
+                runtime_decision,
             ),
             "wait_counterfactual": wait_counterfactual,
             "alternative_action": _best_alternative_action(
@@ -791,9 +887,32 @@ def build_decision_trace(
                 "battery_after": float(after.battery),
             },
             "frozen_mission": frozen_missions.get(agent_id),
+            "human_action_uncertainty": {
+                "participant_action_known_at_decision_time": runtime_decision.get(
+                    "participant_action_known_at_decision_time"
+                ),
+                "participant_legal_actions": list(
+                    runtime_decision.get("participant_legal_actions", ())
+                ),
+                "collision_counterfactuals": list(collision_counterfactuals),
+            },
+            "rejected_action_reasons": [
+                {
+                    "action": str(item.get("action", "")),
+                    "collision_counterfactuals": list(
+                        item.get("collision_counterfactuals", ())
+                    ),
+                    "energy_violation": bool(item.get("energy_violation", False)),
+                    "recent_unproductive_charger_reentry": bool(
+                        item.get("recent_unproductive_charger_reentry", False)
+                    ),
+                }
+                for item in ai_candidates
+                if str(item.get("action", "")) != selected
+            ],
         }
     trace: dict[str, Any] = {
-        "schema_version": "warehouse-decision-trace.v2",
+        "schema_version": "warehouse-decision-trace.v3",
         "episode_id": int(previous.episode_id),
         "decision_frame": int(previous.frame),
         "outcome_frame": int(next_state.frame),
@@ -802,6 +921,13 @@ def build_decision_trace(
         "same_frozen_state_for_all_agents": True,
         "environment_step_calls": 1,
         "decision_source": metadata.get("decision_source", "unspecified"),
+        "pre_state": asdict(previous),
+        "policy_actions": policy_actions,
+        "selected_actions": selected_actions or dict(raw_actions),
+        "executed_actions": dict(executed_actions),
+        "safe_joint_actions": list(safe_joint_actions),
+        "rejected_joint_actions": list(rejected_joint_actions),
+        "runtime_decision": runtime_decision,
         "tasks": tuple(
             {
                 "task_id": task.task_id,

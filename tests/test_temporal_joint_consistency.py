@@ -147,6 +147,11 @@ def test_immediate_reverse_without_lifecycle_event_is_audited() -> None:
     environment.set_state(state)
 
     environment.step({"robot_1": "DOWN", "robot_2": "WAIT"})
+    # Remove the task-rematching lifecycle event created by the first move;
+    # this test isolates a genuine reversal with no new goal or obstacle.
+    assert environment.state is not None
+    environment.state.by_id("robot_1").goal_since = -10
+    environment.state.by_id("robot_1").goal_switch_reason = "state_restore"
     _, _, _, _, info = environment.step(
         {"robot_1": "UP", "robot_2": "WAIT"}
     )

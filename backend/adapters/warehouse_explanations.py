@@ -44,9 +44,9 @@ class WarehouseExplanationMixin:
         robot = self.explanation_entity_label(target_agent, language)
         if not bool(trace.get("fact_valid", False)):
             return (
-                f"{robot}的本帧记录未通过事实校验，因此无法确认更具体的动作原因。"
+                f"无法可靠确认{robot}这一步的具体原因；请不要据此推断它在让路或避碰。"
                 if language == "zh-CN"
-                else f"{robot}'s trace failed factual validation, so no more specific reason can be confirmed."
+                else f"A reliable cause for {robot}'s action could not be confirmed; it should not be interpreted as yielding or collision avoidance."
             )
         teammate_id = next(
             (str(agent_id) for agent_id in agents if str(agent_id) != target_agent),
@@ -169,6 +169,26 @@ class WarehouseExplanationMixin:
                 return priority, "was deeper in the single lane and needed to exit first"
             return priority, "had right of way on the current route"
 
+        uncertainty = decision.get("human_action_uncertainty", {})
+        uncertainty = uncertainty if isinstance(uncertainty, Mapping) else {}
+        collision_counterfactuals = tuple(
+            item
+            for item in uncertainty.get("collision_counterfactuals", ())
+            if isinstance(item, Mapping)
+        )
+
+        if focus == "collision" and collision_counterfactuals:
+            example = collision_counterfactuals[0]
+            ai_action = self.explanation_action_label(
+                str(example.get("ai_action", "WAIT")), language
+            )
+            human_action = self.explanation_action_label(
+                str(example.get("participant_action", "WAIT")), language
+            )
+            if language == "zh-CN":
+                return f"{robot}在决策时不知道你本帧会怎么走；如果它{ai_action}而你{human_action}，双方会发生{str(example.get('kind', '路径冲突'))}，因此它选择了安全动作。"
+            return f"At decision time, {robot} did not know your current move. If it moved {ai_action} while you moved {human_action}, the robots could have had a {str(example.get('kind', 'path conflict'))}, so it chose the safe action."
+
         # Question routing comes before action-template routing.  Previously
         # every non-collision question returned the same action explanation.
         if focus == "allocation":
@@ -213,11 +233,24 @@ class WarehouseExplanationMixin:
             hysteresis_energy = float(
                 charging.get("hysteresis_energy", 0.0) or 0.0
             )
+            coordination_energy = float(
+                charging.get("coordination_contention_energy", 0.0) or 0.0
+            )
             controlling_task = task_label(charging.get("task_id"))
             if reason == "CONTINUE_CHARGING":
                 if language == "zh-CN":
-                    return f"{robot}继续充电：当前电量{before_battery:g}%，{controlling_task}完整配送及安全返航预计需{route_energy:g}%，另留{hysteresis_energy:g}%防止离站后折返，因此需充至{release_threshold:g}%；本步升至{after_battery:g}%。"
-                return f"{robot} kept charging: it had {before_battery:g}%; {controlling_task} required {route_energy:g}% for delivery and a safe return, plus {hysteresis_energy:g}% to prevent an immediate return, so the release level was {release_threshold:g}%. This step raised it to {after_battery:g}%."
+                    contention = (
+                        f"，并为已知的充电通道交接预留{coordination_energy:g}%"
+                        if coordination_energy > 0
+                        else ""
+                    )
+                    return f"{robot}继续充电：当前电量{before_battery:g}%，{controlling_task}完整配送及安全返航预计需{route_energy:g}%，另留{hysteresis_energy:g}%防止离站后折返{contention}，因此需充至{release_threshold:g}%；本步升至{after_battery:g}%。"
+                contention = (
+                    f", plus {coordination_energy:g}% for the visible charger handoff"
+                    if coordination_energy > 0
+                    else ""
+                )
+                return f"{robot} kept charging: it had {before_battery:g}%; {controlling_task} required {route_energy:g}% for delivery and a safe return, plus {hysteresis_energy:g}% to prevent an immediate return{contention}, so the release level was {release_threshold:g}%. This step raised it to {after_battery:g}%."
             if selected_energy is not None:
                 required = float(selected_energy.get("required_energy", 0.0) or 0.0)
                 slack = float(selected_energy.get("energy_slack", 0.0) or 0.0)
@@ -367,9 +400,22 @@ class WarehouseExplanationMixin:
         if reason == "CONTINUE_CHARGING":
             route_energy = float(charging.get("route_energy", 0.0) or 0.0)
             hysteresis_energy = float(charging.get("hysteresis_energy", 0.0) or 0.0)
+            coordination_energy = float(
+                charging.get("coordination_contention_energy", 0.0) or 0.0
+            )
             if language == "zh-CN":
-                return f"{robot}等待是为了继续充电：完整配送及安全返航预计需{route_energy:g}%，另留{hysteresis_energy:g}%防止折返；当前{before_battery:g}%，本步升至{after_battery:g}%。"
-            return f"{robot} waited to keep charging: a complete delivery and safe return required {route_energy:g}%, plus {hysteresis_energy:g}% to prevent an immediate return; battery rose from {before_battery:g}% to {after_battery:g}%."
+                contention = (
+                    f"，并为已知的充电通道交接预留{coordination_energy:g}%"
+                    if coordination_energy > 0
+                    else ""
+                )
+                return f"{robot}等待是为了继续充电：完整配送及安全返航预计需{route_energy:g}%，另留{hysteresis_energy:g}%防止折返{contention}；当前{before_battery:g}%，本步升至{after_battery:g}%。"
+            contention = (
+                f", plus {coordination_energy:g}% for the visible charger handoff"
+                if coordination_energy > 0
+                else ""
+            )
+            return f"{robot} waited to keep charging: a complete delivery and safe return required {route_energy:g}%, plus {hysteresis_energy:g}% to prevent an immediate return{contention}; battery rose from {before_battery:g}% to {after_battery:g}%."
 
         if reason == "LEAVE_CHARGER_THRESHOLD_MET":
             if language == "zh-CN":
@@ -397,6 +443,25 @@ class WarehouseExplanationMixin:
             if language == "zh-CN":
                 return f"{robot}等待是因为充电站当前被另一台机器人占用；它会在充电位释放后继续前进。"
             return f"{robot} waited because the charger was occupied; it can continue after the charging cell is released."
+
+        if reason == "WAIT_FOR_UNKNOWN_PARTICIPANT_ACTION":
+            example = next(
+                (
+                    item
+                    for item in collision_counterfactuals
+                    if str(item.get("ai_action", "")) in {"UP", "DOWN", "LEFT", "RIGHT"}
+                ),
+                collision_counterfactuals[0] if collision_counterfactuals else {},
+            )
+            ai_action = self.explanation_action_label(
+                str(example.get("ai_action", "WAIT")), language
+            )
+            human_action = self.explanation_action_label(
+                str(example.get("participant_action", "WAIT")), language
+            )
+            if language == "zh-CN":
+                return f"{robot}等待以避免潜在碰撞。决策时它不知道你本帧的动作；如果它{ai_action}而你{human_action}，双方可能进入冲突位置。"
+            return f"{robot} waited to avoid a potential collision. It did not know your current move at decision time; moving {ai_action} while you moved {human_action} could put both robots in conflict."
 
         if reason == "DELIVERY_ROUTE_PROGRESS":
             if language == "zh-CN":
@@ -461,12 +526,12 @@ class WarehouseExplanationMixin:
             "POLICY_WAIT_NO_VERIFIED_COORDINATION_CAUSE",
         }:
             if language == "zh-CN":
-                return f"{robot}本帧等待，但当前记录没有提供明确的充电、让行或避碰原因。"
-            return f"{robot} waited, but the current record provides no verified charging, yielding, or collision-avoidance reason."
+                return f"{robot}本帧等待，但没有任务、电量或安全原因支持这次等待；这是一次低效决策。"
+            return f"No task, battery, or safety need justified {robot}'s wait; it was an inefficient decision."
 
         if language == "zh-CN":
-            return f"{robot}执行了{action}；现有状态没有支持更具体的任务、充电或让行原因。"
-        return f"{robot} executed {action}; the current state supports no more specific task, charging, or yielding reason."
+            return f"{robot}执行了{action}，但没有可验证的任务、电量或安全原因；这是一次低效决策。"
+        return f"{robot} moved {action} without a verifiable task, battery, or safety reason; it was an inefficient decision."
 
     def concise_study_explanation(
         self,
@@ -485,8 +550,7 @@ class WarehouseExplanationMixin:
 
         raw_trace = snapshot.metadata.get("decision_trace", {})
         if (
-            focus != "collision"
-            and isinstance(raw_trace, Mapping)
+            isinstance(raw_trace, Mapping)
             and raw_trace.get("agents")
         ):
             trace_text = self._decision_trace_explanation(

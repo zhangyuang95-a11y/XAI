@@ -20,6 +20,7 @@ from backend.adapters.base import (
     SemanticPolicyContext,
 )
 from env.warehouse.contracts import RCPD_PROGRAM_VERSION
+from env.warehouse.decision_protocol import distribution_decision_metadata
 from env.warehouse.environment import (
     ACTIONS,
     MOVE_DELTAS,
@@ -37,6 +38,7 @@ from env.warehouse.observations import (
     global_observation,
     observation_schema,
 )
+from env.warehouse.runtime_coordination import select_ai_ai_joint_actions
 
 
 WAREHOUSE_PROGRAM_VERSION = RCPD_PROGRAM_VERSION
@@ -337,7 +339,10 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
                 global_state,
                 deterministic=deterministic,
             )
-            actions = dict(proposed_actions)
+            actions, runtime_decision = select_ai_ai_joint_actions(
+                self.environment,
+                proposed_actions,
+            )
             decision = replace(
                 decision,
                 observations=deepcopy(observations),
@@ -347,11 +352,20 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
                 proposed_actions=dict(proposed_actions),
                 metadata={
                     **dict(decision.metadata),
-                    "action_execution": "independent_simultaneous_mappo_actor",
+                    "action_execution": "causal_joint_optimizer_atomic_execution",
                     "submitted_actions": dict(actions),
                 },
             )
-            _, rewards, terminated, truncated, info = self.environment.step(actions)
+            _, rewards, terminated, truncated, info = self.environment.step(
+                actions,
+                decision_metadata=distribution_decision_metadata(
+                    distributions,
+                    decision_source="pytorch_actor_plus_joint_optimizer_ai_ai",
+                    policy_actions=proposed_actions,
+                    selected_actions=actions,
+                    runtime_decision=runtime_decision,
+                ),
+            )
             next_snapshot = self.snapshot(policy)
             for agent_id, action in info.get("executed_actions", actions).items():
                 counts[agent_id][action] += 1
@@ -360,7 +374,7 @@ class WarehouseAdapter(WarehouseExplanationMixin, EnvironmentAdapter):
                     frame=decision.frame,
                     snapshot=decision,
                     observations=deepcopy(observations),
-                    actions=dict(proposed_actions),
+                    actions=dict(actions),
                     distributions=dict(distributions),
                     reward=dict(rewards),
                     done=terminated or truncated,

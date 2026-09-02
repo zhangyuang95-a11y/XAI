@@ -622,6 +622,21 @@ def select_human_ai_action(
         and str(active_plan.get("yielding_agent_id", "")) == ai.agent_id
         and public_coordination_action in MOVE_DELTAS
     )
+    allowed_clearing_actions = {
+        str(action)
+        for action in active_plan.get(
+            "allowed_clearing_actions",
+            (public_coordination_action,),
+        )
+    }
+    allowed_clearing_targets = {
+        tuple(target)
+        for target in active_plan.get(
+            "allowed_clearing_targets",
+            (active_plan.get("moving_target", ()),),
+        )
+        if isinstance(target, (list, tuple)) and len(target) == 2
+    }
     physical_clearance_required = bool(
         ai_is_planned_clearer
         or (
@@ -686,6 +701,11 @@ def select_human_ai_action(
                     }
                 )
         target = _target(ai, action)
+        satisfies_planned_clearance = bool(
+            ai_is_planned_clearer
+            and action in allowed_clearing_actions
+            and target in allowed_clearing_targets
+        )
         before_distance = shortest_path_distance(
             ai.position, goal, environment.config.map_layout_id
         )
@@ -746,7 +766,7 @@ def select_human_ai_action(
             int(ai_is_planned_waiter and action != "WAIT"),
             int(
                 ai_is_planned_clearer
-                and action != public_coordination_action
+                and not satisfies_planned_clearance
             ),
             int(physical_clearance_required and action == "WAIT"),
             int(after_distance > before_distance),
@@ -774,6 +794,7 @@ def select_human_ai_action(
                 "recent_unproductive_charger_reentry": bool(
                     recent_unproductive_charger_reentry
                 ),
+                "satisfies_planned_clearance": satisfies_planned_clearance,
                 "nonprogress_move": bool(nonprogress_move),
                 "score": score,
             }

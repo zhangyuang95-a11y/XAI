@@ -371,7 +371,11 @@ class WarehouseExplanationMixin:
             if language == "zh-CN":
                 if left_charger:
                     return f"{robot}{action}离开充电站，是为了给低电量的{priority}清空{purpose}的下一格。"
+                if after_distance < before_distance:
+                    return f"{robot}{action}为{priority}清空{purpose}的下一格，同时将自己到当前目标的剩余路线从{before_distance}格缩短到{after_distance}格。"
                 return f"{robot}{action}是为了给{priority}清空{purpose}的下一格。"
+            if after_distance < before_distance:
+                return f"{robot} moved {action} to clear the next cell on {priority}'s route while shortening its own remaining route from {before_distance} to {after_distance} cells."
             return f"{robot} moved {action} to clear the next cell on {priority}'s route."
 
         if reason in {
@@ -391,8 +395,14 @@ class WarehouseExplanationMixin:
                 continuation_zh = f"继续前往{target_zh}取货"
                 continuation_en = f"continue toward {target_en} to collect the cargo"
             else:
+                target_zh = "当前任务"
+                target_en = "its current task"
                 continuation_zh = "继续执行当前任务"
                 continuation_en = "continue its current task"
+            if reason == "CLEAR_PARTICIPANT_ROUTE" and after_distance < before_distance:
+                if language == "zh-CN":
+                    return f"{robot}{action}为{teammate}清空通道，同时将前往{target_zh}的剩余路线从{before_distance}格缩短到{after_distance}格。"
+                return f"{robot} moved {action} to clear the aisle for {teammate} while shortening its remaining route to {target_en} from {before_distance} to {after_distance} cells."
             if language == "zh-CN":
                 return f"{robot}{action}是为了给{teammate}让路，避免双方在狭窄通道发生冲突。虽然这一步暂时远离当前目标，但避让后它会{continuation_zh}。"
             return f"{robot} moved {action} to yield to {teammate} and avoid a conflict in the narrow aisle. Although this temporarily moved it away from its current goal, it will {continuation_en} after yielding."

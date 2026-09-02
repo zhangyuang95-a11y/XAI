@@ -709,6 +709,114 @@ def test_counterfactual_safe_retreat_is_explained_as_avoidance() -> None:
     assert "inefficient" not in legacy_english.casefold()
 
 
+def test_clearance_prefers_safe_direction_that_also_advances_ai_goal() -> None:
+    environment = _compact_environment()
+    state = environment.get_state()
+    state.frame = 6
+    state.participant_controlled_agent_id = "robot_1"
+    state.tasks = [
+        DeliveryTask("task_a", (1, 0), (5, 4), created_frame=0),
+        DeliveryTask(
+            "task_b",
+            (0, 3),
+            (2, 6),
+            status="carried",
+            carrier_agent_id="robot_1",
+            created_frame=0,
+            claimed_frame=1,
+        ),
+    ]
+    participant = state.by_id("robot_1")
+    participant.position = (3, 1)
+    participant.battery = 90.0
+    participant.carrying_task_id = "task_b"
+    participant.route_commitment_task_id = "task_b"
+    participant.goal_type = "GO_TO_DROPOFF"
+    participant.goal_id = "task_b"
+    participant.navigation_goal_kind = "delivery"
+    participant.navigation_goal_position = (2, 6)
+    ai = state.by_id("robot_2")
+    ai.position = (3, 2)
+    ai.battery = 92.0
+    ai.carrying_task_id = None
+    ai.route_commitment_task_id = "task_a"
+    ai.goal_type = "GO_TO_PICKUP"
+    ai.goal_id = "task_a"
+    ai.navigation_goal_kind = "pickup"
+    ai.navigation_goal_position = (1, 0)
+    environment.set_state(state)
+
+    plan = environment.get_state().active_coordination_plan
+    assert plan is not None
+    assert plan["phase"] == "CLEAR_CELL"
+    assert plan["moving_agent_id"] == "robot_2"
+    assert plan["moving_action"] == "DOWN"
+    assert set(plan["allowed_clearing_actions"]) == {"UP", "DOWN"}
+
+    selected, runtime = select_human_ai_action(environment, "DOWN")
+    up = next(
+        item for item in runtime["ai_action_candidates"]
+        if item["action"] == "UP"
+    )
+    down = next(
+        item for item in runtime["ai_action_candidates"]
+        if item["action"] == "DOWN"
+    )
+    assert up["safe_for_all_participant_actions"] is True
+    assert down["safe_for_all_participant_actions"] is True
+    assert up["satisfies_planned_clearance"] is True
+    assert down["satisfies_planned_clearance"] is True
+    assert up["distance_after"] < up["distance_before"]
+    assert down["distance_after"] > down["distance_before"]
+    assert selected == "UP"
+
+    actions = {"robot_1": "WAIT", "robot_2": selected}
+    distribution = ActionDistribution(
+        agent_id="robot_2",
+        actions=tuple(ACTIONS),
+        probabilities=(0.1, 0.1, 0.1, 0.6, 0.1),
+        logits=(0.0, 0.0, 0.0, 1.0, 0.0),
+        action_mask=(1.0, 1.0, 1.0, 1.0, 1.0),
+        proposed_action="DOWN",
+    )
+    _, _, _, _, info = environment.step(
+        actions,
+        decision_metadata=distribution_decision_metadata(
+            {"robot_1": distribution, "robot_2": distribution},
+            decision_source="test_progressing_clearance",
+            participant_overrides={"robot_1": "WAIT"},
+            policy_actions={"robot_1": "WAIT", "robot_2": "DOWN"},
+            selected_actions=actions,
+            runtime_decision={**runtime, "selected_actions": actions},
+        ),
+    )
+    trace = info["decision_trace"]
+    decision = trace["agents"]["robot_2"]
+    assert decision["primary_reason_code"] == "CLEAR_TEAMMATE_ROUTE"
+    assert decision["direct_effect"]["distance_before"] == 4
+    assert decision["direct_effect"]["distance_after"] == 3
+    assert trace["fact_valid"] is True
+
+    explainer = _Explainer()
+    chinese = explainer._decision_trace_explanation(
+        trace,
+        target_agent="robot_2",
+        focus="action",
+        language="zh-CN",
+    )
+    english = explainer._decision_trace_explanation(
+        trace,
+        target_agent="robot_2",
+        focus="action",
+        language="en",
+    )
+    assert chinese is not None and "清空当前路线" in chinese
+    assert "从4格缩短到3格" in chinese
+    assert "暂时远离" not in chinese
+    assert english is not None and "clear the next cell" in english
+    assert "from 4 to 3 cells" in english
+
+
 def test_loaded_ai_priority_does_not_intercept_participant_action() -> None:
     environment = _compact_environment()
     state = environment.get_state()

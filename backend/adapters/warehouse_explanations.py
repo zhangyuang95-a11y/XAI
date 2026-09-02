@@ -269,7 +269,11 @@ class WarehouseExplanationMixin:
                 return f"{robot} had {current_battery:g}% battery, while even the least costly safe delivery required {least_required:g}%, so it needed to charge first."
 
         if focus == "collaboration":
-            if reason == "CLEAR_PARTICIPANT_STANDOFF":
+            if reason in {
+                "CLEAR_PARTICIPANT_STANDOFF",
+                "CLEAR_PARTICIPANT_ROUTE",
+                "MOVE_TO_AVOID_UNKNOWN_PARTICIPANT_ACTION",
+            }:
                 if language == "zh-CN":
                     return f"队友影响了本步：{robot}{action}为{teammate}让出通道空间，避免双方在狭窄区域发生冲突。"
                 return f"The teammate affected this step: {robot} moved {action} to leave aisle space for {teammate} and avoid a conflict in the narrow area."
@@ -361,7 +365,11 @@ class WarehouseExplanationMixin:
                 return f"{robot}{action}是为了给{priority}清空{purpose}的下一格。"
             return f"{robot} moved {action} to clear the next cell on {priority}'s route."
 
-        if reason == "CLEAR_PARTICIPANT_STANDOFF":
+        if reason in {
+            "CLEAR_PARTICIPANT_STANDOFF",
+            "CLEAR_PARTICIPANT_ROUTE",
+            "MOVE_TO_AVOID_UNKNOWN_PARTICIPANT_ACTION",
+        }:
             goal_type = str(frozen_goal.get("goal_type", ""))
             if goal_type == "GO_TO_DROPOFF" or decision.get("carrying_task_id"):
                 target_zh = delivery_label(goal_id)
@@ -531,8 +539,8 @@ class WarehouseExplanationMixin:
 
         if reason == "POLICY_MISSION_DETOUR":
             if language == "zh-CN":
-                return f"{robot}{action}没有推进已锁定目标，且记录中没有任务、充电或让行事件支持这次绕路。"
-            return f"{robot}'s {action} did not advance its locked goal, and no task, charging, or coordination event justified the detour."
+                return f"{robot}{action}没有缩短前往当前目标的路线，也没有起到避碰、让行或充电作用，因此这是一次低效移动。"
+            return f"{robot}'s {action} did not shorten the route to its current goal or serve collision avoidance, yielding, or charging, so it was an inefficient move."
 
         if reason == "AVOIDABLE_WAIT_SAFE_PROGRESS_AVAILABLE":
             counterfactual = decision.get("wait_counterfactual", {})

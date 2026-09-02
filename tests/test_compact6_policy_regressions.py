@@ -591,6 +591,102 @@ def test_participant_standoff_retreat_is_explained_as_yield_not_detour() -> None
     assert "detour" not in english
 
 
+def test_counterfactual_safe_retreat_is_explained_as_avoidance() -> None:
+    environment = _compact_environment()
+    state = environment.get_state()
+    state.participant_controlled_agent_id = "robot_1"
+    state.ineffective_joint_wait_streak = 0
+    participant = state.by_id("robot_1")
+    participant.position = (1, 0)
+    participant.carrying_task_id = None
+    participant.route_commitment_task_id = None
+    participant.goal_type = "WAIT"
+    participant.goal_id = None
+    participant.navigation_goal_kind = "wait"
+    participant.navigation_goal_position = participant.position
+    ai = state.by_id("robot_2")
+    ai.position = (1, 1)
+    ai.battery = 80.0
+    ai.carrying_task_id = "task_x"
+    ai.route_commitment_task_id = "task_x"
+    ai.goal_type = "GO_TO_DROPOFF"
+    ai.goal_id = "task_x"
+    ai.navigation_goal_kind = "delivery"
+    ai.navigation_goal_position = (1, 0)
+    state.tasks = [
+        DeliveryTask(
+            "task_x",
+            (0, 3),
+            (1, 0),
+            status="carried",
+            carrier_agent_id="robot_2",
+            created_frame=0,
+            claimed_frame=0,
+        ),
+        DeliveryTask("task_y", (2, 6), (3, 0), created_frame=0),
+    ]
+    environment.set_state(state)
+
+    selected, runtime = select_human_ai_action(environment, "WAIT")
+    assert selected == "RIGHT"
+    assert runtime["selected_ai_action"]["distance_after"] > (
+        runtime["selected_ai_action"]["distance_before"]
+    )
+    actions = {"robot_1": "WAIT", "robot_2": selected}
+    distribution = ActionDistribution(
+        agent_id="robot_2",
+        actions=tuple(ACTIONS),
+        probabilities=(0.1, 0.1, 0.1, 0.1, 0.6),
+        logits=(0.0, 0.0, 0.0, 0.0, 1.0),
+        action_mask=(1.0, 1.0, 1.0, 1.0, 1.0),
+        proposed_action="WAIT",
+    )
+    _, _, _, _, info = environment.step(
+        actions,
+        decision_metadata=distribution_decision_metadata(
+            {"robot_1": distribution, "robot_2": distribution},
+            decision_source="test_counterfactual_safe_retreat",
+            participant_overrides={"robot_1": "WAIT"},
+            policy_actions={"robot_1": "WAIT", "robot_2": "WAIT"},
+            selected_actions=actions,
+            runtime_decision={**runtime, "selected_actions": actions},
+        ),
+    )
+    trace = info["decision_trace"]
+    decision = trace["agents"]["robot_2"]
+
+    assert decision["primary_reason_code"] == (
+        "MOVE_TO_AVOID_UNKNOWN_PARTICIPANT_ACTION"
+    )
+    assert decision["human_action_uncertainty"]["riskier_progress_actions"]
+    assert trace["fact_valid"] is True
+
+    explainer = _Explainer()
+    chinese = explainer._decision_trace_explanation(
+        trace,
+        target_agent="robot_2",
+        focus="action",
+        language="zh-CN",
+    )
+    english = explainer._decision_trace_explanation(
+        trace,
+        target_agent="robot_2",
+        focus="action",
+        language="en",
+    )
+
+    assert chinese is not None
+    assert "给机器人1让路" in chinese
+    assert "继续前往B1交付" in chinese
+    assert "记录中" not in chinese
+    assert "低效" not in chinese
+    assert english is not None
+    assert "yield to Robot 1" in english
+    assert "continue toward B1" in english
+    assert "record" not in english.casefold()
+    assert "inefficient" not in english.casefold()
+
+
 def test_loaded_ai_priority_does_not_intercept_participant_action() -> None:
     environment = _compact_environment()
     state = environment.get_state()

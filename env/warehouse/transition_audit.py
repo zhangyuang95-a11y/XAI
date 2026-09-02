@@ -494,6 +494,42 @@ def _decision_reason_code(
         # detour.
         return "CLEAR_PARTICIPANT_STANDOFF"
     if (
+        executed_action in MOVE_DELTAS
+        and str(runtime.get("mode", "")) == "human_ai_robust_selection"
+        and agent_id == "robot_2"
+    ):
+        candidates = tuple(
+            item
+            for item in runtime.get("ai_action_candidates", ())
+            if isinstance(item, Mapping)
+        )
+        selected_candidate = next(
+            (
+                item
+                for item in candidates
+                if str(item.get("action", "")) == executed_action
+            ),
+            None,
+        )
+        selected_conflicts = (
+            len(tuple(selected_candidate.get("collision_counterfactuals", ())))
+            if isinstance(selected_candidate, Mapping)
+            else 0
+        )
+        riskier_progress = tuple(
+            item
+            for item in candidates
+            if str(item.get("action", "")) != executed_action
+            and int(item.get("distance_after", 0))
+            < int(item.get("distance_before", 0))
+            and len(tuple(item.get("collision_counterfactuals", ())))
+            > selected_conflicts
+        )
+        if bool(runtime.get("physical_clearance_required", False)):
+            return "CLEAR_PARTICIPANT_ROUTE"
+        if riskier_progress:
+            return "MOVE_TO_AVOID_UNKNOWN_PARTICIPANT_ACTION"
+    if (
         executed_action == "WAIT"
         and before.position == environment.layout.charger_position
         and after.battery > before.battery
@@ -668,6 +704,28 @@ def validate_decision_trace(
                 failures.append(
                     f"{agent_id}:standoff_clearance_without_evidence"
                 )
+        if reason == "CLEAR_PARTICIPANT_ROUTE":
+            runtime = trace.get("runtime_decision", {})
+            if not (
+                isinstance(runtime, Mapping)
+                and str(runtime.get("mode", ""))
+                == "human_ai_robust_selection"
+                and bool(runtime.get("physical_clearance_required", False))
+            ):
+                failures.append(
+                    f"{agent_id}:participant_route_clearance_without_evidence"
+                )
+        if reason == "MOVE_TO_AVOID_UNKNOWN_PARTICIPANT_ACTION":
+            uncertainty = decision.get("human_action_uncertainty", {})
+            if not (
+                isinstance(uncertainty, Mapping)
+                and uncertainty.get("participant_action_known_at_decision_time")
+                is False
+                and bool(uncertainty.get("riskier_progress_actions"))
+            ):
+                failures.append(
+                    f"{agent_id}:avoidance_move_without_counterfactual"
+                )
         if reason == "LEAVE_CHARGER_THRESHOLD_MET":
             charging = decision.get("charging_state", {})
             threshold = float(charging.get("release_threshold", 101.0))
@@ -799,6 +857,42 @@ def build_decision_trace(
             for item in runtime_decision.get("ai_action_candidates", ())
             if isinstance(item, Mapping)
         )
+        selected_ai_candidate = next(
+            (
+                item
+                for item in ai_candidates
+                if str(item.get("action", "")) == selected
+            ),
+            None,
+        )
+        selected_ai_conflict_count = (
+            len(
+                tuple(
+                    selected_ai_candidate.get(
+                        "collision_counterfactuals",
+                        (),
+                    )
+                )
+            )
+            if isinstance(selected_ai_candidate, Mapping)
+            else 0
+        )
+        riskier_progress_actions = tuple(
+            {
+                "ai_action": str(item.get("action", "")),
+                "distance_before": int(item.get("distance_before", 0)),
+                "distance_after": int(item.get("distance_after", 0)),
+                "collision_counterfactuals": list(
+                    item.get("collision_counterfactuals", ())
+                ),
+            }
+            for item in ai_candidates
+            if str(item.get("action", "")) != selected
+            and int(item.get("distance_after", 0))
+            < int(item.get("distance_before", 0))
+            and len(tuple(item.get("collision_counterfactuals", ())))
+            > selected_ai_conflict_count
+        )
         if str(runtime_decision.get("mode", "")) == "human_ai_robust_selection" and agent_id == "robot_2":
             safe_actions = tuple(
                 str(item.get("action"))
@@ -924,6 +1018,15 @@ def build_decision_trace(
                     runtime_decision.get("participant_legal_actions", ())
                 ),
                 "collision_counterfactuals": list(collision_counterfactuals),
+                "selected_action_collision_counterfactuals": list(
+                    selected_ai_candidate.get(
+                        "collision_counterfactuals",
+                        (),
+                    )
+                )
+                if isinstance(selected_ai_candidate, Mapping)
+                else [],
+                "riskier_progress_actions": list(riskier_progress_actions),
             },
             "coordination_evidence": [
                 dict(event)

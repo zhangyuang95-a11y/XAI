@@ -406,6 +406,57 @@ def _verified_wait_progress_alternative(
     }
 
 
+def human_ai_moving_safety_reason(
+    runtime: Mapping[str, Any],
+    executed_action: str,
+) -> str | None:
+    """Return a verified safety cause for a Human-AI moving action.
+
+    This helper is intentionally shared with the participant-facing renderer.
+    Persisted study traces created before a reason-code upgrade still contain
+    the frozen candidate set, so they can be explained from the same evidence
+    without exposing stale audit labels.
+    """
+
+    if (
+        executed_action not in MOVE_DELTAS
+        or str(runtime.get("mode", "")) != "human_ai_robust_selection"
+    ):
+        return None
+    candidates = tuple(
+        item
+        for item in runtime.get("ai_action_candidates", ())
+        if isinstance(item, Mapping)
+    )
+    selected_candidate = next(
+        (
+            item
+            for item in candidates
+            if str(item.get("action", "")) == executed_action
+        ),
+        None,
+    )
+    selected_conflicts = (
+        len(tuple(selected_candidate.get("collision_counterfactuals", ())))
+        if isinstance(selected_candidate, Mapping)
+        else 0
+    )
+    riskier_progress = tuple(
+        item
+        for item in candidates
+        if str(item.get("action", "")) != executed_action
+        and int(item.get("distance_after", 0))
+        < int(item.get("distance_before", 0))
+        and len(tuple(item.get("collision_counterfactuals", ())))
+        > selected_conflicts
+    )
+    if bool(runtime.get("physical_clearance_required", False)):
+        return "CLEAR_PARTICIPANT_ROUTE"
+    if riskier_progress:
+        return "MOVE_TO_AVOID_UNKNOWN_PARTICIPANT_ACTION"
+    return None
+
+
 def _decision_reason_code(
     environment: Any,
     previous: Any,
@@ -493,42 +544,13 @@ def _decision_reason_code(
         # mission distance, but it is necessary yielding rather than a policy
         # detour.
         return "CLEAR_PARTICIPANT_STANDOFF"
-    if (
-        executed_action in MOVE_DELTAS
-        and str(runtime.get("mode", "")) == "human_ai_robust_selection"
-        and agent_id == "robot_2"
-    ):
-        candidates = tuple(
-            item
-            for item in runtime.get("ai_action_candidates", ())
-            if isinstance(item, Mapping)
+    if agent_id == "robot_2":
+        moving_safety_reason = human_ai_moving_safety_reason(
+            runtime,
+            executed_action,
         )
-        selected_candidate = next(
-            (
-                item
-                for item in candidates
-                if str(item.get("action", "")) == executed_action
-            ),
-            None,
-        )
-        selected_conflicts = (
-            len(tuple(selected_candidate.get("collision_counterfactuals", ())))
-            if isinstance(selected_candidate, Mapping)
-            else 0
-        )
-        riskier_progress = tuple(
-            item
-            for item in candidates
-            if str(item.get("action", "")) != executed_action
-            and int(item.get("distance_after", 0))
-            < int(item.get("distance_before", 0))
-            and len(tuple(item.get("collision_counterfactuals", ())))
-            > selected_conflicts
-        )
-        if bool(runtime.get("physical_clearance_required", False)):
-            return "CLEAR_PARTICIPANT_ROUTE"
-        if riskier_progress:
-            return "MOVE_TO_AVOID_UNKNOWN_PARTICIPANT_ACTION"
+        if moving_safety_reason is not None:
+            return moving_safety_reason
     if (
         executed_action == "WAIT"
         and before.position == environment.layout.charger_position

@@ -686,6 +686,28 @@ def test_counterfactual_safe_retreat_is_explained_as_avoidance() -> None:
     assert "record" not in english.casefold()
     assert "inefficient" not in english.casefold()
 
+    # A persisted trace from before the reason-code upgrade still retains the
+    # frozen runtime candidate set.  Re-asking about that frame must recover
+    # the safety cause instead of repeating the stale generic detour label.
+    decision["primary_reason_code"] = "POLICY_MISSION_DETOUR"
+    decision["human_action_uncertainty"].pop("riskier_progress_actions", None)
+    legacy_chinese = explainer._decision_trace_explanation(
+        trace,
+        target_agent="robot_2",
+        focus="action",
+        language="zh-CN",
+    )
+    legacy_english = explainer._decision_trace_explanation(
+        trace,
+        target_agent="robot_2",
+        focus="action",
+        language="en",
+    )
+    assert legacy_chinese is not None and "给机器人1让路" in legacy_chinese
+    assert "低效" not in legacy_chinese
+    assert legacy_english is not None and "yield to Robot 1" in legacy_english
+    assert "inefficient" not in legacy_english.casefold()
+
 
 def test_loaded_ai_priority_does_not_intercept_participant_action() -> None:
     environment = _compact_environment()

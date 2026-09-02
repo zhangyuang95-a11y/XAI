@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from env.warehouse.transition_audit import human_ai_moving_safety_reason
 
 from .warehouse_context import (
     _action_zh,
@@ -61,6 +62,14 @@ class WarehouseExplanationMixin:
         reason = str(decision.get("primary_reason_code", ""))
         selected = str(decision.get("selected_action", "WAIT"))
         resolved = str(decision.get("resolved_action", selected))
+        # Older persisted Human-AI traces can carry the former generic detour
+        # label even though their frozen runtime candidate set proves that the
+        # move was a safer response to an unknown participant action.  Derive
+        # the public explanation from that evidence, not the stale label.
+        if reason == "POLICY_MISSION_DETOUR" and target_agent == "robot_2":
+            runtime = trace.get("runtime_decision", {})
+            runtime = runtime if isinstance(runtime, Mapping) else {}
+            reason = human_ai_moving_safety_reason(runtime, resolved) or reason
         action = self.explanation_action_label(resolved, language)
         effect = decision.get("direct_effect", {})
         effect = effect if isinstance(effect, Mapping) else {}

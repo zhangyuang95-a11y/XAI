@@ -72,6 +72,33 @@ def read_limited(path, limit):
     return data
 
 
+def read_render_secret_limited(path, limit):
+    """Read Render's mounted Secret File while retaining content binding.
+
+    Render mounts `/etc/secrets/<name>` through a platform-managed symlink on
+    native runtimes.  Only the fixed production Secret File path uses this
+    reader; explicit/local paths still reject every symlink.  The resolved
+    target must be a regular file and its bytes remain bound to the public
+    descriptor by the base64, size, ZIP, and per-member hashes below.
+    """
+    lexical = Path(os.path.abspath(path))
+    require(lexical == SECRET, "unexpected_platform_secret_path")
+    try:
+        resolved = lexical.resolve(strict=True)
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(resolved, flags)
+    except (OSError, RuntimeError):
+        raise ReleaseError("required_file_missing") from None
+    try:
+        require(stat.S_ISREG(os.fstat(descriptor).st_mode), "required_file_missing")
+        with os.fdopen(descriptor, "rb", closefd=False) as source:
+            data = source.read(limit + 1)
+    finally:
+        os.close(descriptor)
+    require(len(data) <= limit, "file_size_limit")
+    return data
+
+
 def strict_json(data):
     def pairs(values):
         result = {}
@@ -136,7 +163,10 @@ def validate_manifest(contents, document):
 
 
 def decode_bundle(secret_path, document):
-    encoded = read_limited(secret_path, MAX_SECRET_BYTES)
+    secret_path = Path(secret_path)
+    encoded = (read_render_secret_limited(secret_path, MAX_SECRET_BYTES)
+               if Path(os.path.abspath(secret_path)) == SECRET else
+               read_limited(secret_path, MAX_SECRET_BYTES))
     # Permit only line endings produced by text editors. Other whitespace,
     # excess padding, noncanonical encodings and appended data are rejected.
     compact = encoded.replace(b"\r\n", b"\n").replace(b"\n", b"")

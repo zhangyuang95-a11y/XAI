@@ -191,6 +191,16 @@ def test_symlink_paths_are_rejected(release, where):
     with pytest.raises(materializer.ReleaseError, match="symlink"): materialize(release)
 
 
+def test_fixed_render_secret_mount_symlink_is_accepted(release, monkeypatch):
+    prepare(release)
+    secret = release["secret"]
+    mounted = secret.with_name(secret.name + ".mounted")
+    secret.rename(mounted)
+    secret.symlink_to(mounted)
+    monkeypatch.setattr(materializer, "SECRET", secret.absolute())
+    assert materialize(release)["passed"]
+
+
 def test_unknown_existing_file_or_empty_directory_rejected(release):
     prepare(release); materialize(release)
     unknown = target(release) / "extra"; unknown.mkdir()

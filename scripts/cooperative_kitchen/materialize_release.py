@@ -240,5 +240,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     try:
         print(json.dumps(materialize(args.descriptor, args.secret_file), indent=2))
-    except (ReleaseError, OSError, ValueError, KeyError, TypeError):
-        parser.exit(1, "Kitchen release materialization failed validation; no private contents were logged.\n")
+    except ReleaseError as error:
+        # ReleaseError messages are fixed diagnostic codes declared in this
+        # module. They identify the failed check without printing archive
+        # names, contents, credentials, or environment values.
+        parser.exit(1, f"Kitchen release materialization failed validation ({error}); no private contents were logged.\n")
+    except (OSError, ValueError, KeyError, TypeError):
+        parser.exit(1, "Kitchen release materialization failed validation (runtime_error); no private contents were logged.\n")

@@ -2,6 +2,16 @@
 
 厨房源码随 XAI 主库管理，厨房和物流仓库仍是两个独立 Render Web Service。厨房使用 `render-kitchen.yaml`；原仓库的 `render.yaml`、依赖和启动入口保留。
 
+## 2026-09-06 迁移状态
+
+厨房已从 `zhangyuang95-a11y/XAI/main` 构建，继续使用 [原厨房网址](https://policylens-kitchen-study.onrender.com)。入口为 `internal_pilot`，参与者自行填写用户 ID，数据库自动分配 A/B 与任务顺序；`formal_ready=false`。原 Neon 数据、DeepSeek 配置和历史记录保留，匿名自由试玩不开放云端问答。
+
+物流仓库在 Render 控制台保持 Auto Deploy Off，并配置厨房路径忽略规则。迁移检查时，仓库最新部署仍为 `de16551`（2026-09-02），没有因厨房提交新增部署。旧厨房私有 GitHub 仓库已不再作为 Render 源码来源；永久删除仍需研究者按迁移方案作最终确认。
+
+当前发布继续标记为 candidate。策略抽取一致率和正式远程负载门槛仍未通过，DeepSeek 使用滚动别名，不能将入口开放理解为正式研究验收通过。历史 20 会话测试的动作 p95 6.76 秒、问答 p95 37.97 秒保留为失败结果。技术测试的用户 ID 和运行记录保存在受保护的验收数据中，真人分析必须排除这些运行。
+
+本次四个独立自动化会话覆盖 `A/XY、A/YX、B/XY、B/YX`，完成 24 个任务回合和 4 份问卷。2,924 次动作确认（含 4 次幂等重放）的全流程 p95 为 **1.104764041 秒**，高于 1 秒目标；两条中英文真实 DeepSeek 问答的 p95 为 **4.718863583 秒**。功能及记录核对通过，四会话性能结果仍为未通过，不宣称达到四人或二十人容量门槛。详细数据保存在私有发布包的 `acceptance/remote_load_report.json`；仅八次 anchor/replay 的指标单独标注，不能替代全流程指标。事后数据库审计使用 Neon HTTPS 只读事务，网络耗时未计入、也未替换原游戏和问答测量。
+
 公开仓库只提交厨房源码、部署脚本，以及 `deployment/cooperative_kitchen/release.json` 中的路径、字节数和 SHA256。Actor、抽取程序、场景、问卷答案及验收报告通过私有 Render Secret File 交付，不提交 Git，不放入 `ui/` 或其他静态目录。Base64 只是文本编码，不提供加密。
 
 ## 私有产物与公开校验描述

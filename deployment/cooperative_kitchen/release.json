@@ -3,15 +3,15 @@
   "status": "prepared",
   "release_status": "candidate",
   "release_path": "output/cooperative_kitchen/v3-id-pilot",
-  "bundle_sha256": "fa1f32611c6542e341a28269eab3c45d51ae3f13124e7dc2c7cdb57ed79f6db5",
-  "bundle_bytes": 197921,
-  "manifest_sha256": "79c67a87c05c5e904776b87a99e2be39949a56afcfa61b60249736c773b663d6",
+  "bundle_sha256": "422b70cdd9070cb81adc4b5656d1d34b623e639284945f854b695353b6dedad3",
+  "bundle_bytes": 199563,
+  "manifest_sha256": "c09002f4db86d2c7cb2eee318c2bd6673865517a2f468d8c0a7232b7f0f76692",
   "runtime_sha256": "74a36c15ff0b87c7154c44ce312cd2555d05654d5c1a6bb62734d1af324ce1c5",
   "members": [
     {
       "kind": "manifest",
       "path": "manifest.json",
-      "sha256": "79c67a87c05c5e904776b87a99e2be39949a56afcfa61b60249736c773b663d6",
+      "sha256": "c09002f4db86d2c7cb2eee318c2bd6673865517a2f468d8c0a7232b7f0f76692",
       "bytes": 6218
     },
     {
@@ -77,8 +77,8 @@
     {
       "kind": "remote_load_report",
       "path": "acceptance/remote_load_report.json",
-      "sha256": "1a349633fca692b0864280f6cd5e2ce2b253d3286fc29d78e02ba4d885dcfb56",
-      "bytes": 4208
+      "sha256": "b12ead1969586412908ce759b8ff898552267abb2c4312dc975ee7ca6fefe766",
+      "bytes": 10399
     },
     {
       "kind": "recovery_report",

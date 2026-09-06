@@ -8,6 +8,7 @@
 - `postgres_restore.py` 校验归档，只恢复到另一个空数据库；拒绝覆盖源库或非空目标。
 - `study_admin.py` 从环境或私有配置文件读取管理员密钥，查看入口状态、导出分析文件或提交有审计原因的技术重试。参与者直接输入用户 ID，旧邀请码命令已移除，不代注册或发送消息。
 - `browser_fixture_server.py --isolated-test-only` 仅在本机 PostgreSQL 新建临时测试 schema，以真实环境、Actor、场景、问卷运行完整浏览器回归。只在 `namespace=test` 中绕过发布门槛并固定第一块 A/B 顺序；不预注册用户 ID，浏览器通过真实入口首次登记。不会改正式发布清单、生产随机分组或简化物理。退出后移除自己创建的 schema。
+- `normalize_canary.py` 默认只检查事先去敏的远程 canary JSON；显式 `--write` 才备份并更新恢复/远程报告，不读取密钥、不联网、不改变二十人门槛。字段契约和两阶段更新顺序见 [normalize_canary.md](normalize_canary.md)。
 
 完整命令和验收边界见 `docs/cooperative_kitchen_research.md`。DeepSeek 的 `deepseek-v4-flash` 是滚动别名，不声称权重已冻结。不把本地测试、候选打包或协议夹具结果称为远程部署、模型效果或真实云端语言模型验收。
 

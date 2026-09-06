@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f1f5f9">
+  <title>PolicyLens · 协作厨房</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script src="engine.js" defer></script>
+  <script src="renderer.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-group"><strong class="brand">PolicyLens</strong><span class="app-subtitle" data-i18n="app_title" data-zh="协作厨房" data-en="Cooperative Kitchen">协作厨房</span></div>
+    <nav class="workflow" aria-label="Demo workflow">
+      <span data-phase="instructions" class="active" data-i18n="workflow_instructions" data-zh="任务说明" data-en="Instructions">任务说明</span><i aria-hidden="true"></i>
+      <span data-phase="play" data-i18n="workflow_play" data-zh="合作任务" data-en="Cooperative task">合作任务</span><i aria-hidden="true"></i>
+      <span data-phase="result" data-i18n="workflow_result" data-zh="任务回顾" data-en="Review">任务回顾</span>
+    </nav>
+    <div class="topbar-actions"><span class="demo-label" data-i18n="demo_label" data-zh="玩法演示 · 程序队友" data-en="Gameplay demo · Programmed teammate">玩法演示 · 程序队友</span><button id="language" class="ghost" type="button" aria-label="Change language">EN</button></div>
+  </header>
+
+  <main>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <section id="instructions" class="intro-layout">
+      <article class="card intro-main">
+        <span class="eyebrow" data-i18n="demo_heading" data-zh="人机协作任务" data-en="HUMAN–AI COOPERATION">人机协作任务</span>
+        <h1 data-i18n="intro_title" data-zh="一起完成两份洋葱汤" data-en="Prepare two onion soups together">一起完成两份洋葱汤</h1>
+        <p class="intro-description" data-i18n="intro_description" data-zh="你和一名程序队友各自在厨房一侧，通过中间的工作台交接物品。目标是在 120 步内完成两份汤。" data-en="You and a programmed teammate work on opposite sides of a kitchen. Exchange items through the shared counters and serve two soups within 120 steps.">你和一名程序队友各自在厨房一侧，通过中间的工作台交接物品。目标是在 120 步内完成两份汤。</p>
+        <div class="cooperation-diagram" aria-hidden="true">
+          <div class="diagram-side"><span class="chef-token human">1</span><strong data-i18n="supply_role" data-zh="供料与出餐" data-en="Supply & serve">供料与出餐</strong><span data-i18n="supply_subtitle" data-zh="取食材 · 接汤 · 出餐" data-en="Ingredients · Handoff · Serve">取食材 · 接汤 · 出餐</span></div>
+          <div class="diagram-middle"><span class="handoff-arrow">⇄</span><span data-i18n="shared_counters" data-zh="共享工作台" data-en="Shared counters">共享工作台</span></div>
+          <div class="diagram-side"><span class="chef-token ai">2</span><strong data-i18n="cook_role" data-zh="烹饪与装盘" data-en="Cook & plate">烹饪与装盘</strong><span data-i18n="cook_subtitle" data-zh="入锅 · 煮汤 · 装盘" data-en="Fill pot · Cook · Plate">入锅 · 煮汤 · 装盘</span></div>
+        </div>
+        <h2 data-i18n="recipe_title" data-zh="单一菜谱" data-en="The recipe">单一菜谱</h2>
+        <ol class="recipe-steps">
+          <li><span>01</span><p data-i18n="recipe_ingredients" data-zh="三份洋葱入锅" data-en="Add three onions">三份洋葱入锅</p></li>
+          <li><span>02</span><p data-i18n="recipe_cooking" data-zh="再经过四步煮熟" data-en="Cook for four more steps">再经过四步煮熟</p></li>
+          <li><span>03</span><p data-i18n="recipe_plate" data-zh="拿盘子装汤" data-en="Collect soup with a plate">拿盘子装汤</p></li>
+          <li><span>04</span><p data-i18n="recipe_serve" data-zh="交接并送到出餐口" data-en="Hand off and serve">交接并送到出餐口</p></li>
+        </ol>
+        <p class="intro-note" data-i18n="intro_note" data-zh="每人一次只能拿一件物品；每张工作台只能放一件物品。拿错或多取的物品可以放进垃圾桶。" data-en="Each chef can hold one item, and each counter can hold one item. Unwanted items can be discarded in a bin.">每人一次只能拿一件物品；每张工作台只能放一件物品。拿错或多取的物品可以放进垃圾桶。</p>
+      </article>
+      <aside class="card intro-controls">
+        <span class="eyebrow" data-i18n="before_start" data-zh="开始前" data-en="BEFORE YOU START">开始前</span>
+        <h2 data-i18n="controls_title" data-zh="操作控制" data-en="Controls">操作控制</h2>
+        <div class="key-instruction"><span class="key-cluster"><kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd></span><span data-i18n="move_hint" data-zh="移动和转向，也可用 WASD" data-en="Move and turn, or use WASD">移动和转向，也可用 WASD</span></div>
+        <div class="key-instruction"><kbd>E</kbd><span data-i18n="interact_hint" data-zh="面向设施取放物品" data-en="Interact with the facility you face">面向设施取放物品</span></div>
+        <div class="key-instruction"><kbd data-i18n="space_key" data-zh="空格" data-en="Space">空格</kbd><span data-i18n="wait_hint" data-zh="等待一步" data-en="Wait one step">等待一步</span></div>
+        <p class="status-note" data-i18n="joint_step_note" data-zh="每次操作，双方共同前进一步。撞墙和无效交互也消耗一步；阅读解释与回放不推进时间。" data-en="Each input advances one joint step. Blocked moves and invalid interactions also use a step. Reading explanations and replaying do not advance time.">每次操作，双方共同前进一步。撞墙和无效交互也消耗一步；阅读解释与回放不推进时间。</p>
+        <button id="start" class="button primary" type="button" data-i18n="start" data-zh="开始合作任务" data-en="Start cooperative task">开始合作任务</button>
+        <p class="small muted" data-i18n="demo_scope" data-zh="本页仅用于体验玩法。队友由固定程序控制；不采集正式实验数据。" data-en="This prototype demonstrates gameplay. The teammate follows a fixed program; no formal study data are collected.">本页仅用于体验玩法。队友由固定程序控制；不采集正式实验数据。</p>
+      </aside>
+    </section>
+
+    <section id="play" hidden>
+      <div class="session-line"><span id="phase-label" class="phase">合作任务</span><span id="role-label" class="muted">你负责供料与出餐</span><button id="show-instructions" class="text-button" type="button" data-i18n="show_instructions" data-zh="查看任务说明" data-en="View instructions">查看任务说明</button></div>
+      <div class="game-layout">
+        <section class="card simulator-card">
+          <div class="card-heading map-heading"><h1 data-i18n="kitchen_title" data-zh="协作厨房" data-en="Cooperative kitchen">协作厨房</h1><span class="map-size" data-i18n="fixed_layout" data-zh="固定布局 · 9 × 7" data-en="Fixed layout · 9 × 7">固定布局 · 9 × 7</span></div>
+          <div class="scorebar">
+            <div><span data-i18n="orders" data-zh="已完成订单" data-en="Orders served">已完成订单</span><strong id="orders-count">0 / 2</strong></div>
+            <div><span data-i18n="steps" data-zh="已用步数" data-en="Steps used">已用步数</span><strong id="turn-count">0 / 120</strong></div>
+            <div class="pot-metric"><span data-i18n="pot" data-zh="锅内状态" data-en="Pot status">锅内状态</span><strong id="pot-status">0 / 3 洋葱</strong></div>
+          </div>
+          <div class="board-shell"><canvas id="board" width="810" height="630" tabindex="0" aria-label="Cooperative kitchen map"></canvas><span id="replay-badge" class="replay-badge" hidden></span></div>
+          <div class="legend"><span><i class="chef-mark human">1</i><b data-i18n="human" data-zh="你" data-en="You">你</b></span><span><i class="chef-mark ai">2</i><b data-i18n="ai" data-zh="程序队友" data-en="Programmed teammate">程序队友</b></span><span><i class="item-mark onion"></i><b data-i18n="onion" data-zh="洋葱" data-en="Onion">洋葱</b></span><span><i class="item-mark plate"></i><b data-i18n="plate" data-zh="盘子" data-en="Plate">盘子</b></span><span><i class="item-mark soup"></i><b data-i18n="soup" data-zh="汤" data-en="Soup">汤</b></span><span class="shared-legend"><i class="counter-mark"></i><b data-i18n="shared_counters" data-zh="共享工作台" data-en="Shared counters">共享工作台</b></span></div>
+          <section class="replay-card">
+            <div class="card-heading"><h3 data-i18n="replay" data-zh="行动回放" data-en="Action replay">行动回放</h3><button id="live" class="text-button" type="button" data-i18n="back_live" data-zh="回到当前" data-en="Return to current">回到当前</button></div>
+            <div class="timeline-controls"><button id="previous-frame" class="icon-button" type="button" aria-label="Previous frame">‹</button><input id="timeline" type="range" min="0" max="0" value="0" aria-label="Replay step"><button id="next-frame" class="icon-button" type="button" aria-label="Next frame">›</button><span id="timeline-label" class="mono">0 / 0</span></div>
+          </section>
+        </section>
+
+        <aside class="sidebar">
+          <section class="card controls-card">
+            <div class="card-heading"><h2 data-i18n="controls_title" data-zh="操作控制" data-en="Controls">操作控制</h2><span class="small muted" data-i18n="synchronous" data-zh="同步回合制" data-en="Joint turns">同步回合制</span></div>
+            <div class="holding-row"><div><i class="chef-mark human">1</i><span data-i18n="holding" data-zh="手持" data-en="Holding">手持</span><strong id="human-held">空手</strong></div><div><i class="chef-mark ai">2</i><span data-i18n="holding" data-zh="手持" data-en="Holding">手持</span><strong id="ai-held">空手</strong></div></div>
+            <div class="direction-pad">
+              <button class="direction up" data-action="UP" type="button" aria-label="Move up"><kbd>↑</kbd></button>
+              <button class="direction left" data-action="LEFT" type="button" aria-label="Move left"><kbd>←</kbd></button>
+              <button class="direction interact" data-action="INTERACT" type="button"><kbd>E</kbd><span data-i18n="interact" data-zh="交互" data-en="Interact">交互</span></button>
+              <button class="direction right" data-action="RIGHT" type="button" aria-label="Move right"><kbd>→</kbd></button>
+              <button class="direction down" data-action="DOWN" type="button" aria-label="Move down"><kbd>↓</kbd></button>
+              <button class="direction wait" data-action="WAIT" type="button"><kbd data-i18n="space_key" data-zh="空格" data-en="Space">空格</kbd><span data-i18n="wait" data-zh="等待" data-en="Wait">等待</span></button>
+            </div>
+            <p class="control-hint" data-i18n="keyboard" data-zh="方向键 / WASD 移动 · E 交互 · 空格等待" data-en="Arrows / WASD move · E interact · Space wait">方向键 / WASD 移动 · E 交互 · 空格等待</p>
+            <p id="feedback" class="feedback" role="status"></p>
+            <div id="result" class="result" role="status" hidden></div>
+            <div class="demo-actions"><button id="auto-demo" class="button primary" type="button" data-i18n="auto_demo" data-zh="自动演示" data-en="Auto demo">自动演示</button><button id="restart" class="button secondary" type="button" data-i18n="restart" data-zh="重新开始" data-en="Restart">重新开始</button><button id="swap-role" class="button secondary" type="button" data-i18n="swap_role" data-zh="交换分工" data-en="Swap roles">交换分工</button></div>
+          </section>
+
+          <section class="card explanation-card">
+            <div class="card-heading"><h2 data-i18n="behavior_explanation" data-zh="行为解释" data-en="Behavior explanation">行为解释</h2><span class="source-chip" data-i18n="program_source" data-zh="程序记录" data-en="Program trace">程序记录</span></div>
+            <div class="teammate-status"><i class="chef-mark ai">2</i><p id="ai-status">等待任务开始</p></div>
+            <div class="explain-buttons">
+              <button type="button" data-explain="why"><span data-i18n="why" data-zh="为什么选择这个动作" data-en="Why choose this action?">为什么选择这个动作</span><span aria-hidden="true">↗</span></button>
+              <button type="button" data-explain="waiting"><span data-i18n="waiting" data-zh="你在等什么" data-en="What are you waiting for?">你在等什么</span><span aria-hidden="true">↗</span></button>
+              <button type="button" data-explain="counterfactual"><span data-i18n="counterfactual" data-zh="如果我等待会怎样" data-en="What if I wait?">如果我等待会怎样</span><span aria-hidden="true">↗</span></button>
+            </div>
+            <p class="small muted explanation-hint" data-i18n="explanation_hint" data-zh="解释对应当前选中的回放帧。打开解释或回放会暂停自动演示。" data-en="Explanations refer to the selected replay frame. Opening an explanation or replay pauses the auto demo.">解释对应当前选中的回放帧。打开解释或回放会暂停自动演示。</p>
+            <article id="explanation" class="explanation" aria-live="polite" hidden>
+              <div class="explanation-heading"><strong id="explanation-title"></strong><button id="close-explanation" class="icon-button" type="button" aria-label="Close explanation">×</button></div>
+              <span id="explanation-frame" class="explanation-frame"></span>
+              <p id="explanation-text"></p>
+            </article>
+          </section>
+          <p class="sidebar-note" data-i18n="recipe_short" data-zh="菜谱：3 份洋葱 → 再煮 4 步 → 拿盘装汤 → 交接出餐" data-en="Recipe: 3 onions → cook 4 more steps → plate soup → hand off & serve">菜谱：3 份洋葱 → 再煮 4 步 → 拿盘装汤 → 交接出餐</p>
+        </aside>
+      </div>
+    </section>
+  </main>
+  <footer><strong>PolicyLens</strong><span data-i18n="demo_footer" data-zh="协作厨房 · 独立玩法原型" data-en="Cooperative Kitchen · Gameplay prototype">协作厨房 · 独立玩法原型</span></footer>
+</body>
+</html>

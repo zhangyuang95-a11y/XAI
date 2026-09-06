@@ -1,0 +1,65 @@
+# Separate kitchen service from the XAI monorepo; warehouse render.yaml stays unchanged.
+# Choose this file explicitly when creating the kitchen Blueprint.
+# Enrollment starts closed. After deployment checks, explicitly enable internal_pilot in Render.
+# Add kitchen_release.b64 as a Render Secret File before building. Never commit its contents.
+services:
+  - type: web
+    name: policylens-kitchen-study
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: python -m pip install -r requirements-kitchen.txt && python scripts/cooperative_kitchen/materialize_release.py && python scripts/cooperative_kitchen/verify_deployment.py
+    startCommand: python -m ui.cooperative_kitchen_server --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/status
+    autoDeployTrigger: "off"
+    # Keep rootDir unset: runtime imports core/, backend/, env/ and ui/ together.
+    buildFilter:
+      paths:
+        - backend/cooperative_kitchen/**
+        - backend/adapters/base.py
+        - backend/adapters/__init__.py
+        - backend/__init__.py
+        - core/**
+        - env/cooperative_kitchen/**
+        - env/__init__.py
+        - ui/cooperative_kitchen_server.py
+        - ui/cooperative_kitchen_store.py
+        - ui/cooperative_kitchen_web/**
+        - ui/__init__.py
+        - scripts/cooperative_kitchen/**
+        - deployment/cooperative_kitchen/release.json
+        - requirements-kitchen.txt
+        - render-kitchen.yaml
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.2
+      - key: KITCHEN_NAMESPACE
+        value: pilot
+      - key: KITCHEN_ENROLLMENT_MODE
+        value: closed
+      - key: KITCHEN_OUTPUT
+        value: output/cooperative_kitchen/v3-id-pilot
+      - key: KITCHEN_ALLOW_SQLITE
+        value: "0"
+      - key: KITCHEN_SECURE_COOKIE
+        value: "1"
+      - key: KITCHEN_QA_WORKERS
+        value: "8"
+      - key: KITCHEN_FREEPLAY_QA
+        value: "0"
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: DATABASE_URL
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: KITCHEN_LLM_PROVIDER
+        value: deepseek
+      - key: KITCHEN_LLM_BASE_URL
+        value: https://api.deepseek.com
+      - key: KITCHEN_LLM_MODEL
+        value: deepseek-v4-flash
+      - key: KITCHEN_ADMIN_KEY
+        generateValue: true

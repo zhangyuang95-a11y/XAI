@@ -1,0 +1,90 @@
+{
+  "schema": "cooperative_kitchen_secret_release_v1",
+  "status": "prepared",
+  "release_status": "candidate",
+  "release_path": "output/cooperative_kitchen/v3-id-pilot",
+  "bundle_sha256": "7b33e8cfbf081c9440f6348ffec8275acf459e86d2306149546ece4e545ab882",
+  "bundle_bytes": 196247,
+  "manifest_sha256": "47422df49702b44b9999dff5a337d04226610d99a2569e2b3fd43334e6dcef62",
+  "runtime_sha256": "74a36c15ff0b87c7154c44ce312cd2555d05654d5c1a6bb62734d1af324ce1c5",
+  "members": [
+    {
+      "kind": "manifest",
+      "path": "manifest.json",
+      "sha256": "47422df49702b44b9999dff5a337d04226610d99a2569e2b3fd43334e6dcef62",
+      "bytes": 6218
+    },
+    {
+      "kind": "actor",
+      "path": "selected/actor.npz",
+      "sha256": "b14abd1f4f280404f02823d4e7d0b812f14522d2673f2f48baf6ee7016443f16",
+      "bytes": 118629
+    },
+    {
+      "kind": "program",
+      "path": "artifacts/program_ai.json",
+      "sha256": "bc515d7448e27de95219d07c0c37c397d22de49ceb6fa2a03c42f9abe68e1ba6",
+      "bytes": 24519
+    },
+    {
+      "kind": "scenarios",
+      "path": "artifacts/calibration.json",
+      "sha256": "af844a0541ba03ec6756f2c32f20b4c064145a7617d988531b77167a8c0d6ce3",
+      "bytes": 28692
+    },
+    {
+      "kind": "questionnaire",
+      "path": "artifacts/questionnaire.json",
+      "sha256": "bfb355c6e2efeb1388e4eddb607b00ee8700e34cb93778e032022db4017add0d",
+      "bytes": 27244
+    },
+    {
+      "kind": "training_report",
+      "path": "acceptance/training_report.json",
+      "sha256": "3f6a3617fd8c3755f42f3206bb0e3d29808cc673124be67955d373344e6c4f64",
+      "bytes": 167154
+    },
+    {
+      "kind": "extraction_report",
+      "path": "acceptance/extraction_report.json",
+      "sha256": "1e6060757dfeb1345507d67cdc7855016d128d0ac8d7d1e45e71ea8cfbb99488",
+      "bytes": 38614
+    },
+    {
+      "kind": "qa_report",
+      "path": "acceptance/qa_report.json",
+      "sha256": "ea8e23c67f0894851050a5d2d194e0bb0c4ec4f19b3a763abc9ce74afbe41f67",
+      "bytes": 426951
+    },
+    {
+      "kind": "calibration_report",
+      "path": "acceptance/calibration_report.json",
+      "sha256": "3a7ef44595745176e1f6a4e8e1bb1519ac0a8c72fd47f34ed000cbafc89f86c1",
+      "bytes": 28800
+    },
+    {
+      "kind": "questionnaire_report",
+      "path": "acceptance/questionnaire_report.json",
+      "sha256": "336d81bd783b2c7f7cdfab9540121c3d25434a0b3e693e3155bbfa0d3f4498e3",
+      "bytes": 1520
+    },
+    {
+      "kind": "protocol_report",
+      "path": "acceptance/protocol_report.json",
+      "sha256": "8b25bfe4b9329df7cf813e69a80fa9fa60666a7c24379e54352c04decd74e3e1",
+      "bytes": 3259
+    },
+    {
+      "kind": "remote_load_report",
+      "path": "acceptance/remote_load_report.json",
+      "sha256": "4e59f77dc290ab2a0368a52d2065436c272abff8399ccd3c9e4deb1811d269c8",
+      "bytes": 2099
+    },
+    {
+      "kind": "recovery_report",
+      "path": "acceptance/recovery_report.json",
+      "sha256": "c902c3e39d55f385fc3bd5a30203f41542ded35a81d278301f7d38a27d5e26ef",
+      "bytes": 842
+    }
+  ]
+}

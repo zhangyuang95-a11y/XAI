@@ -5,6 +5,9 @@
  * 180-step physics, the selected trained Actor, real question bank/scenarios.
  * --auto <local-url> verifies freeplay automatic demonstration against a real
  * server, preserving the neural AI and testing both complete role assignments.
+ * --layout runs only request/keyboard layout regressions on the protocol fixture.
+ * --app-script <file> with --layout tests a saved frontend revision as a negative
+ * control. It changes only the fixture's served app.js, never the source files.
  * KITCHEN_PLAYWRIGHT_MODULE / KITCHEN_CHROME select a local browser runtime.
  */
 'use strict';
@@ -17,6 +20,9 @@ const {chromium} = require(process.env.KITCHEN_PLAYWRIGHT_MODULE || process.env.
 const Demo = require('../ui/cooperative_kitchen_demo/engine.js');
 const args = process.argv.slice(2), fullFixture = args.includes('--full') ? args[args.indexOf('--full') + 1] : null;
 const autoURL = args.includes('--auto') ? args[args.indexOf('--auto') + 1] : null;
+const layoutOnly = args.includes('--layout');
+const appScript = args.includes('--app-script') ? path.resolve(args[args.indexOf('--app-script') + 1]) : null;
+if (appScript) assert.ok(layoutOnly && !autoURL && !fullFixture, '--app-script is restricted to the isolated layout fixture');
 const root = path.resolve(__dirname, '..'), output = path.resolve(process.env.KITCHEN_STUDY_BROWSER_OUTPUT || path.join(root, autoURL ? 'output/cooperative_kitchen/v1/browser-auto' : fullFixture ? 'output/cooperative_kitchen/v1/browser-full' : 'output/cooperative_kitchen/v1/browser'));
 fs.mkdirSync(output, {recursive: true});
 const realURL = args.includes('--real') ? args[args.indexOf('--real') + 1] : null;
@@ -50,7 +56,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://127.0.0.1'); let body = {};
     if (req.method === 'POST') { let raw = ''; for await (const part of req) raw += part; body = JSON.parse(raw || '{}'); }
-    if (!url.pathname.startsWith('/api/')) { const file = {'/': 'index.html', '/app.js': 'app.js', '/renderer.js': 'renderer.js', '/style.css': 'style.css', '/favicon.svg': 'favicon.svg'}[url.pathname]; if (!file) return send(res, 404, {error: 'Missing file'}); const data = fs.readFileSync(path.join(root, 'ui/cooperative_kitchen_web', file)); res.writeHead(200, {'Content-Type': file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : file.endsWith('.svg') ? 'image/svg+xml' : 'text/html'}); return res.end(data); }
+    if (!url.pathname.startsWith('/api/')) { const file = {'/': 'index.html', '/app.js': 'app.js', '/renderer.js': 'renderer.js', '/style.css': 'style.css', '/favicon.svg': 'favicon.svg'}[url.pathname]; if (!file) return send(res, 404, {error: 'Missing file'}); const data = fs.readFileSync(file === 'app.js' && appScript ? appScript : path.join(root, 'ui/cooperative_kitchen_web', file)); res.writeHead(200, {'Content-Type': file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : file.endsWith('.svg') ? 'image/svg+xml' : 'text/html'}); return res.end(data); }
     if (url.pathname === '/api/status') return send(res, 200, {study_ready: false, enrollment: {mode: 'internal_pilot', enabled: true, formal_ready: false, participant_id_pattern: '^[A-Za-z][A-Za-z0-9_-]{2,31}$', participant_id_example: 'user_01'}, policy_kind: 'isolated_protocol_fixture', max_steps: 180, target_orders: 2});
     let session = sessionFor(req);
     if (url.pathname === '/api/session') {
@@ -110,6 +116,111 @@ async function readyAction(page) { await page.waitForFunction(() => !document.qu
 async function input(page, action = 'WAIT') { const before = await pageView(page); await readyAction(page); await page.locator(`[data-action="${action}"]`).click(); await page.waitForFunction(turn => document.querySelector('#turn-count').textContent.startsWith(`${turn} /`), before.state.turn + 1); }
 async function finishRound(page) { while (!(await pageView(page)).state.done) await input(page); await page.locator('#next').waitFor({state: 'visible'}); }
 async function begin(page, target, participantId = null) { await page.goto(target); await page.locator('#lobby').waitFor({state: 'visible'}); if (participantId) { await page.locator('#user-id').fill(['A', 'B'].includes(participantId) ? `fixture_${participantId}` : participantId); await page.locator('#join-study').click(); await page.locator('#consent').waitFor({state: 'visible'}); await page.locator('#consent-check').check(); await page.locator('#accept-consent').click(); } else await page.locator('#freeplay').click(); await page.locator('#start-practice').waitFor({state: 'visible'}); await page.locator('#start-practice').click(); await page.locator('#board').waitFor({state: 'visible'}); }
+
+async function requestLayoutRegression(target) {
+  Object.assign(report, {fixture: 'Isolated protocol fixture. Browser layout, native keyboard input and lost-response retry only; no remote requests, training or explanation validation.', app_script_sha256: crypto.createHash('sha256').update(fs.readFileSync(appScript || path.join(root, 'ui/cooperative_kitchen_web/app.js'))).digest('hex')});
+  const selectors = ['#board', ...['UP', 'DOWN', 'LEFT', 'RIGHT', 'INTERACT', 'WAIT'].map(action => `[data-action="${action}"]`)];
+  async function startSampling(page) {
+    await page.evaluate(selectors => {
+      window.layoutSamples = [];
+      const sample = () => {
+        window.layoutSamples.push({scrollX, scrollY, busy: /正在确认|Confirming/.test(document.querySelector('#connection-status').textContent), boxes: selectors.map(selector => { const {x, y, width, height} = document.querySelector(selector).getBoundingClientRect(); return {x, y, width, height}; })});
+        window.layoutSampleRAF = requestAnimationFrame(sample);
+      };
+      sample();
+    }, selectors);
+  }
+  async function stopSampling(page, name, detail) {
+    const samples = await page.evaluate(() => { cancelAnimationFrame(window.layoutSampleRAF); return window.layoutSamples; });
+    const spread = values => Math.max(...values) - Math.min(...values);
+    const boxes = selectors.map((selector, index) => ({selector, ...Object.fromEntries(['x', 'y', 'width', 'height'].map(key => [key, spread(samples.map(sample => sample.boxes[index][key]))]))}));
+    const scroll = {x: spread(samples.map(sample => sample.scrollX)), y: spread(samples.map(sample => sample.scrollY))};
+    const maximum = Math.max(scroll.x, scroll.y, ...boxes.flatMap(box => ['x', 'y', 'width', 'height'].map(key => box[key])));
+    const pendingSamples = samples.filter(sample => sample.busy).length;
+    record(name, {...detail, passed: maximum <= 0.5 && pendingSamples >= 5, samples: samples.length, pending_samples: pendingSamples, maximum_movement_px: maximum, scroll_range_px: scroll, box_ranges_px: boxes});
+  }
+  for (const size of [{width: 1365, height: 900}, {width: 1280, height: 800}]) for (const language of ['zh', 'en']) {
+    // Keep real action animation enabled; a reduced-motion fixture would miss
+    // frame changes occurring between acknowledgement and re-enabled controls.
+    const context = await browser.newContext({viewport: size}), page = await context.newPage();
+    page.on('pageerror', error => report.errors.push(error.stack || error.message));
+    await begin(page, target); await readyAction(page);
+    if (language === 'en') { await page.locator('#language').click(); await page.waitForFunction(() => document.documentElement.lang === 'en'); await readyAction(page); }
+    await layout(page, size);
+    let actionsReceived = 0;
+    await page.route('**/api/command', async route => {
+      if (route.request().postDataJSON()?.command !== 'action') return route.continue();
+      actionsReceived++;
+      const response = await route.fetch();
+      // The authoritative commit already exists while the user is waiting.
+      await new Promise(resolve => setTimeout(resolve, 420));
+      await route.fulfill({response});
+    });
+    const detail = {viewport: size, language};
+    for (const inputMode of ['keyboard', 'pointer']) {
+      await page.locator('#board').focus(); await page.evaluate(() => scrollTo(0, 0));
+      const before = await pageView(page); await startSampling(page);
+      if (inputMode === 'keyboard') await page.keyboard.press('ArrowUp');
+      else await page.locator('[data-action="WAIT"]').click();
+      await page.waitForFunction(turn => document.querySelector('#turn-count').textContent.startsWith(`${turn} /`), before.state.turn + 1);
+      await readyAction(page); await page.waitForTimeout(70);
+      await stopSampling(page, 'action_keeps_map_controls_and_scroll_stable', {...detail, input: inputMode});
+      assert.equal((await pageView(page)).state.turn, before.state.turn + 1);
+    }
+    await page.locator('#board').focus(); await page.evaluate(() => {
+      scrollTo(0, 0); window.layoutKeyEvents = [];
+      document.addEventListener('keydown', event => window.layoutKeyEvents.push({key: event.key, repeat: event.repeat, trusted: event.isTrusted}), {capture: true});
+    });
+    const holdBefore = await pageView(page), requestsBefore = actionsReceived; await startSampling(page);
+    await page.keyboard.down('ArrowDown');
+    // Repeated keyboard.down emits trusted native repeat events, unlike a
+    // hand-created KeyboardEvent which cannot exercise default page scrolling.
+    for (let index = 0; index < 9; index++) { await page.waitForTimeout(85); await page.keyboard.down('ArrowDown'); }
+    await page.keyboard.up('ArrowDown'); await readyAction(page); await page.waitForTimeout(120);
+    const keyEvents = await page.evaluate(() => window.layoutKeyEvents.filter(event => event.key === 'ArrowDown'));
+    assert.equal(keyEvents.length, 10); assert.ok(keyEvents.every(event => event.trusted)); assert.equal(keyEvents.filter(event => event.repeat).length, 9);
+    await stopSampling(page, 'held_native_arrow_keeps_scroll_stable', {...detail, repeated_keydown_events: 9});
+    assert.equal((await pageView(page)).state.turn, holdBefore.state.turn + 1); assert.equal(actionsReceived, requestsBefore + 1);
+    record('held_native_arrow_advances_only_once', detail);
+
+    // Game shortcuts must not steal editable input or the native button
+    // activation performed on Space keyup by the browser.
+    await page.locator('#question-input').fill('text'); await page.locator('#question-input').focus();
+    const inputTurn = (await pageView(page)).state.turn;
+    await page.keyboard.press('Space'); await page.keyboard.press('ArrowLeft');
+    assert.equal(await page.locator('#question-input').inputValue(), 'text '); assert.equal((await pageView(page)).state.turn, inputTurn);
+    await page.locator('[data-action="WAIT"]').focus(); const buttonRequests = actionsReceived;
+    await page.keyboard.down('Space'); await page.waitForTimeout(80); assert.equal(actionsReceived, buttonRequests);
+    await page.keyboard.up('Space'); await page.waitForFunction(turn => document.querySelector('#turn-count').textContent.startsWith(`${turn} /`), inputTurn + 1);
+    assert.equal(actionsReceived, buttonRequests + 1); assert.equal((await pageView(page)).state.turn, inputTurn + 1);
+    record('editable_space_and_native_button_space_are_preserved', detail);
+    await context.close();
+  }
+  const context = await browser.newContext({viewport: {width: 1280, height: 800}}), page = await context.newPage();
+  page.on('pageerror', error => report.errors.push(error.stack || error.message));
+  await begin(page, target); await readyAction(page);
+  const before = await pageView(page), captured = []; let dropped = false;
+  await page.route('**/api/command', async route => {
+    const body = route.request().postDataJSON();
+    if (body.command !== 'action') return route.continue();
+    captured.push(copy(body));
+    if (!dropped) { dropped = true; await route.fetch(); await route.abort('failed'); }
+    else await route.continue();
+  });
+  await page.locator('[data-action="WAIT"]').click(); await page.locator('#retry-request').waitFor({state: 'visible'});
+  assert.equal(await page.locator('#notice').isVisible(), true); assert.equal(await page.locator('[data-action="WAIT"]').isDisabled(), true);
+  assert.equal((await pageView(page)).state.turn, before.state.turn + 1);
+  await page.locator('#retry-request').click(); await page.waitForFunction(() => document.querySelector('#notice').hidden); await readyAction(page);
+  const after = await pageView(page); assert.equal(after.state.turn, before.state.turn + 1);
+  assert.equal(captured.length, 2); assert.deepEqual(captured[0], captured[1]);
+  const session = sessions.get(after.run.id);
+  assert.equal([...session.operations.keys()].filter(id => id === captured[0].operation_id).length, 1);
+  assert.equal(active(session).frames.length, 2);
+  record('lost_committed_response_has_retry_and_one_operation_one_step', {action_requests: captured.length, committed_actions: active(session).frames.length - 1});
+  await context.close(); assert.deepEqual(report.errors, []);
+  const failed = report.checks.filter(check => !check.passed); assert.equal(failed.length, 0, `${failed.length} layout checks failed; see per-frame measurements in report`);
+  report.status = 'passed';
+}
 
 async function actualAutoDemonstration() {
   assert.ok(['127.0.0.1', 'localhost'].includes(new URL(autoURL).hostname));
@@ -240,6 +351,7 @@ async function fullActualStudy() {
     if (fullFixture) { await fullActualStudy(); return; }
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); const target = `http://127.0.0.1:${server.address().port}`;
     browser = await chromium.launch({headless: true, executablePath: process.env.KITCHEN_CHROME || process.env.CANDY_CHROME || undefined});
+    if (layoutOnly) { await requestLayoutRegression(target); return; }
     const context = await browser.newContext({viewport: {width: 1365, height: 900}, reducedMotion: 'reduce'}), page = await context.newPage(); page.on('pageerror', error => report.errors.push(error.stack || error.message));
     await begin(page, target); assert.equal((await pageView(page)).state.maxSteps, 180); assert.equal(await page.evaluate(() => typeof window.KitchenEngine), 'undefined'); assert.equal(await page.locator('#ai-status').count(), 0); record('server_authority_no_client_policy_or_next_action_preview');
     rejectNextQuestionCode = 'question_rate_limit'; await page.locator('[data-explain="why"]').click(); await page.waitForFunction(() => document.querySelector('#notice-text').textContent === '请等待 2 秒后再提问。'); assert.equal(await page.locator('#notice-text').innerText(), '请等待 2 秒后再提问。');
@@ -327,5 +439,5 @@ async function fullActualStudy() {
     }
     assert.deepEqual(report.errors, []); report.status = 'passed'; record('no_javascript_errors');
   } catch (error) { report.status = 'failed'; report.failure = error.stack || error.message; process.exitCode = 1; }
-  finally { report.finished = new Date().toISOString(); fs.writeFileSync(path.join(output, autoURL ? 'auto_demonstration_acceptance.json' : fullFixture ? 'full_study_browser_acceptance.json' : 'browser_acceptance.json'), JSON.stringify(report, null, 2) + '\n'); if (browser) await browser.close(); if (server.listening) await new Promise(resolve => server.close(resolve)); process.stdout.write(JSON.stringify({status: report.status, checks: report.checks.length, output, failure: report.failure || null}, null, 2) + '\n'); }
+  finally { report.finished = new Date().toISOString(); fs.writeFileSync(path.join(output, layoutOnly ? 'layout_browser_acceptance.json' : autoURL ? 'auto_demonstration_acceptance.json' : fullFixture ? 'full_study_browser_acceptance.json' : 'browser_acceptance.json'), JSON.stringify(report, null, 2) + '\n'); if (browser) await browser.close(); if (server.listening) await new Promise(resolve => server.close(resolve)); process.stdout.write(JSON.stringify({status: report.status, checks: report.checks.length, output, failure: report.failure || null}, null, 2) + '\n'); }
 })();

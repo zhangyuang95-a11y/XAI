@@ -3,16 +3,16 @@
   "status": "prepared",
   "release_status": "candidate",
   "release_path": "output/cooperative_kitchen/v3-id-pilot",
-  "bundle_sha256": "422b70cdd9070cb81adc4b5656d1d34b623e639284945f854b695353b6dedad3",
-  "bundle_bytes": 199563,
-  "manifest_sha256": "c09002f4db86d2c7cb2eee318c2bd6673865517a2f468d8c0a7232b7f0f76692",
-  "runtime_sha256": "74a36c15ff0b87c7154c44ce312cd2555d05654d5c1a6bb62734d1af324ce1c5",
+  "bundle_sha256": "3823ee3b88d116549c4a60e52055ee8dc60a2d31f994eda8897e4b658f47d3dc",
+  "bundle_bytes": 206715,
+  "manifest_sha256": "1764bb7a2ab4f1b246b7f33fdb8b6cc672d1fdef36dbd9e71f77381bbb1e9aa2",
+  "runtime_sha256": "03c1384c0daca85be49b8689c0e3fc44884f7d306ea085186ef51749765b33e3",
   "members": [
     {
       "kind": "manifest",
       "path": "manifest.json",
-      "sha256": "c09002f4db86d2c7cb2eee318c2bd6673865517a2f468d8c0a7232b7f0f76692",
-      "bytes": 6218
+      "sha256": "1764bb7a2ab4f1b246b7f33fdb8b6cc672d1fdef36dbd9e71f77381bbb1e9aa2",
+      "bytes": 7551
     },
     {
       "kind": "actor",
@@ -53,8 +53,8 @@
     {
       "kind": "qa_report",
       "path": "acceptance/qa_report.json",
-      "sha256": "ea8e23c67f0894851050a5d2d194e0bb0c4ec4f19b3a763abc9ce74afbe41f67",
-      "bytes": 426951
+      "sha256": "f5ee0a3688ae3239256575d78b1f8fa5446248d48e6a5954861edb48951fb95d",
+      "bytes": 430401
     },
     {
       "kind": "calibration_report",
@@ -71,20 +71,20 @@
     {
       "kind": "protocol_report",
       "path": "acceptance/protocol_report.json",
-      "sha256": "8b25bfe4b9329df7cf813e69a80fa9fa60666a7c24379e54352c04decd74e3e1",
-      "bytes": 3259
+      "sha256": "ba6e8d34d0311aeff617fb509ec680179c98c47b651f57c2c2632396aee2c6d5",
+      "bytes": 9573
     },
     {
       "kind": "remote_load_report",
       "path": "acceptance/remote_load_report.json",
-      "sha256": "b12ead1969586412908ce759b8ff898552267abb2c4312dc975ee7ca6fefe766",
-      "bytes": 10399
+      "sha256": "3c64dd2865a1fa1f756652f708efc883facca0d2df35d46304160fae973fd23f",
+      "bytes": 13832
     },
     {
       "kind": "recovery_report",
       "path": "acceptance/recovery_report.json",
-      "sha256": "3f0943b31666dcd892080956164db44ae5cf2310efb44e1fa9ef102f87b66757",
-      "bytes": 2975
+      "sha256": "8a8954f76da14aa307290e5a42242d8e5c9157aef7d9ef4121e6adc223f76242",
+      "bytes": 6408
     }
   ]
 }

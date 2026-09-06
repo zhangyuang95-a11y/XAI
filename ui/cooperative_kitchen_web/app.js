@@ -225,7 +225,13 @@
     $('user-id').setAttribute('aria-invalid', String(Boolean(text)));
     $('user-id').setCustomValidity(text || (PARTICIPANT_ID.test($('user-id').value) ? '' : tr('请输入 3–32 个字符，以英文字母开头，仅使用英文字母、数字、下划线或连字符。', 'Enter 3–32 characters, starting with a letter, using only letters, numbers, underscores or hyphens.')));
   }
-  function renderNotice() { $('notice').hidden = !notice && !pending; $('notice-text').textContent = notice || (pending ? tr('仍有一个操作等待服务器确认。', 'One operation is awaiting server confirmation.') : ''); $('retry-request').hidden = !pending || busy; }
+  function renderNotice() {
+    // Routine requests use the existing connection status without moving the map.
+    const retryNeeded = Boolean(pending) && !busy;
+    $('notice').hidden = !notice && !retryNeeded;
+    $('notice-text').textContent = notice || (retryNeeded ? tr('仍有一个操作等待服务器确认。', 'One operation is awaiting server confirmation.') : '');
+    $('retry-request').hidden = !retryNeeded;
+  }
   function renderControls() {
     document.querySelectorAll('[data-action]').forEach(node => { node.disabled = !canAct(); });
     $('language').disabled = busy || Boolean(pending); $('join-study').disabled = busy || Boolean(pending) || !enrollmentEnabled();
@@ -417,10 +423,12 @@
   $('survey-form').onchange = event => { if (!event.target.name) return; surveyDraft[event.target.name] = event.target.value; surveyDirty = true; storageSet(KEYS.survey, {run_id: run()?.id, answers: surveyDraft}); $('survey-save-status').textContent = tr('正在保存草稿…', 'Saving draft…'); if (surveyTimer) clearTimeout(surveyTimer); surveyTimer = setTimeout(saveSurvey, 400); };
   $('survey-form').onsubmit = async event => { event.preventDefault(); if (!$('survey-form').reportValidity() || busy || pending) return; if (surveyTimer) clearTimeout(surveyTimer); const result = await command('survey_submit', {answers: clone(surveyDraft)}); if (result) { surveyDirty = false; storageDelete(KEYS.survey); } };
   document.addEventListener('keydown', event => {
-    if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input,textarea,select,[contenteditable=true]')) return;
+    if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input,textarea,select,[contenteditable=true]')) return;
     if (event.target.closest('button') && [' ', 'Enter'].includes(event.key)) return;
     const keys = {ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', w: 'UP', W: 'UP', s: 'DOWN', S: 'DOWN', a: 'LEFT', A: 'LEFT', d: 'RIGHT', D: 'RIGHT', e: 'INTERACT', E: 'INTERACT', ' ': 'WAIT'};
-    const action = keys[event.key]; if (!action || $('play').hidden) return; event.preventDefault(); stopAuto(); if (canAct()) command('action', {action}, {animateAction: true});
+    const action = keys[event.key]; if (!action || $('play').hidden) return;
+    event.preventDefault(); if (event.repeat) return;
+    stopAuto(); if (canAct()) command('action', {action}, {animateAction: true});
   });
   window.addEventListener('resize', () => { stopAnimation(); draw(); renderControls(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) { stopAuto(); stopAnimation(); draw(); renderControls(); } else if (run() && !busy && !pending) refresh().catch(() => {}); });

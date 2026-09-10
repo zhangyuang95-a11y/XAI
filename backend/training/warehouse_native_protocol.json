@@ -1,0 +1,20 @@
+{
+  "version": "warehouse-native-rcpd.v1",
+  "status": "development_protocol_frozen_before_training",
+  "seed": 260908,
+  "scope": "warehouse_only_local",
+  "authorized_run": {"kind": "pure_rl_foundation", "seeds": 1, "joint_steps_max": 500000, "feedback_enabled": false},
+  "training": {"environments": 16, "rollout_steps": 128, "learning_rate": 0.0003, "gamma": 0.99, "gae_lambda": 0.95, "clip": 0.2, "epochs": 4, "minibatch": 512, "entropy": 0.01, "gradient_norm": 0.5, "checkpoint_interval": 50000, "validation_interval": 50000},
+  "partners": {"selfplay": 0.5, "skilled": 0.2, "assertive": 0.2, "noisy": 0.1},
+  "noisy_partner": {"probability": 0.1, "replacement": "uniform_wait_or_direction"},
+  "architecture": {"actor": "MLP", "hidden": [128, 128], "activation": "tanh", "shared_roles": true, "critic": "centralized_with_role", "actions": ["UP", "DOWN", "LEFT", "RIGHT", "WAIT"], "masks": false, "runtime_override": false},
+  "splits": {"train": 512, "calibration": 100, "validation": 50, "extraction": 100, "explanation_test": 100, "final_test": 100, "play": 12},
+  "checkpoint_selection": {"split": "validation", "metric": "mean_team_deliveries", "partners": ["skilled", "assertive", "noisy"], "tie_break": "fewer_shutdowns_then_earlier_step", "deterministic": true},
+  "warmup_gate": {"minimum_joint_steps": 100000, "minimum_ai_deliveries_mean": 2.0, "minimum_ai_active_end_rate": 0.9, "minimum_delivery_ratio_to_reference": 0.7},
+  "candidate_gate": {"episodes_per_partner": 50, "minimum_skilled_delivery_ratio_to_reference": 0.8, "minimum_noisy_delivery_ratio_to_reference": 0.6, "minimum_ai_deliveries_mean": 2.0, "minimum_ai_active_end_rate": 0.9, "minimum_delivery_improvement_over_random": 0.2, "note": "Development capability criteria, not human explanation efficacy; denominators and raw contributions must be reported."},
+  "feedback": {"depths": [4, 6, 8], "leaves": [16, 32, 64], "target": "detached_tree_distribution", "direction": "KL(nn||tree)", "complexity": "candidate_selection_only", "lambda_max": 0.01, "ramp_steps": 100000, "extract_interval": 50000, "minimum_fidelity": 0.9, "minimum_critical_fidelity": 0.85, "maximum_mean_kl": 0.35, "maximum_performance_drop_fraction": 0.1, "additional_long_training_authorized": false},
+  "explanation": {"minimum_fidelity": 0.9, "minimum_critical_fidelity": 0.85, "minimum_intervention_direction_fidelity": 0.85, "max_counterfactual_steps": 3, "minimum_scenarios_per_category": 10, "categories": ["narrow_passage", "shared_pickup", "shared_charger"], "explanation_may_choose_actions": false},
+  "difficulty_baselines": ["fixed_yield", "fixed_region", "fixed_task", "follow"],
+  "human_analysis": {"primary": "task2_mean_deliveries", "secondary": ["native_score", "legacy_score_when_separately_replayed", "collisions", "shutdowns", "steps", "individual_contributions", "behavior_prediction"], "difference_between_stages": "descriptive_only", "same_frozen_actor_ab": true, "formal_ready": false},
+  "data_contract": {"exact_initial_state_fingerprints_disjoint": true, "seed_difference_alone_insufficient": true, "runtime_nn_action_equals_submitted": true, "record_physical_executed_action_separately": true, "program_actions_in_policy_gradient": false, "legacy_detour_in_new_score": false}
+}

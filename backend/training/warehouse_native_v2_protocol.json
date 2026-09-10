@@ -1,0 +1,17 @@
+{
+  "version": "warehouse-native-foundation.v2",
+  "status": "prepared_pending_explicit_budget_approval",
+  "seed": 260908,
+  "authorized_run": {"authorized": false, "kind": "proposed_second_foundation", "seeds": 1, "total_training_environment_steps_max": 500000, "includes_curriculum_generation": true, "feedback_enabled": false},
+  "training": {"environments": 16, "rollout_steps": 128, "learning_rate": 0.0003, "actor_learning_rate": 0.0003, "critic_learning_rate": 0.0003, "gamma": 0.99, "gae_lambda": 0.95, "clip": 0.2, "epochs": 4, "minibatch": 512, "entropy": 0.01, "actor_gradient_norm": 0.5, "critic_gradient_norm": 0.5, "checkpoint_interval": 50000},
+  "reward": {"version": "warehouse-native-score-pbrs.v2", "native_score_scale": 0.01, "static_wall_command_cost": 0.02, "potential_scale": 0.25, "gamma": 0.99, "shared_reward": true, "pickup_bonus": 0.0, "charge_bonus": 0.0},
+  "curriculum": {"version": "warehouse-native-legal-curriculum.v2", "source_split": "train", "maximum_generation_steps": 10000, "generation_chunk": 128, "entries_per_category": 128, "categories": ["near_pickup", "carrying", "low_battery_near_charger", "narrow_encounter"], "initial_probability": 0.5, "constant_until_ppo_steps": 100000, "zero_at_ppo_steps": 200000, "generator_partner": "skilled", "teacher_action_labels": false, "manual_state_edits": false},
+  "partners": {"selfplay": 0.5, "skilled": 0.2, "assertive": 0.2, "noisy": 0.1},
+  "splits": {"train": 512, "calibration": 100, "validation": 50, "extraction": 100, "explanation_test": 100, "final_test": 100, "play": 12},
+  "architecture": {"actor": "MLP", "hidden": [128, 128], "activation": "tanh", "shared_roles": true, "critic": "centralized_with_role", "actions": ["UP", "DOWN", "LEFT", "RIGHT", "WAIT"], "masks": false, "runtime_override": false},
+  "checkpoint_selection": {"split": "validation", "metric": "mean_team_deliveries", "partners": ["skilled", "assertive", "noisy"], "tie_break": "fewer_shutdowns_then_earlier_step", "deterministic": true},
+  "warmup_gate": {"minimum_joint_steps": 100000, "minimum_ai_deliveries_mean": 2.0, "minimum_ai_active_end_rate": 0.9, "minimum_delivery_ratio_to_reference": 0.7},
+  "candidate_gate": {"episodes_per_partner": 50, "minimum_skilled_delivery_ratio_to_reference": 0.8, "minimum_noisy_delivery_ratio_to_reference": 0.6, "minimum_ai_deliveries_mean": 2.0, "minimum_ai_active_end_rate": 0.9, "minimum_delivery_improvement_over_random": 0.2},
+  "diagnostic_checkpoints": {"first_review_ppo_steps": 100000, "stop_for_review_ppo_steps": 200000, "static_wall_rate_warning": 0.2, "mean_ai_delivery_warning": 1.0, "never_weaken_candidate_gate": true},
+  "release": {"formal_ready": false, "automatic_deployment": false, "final_test_used_for_selection": false, "same_frozen_actor_required_for_explanation_comparison": true}
+}

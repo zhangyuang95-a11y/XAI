@@ -49,6 +49,19 @@ MISSION_INTENT_NAMES = (
     "wait",
 )
 
+# This is an explicit inference ablation of an existing checkpoint, not a new
+# trained model. The structured inputs still contain engineered state features.
+# Participant provenance routes its learned residual; the action-specific
+# deadlock/priority/wait-history rule gate is intentionally absent. The latter
+# evaluates that residual outside its original activation distribution.
+LEARNED_ONLY_FORWARD_VERSION = "warehouse_learned_heads_ablation_1"
+LEARNED_ONLY_FORWARD_COMPONENTS = (
+    "bounded_base_head",
+    "bounded_structured_head_with_neural_mission_and_peer_forecast",
+    "bounded_participant_residual_with_episode_role_routing",
+    "bounded_deadlock_residual_without_handwritten_activation_gate",
+)
+
 
 def independent_actor_input(observation: Any) -> np.ndarray:
     """Return one actor input containing pre-move observable state only."""
@@ -381,8 +394,19 @@ class SharedActorCentralCritic(nn.Module):
     def actor_outputs(
         self,
         observations: torch.Tensor,
+        *,
+        learned_only: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return final action logits and the Actor's neural mission logits."""
+        """Return action and mission logits; opt in to the learned-head ablation.
+
+        The default retains the original rule-augmented forward expression.
+        In the ablation, even trainable scalar coefficients on hand-written
+        penalties/bonuses are excluded: they are not action-scoring MLP heads.
+        Legal masking, if requested by a caller, remains a separate operation.
+        """
+
+        if not isinstance(learned_only, bool):
+            raise TypeError("learned_only must be an explicit bool")
 
         latent_intent = self.intent_encoder(observations)
         mission_logits = self.mission_head(latent_intent)
@@ -471,6 +495,25 @@ class SharedActorCentralCritic(nn.Module):
         structured_logits = self.learned_logit_limit * torch.tanh(
             raw_structured_logits / self.learned_logit_limit
         )
+        if learned_only:
+            participant_residual = (
+                self.participant_partner_logit_limit
+                * torch.tanh(
+                    self.participant_partner_action_head(observations)
+                    / self.participant_partner_logit_limit
+                )
+                * participant_teammate
+            )
+            # Keep the learned weights and numerical bound, but not the
+            # manually specified carrying/corridor/priority/wait-history gate.
+            deadlock_residual = self.deadlock_escape_logit_limit * torch.tanh(
+                self.deadlock_escape_action_head(observations)
+                / self.deadlock_escape_logit_limit
+            )
+            return (
+                base_logits + structured_logits + participant_residual + deadlock_residual,
+                mission_logits,
+            )
         collision_penalty = torch.nn.functional.softplus(
             self.collision_risk_log_scale
         ) * selected_collision.squeeze(-1)
@@ -1336,8 +1379,12 @@ class SharedActorCentralCritic(nn.Module):
             + participant_logits * participant_flag
         )
 
-    def actor_logits(self, observations: torch.Tensor) -> torch.Tensor:
-        return self.actor_outputs(observations)[0]
+    def actor_logits(
+        self, observations: torch.Tensor, *, learned_only: bool = False
+    ) -> torch.Tensor:
+        if learned_only is False:
+            return self.actor_outputs(observations)[0]
+        return self.actor_outputs(observations, learned_only=learned_only)[0]
 
     def mission_logits(self, observations: torch.Tensor) -> torch.Tensor:
         return self.actor_outputs(observations)[1]
@@ -1476,6 +1523,8 @@ class MAPPOPolicy:
     def masked_actor_logits(
         self,
         observations: torch.Tensor,
+        *,
+        learned_only: bool = False,
     ) -> torch.Tensor:
         local_dim = observation_dim(self.environment_config)
         if observations.shape[-1] != local_dim:
@@ -1483,7 +1532,11 @@ class MAPPOPolicy:
                 "Actor inputs must be independent local observations from the "
                 "shared pre-move state."
             )
-        logits = self.network.actor_logits(observations)
+        logits = (
+            self.network.actor_logits(observations)
+            if learned_only is False
+            else self.network.actor_logits(observations, learned_only=learned_only)
+        )
         mask = observations[..., -len(ACTIONS) :] > 0.5
         # MPS materialises a Python bool by synchronising the whole command
         # stream.  Runtime observations are validated below while they are
@@ -1504,6 +1557,7 @@ class MAPPOPolicy:
         *,
         deterministic: bool = False,
         decision_key: tuple[int, int] | None = None,
+        learned_only: bool = False,
     ) -> tuple[dict[str, str], dict[str, ActionDistribution]]:
         del global_state  # The decentralized actor consumes local observations.
         agent_ids = sorted(observations, key=agent_index)
@@ -1523,7 +1577,11 @@ class MAPPOPolicy:
             device=self.device,
         )
         with torch.no_grad():
-            logits = self.masked_actor_logits(tensor)
+            logits = (
+                self.masked_actor_logits(tensor)
+                if learned_only is False
+                else self.masked_actor_logits(tensor, learned_only=learned_only)
+            )
             probabilities = torch.softmax(logits, dim=-1)
         cpu_logits = logits.detach().cpu().numpy()
         cpu_probabilities = probabilities.detach().cpu().numpy()

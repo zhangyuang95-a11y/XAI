@@ -1,10 +1,11 @@
 """Dependency-light execution of a trained warehouse Actor.
 
 Render's free service does not need the PyTorch training runtime.  The export
-contains the exact Actor tensors from a validated MAPPO checkpoint, and this
-module evaluates the same network with NumPy.  It does not add a rule layer or
-post-process actions: both robots receive independent observations from the
-same pre-move state and are sampled independently.
+contains the exact Actor tensors from a validated MAPPO checkpoint. The default
+reproduces its original rule-augmented forward with NumPy; ``learned_only``
+explicitly excludes the hand-written logit terms without changing tensors.
+Both robots receive independent observations from the same pre-move state and
+are sampled independently, without rewriting a sampled action here.
 """
 
 from __future__ import annotations
@@ -28,6 +29,17 @@ from .contracts import (
 from .decision_protocol import independent_agent_seed
 from .navigation import ACTIONS
 from .rewards import REWARD_VERSION
+
+
+# Kept dependency-light: importing this runtime must not import PyTorch.
+# Same-weight forward ablation, not a separately trained or validated policy.
+LEARNED_ONLY_FORWARD_VERSION = "warehouse_learned_heads_ablation_1"
+LEARNED_ONLY_FORWARD_COMPONENTS = (
+    "bounded_base_head",
+    "bounded_structured_head_with_neural_mission_and_peer_forecast",
+    "bounded_participant_residual_with_episode_role_routing",
+    "bounded_deadlock_residual_without_handwritten_activation_gate",
+)
 
 
 def _softmax(values: np.ndarray) -> np.ndarray:
@@ -137,8 +149,19 @@ class NumpyWarehousePolicy:
             self.weights[f"{prefix}.weight"],
         ) + self.weights[f"{prefix}.bias"]
 
-    def logits(self, observation: Any) -> np.ndarray:
-        """Evaluate one or more local observations in a single Actor pass."""
+    def logits(self, observation: Any, *, learned_only: bool = False) -> np.ndarray:
+        """Evaluate the original forward, or explicitly ablate rule logit terms.
+
+        The ablation retains engineered inputs, neural heads, their original
+        tanh bounds and participant-type routing. It drops all rule penalties
+        and bonuses (including learned scalars multiplying rules), and removes
+        the deadlock residual's hand-written activation gate. That residual
+        can therefore be evaluated outside its original activation domain.
+        This method does not apply an action mask in either mode.
+        """
+
+        if not isinstance(learned_only, bool):
+            raise TypeError("learned_only must be an explicit bool")
 
         local = np.asarray(observation, dtype=np.float64)
         if local.ndim < 1 or local.shape[-1] != self.metadata.observation_dim:
@@ -258,6 +281,28 @@ class NumpyWarehousePolicy:
         structured_logits = learned_logit_limit * np.tanh(
             raw_structured_logits / learned_logit_limit
         )
+        if learned_only:
+            participant = np.maximum(
+                self._linear(local, "participant_partner_action_head.0"), 0.0
+            )
+            participant = np.maximum(
+                self._linear(participant, "participant_partner_action_head.2"), 0.0
+            )
+            participant_residual = (
+                12.0
+                * np.tanh(self._linear(participant, "participant_partner_action_head.4") / 12.0)
+                * participant_flag
+            )
+            deadlock = np.maximum(
+                self._linear(local, "deadlock_escape_action_head.0"), 0.0
+            )
+            deadlock_residual = 100.0 * np.tanh(
+                self._linear(deadlock, "deadlock_escape_action_head.2") / 100.0
+            )
+            return np.asarray(
+                base_logits + structured_logits + participant_residual + deadlock_residual,
+                dtype=np.float32,
+            )
         risk_log_scale = self.weights["collision_risk_log_scale"]
         collision_scale = np.logaddexp(0.0, risk_log_scale)
         collision_penalty = collision_scale * selected_collision[..., 0]
@@ -1069,6 +1114,7 @@ class NumpyWarehousePolicy:
         deterministic: bool = False,
         base_seed: int | None = None,
         decision_key: tuple[int, int] | None = None,
+        learned_only: bool = False,
     ) -> tuple[dict[str, str], dict[str, ActionDistribution]]:
         """Sample each Actor independently from the frozen pre-move state."""
 
@@ -1078,7 +1124,11 @@ class NumpyWarehousePolicy:
         local = np.stack(
             [np.asarray(observations[agent_id], dtype=np.float32) for agent_id in agent_ids]
         )
-        raw_logits = self.logits(local)
+        raw_logits = (
+            self.logits(local)
+            if learned_only is False
+            else self.logits(local, learned_only=learned_only)
+        )
         masks = local[..., -len(ACTIONS) :] > 0.5
         if not bool(masks.any(axis=-1).all()):
             raise ValueError("Every deployed Actor must have a legal action.")

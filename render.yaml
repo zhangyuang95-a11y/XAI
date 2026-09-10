@@ -5,5 +5,17 @@ services:
     plan: free
     region: singapore
     buildCommand: python -m pip install -r requirements-render.txt
-    startCommand: python -m ui.development_preview_server --host 0.0.0.0 --port $PORT
-    healthCheckPath: /
+    startCommand: python -m ui.warehouse_alignment_online_server --base64 /etc/secrets/warehouse_alignment_release.b64
+    healthCheckPath: /health
+    autoDeployTrigger: "off"
+    envVars:
+      - key: WAREHOUSE_RELEASE_PACKAGE_SHA256
+        value: 011f9bd9fe93d857e960145b5e6fc2b68b049b8a269345c20942e82484260e15
+      - key: WAREHOUSE_RELEASE_MANIFEST_SHA256
+        value: 2a3aedf224d617eeb346a666a84d628d52f7473818457e2272dcb9d497677726
+      - key: WAREHOUSE_ONLINE_DATABASE
+        value: /tmp/warehouse_alignment_online.sqlite3
+      - key: WAREHOUSE_STORAGE_MODE
+        value: ephemeral
+      - key: WAREHOUSE_PUBLIC_ORIGIN
+        value: https://policylens-warehouse-study.onrender.com

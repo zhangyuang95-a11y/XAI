@@ -32,7 +32,7 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "ui/warehouse_family_feedback_research"
-VERSION = "warehouse-alignment-online-study-server.v1"
+VERSION = "warehouse-alignment-online-study-server.v2"
 SERVICE_FAMILY = "warehouse_alignment_online_r2"
 NAMESPACE = "online_demo"
 COOKIE = "warehouse_alignment_online_session_v1"
@@ -199,12 +199,13 @@ def _questionnaire_items():
 
 
 def _assets():
-    data = {name: (WEB / name).read_bytes() for name in ("index.html", "app.js", "styles.css")}
+    data = {name: (WEB / name).read_bytes()
+            for name in ("index.html", "app.js", "styles.css", "favicon.svg")}
     js = data["app.js"].decode("utf-8")
-    js = js.replace('const FRONTEND_VERSION="warehouse-family-feedback-research.v2";',
-                    'const FRONTEND_VERSION="warehouse-alignment-online.v1";')
+    js = js.replace('const FRONTEND_VERSION="warehouse-family-feedback-research.r4";',
+                    'const FRONTEND_VERSION="warehouse-alignment-online.r4";')
     js = re.sub(r'const PENDING_KEY="[^"]+", LANGUAGE_KEY="[^"]+";',
-        'const PENDING_KEY="warehouse-alignment-online.v1.pending", LANGUAGE_KEY="warehouse-alignment-online.v1.lang";', js, count=1)
+        'const PENDING_KEY="warehouse-alignment-online.r4.pending", LANGUAGE_KEY="warehouse-alignment-online.r4.lang";', js, count=1)
     js = js.replace('localStudy:"本地预实验 · 已核验"',
                     'localStudy:"线上试玩 · 已核验"')
     js = js.replace('localStudyMessage:"本地预实验 · 已核验。当前记录不作为正式研究样本。"',
@@ -213,6 +214,8 @@ def _assets():
                     'localStudy:"Online demo · Verified"')
     js = js.replace('localStudyMessage:"Local pilot · Verified. These records are not formal research samples."',
                     'localStudyMessage:"Verified online demo. The free instance may lose records after a restart; these are not formal research samples."')
+    js = js.replace('request("/api/command",{method:"POST"',
+                    'request("/api/study/command",{method:"POST"')
     js = js.replace(
         'const consentStage=isStudy && p==="consent";const entryAllowed=!isStudy || consentStage;',
         'const consentStage=isStudy && p==="consent",registrationStage=p==="registration" || consentStage;const entryAllowed=!isStudy || registrationStage;',
@@ -234,6 +237,7 @@ def _assets():
         'void execute({kind:"start",mode:"study",participant_id:id,consent:true});',
     )
     required = ("registrationStage", "participant_id:id,consent:true",
+                'request("/api/study/command",{method:"POST"',
                 "线上试玩 · 已核验", "Online demo · Verified")
     if any(value not in js for value in required):
         raise ValueError("online frontend transformation anchor changed")
@@ -267,7 +271,7 @@ CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,session_i
  payload TEXT NOT NULL,created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS questions(id TEXT PRIMARY KEY,session_id TEXT NOT NULL,run_id TEXT NOT NULL,frame INTEGER NOT NULL,
  stage TEXT NOT NULL,question TEXT NOT NULL,language TEXT NOT NULL,status TEXT NOT NULL,answer TEXT,shown TEXT,created TEXT NOT NULL,
- focus TEXT NOT NULL DEFAULT 'executed');
+ focus TEXT NOT NULL DEFAULT 'executed',evidence_detail TEXT);
 CREATE TABLE IF NOT EXISTS blocks(id INTEGER PRIMARY KEY,allocation TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 COMMIT;
@@ -365,6 +369,9 @@ class OnlineAlignmentStudyStore:
                 if values != {"service_family": SERVICE_FAMILY, "namespace": NAMESPACE}:
                     raise ValueError("database family or namespace differs")
             db.executescript(_SCHEMA)
+            question_columns = {row[1] for row in db.execute("PRAGMA table_info(questions)")}
+            if "evidence_detail" not in question_columns:
+                db.execute("ALTER TABLE questions ADD COLUMN evidence_detail TEXT")
             if not exists:
                 db.executemany("INSERT INTO metadata VALUES(?,?)", [
                     ("service_family", _canonical(SERVICE_FAMILY)), ("namespace", _canonical(NAMESPACE))])
@@ -390,8 +397,14 @@ class OnlineAlignmentStudyStore:
 
     def session(self, candidate=None):
         with closing(self.connect()) as db:
-            if candidate and db.execute("SELECT 1 FROM sessions WHERE id=?", (candidate,)).fetchone():
-                return candidate
+            if candidate:
+                existing = db.execute("SELECT * FROM sessions WHERE id=?", (candidate,)).fetchone()
+                if existing is not None and not self._mismatch(existing):
+                    return candidate
+                # A deployed runtime change starts a fresh browser session while
+                # retaining the old session, runs, frames, and answers as audit
+                # records.  This also prevents an old pending request from being
+                # replayed into the newly bound experiment version.
             sid = uuid4().hex
             db.execute("INSERT INTO sessions(id,namespace) VALUES(?,?)", (sid, NAMESPACE))
             return sid
@@ -514,7 +527,8 @@ class OnlineAlignmentStudyStore:
             if permitted:
                 result["answers"] = [{"id": q["id"], "status": q["status"], "frame": q["frame"],
                     "question": q["question"], "text": q["answer"] or "", "run_id": q["run_id"],
-                    "focus": q["focus"], "sources": ["frozen NN", "validated policy program", "isolated counterfactual"]}
+                    "focus": q["focus"], "evidence_detail": q["evidence_detail"] or "",
+                    "sources": ["frozen NN", "validated policy program", "isolated counterfactual"]}
                     for q in db.execute("SELECT * FROM questions WHERE session_id=? AND run_id=? ORDER BY created,id", (sid, run["id"]))]
         kinds = []
         if session["mode"] == "enrollment":
@@ -696,7 +710,12 @@ class OnlineAlignmentStudyStore:
             index += 1
         elif stage == "task1":
             stage, index = "task2", 0
-            db.execute("UPDATE questions SET status='expired',answer=NULL WHERE session_id=?", (sid,))
+            # Task 2 cannot expose or create explanations, but completed Task 1
+            # answers are research records and must remain recoverable from the
+            # database/export.  The view and command gates below enforce the
+            # participant boundary; only unfinished work is retired here.
+            db.execute("""UPDATE questions SET status='expired'
+                WHERE session_id=? AND status IN ('pending','running')""", (sid,))
         else:
             stage, index = "questionnaire", 0
         db.execute("UPDATE sessions SET stage=?,round_index=?,active_run=NULL WHERE id=?", (stage, index, sid))
@@ -719,9 +738,11 @@ class OnlineAlignmentStudyStore:
         language, focus = payload.get("language", "zh"), payload.get("focus", "executed")
         if language not in ("zh", "en") or focus not in ("executed", "next"):
             raise CommandError("invalid_question_reference")
-        db.execute("INSERT INTO questions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        db.execute("""INSERT INTO questions
+            (id,session_id,run_id,frame,stage,question,language,status,answer,shown,created,focus,evidence_detail)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (uuid4().hex, session["id"], run["id"], frame, "task1", question.strip(), language,
-             "pending", None, None, _utcnow(), focus))
+             "pending", None, None, _utcnow(), focus, None))
 
     def _save_questionnaire(self, db, session, payload):
         if session["stage"] != "questionnaire":
@@ -779,27 +800,34 @@ class OnlineAlignmentStudyStore:
                     db.rollback(); return
                 session = self._session(db, q["session_id"])
                 if not self._can_explain(db, session) or session["active_run"] != q["run_id"]:
-                    db.execute("UPDATE questions SET status='expired',answer=NULL WHERE id=?", (qid,))
+                    db.execute("UPDATE questions SET status='expired',answer=NULL,evidence_detail=NULL WHERE id=?", (qid,))
                     db.commit(); return
                 row = db.execute("SELECT internal FROM frames WHERE run_id=? AND frame=?", (q["run_id"], q["frame"])).fetchone()
                 db.execute("UPDATE questions SET status='running' WHERE id=?", (qid,))
                 db.commit()
             record = json.loads(row[0])
-            answer = self.explainer.answer(dict(q), record, self.runtime)
-            if isinstance(answer, dict):
-                answer = answer.get("answer", answer.get("text"))
+            answer_result = self.explainer.answer(dict(q), record, self.runtime)
+            evidence_detail = ""
+            if isinstance(answer_result, dict):
+                evidence_detail = answer_result.get("evidence_detail", "")
+                answer = answer_result.get("answer", answer_result.get("text"))
+            else:
+                answer = answer_result
             if not isinstance(answer, str) or not answer.strip():
                 raise ValueError("explainer returned no verified answer")
+            if not isinstance(evidence_detail, str):
+                raise ValueError("explainer returned invalid evidence detail")
             with closing(self.connect()) as db:
                 db.execute("BEGIN IMMEDIATE")
                 session = self._session(db, q["session_id"])
                 permitted = self._can_explain(db, session) and session["active_run"] == q["run_id"]
-                db.execute("UPDATE questions SET status=?,answer=? WHERE id=?",
-                    ("complete" if permitted else "expired", answer if permitted else None, qid))
+                db.execute("UPDATE questions SET status=?,answer=?,evidence_detail=? WHERE id=?",
+                    ("complete" if permitted else "expired", answer if permitted else None,
+                     evidence_detail if permitted else None, qid))
                 db.commit()
         except Exception:
             with closing(self.connect()) as db:
-                db.execute("UPDATE questions SET status='failed',answer=NULL WHERE id=?", (qid,))
+                db.execute("UPDATE questions SET status='failed',answer=NULL,evidence_detail=NULL WHERE id=?", (qid,))
         finally:
             with self.schedule_lock:
                 self.scheduled.discard(qid)
@@ -850,7 +878,8 @@ def handler_class(store, *, public_origin=DEFAULT_ORIGIN):
             assets = {"/": ("index.html", "text/html; charset=utf-8"),
                 "/index.html": ("index.html", "text/html; charset=utf-8"),
                 "/assets/app.js": ("app.js", "text/javascript; charset=utf-8"),
-                "/assets/styles.css": ("styles.css", "text/css; charset=utf-8")}
+                "/assets/styles.css": ("styles.css", "text/css; charset=utf-8"),
+                "/assets/favicon.svg": ("favicon.svg", "image/svg+xml")}
             if path in assets:
                 name, mime = assets[path]
                 self.reply(200, store.web_assets[name], content_type=mime)
@@ -871,7 +900,7 @@ def handler_class(store, *, public_origin=DEFAULT_ORIGIN):
         def do_POST(self):
             sid = self.sid()
             try:
-                if urlparse(self.path).path != "/api/command":
+                if urlparse(self.path).path not in ("/api/study/command", "/api/command"):
                     raise CommandError("not_found", 404)
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= MAX_BODY:

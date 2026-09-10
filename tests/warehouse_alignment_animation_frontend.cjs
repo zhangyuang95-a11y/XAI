@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const {test} = require('node:test');
 
@@ -58,4 +59,29 @@ test('easing is continuous, monotone and clamps endpoints', () => {
   assert.equal(values.at(-1),1);assert.equal(values.at(-2),1);
   for(let i=1;i<values.length;i++)assert.ok(values[i]>=values[i-1]);
   assert.ok(values[3]>0 && values[3]<values[4]);
+});
+
+test('participant answer and collapsed evidence remain separate', () => {
+  const answers=app.visibleAnswers({
+    run_id:'run-1', explain_allowed:true,
+    release:{explanation_ready:true},
+    flow:{stage:'task1'}, allowed_kinds:['question'],
+    answers:[{id:'q-1',run_id:'run-1',status:'complete',frame:12,
+      question:'为什么？',text:'机器人2向右，距离缩短了一格。',
+      evidence_detail:'动作概率：向右 80%',sources:['frozen NN']}],
+  });
+  assert.equal(answers.length,1);
+  assert.equal(answers[0].text,'机器人2向右，距离缩短了一格。');
+  assert.equal(answers[0].evidence_detail,'动作概率：向右 80%');
+  assert.deepEqual(answers[0].sources,['frozen NN']);
+});
+
+test('long translated subtitle is clipped before the centered workflow', () => {
+  const css=fs.readFileSync(path.resolve(
+    __dirname, '../ui/warehouse_family_feedback_research/styles.css'),'utf8');
+  const subtitleRule=css.match(/\.subtitle\s*\{([^}]*)\}/)?.[1] || '';
+  assert.match(subtitleRule,/min-width:\s*0/);
+  assert.match(subtitleRule,/overflow:\s*hidden/);
+  assert.match(subtitleRule,/text-overflow:\s*ellipsis/);
+  assert.match(subtitleRule,/white-space:\s*nowrap/);
 });

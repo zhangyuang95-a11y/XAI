@@ -145,7 +145,7 @@ test('existing A/B and Task2 answer visibility remains gated',async t=>{
   assert.equal(h.api.visibleAnswers({...a,explain_allowed:false}).length,0);
   assert.equal(h.api.visibleAnswers({...a,flow:{mode:'study',stage:'task2'}}).length,0);
   assert.equal(h.api.visibleAnswers({...a,study_version_mismatch:true}).length,0);
-  assert.equal(h.api.FRONTEND_VERSION,'warehouse-family-feedback-research.v2');
+  assert.equal(h.api.FRONTEND_VERSION,'warehouse-family-feedback-research.r4');
 });
 
 process.on('exit',()=>console.log('FEEDBACK_HISTORY_FRONTEND_SCOPE='+JSON.stringify(counts)));

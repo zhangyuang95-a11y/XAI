@@ -1,5 +1,7 @@
 # 仓库 A/B 预实验 Render 部署
 
+> 本页记录当前 r3 在线版本及其已冻结哈希。r4 不能复用这些哈希，也不能在组件验收前覆盖当前 Secret File。r4 的 fail-closed 验收、打包和上线前命令见 [warehouse_r4_final_release_commands.md](warehouse_r4_final_release_commands.md)；该流程仍只生成 `formal_ready=false` 的内部预实验版本。
+
 ## 部署范围
 
 公网服务继续使用 XAI 主库与现有 Render 服务：

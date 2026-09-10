@@ -59,10 +59,10 @@ def _assets(binding, verification):
             raise ValueError("Bound alignment study asset changed")
     js = assets["app.js"].decode()
     replacements = {
-        'const FRONTEND_VERSION="warehouse-family-feedback-research.v2";':
-            'const FRONTEND_VERSION="warehouse-alignment-research.v1";',
-        'const PENDING_KEY="warehouse-family-feedback-fresh.v2.pending", LANGUAGE_KEY="warehouse-family-feedback-fresh.v2.lang";':
-            'const PENDING_KEY="warehouse-alignment.' + ("verification" if verification else "pilot") + '.v1.pending", LANGUAGE_KEY="warehouse-alignment.v1.lang";',
+        'const FRONTEND_VERSION="warehouse-family-feedback-research.r4";':
+            'const FRONTEND_VERSION="warehouse-alignment-research.r4";',
+        'const PENDING_KEY="warehouse-family-feedback-r4.pending", LANGUAGE_KEY="warehouse-family-feedback-r4.lang";':
+            'const PENDING_KEY="warehouse-alignment.' + ("verification" if verification else "pilot") + '.r4.pending", LANGUAGE_KEY="warehouse-alignment.r4.lang";',
         'function verificationFlow(view){return view?.verification_only===true && view?.verification_flow_allowed===true && view?.release?.test_fixture===true;}':
             'function verificationFlow(view){return view?.verification_only===true && view?.verification_flow_allowed===true && view?.real_nn_component_verification===true && view?.release?.test_fixture===false && view?.release?.study_ready===false && view?.release?.participant_enabled===false;}',
         'const consentStage=isStudy && p==="consent";const entryAllowed=!isStudy || consentStage;':

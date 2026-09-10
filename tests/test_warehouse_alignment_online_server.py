@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import sqlite3
 from contextlib import closing
 from pathlib import Path
 import sys
@@ -94,7 +95,12 @@ class FakeExplainer:
     def answer(self, request, record, runtime):
         assert request["frame"] == record["after"]["state"]["frame"]
         assert runtime.signature == record["runtime_signature"]
-        return "这是绑定所选帧的核验回答。" if request["language"] == "zh" else "Verified answer for the selected frame."
+        return {
+            "answer": ("这是绑定所选帧的核验回答。" if request["language"] == "zh"
+                       else "Verified answer for the selected frame."),
+            "evidence_detail": ("绑定帧与策略证据已核验。" if request["language"] == "zh"
+                                else "Frame binding and policy evidence verified."),
+        }
 
 
 class FakeBank:
@@ -199,6 +205,7 @@ class StoreCase(unittest.TestCase):
                 break
             time.sleep(.01)
         self.assertEqual(a["answers"][0]["status"], "complete")
+        self.assertEqual(a["answers"][0]["evidence_detail"], "绑定帧与策略证据已核验。")
         with self.assertRaises(online.CommandError) as error:
             self.cmd(sid_b, b, "question", run_id=b["run_id"], frame=0,
                 question="why", language="en", focus="next")
@@ -208,6 +215,14 @@ class StoreCase(unittest.TestCase):
         self.assertEqual(a["flow"]["stage"], "task2")
         self.assertFalse(a["explain_allowed"])
         self.assertEqual(a["answers"], [])
+        with closing(self.store.connect()) as db:
+            retained = db.execute(
+                "SELECT status,answer,evidence_detail FROM questions WHERE session_id=?",
+                (sid_a,),
+            ).fetchone()
+        self.assertEqual(retained["status"], "complete")
+        self.assertEqual(retained["answer"], "这是绑定所选帧的核验回答。")
+        self.assertEqual(retained["evidence_detail"], "绑定帧与策略证据已核验。")
         with self.assertRaises(online.CommandError) as error:
             self.cmd(sid_a, a, "question", run_id=a["run_id"], frame=0,
                 question="why", language="en", focus="next")
@@ -271,11 +286,18 @@ class StoreCase(unittest.TestCase):
             conn.request("GET","/health"); response=conn.getresponse()
             self.assertEqual(response.status,200); self.assertFalse(json.loads(response.read())["data_persistent"])
             body = json.dumps({"kind":"start"})
-            conn.request("POST","/api/command",body,{"Content-Type":"application/json","Origin":"http://study.test"})
+            conn.request("POST","/api/study/command",body,{"Content-Type":"application/json","Origin":"http://study.test"})
             response=conn.getresponse(); self.assertEqual(response.status,403); response.read()
             conn.request("GET","/api/view"); response=conn.getresponse(); response.read()
             cookie=response.getheader("Set-Cookie")
             self.assertIn("HttpOnly",cookie); self.assertIn("Secure",cookie); self.assertIn("SameSite=Strict",cookie)
+            enrollment = json.dumps({"operation_id":"http-enroll","expected_version":0,
+                "kind":"start","mode":"study","participant_id":"http_user_1","consent":True})
+            conn.request("POST","/api/study/command",enrollment,{"Content-Type":"application/json",
+                "Origin":"https://study.test","Cookie":cookie.split(";",1)[0]})
+            response=conn.getresponse(); enrolled=json.loads(response.read())
+            self.assertEqual(response.status,200)
+            self.assertEqual(enrolled["flow"]["stage"],"practice")
             conn.close()
         finally:
             server.shutdown(); server.server_close(); thread.join(2)
@@ -286,6 +308,55 @@ class StoreCase(unittest.TestCase):
         self.assertIn('participant_id:id,consent:true', javascript)
         self.assertIn("线上试玩 · 已核验", javascript)
         self.assertIn("Online demo · Verified", javascript)
+        self.assertIn("evidence_detail", javascript)
+        self.assertIn("whyCollision", javascript)
+        self.assertIn('request("/api/study/command",{method:"POST"', javascript)
+        self.assertNotIn('request("/api/command",{method:"POST"', javascript)
+        html = self.store.web_assets["index.html"].decode("utf-8")
+        self.assertEqual(html.count("data-question="), 6)
+        css = self.store.web_assets["styles.css"].decode("utf-8")
+        self.assertIn("grid-template-columns: minmax(600px, 1.45fr)", css)
+
+    def test_question_evidence_column_is_added_to_existing_database(self):
+        enrolled = [self.enroll(f"legacy_{index}") for index in range(4)]
+        with closing(self.store.connect()) as db:
+            sid, view = next((sid, view) for sid, view in enrolled
+                if db.execute("SELECT condition FROM sessions WHERE id=?", (sid,)).fetchone()[0] == "A")
+        view = self.end_next(sid, view)
+        run_id = view["run_id"]
+        self.store.close()
+        with sqlite3.connect(self.db) as db:
+            db.execute("DROP TABLE questions")
+            db.execute("""CREATE TABLE questions(
+                id TEXT PRIMARY KEY,session_id TEXT NOT NULL,run_id TEXT NOT NULL,frame INTEGER NOT NULL,
+                stage TEXT NOT NULL,question TEXT NOT NULL,language TEXT NOT NULL,status TEXT NOT NULL,
+                answer TEXT,shown TEXT,created TEXT NOT NULL,focus TEXT NOT NULL DEFAULT 'executed')""")
+            db.execute("""INSERT INTO questions
+                (id,session_id,run_id,frame,stage,question,language,status,answer,shown,created,focus)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ("legacy-answer", sid, run_id, 0, "task1", "旧问题", "zh", "complete",
+                 "旧回答仍可读取。", None, "2026-09-10T00:00:00+00:00", "next"))
+        self.store = online.OnlineAlignmentStudyStore(
+            FakeContext(self.tmp.name), database=self.db, storage_mode="ephemeral")
+        with closing(self.store.connect()) as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(questions)")}
+        self.assertIn("evidence_detail", columns)
+        restored = self.store.view(sid)
+        self.assertEqual(restored["answers"][0]["text"], "旧回答仍可读取。")
+        self.assertEqual(restored["answers"][0]["evidence_detail"], "")
+
+    def test_version_change_rotates_browser_session_without_deleting_old_records(self):
+        sid, view = self.enroll("old_version_1")
+        old_run = view["run_id"]
+        with closing(self.store.connect()) as db:
+            db.execute("UPDATE sessions SET study_signature='older-runtime' WHERE id=?", (sid,))
+        fresh_sid = self.store.session(sid)
+        self.assertNotEqual(fresh_sid, sid)
+        fresh = self.store.view(fresh_sid)
+        self.assertEqual(fresh["flow"]["stage"], "registration")
+        with closing(self.store.connect()) as db:
+            self.assertIsNotNone(db.execute("SELECT 1 FROM sessions WHERE id=?", (sid,)).fetchone())
+            self.assertIsNotNone(db.execute("SELECT 1 FROM runs WHERE id=? AND session_id=?", (old_run, sid)).fetchone())
 
 
 if __name__ == "__main__":

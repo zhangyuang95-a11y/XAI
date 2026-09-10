@@ -576,16 +576,35 @@ def _validate_manifest(manifest):
 
 def _read_bounded(path, limit, label):
     value = Path(path).expanduser().absolute()
-    if value.is_symlink() or not value.is_file():
-        raise ValueError("Regular " + label + " file required")
-    size = value.stat().st_size
-    if size <= 0 or size > limit:
-        raise ValueError(label + " file exceeds the safe limit")
-    with value.open("rb") as stream:
-        raw = stream.read(limit + 1)
-    if len(raw) != size or len(raw) > limit:
-        raise ValueError(label + " changed or exceeds the safe limit")
-    return raw
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        descriptor = os.open(value, flags)
+    except (OSError, TypeError, ValueError) as error:
+        raise ValueError("Readable " + label + " file required") from error
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("Regular " + label + " file required")
+        size = before.st_size
+        if size <= 0 or size > limit:
+            raise ValueError(label + " file exceeds the safe limit")
+        chunks = []
+        remaining = limit + 1
+        while remaining:
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        after = os.fstat(descriptor)
+        identity = lambda value: (value.st_dev, value.st_ino, value.st_size,
+                                  value.st_mtime_ns)
+        if identity(before) != identity(after) or len(raw) != size or len(raw) > limit:
+            raise ValueError(label + " changed or exceeds the safe limit")
+        return raw
+    finally:
+        os.close(descriptor)
 
 
 def _package_bytes(*, package_path=None, base64_path=None):

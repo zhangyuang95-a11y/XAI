@@ -93,6 +93,22 @@ def test_archive_is_deterministic_and_accepts_package_or_base64(tmp_path):
     )["identities"]["play_scene_count"] == 12
 
 
+def test_render_style_secret_symlink_is_read_after_opened_target_validation(tmp_path):
+    artifacts = _artifacts()
+    manifest = _manifest(artifacts)
+    package, package_sha, manifest_sha = _write_package(tmp_path, manifest, artifacts)
+    target = tmp_path / "mounted-value.b64"
+    target.write_bytes(base64.b64encode(package.read_bytes()) + b"\n")
+    secret = tmp_path / "warehouse_alignment_release.b64"
+    secret.symlink_to(target)
+
+    inspected = online.inspect_online_release(
+        base64_path=secret, expected_package_sha256=package_sha,
+        expected_manifest_sha256=manifest_sha,
+    )
+    assert inspected["identities"]["play_scene_count"] == 12
+
+
 def test_archive_rejects_wrong_package_manifest_and_artifact_hashes(tmp_path):
     artifacts = _artifacts()
     manifest = _manifest(artifacts)

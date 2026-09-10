@@ -10,11 +10,11 @@
   "online_question_bank_signature": "369d4ac758008b75b2b5dcfbdce9a8a700eeec76363cc9af04b1dbdcdf9ada1b",
   "online_runtime_signature": "ab654169e48130b7547f0112321e08e33670a4fa979a87f7dd5f51ed1bbf95c6",
   "package": {
-    "base64_size": 597349,
-    "manifest_sha256": "2a3aedf224d617eeb346a666a84d628d52f7473818457e2272dcb9d497677726",
+    "base64_size": 597345,
+    "manifest_sha256": "39fa89d057112418a8cee9d4a6a5d9ff1b6432edaa668e1ce9acc307a4b849ce",
     "secret_file": "/etc/secrets/warehouse_alignment_release.b64",
-    "sha256": "011f9bd9fe93d857e960145b5e6fc2b68b049b8a269345c20942e82484260e15",
-    "zip_size": 448009
+    "sha256": "0d7ea02f618c252b864ead823f353e162e23494471d23095eb3a9c24164082df",
+    "zip_size": 448007
   },
   "parent_manifest_sha256": "cdcd44e3f8db950f5d5e36b175ed389ea54bd16748b504d7660d9e44cc86ad28",
   "parent_runtime_signature": "5f02a41f74403b0906dbe4f94cc4600271a33dfe58c3faef66935cf1776d70a9",
@@ -24,7 +24,7 @@
     "backend/warehouse_alignment_online_runtime.py": "af92623525e4f789e351d6a2d18b954c47f2d342f1d274472e406f37c8d682bf",
     "requirements-render.txt": "69d2a6b1940acd7e2a90a05a0ceee52a91c38d4ce2055c65041d44438ae67f3f",
     "scripts/build_warehouse_alignment_online_release.py": "97d3a0d99784f03099bcfa5a1e2ba3dc1c52bf966ea74d2777fdf63c28b1574e",
-    "ui/warehouse_alignment_online_release.py": "88b6ab2ae3da3329a65385af83bbe48266d224d4e7f2f467974d123685b6bcc9",
+    "ui/warehouse_alignment_online_release.py": "3225fa31aeb807ad631f1835f6b62d92b87f85e3e45a67f295766d49dd8232e3",
     "ui/warehouse_alignment_online_server.py": "ac58bb32b30e5c177400f84f0cc4b5ded9dcae8451261052ba2a0b6e704d0afe"
   },
   "program_sha256": "6c21ff3bb061badba0ff930813b5fcfbdb35c52b6b6c29df84c5cf25428d3f8f",

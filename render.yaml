@@ -10,9 +10,9 @@ services:
     autoDeployTrigger: "off"
     envVars:
       - key: WAREHOUSE_RELEASE_PACKAGE_SHA256
-        value: 011f9bd9fe93d857e960145b5e6fc2b68b049b8a269345c20942e82484260e15
+        value: 0d7ea02f618c252b864ead823f353e162e23494471d23095eb3a9c24164082df
       - key: WAREHOUSE_RELEASE_MANIFEST_SHA256
-        value: 2a3aedf224d617eeb346a666a84d628d52f7473818457e2272dcb9d497677726
+        value: 39fa89d057112418a8cee9d4a6a5d9ff1b6432edaa668e1ce9acc307a4b849ce
       - key: WAREHOUSE_ONLINE_DATABASE
         value: /tmp/warehouse_alignment_online.sqlite3
       - key: WAREHOUSE_STORAGE_MODE

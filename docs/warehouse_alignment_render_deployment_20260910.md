@@ -11,8 +11,8 @@
 
 - 冻结 Actor SHA-256：`309b6e53fe682bead8d3443015aca27eae60e561175e71d7c25f57314ac69d5b`
 - 父级本地发布 manifest SHA-256：`cdcd44e3f8db950f5d5e36b175ed389ea54bd16748b504d7660d9e44cc86ad28`
-- 在线 ZIP SHA-256：`011f9bd9fe93d857e960145b5e6fc2b68b049b8a269345c20942e82484260e15`
-- 在线 manifest SHA-256：`2a3aedf224d617eeb346a666a84d628d52f7473818457e2272dcb9d497677726`
+- 在线 ZIP SHA-256：`0d7ea02f618c252b864ead823f353e162e23494471d23095eb3a9c24164082df`
+- 在线 manifest SHA-256：`39fa89d057112418a8cee9d4a6a5d9ff1b6432edaa668e1ce9acc307a4b849ce`
 - Secret File：`/etc/secrets/warehouse_alignment_release.b64`
 
 Secret File 包含冻结 Actor、完整协议、12 个试玩场景、抽取程序和 8 道带私有答案的冻结题目。它不进入 Git；加载器会校验 Base64、ZIP 白名单、解压大小、逐项哈希、父级身份和当前运行源码。
@@ -32,8 +32,8 @@ python scripts/build_warehouse_alignment_online_release.py \
 
 python -m ui.warehouse_alignment_online_server \
   --base64 /etc/secrets/warehouse_alignment_release.b64 \
-  --expected-package-sha256 011f9bd9fe93d857e960145b5e6fc2b68b049b8a269345c20942e82484260e15 \
-  --expected-manifest-sha256 2a3aedf224d617eeb346a666a84d628d52f7473818457e2272dcb9d497677726 \
+  --expected-package-sha256 0d7ea02f618c252b864ead823f353e162e23494471d23095eb3a9c24164082df \
+  --expected-manifest-sha256 39fa89d057112418a8cee9d4a6a5d9ff1b6432edaa668e1ce9acc307a4b849ce \
   --database /tmp/warehouse_alignment_online.sqlite3 \
   --storage-mode ephemeral \
   --public-origin https://policylens-warehouse-study.onrender.com
@@ -43,7 +43,7 @@ Render 构建只安装 NumPy。训练、模型选择和 RCPD 拟合仍在本机�
 
 ## 验证
 
-- 线上发布、轻量运行时、解释器和 A/B 存储测试：20 项通过。
+- 线上发布、轻量运行时、解释器和 A/B 存储测试：21 项通过；其中包含 Render Secret File 符号链接挂载回归。
 - 连续动画及既有回放/权限前端测试：12 项通过。
 - 冻结 Actor 在 12 个场景的 120 次决策与原运行时动作、概率和推进后状态一致。
 - 中文、英文的原因、反事实及规则回答与原已验收解释器一致。

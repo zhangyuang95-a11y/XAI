@@ -24,6 +24,7 @@ import random
 import re
 import signal
 import sqlite3
+import stat
 from threading import Lock
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
@@ -33,19 +34,27 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "ui/warehouse_family_feedback_research"
 VERSION = "warehouse-alignment-online-study-server.r4.1"
+DIAGNOSTIC_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.1-diagnostic"
 SERVICE_FAMILY = "warehouse_alignment_online_r2"
 R41_RELEASE_CONTEXT_VERSION = "warehouse-r41-online-release.v1"
 R41_PUBLIC_RELEASE_VERSION = "r4.1"
+R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION = "warehouse-r41-diagnostic-online-release.v3"
+R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION = "r4.1-diagnostic"
 NAMESPACE = "online_demo"
 COOKIE = "warehouse_alignment_online_session_v1"
+DIAGNOSTIC_NAMESPACE = "online_diagnostic"
+DIAGNOSTIC_COOKIE = "warehouse_alignment_online_session_r41_diagnostic"
 DEFAULT_PORT = 8000
 DEFAULT_ORIGIN = "https://policylens-warehouse-study.onrender.com"
 DEFAULT_DATABASE = Path(os.environ.get("WAREHOUSE_ONLINE_DATABASE", "/tmp/warehouse_alignment_online.sqlite3"))
 PERSISTENT_DATABASE_ROOT = Path("/var/data")
 DEFAULT_RELEASE_MODULE = "ui.warehouse_alignment_online_release"
 R41_RELEASE_MODULE = "ui.warehouse_alignment_r41_online_release"
-RELEASE_MODULES = (DEFAULT_RELEASE_MODULE, R41_RELEASE_MODULE)
+R41_DIAGNOSTIC_RELEASE_MODULE = "ui.warehouse_alignment_r41_diagnostic_release"
+RELEASE_MODULES = (DEFAULT_RELEASE_MODULE, R41_RELEASE_MODULE,
+                   R41_DIAGNOSTIC_RELEASE_MODULE)
 MAX_BODY = 20_000
+MAX_SECRET_FILE_BYTES = 1_000_000
 _ACTIONS = {"UP", "DOWN", "LEFT", "RIGHT", "WAIT"}
 _COLLISION_KINDS = {"none", "same_target", "swap", "occupied_stationary"}
 _TERMINAL_REASONS = {None, "horizon", "battery_shutdown", "participant_ended"}
@@ -54,11 +63,13 @@ _MAIN_ANSWER_FORBIDDEN = re.compile(
     r"\b(?:NN|argmax|SHA(?:-?256)?)\b|神经(?:网络|策略|输出)|动作概率|决策树|"
     r"树分支|阈值|指示值|特征编码|\b(?:action |policy )?probabilit(?:y|ies)\b|"
     r"\bdecision tree\b|\btree branch\b|\bthreshold\b|\bfeature encod\w*\b|"
-    r"\bhash(?:es)?\b",
+    r"\bhash(?:es)?\b|\bseed\b|\bfingerprint\b|\bscene[_ -]?id\b|"
+    r"随机种子|场景指纹",
     re.IGNORECASE,
 )
 _PRIVATE_EVIDENCE_LINE = re.compile(
-    r"\b(?:SHA(?:-?256)?|hash(?:es)?)\b|(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])",
+    r"\b(?:SHA(?:-?256)?|hash(?:es)?|seed|fingerprint|scene[_ -]?id)\b|"
+    r"随机种子|场景指纹|(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])",
     re.IGNORECASE,
 )
 
@@ -313,6 +324,8 @@ def _participant_release(value):
         "explanation_ready": value.get("explanation_ready") is True,
         "study_ready": value.get("study_ready") is True,
         "formal_ready": False,
+        "formal_sample_eligible": False,
+        "pilot_class": str(value.get("pilot_class", "internal_pilot")),
         "test_fixture": value.get("test_fixture") is True,
         "data_persistent": value.get("data_persistent") is True,
         "message": deepcopy(value.get("message", {}))}
@@ -369,22 +382,31 @@ def _questionnaire_items():
         )]
 
 
-def _assets():
+def _assets(*, diagnostic=False):
     data = {name: (WEB / name).read_bytes()
             for name in ("index.html", "app.js", "styles.css", "favicon.svg")}
     js = data["app.js"].decode("utf-8")
     js = js.replace('const FRONTEND_VERSION="warehouse-family-feedback-research.r4";',
-                    'const FRONTEND_VERSION="warehouse-alignment-online.r4.1";')
+                    ('const FRONTEND_VERSION="warehouse-alignment-online.r4.1-diagnostic";'
+                     if diagnostic else
+                     'const FRONTEND_VERSION="warehouse-alignment-online.r4.1";'))
     js = re.sub(r'const PENDING_KEY="[^"]+", LANGUAGE_KEY="[^"]+";',
-        'const PENDING_KEY="warehouse-alignment-online.r4_1.pending", LANGUAGE_KEY="warehouse-alignment-online.r4_1.lang";', js, count=1)
+        ('const PENDING_KEY="warehouse-alignment-online.r4_1_diagnostic.pending", LANGUAGE_KEY="warehouse-alignment-online.r4_1_diagnostic.lang";'
+         if diagnostic else
+         'const PENDING_KEY="warehouse-alignment-online.r4_1.pending", LANGUAGE_KEY="warehouse-alignment-online.r4_1.lang";'),
+        js, count=1)
     js = js.replace('localStudy:"本地预实验 · 已核验"',
-                    'localStudy:"内部预实验 · r4.1"')
+                    ('localStudy:"内部诊断实验 · r4.1-diagnostic"'
+                     if diagnostic else 'localStudy:"内部预实验 · r4.1"'))
     js = js.replace('localStudyMessage:"本地预实验 · 已核验。当前记录不作为正式研究样本。"',
-                    'localStudyMessage:"线上试玩已核验。当前免费实例重启后可能丢失记录，不作为正式研究样本。"')
+                    ('localStudyMessage:"内部诊断实验。当前免费实例重启后可能丢失记录，数据仅用于内部探索，不作为正式研究样本。"'
+                     if diagnostic else 'localStudyMessage:"线上试玩已核验。当前免费实例重启后可能丢失记录，不作为正式研究样本。"'))
     js = js.replace('localStudy:"Local pilot · Verified"',
-                    'localStudy:"Internal pilot · r4.1"')
+                    ('localStudy:"Internal diagnostic · r4.1-diagnostic"'
+                     if diagnostic else 'localStudy:"Internal pilot · r4.1"'))
     js = js.replace('localStudyMessage:"Local pilot · Verified. These records are not formal research samples."',
-                    'localStudyMessage:"Verified online demo. The free instance may lose records after a restart; these are not formal research samples."')
+                    ('localStudyMessage:"Internal diagnostic study. The free instance may lose records after a restart; data are for internal exploration and are not formal research samples."'
+                     if diagnostic else 'localStudyMessage:"Verified online demo. The free instance may lose records after a restart; these are not formal research samples."'))
     js = js.replace('request("/api/command",{method:"POST"',
                     'request("/api/study/command",{method:"POST"')
     js = js.replace(
@@ -413,7 +435,10 @@ def _assets():
     )
     required = ("registrationStage", "participant_id:id,consent:true",
                 'request("/api/study/command",{method:"POST"',
-                "内部预实验 · r4.1", "Internal pilot · r4.1",
+                ("内部诊断实验 · r4.1-diagnostic" if diagnostic
+                 else "内部预实验 · r4.1"),
+                ("Internal diagnostic · r4.1-diagnostic" if diagnostic
+                 else "Internal pilot · r4.1"),
                 "local(r.message,ui.language)")
     if any(value not in js for value in required):
         raise ValueError("online frontend transformation anchor changed")
@@ -480,8 +505,29 @@ class OnlineAlignmentStudyStore:
                 or release.get("formal_ready") is not False):
             raise ValueError("a genuine technically verified local-pilot release is required")
         context_version = str(getattr(context, "provenance", {}).get("version", ""))
-        self.public_release_version = (R41_PUBLIC_RELEASE_VERSION
+        self.is_diagnostic = context_version == R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION
+        if self.is_diagnostic and (
+                release.get("release_version")
+                    != R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION
+                or release.get("pilot_class") != "internal_diagnostic"
+                or release.get("formal_sample_eligible") is not False
+                or release.get("human_explanation_effect_validated") is not False
+                or release.get("behavior_performance_gate_passed") is not False
+                or release.get("behavior_performance_gate_waived") is not True
+                or release.get("data_persistent") is not False):
+            raise ValueError("diagnostic release classification is incomplete")
+        if (not self.is_diagnostic
+                and release.get("release_version")
+                    == R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION):
+            raise ValueError("diagnostic release requires its exact context version")
+        self.public_release_version = (
+            R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION if self.is_diagnostic
+            else R41_PUBLIC_RELEASE_VERSION
             if context_version == R41_RELEASE_CONTEXT_VERSION else "legacy")
+        self.pilot_class = ("internal_diagnostic" if self.is_diagnostic
+                            else "internal_pilot")
+        self.service_version = (DIAGNOSTIC_SERVER_VERSION if self.is_diagnostic
+                                else VERSION)
         play = self.scenarios.get("splits", {}).get("play")
         if not isinstance(play, list) or len(play) < 7 or len({s.get("id") for s in play}) != len(play):
             raise ValueError("practice and six unique online study scenes are required")
@@ -496,6 +542,7 @@ class OnlineAlignmentStudyStore:
         if requested == root or root in requested.parents:
             raise ValueError("database must be outside the immutable release")
         mode = storage_mode
+        requested_storage_mode = mode
         persistent_root = PERSISTENT_DATABASE_ROOT.resolve(strict=False)
         on_persistent_root = requested != persistent_root and persistent_root in requested.parents
         if mode == "auto":
@@ -513,20 +560,26 @@ class OnlineAlignmentStudyStore:
         # the matching disk, plan and environment declaration before deployment.
         if mode == "persistent" and not on_persistent_root:
             raise ValueError("persistent SQLite storage must be under /var/data")
+        if self.is_diagnostic and requested_storage_mode != "ephemeral":
+            raise ValueError("diagnostic release requires explicitly ephemeral storage")
         self.data_persistent = mode == "persistent"
         self.database = requested
-        self.namespace, self.cookie_name = NAMESPACE, COOKIE
-        self.web_assets = _assets()
+        self.namespace = DIAGNOSTIC_NAMESPACE if self.is_diagnostic else NAMESPACE
+        self.cookie_name = DIAGNOSTIC_COOKIE if self.is_diagnostic else COOKIE
+        self.web_assets = _assets(diagnostic=self.is_diagnostic)
         self.asset_sha256 = {k: sha256(v).hexdigest() for k, v in self.web_assets.items()}
         template = self.runtime.environment(play[0])
         self._map = _public_map(template)
         self.horizon = int(_attr(getattr(self.runtime, "config", {}), "horizon", 120))
         self.tutorial_frames, self.tutorial_signature = self._validated_tutorial(context)
-        self.signature = _digest({"version": VERSION, "context": str(context.signature),
+        self.signature = _digest({"version": self.service_version, "context": str(context.signature),
             "runtime": str(self.runtime.signature), "explainer": str(self.explainer.signature),
             "bank": str(self.question_bank.signature), "scenarios": _digest(self.scenarios),
             "assets": self.asset_sha256, "tutorial": self.tutorial_signature})
         message = ({
+            "zh": "r4.1-diagnostic 内部诊断实验：数据仅用于内部探索，不作为正式实验样本。当前 Render 免费实例没有持久磁盘，服务重启可能丢失记录。",
+            "en": "R4.1-diagnostic internal study: data are for internal exploration and are not formal research samples. This free Render instance has no persistent disk, so a restart may erase records.",
+        } if self.is_diagnostic else {
             "zh": "线上试玩服务已核验；当前 Render 实例没有持久磁盘，服务重启可能丢失记录，因此不能作为正式持久化人类实验。",
             "en": "Verified online demo. This Render instance has no persistent disk; a restart may erase records, so it is not a formally persistent human study.",
         } if not self.data_persistent else {
@@ -534,13 +587,15 @@ class OnlineAlignmentStudyStore:
             "en": "Verified online pilot with persistent storage. This is still not a formal-study release.",
         })
         self.release = {**release, "status": "online_demo_ephemeral" if not self.data_persistent else "online_pilot_persistent",
-            "namespace": NAMESPACE, "online": True, "online_demo": not self.data_persistent,
+            "namespace": self.namespace, "online": True, "online_demo": not self.data_persistent,
             "data_persistent": self.data_persistent, "formal_ready": False,
+            "formal_sample_eligible": False, "pilot_class": self.pilot_class,
             "human_explanation_effect_validated": False,
             "release_version": self.public_release_version, "message": message}
         self.provenance = {**deepcopy(context.provenance), "service_family": SERVICE_FAMILY,
-            "service_version": VERSION, "run_signature": self.signature, "namespace": NAMESPACE,
+            "service_version": self.service_version, "run_signature": self.signature, "namespace": self.namespace,
             "data_persistent": self.data_persistent, "formal_ready": False,
+            "formal_sample_eligible": False, "pilot_class": self.pilot_class,
             "release": deepcopy(self.release)}
         self._initialize_database()
         self.scheduled, self.schedule_lock = set(), Lock()
@@ -553,10 +608,14 @@ class OnlineAlignmentStudyStore:
         returned by participant HTTP endpoints: task fingerprints and artifact
         hashes reveal experiment allocation and implementation metadata.
         """
-        result = {"event": "warehouse_r41_deployment_identity",
-            "server_version": VERSION,
+        result = {"event": ("warehouse_r41_diagnostic_deployment_identity"
+                            if self.is_diagnostic
+                            else "warehouse_r41_deployment_identity"),
+            "server_version": self.service_version,
             "release_version": self.public_release_version}
-        if self.public_release_version != R41_PUBLIC_RELEASE_VERSION:
+        if self.public_release_version not in (
+                R41_PUBLIC_RELEASE_VERSION,
+                R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION):
             return result
         play = self.scenarios.get("splits", {}).get("play", [])
         fingerprints = [row.get("fingerprint") for row in play[1:7]]
@@ -593,7 +652,8 @@ class OnlineAlignmentStudyStore:
                         "SELECT key,value FROM metadata WHERE key IN ('service_family','namespace')")}
                 except sqlite3.Error as exc:
                     raise ValueError("existing database lacks the online service identity") from exc
-                if values != {"service_family": SERVICE_FAMILY, "namespace": NAMESPACE}:
+                if values != {"service_family": SERVICE_FAMILY,
+                              "namespace": self.namespace}:
                     raise ValueError("database family or namespace differs")
             db.executescript(_SCHEMA)
             question_columns = {row[1] for row in db.execute("PRAGMA table_info(questions)")}
@@ -605,7 +665,8 @@ class OnlineAlignmentStudyStore:
                     db.execute(f"ALTER TABLE sessions ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0")
             if not exists:
                 db.executemany("INSERT INTO metadata VALUES(?,?)", [
-                    ("service_family", _canonical(SERVICE_FAMILY)), ("namespace", _canonical(NAMESPACE))])
+                    ("service_family", _canonical(SERVICE_FAMILY)),
+                    ("namespace", _canonical(self.namespace))])
             db.execute("INSERT OR IGNORE INTO metadata VALUES(?,?)",
                 ("service_context:" + self.signature, _canonical(self.provenance)))
             db.execute("UPDATE questions SET status='pending' WHERE status='running'")
@@ -637,7 +698,8 @@ class OnlineAlignmentStudyStore:
                 # records.  This also prevents an old pending request from being
                 # replayed into the newly bound experiment version.
             sid = uuid4().hex
-            db.execute("INSERT INTO sessions(id,namespace) VALUES(?,?)", (sid, NAMESPACE))
+            db.execute("INSERT INTO sessions(id,namespace) VALUES(?,?)",
+                       (sid, self.namespace))
             return sid
 
     def _session(self, db, sid):
@@ -695,15 +757,28 @@ class OnlineAlignmentStudyStore:
         signature = getattr(context, "tutorial_signature", None)
         expected_fields = {"version", "source", "uses_final_actor", "scene_id",
             "duration_ms", "map_sha256", "bindings", "coverage", "frames"}
-        binding_fields = {"scene_manifest_version", "scene_manifest_content_sha256",
+        tutorial_version = ("warehouse-alignment-diagnostic-neutral-tutorial.v3"
+                            if self.is_diagnostic else
+                            "warehouse-alignment-neutral-tutorial.v1")
+        manifest_version = ("warehouse-r41-diagnostic-conflict-scene-manifest.v3"
+                            if self.is_diagnostic else
+                            "warehouse-r41-conflict-scene-manifest.v1")
+        binding_fields = ({"scene_manifest_version", "scene_manifest_file_sha256",
+            "scene_manifest_content_sha256", "scene_manifest_semantic_sha256",
             "tutorial_scene_fingerprint", "tutorial_successor_state_sha256",
-            "tutorial_snapshot_sha256", "conflict_contract_sha256",
-            "conflict_graph_sha256", "producer_sources_sha256"}
+            "tutorial_snapshot_sha256", "diagnostic_contract_sha256",
+            "diagnostic_contract_version", "diagnostic_conflict_graph_sha256",
+            "conflict_families_sha256", "producer_sources_sha256"}
+            if self.is_diagnostic else
+            {"scene_manifest_version", "scene_manifest_content_sha256",
+             "tutorial_scene_fingerprint", "tutorial_successor_state_sha256",
+             "tutorial_snapshot_sha256", "conflict_contract_sha256",
+             "conflict_graph_sha256", "producer_sources_sha256"})
         coverage_fields = {"pickup_frames", "delivery_frames",
             "simultaneous_movement_frames", "collision_frames", "wait_frames",
             "charge_frames"}
         if (not isinstance(payload, dict) or set(payload) != expected_fields
-                or payload.get("version") != "warehouse-alignment-neutral-tutorial.v1"
+                or payload.get("version") != tutorial_version
                 or payload.get("source") != "independent_neutral_ai_ai"
                 or payload.get("uses_final_actor") is not False
                 or not isinstance(payload.get("scene_id"), str) or not payload["scene_id"]
@@ -712,11 +787,15 @@ class OnlineAlignmentStudyStore:
                 or not isinstance(payload.get("bindings"), dict)
                 or set(payload["bindings"]) != binding_fields
                 or payload["bindings"].get("scene_manifest_version")
-                    != "warehouse-r41-conflict-scene-manifest.v1"
+                    != manifest_version
+                or (self.is_diagnostic
+                    and payload["bindings"].get("diagnostic_contract_version")
+                        != "warehouse-r41-diagnostic-conflict.v2")
                 or any(not isinstance(value, str)
                        or re.fullmatch(r"[0-9a-f]{64}", value) is None
                        for name, value in payload["bindings"].items()
-                       if name != "scene_manifest_version")
+                       if name not in {
+                           "scene_manifest_version", "diagnostic_contract_version"})
                 or not isinstance(payload.get("coverage"), dict)
                 or set(payload["coverage"]) != coverage_fields
                 or any(not isinstance(values, list) or not values
@@ -810,6 +889,9 @@ class OnlineAlignmentStudyStore:
         session = self._session(db, sid)
         permitted = self._can_explain(db, session)
         consent_text = ({
+            "zh": "本内部诊断实验记录用户 ID、操作、问答和问卷，数据仅用于内部探索，不纳入正式实验样本。当前 Render 免费实例没有持久磁盘，服务重启可能丢失记录。请使用不含姓名、邮箱或电话号码的研究编号。",
+            "en": "This internal diagnostic study records the study ID, actions, questions, and questionnaire for internal exploration only; the data are not formal research samples. The free Render instance has no persistent disk, so a restart may erase records. Use an ID without a name, email, or telephone number.",
+        } if self.is_diagnostic else {
             "zh": "本线上试玩记录用户 ID、操作、问答和问卷。当前 Render 实例没有持久磁盘，服务重启可能丢失记录，因此本服务不是正式持久化实验。请使用不含姓名、邮箱或电话号码的研究编号。",
             "en": "This online demo records the study ID, actions, questions, and questionnaire. The current Render instance has no persistent disk, so a restart may erase records and this is not a formally persistent study. Use an ID without a name, email, or telephone number.",
         } if not self.data_persistent else {
@@ -820,8 +902,12 @@ class OnlineAlignmentStudyStore:
             "version": session["version"], "run_id": session["active_run"],
             "release": _participant_release(self.release), "study_allowed": not self._mismatch(session),
             "study_version_mismatch": self._mismatch(session),
-            "enrollment": {"mode": "online_demo" if not self.data_persistent else "online_pilot",
+            "enrollment": {"mode": ("internal_diagnostic" if self.is_diagnostic
+                                      else "online_demo" if not self.data_persistent
+                                      else "online_pilot"),
                 "enabled": True, "id_pattern": _ID.pattern, "formal_ready": False,
+                "formal_sample_eligible": False,
+                "pilot_class": self.pilot_class,
                 "data_persistent": self.data_persistent},
             "flow": {"mode": session["mode"], "stage": session["stage"],
                 "round_index": session["round_index"] + 1,
@@ -1208,8 +1294,35 @@ class OnlineAlignmentStudyStore:
 def _startup_identity(store, *, base64_path=None):
     result = store.deployment_identity()
     if base64_path is not None:
-        result["secret_file_sha256"] = sha256(
-            Path(base64_path).read_bytes()).hexdigest()
+        path = Path(base64_path).expanduser().absolute()
+        flags = (os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+                 | getattr(os, "O_NONBLOCK", 0))
+        try:
+            descriptor = os.open(path, flags)
+        except (OSError, TypeError, ValueError) as error:
+            raise ValueError("Readable diagnostic Secret File required") from error
+        try:
+            before = os.fstat(descriptor)
+            if (not stat.S_ISREG(before.st_mode) or before.st_size <= 0
+                    or before.st_size > MAX_SECRET_FILE_BYTES):
+                raise ValueError("Diagnostic Secret File exceeds the safe limit")
+            value = sha256()
+            remaining = MAX_SECRET_FILE_BYTES + 1
+            read_size = 0
+            while remaining:
+                chunk = os.read(descriptor, min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                value.update(chunk); read_size += len(chunk); remaining -= len(chunk)
+            after = os.fstat(descriptor)
+            identity = lambda row: (
+                row.st_dev, row.st_ino, row.st_size, row.st_mtime_ns)
+            if (identity(before) != identity(after) or read_size != before.st_size
+                    or read_size > MAX_SECRET_FILE_BYTES):
+                raise ValueError("Diagnostic Secret File changed or exceeds the safe limit")
+            result["secret_file_sha256"] = value.hexdigest()
+        finally:
+            os.close(descriptor)
     return result
 
 
@@ -1252,9 +1365,12 @@ def handler_class(store, *, public_origin=DEFAULT_ORIGIN):
         def do_GET(self):
             path = urlparse(self.path).path
             if path in ("/health", "/api/health"):
-                self.reply(200, {"status":"ok", "service":SERVICE_FAMILY, "version":VERSION,
+                self.reply(200, {"status":"ok", "service":SERVICE_FAMILY,
+                    "version":store.service_version,
                     "release_version":store.public_release_version,
-                    "data_persistent":store.data_persistent, "formal_ready":False})
+                    "pilot_class":store.pilot_class,
+                    "data_persistent":store.data_persistent, "formal_ready":False,
+                    "formal_sample_eligible":False})
                 return
             assets = {"/": ("index.html", "text/html; charset=utf-8"),
                 "/index.html": ("index.html", "text/html; charset=utf-8"),

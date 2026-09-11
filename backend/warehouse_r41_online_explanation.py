@@ -16,11 +16,15 @@ import numpy as np
 from backend import warehouse_alignment_online_explanation as base
 from backend.warehouse_alignment_online_runtime import ACTIONS, digest
 from backend.warehouse_r41_online_runtime import R41OnlineAlignmentRuntime
+from backend.warehouse_r41_diagnostic_model_tree import (
+    R41DiagnosticModelTreeProgram,
+)
 from core.program import ExecutableProgram
 
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "warehouse-r41-alignment-online-readable-answers.v1"
+DIAGNOSTIC_VERSION = "warehouse-r41-diagnostic-online-readable-answers.v3"
 
 
 def explanation_sources() -> dict[str, str]:
@@ -35,6 +39,24 @@ def explanation_sources() -> dict[str, str]:
     for path in paths:
         if not path.is_file() or path.is_symlink():
             raise ValueError("r4.1 explanation source is missing: " + str(path))
+        result[str(path.relative_to(ROOT))] = sha256(path.read_bytes()).hexdigest()
+    return dict(sorted(result.items()))
+
+
+def diagnostic_explanation_sources() -> dict[str, str]:
+    paths = (
+        Path(__file__),
+        ROOT / "backend/warehouse_alignment_online_explanation.py",
+        ROOT / "backend/warehouse_alignment_online_runtime.py",
+        ROOT / "backend/warehouse_r41_diagnostic_online_runtime.py",
+        ROOT / "backend/warehouse_r41_diagnostic_model_tree.py",
+        ROOT / "env/warehouse_native/r41_diagnostic_conflict.py",
+        ROOT / "core/program.py",
+    )
+    result = {}
+    for path in paths:
+        if not path.is_file() or path.is_symlink():
+            raise ValueError("r4.1 diagnostic explanation source is missing: " + str(path))
         result[str(path.relative_to(ROOT))] = sha256(path.read_bytes()).hexdigest()
     return dict(sorted(result.items()))
 
@@ -127,7 +149,98 @@ class R41OnlineAlignmentExplainer(base.OnlineAlignmentExplainer):
             raise ValueError("This component cannot grant participant qualification")
 
 
+class R41DiagnosticOnlineAlignmentExplainer(base.OnlineAlignmentExplainer):
+    """Readable renderer bound to the strict diagnostic runtime and program."""
+
+    def __init__(self, program_path, *, expected_program_sha256, runtime,
+                 allow_test_fixture=False):
+        from backend.warehouse_r41_diagnostic_online_runtime import (
+            R41DiagnosticOnlineAlignmentRuntime,
+        )
+
+        if (type(runtime) is not R41DiagnosticOnlineAlignmentRuntime
+                or type(allow_test_fixture) is not bool
+                or runtime.test_fixture is not allow_test_fixture):
+            raise ValueError("Explicit matching r4.1 diagnostic runtime scope is required")
+        runtime.verify_binding()
+        self.program_path = Path(program_path).expanduser().resolve()
+        raw = self.program_path.read_bytes()
+        if (not isinstance(expected_program_sha256, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", expected_program_sha256)
+                or sha256(raw).hexdigest() != expected_program_sha256):
+            raise ValueError("Program differs from its external hash")
+        payload = json.loads(raw)
+        self.program = R41DiagnosticModelTreeProgram.from_dict(payload)
+        if (tuple(self.program.feature_names)
+                != tuple(runtime.actor.metadata["feature_names"])
+                or tuple(self.program.action_names) != ACTIONS
+                or self.program.metadata.get("native_source_actor_sha256")
+                    != runtime.actor_sha256
+                or self.program.metadata.get("diagnostic_rcpd_version")
+                    != "warehouse-r41-diagnostic-rcpd.v3"
+                or self.program.metadata.get("source_full_manifest_bindings")
+                    != runtime.source_full_manifest_bindings
+                or self.program.metadata.get("action_legality_features")
+                or self.program.metadata.get("action_constraint_reason_features")
+                or self.program.metadata.get("program_family")
+                    != "axis_router_sparse_public_linear_softmax_leaves"
+                or self.program.router_depth > 8
+                or self.program.router_leaf_count > 32):
+            raise ValueError("Program source, diagnostic schema or unmasked action contract differs")
+        self.actor_sha256 = runtime.actor_sha256
+        self.runtime_signature = runtime.signature
+        self.program_sha256 = expected_program_sha256
+        self.program_content_sha256 = digest(self.program.to_dict())
+        self.sources = diagnostic_explanation_sources()
+        self.test_fixture = allow_test_fixture
+        self.eligible = False
+        self.participant_enabled = False
+        self.study_ready = False
+        self.explanation_qualified = True
+        self.release_ready = False
+        self.fixture_enabled = allow_test_fixture
+        self.signature = digest({
+            "version": DIAGNOSTIC_VERSION,
+            "scope": "r4.1-diagnostic",
+            "runtime": self.runtime_signature,
+            "program": self.program_sha256,
+            "sources": self.sources,
+        })
+        self.contract_report = {
+            "version": DIAGNOSTIC_VERSION,
+            "signature": self.signature,
+            "test_fixture": allow_test_fixture,
+            "eligibility_evaluated": True,
+            "explanation_eligible": True,
+            "explanation_qualified": True,
+            "study_ready": False,
+            "participant_enabled": False,
+            "release_ready": False,
+            "scope": "diagnostic_component_requires_separate_admission",
+        }
+
+    def _assert_current(self, runtime):
+        from backend.warehouse_r41_diagnostic_online_runtime import (
+            R41DiagnosticOnlineAlignmentRuntime,
+        )
+
+        if (type(runtime) is not R41DiagnosticOnlineAlignmentRuntime
+                or runtime.verify_binding() != self.runtime_signature
+                or runtime.actor_sha256 != self.actor_sha256
+                or runtime.test_fixture is not self.test_fixture
+                or diagnostic_explanation_sources() != self.sources):
+            raise ValueError("diagnostic_explanation_runtime_version_mismatch")
+        if (sha256(self.program_path.read_bytes()).hexdigest()
+                != self.program_sha256
+                or digest(self.program.to_dict()) != self.program_content_sha256):
+            raise ValueError("diagnostic_explanation_program_changed")
+        if (self.eligible or self.participant_enabled or self.study_ready
+                or not self.explanation_qualified or self.release_ready):
+            raise ValueError("This component cannot grant participant qualification")
+
+
 AlignmentExplainer = R41OnlineAlignmentExplainer
 
-__all__ = ["VERSION", "R41OnlineAlignmentExplainer", "AlignmentExplainer",
-           "explanation_sources"]
+__all__ = ["VERSION", "DIAGNOSTIC_VERSION", "R41OnlineAlignmentExplainer",
+           "AlignmentExplainer", "R41DiagnosticOnlineAlignmentExplainer",
+           "explanation_sources", "diagnostic_explanation_sources"]

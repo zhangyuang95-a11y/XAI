@@ -106,7 +106,7 @@ def parse_question(question, focus=None):
         return {"intent":"collision","focus":"executed"}
     if re.search(r"(?:我的|玩家).{0,12}(?:影响|改变)|(?:影响|改变).{0,12}(?:队友|机器人)|\b(?:my|player) action.{0,16}(?:affect|change|influence)|\b(?:affect|change|influence).{0,16}(?:teammate|robot)", text):
         return {"intent":"influence","focus":"executed" if not future else "next"}
-    if re.search(r"(?:当前|现在).{0,8}(?:目标|任务|方向)|(?:目标|任务).{0,8}(?:是什么|哪个|哪里)|trying to do|current (?:goal|task|objective)|heading (?:for|toward)", text):
+    if re.search(r"(?:当前|现在).{0,8}(?:目标|任务|方向)|(?:目标|任务).{0,8}(?:是什么|哪个|哪里)|trying to do|current (?:goal|task|objective)|which (?:goal|task|objective)|heading (?:for|toward)|moving toward", text):
         return {"intent":"goal","focus":"next"}
     if re.search(r"需要.{0,4}充电|该.{0,4}充电|电量够|充电吗|need(?:s|ed)? to charge|need charging|enough (?:battery|charge)", text):
         return {"intent":"energy","focus":"next"}

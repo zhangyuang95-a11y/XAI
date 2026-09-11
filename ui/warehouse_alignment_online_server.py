@@ -32,16 +32,35 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "ui/warehouse_family_feedback_research"
-VERSION = "warehouse-alignment-online-study-server.v2"
+VERSION = "warehouse-alignment-online-study-server.r4.1"
 SERVICE_FAMILY = "warehouse_alignment_online_r2"
+R41_RELEASE_CONTEXT_VERSION = "warehouse-r41-online-release.v1"
+R41_PUBLIC_RELEASE_VERSION = "r4.1"
 NAMESPACE = "online_demo"
 COOKIE = "warehouse_alignment_online_session_v1"
 DEFAULT_PORT = 8000
 DEFAULT_ORIGIN = "https://policylens-warehouse-study.onrender.com"
 DEFAULT_DATABASE = Path(os.environ.get("WAREHOUSE_ONLINE_DATABASE", "/tmp/warehouse_alignment_online.sqlite3"))
+PERSISTENT_DATABASE_ROOT = Path("/var/data")
+DEFAULT_RELEASE_MODULE = "ui.warehouse_alignment_online_release"
+R41_RELEASE_MODULE = "ui.warehouse_alignment_r41_online_release"
+RELEASE_MODULES = (DEFAULT_RELEASE_MODULE, R41_RELEASE_MODULE)
 MAX_BODY = 20_000
 _ACTIONS = {"UP", "DOWN", "LEFT", "RIGHT", "WAIT"}
+_COLLISION_KINDS = {"none", "same_target", "swap", "occupied_stationary"}
+_TERMINAL_REASONS = {None, "horizon", "battery_shutdown", "participant_ended"}
 _ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{2,31}")
+_MAIN_ANSWER_FORBIDDEN = re.compile(
+    r"\b(?:NN|argmax|SHA(?:-?256)?)\b|神经(?:网络|策略|输出)|动作概率|决策树|"
+    r"树分支|阈值|指示值|特征编码|\b(?:action |policy )?probabilit(?:y|ies)\b|"
+    r"\bdecision tree\b|\btree branch\b|\bthreshold\b|\bfeature encod\w*\b|"
+    r"\bhash(?:es)?\b",
+    re.IGNORECASE,
+)
+_PRIVATE_EVIDENCE_LINE = re.compile(
+    r"\b(?:SHA(?:-?256)?|hash(?:es)?)\b|(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])",
+    re.IGNORECASE,
+)
 
 
 def _canonical(value):
@@ -119,73 +138,225 @@ def _public_map(env):
         "shared_delivery_tasks":True}
 
 
+def _participant_map(value):
+    """Return only geometry the participant can see on the canvas."""
+    if not isinstance(value, dict):
+        raise ValueError("public map must be an object")
+    required = ("rows", "cols", "shelves", "charger_position",
+                "robot_exit_positions", "waiting_zone",
+                "robot_start_positions", "shared_delivery_tasks")
+    if any(name not in value for name in required):
+        raise ValueError("public map is incomplete")
+    return {name: deepcopy(value[name]) for name in required}
+
+
+def _participant_history(value):
+    """Whitelist the immediately preceding observable physical transition."""
+    if not isinstance(value, dict):
+        raise ValueError("public history must be an object")
+    valid = bool(value.get("valid"))
+    if not valid:
+        return {"valid": False, "submitted_actions": None,
+            "executed_actions": None, "move_canceled": None,
+            "consecutive_move_canceled": None, "collision_kind": None,
+            "consecutive_collision": 0}
+    submitted = value.get("submitted_actions")
+    executed = value.get("executed_actions")
+    canceled = value.get("move_canceled")
+    consecutive = value.get("consecutive_move_canceled")
+    if (not all(isinstance(item, dict) for item in
+                (submitted, executed, canceled, consecutive))
+            or set(submitted) != {"robot_1", "robot_2"}
+            or set(executed) != {"robot_1", "robot_2"}
+            or any(action not in _ACTIONS for action in submitted.values())
+            or any(action not in _ACTIONS for action in executed.values())):
+        raise ValueError("public history actions are invalid")
+    collision_kind = str(value.get("collision_kind", "none"))
+    if collision_kind not in _COLLISION_KINDS:
+        raise ValueError("public history collision kind is invalid")
+    return {"valid": True,
+        "submitted_actions": {key: submitted[key] for key in ("robot_1", "robot_2")},
+        "executed_actions": {key: executed[key] for key in ("robot_1", "robot_2")},
+        "move_canceled": {key: bool(canceled.get(key, False))
+                          for key in ("robot_1", "robot_2")},
+        "consecutive_move_canceled": {
+            key: max(0, int(consecutive.get(key, 0)))
+            for key in ("robot_1", "robot_2")},
+        "collision_kind": collision_kind,
+        "consecutive_collision": max(0, int(value.get("consecutive_collision", 0)))}
+
+
+def _participant_state(value):
+    """Project a state onto visible physics and opaque, per-frame task labels."""
+    if not isinstance(value, dict):
+        value = _plain(value)
+    tasks = sorted(list(value.get("tasks", ())),
+                   key=lambda item: str(item.get("task_id", "")))
+    task_ids = {str(task.get("task_id")): f"task_{index}"
+                for index, task in enumerate(tasks, 1)}
+    agents = []
+    for raw in value.get("agents", ()):
+        agent_id = str(raw.get("agent_id", raw.get("id", "")))
+        if agent_id not in ("robot_1", "robot_2"):
+            raise ValueError("public state has an unknown robot")
+        carrying = raw.get("carrying_task_id")
+        public_carrying = task_ids.get(str(carrying)) if carrying is not None else None
+        agents.append({
+            "id": agent_id,
+            "position": _point(raw.get("position")),
+            "battery": float(raw.get("battery", 0)),
+            "carrying_task_id": public_carrying,
+            "carrying_label": (f"A{public_carrying.rsplit('_', 1)[-1]}"
+                               if public_carrying else None),
+            "deliveries_completed": int(raw.get("deliveries_completed", 0)),
+            "active": bool(raw.get("active", True)),
+            "heading": str(raw.get("heading", "WAIT")),
+            "last_action": str(raw.get("last_action", "WAIT")),
+            "last_executed_action": str(raw.get("last_executed_action", "WAIT")),
+        })
+    if {agent["id"] for agent in agents} != {"robot_1", "robot_2"}:
+        raise ValueError("public state requires both robots")
+    terminal_reason = value.get("terminal_reason")
+    if terminal_reason not in _TERMINAL_REASONS:
+        terminal_reason = "round_ended" if (value.get("terminated")
+                                              or value.get("truncated")) else None
+    for task in tasks:
+        carrier = task.get("carrier_agent_id")
+        if carrier not in (None, "robot_1", "robot_2"):
+            raise ValueError("public task has an unknown carrier")
+    return {
+        "frame": int(value.get("frame", 0)),
+        "total_deliveries": int(value.get("total_deliveries", 0)),
+        "collision_count": int(value.get("collision_count", 0)),
+        "shutdown_count": int(value.get("shutdown_count", 0)),
+        "terminated": bool(value.get("terminated", False)),
+        "truncated": bool(value.get("truncated", False)),
+        "terminal_reason": terminal_reason,
+        "agents": agents,
+        "tasks": [{
+            "task_id": task_ids[str(task.get("task_id"))],
+            "pickup_position": _point(task.get("pickup_position")),
+            "delivery_position": _point(task.get("delivery_position")),
+            "status": str(task.get("status", "available")),
+            "carrier_agent_id": task.get("carrier_agent_id"),
+        } for task in tasks],
+        "user_score": float(value.get("user_score", 0)),
+        "robot_collision_events": int(value.get(
+            "robot_collision_events", value.get("collision_count", 0))),
+    }
+
+
+def _participant_metrics(value):
+    """Expose scorecard values, never training/runtime diagnostics."""
+    value = value if isinstance(value, dict) else {}
+    return {key: deepcopy(value.get(key)) for key in
+            ("deliveries", "score", "legacy_score", "steps", "collisions", "shutdowns")}
+
+
+def _participant_frame(value):
+    if not isinstance(value, dict):
+        raise ValueError("public frame must be an object")
+    state = _participant_state(value.get("state", {}))
+    history = value.get("state", {}).get("public_feedback",
+                                         value.get("public_feedback"))
+    state["public_feedback"] = _participant_history(history or {"valid": False})
+    actions = value.get("actions", {})
+    if not isinstance(actions, dict):
+        raise ValueError("public frame actions must be an object")
+    actions = {key: actions[key] for key in ("robot_1", "robot_2")
+               if key in actions and actions[key] in _ACTIONS}
+    return {"state": state, "metrics": _participant_metrics(value.get("metrics")),
+            "actions": actions}
+
+
+def _participant_preview(value):
+    if not isinstance(value, dict):
+        raise ValueError("question preview must be an object")
+    result = {"map": _participant_map(value.get("map", {})),
+              "state": _participant_state(value.get("state", {})),
+              "public_feedback": _participant_history(
+                  value.get("public_feedback") or {"valid": False})}
+    if "question_markers" in value:
+        markers = value["question_markers"]
+        if not isinstance(markers, list):
+            raise ValueError("question markers must be a list")
+        result["question_markers"] = [{"position": _point(marker["position"]),
+                                       "label": str(marker["label"])}
+                                      for marker in markers]
+    return result
+
+
+def _participant_questionnaire_items(items):
+    result = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("questionnaire item must be an object")
+        public = {name: deepcopy(item[name]) for name in
+                  ("id", "type", "required", "prompt", "options")
+                  if name in item}
+        if "prediction_kind" in item:
+            public["prediction_kind"] = item["prediction_kind"]
+        if "preview" in item:
+            public["preview"] = _participant_preview(item["preview"])
+        result.append(public)
+    return result
+
+
+def _participant_release(value):
+    """Keep admission identities and artifact metadata server-side."""
+    if not isinstance(value, dict):
+        raise ValueError("release status must be an object")
+    return {"status": ("online_pilot_persistent" if value.get("data_persistent") is True
+                       else "online_demo_ephemeral"),
+        "release_version": str(value.get("release_version", "legacy")),
+        "model_ready": value.get("model_ready") is True,
+        "explanation_ready": value.get("explanation_ready") is True,
+        "study_ready": value.get("study_ready") is True,
+        "formal_ready": False,
+        "test_fixture": value.get("test_fixture") is True,
+        "data_persistent": value.get("data_persistent") is True,
+        "message": deepcopy(value.get("message", {}))}
+
+
+def _participant_answer(row):
+    """Fail closed if a stored/legacy answer puts audit terms in main prose."""
+    status = str(row["status"])
+    answer = row["answer"] or ""
+    detail = row["evidence_detail"] or ""
+    if (not isinstance(answer, str) or not isinstance(detail, str)
+            or (answer and _MAIN_ANSWER_FORBIDDEN.search(answer))):
+        status, answer, detail = "failed", "", ""
+    else:
+        # Artifact identities remain in the stored audit record.  Participants
+        # receive behavioral evidence only, with any identity-bearing line
+        # removed at the final response boundary.
+        detail = "\n".join(line for line in detail.splitlines()
+                           if not _PRIVATE_EVIDENCE_LINE.search(line)).strip()
+    return {"id": row["id"], "status": status, "frame": row["frame"],
+        "question": row["question"], "text": answer, "run_id": row["run_id"],
+        "focus": row["focus"], "evidence_detail": detail}
+
+
 def _state(env):
     getter = getattr(env, "get_state", None)
     return getter() if callable(getter) else env.state
 
 
 def _public_state(env):
-    state = _state(env)
-    tasks = sorted(list(_attr(state, "tasks", ())), key=lambda t: str(_attr(t, "task_id", "")))
-    slots = {str(_attr(task, "task_id")): i for i, task in enumerate(tasks, 1)}
-    agents = []
-    for agent in _attr(state, "agents", ()):
-        agent_id = str(_attr(agent, "agent_id", _attr(agent, "id", "")))
-        carrying = _attr(agent, "carrying_task_id")
-        agents.append({
-            "id": agent_id,
-            "position": _point(_attr(agent, "position")),
-            "battery": float(_attr(agent, "battery", 0)),
-            "carrying_task_id": carrying,
-            "carrying_label": f"A{slots[str(carrying)]}" if carrying is not None and str(carrying) in slots else None,
-            "deliveries_completed": int(_attr(agent, "deliveries_completed", 0)),
-            "active": bool(_attr(agent, "active", True)),
-            "heading": str(_attr(agent, "heading", "WAIT")),
-            "last_action": str(_attr(agent, "last_action", "WAIT")),
-            "last_executed_action": str(_attr(agent, "last_executed_action", "WAIT")),
-            "selected": agent_id == "robot_2",
-        })
-    return {
-        "episode_id": int(_attr(state, "episode_id", 0)),
-        "frame": int(_attr(state, "frame", 0)),
-        "total_deliveries": int(_attr(state, "total_deliveries", 0)),
-        "active_count": sum(bool(a["active"]) for a in agents),
-        "collision_count": int(_attr(state, "collision_count", 0)),
-        "shutdown_count": int(_attr(state, "shutdown_count", 0)),
-        "terminated": bool(_attr(state, "terminated", False)),
-        "truncated": bool(_attr(state, "truncated", False)),
-        "terminal_reason": _attr(state, "terminal_reason"),
-        "selected_agent": "robot_2",
-        "agents": agents,
-        "tasks": [{
-            "task_id": str(_attr(task, "task_id")),
-            "pickup_position": _point(_attr(task, "pickup_position")),
-            "delivery_position": _point(_attr(task, "delivery_position")),
-            "status": str(_attr(task, "status", "available")),
-            "carrier_agent_id": _attr(task, "carrier_agent_id"),
-            "created_frame": int(_attr(task, "created_frame", 0)),
-            "claimed_frame": (int(_attr(task, "claimed_frame")) if _attr(task, "claimed_frame") is not None else None),
-        } for task in tasks],
-        "user_score": float(_attr(state, "user_score", 0)),
-        "score_breakdown": {str(k): float(v) for k, v in dict(_attr(state, "score_breakdown", {})).items()},
-        "robot_collision_events": int(_attr(state, "robot_collision_events", _attr(state, "collision_count", 0))),
-        "invalid_move_count": int(_attr(state, "invalid_move_count", 0)),
-        "events": None,
-        "policy_hidden": True,
-    }
+    return _participant_state(_plain(_state(env)))
 
 
 def _public_history(env, outcome=None):
     method = getattr(env, "public_history", None)
     if callable(method):
-        return _plain(method())
+        return _participant_history(_plain(method()))
     outcome = outcome or {}
     submitted = outcome.get("submitted_actions", outcome.get("policy_actions", {}))
     executed = outcome.get("executed_actions", submitted)
-    return {"valid": bool(outcome), "submitted_actions": submitted,
+    return _participant_history({"valid": bool(outcome), "submitted_actions": submitted,
         "executed_actions": executed, "move_canceled": {},
         "consecutive_move_canceled": {}, "collision_kind": "none",
-        "consecutive_collision": 0}
+        "consecutive_collision": 0})
 
 
 def _questionnaire_items():
@@ -203,19 +374,23 @@ def _assets():
             for name in ("index.html", "app.js", "styles.css", "favicon.svg")}
     js = data["app.js"].decode("utf-8")
     js = js.replace('const FRONTEND_VERSION="warehouse-family-feedback-research.r4";',
-                    'const FRONTEND_VERSION="warehouse-alignment-online.r4";')
+                    'const FRONTEND_VERSION="warehouse-alignment-online.r4.1";')
     js = re.sub(r'const PENDING_KEY="[^"]+", LANGUAGE_KEY="[^"]+";',
-        'const PENDING_KEY="warehouse-alignment-online.r4.pending", LANGUAGE_KEY="warehouse-alignment-online.r4.lang";', js, count=1)
+        'const PENDING_KEY="warehouse-alignment-online.r4_1.pending", LANGUAGE_KEY="warehouse-alignment-online.r4_1.lang";', js, count=1)
     js = js.replace('localStudy:"本地预实验 · 已核验"',
-                    'localStudy:"线上试玩 · 已核验"')
+                    'localStudy:"内部预实验 · r4.1"')
     js = js.replace('localStudyMessage:"本地预实验 · 已核验。当前记录不作为正式研究样本。"',
                     'localStudyMessage:"线上试玩已核验。当前免费实例重启后可能丢失记录，不作为正式研究样本。"')
     js = js.replace('localStudy:"Local pilot · Verified"',
-                    'localStudy:"Online demo · Verified"')
+                    'localStudy:"Internal pilot · r4.1"')
     js = js.replace('localStudyMessage:"Local pilot · Verified. These records are not formal research samples."',
                     'localStudyMessage:"Verified online demo. The free instance may lose records after a restart; these are not formal research samples."')
     js = js.replace('request("/api/command",{method:"POST"',
                     'request("/api/study/command",{method:"POST"')
+    js = js.replace(
+        '$("releaseMessage").textContent=tr(releaseMessageKey(v));',
+        '$("releaseMessage").textContent=local(r.message,ui.language)||tr(releaseMessageKey(v));',
+    )
     js = js.replace(
         'const consentStage=isStudy && p==="consent";const entryAllowed=!isStudy || consentStage;',
         'const consentStage=isStudy && p==="consent",registrationStage=p==="registration" || consentStage;const entryAllowed=!isStudy || registrationStage;',
@@ -238,7 +413,8 @@ def _assets():
     )
     required = ("registrationStage", "participant_id:id,consent:true",
                 'request("/api/study/command",{method:"POST"',
-                "线上试玩 · 已核验", "Online demo · Verified")
+                "内部预实验 · r4.1", "Internal pilot · r4.1",
+                "local(r.message,ui.language)")
     if any(value not in js for value in required):
         raise ValueError("online frontend transformation anchor changed")
     data["app.js"] = js.encode("utf-8")
@@ -259,7 +435,8 @@ CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,version INTEGER NOT NULL
  participant_id TEXT,participant_key TEXT UNIQUE,position INTEGER UNIQUE,condition TEXT,task_order TEXT,
  mode TEXT NOT NULL DEFAULT 'enrollment',stage TEXT NOT NULL DEFAULT 'registration',round_index INTEGER NOT NULL DEFAULT 0,
  questionnaire TEXT NOT NULL DEFAULT '{}',questionnaire_scores TEXT,namespace TEXT NOT NULL,study_signature TEXT,
- questionnaire_bank_signature TEXT,consented TEXT);
+ questionnaire_bank_signature TEXT,consented TEXT,tutorial_index INTEGER NOT NULL DEFAULT 0,
+ tutorial_max_index INTEGER NOT NULL DEFAULT 0,tutorial_complete INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,session_id TEXT NOT NULL,scenario_id TEXT NOT NULL,signature TEXT NOT NULL,
  stage TEXT NOT NULL,round_index INTEGER NOT NULL,snapshot TEXT NOT NULL,metrics TEXT NOT NULL,ended INTEGER NOT NULL DEFAULT 0,
  created TEXT NOT NULL,end_reason TEXT,provenance TEXT NOT NULL);
@@ -302,6 +479,9 @@ class OnlineAlignmentStudyStore:
                 or any(release.get(k) is not True for k in ("model_ready", "explanation_ready", "study_ready"))
                 or release.get("formal_ready") is not False):
             raise ValueError("a genuine technically verified local-pilot release is required")
+        context_version = str(getattr(context, "provenance", {}).get("version", ""))
+        self.public_release_version = (R41_PUBLIC_RELEASE_VERSION
+            if context_version == R41_RELEASE_CONTEXT_VERSION else "legacy")
         play = self.scenarios.get("splits", {}).get("play")
         if not isinstance(play, list) or len(play) < 7 or len({s.get("id") for s in play}) != len(play):
             raise ValueError("practice and six unique online study scenes are required")
@@ -316,19 +496,36 @@ class OnlineAlignmentStudyStore:
         if requested == root or root in requested.parents:
             raise ValueError("database must be outside the immutable release")
         mode = storage_mode
+        persistent_root = PERSISTENT_DATABASE_ROOT.resolve(strict=False)
+        on_persistent_root = requested != persistent_root and persistent_root in requested.parents
         if mode == "auto":
-            mode = "persistent" if str(requested).startswith("/var/data/") else "ephemeral"
+            # A directory name alone is not durability evidence: /var/data can
+            # exist without a Render disk. Production must opt in explicitly,
+            # and the independent Blueprint preflight proves the matching disk.
+            mode = "ephemeral"
         if mode not in ("persistent", "ephemeral"):
             raise ValueError("storage_mode must be auto, persistent, or ephemeral")
+        # ``persistent`` is a participant-facing data guarantee, so an operator
+        # flag alone must never turn a /tmp (or other ordinary local) SQLite file
+        # into a claimed durable store. A /var/data-looking path in ``auto`` mode
+        # is also insufficient. The r4.1 Render deployment contract uses an
+        # explicit mode and a disk mounted at /var/data; its preflight verifies
+        # the matching disk, plan and environment declaration before deployment.
+        if mode == "persistent" and not on_persistent_root:
+            raise ValueError("persistent SQLite storage must be under /var/data")
         self.data_persistent = mode == "persistent"
         self.database = requested
         self.namespace, self.cookie_name = NAMESPACE, COOKIE
         self.web_assets = _assets()
         self.asset_sha256 = {k: sha256(v).hexdigest() for k, v in self.web_assets.items()}
+        template = self.runtime.environment(play[0])
+        self._map = _public_map(template)
+        self.horizon = int(_attr(getattr(self.runtime, "config", {}), "horizon", 120))
+        self.tutorial_frames, self.tutorial_signature = self._validated_tutorial(context)
         self.signature = _digest({"version": VERSION, "context": str(context.signature),
             "runtime": str(self.runtime.signature), "explainer": str(self.explainer.signature),
             "bank": str(self.question_bank.signature), "scenarios": _digest(self.scenarios),
-            "assets": self.asset_sha256})
+            "assets": self.asset_sha256, "tutorial": self.tutorial_signature})
         message = ({
             "zh": "线上试玩服务已核验；当前 Render 实例没有持久磁盘，服务重启可能丢失记录，因此不能作为正式持久化人类实验。",
             "en": "Verified online demo. This Render instance has no persistent disk; a restart may erase records, so it is not a formally persistent human study.",
@@ -339,17 +536,47 @@ class OnlineAlignmentStudyStore:
         self.release = {**release, "status": "online_demo_ephemeral" if not self.data_persistent else "online_pilot_persistent",
             "namespace": NAMESPACE, "online": True, "online_demo": not self.data_persistent,
             "data_persistent": self.data_persistent, "formal_ready": False,
-            "human_explanation_effect_validated": False, "message": message}
+            "human_explanation_effect_validated": False,
+            "release_version": self.public_release_version, "message": message}
         self.provenance = {**deepcopy(context.provenance), "service_family": SERVICE_FAMILY,
             "service_version": VERSION, "run_signature": self.signature, "namespace": NAMESPACE,
             "data_persistent": self.data_persistent, "formal_ready": False,
             "release": deepcopy(self.release)}
-        template = self.runtime.environment(play[0])
-        self._map = _public_map(template)
-        self.horizon = int(_attr(getattr(self.runtime, "config", {}), "horizon", 120))
         self._initialize_database()
         self.scheduled, self.schedule_lock = set(), Lock()
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="online-alignment-explanation")
+
+    def deployment_identity(self):
+        """Return the operator-only identity used to verify an r4.1 deploy.
+
+        This value is written once to the service log. It is deliberately not
+        returned by participant HTTP endpoints: task fingerprints and artifact
+        hashes reveal experiment allocation and implementation metadata.
+        """
+        result = {"event": "warehouse_r41_deployment_identity",
+            "server_version": VERSION,
+            "release_version": self.public_release_version}
+        if self.public_release_version != R41_PUBLIC_RELEASE_VERSION:
+            return result
+        play = self.scenarios.get("splits", {}).get("play", [])
+        fingerprints = [row.get("fingerprint") for row in play[1:7]]
+        actor_sha256 = str(getattr(self.runtime, "actor_sha256", ""))
+        package_sha256 = str(self.provenance.get("package_sha256", ""))
+        manifest_sha256 = str(self.provenance.get("manifest_sha256", ""))
+        if (len(play) != 7 or len(fingerprints) != 6
+                or len(set(fingerprints)) != 6
+                or any(not isinstance(value, str)
+                       or re.fullmatch(r"[0-9a-f]{64}", value) is None
+                       for value in fingerprints)
+                or any(re.fullmatch(r"[0-9a-f]{64}", value) is None
+                       for value in (actor_sha256, package_sha256,
+                                     manifest_sha256))):
+            raise ValueError("r4.1 deployment identity is incomplete")
+        result.update(actor_sha256=actor_sha256,
+            package_sha256=package_sha256,
+            manifest_sha256=manifest_sha256,
+            scene_fingerprints={"X": fingerprints[:3], "Y": fingerprints[3:]})
+        return result
 
     def _initialize_database(self):
         self.database.parent.mkdir(parents=True, exist_ok=True)
@@ -372,6 +599,10 @@ class OnlineAlignmentStudyStore:
             question_columns = {row[1] for row in db.execute("PRAGMA table_info(questions)")}
             if "evidence_detail" not in question_columns:
                 db.execute("ALTER TABLE questions ADD COLUMN evidence_detail TEXT")
+            session_columns = {row[1] for row in db.execute("PRAGMA table_info(sessions)")}
+            for name in ("tutorial_index", "tutorial_max_index", "tutorial_complete"):
+                if name not in session_columns:
+                    db.execute(f"ALTER TABLE sessions ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0")
             if not exists:
                 db.executemany("INSERT INTO metadata VALUES(?,?)", [
                     ("service_family", _canonical(SERVICE_FAMILY)), ("namespace", _canonical(NAMESPACE))])
@@ -452,11 +683,94 @@ class OnlineAlignmentStudyStore:
             result["ai_blocked"] = int(result.get("ai_blocked", 0)) + int(ai_submitted not in (None, "WAIT") and ai_executed == "WAIT")
         return result
 
+    def _validated_tutorial(self, context):
+        """Admit public, pre-recorded teaching frames bound by the release.
+
+        The tutorial is deliberately not generated from the deployed Actor:
+        otherwise its action sequence could reveal the very task preference
+        the explanation intervention is meant to communicate.  The release
+        builder must bind a neutral AI-AI recording and its canonical hash.
+        """
+        payload = _plain(getattr(context, "tutorial", None))
+        signature = getattr(context, "tutorial_signature", None)
+        expected_fields = {"version", "source", "uses_final_actor", "scene_id",
+            "duration_ms", "map_sha256", "bindings", "coverage", "frames"}
+        binding_fields = {"scene_manifest_version", "scene_manifest_content_sha256",
+            "tutorial_scene_fingerprint", "tutorial_successor_state_sha256",
+            "tutorial_snapshot_sha256", "conflict_contract_sha256",
+            "conflict_graph_sha256", "producer_sources_sha256"}
+        coverage_fields = {"pickup_frames", "delivery_frames",
+            "simultaneous_movement_frames", "collision_frames", "wait_frames",
+            "charge_frames"}
+        if (not isinstance(payload, dict) or set(payload) != expected_fields
+                or payload.get("version") != "warehouse-alignment-neutral-tutorial.v1"
+                or payload.get("source") != "independent_neutral_ai_ai"
+                or payload.get("uses_final_actor") is not False
+                or not isinstance(payload.get("scene_id"), str) or not payload["scene_id"]
+                or payload.get("duration_ms") != 380
+                or payload.get("map_sha256") != _digest(self._map)
+                or not isinstance(payload.get("bindings"), dict)
+                or set(payload["bindings"]) != binding_fields
+                or payload["bindings"].get("scene_manifest_version")
+                    != "warehouse-r41-conflict-scene-manifest.v1"
+                or any(not isinstance(value, str)
+                       or re.fullmatch(r"[0-9a-f]{64}", value) is None
+                       for name, value in payload["bindings"].items()
+                       if name != "scene_manifest_version")
+                or not isinstance(payload.get("coverage"), dict)
+                or set(payload["coverage"]) != coverage_fields
+                or any(not isinstance(values, list) or not values
+                       or len(values) != len(set(values))
+                       or any(type(frame) is not int or frame < 1 for frame in values)
+                       for values in payload["coverage"].values())
+                or not isinstance(signature, str) or not re.fullmatch(r"[0-9a-f]{64}", signature)
+                or _digest(payload) != signature
+                or context.provenance.get("tutorial_signature") != signature):
+            raise ValueError("a hash-bound neutral AI-AI tutorial is required")
+        frames = payload.get("frames")
+        if not isinstance(frames, list) or not 2 <= len(frames) <= self.horizon + 1:
+            raise ValueError("neutral tutorial frame count is invalid")
+        if any(frame >= len(frames)
+               for values in payload["coverage"].values() for frame in values):
+            raise ValueError("neutral tutorial coverage references an unknown frame")
+        forbidden = {"probabilities", "logits", "decision", "policy_actions",
+            "proposed_actions", "observation_hashes", "program", "tree", "target_goal"}
+        def check_public(value):
+            if isinstance(value, dict):
+                if forbidden.intersection(value):
+                    raise ValueError("neutral tutorial exposes policy-internal evidence")
+                for child in value.values():
+                    check_public(child)
+            elif isinstance(value, list):
+                for child in value:
+                    check_public(child)
+        previous = None
+        for index, frame in enumerate(frames):
+            if not isinstance(frame, dict) or set(frame) != {"state", "metrics", "actions"}:
+                raise ValueError("neutral tutorial public frame schema differs")
+            check_public(frame)
+            state, actions = frame["state"], frame["actions"]
+            if (not isinstance(state, dict) or type(state.get("frame")) is not int
+                    or (previous is not None and state["frame"] != previous + 1)
+                    or not isinstance(state.get("agents"), list)
+                    or {agent.get("id") for agent in state["agents"]} != {"robot_1", "robot_2"}
+                    or not isinstance(frame["metrics"], dict)
+                    or frame["metrics"].get("steps") != state["frame"]
+                    or not isinstance(actions, dict)
+                    or (index == 0 and actions)
+                    or (index > 0 and (set(actions) != {"robot_1", "robot_2"}
+                        or any(action not in _ACTIONS for action in actions.values())))):
+                raise ValueError("neutral tutorial public frame content differs")
+            previous = state["frame"]
+        return tuple(deepcopy(frames)), signature
+
     def _frame(self, env, metrics, outcome=None):
         actions = (outcome or {}).get("executed_actions", {})
         state = _public_state(env)
         state["public_feedback"] = _public_history(env, outcome)
-        return {"state": state, "metrics": deepcopy(metrics), "actions": deepcopy(actions)}
+        return {"state": state, "metrics": _participant_metrics(metrics),
+            "actions": {key: actions[key] for key in ("robot_1", "robot_2")
+                        if key in actions and actions[key] in _ACTIONS}}
 
     def _initial_record(self, env, scene):
         snapshot = _plain(env.snapshot())
@@ -483,7 +797,9 @@ class OnlineAlignmentStudyStore:
         blocked = self._mismatch(session)
         bound = session["questionnaire_bank_signature"] == str(self.question_bank.signature)
         visible = session["stage"] == "questionnaire" and bound and not blocked
-        return {"items": _questionnaire_items() + (deepcopy(self.question_bank.public_items()) if visible else []),
+        frozen = (_participant_questionnaire_items(
+            self.question_bank.public_items()) if visible else [])
+        return {"items": _questionnaire_items() + frozen,
             "draft": json.loads(session["questionnaire"]), "blocked": blocked or (session["mode"] == "study" and not bound),
             "complete_prediction_bank_available": True,
             "scope": "four_next_four_wait_three_plus_self_report",
@@ -493,11 +809,17 @@ class OnlineAlignmentStudyStore:
     def _view(self, db, sid):
         session = self._session(db, sid)
         permitted = self._can_explain(db, session)
+        consent_text = ({
+            "zh": "本线上试玩记录用户 ID、操作、问答和问卷。当前 Render 实例没有持久磁盘，服务重启可能丢失记录，因此本服务不是正式持久化实验。请使用不含姓名、邮箱或电话号码的研究编号。",
+            "en": "This online demo records the study ID, actions, questions, and questionnaire. The current Render instance has no persistent disk, so a restart may erase records and this is not a formally persistent study. Use an ID without a name, email, or telephone number.",
+        } if not self.data_persistent else {
+            "zh": "本内部预实验记录用户 ID、操作、问答和问卷，记录写入已配置的持久磁盘。本版本仍不是正式研究版本。请使用不含姓名、邮箱或电话号码的研究编号。",
+            "en": "This internal pilot records the study ID, actions, questions, and questionnaire on the configured persistent disk. This is still not a formal-study release. Use an ID without a name, email, or telephone number.",
+        })
         result = {"session_id": _digest({"service": self.signature, "session": sid}),
             "version": session["version"], "run_id": session["active_run"],
-            "release": deepcopy(self.release), "study_allowed": not self._mismatch(session),
-            "study_version_mismatch": self._mismatch(session), "verification_only": False,
-            "verification_flow_allowed": False, "study_only": True,
+            "release": _participant_release(self.release), "study_allowed": not self._mismatch(session),
+            "study_version_mismatch": self._mismatch(session),
             "enrollment": {"mode": "online_demo" if not self.data_persistent else "online_pilot",
                 "enabled": True, "id_pattern": _ID.pattern, "formal_ready": False,
                 "data_persistent": self.data_persistent},
@@ -505,39 +827,45 @@ class OnlineAlignmentStudyStore:
                 "round_index": session["round_index"] + 1,
                 "round_count": 3 if session["stage"] in ("task1", "task2") else 1,
                 "participant_id": session["participant_id"],
-                "consent_text": {"zh": "本线上预实验记录用户 ID、操作、问答和问卷。当前免费 Render 实例的本地记录可能在重启时丢失，因此本服务不是正式持久化实验。请使用不含姓名、邮箱或电话号码的研究编号。",
-                    "en": "This online pilot records the study ID, actions, questions, and questionnaire. Local records on the current free Render instance may be lost after a restart, so this is not a formally persistent study. Use an ID without a name, email, or telephone number."}},
-            "map": deepcopy(self._map), "horizon": self.horizon,
+                "consent_text": consent_text},
+            "map": _participant_map(self._map), "horizon": self.horizon,
             "explain_allowed": permitted, "answers": [], "runs": [], "history_count": 0,
             "state": None, "metrics": {}, "ended": False,
-            "play_scene_count": len(self.scenarios["splits"]["play"]),
-            "questionnaire": self._questionnaire(session), "provenance": {"service_version": VERSION,
-                "data_persistent": self.data_persistent, "formal_ready": False}}
-        if session["active_run"]:
+            "tutorial": None,
+            "questionnaire": self._questionnaire(session)}
+        if session["stage"] == "instructions":
+            last = len(self.tutorial_frames) - 1
+            index = max(0, min(int(session["tutorial_index"]), last))
+            maximum = max(index, min(int(session["tutorial_max_index"]), last))
+            result.update(_participant_frame(self.tutorial_frames[index]))
+            result["tutorial"] = {"frame_index": index, "max_played_index": maximum,
+                "total_frames": len(self.tutorial_frames), "complete": bool(session["tutorial_complete"]),
+                "duration_ms": 380, "scored": False, "independent_from_formal_rounds": True}
+        elif session["active_run"]:
             run = self._run(db, sid)
             row = db.execute("SELECT public FROM frames WHERE run_id=? ORDER BY frame DESC LIMIT 1", (run["id"],)).fetchone()
             if row is None:
                 raise ValueError("run has no authoritative frame")
             result.update(json.loads(row["public"]))
-            scene_index = next(i for i, scene in enumerate(self.scenarios["splits"]["play"])
-                               if scene["id"] == run["scenario_id"])
-            result.update(ended=bool(run["ended"]), done=bool(run["ended"]), end_reason=run["end_reason"],
-                version_mismatch=run["signature"] != self.signature, seed=scene_index,
+            end_reason = run["end_reason"] if run["end_reason"] in _TERMINAL_REASONS \
+                else ("round_ended" if run["ended"] else None)
+            result.update(ended=bool(run["ended"]), done=bool(run["ended"]), end_reason=end_reason,
+                version_mismatch=run["signature"] != self.signature,
                 history_count=db.execute("SELECT count(*) FROM frames WHERE run_id=?", (run["id"],)).fetchone()[0])
             if permitted:
-                result["answers"] = [{"id": q["id"], "status": q["status"], "frame": q["frame"],
-                    "question": q["question"], "text": q["answer"] or "", "run_id": q["run_id"],
-                    "focus": q["focus"], "evidence_detail": q["evidence_detail"] or "",
-                    "sources": ["frozen NN", "validated policy program", "isolated counterfactual"]}
-                    for q in db.execute("SELECT * FROM questions WHERE session_id=? AND run_id=? ORDER BY created,id", (sid, run["id"]))]
+                result["answers"] = [_participant_answer(q) for q in db.execute(
+                    "SELECT * FROM questions WHERE session_id=? AND run_id=? ORDER BY created,id",
+                    (sid, run["id"]))]
         kinds = []
         if session["mode"] == "enrollment":
             kinds = ["start"]
         elif session["stage"] == "consent":
             kinds = ["next"]
+        elif session["stage"] == "instructions":
+            kinds = ["tutorial_advance", "tutorial_restart", "tutorial_select", "begin_task1"]
         elif session["stage"] == "questionnaire":
             kinds = ["questionnaire"]
-        elif session["active_run"] and session["stage"] in ("practice", "task1", "task2"):
+        elif session["active_run"] and session["stage"] in ("task1", "task2"):
             if result["ended"]:
                 kinds = ["next"]
             elif not result.get("version_mismatch"):
@@ -562,8 +890,9 @@ class OnlineAlignmentStudyStore:
             run = self._run(db, sid)
             if run_id is not None and run_id != run["id"]:
                 raise CommandError("history_current_run_only", 403)
-            return {"run_id": run["id"], "version": session["version"], "map": deepcopy(self._map),
-                "frames": [json.loads(row[0]) for row in db.execute(
+            return {"run_id": run["id"], "version": session["version"],
+                "map": _participant_map(self._map),
+                "frames": [_participant_frame(json.loads(row[0])) for row in db.execute(
                     "SELECT public FROM frames WHERE run_id=? ORDER BY frame", (run["id"],))]}
 
     def _record_operation(self, db, sid, op, request_hash, kind, payload):
@@ -599,10 +928,10 @@ class OnlineAlignmentStudyStore:
             cells = json.loads(block[0])
         condition, task_order = cells[position % 4]
         consented = _utcnow()
-        db.execute("UPDATE sessions SET mode='study',stage='practice',participant_id=?,participant_key=?,position=?,condition=?,task_order=?,round_index=0,active_run=NULL,questionnaire_bank_signature=?,study_signature=?,consented=? WHERE id=?",
+        initial_complete = int(len(self.tutorial_frames) == 1)
+        db.execute("UPDATE sessions SET mode='study',stage='instructions',participant_id=?,participant_key=?,position=?,condition=?,task_order=?,round_index=0,active_run=NULL,questionnaire_bank_signature=?,study_signature=?,consented=?,tutorial_index=0,tutorial_max_index=0,tutorial_complete=? WHERE id=?",
             (participant, participant.lower(), position, condition, task_order,
-             str(self.question_bank.signature), self.signature, consented, sid))
-        self._start_run(db, sid, 0)
+             str(self.question_bank.signature), self.signature, consented, initial_complete, sid))
 
     def command(self, sid, payload):
         if not isinstance(payload, dict):
@@ -630,12 +959,16 @@ class OnlineAlignmentStudyStore:
                     raise CommandError("study_version_changed", 409, self._view(db, sid))
                 if kind == "start":
                     self._register(db, sid, payload)
+                elif kind in ("tutorial_advance", "tutorial_restart", "tutorial_select"):
+                    self._tutorial_command(db, session, kind, payload)
+                elif kind == "begin_task1":
+                    self._begin_task1(db, session)
                 elif kind == "next":
                     self._next(db, session, payload)
                 elif kind == "action":
                     self._action(db, session, payload)
                 elif kind == "end":
-                    if session["stage"] not in ("practice", "task1", "task2"):
+                    if session["stage"] not in ("task1", "task2"):
                         raise CommandError("end_not_allowed_in_stage", 403)
                     run = self._run(db, sid)
                     if run["ended"]:
@@ -665,7 +998,7 @@ class OnlineAlignmentStudyStore:
         return result
 
     def _action(self, db, session, payload):
-        if session["stage"] not in ("practice", "task1", "task2"):
+        if session["stage"] not in ("task1", "task2"):
             raise CommandError("actions_not_allowed_in_stage", 403)
         if payload.get("action") not in _ACTIONS:
             raise CommandError("invalid_action")
@@ -696,17 +1029,14 @@ class OnlineAlignmentStudyStore:
         if stage == "consent":
             if payload.get("consent") is not True:
                 raise CommandError("explicit_consent_required")
-            db.execute("UPDATE sessions SET stage='practice',consented=?,round_index=0 WHERE id=?", (_utcnow(), sid))
-            self._start_run(db, sid, 0)
+            db.execute("UPDATE sessions SET stage='instructions',consented=?,round_index=0,active_run=NULL WHERE id=?", (_utcnow(), sid))
             return
-        if stage not in ("practice", "task1", "task2"):
+        if stage not in ("task1", "task2"):
             raise CommandError("cannot_advance_stage")
         run = self._run(db, sid)
         if not run["ended"]:
             raise CommandError("finish_or_end_round_first", 409)
-        if stage == "practice":
-            stage, index = "task1", 0
-        elif index < 2:
+        if index < 2:
             index += 1
         elif stage == "task1":
             stage, index = "task2", 0
@@ -722,6 +1052,46 @@ class OnlineAlignmentStudyStore:
         if stage in ("task1", "task2"):
             bank = 0 if (stage == "task1") == (session["task_order"] == "XY") else 1
             self._start_run(db, sid, 1 + bank * 3 + index)
+
+    def _tutorial_command(self, db, session, kind, payload):
+        if session["mode"] != "study" or session["stage"] != "instructions":
+            raise CommandError("tutorial_not_allowed_in_stage", 403)
+        last = len(self.tutorial_frames) - 1
+        index = max(0, min(int(session["tutorial_index"]), last))
+        maximum = max(index, min(int(session["tutorial_max_index"]), last))
+        if kind == "tutorial_advance":
+            index = min(last, index + 1)
+            maximum = max(maximum, index)
+        elif kind == "tutorial_restart":
+            index = 0
+        else:
+            requested = payload.get("frame_index")
+            if type(requested) is not int or not 0 <= requested <= maximum:
+                raise CommandError("tutorial_frame_not_available", 409)
+            index = requested
+        complete = int(maximum >= last)
+        db.execute("UPDATE sessions SET tutorial_index=?,tutorial_max_index=?,tutorial_complete=? WHERE id=?",
+            (index, maximum, complete, session["id"]))
+
+    def _begin_task1(self, db, session):
+        if session["mode"] != "study" or session["stage"] != "instructions":
+            raise CommandError("begin_task1_not_allowed_in_stage", 403)
+        total = len(self.tutorial_frames)
+        maximum = max(0, min(int(session["tutorial_max_index"]), total - 1))
+        displayed = min(total, maximum + 1)
+        audit = {"tutorial_signature": self.tutorial_signature,
+            "tutorial_completed": bool(session["tutorial_complete"]),
+            "ended_early": not bool(session["tutorial_complete"]),
+            "last_displayed_index": int(session["tutorial_index"]),
+            "displayed_frames": displayed, "total_frames": total,
+            "remaining_frames": max(0, total - displayed),
+            "completion_fraction": displayed / total, "scored": False}
+        db.execute("INSERT INTO events(session_id,run_id,kind,payload,created) VALUES(?,?,?,?,?)",
+            (session["id"], None, "tutorial_acknowledged", _canonical(audit), _utcnow()))
+        db.execute("UPDATE sessions SET stage='task1',round_index=0,active_run=NULL WHERE id=?",
+            (session["id"],))
+        bank = 0 if session["task_order"] == "XY" else 1
+        self._start_run(db, session["id"], 1 + bank * 3)
 
     def _question(self, db, session, payload):
         if not self._can_explain(db, session):
@@ -815,6 +1185,8 @@ class OnlineAlignmentStudyStore:
                 answer = answer_result
             if not isinstance(answer, str) or not answer.strip():
                 raise ValueError("explainer returned no verified answer")
+            if _MAIN_ANSWER_FORBIDDEN.search(answer):
+                raise ValueError("explainer returned audit terminology in participant answer")
             if not isinstance(evidence_detail, str):
                 raise ValueError("explainer returned invalid evidence detail")
             with closing(self.connect()) as db:
@@ -831,6 +1203,14 @@ class OnlineAlignmentStudyStore:
         finally:
             with self.schedule_lock:
                 self.scheduled.discard(qid)
+
+
+def _startup_identity(store, *, base64_path=None):
+    result = store.deployment_identity()
+    if base64_path is not None:
+        result["secret_file_sha256"] = sha256(
+            Path(base64_path).read_bytes()).hexdigest()
+    return result
 
 
 def handler_class(store, *, public_origin=DEFAULT_ORIGIN):
@@ -873,6 +1253,7 @@ def handler_class(store, *, public_origin=DEFAULT_ORIGIN):
             path = urlparse(self.path).path
             if path in ("/health", "/api/health"):
                 self.reply(200, {"status":"ok", "service":SERVICE_FAMILY, "version":VERSION,
+                    "release_version":store.public_release_version,
                     "data_persistent":store.data_persistent, "formal_ready":False})
                 return
             assets = {"/": ("index.html", "text/html; charset=utf-8"),
@@ -921,8 +1302,11 @@ def handler_class(store, *, public_origin=DEFAULT_ORIGIN):
 
 
 def load_online_context(*, expected_package_sha256, expected_manifest_sha256,
-        package_path=None, base64_path=None):
-    module = importlib.import_module("ui.warehouse_alignment_online_release")
+        package_path=None, base64_path=None,
+        release_module=DEFAULT_RELEASE_MODULE):
+    if release_module not in RELEASE_MODULES:
+        raise ValueError("unsupported online release module")
+    module = importlib.import_module(release_module)
     return module.load_online_release(expected_package_sha256=expected_package_sha256,
         expected_manifest_sha256=expected_manifest_sha256, package_path=package_path,
         base64_path=base64_path)
@@ -934,6 +1318,8 @@ def main(argv=None):
     parser.add_argument("--base64", type=Path, default=os.environ.get("WAREHOUSE_RELEASE_BASE64"))
     parser.add_argument("--expected-package-sha256", default=os.environ.get("WAREHOUSE_RELEASE_PACKAGE_SHA256"), required=False)
     parser.add_argument("--expected-manifest-sha256", default=os.environ.get("WAREHOUSE_RELEASE_MANIFEST_SHA256"), required=False)
+    parser.add_argument("--release-module", choices=RELEASE_MODULES,
+        default=os.environ.get("WAREHOUSE_RELEASE_MODULE", DEFAULT_RELEASE_MODULE))
     parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     parser.add_argument("--storage-mode", choices=("auto","persistent","ephemeral"), default=os.environ.get("WAREHOUSE_STORAGE_MODE", "auto"))
     parser.add_argument("--public-origin", default=os.environ.get("WAREHOUSE_PUBLIC_ORIGIN", DEFAULT_ORIGIN))
@@ -952,7 +1338,8 @@ def main(argv=None):
         parser.error("public origin must use HTTPS")
     context = load_online_context(expected_package_sha256=args.expected_package_sha256,
         expected_manifest_sha256=args.expected_manifest_sha256,
-        package_path=args.package, base64_path=args.base64)
+        package_path=args.package, base64_path=args.base64,
+        release_module=args.release_module)
     store = OnlineAlignmentStudyStore(context, database=args.database, storage_mode=args.storage_mode)
     server = ThreadingHTTPServer((args.host, args.port), handler_class(store, public_origin=args.public_origin))
     server.daemon_threads = False
@@ -963,6 +1350,8 @@ def main(argv=None):
         for signum in (signal.SIGINT, signal.SIGTERM):
             handlers[signum] = signal.getsignal(signum)
             signal.signal(signum, stop)
+        identity = _startup_identity(store, base64_path=args.base64)
+        print(_canonical(identity), flush=True)
         print(f"PolicyLens Warehouse online: {args.public_origin}", flush=True)
         server.serve_forever(poll_interval=.25)
         return 0

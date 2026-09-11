@@ -53,6 +53,17 @@ test('wait, blocked moves, replay, refresh and stale responses never animate', (
     view({version:5, frame:9, run:'run-2',positions:[[4, 4], [7, 6]]}), 'action', null), null);
 });
 
+test('each confirmed AI-AI tutorial step reserves the full 380ms even when stationary', () => {
+  const before={...view({run:null}),flow:{mode:'study',stage:'instructions'},
+    tutorial:{frame_index:0,total_frames:4}};
+  const after={...view({version:5,frame:9,run:null}),flow:{mode:'study',stage:'instructions'},
+    tutorial:{frame_index:1,total_frames:4}};
+  const motion=app.confirmedMotion(before,after,'tutorial_advance',null);
+  assert.ok(motion);assert.equal(motion.duration,380);assert.equal(motion.tutorial,true);
+  assert.equal(app.confirmedMotion(before,{...after,tutorial:{...after.tutorial,frame_index:2}},'tutorial_advance',null),null);
+  assert.equal(app.confirmedMotion(before,after,'tutorial_select',null),null);
+});
+
 test('easing is continuous, monotone and clamps endpoints', () => {
   const values=[-1,0,.1,.25,.5,.75,.9,1,2].map(app.easeMotion);
   assert.equal(values[0],0);assert.equal(values[1],0);
@@ -73,7 +84,30 @@ test('participant answer and collapsed evidence remain separate', () => {
   assert.equal(answers.length,1);
   assert.equal(answers[0].text,'机器人2向右，距离缩短了一格。');
   assert.equal(answers[0].evidence_detail,'动作概率：向右 80%');
-  assert.deepEqual(answers[0].sources,['frozen NN']);
+  assert.equal(Object.hasOwn(answers[0],'sources'),false);
+});
+
+test('scorecard shows the five measures used by the native runtime', () => {
+  const html=fs.readFileSync(path.resolve(
+    __dirname, '../ui/warehouse_family_feedback_research/index.html'),'utf8');
+  const scoreStrip=html.slice(html.indexOf('<div class="score-strip metrics">'),
+    html.indexOf('<div class="canvas-wrap">'));
+  const metricIds=[...scoreStrip.matchAll(/<strong id="([^"]+Value)">/g)].map(match=>match[1]);
+  assert.deepEqual(metricIds,[
+    'scoreValue','deliveriesValue','stepsValue','collisionsValue','shutdownsValue',
+  ]);
+  assert.deepEqual(app.frameMetrics({
+    state:{frame:7,total_deliveries:2,robot_collision_events:1,
+      shutdown_count:0},
+    metrics:{score:-14},
+  }),{deliveries:2,score:-14,legacy_score:null,steps:7,collisions:1,
+    shutdowns:0});
+  const source=fs.readFileSync(path.resolve(
+    __dirname, '../ui/warehouse_family_feedback_research/app.js'),'utf8');
+  assert.match(source,/机器人碰撞 −200，断电 −50，每步 −1。/);
+  assert.match(source,/−200 per robot collision, −50 per shutdown, −1 per turn\./);
+  assert.doesNotMatch(source,/参与者绕路每单位 −2/);
+  assert.doesNotMatch(source,/−2 per human detour unit/);
 });
 
 test('long translated subtitle is clipped before the centered workflow', () => {

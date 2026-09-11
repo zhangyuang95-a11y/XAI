@@ -16,7 +16,7 @@
     </div>
     <nav class="workflow" id="workflow" aria-label="研究流程">
       <span data-stage="consent" data-i18n="consent">参与说明与同意</span><i></i>
-      <span data-stage="practice" data-i18n="practice">操作练习</span><i></i>
+      <span data-stage="instructions" data-i18n="instructions">任务说明与演示</span><i></i>
       <span data-stage="task1">Task 1</span><i></i>
       <span data-stage="task2">Task 2</span><i></i>
       <span data-stage="questionnaire" data-i18n="questionnaire">问卷</span><i></i>
@@ -36,12 +36,11 @@
       </div>
 
       <div class="score-strip metrics">
+        <div><span data-i18n="score">总分</span><strong id="scoreValue">—</strong></div>
         <div><span data-i18n="deliveries">配送</span><strong id="deliveriesValue">—</strong></div>
-        <div><span data-i18n="score">得分</span><strong id="scoreValue">—</strong></div>
         <div><span data-i18n="steps">步数</span><strong id="stepsValue">—</strong></div>
         <div><span data-i18n="collisions">碰撞</span><strong id="collisionsValue">—</strong></div>
-        <div><span data-i18n="shutdowns">停机</span><strong id="shutdownsValue">—</strong></div>
-        <div class="legacy-metric"><span data-i18n="legacyScore">原计分（参考）</span><strong id="legacyScoreValue">—</strong></div>
+        <div><span data-i18n="shutdowns">断电</span><strong id="shutdownsValue">—</strong></div>
       </div>
 
       <div class="canvas-wrap">
@@ -50,7 +49,7 @@
       </div>
 
       <div class="legend">
-        <span><i class="human">1</i><b data-i18n="you">你 · 1</b></span>
+        <span><i class="human">1</i><b id="primaryRoleLabel" data-i18n="you">你 · 1</b></span>
         <span><i class="ai">2</i><b>AI · 2</b></span>
         <span><i class="shelf"></i><b data-i18n="shelf">货架</b></span>
         <span><i class="task">A/B</i><b data-i18n="jobs">取货／交付</b></span>
@@ -71,7 +70,7 @@
       </section>
 
       <section id="robotStatus" class="robot-status detail-grid">
-        <article class="robot-card participant"><header><strong data-i18n="you">你 · 1</strong><span class="robot-dot human"></span></header><p id="humanStatus">—</p></article>
+        <article class="robot-card participant"><header><strong id="primaryStatusLabel" data-i18n="you">你 · 1</strong><span class="robot-dot human"></span></header><p id="humanStatus">—</p></article>
         <article class="robot-card ai"><header><strong>AI · 2</strong><span class="robot-dot ai"></span></header><p id="aiStatus">—</p></article>
         <p id="lastActions" class="last-actions"></p>
       </section>
@@ -100,6 +99,37 @@
         </div>
         <button id="startButton" class="primary full" type="button" data-i18n="startFreeplay">开始试玩</button>
         <p id="entryGate" class="small gate" aria-live="polite"></p>
+      </section>
+
+      <section id="instructionsPanel" class="instructions-panel hidden">
+        <span class="eyebrow" data-i18n="instructions">任务说明与演示</span>
+        <h3 data-i18n="tutorialTitle">AI–AI 协作教学演示</h3>
+        <p class="small" data-i18n="tutorialText">先观看两个 AI 完成一次固定协作配送，了解取货、交付、充电和碰撞规则。演示不计入正式任务成绩。</p>
+        <details class="public-rules" open>
+          <summary data-i18n="publicRules">玩法规则</summary>
+          <ul class="tutorial-rules">
+            <li data-i18n="tutorialRuleTasks">地图始终有两个共享任务；任一机器人都可以领取并完成。</li>
+            <li data-i18n="tutorialRulePickup">机器人到达 A 点自动取货，到达同色 B 点自动交付。</li>
+            <li data-i18n="tutorialRuleJoint">你和队友从同一个行动前状态独立选择，再同步执行动作。</li>
+            <li data-i18n="tutorialRuleControls">方向键／WASD 移动，空格等待；每次输入推进一步。</li>
+            <li data-i18n="tutorialRuleEnergy">成功移动消耗 2% 电量；在充电格实际停留一步最多恢复 10%。</li>
+            <li data-i18n="tutorialRuleCollision">撞墙、争用同格或交换位置会取消移动，但仍消耗一步。</li>
+            <li data-i18n="tutorialRuleEnd">每局最多 120 步；任一机器人在充电格外耗尽电量会结束本局。</li>
+            <li data-i18n="tutorialRuleScore">每次配送 +100，机器人碰撞 −200，断电 −50，每步 −1；回放不推进时间。</li>
+          </ul>
+        </details>
+        <p class="tutorial-note" data-i18n="tutorialUnscored">演示记录与 Task 1 的三局成绩完全分开。</p>
+        <div class="tutorial-progress" aria-live="polite">
+          <input id="tutorialSlider" type="range" min="0" max="0" value="0" aria-label="教学演示帧">
+          <strong id="tutorialFrameLabel">1 / 1</strong>
+        </div>
+        <div class="tutorial-frame-controls">
+          <button id="tutorialRestartButton" type="button" class="secondary" data-i18n="restartTutorial">从头播放</button>
+          <button id="tutorialPreviousButton" type="button" class="secondary" data-i18n="previousTutorialFrame">上一帧</button>
+          <button id="tutorialPlayButton" type="button" class="primary" data-i18n="playTutorial">播放</button>
+          <button id="tutorialNextButton" type="button" class="secondary" data-i18n="nextTutorialFrame">下一帧</button>
+        </div>
+        <button id="beginTask1Button" type="button" class="primary full" data-i18n="skipTutorial">跳过演示并开始 Task 1</button>
       </section>
 
       <section id="operationPanel">

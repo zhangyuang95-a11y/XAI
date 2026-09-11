@@ -1,0 +1,1568 @@
+{
+  "audit_date": "2026-09-11",
+  "confirmed_implementation_defects": [
+    {
+      "evidence": "Both evaluators control robot_1 with fixed_yield, while the only fixed_yield-specific guard applies to robot_2. Every baseline and 50k-650k skilled/fixed_yield episode pair is value-identical after removing partner and seed labels.",
+      "id": "validation_partner_alias",
+      "required_action": "Re-evaluate every frozen boundary with a distinct public-state fixed_yield_r1 behavior before admission.",
+      "severity": "release-blocking evaluation defect",
+      "training_effect": "None: fixed_yield is not in the PPO partner mix."
+    },
+    {
+      "evidence": "protocol.implementation_sources omits warehouse_r41_active_run.py and warehouse_r41_active_evaluation.py even though they commit boundaries and compute selection.",
+      "id": "incomplete_implementation_source_closure",
+      "required_action": "Bind their exact hashes in an additive post-freeze admission receipt and include them in the next run closure.",
+      "severity": "release provenance defect",
+      "training_effect": "No observed corruption, but the receipt cannot prove which runner/evaluator bytes produced every stored decision."
+    },
+    {
+      "evidence": "run.json still reports current_additional_joint_steps=0 and cumulative_joint_steps=3950000 while the immutable 650000 boundary exists.",
+      "id": "stale_running_status",
+      "required_action": "Use the immutable-boundary ledger for monitoring; update status atomically per boundary in the next runner.",
+      "severity": "operational monitoring defect",
+      "training_effect": "None: resume and evidence are boundary-based."
+    }
+  ],
+  "decision": {
+    "continue_current_pid": "Continue within the already approved 2M budget as immutable diagnostic evidence; no batch, authority, shaping arithmetic, KL-direction, or checkpoint discontinuity defect was found.",
+    "immediate_stop_for_integrity": false,
+    "likelihood_under_current_gate": "Low at 650k: original-suite behavior has degraded, conflict delivery gains remain below both registered thresholds, and robot_2 shutdowns remain nonzero and unstable.",
+    "release_guard": "Do not release any boundary selected by the frozen aggregate until the corrected sixth-partner audit and explicit runner/evaluator source binding pass."
+  },
+  "minimum_next_round_if_2m_fails": [
+    "Replace the duplicate sixth validation behavior and bind runner/evaluator hashes before any new selection.",
+    "Stratify PPO starts across conflict and original training families (a fixed 50/50 family quota is the smallest alignment with the equally mandatory dual-suite gate); extract RCPD from both strata.",
+    "Make reachable-energy sampling transition-weighted at 20%, with a regenerated diverse bank spanning all training scenes and energy-distance bins instead of 20% short episode resets from 18 scenes.",
+    "Add registered robot_2-specific shutdown/energy-survival credit and centered own-delivery credit so the PPO objective directly matches zero Actor shutdowns and the own-delivery gates; keep NN actions authoritative and do not change thresholds."
+  ],
+  "objective_and_coverage_findings": [
+    {
+      "classification": "registered distribution mismatch, not an optimizer implementation bug",
+      "effect": "The conflict suite improves while original behavior forgets. At 650k original productive action is -3.053 pp and AI delivery is -1.270 versus baseline, while conflict productive action is +5.511 pp and delivery is +0.531.",
+      "evidence": "Every ordinary and energy reset uses r41 conflict train states; the original suite is evaluation-only.",
+      "id": "dual_admission_single_family_training"
+    },
+    {
+      "bank_rows": 192,
+      "bank_unique_source_entries": 18,
+      "classification": "curriculum semantics/coverage weakness, not reset-sampler arithmetic corruption",
+      "completed_episode_counts": {
+        "ordinary": 5127,
+        "reachable_energy": 1245
+      },
+      "effect": "Energy starts are late and therefore short. A nominal 20% of episode resets supplies only about 7.9% of PPO transitions from a fixed 192-row bank covering 18/128 scenes, too weak and narrow for a zero-shutdown admission target.",
+      "id": "energy_curriculum_transition_underexposure",
+      "observed_episode_reset_share": 0.19489668127739512,
+      "observed_transition_share": 0.07912461538461539,
+      "registered_episode_probability": 0.2,
+      "team_shutdown_counts_in_completed_segments": {
+        "ordinary": 728,
+        "reachable_energy": 72
+      },
+      "total_conflict_training_entries": 128,
+      "transition_counts": {
+        "ordinary": 598569,
+        "reachable_energy": 51431
+      }
+    },
+    {
+      "classification": "objective-design weakness",
+      "effect": "The Actor can improve team return without meeting the registered own-delivery +1/+15% gates. The best conflict AI-delivery result through 650k is only +0.672 (+7.39%) over baseline.",
+      "evidence": "The native base reward uses team score_delta for both agents; role-specific progress exists, but a program-partner delivery still contributes to robot_2 return.",
+      "id": "shared_terminal_delivery_credit"
+    },
+    {
+      "classification": "objective-design weakness",
+      "effect": "Shutdown count oscillates rather than converges: 600k->650k is 25->99 on original and 16->79 on conflict.",
+      "evidence": "Active shaping rewards progress toward the charger and penalizes avoidable WAIT, but distance regression is intentionally disabled when charge_needed and the base shutdown score is team-shared.",
+      "id": "energy_objective_too_indirect_for_zero_gate"
+    },
+    {
+      "classification": "coverage weakness",
+      "effect": "Reliable RCPD fidelity does not prevent original-suite forgetting.",
+      "evidence": "Each refreshed RCPD is extracted from conflict-training trajectories only.",
+      "id": "rcpd_regularizer_not_original_anchor"
+    }
+  ],
+  "partner_alias_verification": [
+    {
+      "boundary": "baseline",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    },
+    {
+      "boundary": "50000",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    },
+    {
+      "boundary": "100000",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    },
+    {
+      "boundary": "150000",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    },
+    {
+      "boundary": "200000",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    },
+    {
+      "boundary": "250000",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    },
+    {
+      "boundary": "300000",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    },
+    {
+      "boundary": "350000",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    },
+    {
+      "boundary": "400000",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    },
+    {
+      "boundary": "450000",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    },
+    {
+      "boundary": "500000",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    },
+    {
+      "boundary": "550000",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    },
+    {
+      "boundary": "600000",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    },
+    {
+      "boundary": "650000",
+      "conflict": {
+        "exact_matches_after_dropping_partner_and_seed": 64,
+        "paired_scenes": 64
+      },
+      "original": {
+        "exact_matches_after_dropping_partner_and_seed": 50,
+        "paired_scenes": 50
+      }
+    }
+  ],
+  "protocol_implementation_sources": {
+    "backend/training/warehouse_r41_active_trainer.py": "9b4caec47e49d2ca6ec83c5b4174852e2b25b1fd9f745ddc61a9cc664b1239aa",
+    "backend/training/warehouse_r41_conflict_scenarios.py": "718159b8ce08f76acc3a9366fbd7726b1ed20d4a64d034bf17ae45bfefaf9a18",
+    "backend/training/warehouse_r4_active_trainer.py": "0b25f38f669c4ed5bdb36a30ccbbc6f9d474a499ec5ec416a0fa421e1b4507d3",
+    "backend/training/warehouse_r4_role_feedback_update.py": "0dbba0df53c8ef6652a90f81426cca6085d7c94d31ba95ad2ad40f9b6eb12fcf",
+    "backend/warehouse_r41_online_runtime.py": "2633a7cf7f47a07174a02575620ebfed9fece9917bcf35e8e5431c7f645fb9be",
+    "env/warehouse_native/r41_conflict.py": "f2d8f19fd2ee2e3df86961c6eef35496c82d291075b23f82cf14a1c07923c291"
+  },
+  "read_only": true,
+  "scope": {
+    "baseline_actor_sha256": "309b6e53fe682bead8d3443015aca27eae60e561175e71d7c25f57314ac69d5b",
+    "committed_boundaries": [
+      50000,
+      100000,
+      150000,
+      200000,
+      250000,
+      300000,
+      350000,
+      400000,
+      450000,
+      500000,
+      550000,
+      600000,
+      650000
+    ],
+    "cutoff_additional_joint_steps": 650000,
+    "no_frozen_source_or_training_artifact_modified": true,
+    "run": "output/warehouse_native/r41_active_2m_20260911",
+    "run_pid_observed": 86030
+  },
+  "source_sha256": {
+    "backend/training/warehouse_r41_active_evaluation.py": "c75194254e46e5aa224cbde4979a844797bc2a9f8f03ab318b1e199f60fa87e5",
+    "backend/training/warehouse_r41_active_run.py": "61b9e8b627f9fd3005938359dd98a0516cefbb48b8754f7e9169c44d7d945172",
+    "backend/training/warehouse_r41_active_trainer.py": "9b4caec47e49d2ca6ec83c5b4174852e2b25b1fd9f745ddc61a9cc664b1239aa",
+    "backend/training/warehouse_r41_conflict_scenarios.py": "718159b8ce08f76acc3a9366fbd7726b1ed20d4a64d034bf17ae45bfefaf9a18",
+    "backend/training/warehouse_r4_active_trainer.py": "0b25f38f669c4ed5bdb36a30ccbbc6f9d474a499ec5ec416a0fa421e1b4507d3",
+    "backend/training/warehouse_r4_role_feedback_update.py": "0dbba0df53c8ef6652a90f81426cca6085d7c94d31ba95ad2ad40f9b6eb12fcf",
+    "backend/warehouse_r41_online_runtime.py": "2633a7cf7f47a07174a02575620ebfed9fece9917bcf35e8e5431c7f645fb9be",
+    "env/warehouse_native/partners.py": "8f70f3234f898e66ae3b790d8b4f6e869d0d7f60ae3086cc30a15f7d1dbceb95",
+    "env/warehouse_native/r41_conflict.py": "f2d8f19fd2ee2e3df86961c6eef35496c82d291075b23f82cf14a1c07923c291"
+  },
+  "trend": [
+    {
+      "actor_sha256": "2d97cf7a7fef55733c048679624a3aab5faa3a99f792a2e77213be27fe20819f",
+      "candidate_selected": false,
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8708015478164732,
+        "ai_delivery_share": 0.628808864265928,
+        "ai_shutdown_count": 43,
+        "charge_needed_nonproductive_rate": 0.46339224236860227,
+        "charge_needed_wait_rate": 0.2666972687629103,
+        "collision_cancellation_rate": 0.06309989335229292,
+        "mean_ai_deliveries": 9.458333333333334,
+        "mean_longest_collision_streak": 3.6041666666666665,
+        "no_task_progress_streak_p95": 40.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.744742951907131,
+        "static_wall_command_rate": 0.0018131564400221116
+      },
+      "cumulative_training": {
+        "action_authority": {
+          "equal": 59866,
+          "overrides": 0,
+          "partner_assertive_trainable_robot_2": 25655,
+          "partner_noisy_trainable_robot_2": 5017,
+          "partner_selfplay_trainable_robot_1": 9866,
+          "partner_selfplay_trainable_robot_2": 9866,
+          "partner_skilled_trainable_robot_2": 9462,
+          "trainable": 59866,
+          "trainable_robot_1": 9866,
+          "trainable_robot_2": 50000
+        },
+        "sampling_counts": {
+          "conflict_train_initial_episodes": 403,
+          "reachable_energy_assertive_episodes": 72,
+          "reachable_energy_episodes": 98,
+          "reachable_energy_noisy_episodes": 11,
+          "reachable_energy_skilled_episodes": 15
+        },
+        "shaping_counts": {
+          "avoidable_wait": 7190,
+          "base_reward_abs_sum": 8398.086593996335,
+          "base_reward_sum": 7643.208554113347,
+          "charge_needed": 5564,
+          "distance_regression": 3764,
+          "productive": 44082,
+          "rows": 59866,
+          "safe_task_progress": 8887,
+          "shaping_reward_abs_sum": 1172.6199999992148,
+          "shaping_reward_sum": 590.6599999997696
+        },
+        "shaping_formula_residual": -2.304432200617157e-10
+      },
+      "evidence_sha256": {
+        "checkpoint": "b72f49f9039795373385a1318c33002a1bb768f282eede740856dcd6945abc4d",
+        "paired_dual_report": "addb343984377d7f90a4f7b058e96f6aef5a7cbbd29a720b02bf3c7d8bf91688",
+        "summary": "7a5f319a28675cf3e364a6bb324850f4bd5401e5b4b402e5001915fe53154fd9",
+        "training_segment": "da443e8f4b2be11d6830b415e21f34f9b58a5476f0beb4e78a602d08bd1cadbf"
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.85055280213496,
+        "ai_delivery_share": 0.6349081364829396,
+        "ai_shutdown_count": 53,
+        "charge_needed_nonproductive_rate": 0.5404775771694816,
+        "charge_needed_wait_rate": 0.30634828188701224,
+        "collision_cancellation_rate": 0.08526704134055098,
+        "mean_ai_deliveries": 8.063333333333333,
+        "mean_longest_collision_streak": 5.5,
+        "no_task_progress_streak_p95": 62.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.6983782515616294,
+        "static_wall_command_rate": 0.0057186427754479605
+      },
+      "rcpd": {
+        "fidelity": 0.8783244680851063,
+        "lambda_next_cycle": 0.001,
+        "mean_kl": 0.31446191668510437,
+        "reliable_for_training": true
+      },
+      "step": 50000,
+      "suite_relative_checks_passed": {
+        "conflict": 2,
+        "original": 1
+      }
+    },
+    {
+      "actor_sha256": "52509470e57daa0f96cdb3c812f4037e0b4dd4ac807f9701be803f9b256b5b5a",
+      "candidate_selected": false,
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8728701333097908,
+        "ai_delivery_share": 0.6300189557125625,
+        "ai_shutdown_count": 26,
+        "charge_needed_nonproductive_rate": 0.5125273656044758,
+        "charge_needed_wait_rate": 0.32400875699343223,
+        "collision_cancellation_rate": 0.06356832203904117,
+        "mean_ai_deliveries": 9.520833333333334,
+        "mean_longest_collision_streak": 3.0364583333333335,
+        "no_task_progress_streak_p95": 25.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7557385009269886,
+        "static_wall_command_rate": 0.004701156528648363
+      },
+      "cumulative_training": {
+        "action_authority": {
+          "equal": 121557,
+          "overrides": 0,
+          "partner_assertive_trainable_robot_2": 50785,
+          "partner_noisy_trainable_robot_2": 10182,
+          "partner_selfplay_trainable_robot_1": 21557,
+          "partner_selfplay_trainable_robot_2": 21557,
+          "partner_skilled_trainable_robot_2": 17476,
+          "trainable": 121557,
+          "trainable_robot_1": 21557,
+          "trainable_robot_2": 100000
+        },
+        "sampling_counts": {
+          "conflict_train_initial_episodes": 806,
+          "reachable_energy_assertive_episodes": 119,
+          "reachable_energy_episodes": 176,
+          "reachable_energy_noisy_episodes": 18,
+          "reachable_energy_skilled_episodes": 39
+        },
+        "shaping_counts": {
+          "avoidable_wait": 14345,
+          "base_reward_abs_sum": 17269.69538824846,
+          "base_reward_sum": 15846.878011584722,
+          "charge_needed": 11050,
+          "distance_regression": 7851,
+          "productive": 90063,
+          "rows": 121557,
+          "safe_task_progress": 18229,
+          "shaping_reward_abs_sum": 2388.6299999985736,
+          "shaping_reward_sum": 1213.889999999203
+        },
+        "shaping_formula_residual": -7.971721061039716e-10
+      },
+      "evidence_sha256": {
+        "checkpoint": "3b6d043a5e8c03f909b663bfee69c596ad57306c2420e26e11f327c1c5e44756",
+        "paired_dual_report": "eff9788b245abb3e2a4ba117fbc6eefecfb4454647fcbcc475347990534c5751",
+        "summary": "f4a86a43fccca2ee078d6933a91697d17881ec8a07a582b0fd6d2f1ccac18f1f",
+        "training_segment": "03b15023ce96f1cb431608622a3746201a83f2ee72220fc1b11fcb05500fd547"
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8590890839212987,
+        "ai_delivery_share": 0.6277242777496199,
+        "ai_shutdown_count": 35,
+        "charge_needed_nonproductive_rate": 0.5535348360655737,
+        "charge_needed_wait_rate": 0.2886782786885246,
+        "collision_cancellation_rate": 0.06920842653490468,
+        "mean_ai_deliveries": 8.256666666666666,
+        "mean_longest_collision_streak": 3.9633333333333334,
+        "no_task_progress_streak_p95": 39.05000000000001,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7128434578099008,
+        "static_wall_command_rate": 0.0159754488613549
+      },
+      "rcpd": {
+        "fidelity": 0.8956367924528302,
+        "lambda_next_cycle": 0.001,
+        "mean_kl": 0.2914973795413971,
+        "reliable_for_training": true
+      },
+      "step": 100000,
+      "suite_relative_checks_passed": {
+        "conflict": 2,
+        "original": 1
+      }
+    },
+    {
+      "actor_sha256": "e488918c359cc0db59cbd51028039e222bf16b54d7f14c2749754df71f1a135b",
+      "candidate_selected": false,
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.871052399435427,
+        "ai_delivery_share": 0.6272979535206382,
+        "ai_shutdown_count": 25,
+        "charge_needed_nonproductive_rate": 0.49434290687554394,
+        "charge_needed_wait_rate": 0.3170147954743255,
+        "collision_cancellation_rate": 0.07418284933032888,
+        "mean_ai_deliveries": 9.419270833333334,
+        "mean_longest_collision_streak": 4.4921875,
+        "no_task_progress_streak_p95": 24.699999999999932,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7473756175017643,
+        "static_wall_command_rate": 0.001058574453069866
+      },
+      "cumulative_training": {
+        "action_authority": {
+          "equal": 184019,
+          "overrides": 0,
+          "partner_assertive_trainable_robot_2": 73114,
+          "partner_noisy_trainable_robot_2": 15355,
+          "partner_selfplay_trainable_robot_1": 34019,
+          "partner_selfplay_trainable_robot_2": 34019,
+          "partner_skilled_trainable_robot_2": 27512,
+          "trainable": 184019,
+          "trainable_robot_1": 34019,
+          "trainable_robot_2": 150000
+        },
+        "sampling_counts": {
+          "conflict_train_initial_episodes": 1200,
+          "reachable_energy_assertive_episodes": 186,
+          "reachable_energy_episodes": 283,
+          "reachable_energy_noisy_episodes": 36,
+          "reachable_energy_skilled_episodes": 61
+        },
+        "shaping_counts": {
+          "avoidable_wait": 21270,
+          "base_reward_abs_sum": 26381.5947545905,
+          "base_reward_sum": 24299.54139808663,
+          "charge_needed": 17888,
+          "distance_regression": 11165,
+          "productive": 137440,
+          "rows": 184019,
+          "safe_task_progress": 27848,
+          "shaping_reward_abs_sum": 3610.199999999037,
+          "shaping_reward_sum": 1887.3999999985904
+        },
+        "shaping_formula_residual": -1.409944161423482e-09
+      },
+      "evidence_sha256": {
+        "checkpoint": "c79f8e6701003b06d38a110b817e29865f6a220d2440f21303ad0a29dcaae9e3",
+        "paired_dual_report": "c790f55d3fb7887a58c78659bb6a5c26ecceddfa928a25cf44341dde4a6502cd",
+        "summary": "57452c90954ffd8a61510a65ef6f46e5c7a3755acd41d82c9f83dc4f8776e21d",
+        "training_segment": "7dc32e72f0592de8226e8a4805386c08453a25996b682737c0a7a810a74b6ad2"
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8640378083001033,
+        "ai_delivery_share": 0.6239386469460422,
+        "ai_shutdown_count": 63,
+        "charge_needed_nonproductive_rate": 0.528937053262624,
+        "charge_needed_wait_rate": 0.2633156559833987,
+        "collision_cancellation_rate": 0.08601121290851907,
+        "mean_ai_deliveries": 7.593333333333334,
+        "mean_longest_collision_streak": 5.533333333333333,
+        "no_task_progress_streak_p95": 76.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.6928666371289323,
+        "static_wall_command_rate": 0.01618667848176045
+      },
+      "rcpd": {
+        "fidelity": 0.8907615480649188,
+        "lambda_next_cycle": 0.001,
+        "mean_kl": 0.32578009366989136,
+        "reliable_for_training": true
+      },
+      "step": 150000,
+      "suite_relative_checks_passed": {
+        "conflict": 2,
+        "original": 1
+      }
+    },
+    {
+      "actor_sha256": "56b0d60e28ef9282c15f3bc6801572e61b2ef99d3bf6db85ddf750110fbc8be4",
+      "candidate_selected": false,
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8714336267527757,
+        "ai_delivery_share": 0.636952714535902,
+        "ai_shutdown_count": 40,
+        "charge_needed_nonproductive_rate": 0.4932056137224326,
+        "charge_needed_wait_rate": 0.2849186901314324,
+        "collision_cancellation_rate": 0.06215578284815106,
+        "mean_ai_deliveries": 9.471354166666666,
+        "mean_longest_collision_streak": 4.268229166666667,
+        "no_task_progress_streak_p95": 26.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7514486663422834,
+        "static_wall_command_rate": 0.007055336842570885
+      },
+      "cumulative_training": {
+        "action_authority": {
+          "equal": 243930,
+          "overrides": 0,
+          "partner_assertive_trainable_robot_2": 97948,
+          "partner_noisy_trainable_robot_2": 20813,
+          "partner_selfplay_trainable_robot_1": 43930,
+          "partner_selfplay_trainable_robot_2": 43930,
+          "partner_skilled_trainable_robot_2": 37309,
+          "trainable": 243930,
+          "trainable_robot_1": 43930,
+          "trainable_robot_2": 200000
+        },
+        "sampling_counts": {
+          "conflict_train_initial_episodes": 1598,
+          "reachable_energy_assertive_episodes": 254,
+          "reachable_energy_episodes": 378,
+          "reachable_energy_noisy_episodes": 49,
+          "reachable_energy_skilled_episodes": 75
+        },
+        "shaping_counts": {
+          "avoidable_wait": 27824,
+          "base_reward_abs_sum": 34998.90549793484,
+          "base_reward_sum": 32237.23946935394,
+          "charge_needed": 24612,
+          "distance_regression": 14271,
+          "productive": 182774,
+          "rows": 243930,
+          "safe_task_progress": 37061,
+          "shaping_reward_abs_sum": 4775.620000010559,
+          "shaping_reward_sum": 2535.339999996874
+        },
+        "shaping_formula_residual": -3.1259332899935544e-09
+      },
+      "evidence_sha256": {
+        "checkpoint": "602e9d6a3ddc0383d947f01fdbcb3d9805fce00dedca529d2344f0cb38e80408",
+        "paired_dual_report": "4a0085439ba6aada7ea6b9f5e877d911356a24b291931523b804ef22d8464117",
+        "summary": "2f3189dafd9cf41c7999dbd47f423fc6d068afbcd9e587e4167417c8a5d2de25",
+        "training_segment": "d62b7b338bee243ef38acfe4ab6fc7e4cfd3f967a15a49de1d8bf727436db637"
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8659148973658708,
+        "ai_delivery_share": 0.6301846400856301,
+        "ai_shutdown_count": 54,
+        "charge_needed_nonproductive_rate": 0.5057839035195668,
+        "charge_needed_wait_rate": 0.2712281565345804,
+        "collision_cancellation_rate": 0.08695357276087767,
+        "mean_ai_deliveries": 7.85,
+        "mean_longest_collision_streak": 5.926666666666667,
+        "no_task_progress_streak_p95": 61.600000000000136,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7032566881038381,
+        "static_wall_command_rate": 0.012950400845740463
+      },
+      "rcpd": {
+        "fidelity": 0.900355871886121,
+        "lambda_next_cycle": 0.001,
+        "mean_kl": 0.2538778483867645,
+        "reliable_for_training": true
+      },
+      "step": 200000,
+      "suite_relative_checks_passed": {
+        "conflict": 2,
+        "original": 1
+      }
+    },
+    {
+      "actor_sha256": "e6f8b2390981f51560d07185c5a4b1a4b9809d8f8400bf42523e44b2aa02613b",
+      "candidate_selected": false,
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8762859345742923,
+        "ai_delivery_share": 0.6335529650278763,
+        "ai_shutdown_count": 40,
+        "charge_needed_nonproductive_rate": 0.508760545100584,
+        "charge_needed_wait_rate": 0.28423101881894874,
+        "collision_cancellation_rate": 0.05623570225495865,
+        "mean_ai_deliveries": 9.765625,
+        "mean_longest_collision_streak": 3.0807291666666665,
+        "no_task_progress_streak_p95": 23.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.762242537724419,
+        "static_wall_command_rate": 0.007599955942284392
+      },
+      "cumulative_training": {
+        "action_authority": {
+          "equal": 306557,
+          "overrides": 0,
+          "partner_assertive_trainable_robot_2": 121687,
+          "partner_noisy_trainable_robot_2": 26143,
+          "partner_selfplay_trainable_robot_1": 56557,
+          "partner_selfplay_trainable_robot_2": 56557,
+          "partner_skilled_trainable_robot_2": 45613,
+          "trainable": 306557,
+          "trainable_robot_1": 56557,
+          "trainable_robot_2": 250000
+        },
+        "sampling_counts": {
+          "conflict_train_initial_episodes": 1991,
+          "reachable_energy_assertive_episodes": 315,
+          "reachable_energy_episodes": 479,
+          "reachable_energy_noisy_episodes": 65,
+          "reachable_energy_skilled_episodes": 99
+        },
+        "shaping_counts": {
+          "avoidable_wait": 35076,
+          "base_reward_abs_sum": 44249.214143783,
+          "base_reward_sum": 40882.89814482179,
+          "charge_needed": 30482,
+          "distance_regression": 17706,
+          "productive": 230380,
+          "rows": 306557,
+          "safe_task_progress": 46968,
+          "shaping_reward_abs_sum": 6014.000000030995,
+          "shaping_reward_sum": 3201.1999999946197
+        },
+        "shaping_formula_residual": -5.38102540303953e-09
+      },
+      "evidence_sha256": {
+        "checkpoint": "f8427e70a2a521304f3db78decb1682ed1a0be0803b035e50b3e5bf5f7e42bcb",
+        "paired_dual_report": "8af5ef70b40ecf8d57b774f56780450861dfafcc985a926164ee625bcb7b4473",
+        "summary": "9c1b283c21ac65bd5455bd781ce75347e50bb19f678bebb9099aa5a58529d618",
+        "training_segment": "6bdfefa4469926850537632a398eecccfc570e2992df254720bd6dccb7bce135"
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8701829734659058,
+        "ai_delivery_share": 0.627226801382611,
+        "ai_shutdown_count": 61,
+        "charge_needed_nonproductive_rate": 0.5661109842429779,
+        "charge_needed_wait_rate": 0.2283626398721169,
+        "collision_cancellation_rate": 0.0616273959636253,
+        "mean_ai_deliveries": 7.863333333333333,
+        "mean_longest_collision_streak": 3.7933333333333334,
+        "no_task_progress_streak_p95": 57.05000000000001,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7036535859269283,
+        "static_wall_command_rate": 0.03297640760134141
+      },
+      "rcpd": {
+        "fidelity": 0.889955214331414,
+        "lambda_next_cycle": 0.001,
+        "mean_kl": 0.33983227610588074,
+        "reliable_for_training": true
+      },
+      "step": 250000,
+      "suite_relative_checks_passed": {
+        "conflict": 2,
+        "original": 1
+      }
+    },
+    {
+      "actor_sha256": "44346dac25c0e2bfe7895907b0af0bfa8d031264cbf072766a48e83e4f380b6c",
+      "candidate_selected": false,
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8679241101112638,
+        "ai_delivery_share": 0.6297430661902331,
+        "ai_shutdown_count": 50,
+        "charge_needed_nonproductive_rate": 0.4774833010127128,
+        "charge_needed_wait_rate": 0.32277526395173456,
+        "collision_cancellation_rate": 0.0445619142470441,
+        "mean_ai_deliveries": 9.638020833333334,
+        "mean_longest_collision_streak": 2.3098958333333335,
+        "no_task_progress_streak_p95": 20.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7735715235604415,
+        "static_wall_command_rate": 0.0015293231082938073
+      },
+      "cumulative_training": {
+        "action_authority": {
+          "equal": 368890,
+          "overrides": 0,
+          "partner_assertive_trainable_robot_2": 146452,
+          "partner_noisy_trainable_robot_2": 30001,
+          "partner_selfplay_trainable_robot_1": 68890,
+          "partner_selfplay_trainable_robot_2": 68890,
+          "partner_skilled_trainable_robot_2": 54657,
+          "trainable": 368890,
+          "trainable_robot_1": 68890,
+          "trainable_robot_2": 300000
+        },
+        "sampling_counts": {
+          "conflict_train_initial_episodes": 2390,
+          "reachable_energy_assertive_episodes": 370,
+          "reachable_energy_episodes": 559,
+          "reachable_energy_noisy_episodes": 72,
+          "reachable_energy_skilled_episodes": 117
+        },
+        "shaping_counts": {
+          "avoidable_wait": 42225,
+          "base_reward_abs_sum": 53525.83825479587,
+          "base_reward_sum": 49547.55822211971,
+          "charge_needed": 36791,
+          "distance_regression": 21142,
+          "productive": 277693,
+          "rows": 368890,
+          "safe_task_progress": 56785,
+          "shaping_reward_abs_sum": 7243.450000051329,
+          "shaping_reward_sum": 3864.269999992391
+        },
+        "shaping_formula_residual": -7.608377927681431e-09
+      },
+      "evidence_sha256": {
+        "checkpoint": "77e85f17996c2dc7a3f535bf1e66a4f8c29d4df8da035532b231437fa8e90a4a",
+        "paired_dual_report": "b0f5fdd7fcc0e43d0fd1f82286c06a5df013182139660e9da8283e58589574c4",
+        "summary": "ca663f735683c598e8d0f41802e6560d6893dccb8aa333a6d6452b8912a4456d",
+        "training_segment": "51168e9df8a964972412126a5f4c67f9997dface09adfe675b74f873e63206c0"
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.835702136247009,
+        "ai_delivery_share": 0.6291283161884137,
+        "ai_shutdown_count": 44,
+        "charge_needed_nonproductive_rate": 0.5517155021287252,
+        "charge_needed_wait_rate": 0.331580265464563,
+        "collision_cancellation_rate": 0.07368566303297916,
+        "mean_ai_deliveries": 7.746666666666667,
+        "mean_longest_collision_streak": 5.56,
+        "no_task_progress_streak_p95": 76.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.6831377749589184,
+        "static_wall_command_rate": 0.013953354282584254
+      },
+      "rcpd": {
+        "fidelity": 0.9122596153846154,
+        "lambda_next_cycle": 0.001,
+        "mean_kl": 0.26272568106651306,
+        "reliable_for_training": true
+      },
+      "step": 300000,
+      "suite_relative_checks_passed": {
+        "conflict": 2,
+        "original": 0
+      }
+    },
+    {
+      "actor_sha256": "01657e516e56c2a186415072191cb0069388d50dfca7187fd23d39bb53c7e8df",
+      "candidate_selected": false,
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8657267390144102,
+        "ai_delivery_share": 0.623267750213858,
+        "ai_shutdown_count": 49,
+        "charge_needed_nonproductive_rate": 0.5256780150028851,
+        "charge_needed_wait_rate": 0.3366031929217157,
+        "collision_cancellation_rate": 0.04531209863858207,
+        "mean_ai_deliveries": 9.486979166666666,
+        "mean_longest_collision_streak": 2.3177083333333335,
+        "no_task_progress_streak_p95": 21.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.764988436221313,
+        "static_wall_command_rate": 0.00413627468421989
+      },
+      "cumulative_training": {
+        "action_authority": {
+          "equal": 430108,
+          "overrides": 0,
+          "partner_assertive_trainable_robot_2": 172014,
+          "partner_noisy_trainable_robot_2": 33999,
+          "partner_selfplay_trainable_robot_1": 80108,
+          "partner_selfplay_trainable_robot_2": 80108,
+          "partner_skilled_trainable_robot_2": 63879,
+          "trainable": 430108,
+          "trainable_robot_1": 80108,
+          "trainable_robot_2": 350000
+        },
+        "sampling_counts": {
+          "conflict_train_initial_episodes": 2786,
+          "reachable_energy_assertive_episodes": 427,
+          "reachable_energy_episodes": 654,
+          "reachable_energy_noisy_episodes": 85,
+          "reachable_energy_skilled_episodes": 142
+        },
+        "shaping_counts": {
+          "avoidable_wait": 49139,
+          "base_reward_abs_sum": 62651.317832110006,
+          "base_reward_sum": 58048.04261999611,
+          "charge_needed": 43233,
+          "distance_regression": 24396,
+          "productive": 324239,
+          "rows": 430108,
+          "safe_task_progress": 66475,
+          "shaping_reward_abs_sum": 8446.870000072628,
+          "shaping_reward_sum": 4522.690000004955
+        },
+        "shaping_formula_residual": 4.955836629960686e-09
+      },
+      "evidence_sha256": {
+        "checkpoint": "b13925e524535796ecd4b8f8ac77471f314506395e97fc4f9aa6e3b2374d757c",
+        "paired_dual_report": "b548a2bc952a15966b9684c62b7b47518f855a48f62525b57c9bca570404dec8",
+        "summary": "e415499337c218da4d85d9b045812b2a177a7d24759a5a98665fb94391020b76",
+        "training_segment": "e81caad99e3566c3f34c3b1fd6bae207a392c9fae1e7425ec78e08db8fdfdbd3"
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.841392308145356,
+        "ai_delivery_share": 0.6238174735670562,
+        "ai_shutdown_count": 60,
+        "charge_needed_nonproductive_rate": 0.5259889604415824,
+        "charge_needed_wait_rate": 0.3235970561177553,
+        "collision_cancellation_rate": 0.08452330953380932,
+        "mean_ai_deliveries": 7.473333333333334,
+        "mean_longest_collision_streak": 5.86,
+        "no_task_progress_streak_p95": 62.05000000000001,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.6851699157783144,
+        "static_wall_command_rate": 0.003681017727781377
+      },
+      "rcpd": {
+        "fidelity": 0.8877721943048577,
+        "lambda_next_cycle": 0.001,
+        "mean_kl": 0.3331603705883026,
+        "reliable_for_training": true
+      },
+      "step": 350000,
+      "suite_relative_checks_passed": {
+        "conflict": 2,
+        "original": 0
+      }
+    },
+    {
+      "actor_sha256": "ba000b9bd04c49b984e8b2d7f64ef5765c076962d07f8416e5718c09153f9654",
+      "candidate_selected": false,
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8618705035971223,
+        "ai_delivery_share": 0.6279986291980809,
+        "ai_shutdown_count": 56,
+        "charge_needed_nonproductive_rate": 0.5289526229805772,
+        "charge_needed_wait_rate": 0.31548375385732436,
+        "collision_cancellation_rate": 0.04540901502504174,
+        "mean_ai_deliveries": 9.544270833333334,
+        "mean_longest_collision_streak": 3.9661458333333335,
+        "no_task_progress_streak_p95": 43.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7584726065301605,
+        "static_wall_command_rate": 0.009806308799114554
+      },
+      "cumulative_training": {
+        "action_authority": {
+          "equal": 491716,
+          "overrides": 0,
+          "partner_assertive_trainable_robot_2": 194409,
+          "partner_noisy_trainable_robot_2": 38879,
+          "partner_selfplay_trainable_robot_1": 91716,
+          "partner_selfplay_trainable_robot_2": 91716,
+          "partner_skilled_trainable_robot_2": 74996,
+          "trainable": 491716,
+          "trainable_robot_1": 91716,
+          "trainable_robot_2": 400000
+        },
+        "sampling_counts": {
+          "conflict_train_initial_episodes": 3183,
+          "reachable_energy_assertive_episodes": 490,
+          "reachable_energy_episodes": 757,
+          "reachable_energy_noisy_episodes": 97,
+          "reachable_energy_skilled_episodes": 170
+        },
+        "shaping_counts": {
+          "avoidable_wait": 55687,
+          "base_reward_abs_sum": 71699.37536070627,
+          "base_reward_sum": 66463.14522527196,
+          "charge_needed": 50529,
+          "distance_regression": 27490,
+          "productive": 371441,
+          "rows": 491716,
+          "safe_task_progress": 76070,
+          "shaping_reward_abs_sum": 9649.230000098873,
+          "shaping_reward_sum": 5208.410000025879
+        },
+        "shaping_formula_residual": 2.58787622442469e-08
+      },
+      "evidence_sha256": {
+        "checkpoint": "2cb034d1d456a03e4705a92c5b0bf82531334dc94b104e0f16d1b818fe1f46ba",
+        "paired_dual_report": "e920d3b928861e3b3791d90eed0db9015e28ff8939285957ea4228bbd45c31c7",
+        "summary": "8d02ea130d9c22d2d706a06c54c7eefd25a0fb0f0c6094141db167006e663757",
+        "training_segment": "e858acfcc098a7649b5c9ddc251661f564cb68fb8e0549d1838c8c5fd1c47900"
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8402593659942363,
+        "ai_delivery_share": 0.6164307521509853,
+        "ai_shutdown_count": 48,
+        "charge_needed_nonproductive_rate": 0.5605493133583022,
+        "charge_needed_wait_rate": 0.32634207240948815,
+        "collision_cancellation_rate": 0.07545357890043557,
+        "mean_ai_deliveries": 7.403333333333333,
+        "mean_longest_collision_streak": 6.3933333333333335,
+        "no_task_progress_streak_p95": 80.10000000000002,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.6751585014409222,
+        "static_wall_command_rate": 0.010979827089337176
+      },
+      "rcpd": {
+        "fidelity": 0.8679495686794957,
+        "lambda_next_cycle": 0.001,
+        "mean_kl": 0.3345690965652466,
+        "reliable_for_training": true
+      },
+      "step": 400000,
+      "suite_relative_checks_passed": {
+        "conflict": 2,
+        "original": 0
+      }
+    },
+    {
+      "actor_sha256": "3c154c0297d637801004a1cc1d336afdfcc6512930f8072e32f85b0d76f77101",
+      "candidate_selected": false,
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8794998191027497,
+        "ai_delivery_share": 0.637103912196849,
+        "ai_shutdown_count": 73,
+        "charge_needed_nonproductive_rate": 0.4554727344056493,
+        "charge_needed_wait_rate": 0.2834444880345233,
+        "collision_cancellation_rate": 0.056254017225864504,
+        "mean_ai_deliveries": 9.372395833333334,
+        "mean_longest_collision_streak": 3.5234375,
+        "no_task_progress_streak_p95": 31.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7646300651230101,
+        "static_wall_command_rate": 0.0022159913169319824
+      },
+      "cumulative_training": {
+        "action_authority": {
+          "equal": 552517,
+          "overrides": 0,
+          "partner_assertive_trainable_robot_2": 219058,
+          "partner_noisy_trainable_robot_2": 43557,
+          "partner_selfplay_trainable_robot_1": 102517,
+          "partner_selfplay_trainable_robot_2": 102517,
+          "partner_skilled_trainable_robot_2": 84868,
+          "trainable": 552517,
+          "trainable_robot_1": 102517,
+          "trainable_robot_2": 450000
+        },
+        "sampling_counts": {
+          "conflict_train_initial_episodes": 3581,
+          "reachable_energy_assertive_episodes": 543,
+          "reachable_energy_episodes": 849,
+          "reachable_energy_noisy_episodes": 116,
+          "reachable_energy_skilled_episodes": 190
+        },
+        "shaping_counts": {
+          "avoidable_wait": 62280,
+          "base_reward_abs_sum": 80655.73744602819,
+          "base_reward_sum": 74806.0672496859,
+          "charge_needed": 57173,
+          "distance_regression": 30713,
+          "productive": 417926,
+          "rows": 552517,
+          "safe_task_progress": 85607,
+          "shaping_reward_abs_sum": 10841.18000012489,
+          "shaping_reward_sum": 5875.860000046444
+        },
+        "shaping_formula_residual": 4.644334694603458e-08
+      },
+      "evidence_sha256": {
+        "checkpoint": "1e76feca29338192c215cde3bd986360b864b33dc5d7749c5205fb9b0eba5931",
+        "paired_dual_report": "c8dcbcaec688af2ffc4aa254e5aeb03a88ef7e783f744b07db9a0381495b6c25",
+        "summary": "baecc47864234f60561db344a48eb805919d30a468376e3d0cb099c188e1dd47",
+        "training_segment": "c1e2c78562dd1a560e1bc00f4cec4a5463269319d0a8c1c22bcc6585fb7b25da"
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8564206856478791,
+        "ai_delivery_share": 0.6192893401015228,
+        "ai_shutdown_count": 49,
+        "charge_needed_nonproductive_rate": 0.5344748858447489,
+        "charge_needed_wait_rate": 0.271689497716895,
+        "collision_cancellation_rate": 0.0932559875161137,
+        "mean_ai_deliveries": 7.32,
+        "mean_longest_collision_streak": 7.38,
+        "no_task_progress_streak_p95": 83.10000000000002,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.6737361998837885,
+        "static_wall_command_rate": 0.012173155142359093
+      },
+      "rcpd": {
+        "fidelity": 0.8948412698412699,
+        "lambda_next_cycle": 0.001,
+        "mean_kl": 0.29394271969795227,
+        "reliable_for_training": true
+      },
+      "step": 450000,
+      "suite_relative_checks_passed": {
+        "conflict": 2,
+        "original": 1
+      }
+    },
+    {
+      "actor_sha256": "2356c10d57b07afa600a44f22feb847710e09e5c01b1d61e3d8a5df95a7112e6",
+      "candidate_selected": false,
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8639991181657848,
+        "ai_delivery_share": 0.6291424666894431,
+        "ai_shutdown_count": 38,
+        "charge_needed_nonproductive_rate": 0.495077663530956,
+        "charge_needed_wait_rate": 0.33121855173922554,
+        "collision_cancellation_rate": 0.04960322523028246,
+        "mean_ai_deliveries": 9.591145833333334,
+        "mean_longest_collision_streak": 2.9609375,
+        "no_task_progress_streak_p95": 24.849999999999966,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7610670194003527,
+        "static_wall_command_rate": 0.003990299823633157
+      },
+      "cumulative_training": {
+        "action_authority": {
+          "equal": 612531,
+          "overrides": 0,
+          "partner_assertive_trainable_robot_2": 245605,
+          "partner_noisy_trainable_robot_2": 48793,
+          "partner_selfplay_trainable_robot_1": 112531,
+          "partner_selfplay_trainable_robot_2": 112531,
+          "partner_skilled_trainable_robot_2": 93071,
+          "trainable": 612531,
+          "trainable_robot_1": 112531,
+          "trainable_robot_2": 500000
+        },
+        "sampling_counts": {
+          "conflict_train_initial_episodes": 3972,
+          "reachable_energy_assertive_episodes": 604,
+          "reachable_energy_episodes": 939,
+          "reachable_energy_noisy_episodes": 129,
+          "reachable_energy_skilled_episodes": 206
+        },
+        "shaping_counts": {
+          "avoidable_wait": 68910,
+          "base_reward_abs_sum": 89586.08968678614,
+          "base_reward_sum": 83183.22712862611,
+          "charge_needed": 63266,
+          "distance_regression": 33654,
+          "productive": 464304,
+          "rows": 612531,
+          "safe_task_progress": 95282,
+          "shaping_reward_abs_sum": 12026.460000150762,
+          "shaping_reward_sum": 6545.700000067095
+        },
+        "shaping_formula_residual": 6.709433364449069e-08
+      },
+      "evidence_sha256": {
+        "checkpoint": "34a21f7d987f2bfc0420380185083cdf8aa6a40b09017bb6241aaef5b5e8f019",
+        "paired_dual_report": "988042b09e8352b0f9d2c8e2a8c192306d2d1729c90e651e40765906235bd67c",
+        "summary": "6f161188e44e70ff7cd0791bfa0c750080102f20e7edcdf0ae2f41fbafbc4e19",
+        "training_segment": "3d5679caf74c0e1b63daf482d4103ed8de82856952c53f2d4e8dfdb8dfa2b557"
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.851480898554872,
+        "ai_delivery_share": 0.6157924107142857,
+        "ai_shutdown_count": 36,
+        "charge_needed_nonproductive_rate": 0.5764944275582573,
+        "charge_needed_wait_rate": 0.2548125633232016,
+        "collision_cancellation_rate": 0.08674172407998655,
+        "mean_ai_deliveries": 7.3566666666666665,
+        "mean_longest_collision_streak": 6.51,
+        "no_task_progress_streak_p95": 77.10000000000002,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.6664758906853627,
+        "static_wall_command_rate": 0.026756331377879524
+      },
+      "rcpd": {
+        "fidelity": 0.8949086161879896,
+        "lambda_next_cycle": 0.001,
+        "mean_kl": 0.3103579580783844,
+        "reliable_for_training": true
+      },
+      "step": 500000,
+      "suite_relative_checks_passed": {
+        "conflict": 2,
+        "original": 1
+      }
+    },
+    {
+      "actor_sha256": "624ab586ab31d116147ca6d86552fb2b5f92f8d0c0e19a75506ec14ff4bef229",
+      "candidate_selected": false,
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.87488894811656,
+        "ai_delivery_share": 0.6331632653061224,
+        "ai_shutdown_count": 34,
+        "charge_needed_nonproductive_rate": 0.4897680763983629,
+        "charge_needed_wait_rate": 0.33997271487039565,
+        "collision_cancellation_rate": 0.061943083445457084,
+        "mean_ai_deliveries": 9.6953125,
+        "mean_longest_collision_streak": 4.21875,
+        "no_task_progress_streak_p95": 21.849999999999966,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.761660447761194,
+        "static_wall_command_rate": 0.0019989339019189766
+      },
+      "cumulative_training": {
+        "action_authority": {
+          "equal": 674314,
+          "overrides": 0,
+          "partner_assertive_trainable_robot_2": 271417,
+          "partner_noisy_trainable_robot_2": 52218,
+          "partner_selfplay_trainable_robot_1": 124314,
+          "partner_selfplay_trainable_robot_2": 124314,
+          "partner_skilled_trainable_robot_2": 102051,
+          "trainable": 674314,
+          "trainable_robot_1": 124314,
+          "trainable_robot_2": 550000
+        },
+        "sampling_counts": {
+          "conflict_train_initial_episodes": 4362,
+          "reachable_energy_assertive_episodes": 671,
+          "reachable_energy_episodes": 1038,
+          "reachable_energy_noisy_episodes": 133,
+          "reachable_energy_skilled_episodes": 234
+        },
+        "shaping_counts": {
+          "avoidable_wait": 75847,
+          "base_reward_abs_sum": 98876.49668179726,
+          "base_reward_sum": 91870.47404641198,
+          "charge_needed": 69796,
+          "distance_regression": 36778,
+          "productive": 511670,
+          "rows": 674314,
+          "safe_task_progress": 105144,
+          "shaping_reward_abs_sum": 13244.370000177347,
+          "shaping_reward_sum": 7222.430000088176
+        },
+        "shaping_formula_residual": 8.817642083158717e-08
+      },
+      "evidence_sha256": {
+        "checkpoint": "c8bfe34de5bf99570204de517361ee3ff801e3c0625677109a5aa3f155ab5425",
+        "paired_dual_report": "97d2560dd0b08684874de6ca1fc1f496af77f575a07730265db55fabe07917f9",
+        "summary": "d6e7b4ae173711129eeaa8385351b317c826f5c6b5c34134172a42c452fc0216",
+        "training_segment": "f16a5940d8d99fa0428c8ae0a9671862e7ad9e92d4532e1630b283cd65446c36"
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8519554683894786,
+        "ai_delivery_share": 0.6110149942329873,
+        "ai_shutdown_count": 37,
+        "charge_needed_nonproductive_rate": 0.608475356978351,
+        "charge_needed_wait_rate": 0.2533394748963611,
+        "collision_cancellation_rate": 0.09878465757134636,
+        "mean_ai_deliveries": 7.0633333333333335,
+        "mean_longest_collision_streak": 7.02,
+        "no_task_progress_streak_p95": 77.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.650957544993078,
+        "static_wall_command_rate": 0.029043608675588372
+      },
+      "rcpd": {
+        "fidelity": 0.8647604327666152,
+        "lambda_next_cycle": 0.001,
+        "mean_kl": 0.3476680517196655,
+        "reliable_for_training": true
+      },
+      "step": 550000,
+      "suite_relative_checks_passed": {
+        "conflict": 2,
+        "original": 1
+      }
+    },
+    {
+      "actor_sha256": "7546ba880b07e14cc571f6746800c502cfc9e04e2901e259e1a62645b0a3db70",
+      "candidate_selected": false,
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8591432197085722,
+        "ai_delivery_share": 0.6336650652024708,
+        "ai_shutdown_count": 16,
+        "charge_needed_nonproductive_rate": 0.48575418994413405,
+        "charge_needed_wait_rate": 0.34804469273743016,
+        "collision_cancellation_rate": 0.0636396047672405,
+        "mean_ai_deliveries": 9.6171875,
+        "mean_longest_collision_streak": 3.7890625,
+        "no_task_progress_streak_p95": 34.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7461383625782173,
+        "static_wall_command_rate": 0.00021878965562508205
+      },
+      "cumulative_training": {
+        "action_authority": {
+          "equal": 734716,
+          "overrides": 0,
+          "partner_assertive_trainable_robot_2": 296318,
+          "partner_noisy_trainable_robot_2": 58056,
+          "partner_selfplay_trainable_robot_1": 134716,
+          "partner_selfplay_trainable_robot_2": 134716,
+          "partner_skilled_trainable_robot_2": 110910,
+          "trainable": 734716,
+          "trainable_robot_1": 134716,
+          "trainable_robot_2": 600000
+        },
+        "sampling_counts": {
+          "conflict_train_initial_episodes": 4757,
+          "reachable_energy_assertive_episodes": 736,
+          "reachable_energy_episodes": 1128,
+          "reachable_energy_noisy_episodes": 143,
+          "reachable_energy_skilled_episodes": 249
+        },
+        "shaping_counts": {
+          "avoidable_wait": 82710,
+          "base_reward_abs_sum": 107885.73943245987,
+          "base_reward_sum": 100284.66827883286,
+          "charge_needed": 75664,
+          "distance_regression": 39962,
+          "productive": 557742,
+          "rows": 734716,
+          "safe_task_progress": 114828,
+          "shaping_reward_abs_sum": 14435.380000203344,
+          "shaping_reward_sum": 7874.300000108647
+        },
+        "shaping_formula_residual": 1.0864550858968869e-07
+      },
+      "evidence_sha256": {
+        "checkpoint": "c8abfe52f7f2a724c5c1d51f59c9370e1f80cf92b28aa71ec2eb51c1c9d176c5",
+        "paired_dual_report": "43493466399c86ec778b339fc2a479c389f89a01c47de072665eab1019297a16",
+        "summary": "2bd6e80a70a0ffbe4ddcd118d8c0beb0e559560a87d80e71c30545be7efeb2e0",
+        "training_segment": "d61e4d400ce88013c896d014deb3d58928a56e54ddf7b81864839ea3d2d94b92"
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8382427771809804,
+        "ai_delivery_share": 0.6159822419533851,
+        "ai_shutdown_count": 25,
+        "charge_needed_nonproductive_rate": 0.5191722458916616,
+        "charge_needed_wait_rate": 0.31223371880706025,
+        "collision_cancellation_rate": 0.1066369890732497,
+        "mean_ai_deliveries": 7.4,
+        "mean_longest_collision_streak": 8.543333333333333,
+        "no_task_progress_streak_p95": 83.05000000000001,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.6604002940012439,
+        "static_wall_command_rate": 0.005003675015548143
+      },
+      "rcpd": {
+        "fidelity": 0.8900621118012423,
+        "lambda_next_cycle": 0.001,
+        "mean_kl": 0.3277479410171509,
+        "reliable_for_training": true
+      },
+      "step": 600000,
+      "suite_relative_checks_passed": {
+        "conflict": 2,
+        "original": 0
+      }
+    },
+    {
+      "actor_sha256": "74006c5ab0417740a59b35eab53544266669ee929a485a9627887d447d9c3f3d",
+      "candidate_selected": false,
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8760323078319266,
+        "ai_delivery_share": 0.638121546961326,
+        "ai_shutdown_count": 79,
+        "charge_needed_nonproductive_rate": 0.48210774675580026,
+        "charge_needed_wait_rate": 0.2467558002359418,
+        "collision_cancellation_rate": 0.049854967367657724,
+        "mean_ai_deliveries": 9.625,
+        "mean_longest_collision_streak": 2.6770833333333335,
+        "no_task_progress_streak_p95": 24.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7676740176059533,
+        "static_wall_command_rate": 0.003380524548507124
+      },
+      "cumulative_training": {
+        "action_authority": {
+          "equal": 796265,
+          "overrides": 0,
+          "partner_assertive_trainable_robot_2": 320670,
+          "partner_noisy_trainable_robot_2": 62950,
+          "partner_selfplay_trainable_robot_1": 146265,
+          "partner_selfplay_trainable_robot_2": 146265,
+          "partner_skilled_trainable_robot_2": 120115,
+          "trainable": 796265,
+          "trainable_robot_1": 146265,
+          "trainable_robot_2": 650000
+        },
+        "sampling_counts": {
+          "conflict_train_initial_episodes": 5143,
+          "reachable_energy_assertive_episodes": 797,
+          "reachable_energy_episodes": 1245,
+          "reachable_energy_noisy_episodes": 161,
+          "reachable_energy_skilled_episodes": 287
+        },
+        "shaping_counts": {
+          "avoidable_wait": 89784,
+          "base_reward_abs_sum": 117070.49294907606,
+          "base_reward_sum": 108868.60797953123,
+          "charge_needed": 81597,
+          "distance_regression": 43143,
+          "productive": 604767,
+          "rows": 796265,
+          "safe_task_progress": 124687,
+          "shaping_reward_abs_sum": 15651.720000229894,
+          "shaping_reward_sum": 8538.960000126266
+        },
+        "shaping_formula_residual": 1.2626696843653917e-07
+      },
+      "evidence_sha256": {
+        "checkpoint": "c55e36a96afdaaf8e0548869616cc83a0f654830d6bf8acb9b3c9066b8a9cdff",
+        "paired_dual_report": "95d653fa290d07b08e1e4a057c8e738f018dfda2be5ba10f679986df191c15b3",
+        "summary": "c6bb760374e96552e8b7422437924968be32456e3d5b695b6544cf4ced3a8ef3",
+        "training_segment": "abf18437fe5e6bfe2a4608afd4134ada4de293b061e6ce90b8cb9977229b0832"
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8700668436956323,
+        "ai_delivery_share": 0.6219340287566958,
+        "ai_shutdown_count": 99,
+        "charge_needed_nonproductive_rate": 0.5055484421681605,
+        "charge_needed_wait_rate": 0.23090055484421682,
+        "collision_cancellation_rate": 0.09387497368974952,
+        "mean_ai_deliveries": 7.3533333333333335,
+        "mean_longest_collision_streak": 6.81,
+        "no_task_progress_streak_p95": 63.30000000000007,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.6914812440863168,
+        "static_wall_command_rate": 0.010255471110704148
+      },
+      "rcpd": {
+        "fidelity": 0.9141274238227147,
+        "lambda_next_cycle": 0.001,
+        "mean_kl": 0.2553319036960602,
+        "reliable_for_training": true
+      },
+      "step": 650000,
+      "suite_relative_checks_passed": {
+        "conflict": 2,
+        "original": 1
+      }
+    }
+  ],
+  "trend_summary": {
+    "baseline": {
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8504289526498026,
+        "ai_delivery_share": 0.628736046092906,
+        "ai_shutdown_count": 49,
+        "charge_needed_nonproductive_rate": 0.46910617876424715,
+        "charge_needed_wait_rate": 0.29784043191361725,
+        "collision_cancellation_rate": 0.08620108399678432,
+        "mean_ai_deliveries": 9.09375,
+        "mean_longest_collision_streak": 4.390625,
+        "no_task_progress_streak_p95": 53.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7125686434510288,
+        "static_wall_command_rate": 0.0
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8481433113786055,
+        "ai_delivery_share": 0.6390810276679841,
+        "ai_shutdown_count": 19,
+        "charge_needed_nonproductive_rate": 0.5165260196905767,
+        "charge_needed_wait_rate": 0.3611111111111111,
+        "collision_cancellation_rate": 0.07531380753138076,
+        "mean_ai_deliveries": 8.623333333333333,
+        "mean_longest_collision_streak": 5.0,
+        "no_task_progress_streak_p95": 35.10000000000002,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.722007722007722,
+        "static_wall_command_rate": 2.8389734272087213e-05
+      }
+    },
+    "best_conflict_through_650k": {
+      "ai_shutdown_count": {
+        "step": 600000,
+        "value": 16
+      },
+      "mean_ai_deliveries": {
+        "step": 250000,
+        "value": 9.765625
+      },
+      "no_task_progress_streak_p95": {
+        "step": 300000,
+        "value": 20.0
+      },
+      "productive_action_rate": {
+        "step": 300000,
+        "value": 0.7735715235604415
+      }
+    },
+    "latest_650k": {
+      "conflict": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8760323078319266,
+        "ai_delivery_share": 0.638121546961326,
+        "ai_shutdown_count": 79,
+        "charge_needed_nonproductive_rate": 0.48210774675580026,
+        "charge_needed_wait_rate": 0.2467558002359418,
+        "collision_cancellation_rate": 0.049854967367657724,
+        "mean_ai_deliveries": 9.625,
+        "mean_longest_collision_streak": 2.6770833333333335,
+        "no_task_progress_streak_p95": 24.0,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.7676740176059533,
+        "static_wall_command_rate": 0.003380524548507124
+      },
+      "original": {
+        "action_override_count": 0,
+        "active_non_wait_rate": 0.8700668436956323,
+        "ai_delivery_share": 0.6219340287566958,
+        "ai_shutdown_count": 99,
+        "charge_needed_nonproductive_rate": 0.5055484421681605,
+        "charge_needed_wait_rate": 0.23090055484421682,
+        "collision_cancellation_rate": 0.09387497368974952,
+        "mean_ai_deliveries": 7.3533333333333335,
+        "mean_longest_collision_streak": 6.81,
+        "no_task_progress_streak_p95": 63.30000000000007,
+        "policy_action_equality_rate": 1.0,
+        "productive_action_rate": 0.6914812440863168,
+        "static_wall_command_rate": 0.010255471110704148
+      }
+    },
+    "latest_minus_baseline": {
+      "conflict": {
+        "active_non_wait_rate": 0.025603355182124088,
+        "ai_shutdown_count": 30,
+        "collision_cancellation_rate": -0.036346116629126596,
+        "mean_ai_deliveries": 0.53125,
+        "mean_longest_collision_streak": -1.7135416666666665,
+        "no_task_progress_streak_p95": -29.0,
+        "productive_action_rate": 0.05510537415492456,
+        "static_wall_command_rate": 0.003380524548507124
+      },
+      "original": {
+        "active_non_wait_rate": 0.021923532317026706,
+        "ai_shutdown_count": 80,
+        "collision_cancellation_rate": 0.018561166158368766,
+        "mean_ai_deliveries": -1.2699999999999996,
+        "mean_longest_collision_streak": 1.8099999999999996,
+        "no_task_progress_streak_p95": 28.200000000000045,
+        "productive_action_rate": -0.03052647792140517,
+        "static_wall_command_rate": 0.01022708137643206
+      }
+    },
+    "registered_conflict_delivery_thresholds": {
+      "absolute_improvement": 1.0,
+      "relative_improvement": 0.15
+    },
+    "registered_conflict_productive_improvement": 0.08
+  },
+  "verified_not_broken": {
+    "action_authority": {
+      "equal": 796265,
+      "overrides": 0,
+      "partner_assertive_trainable_robot_2": 320670,
+      "partner_noisy_trainable_robot_2": 62950,
+      "partner_selfplay_trainable_robot_1": 146265,
+      "partner_selfplay_trainable_robot_2": 146265,
+      "partner_skilled_trainable_robot_2": 120115,
+      "trainable": 796265,
+      "trainable_robot_1": 146265,
+      "trainable_robot_2": 650000
+    },
+    "active_shaping": {
+      "interpretation": "All boundary counters exactly reconcile with +.02*productive-.03*avoidable_wait-.02*distance_regression up to float accumulation error.",
+      "latest_absolute_shaping_over_base_reward_ratio": 0.1336948329673316,
+      "maximum_absolute_formula_residual_through_cutoff": 1.2626696843653917e-07,
+      "registered": {
+        "avoidable_wait": -0.03,
+        "productive_progress": 0.02,
+        "task_distance_regression": -0.02
+      }
+    },
+    "checkpoint_counters": {
+      "actor_optimizer_steps": 10192,
+      "critic_optimizer_steps": 10192,
+      "episode_count": 6388,
+      "joint_steps": 650000,
+      "minibatch_updates": 10192,
+      "optimizer_updates": 325
+    },
+    "partner_sampling": {
+      "interpretation": "Counts differ slightly from target percentages because partners are sampled per episode and episode lengths differ; reset frequencies match the registered mix within ordinary sampling noise.",
+      "registered": {
+        "assertive": 0.5,
+        "noisy": 0.1,
+        "selfplay": 0.2,
+        "skilled": 0.2
+      },
+      "robot_2_transition_counts": {
+        "assertive": 320670,
+        "noisy": 62950,
+        "selfplay": 146265,
+        "skilled": 120115
+      }
+    },
+    "rcpd_kl": {
+      "all_boundaries_training_reliable": true,
+      "all_update_lambdas": [
+        0.001
+      ],
+      "all_update_paths": [
+        "ordinary_feedback"
+      ],
+      "fidelity_range": [
+        0.8647604327666152,
+        0.9141274238227147
+      ],
+      "interpretation": "The code computes KL(pi_nn||program) from detached normalized tree targets and applies it only to robot_2 at bounded lambda .001. No direction, scope, or schedule defect was found.",
+      "optimizer_update_audits": 325,
+      "registered_direction": "KL(nn||program)",
+      "registered_lambda": 0.001
+    }
+  },
+  "version": "warehouse-r41-training-trend-audit.v1"
+}

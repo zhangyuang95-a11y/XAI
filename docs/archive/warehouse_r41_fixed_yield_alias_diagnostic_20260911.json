@@ -1,0 +1,355 @@
+{
+  "artifact_semantic_sha256": "32aef2abd78d4cb127c20dd06b1513b26743280beffc69d06dbaa25a7746c871",
+  "boundary_impact": [
+    {
+      "candidate_actor_sha256": "2d97cf7a7fef55733c048679624a3aab5faa3a99f792a2e77213be27fe20819f",
+      "paired_report": "output/warehouse_native/r41_active_2m_20260911/boundaries/step_0050000/evaluation/paired_dual_report.json",
+      "paired_report_sha256": "addb343984377d7f90a4f7b058e96f6aef5a7cbbd29a720b02bf3c7d8bf91688",
+      "selected_under_recorded_audit": false,
+      "step": 50000,
+      "suites": {
+        "conflict": {
+          "absolute_failed": [
+            "mean_longest_collision_streak",
+            "no_task_progress_streak_p95",
+            "shutdowns"
+          ],
+          "cannot_become_selected_by_replacing_only_fixed_yield": true,
+          "relative_checks_passed": 2,
+          "unique_nonduplicated_partner_ai_shutdowns": 40
+        },
+        "original": {
+          "absolute_failed": [
+            "mean_longest_collision_streak",
+            "no_task_progress_streak_p95",
+            "shutdowns"
+          ],
+          "cannot_become_selected_by_replacing_only_fixed_yield": true,
+          "relative_checks_passed": 1,
+          "unique_nonduplicated_partner_ai_shutdowns": 43
+        }
+      }
+    },
+    {
+      "candidate_actor_sha256": "52509470e57daa0f96cdb3c812f4037e0b4dd4ac807f9701be803f9b256b5b5a",
+      "paired_report": "output/warehouse_native/r41_active_2m_20260911/boundaries/step_0100000/evaluation/paired_dual_report.json",
+      "paired_report_sha256": "eff9788b245abb3e2a4ba117fbc6eefecfb4454647fcbcc475347990534c5751",
+      "selected_under_recorded_audit": false,
+      "step": 100000,
+      "suites": {
+        "conflict": {
+          "absolute_failed": [
+            "mean_longest_collision_streak",
+            "no_task_progress_streak_p95",
+            "shutdowns"
+          ],
+          "cannot_become_selected_by_replacing_only_fixed_yield": true,
+          "relative_checks_passed": 2,
+          "unique_nonduplicated_partner_ai_shutdowns": 18
+        },
+        "original": {
+          "absolute_failed": [
+            "mean_longest_collision_streak",
+            "no_task_progress_streak_p95",
+            "shutdowns",
+            "static_wall_command"
+          ],
+          "cannot_become_selected_by_replacing_only_fixed_yield": true,
+          "relative_checks_passed": 1,
+          "unique_nonduplicated_partner_ai_shutdowns": 30
+        }
+      }
+    },
+    {
+      "candidate_actor_sha256": "e488918c359cc0db59cbd51028039e222bf16b54d7f14c2749754df71f1a135b",
+      "paired_report": "output/warehouse_native/r41_active_2m_20260911/boundaries/step_0150000/evaluation/paired_dual_report.json",
+      "paired_report_sha256": "c790f55d3fb7887a58c78659bb6a5c26ecceddfa928a25cf44341dde4a6502cd",
+      "selected_under_recorded_audit": false,
+      "step": 150000,
+      "suites": {
+        "conflict": {
+          "absolute_failed": [
+            "mean_longest_collision_streak",
+            "no_task_progress_streak_p95",
+            "shutdowns"
+          ],
+          "cannot_become_selected_by_replacing_only_fixed_yield": true,
+          "relative_checks_passed": 2,
+          "unique_nonduplicated_partner_ai_shutdowns": 18
+        },
+        "original": {
+          "absolute_failed": [
+            "mean_longest_collision_streak",
+            "no_task_progress_streak_p95",
+            "shutdowns",
+            "static_wall_command"
+          ],
+          "cannot_become_selected_by_replacing_only_fixed_yield": true,
+          "relative_checks_passed": 1,
+          "unique_nonduplicated_partner_ai_shutdowns": 58
+        }
+      }
+    },
+    {
+      "candidate_actor_sha256": "56b0d60e28ef9282c15f3bc6801572e61b2ef99d3bf6db85ddf750110fbc8be4",
+      "paired_report": "output/warehouse_native/r41_active_2m_20260911/boundaries/step_0200000/evaluation/paired_dual_report.json",
+      "paired_report_sha256": "4a0085439ba6aada7ea6b9f5e877d911356a24b291931523b804ef22d8464117",
+      "selected_under_recorded_audit": false,
+      "step": 200000,
+      "suites": {
+        "conflict": {
+          "absolute_failed": [
+            "mean_longest_collision_streak",
+            "no_task_progress_streak_p95",
+            "shutdowns"
+          ],
+          "cannot_become_selected_by_replacing_only_fixed_yield": true,
+          "relative_checks_passed": 2,
+          "unique_nonduplicated_partner_ai_shutdowns": 40
+        },
+        "original": {
+          "absolute_failed": [
+            "mean_longest_collision_streak",
+            "no_task_progress_streak_p95",
+            "shutdowns",
+            "static_wall_command"
+          ],
+          "cannot_become_selected_by_replacing_only_fixed_yield": true,
+          "relative_checks_passed": 1,
+          "unique_nonduplicated_partner_ai_shutdowns": 48
+        }
+      }
+    }
+  ],
+  "conclusion": {
+    "claim_limit": "Recorded reports support five distinct program-partner behaviors with skilled double-weighted, not six distinct behaviors.",
+    "completed_boundaries_50k_through_200k": "All remain failed. Each suite has at least one AI shutdown among the five nonduplicated partner types, so replacing only the aliased sixth partner cannot satisfy the zero-AI-shutdown absolute gate.",
+    "earliest_pass": "There is no valid earliest passing boundary through 200k. Any later boundary that passes the recorded audit must be re-evaluated with a genuinely distinct sixth partner before selection.",
+    "training_validity": "The alias is in the evaluation roster, not the PPO sampling mixture. It does not by itself invalidate sampled training steps or action-authority receipts."
+  },
+  "corrected_sixth_partner_proposal": {
+    "audit_protocol": "Use a new independent evaluator version. Re-evaluate frozen r3 and every committed candidate Actor on the same original/conflict scenes and matched seeds; apply the unchanged aggregate gates. Do not edit the running frozen evaluator or its artifacts.",
+    "definition": "Compute the ordinary skilled robot_1 action. If robot_1 and robot_2 are within path distance two and robot_1 is not in a public must-charge state, return WAIT; otherwise return the skilled action.",
+    "forbidden_inputs": [
+      "Actor logits",
+      "Actor probabilities",
+      "robot_2 current command",
+      "future state"
+    ],
+    "name": "fixed_yield_r1",
+    "state_scope": "public pre-action state S_t only"
+  },
+  "registered_eight_group_evidence": [
+    {
+      "all_core_rows_identical": true,
+      "differing_core_rows": 0,
+      "differing_fields": [],
+      "episodes_jsonl": "output/warehouse_native/r41_active_2m_20260911/baseline/original/episodes.jsonl",
+      "episodes_jsonl_sha256": "b4338b7693e0f68c65a4446190b503e4c409922a2c65ed034c9640ff2ad69309",
+      "exact_core_row_matches": 50,
+      "excluded_label_fields": [
+        "partner",
+        "seed"
+      ],
+      "fixed_yield_core_rows_sha256": "037f02b7dc96b1c0c90b53e01b04cd4374febd62a918afd3c49ade27a3962680",
+      "label": "r3_baseline",
+      "paired_scenes": 50,
+      "skilled_core_rows_sha256": "037f02b7dc96b1c0c90b53e01b04cd4374febd62a918afd3c49ade27a3962680",
+      "suite": "original"
+    },
+    {
+      "all_core_rows_identical": true,
+      "differing_core_rows": 0,
+      "differing_fields": [],
+      "episodes_jsonl": "output/warehouse_native/r41_active_2m_20260911/baseline/conflict/episodes.jsonl",
+      "episodes_jsonl_sha256": "aca41d43f3af1ad8d3ec094813a1ada4f59055a9a454cd2412762db47f275041",
+      "exact_core_row_matches": 64,
+      "excluded_label_fields": [
+        "partner",
+        "seed"
+      ],
+      "fixed_yield_core_rows_sha256": "c2793e9891f557ce1273545a0b059966e7e27e1a346912463aab6b8b1d558a04",
+      "label": "r3_baseline",
+      "paired_scenes": 64,
+      "skilled_core_rows_sha256": "c2793e9891f557ce1273545a0b059966e7e27e1a346912463aab6b8b1d558a04",
+      "suite": "conflict"
+    },
+    {
+      "all_core_rows_identical": true,
+      "differing_core_rows": 0,
+      "differing_fields": [],
+      "episodes_jsonl": "output/warehouse_native/r41_active_2m_20260911/boundaries/step_0050000/evaluation/original/candidate/episodes.jsonl",
+      "episodes_jsonl_sha256": "79c4363b81c62d6e1dd421d0ce47bb50e63646a567d6775812a29fb910a43fcd",
+      "exact_core_row_matches": 50,
+      "excluded_label_fields": [
+        "partner",
+        "seed"
+      ],
+      "fixed_yield_core_rows_sha256": "ab0c5058a295ffc58107d9d98bbfaac48422d54d8f4d3563e3d284689262d01c",
+      "label": "candidate_0050000",
+      "paired_scenes": 50,
+      "skilled_core_rows_sha256": "ab0c5058a295ffc58107d9d98bbfaac48422d54d8f4d3563e3d284689262d01c",
+      "suite": "original"
+    },
+    {
+      "all_core_rows_identical": true,
+      "differing_core_rows": 0,
+      "differing_fields": [],
+      "episodes_jsonl": "output/warehouse_native/r41_active_2m_20260911/boundaries/step_0050000/evaluation/conflict/candidate/episodes.jsonl",
+      "episodes_jsonl_sha256": "56cc6140b1c02496bab7c1d77c34f2e49a09d1af735fa49cc7456c5c4a2986e1",
+      "exact_core_row_matches": 64,
+      "excluded_label_fields": [
+        "partner",
+        "seed"
+      ],
+      "fixed_yield_core_rows_sha256": "180cf99bdb8cfc0527072eb742d72e73fe3f918085576d660e0c6434b8501830",
+      "label": "candidate_0050000",
+      "paired_scenes": 64,
+      "skilled_core_rows_sha256": "180cf99bdb8cfc0527072eb742d72e73fe3f918085576d660e0c6434b8501830",
+      "suite": "conflict"
+    },
+    {
+      "all_core_rows_identical": true,
+      "differing_core_rows": 0,
+      "differing_fields": [],
+      "episodes_jsonl": "output/warehouse_native/r41_active_2m_20260911/boundaries/step_0100000/evaluation/original/candidate/episodes.jsonl",
+      "episodes_jsonl_sha256": "b954cf0e2a386e35aa5c4fc596b0b0b330db717cecdd8b9d1d7dc1d2627a2da4",
+      "exact_core_row_matches": 50,
+      "excluded_label_fields": [
+        "partner",
+        "seed"
+      ],
+      "fixed_yield_core_rows_sha256": "22755ce12ba94ca914b21e6df670f5d87662f87da4010ed4343b50d667780c11",
+      "label": "candidate_0100000",
+      "paired_scenes": 50,
+      "skilled_core_rows_sha256": "22755ce12ba94ca914b21e6df670f5d87662f87da4010ed4343b50d667780c11",
+      "suite": "original"
+    },
+    {
+      "all_core_rows_identical": true,
+      "differing_core_rows": 0,
+      "differing_fields": [],
+      "episodes_jsonl": "output/warehouse_native/r41_active_2m_20260911/boundaries/step_0100000/evaluation/conflict/candidate/episodes.jsonl",
+      "episodes_jsonl_sha256": "afb1cdf8d281ad2520edf58bc6d76eddae4b4e1e3f62361f9c1a41d2a4fe7dd5",
+      "exact_core_row_matches": 64,
+      "excluded_label_fields": [
+        "partner",
+        "seed"
+      ],
+      "fixed_yield_core_rows_sha256": "e284d59c1e7848c5a0d1f6128711acf767079d943ecd8915853c1470f02d1612",
+      "label": "candidate_0100000",
+      "paired_scenes": 64,
+      "skilled_core_rows_sha256": "e284d59c1e7848c5a0d1f6128711acf767079d943ecd8915853c1470f02d1612",
+      "suite": "conflict"
+    },
+    {
+      "all_core_rows_identical": true,
+      "differing_core_rows": 0,
+      "differing_fields": [],
+      "episodes_jsonl": "output/warehouse_native/r41_active_2m_20260911/boundaries/step_0150000/evaluation/original/candidate/episodes.jsonl",
+      "episodes_jsonl_sha256": "0c1350e1bd72fe9487e3b869f05cf4280da88eb0f2fc9e5cc484db74e67d1dcc",
+      "exact_core_row_matches": 50,
+      "excluded_label_fields": [
+        "partner",
+        "seed"
+      ],
+      "fixed_yield_core_rows_sha256": "7db9a7e9436e0e92683f0d953367e1a58ec1db96ef2c4d73d1ee0bdc04be4fde",
+      "label": "candidate_0150000",
+      "paired_scenes": 50,
+      "skilled_core_rows_sha256": "7db9a7e9436e0e92683f0d953367e1a58ec1db96ef2c4d73d1ee0bdc04be4fde",
+      "suite": "original"
+    },
+    {
+      "all_core_rows_identical": true,
+      "differing_core_rows": 0,
+      "differing_fields": [],
+      "episodes_jsonl": "output/warehouse_native/r41_active_2m_20260911/boundaries/step_0150000/evaluation/conflict/candidate/episodes.jsonl",
+      "episodes_jsonl_sha256": "e33ac9b3f8fba0b223103e499b7e0cc90a293982d5150c492df73e0046b019d7",
+      "exact_core_row_matches": 64,
+      "excluded_label_fields": [
+        "partner",
+        "seed"
+      ],
+      "fixed_yield_core_rows_sha256": "fa6d1f171aea17b23725942619a4b41d55c7ae360722831ac0c9743177c98f8c",
+      "label": "candidate_0150000",
+      "paired_scenes": 64,
+      "skilled_core_rows_sha256": "fa6d1f171aea17b23725942619a4b41d55c7ae360722831ac0c9743177c98f8c",
+      "suite": "conflict"
+    }
+  ],
+  "root_cause": {
+    "alias_logic": "For robot_1, skilled and fixed_yield share the symmetric assignment, goal construction, and joint-route branch; the fixed_yield-only guard is unreachable.",
+    "evaluation_partner_list": "skilled, assertive, noisy, fixed_yield, fixed_region, fixed_task",
+    "fixed_yield_guard": "The only fixed_yield-specific branch waits only when agent_id == robot_2 and path distance to the other robot is <= 2.",
+    "locations": [
+      {
+        "lines": [
+          33,
+          101
+        ],
+        "path": "backend/training/warehouse_r4_active_evaluation.py"
+      },
+      {
+        "lines": [
+          109,
+          117
+        ],
+        "path": "backend/training/warehouse_r41_active_evaluation.py"
+      },
+      {
+        "lines": [
+          25,
+          57,
+          121,
+          147
+        ],
+        "path": "env/warehouse_native/partners.py"
+      }
+    ],
+    "program_role": "Both original and conflict evaluators always request the program partner action for robot_1 and deploy the candidate Actor as robot_2."
+  },
+  "scope": "read_only_post_hoc_diagnosis; no running trainer, checkpoint, Actor, program, scene, or frozen training source was changed",
+  "source_receipt": {
+    "backend/training/warehouse_r41_active_evaluation.py": "c75194254e46e5aa224cbde4979a844797bc2a9f8f03ab318b1e199f60fa87e5",
+    "backend/training/warehouse_r4_active_evaluation.py": "40b66fa2435fc1bc58534e66ce09837f76ab5ef8a4a8992c0c2d5a3b346b04a3",
+    "env/warehouse_native/partners.py": "8f70f3234f898e66ae3b790d8b4f6e869d0d7f60ae3086cc30a15f7d1dbceb95"
+  },
+  "status": "confirmed_validation_partner_alias",
+  "supplemental_200k_corroboration": [
+    {
+      "all_core_rows_identical": true,
+      "differing_core_rows": 0,
+      "differing_fields": [],
+      "episodes_jsonl": "output/warehouse_native/r41_active_2m_20260911/boundaries/step_0200000/evaluation/original/candidate/episodes.jsonl",
+      "episodes_jsonl_sha256": "084be9b762188b053b8141b1018bd58d8238e0a06d254cdbd2f485493fd5267a",
+      "exact_core_row_matches": 50,
+      "excluded_label_fields": [
+        "partner",
+        "seed"
+      ],
+      "fixed_yield_core_rows_sha256": "4cdc761f1f6e6d4f4e5fdddca3f2d8f3945f5697f40ccfd65b1822ed10df5f77",
+      "label": "candidate_0200000_supplemental",
+      "paired_scenes": 50,
+      "skilled_core_rows_sha256": "4cdc761f1f6e6d4f4e5fdddca3f2d8f3945f5697f40ccfd65b1822ed10df5f77",
+      "suite": "original"
+    },
+    {
+      "all_core_rows_identical": true,
+      "differing_core_rows": 0,
+      "differing_fields": [],
+      "episodes_jsonl": "output/warehouse_native/r41_active_2m_20260911/boundaries/step_0200000/evaluation/conflict/candidate/episodes.jsonl",
+      "episodes_jsonl_sha256": "e50f863e0fd375ed2c7d41087ff7f3b3f21aff636cfc8ea1c02be752fc2b6653",
+      "exact_core_row_matches": 64,
+      "excluded_label_fields": [
+        "partner",
+        "seed"
+      ],
+      "fixed_yield_core_rows_sha256": "80aac6db3973dacc0941739916cf7bbefd8bbfef045a098c34922349509b8cee",
+      "label": "candidate_0200000_supplemental",
+      "paired_scenes": 64,
+      "skilled_core_rows_sha256": "80aac6db3973dacc0941739916cf7bbefd8bbfef045a098c34922349509b8cee",
+      "suite": "conflict"
+    }
+  ],
+  "version": "warehouse-r41-fixed-yield-alias-diagnostic.v1"
+}

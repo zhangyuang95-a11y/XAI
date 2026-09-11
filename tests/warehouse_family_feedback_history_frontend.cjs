@@ -23,6 +23,15 @@ function view({run='run1',frame=20,version=20,stage='task1',explain=false}={}) {
     explain_allowed:explain,state:{frame,agents:[]},answers:[],runs:[]};
 }
 function history(run='run1',frame=20) {return {run_id:run,frames:Array.from({length:frame+1},(_,i)=>({state:{frame:i,agents:[]}}))};}
+function tutorialView({index=0,maximum=0,version=1}={}) {return {
+  session_id:'session1',run_id:null,version,history_count:0,
+  flow:{mode:'study',stage:'instructions',participant_id:'qa_tutorial'},horizon:120,
+  release:{model_ready:true,study_ready:true,explanation_ready:true},study_allowed:true,
+  allowed_kinds:['tutorial_advance','tutorial_restart','tutorial_select','begin_task1'],
+  explain_allowed:false,map:{rows:6,cols:7,shelves:[]},metrics:{},answers:[],runs:[],
+  tutorial:{frame_index:index,max_played_index:maximum,total_frames:3,complete:maximum>=2,duration_ms:380,scored:false},
+  state:{frame:index,agents:[{id:'robot_1',position:[5-index,2],battery:100},{id:'robot_2',position:[5,4-index],battery:100}]},
+};}
 
 async function harness(initial=view()) {
   counts.app_instances++;
@@ -73,6 +82,13 @@ async function harness(initial=view()) {
       const body=JSON.parse(options.body);posts.push(body);
       current={...current,version:current.version+1};
       if(body.kind==='action')current={...current,history_count:current.history_count+1,state:{...current.state,frame:current.state.frame+1}};
+      if(body.kind==='tutorial_advance'){
+        const index=Math.min(current.tutorial.total_frames-1,current.tutorial.frame_index+1),maximum=Math.max(current.tutorial.max_played_index,index);
+        current={...current,tutorial:{...current.tutorial,frame_index:index,max_played_index:maximum,complete:maximum>=current.tutorial.total_frames-1},state:{...current.state,frame:index}};
+      }
+      if(body.kind==='tutorial_select')current={...current,tutorial:{...current.tutorial,frame_index:body.frame_index},state:{...current.state,frame:body.frame_index}};
+      if(body.kind==='tutorial_restart')current={...current,tutorial:{...current.tutorial,frame_index:0},state:{...current.state,frame:0}};
+      if(body.kind==='begin_task1')current={...view({run:'task1-run',frame:0,version:current.version,stage:'task1'}),allowed_kinds:['action','end']};
       return response(structuredClone(current));
     }};
   vm.runInNewContext(script,context,{filename:path.join(web,'app.js')});await tick();
@@ -146,6 +162,26 @@ test('existing A/B and Task2 answer visibility remains gated',async t=>{
   assert.equal(h.api.visibleAnswers({...a,flow:{mode:'study',stage:'task2'}}).length,0);
   assert.equal(h.api.visibleAnswers({...a,study_version_mismatch:true}).length,0);
   assert.equal(h.api.FRONTEND_VERSION,'warehouse-family-feedback-research.r4');
+});
+
+test('instruction controls step, replay and enter the three-round Task 1 flow',async t=>{
+  const h=await harness(tutorialView());t.after(()=>h.cleanup());
+  assert.equal(h.document.body.dataset.stage,'instructions');
+  assert.equal(h.ids.get('instructionsPanel').classList.contains('hidden'),false);
+  assert.equal(h.ids.get('operationPanel').classList.contains('hidden'),true);
+  assert.equal(h.ids.get('tutorialFrameLabel').textContent,'1 / 3');
+  h.click('tutorialNextButton');await tick();await tick();
+  assert.equal(h.posts.at(-1).kind,'tutorial_advance');
+  assert.equal(h.ids.get('tutorialFrameLabel').textContent,'2 / 3');
+  h.click('tutorialPreviousButton');await tick();
+  assert.equal(h.posts.at(-1).kind,'tutorial_select');assert.equal(h.posts.at(-1).frame_index,0);
+  h.click('tutorialPlayButton');for(let i=0;i<8;i++)await tick();
+  assert.equal(h.ids.get('tutorialFrameLabel').textContent,'3 / 3');
+  assert.equal(h.document.body.dataset.tutorialPlaying,'false');
+  h.click('beginTask1Button');await tick();
+  assert.equal(h.posts.at(-1).kind,'begin_task1');
+  assert.equal(h.document.body.dataset.stage,'task1');
+  assert.equal(h.ids.get('operationPanel').classList.contains('hidden'),false);
 });
 
 process.on('exit',()=>console.log('FEEDBACK_HISTORY_FRONTEND_SCOPE='+JSON.stringify(counts)));

@@ -1,0 +1,203 @@
+{
+  "audit_cutoff_additional_joint_steps": 350000,
+  "conclusion": "The existing absolute gate uses ai_shutdown_count and therefore tests zero robot_2 Actor shutdowns. Program-partner shutdowns, including noisy-profile failures, remain diagnostic and do not fail the Actor gate. Retain frozen receipts; expose actor_shutdown_count explicitly in the additive post-training admission audit.",
+  "gate_subject": "robot_2_neural_actor",
+  "global_reconciliation": {
+    "actor_only": 710,
+    "both": 1,
+    "episodes": 5472,
+    "identity_failures": 0,
+    "neither": 4674,
+    "partner_only": 87,
+    "terminal_reason_failures": 0
+  },
+  "read_only": true,
+  "registered_limit": 0,
+  "saved_evidence": [
+    {
+      "actor": "r3_baseline",
+      "actor_shutdown_count": 19,
+      "actor_zero_gate_passed": false,
+      "episodes": 300,
+      "episodes_sha256": "b4338b7693e0f68c65a4446190b503e4c409922a2c65ed034c9640ff2ad69309",
+      "partner_shutdown_count": 8,
+      "report_sha256": "b9626cfcbad6d29f4cebb274f90ca5551e3366c953622a70023291ba4cc1f429",
+      "suite": "original",
+      "team_shutdown_count": 27
+    },
+    {
+      "actor": "r3_baseline",
+      "actor_shutdown_count": 49,
+      "actor_zero_gate_passed": false,
+      "episodes": 384,
+      "episodes_sha256": "aca41d43f3af1ad8d3ec094813a1ada4f59055a9a454cd2412762db47f275041",
+      "partner_shutdown_count": 5,
+      "report_sha256": "719661884b2ae7654acc830ca43084f47e68ff1206edda03dc384a431009061a",
+      "suite": "conflict",
+      "team_shutdown_count": 54
+    },
+    {
+      "actor": "r41_0050000",
+      "actor_shutdown_count": 53,
+      "actor_zero_gate_passed": false,
+      "episodes": 300,
+      "episodes_sha256": "79c4363b81c62d6e1dd421d0ce47bb50e63646a567d6775812a29fb910a43fcd",
+      "partner_shutdown_count": 7,
+      "report_sha256": "2d0a0e570903672b7d3e7c4b5d1feb579dfa637288fbc872d0dbee0ad713e12e",
+      "suite": "original",
+      "team_shutdown_count": 60
+    },
+    {
+      "actor": "r41_0050000",
+      "actor_shutdown_count": 43,
+      "actor_zero_gate_passed": false,
+      "episodes": 384,
+      "episodes_sha256": "56cc6140b1c02496bab7c1d77c34f2e49a09d1af735fa49cc7456c5c4a2986e1",
+      "partner_shutdown_count": 4,
+      "report_sha256": "9ff4cdb747255835683a15fe2354915e8436a6b8d4946e91db1ba4a2c33f5432",
+      "suite": "conflict",
+      "team_shutdown_count": 47
+    },
+    {
+      "actor": "r41_0100000",
+      "actor_shutdown_count": 35,
+      "actor_zero_gate_passed": false,
+      "episodes": 300,
+      "episodes_sha256": "b954cf0e2a386e35aa5c4fc596b0b0b330db717cecdd8b9d1d7dc1d2627a2da4",
+      "partner_shutdown_count": 5,
+      "report_sha256": "16a41c2cc93798fd85b8e00307cf8de38c08c67a9188d8fc4c14ee8711171b0e",
+      "suite": "original",
+      "team_shutdown_count": 40
+    },
+    {
+      "actor": "r41_0100000",
+      "actor_shutdown_count": 26,
+      "actor_zero_gate_passed": false,
+      "episodes": 384,
+      "episodes_sha256": "afb1cdf8d281ad2520edf58bc6d76eddae4b4e1e3f62361f9c1a41d2a4fe7dd5",
+      "partner_shutdown_count": 4,
+      "report_sha256": "ad73aca16c7f3131bfd39e9bf68f35d6054cf0ec705a980a795e17d739e70e79",
+      "suite": "conflict",
+      "team_shutdown_count": 30
+    },
+    {
+      "actor": "r41_0150000",
+      "actor_shutdown_count": 63,
+      "actor_zero_gate_passed": false,
+      "episodes": 300,
+      "episodes_sha256": "0c1350e1bd72fe9487e3b869f05cf4280da88eb0f2fc9e5cc484db74e67d1dcc",
+      "partner_shutdown_count": 4,
+      "report_sha256": "a291fa9e5378f3c70ad5577cc761d155132ad84e1748727344ef5f9028f87108",
+      "suite": "original",
+      "team_shutdown_count": 67
+    },
+    {
+      "actor": "r41_0150000",
+      "actor_shutdown_count": 25,
+      "actor_zero_gate_passed": false,
+      "episodes": 384,
+      "episodes_sha256": "e33ac9b3f8fba0b223103e499b7e0cc90a293982d5150c492df73e0046b019d7",
+      "partner_shutdown_count": 6,
+      "report_sha256": "25e4013c716be8717b015174a283b1fb7b071ae5210843339a5cea94cc2e2d68",
+      "suite": "conflict",
+      "team_shutdown_count": 31
+    },
+    {
+      "actor": "r41_0200000",
+      "actor_shutdown_count": 54,
+      "actor_zero_gate_passed": false,
+      "episodes": 300,
+      "episodes_sha256": "084be9b762188b053b8141b1018bd58d8238e0a06d254cdbd2f485493fd5267a",
+      "partner_shutdown_count": 4,
+      "report_sha256": "6e068dfc5908d0413f4dacec415798228acf7062a73cbba796eed4a6fa08845d",
+      "suite": "original",
+      "team_shutdown_count": 58
+    },
+    {
+      "actor": "r41_0200000",
+      "actor_shutdown_count": 40,
+      "actor_zero_gate_passed": false,
+      "episodes": 384,
+      "episodes_sha256": "e50f863e0fd375ed2c7d41087ff7f3b3f21aff636cfc8ea1c02be752fc2b6653",
+      "partner_shutdown_count": 6,
+      "report_sha256": "136552e038be9e470c35b77cecbf3b6ab2f42cbd5f141ff392b01bc74b0e96eb",
+      "suite": "conflict",
+      "team_shutdown_count": 46
+    },
+    {
+      "actor": "r41_0250000",
+      "actor_shutdown_count": 61,
+      "actor_zero_gate_passed": false,
+      "episodes": 300,
+      "episodes_sha256": "ccfc1d34f3649c7012332d32395ba43759b1357f1761dc2d61ed77a6015324af",
+      "partner_shutdown_count": 11,
+      "report_sha256": "4a39dc1394e3b52cb2119e0bdd5c2b60fa8c4d887a07809dcce479d81626d812",
+      "suite": "original",
+      "team_shutdown_count": 72
+    },
+    {
+      "actor": "r41_0250000",
+      "actor_shutdown_count": 40,
+      "actor_zero_gate_passed": false,
+      "episodes": 384,
+      "episodes_sha256": "b39f195a595764c410c860eb87482db4c4e1aa3b36b921608b62dbb5b68494c1",
+      "partner_shutdown_count": 2,
+      "report_sha256": "278ebb629bae6cde6c4db7dabd30f7143a2326cb05a8569e580f6436158264d5",
+      "suite": "conflict",
+      "team_shutdown_count": 42
+    },
+    {
+      "actor": "r41_0300000",
+      "actor_shutdown_count": 44,
+      "actor_zero_gate_passed": false,
+      "episodes": 300,
+      "episodes_sha256": "5788f1f97200de8d99cbf1a9ab81b0e0f2aecd8e055614b5376e98b6e3dcdfd2",
+      "partner_shutdown_count": 4,
+      "report_sha256": "c84650bb191cefe8c77c9c3c827668f8713794a88aeeaa855517bf4f627d258d",
+      "suite": "original",
+      "team_shutdown_count": 48
+    },
+    {
+      "actor": "r41_0300000",
+      "actor_shutdown_count": 50,
+      "actor_zero_gate_passed": false,
+      "episodes": 384,
+      "episodes_sha256": "584de0a9ce4c44da054613a483d03621381bae31935423b22b76a1d122a6328a",
+      "partner_shutdown_count": 5,
+      "report_sha256": "bb51645a67be6c272e2e4d74f1a4db35ce926d14438e0621416411ff848bc646",
+      "suite": "conflict",
+      "team_shutdown_count": 55
+    },
+    {
+      "actor": "r41_0350000",
+      "actor_shutdown_count": 60,
+      "actor_zero_gate_passed": false,
+      "episodes": 300,
+      "episodes_sha256": "f44d1d586261c9b801cc6e7b5347ed71ce0cdd5d70e32270d1cccaed21f2ba24",
+      "partner_shutdown_count": 4,
+      "report_sha256": "5a26e15101d308863a9d5a794718244c55d529369cabbf6386a8e2d18f16bd4b",
+      "suite": "original",
+      "team_shutdown_count": 64
+    },
+    {
+      "actor": "r41_0350000",
+      "actor_shutdown_count": 49,
+      "actor_zero_gate_passed": false,
+      "episodes": 384,
+      "episodes_sha256": "5573fd6d339a0880606613f5e990298a2892f1feda219b20cc5ee36ee56b6c68",
+      "partner_shutdown_count": 9,
+      "report_sha256": "1fea96323aa8711368e0eaee4a6450147b149b75f4352b80b35b391a137fe871",
+      "suite": "conflict",
+      "team_shutdown_count": 58
+    }
+  ],
+  "sources": {
+    "backend/training/warehouse_r41_active_evaluation.py": "c75194254e46e5aa224cbde4979a844797bc2a9f8f03ab318b1e199f60fa87e5",
+    "backend/training/warehouse_r4_active_evaluation.py": "40b66fa2435fc1bc58534e66ce09837f76ab5ef8a4a8992c0c2d5a3b346b04a3",
+    "env/warehouse/transition_outcome.py": "b670ab20794a87cb5de7ee48f2f2f7b30744203f984cd87d1ad5258bf3c962b7",
+    "tests/test_warehouse_r41_energy_gate_semantics.py": "4e248d4fd5d5ac03d5dc2626f804bde0257f3dc101e604ebdf532c588c2892ed"
+  },
+  "status": "passed_consistency_no_attribution_bug",
+  "team_total_is_not_actor_gate": true,
+  "version": "warehouse-r41-energy-gate-audit.v1"
+}

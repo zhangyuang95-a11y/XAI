@@ -134,8 +134,17 @@ button:not(:disabled):hover { border-color: var(--purple); transform: translateY
 .agreement { display: flex; gap: 9px; align-items: flex-start; margin: 14px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .agreement input { width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--purple); }
 #operationPanel { padding-top: 2px; }
-#operationPanel h3, #questionnairePanel h3, #completedPanel h3 { margin: 7px 0; font-size: 17px; }
+#operationPanel h3, #instructionsPanel h3, #questionnairePanel h3, #completedPanel h3 { margin: 7px 0; font-size: 17px; }
+.instructions-panel { padding-top: 2px; }
+.tutorial-note { margin: 12px 0; padding: 9px 11px; border: 1px solid rgba(101,88,232,.22); border-radius: 10px; color: #5145c7; background: #f5f3ff; font-size: 12px; line-height: 1.5; }
+.tutorial-progress { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: center; margin: 15px 0 11px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }
+.tutorial-progress input { width: 100%; accent-color: var(--purple); }
+.tutorial-progress strong { min-width: 58px; color: var(--muted); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.tutorial-frame-controls { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 7px; margin-bottom: 12px; }
+.tutorial-frame-controls button { min-width: 0; padding: 0 8px; font-size: 12px; }
 .public-rules { margin: 10px 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: var(--panel-2); font-size: 12px; }
+.tutorial-rules { margin: 9px 0 2px; padding-left: 19px; color: var(--muted); font-size: 12px; line-height: 1.48; }
+.tutorial-rules li { margin: 4px 0; padding-left: 2px; }
 summary { cursor: pointer; }
 .action-pad { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 7px; margin: 16px 0; }
 .action-pad button { min-width: 0; min-height: 68px; padding: 8px 4px; border-color: var(--line); background: var(--panel-2); }
@@ -192,5 +201,6 @@ dd { margin: 4px 0; overflow-wrap: anywhere; font: 11px/1.5 ui-monospace,monospa
   .public-history { grid-template-columns: 1fr; gap: 5px; }
   .public-history p { white-space: normal; }
   .detail-grid, .button-row, .preset-question-list { grid-template-columns: 1fr; }
+  .tutorial-frame-controls { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .action-pad { grid-template-columns: repeat(5,minmax(54px,1fr)); overflow-x: auto; padding-bottom: 4px; }
 }

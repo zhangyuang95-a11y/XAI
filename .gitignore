@@ -16,3 +16,20 @@ output/*
 !output/.gitignore
 !output/deployment/
 !output/deployment/**
+
+# Deployment artifacts that may contain credentials or participant data stay
+# private even under the otherwise public output/deployment allowlist.
+.env
+.env.*
+!.env.example
+*.env
+*.b64
+*.pem
+*.key
+*.sqlite
+*.sqlite3
+*.db
+output/deployment/**/*secret*
+output/deployment/**/*participant*
+output/deployment/**/*.jsonl
+output/deployment/**/*.csv

@@ -23,6 +23,8 @@ def test_v4_contract_is_program_blind_and_claim_burns_v3_internally():
     assert contract["final_labels_used_for_selection"] is False
     assert contract["external_retired_final_registries"] == list(
         subject.EXTERNAL_RETIRED_VERSIONS)
+    assert contract["external_retired_final_sha256"] == dict(
+        sorted(subject.EXPECTED_RETIRED_HOLDOUT_SHA256.items()))
     assert contract["internal_v3_exclusion_registry"] == subject.V3_TOMBSTONE_VERSION
     assert subject.RETIRED_VERSIONS == subject.EXTERNAL_RETIRED_VERSIONS
 
@@ -40,6 +42,20 @@ def test_holdout_has_no_program_import_cli_or_public_writer_export():
                    for module in imported)
     assert not hasattr(subject, "main")
     assert "build" not in subject.__all__
+
+
+def test_holdout_source_closure_binds_transitive_selection_and_physics():
+    sources = subject.producer_sources()
+    assert {
+        "backend/training/warehouse_r41_diagnostic_workload_screen.py",
+        "backend/training/warehouse_r41_diagnostic_fresh_final_holdout_v3.py",
+        "backend/training/warehouse_r41_diagnostic_conflict_scenarios.py",
+        "backend/training/warehouse_native_common.py",
+        "env/warehouse/transition_outcome.py",
+        "env/warehouse_native/environment.py",
+    }.issubset(sources)
+    assert "core/__init__.py" in sources
+    assert not any("admission" in path or "release" in path for path in sources)
 
 
 def _rows(path, observations, fingerprints, *, corrupt=False):
@@ -131,6 +147,23 @@ def test_private_salt_uses_domain_separated_commitment(tmp_path, monkeypatch):
         subject._read_committed_salt(path)
 
 
+def test_claim_phase_partial_payload_never_gets_final_name(tmp_path, monkeypatch):
+    marker = tmp_path / "holdout_started.json"
+
+    def partial_then_fail(stream, raw):
+        stream.write(raw[: max(1, len(raw) // 2)])
+        stream.flush()
+        raise OSError("synthetic phase payload failure")
+
+    monkeypatch.setattr(subject, "_write_phase_payload", partial_then_fail)
+    with pytest.raises(OSError, match="payload failure"):
+        subject._claim_marker(tmp_path, marker.name, {
+            "status": "started_no_retry", "campaign_key": "a" * 64,
+        })
+    assert not marker.exists()
+    assert not (tmp_path / ".holdout_started.json.partial").exists()
+
+
 def test_direct_writer_rejects_before_salt_or_final_input_access(monkeypatch):
     calls = []
 
@@ -163,8 +196,8 @@ def test_forged_ledger_claim_without_permanent_anchor_is_rejected(
     monkeypatch.setattr(subject, "HOLDOUT_SALT_COMMITMENT", "9" * 64)
     ledger = tmp_path / "ledger"
     anchor = tmp_path / "outside" / "permanent.anchor"
-    monkeypatch.setenv(subject.LEDGER_ENV, str(ledger))
-    monkeypatch.setenv(subject.PERMANENT_ANCHOR_ENV, str(anchor))
+    monkeypatch.setattr(subject, "DEFAULT_LEDGER_ROOT", ledger)
+    monkeypatch.setattr(subject, "DEFAULT_PERMANENT_ANCHOR", anchor)
     identity = subject._campaign_identity()
     key = subject.digest(identity)
     campaign = ledger / key
@@ -190,6 +223,47 @@ def test_forged_ledger_claim_without_permanent_anchor_is_rejected(
             claim, expected_claim_sha256=subject.file_hash(claim),
             expected_campaign_key=key,
             expected_candidate_identity_sha256=subject.digest(identity))
+
+
+def test_retired_registry_bytes_are_fixed_even_if_replacement_is_self_consistent(
+        tmp_path, monkeypatch):
+    retired_paths = [
+        ROOT / "output/warehouse_native/r41_diagnostic_fresh_final_holdout_v1_20260912/holdout.json",
+        ROOT / "output/warehouse_native/r41_diagnostic_fresh_final_holdout_v2_20260912/holdout.json",
+    ]
+    if not all(path.is_file() for path in retired_paths):
+        pytest.skip("retired local evidence is not present")
+    registries, bindings = subject._retired_registries(retired_paths)
+    assert [row["version"] for row in registries] == list(
+        subject.EXTERNAL_RETIRED_VERSIONS)
+    assert {version: value["file_sha256"] for version, value in bindings.items()} == (
+        subject.EXPECTED_RETIRED_HOLDOUT_SHA256)
+
+    replacement = json.loads(retired_paths[0].read_text(encoding="utf-8"))
+    replacement["attacker_self_consistent_note"] = "replacement"
+    replacement["content_sha256"] = subject.digest({
+        key: value for key, value in replacement.items() if key != "content_sha256"
+    })
+    replaced_path = tmp_path / "holdout-v1-replaced.json"
+    replaced_path.write_text(
+        subject.canonical(replacement) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="identity differs"):
+        subject._retired_registries([replaced_path, retired_paths[1]])
+
+
+def test_expansion_must_bind_the_same_fixed_retired_entities():
+    bindings = {
+        version: {"file_sha256": file_sha, "content_sha256": str(index) * 64}
+        for index, (version, file_sha) in enumerate(
+            subject.EXPECTED_RETIRED_HOLDOUT_SHA256.items(), start=1)
+    }
+    subject._validate_retired_expansion_bindings(
+        bindings, {"bindings": {"retired_holdouts": bindings}})
+    replacement = {version: dict(value) for version, value in bindings.items()}
+    replacement[subject.EXTERNAL_RETIRED_VERSIONS[0]]["file_sha256"] = "f" * 64
+    with pytest.raises(ValueError, match="fixed development expansion"):
+        subject._validate_retired_expansion_bindings(
+            replacement, {"bindings": {"retired_holdouts": replacement}})
 
 
 def test_retired_trace_closure_excludes_rejected_and_accepted_rows(monkeypatch):

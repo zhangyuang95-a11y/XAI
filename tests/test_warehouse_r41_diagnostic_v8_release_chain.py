@@ -7,11 +7,14 @@ import io
 import json
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 import zipfile
 
 import pytest
 
 from backend.training import warehouse_r41_diagnostic_admission_v6 as admission
+from backend.training import warehouse_r41_diagnostic_explanation_audit_v8 as audit
+from backend.training import warehouse_r41_diagnostic_fresh_final_holdout_v4 as holdout
 from backend.training import warehouse_r41_diagnostic_pair_weights_v8 as weights
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as rcpd
 from backend.training import warehouse_r41_diagnostic_release_receipt_v6 as receipt
@@ -459,6 +462,329 @@ def test_final_once_ledger_artifact_paths_are_external_and_redacted(
         admission._artifact_path(
             inside, "final-once attempt start",
             external_name="attempt_started.json",
+        )
+
+
+def test_admission_consumes_holdout_v4_four_field_v3_claim_interface(
+        monkeypatch):
+    monkeypatch.setattr(
+        holdout.legacy_v3, "_select",
+        lambda **kwargs: (
+            [{"fingerprint": "e" * 64, "seed": 7}],
+            [{"fingerprint": "e" * 64}],
+            {"accepted": 1},
+        ),
+    )
+    expected = admission._final_claim_binding(
+        campaign_key="a" * 64,
+        attempt_started_sha256="b" * 64,
+        candidate_identity_sha256="c" * 64,
+        candidate_authenticated_sha256="d" * 64,
+    )
+    tombstone = holdout._build_v3_tombstone(
+        runtime=object(), actor=object(), manifest={}, selected={},
+        legacy_development_hashes=set(), retired_registries=[],
+        claim_binding=expected,
+    )
+    admission._require_v3_claim_binding(
+        tombstone["claim_binding"], expected)
+    assert set(tombstone["claim_binding"]) == {
+        "campaign_key", "attempt_started_sha256",
+        "candidate_identity_sha256", "candidate_authenticated_sha256",
+    }
+
+    missing_authentication = dict(tombstone["claim_binding"])
+    missing_authentication.pop("candidate_authenticated_sha256")
+    with pytest.raises(ValueError, match="claim binding"):
+        admission._require_v3_claim_binding(
+            missing_authentication, expected)
+
+
+@pytest.mark.parametrize("changed", [
+    "candidate_authenticated_sha256",
+    "candidate_artifacts",
+    "candidate_artifacts_sha256",
+    "source_full_manifest_bindings",
+    "source_full_manifest_bindings_sha256",
+    "runtime_sources",
+    "runtime_sources_sha256",
+])
+def test_admission_consumes_complete_audit_v8_candidate_and_source_interface(
+        monkeypatch, changed):
+    full_manifest = {"manifest.py": "a" * 64}
+    runtime_sources = {"runtime.py": "b" * 64}
+    candidate_artifacts = {
+        filename: format(index + 3, "x") * 64
+        for index, filename in enumerate(
+            admission.final_once_api.CANDIDATE_ARTIFACT_KEYS)
+    }
+    monkeypatch.setattr(
+        audit, "diagnostic_runtime_sources", lambda: dict(runtime_sources))
+    runtime = SimpleNamespace(
+        source_full_manifest_bindings=dict(full_manifest))
+
+    # Construct the producer side from audit-v8's runtime-source interface,
+    # independently of admission's consumer helper.
+    produced = {
+        "candidate_authenticated_sha256": "c" * 64,
+        "candidate_artifacts": dict(sorted(candidate_artifacts.items())),
+        "candidate_artifacts_sha256": audit.digest(
+            dict(sorted(candidate_artifacts.items()))),
+        "source_full_manifest_bindings": dict(full_manifest),
+        "source_full_manifest_bindings_sha256": audit.digest(full_manifest),
+        "runtime_sources": audit.diagnostic_runtime_sources(),
+        "runtime_sources_sha256": audit.digest(
+            audit.diagnostic_runtime_sources()),
+    }
+    consumed = {
+        **admission._audit_candidate_bindings(
+            candidate_authenticated_sha256="c" * 64,
+            candidate_artifacts=candidate_artifacts,
+        ),
+        **admission._audit_runtime_source_bindings(runtime),
+    }
+    assert consumed == produced
+    expected = {"actor_sha256": admission.FIXED_ACTOR_SHA256, **consumed}
+    admission._require_exact_audit_bindings(dict(expected), expected)
+
+    mismatched = deepcopy(expected)
+    mismatched.pop(changed)
+    with pytest.raises(ValueError, match="external bindings"):
+        admission._require_exact_audit_bindings(mismatched, expected)
+
+
+@pytest.mark.parametrize("producer", [holdout, audit])
+def test_admission_requires_complete_recursive_producer_source_closure(
+        producer):
+    sources = producer.producer_sources()
+    own_path = Path(producer.__file__).resolve().relative_to(admission.ROOT).as_posix()
+    assert sources[own_path] == file_hash(Path(producer.__file__).resolve())
+    assert len(sources) > 1
+    admission._require_exact_producer_source_closure(
+        dict(sources), sources, label="fixture")
+
+    changed = dict(sources)
+    first = next(iter(changed))
+    changed[first] = "f" * 64 if changed[first] != "f" * 64 else "e" * 64
+    with pytest.raises(ValueError, match="producer source closure"):
+        admission._require_exact_producer_source_closure(
+            changed, sources, label="fixture")
+    missing = dict(sources)
+    missing.pop(first)
+    with pytest.raises(ValueError, match="producer source closure"):
+        admission._require_exact_producer_source_closure(
+            missing, sources, label="fixture")
+
+
+def test_final_once_fixed_paths_ignore_home_and_ledger_environment(
+        tmp_path, monkeypatch):
+    final_api = admission.final_once_api
+    expected_ledger = final_api.REGISTRY_ROOT.absolute()
+    expected_anchor = final_api.PERMANENT_ANCHOR.absolute()
+    monkeypatch.setenv("HOME", str(tmp_path / "substitute-home"))
+    monkeypatch.setenv(final_api.LEDGER_ENV, str(tmp_path / "substitute-ledger"))
+    monkeypatch.setenv(
+        final_api.PERMANENT_ANCHOR_ENV, str(tmp_path / "substitute-anchor"))
+    assert final_api._ledger_root() == expected_ledger
+    assert final_api._anchor_path() == expected_anchor
+    assert holdout._ledger_root() == expected_ledger
+    assert holdout._anchor_path() == expected_anchor
+
+    campaign_key = "a" * 64
+    admission._require_fixed_final_once_registry(
+        expected_ledger / campaign_key, campaign_key)
+    with pytest.raises(ValueError, match="permanent registry layout"):
+        admission._require_fixed_final_once_registry(
+            tmp_path / "substitute-ledger" / campaign_key, campaign_key)
+
+
+def test_release_receipt_reauthenticates_same_fixed_external_ledger(
+        tmp_path, monkeypatch):
+    final_api = admission.final_once_api
+    identity = {"version": "synthetic-final-campaign.v1"}
+    key = digest(identity)
+    ledger_root = tmp_path / "account-ledger"
+    registry = ledger_root / key
+    registry.mkdir(parents=True)
+    bindings = {
+        "final_once_campaign_key": key,
+        "final_once_identity_sha256": digest(identity),
+        "final_once_permanent_anchor_sha256": "f" * 64,
+    }
+    artifacts = {}
+    for index, (artifact_name, filename) in enumerate(
+            admission.FINAL_ONCE_LEDGER_ARTIFACTS.items()):
+        path = registry / filename
+        path.write_text(canonical({"index": index}) + "\n", encoding="utf-8")
+        value = file_hash(path)
+        bindings[artifact_name + "_sha256"] = value
+        artifacts[artifact_name] = {
+            "path": "external/final_once_ledger/" + filename,
+            "sha256": value,
+        }
+    monkeypatch.setattr(final_api, "_campaign_identity", lambda: dict(identity))
+    monkeypatch.setattr(final_api, "campaign_key", lambda: key)
+    monkeypatch.setattr(final_api, "_ledger_root", lambda: ledger_root)
+
+    def read_completion(path, *, expected_completion_sha256,
+                        expected_identity):
+        assert path == registry
+        assert expected_completion_sha256 == bindings[
+            "final_once_attempt_completed_sha256"]
+        assert expected_identity == identity
+        return {"permanent_anchor_sha256": "f" * 64}
+
+    monkeypatch.setattr(final_api, "read_completion", read_completion)
+    monkeypatch.setenv("HOME", str(tmp_path / "substitute-home"))
+    value = {"bindings": bindings, "artifacts": artifacts}
+    receipt._validate_fixed_final_once_ledger(value)
+
+    redirected = deepcopy(value)
+    redirected["artifacts"]["final_once_attempt_started"]["path"] = (
+        str(tmp_path / "substitute-home" / "attempt_started.json"))
+    with pytest.raises(ValueError, match="external ledger differs"):
+        receipt._validate_fixed_final_once_ledger(redirected)
+
+
+def test_admission_pins_retired_v1_v2_to_expansion_file_and_content_hashes(
+        tmp_path, monkeypatch):
+    files = {}
+    hashes = {}
+    expected = {}
+    for index in (1, 2):
+        name = f"retired_fresh_final_holdout_v{index}"
+        version = f"warehouse-r41-diagnostic-fresh-final-holdout.v{index}"
+        payload = {"version": version, "status": "retired", "marker": index}
+        payload["content_sha256"] = digest(payload)
+        path = tmp_path / f"v{index}.json"
+        path.write_text(canonical(payload) + "\n", encoding="utf-8")
+        files[name] = path
+        hashes[name] = file_hash(path)
+        expected[version] = {
+            "file_sha256": hashes[name],
+            "content_sha256": payload["content_sha256"],
+        }
+    monkeypatch.setattr(admission, "EXPECTED_RETIRED_HOLDOUTS", expected)
+    expansion = {"bindings": {"retired_holdouts": deepcopy(expected)}}
+    assert admission._validate_retired_holdout_bindings(
+        files, hashes, expansion) == expected
+
+    # A replacement registry remains rejected even if an attacker also makes
+    # the supplied expansion binding internally self-consistent.
+    replacement = {
+        "version": "warehouse-r41-diagnostic-fresh-final-holdout.v1",
+        "status": "retired", "marker": "replacement",
+    }
+    replacement["content_sha256"] = digest(replacement)
+    files["retired_fresh_final_holdout_v1"].write_text(
+        canonical(replacement) + "\n", encoding="utf-8")
+    replacement_hashes = dict(hashes)
+    replacement_hashes["retired_fresh_final_holdout_v1"] = file_hash(
+        files["retired_fresh_final_holdout_v1"])
+    replacement_bindings = deepcopy(expected)
+    replacement_bindings[replacement["version"]] = {
+        "file_sha256": replacement_hashes["retired_fresh_final_holdout_v1"],
+        "content_sha256": replacement["content_sha256"],
+    }
+    with pytest.raises(ValueError, match="fixed development expansion"):
+        admission._validate_retired_holdout_bindings(
+            files, replacement_hashes,
+            {"bindings": {"retired_holdouts": replacement_bindings}},
+        )
+
+
+def test_admission_binds_final_candidate_to_strict_refit_marker_bytes(tmp_path):
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    by_filename = {}
+    for filename in (
+            "program.json", "report.json", "rows.npz",
+            "prior_v7_report.json", "prior_v7_rows.npz",
+            "expansion_rows.npz", "fit_config.json"):
+        path = candidate / filename
+        path.write_bytes((filename + "\n").encode("ascii"))
+        by_filename[filename] = path
+    simple = {}
+    for name in ("actor", "protocol", "manifest", "designation",
+                 "selected_scenes"):
+        path = tmp_path / name
+        path.write_bytes((name + "\n").encode("ascii"))
+        simple[name] = path
+    singles = {
+        **simple,
+        "program": by_filename["program.json"],
+        "rcpd_report": by_filename["report.json"],
+        "candidate_prior_v7_report_json": by_filename["prior_v7_report.json"],
+        "candidate_prior_v7_rows_npz": by_filename["prior_v7_rows.npz"],
+        "candidate_expansion_rows_npz": by_filename["expansion_rows.npz"],
+        "candidate_fit_config_json": by_filename["fit_config.json"],
+    }
+    row_paths = [by_filename["rows.npz"]]
+    development_paths = []
+    for index, version in enumerate((
+            holdout.DEVELOPMENT_SUPPLEMENT_VERSION,
+            holdout.DEVELOPMENT_EXPANSION_VERSION)):
+        path = tmp_path / f"development-{index}.json"
+        path.write_text(canonical({"version": version}) + "\n", encoding="utf-8")
+        development_paths.append(path)
+    artifacts = admission.final_once_api._candidate_artifact_hashes(
+        singles, row_paths)
+    campaign_key = "a" * 64
+    identity_sha = "b" * 64
+    start_sha = "c" * 64
+    marker = {
+        "version": admission.final_once_api.VERSION
+            + ".candidate-authentication.v1",
+        "status": "passed_strict_reader_and_refit",
+        "campaign_key": campaign_key,
+        "candidate_identity_sha256": identity_sha,
+        "attempt_started_sha256": start_sha,
+        "candidate_artifacts": artifacts,
+        "candidate_artifacts_sha256": digest(artifacts),
+        "rcpd_report_file_sha256": artifacts["report.json"],
+        "program_file_sha256": artifacts["program.json"],
+        "rows_file_sha256": artifacts["rows.npz"],
+        "prior_v7_report_file_sha256": artifacts["prior_v7_report.json"],
+        "prior_v7_rows_file_sha256": artifacts["prior_v7_rows.npz"],
+        "expansion_rows_file_sha256": artifacts["expansion_rows.npz"],
+        "fit_config_file_sha256": artifacts["fit_config.json"],
+        "actor_file_sha256": file_hash(simple["actor"]),
+        "protocol_file_sha256": file_hash(simple["protocol"]),
+        "manifest_file_sha256": file_hash(simple["manifest"]),
+        "designation_file_sha256": file_hash(simple["designation"]),
+        "selected_scenes_file_sha256": file_hash(simple["selected_scenes"]),
+        "development_registries": {
+            json.loads(path.read_text())["version"]: file_hash(path)
+            for path in development_paths
+        },
+        "require_passed": True, "refit": True, "formal_ready": False,
+    }
+    marker_path = tmp_path / "candidate_authenticated.json"
+    marker_path.write_text(canonical(marker) + "\n", encoding="utf-8")
+    files = {"final_once_candidate_authenticated": marker_path}
+    hashes = {
+        "final_once_candidate_authenticated": file_hash(marker_path),
+        "final_once_attempt_started": start_sha,
+        "actor": file_hash(simple["actor"]),
+        "protocol": file_hash(simple["protocol"]),
+        "conflict_manifest": file_hash(simple["manifest"]),
+        "diagnostic_designation": file_hash(simple["designation"]),
+        "selected_scenes": file_hash(simple["selected_scenes"]),
+    }
+    assert admission._validate_candidate_authentication_marker(
+        marker, files=files, hashes=hashes, singles=singles,
+        row_paths=row_paths, development_paths=development_paths,
+        campaign_key=campaign_key,
+        candidate_identity_sha256=identity_sha,
+    ) == artifacts
+
+    by_filename["program.json"].write_bytes(b"post-claim replacement\n")
+    with pytest.raises(ValueError, match="candidate artifacts changed"):
+        admission._validate_candidate_authentication_marker(
+            marker, files=files, hashes=hashes, singles=singles,
+            row_paths=row_paths, development_paths=development_paths,
+            campaign_key=campaign_key,
+            candidate_identity_sha256=identity_sha,
         )
 
 

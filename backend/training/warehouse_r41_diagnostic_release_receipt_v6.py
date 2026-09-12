@@ -13,7 +13,7 @@ import zipfile
 
 from backend.training import warehouse_r41_diagnostic_admission_v6 as admission_api
 from backend.training import warehouse_r41_diagnostic_designation as designation_api
-from backend.training.warehouse_native_common import canonical, file_hash
+from backend.training.warehouse_native_common import canonical, digest, file_hash
 from ui import warehouse_alignment_r41_diagnostic_release_v8 as release
 
 
@@ -137,6 +137,46 @@ def _validate_rollback(path: Path, expected_sha256: str) -> None:
             raise ValueError("R3 rollback artifact changed: " + name)
 
 
+def _validate_fixed_final_once_ledger(admission: Mapping[str, Any]) -> None:
+    """Re-authenticate the fixed account ledger referenced by admission.
+
+    The external ledger path is deliberately derived from final-once itself;
+    neither ``HOME`` nor a receipt argument may redirect this check.
+    """
+    bindings = admission.get("bindings")
+    artifacts = admission.get("artifacts")
+    if not isinstance(bindings, Mapping) or not isinstance(artifacts, Mapping):
+        raise ValueError("Diagnostic admission final-once registry is missing")
+    final_api = admission_api.final_once_api
+    identity = final_api._campaign_identity()
+    key = final_api.campaign_key()
+    if (bindings.get("final_once_campaign_key") != key
+            or bindings.get("final_once_identity_sha256") != digest(identity)):
+        raise ValueError("Diagnostic admission final-once campaign differs")
+    registry = final_api._ledger_root() / key
+    for artifact_name, filename in admission_api.FINAL_ONCE_LEDGER_ARTIFACTS.items():
+        record = artifacts.get(artifact_name)
+        binding_name = artifact_name + "_sha256"
+        expected_path = "external/final_once_ledger/" + filename
+        target = registry / filename
+        if (not isinstance(record, Mapping)
+                or record.get("path") != expected_path
+                or record.get("sha256") != bindings.get(binding_name)
+                or target.is_symlink() or not target.is_file()
+                or target.resolve() != target
+                or file_hash(target) != bindings.get(binding_name)):
+            raise ValueError("Diagnostic admission external ledger differs: " + filename)
+    completion = final_api.read_completion(
+        registry,
+        expected_completion_sha256=bindings[
+            "final_once_attempt_completed_sha256"],
+        expected_identity=identity,
+    )
+    if (completion.get("permanent_anchor_sha256")
+            != bindings.get("final_once_permanent_anchor_sha256")):
+        raise ValueError("Diagnostic admission permanent final anchor differs")
+
+
 def _validate_inputs(*, admission_path: Path, designation_path: Path,
                      package_path: Path, base64_path: Path,
                      rollback_path: Path, expected_admission_sha256: str,
@@ -177,6 +217,7 @@ def _validate_inputs(*, admission_path: Path, designation_path: Path,
     )
     identities, parent = manifest["identities"], manifest["parent"]
     bindings = admission.get("bindings", {})
+    _validate_fixed_final_once_ledger(admission)
     expected_parent = {
         "version": admission["version"], "status": admission["status"],
         "diagnostic_admission_sha256": expected_admission_sha256,

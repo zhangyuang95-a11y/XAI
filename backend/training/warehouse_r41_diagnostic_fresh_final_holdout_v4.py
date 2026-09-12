@@ -24,6 +24,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 from typing import Any, Mapping, Sequence
 
@@ -31,6 +32,7 @@ import numpy as np
 
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 from backend.training.warehouse_native_evaluation import critical_groups
+from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training.warehouse_r41_diagnostic_conflict_scenarios import (
     FAMILY_IDS,
     VERSION as MANIFEST_VERSION,
@@ -70,11 +72,12 @@ HOLDOUT_SALT_COMMITMENT = (
 )
 LEDGER_ENV = "WAREHOUSE_R41_FINAL_LEDGER_DIR"
 PERMANENT_ANCHOR_ENV = "WAREHOUSE_R41_FINAL_PERMANENT_ANCHOR"
+_ACCOUNT_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
 DEFAULT_LEDGER_ROOT = (
-    Path.home() / ".local/state/policylens/warehouse_r41_diagnostic_v8_final_once"
+    _ACCOUNT_HOME / ".local/state/policylens/warehouse_r41_diagnostic_v8_final_once"
 )
 DEFAULT_PERMANENT_ANCHOR = (
-    Path.home() / ".local/state/policylens/warehouse_r41_diagnostic_v8_final_once.anchor"
+    _ACCOUNT_HOME / ".local/state/policylens/warehouse_r41_diagnostic_v8_final_once.anchor"
 )
 EXPECTED_ACTOR_SHA256 = (
     "4ac2ba7782b5556761edaab22bfad50c831c1d8b41b174245e2d81486287ff6b"
@@ -94,6 +97,18 @@ EXPECTED_EXPANSION_REGISTRY_SHA256 = (
 EXPECTED_SELECTED_SCENES_SHA256 = (
     "30accfb01d5e022fc42734622cc38481bde639ba9ed2edfb789ddbdf8a6f4fd8"
 )
+EXPECTED_RETIRED_HOLDOUT_SHA256 = {
+    "warehouse-r41-diagnostic-fresh-final-holdout.v1": (
+        "6c3ff25f9917451815979173d98881fe5e5e98258b514d199d50ee362d2746c2"
+    ),
+    "warehouse-r41-diagnostic-fresh-final-holdout.v2": (
+        "7d72424744eea7547516cffe414c15578802c7204b90bdf1b129a1e9acfbf17b"
+    ),
+}
+CANDIDATE_ARTIFACT_NAMES = frozenset({
+    "program.json", "report.json", "rows.npz", "prior_v7_report.json",
+    "prior_v7_rows.npz", "expansion_rows.npz", "fit_config.json",
+})
 MAX_JSON_BYTES = 512 * 1024 * 1024
 MAX_NPZ_BYTES = 2 * 1024 * 1024 * 1024
 ROOT = Path(__file__).resolve().parents[2]
@@ -125,6 +140,8 @@ def contract() -> dict[str, Any]:
             DEVELOPMENT_EXPANSION_VERSION,
         ],
         "external_retired_final_registries": list(EXTERNAL_RETIRED_VERSIONS),
+        "external_retired_final_sha256": dict(
+            sorted(EXPECTED_RETIRED_HOLDOUT_SHA256.items())),
         "internal_v3_exclusion_registry": V3_TOMBSTONE_VERSION,
         "program_access": False,
         "program_predictions_access": False,
@@ -139,34 +156,25 @@ def contract() -> dict[str, Any]:
 
 
 def producer_sources() -> dict[str, str]:
-    paths = (
-        Path(__file__).resolve(),
-        ROOT / "backend/training/warehouse_native_common.py",
-        ROOT / "backend/training/warehouse_native_evaluation.py",
-        ROOT / "backend/training/warehouse_r41_diagnostic_conflict_scenarios.py",
-        ROOT / "backend/training/warehouse_r41_diagnostic_workload_screen.py",
-        Path(legacy_v3.__file__).resolve(),
-        ROOT / "backend/warehouse_r41_diagnostic_online_runtime.py",
-        ROOT / "env/warehouse_native/partners.py",
-    )
-    result = {}
-    for path in paths:
-        path = path.resolve()
-        if not path.is_file() or path.is_symlink():
-            raise ValueError("Fresh-final producer source is unsafe")
-        result[path.relative_to(ROOT.resolve()).as_posix()] = file_hash(path)
-    return dict(sorted(result.items()))
+    # Use the real CLI import closure, including package initializers and their
+    # import-time effects.
+    return dict(sorted(local_source_hashes((Path(__file__).resolve(),)).items()))
 
 
 def _ledger_root() -> Path:
-    raw = os.environ.get(LEDGER_ENV)
-    return Path(raw).expanduser().absolute() if raw else DEFAULT_LEDGER_ROOT.absolute()
+    # Environment variables are intentionally ignored.  A caller-selectable
+    # ledger would let the same campaign claim a fresh directory and retry.
+    path = DEFAULT_LEDGER_ROOT.expanduser().absolute()
+    if path == ROOT.resolve() or path.is_relative_to(ROOT.resolve()):
+        raise ValueError("Final-once ledger must be at its fixed repository-external path")
+    return path
 
 
 def _anchor_path() -> Path:
-    raw = os.environ.get(PERMANENT_ANCHOR_ENV)
-    return (Path(raw).expanduser().absolute()
-            if raw else DEFAULT_PERMANENT_ANCHOR.absolute())
+    path = DEFAULT_PERMANENT_ANCHOR.expanduser().absolute()
+    if path == ROOT.resolve() or path.is_relative_to(ROOT.resolve()):
+        raise ValueError("Final-once anchor must be at its fixed repository-external path")
+    return path
 
 
 def _campaign_identity() -> dict[str, Any]:
@@ -181,6 +189,8 @@ def _campaign_identity() -> dict[str, Any]:
         "development_expansion_registry_sha256": (
             EXPECTED_EXPANSION_REGISTRY_SHA256
         ),
+        "retired_holdout_sha256": dict(
+            sorted(EXPECTED_RETIRED_HOLDOUT_SHA256.items())),
         "holdout_version": VERSION,
         "selection_salt_commitment": HOLDOUT_SALT_COMMITMENT,
     }
@@ -211,6 +221,7 @@ def _claim_receipt(
     candidate_marker_path = path.parent / "candidate_authenticated.json"
     candidate_marker = _read(
         candidate_marker_path, "strict candidate authentication phase")
+    candidate_artifacts = candidate_marker.get("candidate_artifacts")
     if (receipt.get("version") != FINAL_ONCE_VERSION
             or receipt.get("status") != "started_irrevocable_no_retry"
             or receipt.get("key") != fixed_key
@@ -236,6 +247,26 @@ def _claim_receipt(
                 != expected_claim_sha256
             or candidate_marker.get("require_passed") is not True
             or candidate_marker.get("refit") is not True
+            or not isinstance(candidate_artifacts, Mapping)
+            or set(candidate_artifacts) != CANDIDATE_ARTIFACT_NAMES
+            or any(_HEX.fullmatch(str(value)) is None
+                   for value in candidate_artifacts.values())
+            or candidate_marker.get("candidate_artifacts_sha256")
+                != digest(dict(candidate_artifacts))
+            or candidate_marker.get("program_file_sha256")
+                != candidate_artifacts.get("program.json")
+            or candidate_marker.get("rcpd_report_file_sha256")
+                != candidate_artifacts.get("report.json")
+            or candidate_marker.get("rows_file_sha256")
+                != candidate_artifacts.get("rows.npz")
+            or candidate_marker.get("prior_v7_report_file_sha256")
+                != candidate_artifacts.get("prior_v7_report.json")
+            or candidate_marker.get("prior_v7_rows_file_sha256")
+                != candidate_artifacts.get("prior_v7_rows.npz")
+            or candidate_marker.get("expansion_rows_file_sha256")
+                != candidate_artifacts.get("expansion_rows.npz")
+            or candidate_marker.get("fit_config_file_sha256")
+                != candidate_artifacts.get("fit_config.json")
             or candidate_marker.get("actor_file_sha256") != EXPECTED_ACTOR_SHA256
             or candidate_marker.get("protocol_file_sha256")
                 != EXPECTED_PROTOCOL_SHA256
@@ -255,7 +286,7 @@ def _claim_receipt(
 
 def _claim_marker(directory: Path, name: str, value: Mapping[str, Any]) -> Path:
     path = directory / name
-    _write_new(path, dict(value))
+    _write_phase_new(path, dict(value))
     return path
 
 
@@ -322,6 +353,52 @@ def _write_new(path: Path, value: Any) -> None:
         stream.write(raw)
         stream.flush()
         os.fsync(stream.fileno())
+
+
+def _write_phase_payload(stream: Any, raw: bytes) -> None:
+    """Finish the private phase payload before it can acquire its final name."""
+    stream.write(raw)
+    stream.flush()
+    os.fsync(stream.fileno())
+
+
+def _link_no_replace(source: Path, target: Path) -> None:
+    """Atomically publish ``source`` and fail if ``target`` already exists."""
+    os.link(source, target, follow_symlinks=False)
+
+
+def _write_phase_new(path: Path, value: Any) -> None:
+    """Publish a complete claim phase without exposing partial final bytes."""
+    if (path.exists() or path.is_symlink() or path.parent.is_symlink()
+            or path.parent.resolve() != path.parent.absolute()):
+        raise ValueError("Fresh-final phase destination is unsafe")
+    raw = (canonical(value) + "\n").encode("utf-8")
+    temporary = path.parent / ("." + path.name + ".partial")
+    descriptor = None
+    temporary_created = False
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        temporary_created = True
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = None
+            _write_phase_payload(stream, raw)
+        _link_no_replace(temporary, path)
+        temporary.unlink()
+        temporary_created = False
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temporary_created:
+            temporary.unlink(missing_ok=True)
 
 
 def _observation_hash(observation: Any) -> str:
@@ -447,7 +524,9 @@ def _retired_registries(
         version = value.get("version")
         if version not in EXTERNAL_RETIRED_VERSIONS or version in values:
             raise ValueError("Exactly one retired v1 and v2 registry is required")
-        if (not _content_valid(value) or value.get("program_access") is not False
+        if (file_hash(path) != EXPECTED_RETIRED_HOLDOUT_SHA256[str(version)]
+                or not _content_valid(value)
+                or value.get("program_access") is not False
                 or value.get("contract", {}).get("program_predictions_access") is not False
                 or value.get("statistics", {}).get("accepted") != TOTAL_SCENES
                 or value.get("statistics", {}).get("public_observation_overlap") != 0):
@@ -471,6 +550,23 @@ def _retired_registries(
         "content_sha256": values[version][0]["content_sha256"],
     } for version in EXTERNAL_RETIRED_VERSIONS}
     return registries, bindings
+
+
+def _validate_retired_expansion_bindings(
+    retired_bindings: Mapping[str, Mapping[str, str]],
+    expansion: Mapping[str, Any],
+) -> None:
+    expansion_bindings = expansion.get("bindings")
+    frozen = (expansion_bindings.get("retired_holdouts")
+              if isinstance(expansion_bindings, Mapping) else None)
+    if (dict(retired_bindings) != frozen
+            or not isinstance(frozen, Mapping)
+            or set(frozen) != set(EXTERNAL_RETIRED_VERSIONS)
+            or any(frozen[version].get("file_sha256")
+                   != EXPECTED_RETIRED_HOLDOUT_SHA256[version]
+                   for version in EXTERNAL_RETIRED_VERSIONS)):
+        raise ValueError(
+            "Retired v1/v2 bytes must match the fixed development expansion")
 
 
 def _exact_final_workload_observations(
@@ -814,6 +910,7 @@ def build(
     }
     supplement = development_values[DEVELOPMENT_SUPPLEMENT_VERSION]
     expansion = development_values[DEVELOPMENT_EXPANSION_VERSION]
+    _validate_retired_expansion_bindings(retired_bindings, expansion)
     if (candidate_marker.get("development_registries") != {
             version: binding["file_sha256"]
             for version, binding in sorted(development_bindings.items())

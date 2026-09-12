@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import pwd
 import shutil
 
 import pytest
@@ -33,13 +34,26 @@ def test_contract_is_irrevocable_fixed_campaign_and_program_independent():
     assert contract["program_fits"] == 0
     assert contract["actor_updates"] == 0
     assert "development_expansion_registry_sha256" in contract["campaign_key_inputs"]
+    assert "retired_holdout_sha256" in contract["campaign_key_inputs"]
+    assert contract["caller_selectable_ledger_or_anchor"] is False
     assert {"program", "rcpd_report", "producer_sources", "output"}.issubset(
         contract["campaign_key_excludes"])
     identity = subject._campaign_identity()
     assert identity == subject.holdout_api._campaign_identity()
     assert identity["development_expansion_registry_sha256"] == (
         subject.EXPECTED_EXPANSION_REGISTRY_SHA256)
+    assert identity["retired_holdout_sha256"] == dict(
+        sorted(subject.EXPECTED_RETIRED_HOLDOUT_SHA256.items()))
     assert subject.campaign_key() == subject.digest(identity)
+    sources = subject.producer_sources()
+    assert {
+        "backend/training/warehouse_r41_diagnostic_final_once_v8.py",
+        "backend/training/warehouse_r41_diagnostic_fresh_final_holdout_v4.py",
+        "backend/training/warehouse_r41_diagnostic_explanation_audit_v8.py",
+        "backend/training/warehouse_r41_diagnostic_rcpd_v8.py",
+        "env/warehouse/transition_outcome.py",
+    }.issubset(sources)
+    assert "core/__init__.py" in sources
 
 
 def test_placeholder_commitment_refuses_before_claim(monkeypatch):
@@ -105,6 +119,39 @@ def test_deleting_output_and_ledger_or_changing_sources_does_not_refund(
         subject._claim(identity, output=tmp_path / "new-output")
 
 
+def test_two_caller_environment_paths_cannot_create_two_campaign_claims(
+        tmp_path, monkeypatch):
+    registry_root, anchor = _ledger(tmp_path, monkeypatch)
+    identity = subject._campaign_identity()
+    attacker_ledger_a = tmp_path / "attacker-a" / "ledger"
+    attacker_anchor_a = tmp_path / "attacker-a" / "anchor"
+    monkeypatch.setenv(subject.LEDGER_ENV, str(attacker_ledger_a))
+    monkeypatch.setenv(subject.PERMANENT_ANCHOR_ENV, str(attacker_anchor_a))
+    monkeypatch.setenv("HOME", str(tmp_path / "attacker-a" / "home"))
+    _, registry, _ = subject._claim(identity, output=tmp_path / "out-a")
+    assert registry == registry_root / subject.campaign_key()
+    assert anchor.is_file()
+    assert not attacker_ledger_a.exists() and not attacker_anchor_a.exists()
+
+    attacker_ledger_b = tmp_path / "attacker-b" / "ledger"
+    attacker_anchor_b = tmp_path / "attacker-b" / "anchor"
+    monkeypatch.setenv(subject.LEDGER_ENV, str(attacker_ledger_b))
+    monkeypatch.setenv(subject.PERMANENT_ANCHOR_ENV, str(attacker_anchor_b))
+    monkeypatch.setenv("HOME", str(tmp_path / "attacker-b" / "home"))
+    with pytest.raises(ValueError, match="already_reserved_no_retry"):
+        subject._claim(identity, output=tmp_path / "out-b")
+    assert not attacker_ledger_b.exists() and not attacker_anchor_b.exists()
+
+
+def test_default_registry_anchor_and_salt_use_account_home_not_home_env(
+        tmp_path, monkeypatch):
+    account_home = Path(pwd.getpwuid(subject.os.getuid()).pw_dir).resolve()
+    monkeypatch.setenv("HOME", str(tmp_path / "attacker-home"))
+    assert subject.holdout_api.DEFAULT_LEDGER_ROOT.is_relative_to(account_home)
+    assert subject.holdout_api.DEFAULT_PERMANENT_ANCHOR.is_relative_to(account_home)
+    assert subject.DEFAULT_SALT_FILE.is_relative_to(account_home)
+
+
 def test_input_paths_accept_only_v1_v2_and_one_candidate_directory(tmp_path):
     candidate = tmp_path / "candidate"; candidate.mkdir()
     paths = {}
@@ -152,21 +199,35 @@ def test_candidate_authentication_uses_same_directory_strict_refit(tmp_path, mon
     supplement = tmp_path / "supplement.json"
     supplement.write_text(json.dumps({
         "version": subject.holdout_api.DEVELOPMENT_SUPPLEMENT_VERSION}), encoding="utf-8")
-    expansion = tmp_path / "expansion.json"
-    expansion.write_text(json.dumps({
-        "version": subject.holdout_api.DEVELOPMENT_EXPANSION_VERSION}), encoding="utf-8")
     retired = []
+    retired_bindings = {}
     for version in subject.holdout_api.EXTERNAL_RETIRED_VERSIONS:
         path = tmp_path / (version + ".json")
-        path.write_text(json.dumps({"version": version}), encoding="utf-8")
+        content_sha = ("1" if not retired else "2") * 64
+        path.write_text(json.dumps({
+            "version": version, "content_sha256": content_sha}), encoding="utf-8")
         retired.append(path)
+        retired_bindings[version] = {
+            "file_sha256": subject.file_hash(path),
+            "content_sha256": content_sha,
+        }
+    expansion = tmp_path / "expansion.json"
+    expansion.write_text(json.dumps({
+        "version": subject.holdout_api.DEVELOPMENT_EXPANSION_VERSION,
+        "bindings": {"retired_holdouts": retired_bindings},
+    }), encoding="utf-8")
     monkeypatch.setattr(subject, "EXPECTED_EXPANSION_REGISTRY_SHA256",
                         subject.file_hash(expansion))
+    monkeypatch.setattr(subject, "EXPECTED_RETIRED_HOLDOUT_SHA256", {
+        version: values["file_sha256"]
+        for version, values in retired_bindings.items()
+    })
     bindings = {
         "prior_v7_report_file_sha256": "1" * 64,
         "expansion_rows_file_sha256": "2" * 64,
         "fit_config_file_sha256": "3" * 64,
         "expansion_registry_file_sha256": subject.file_hash(expansion),
+        "previous_development_file_sha256": subject.file_hash(supplement),
     }
     report = {
         "version": subject.audit_api.RCPD_VERSION,
@@ -191,11 +252,20 @@ def test_candidate_authentication_uses_same_directory_strict_refit(tmp_path, mon
         "actor": external["actor"], "protocol": external["protocol"],
         "manifest": external["manifest"], "designation": external["designation"],
         "program": files["program.json"], "rcpd_report": files["report.json"],
+        "candidate_prior_v7_report_json": files["prior_v7_report.json"],
+        "candidate_prior_v7_rows_npz": files["prior_v7_rows.npz"],
+        "candidate_expansion_rows_npz": files["expansion_rows.npz"],
+        "candidate_fit_config_json": files["fit_config.json"],
     }
-    authenticated, sources, developments = subject._authenticate_candidate_after_claim(
+    authenticated, sources, developments, candidate_artifacts = (
+        subject._authenticate_candidate_after_claim(
         singles=singles, development_paths=[supplement, expansion],
-        row_paths=[files["rows.npz"]], retired_paths=retired)
+        row_paths=[files["rows.npz"]], retired_paths=retired))
     assert authenticated == report and sources == {"source.py": "a" * 64}
+    assert candidate_artifacts == {
+        name: subject.file_hash(candidate / name)
+        for name in sorted(subject.CANDIDATE_ARTIFACT_KEYS)
+    }
     assert calls[0][0] == candidate
     assert calls[0][1]["require_passed"] is True
     assert calls[0][1]["refit"] is True
@@ -206,11 +276,21 @@ def test_candidate_authentication_uses_same_directory_strict_refit(tmp_path, mon
 def _fake_run_setup(tmp_path, monkeypatch, audit_error):
     registry_root, anchor = _ledger(tmp_path, monkeypatch)
     files = {}
-    for name in ("actor", "protocol", "program", "rcpd_report", "manifest",
-                 "designation", "selected_scenes", "candidate_prior_v7_rows_npz"):
+    for name in (
+            "actor", "protocol", "program", "rcpd_report", "manifest",
+            "designation", "selected_scenes", "candidate_prior_v7_report_json",
+            "candidate_prior_v7_rows_npz", "candidate_expansion_rows_npz",
+            "candidate_fit_config_json"):
         path = tmp_path / (name + ".bin")
         path.write_bytes(name.encode())
         files[name] = path
+    for constant, name in (
+            ("EXPECTED_ACTOR_SHA256", "actor"),
+            ("EXPECTED_PROTOCOL_SHA256", "protocol"),
+            ("EXPECTED_MANIFEST_SHA256", "manifest"),
+            ("EXPECTED_DESIGNATION_SHA256", "designation"),
+            ("EXPECTED_SELECTED_SCENES_SHA256", "selected_scenes")):
+        monkeypatch.setattr(subject, constant, subject.file_hash(files[name]))
     development = []
     for index, version in enumerate((
             subject.holdout_api.DEVELOPMENT_SUPPLEMENT_VERSION,
@@ -218,6 +298,9 @@ def _fake_run_setup(tmp_path, monkeypatch, audit_error):
         path = tmp_path / f"development-{index}.json"
         path.write_text('{"version":"' + version + '"}', encoding="utf-8")
         development.append(path)
+    monkeypatch.setattr(
+        subject, "EXPECTED_EXPANSION_REGISTRY_SHA256",
+        subject.file_hash(development[1]))
     rows = tmp_path / "rows.npz"; rows.write_bytes(b"rows")
     retired = []
     for index, version in enumerate(subject.holdout_api.EXTERNAL_RETIRED_VERSIONS):
@@ -245,7 +328,17 @@ def _fake_run_setup(tmp_path, monkeypatch, audit_error):
             subject.holdout_api.DEVELOPMENT_EXPANSION_VERSION:
                 (development[1], {"version": subject.holdout_api.DEVELOPMENT_EXPANSION_VERSION}),
         }
-        return {"status": "passed_development_gates"}, frozen_sources, developments
+        candidate_artifacts = subject._candidate_artifact_hashes(files, [rows])
+        return ({
+            "status": "passed_development_gates",
+            "bindings": {
+                "previous_development_file_sha256": subject.file_hash(
+                    development[0]),
+                "expansion_registry_file_sha256": subject.file_hash(
+                    development[1]),
+            },
+        }, frozen_sources,
+                developments, candidate_artifacts)
 
     monkeypatch.setattr(subject, "_authenticate_candidate_after_claim", authenticate)
 
@@ -265,6 +358,8 @@ def _fake_run_setup(tmp_path, monkeypatch, audit_error):
             "candidate_identity_sha256": subject.digest(identity),
             "attempt_started_sha256": subject.file_hash(
                 registry / "attempt_started.json"),
+            "candidate_authenticated_sha256": subject.file_hash(
+                registry / "candidate_authenticated.json"),
         }
         (registry / "holdout_started.json").write_text(subject.canonical({
             **common, "status": "started_no_retry"}) + "\n", encoding="utf-8")
@@ -291,6 +386,10 @@ def _fake_run_setup(tmp_path, monkeypatch, audit_error):
                 registry / "attempt_started.json"),
             "holdout_completed_sha256": subject.file_hash(
                 registry / "holdout_completed.json"),
+            "candidate_authenticated_sha256": subject.file_hash(
+                registry / "candidate_authenticated.json"),
+            "candidate_artifacts_sha256": subject.digest(
+                subject._candidate_artifact_hashes(files, [rows])),
         }
         (registry / "audit_started.json").write_text(subject.canonical({
             **common, "status": "started_no_retry"}) + "\n", encoding="utf-8")
@@ -381,6 +480,254 @@ def test_success_orders_claim_refit_holdout_strict_audit_and_physical_replay(
     assert completion["development_authentication_refit"] is True
     assert completion["audit_status"] == "passed"
     assert completion["physical_replay_status"] == "passed"
+
+
+def test_candidate_replacement_after_strict_refit_burns_attempt(
+        tmp_path, monkeypatch):
+    setup = _fake_run_setup(tmp_path, monkeypatch, None)
+    files, development, rows, retired, identity, calls = setup
+    original_audit = subject.audit_api.audit
+
+    def replacing_audit(**kwargs):
+        files["program"].write_bytes(b"different self-consistent candidate")
+        return original_audit(**kwargs)
+
+    monkeypatch.setattr(subject.audit_api, "audit", replacing_audit)
+    monkeypatch.setattr(
+        subject.audit_api, "read_saved_report",
+        lambda *args, **kwargs: {"status": "passed"})
+    monkeypatch.setattr(
+        subject.audit_api, "replay_saved_audit",
+        lambda *args, **kwargs: {"status": "passed"})
+    result = subject.run_final_once(**_run_args(
+        files, development, rows, retired, tmp_path / "candidate-replaced"))
+    assert result["status"] == "burned_failed"
+    assert "candidate artifacts changed" in result["reason"]
+    with pytest.raises(ValueError, match="already_reserved_no_retry"):
+        subject._claim(identity, output=tmp_path / "retry")
+
+
+def test_fixed_input_toctou_before_candidate_publish_keeps_completion_readable(
+        tmp_path, monkeypatch):
+    setup = _fake_run_setup(tmp_path, monkeypatch, None)
+    files, development, rows, retired, identity, calls = setup
+    original_authenticate = subject._authenticate_candidate_after_claim
+
+    def replace_actor_after_strict_refit(**kwargs):
+        result = original_authenticate(**kwargs)
+        files["actor"].write_bytes(b"post-refit fixed-input replacement")
+        return result
+
+    monkeypatch.setattr(
+        subject, "_authenticate_candidate_after_claim",
+        replace_actor_after_strict_refit)
+    result = subject.run_final_once(**_run_args(
+        files, development, rows, retired, tmp_path / "fixed-input-toctou"))
+    assert result["status"] == "burned_failed"
+    assert "candidate" in result["reason"].lower()
+    assert calls == ["rcpd_strict_refit"]
+    registry = Path(result["registry"])
+    assert not (registry / "candidate_authenticated.json").exists()
+    completion = subject.read_completion(
+        registry, expected_completion_sha256=result["completion_sha256"],
+        expected_identity=identity)
+    assert completion["candidate_authentication_status"] is None
+    assert completion["candidate_authenticated_sha256"] is None
+    assert completion["candidate_artifacts"] is None
+    assert completion["phase_receipts"] == {}
+
+
+def test_candidate_marker_partial_payload_failure_is_readable_burned_ledger(
+        tmp_path, monkeypatch):
+    setup = _fake_run_setup(tmp_path, monkeypatch, None)
+    files, development, rows, retired, identity, calls = setup
+    original_payload = subject._write_phase_payload
+    payload_calls = 0
+
+    def fail_during_candidate_payload(stream, raw):
+        nonlocal payload_calls
+        payload_calls += 1
+        if payload_calls == 1:
+            stream.write(raw[: max(1, len(raw) // 2)])
+            stream.flush()
+            raise OSError("synthetic candidate marker payload failure")
+        return original_payload(stream, raw)
+
+    monkeypatch.setattr(subject, "_write_phase_payload", fail_during_candidate_payload)
+    result = subject.run_final_once(**_run_args(
+        files, development, rows, retired, tmp_path / "marker-io-failure"))
+    assert result["status"] == "burned_failed"
+    assert calls == ["rcpd_strict_refit"]
+    completion = subject.read_completion(
+        result["registry"],
+        expected_completion_sha256=result["completion_sha256"],
+        expected_identity=identity)
+    assert completion["candidate_authenticated_sha256"] is None
+    assert completion["candidate_artifacts"] is None
+    assert completion["phase_receipts"] == {}
+    assert completion["uncommitted_phase_residues"] == {}
+    registry = Path(result["registry"])
+    assert not (registry / "candidate_authenticated.json").exists()
+    assert not (registry / ".candidate_authenticated.json.partial").exists()
+    with pytest.raises(ValueError, match="already_reserved_no_retry"):
+        subject._claim(identity, output=tmp_path / "retry-after-io-failure")
+
+
+def test_candidate_marker_post_publish_failure_is_readable_burned_residue(
+        tmp_path, monkeypatch):
+    setup = _fake_run_setup(tmp_path, monkeypatch, None)
+    files, development, rows, retired, identity, calls = setup
+    original_write = subject._write_phase_exclusive
+
+    def fail_after_publish(path, raw):
+        original_write(path, raw)
+        if Path(path).name == "candidate_authenticated.json":
+            raise OSError("synthetic candidate marker directory fsync failure")
+
+    monkeypatch.setattr(subject, "_write_phase_exclusive", fail_after_publish)
+    result = subject.run_final_once(**_run_args(
+        files, development, rows, retired, tmp_path / "marker-post-publish-failure"))
+    assert result["status"] == "burned_failed"
+    assert calls == ["rcpd_strict_refit"]
+    completion = subject.read_completion(
+        result["registry"], expected_completion_sha256=result["completion_sha256"],
+        expected_identity=identity)
+    assert completion["candidate_authenticated_sha256"] is None
+    assert completion["candidate_artifacts"] is None
+    assert completion["phase_receipts"] == {}
+    assert set(completion["uncommitted_phase_residues"]) == {
+        "candidate_authenticated.json"
+    }
+
+
+def test_holdout_started_partial_payload_failure_keeps_burned_ledger_readable(
+        tmp_path, monkeypatch):
+    setup = _fake_run_setup(tmp_path, monkeypatch, None)
+    files, development, rows, retired, identity, calls = setup
+    registry_root = tmp_path / "external" / "ledger"
+
+    def partial_then_fail(stream, raw):
+        stream.write(raw[: max(1, len(raw) // 2)])
+        stream.flush()
+        raise OSError("synthetic holdout phase payload failure")
+
+    def failed_holdout(**kwargs):
+        registry = registry_root / subject.campaign_key()
+        subject.holdout_api._claim_marker(registry, "holdout_started.json", {
+            "version": subject.holdout_api.VERSION, "status": "started_no_retry",
+            "campaign_key": subject.campaign_key(),
+            "candidate_identity_sha256": subject.digest(identity),
+            "attempt_started_sha256": subject.file_hash(
+                registry / "attempt_started.json"),
+            "candidate_authenticated_sha256": subject.file_hash(
+                registry / "candidate_authenticated.json"),
+        })
+
+    monkeypatch.setattr(
+        subject.holdout_api, "_write_phase_payload", partial_then_fail)
+    monkeypatch.setattr(subject.holdout_api, "build", failed_holdout)
+    result = subject.run_final_once(**_run_args(
+        files, development, rows, retired, tmp_path / "holdout-phase-failure"))
+    assert result["status"] == "burned_failed"
+    completion = subject.read_completion(
+        result["registry"], expected_completion_sha256=result["completion_sha256"],
+        expected_identity=identity)
+    assert set(completion["phase_receipts"]) == {"candidate_authenticated.json"}
+    registry = Path(result["registry"])
+    assert not (registry / "holdout_started.json").exists()
+    assert not (registry / ".holdout_started.json.partial").exists()
+
+
+def test_audit_started_partial_payload_failure_keeps_burned_ledger_readable(
+        tmp_path, monkeypatch):
+    setup = _fake_run_setup(tmp_path, monkeypatch, None)
+    files, development, rows, retired, identity, calls = setup
+    registry_root = tmp_path / "external" / "ledger"
+
+    def partial_then_fail(stream, raw):
+        stream.write(raw[: max(1, len(raw) // 2)])
+        stream.flush()
+        raise OSError("synthetic audit phase payload failure")
+
+    def failed_audit(**kwargs):
+        registry = registry_root / subject.campaign_key()
+        subject.audit_api._claim_marker(registry, "audit_started.json", {
+            "version": subject.audit_api.VERSION, "status": "started_no_retry",
+            "campaign_key": subject.campaign_key(),
+            "candidate_identity_sha256": subject.digest(identity),
+            "attempt_started_sha256": subject.file_hash(
+                registry / "attempt_started.json"),
+            "holdout_completed_sha256": subject.file_hash(
+                registry / "holdout_completed.json"),
+            "candidate_authenticated_sha256": subject.file_hash(
+                registry / "candidate_authenticated.json"),
+            "candidate_artifacts_sha256": subject.digest(
+                subject._candidate_artifact_hashes(files, rows)),
+        })
+
+    monkeypatch.setattr(subject.audit_api, "_write_phase_payload", partial_then_fail)
+    monkeypatch.setattr(subject.audit_api, "audit", failed_audit)
+    result = subject.run_final_once(**_run_args(
+        files, development, rows, retired, tmp_path / "audit-phase-failure"))
+    assert result["status"] == "burned_failed"
+    completion = subject.read_completion(
+        result["registry"], expected_completion_sha256=result["completion_sha256"],
+        expected_identity=identity)
+    assert set(completion["phase_receipts"]) == {
+        "candidate_authenticated.json", "holdout_started.json",
+        "holdout_completed.json",
+    }
+    registry = Path(result["registry"])
+    assert not (registry / "audit_started.json").exists()
+    assert not (registry / ".audit_started.json.partial").exists()
+
+
+def test_failed_audit_gate_produces_authentic_readable_burned_ledger(
+        tmp_path, monkeypatch):
+    setup = _fake_run_setup(tmp_path, monkeypatch, None)
+    files, development, rows, retired, identity, calls = setup
+    registry_root = tmp_path / "external" / "ledger"
+
+    def failed_audit(**kwargs):
+        key = subject.campaign_key()
+        registry = registry_root / key
+        common = {
+            "campaign_key": key,
+            "candidate_identity_sha256": subject.digest(identity),
+            "attempt_started_sha256": subject.file_hash(
+                registry / "attempt_started.json"),
+            "holdout_completed_sha256": subject.file_hash(
+                registry / "holdout_completed.json"),
+            "candidate_authenticated_sha256": subject.file_hash(
+                registry / "candidate_authenticated.json"),
+            "candidate_artifacts_sha256": subject.digest(
+                subject._candidate_artifact_hashes(files, rows)),
+        }
+        (registry / "audit_started.json").write_text(subject.canonical({
+            **common, "status": "started_no_retry"}) + "\n", encoding="utf-8")
+        output = Path(kwargs["output"]); output.mkdir()
+        (output / "inputs.json").write_text("{}", encoding="utf-8")
+        (output / "report.json").write_text("{}", encoding="utf-8")
+        (output / "evidence.npz").write_bytes(b"evidence")
+        (registry / "audit_completed.json").write_text(subject.canonical({
+            **common, "status": "failed"}) + "\n", encoding="utf-8")
+        return {"status": "failed", "bindings": {"bound": True}}
+
+    monkeypatch.setattr(subject.audit_api, "audit", failed_audit)
+    monkeypatch.setattr(
+        subject.audit_api, "read_saved_report",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("development gates failed")))
+    result = subject.run_final_once(**_run_args(
+        files, development, rows, retired, tmp_path / "failed-gate"))
+    assert result["status"] == "burned_failed"
+    completion = subject.read_completion(
+        result["registry"],
+        expected_completion_sha256=result["completion_sha256"],
+        expected_identity=identity)
+    assert completion["status"] == "burned_failed"
+    assert completion["audit_status"] == "failed"
+    assert set(completion["phase_receipts"]) == set(subject.PHASE_RECEIPT_NAMES)
 
 
 def test_read_completion_binds_permanent_anchor_and_detects_tamper(

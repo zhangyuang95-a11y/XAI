@@ -56,6 +56,24 @@ MAX_TOTAL_ITERATIONS = 2048
 MAX_TOTAL_TREES = 10_240
 MAX_TOTAL_NODES = 2_500_000
 MAXIMUM_TREE_DEPTH = 16
+EXPECTED_RETIRED_HOLDOUTS = {
+    "warehouse-r41-diagnostic-fresh-final-holdout.v1": {
+        "file_sha256": (
+            "6c3ff25f9917451815979173d98881fe5e5e98258b514d199d50ee362d2746c2"
+        ),
+        "content_sha256": (
+            "92d3a1320a08dcfa07e8a68e2b8e43f8d3748072e3c887a965c9b7efd9cfe627"
+        ),
+    },
+    "warehouse-r41-diagnostic-fresh-final-holdout.v2": {
+        "file_sha256": (
+            "7d72424744eea7547516cffe414c15578802c7204b90bdf1b129a1e9acfbf17b"
+        ),
+        "content_sha256": (
+            "a0072c07e196ceca2680fbdde2f786d4867a1862ee8461a7fc943cbc8f765e28"
+        ),
+    },
+}
 
 ARTIFACT_NAMES = (
     "diagnostic_designation", "actor", "protocol", "training_ledger",
@@ -85,6 +103,17 @@ FINAL_ONCE_LEDGER_ARTIFACTS = {
     "final_once_audit_completed": "audit_completed.json",
     "final_once_attempt_completed": "attempt_completed.json",
 }
+FINAL_ONCE_CANDIDATE_AUTH_FIELDS = frozenset((
+    "version", "status", "campaign_key", "candidate_identity_sha256",
+    "attempt_started_sha256", "candidate_artifacts",
+    "candidate_artifacts_sha256", "rcpd_report_file_sha256",
+    "program_file_sha256", "rows_file_sha256",
+    "prior_v7_report_file_sha256", "prior_v7_rows_file_sha256",
+    "expansion_rows_file_sha256", "fit_config_file_sha256",
+    "actor_file_sha256", "protocol_file_sha256", "manifest_file_sha256",
+    "designation_file_sha256", "selected_scenes_file_sha256",
+    "development_registries", "require_passed", "refit", "formal_ready",
+))
 GATE_NAMES = (
     "terminal_actor_designation", "runtime_action_authority",
     "diagnostic_conflict_publication", "dynamic_six_family_scene_selection",
@@ -213,6 +242,118 @@ def _reject_sensitive(value: Any, label: str) -> None:
 def _default_routes() -> tuple[dict[str, Any], ...]:
     return tuple({"feature_name": "derived.critical." + group,
                   "operator": ">", "threshold": 0.5} for group in GROUPS)
+
+
+def _final_claim_binding(*, campaign_key: str,
+                         attempt_started_sha256: str,
+                         candidate_identity_sha256: str,
+                         candidate_authenticated_sha256: str) -> dict[str, str]:
+    """Return the exact claim lineage written into the v4 v3 tombstone."""
+    return {
+        "campaign_key": _sha(campaign_key, "final-once campaign key"),
+        "attempt_started_sha256": _sha(
+            attempt_started_sha256, "final-once attempt start"),
+        "candidate_identity_sha256": _sha(
+            candidate_identity_sha256, "final-once candidate identity"),
+        "candidate_authenticated_sha256": _sha(
+            candidate_authenticated_sha256,
+            "final-once candidate authentication"),
+    }
+
+
+def _require_v3_claim_binding(value: Any,
+                              expected: Mapping[str, str]) -> None:
+    if (not isinstance(value, Mapping) or set(value) != set(expected)
+            or dict(value) != dict(expected)):
+        raise ValueError("Fresh-final v3 exclusion claim binding differs")
+
+
+def _audit_runtime_source_bindings(
+        runtime: R41DiagnosticOnlineAlignmentRuntime) -> dict[str, Any]:
+    """Mirror the exact runtime/source identity emitted by audit v8."""
+    full_manifest = deepcopy(runtime.source_full_manifest_bindings)
+    runtime_sources = explanation_api.diagnostic_runtime_sources()
+    return {
+        "source_full_manifest_bindings": full_manifest,
+        "source_full_manifest_bindings_sha256": digest(full_manifest),
+        "runtime_sources": runtime_sources,
+        "runtime_sources_sha256": digest(runtime_sources),
+    }
+
+
+def _audit_candidate_bindings(
+        *, candidate_authenticated_sha256: str,
+        candidate_artifacts: Mapping[str, str]) -> dict[str, Any]:
+    """Mirror audit v8's post-claim strict-candidate lineage fields."""
+    artifacts = {str(name): _sha(value, "candidate artifact " + str(name))
+                 for name, value in sorted(candidate_artifacts.items())}
+    if set(artifacts) != set(final_once_api.CANDIDATE_ARTIFACT_KEYS):
+        raise ValueError("Exact final-once candidate artifact registry required")
+    return {
+        "candidate_authenticated_sha256": _sha(
+            candidate_authenticated_sha256,
+            "final-once candidate authentication"),
+        "candidate_artifacts": artifacts,
+        "candidate_artifacts_sha256": digest(artifacts),
+    }
+
+
+def _require_exact_producer_source_closure(
+        value: Any, expected: Mapping[str, str], *, label: str) -> None:
+    """Require the complete recursive producer closure and every file hash."""
+    if (not isinstance(value, Mapping) or dict(value) != dict(expected)
+            or any(type(name) is not str or _HEX.fullmatch(str(item)) is None
+                   for name, item in value.items())):
+        raise ValueError(label + " producer source closure differs")
+
+
+def _require_exact_audit_bindings(value: Any,
+                                  expected: Mapping[str, Any]) -> None:
+    if not isinstance(value, Mapping) or dict(value) != dict(expected):
+        raise ValueError("Final explanation-audit external bindings differ")
+
+
+def _validate_candidate_authentication_marker(
+        marker: Mapping[str, Any], *, files: Mapping[str, Path],
+        hashes: Mapping[str, str], singles: Mapping[str, Path],
+        row_paths: Sequence[Path], development_paths: Sequence[Path],
+        campaign_key: str, candidate_identity_sha256: str,
+) -> dict[str, str]:
+    """Bind post-claim final use to the exact strict-refit candidate bytes."""
+    candidate_artifacts = final_once_api._validate_candidate_artifact_binding(
+        marker, singles=singles, row_paths=row_paths)
+    development_registries: dict[str, str] = {}
+    for path in development_paths:
+        version = _strict_json(path, "development registry").get("version")
+        if type(version) is not str or version in development_registries:
+            raise ValueError("Candidate authentication development registry differs")
+        development_registries[version] = file_hash(path)
+    expected_scalar = {
+        "version": final_once_api.VERSION + ".candidate-authentication.v1",
+        "status": "passed_strict_reader_and_refit",
+        "campaign_key": campaign_key,
+        "candidate_identity_sha256": candidate_identity_sha256,
+        "attempt_started_sha256": hashes["final_once_attempt_started"],
+        "actor_file_sha256": hashes["actor"],
+        "protocol_file_sha256": hashes["protocol"],
+        "manifest_file_sha256": hashes["conflict_manifest"],
+        "designation_file_sha256": hashes["diagnostic_designation"],
+        "selected_scenes_file_sha256": hashes["selected_scenes"],
+        "development_registries": dict(sorted(development_registries.items())),
+        "require_passed": True,
+        "refit": True,
+        "formal_ready": False,
+    }
+    if (set(marker) != FINAL_ONCE_CANDIDATE_AUTH_FIELDS
+            or any(marker.get(name) != expected
+                   for name, expected in expected_scalar.items())
+            or marker.get("candidate_artifacts") != candidate_artifacts
+            or marker.get("candidate_artifacts_sha256")
+                != digest(candidate_artifacts)
+            or file_hash(files["final_once_candidate_authenticated"])
+                != hashes["final_once_candidate_authenticated"]):
+        raise ValueError("Exact strict-refit candidate authentication marker required")
+    return candidate_artifacts
 
 
 def validate_v8_program_identity(program_path: str | Path, *,
@@ -382,6 +523,34 @@ def _validate_expansion(files: Mapping[str, Path], hashes: Mapping[str, str],
     return registry
 
 
+def _validate_retired_holdout_bindings(
+        files: Mapping[str, Path], hashes: Mapping[str, str],
+        expansion: Mapping[str, Any]) -> dict[str, dict[str, str]]:
+    actual: dict[str, dict[str, str]] = {}
+    for index in (1, 2):
+        name = f"retired_fresh_final_holdout_v{index}"
+        value = _strict_json(files[name], "retired fresh-final holdout")
+        version = value.get("version")
+        content = {key: child for key, child in value.items()
+                   if key != "content_sha256"}
+        claimed_content = value.get("content_sha256")
+        if (version not in EXPECTED_RETIRED_HOLDOUTS or version in actual
+                or claimed_content != digest(content)):
+            raise ValueError("Retired fresh-final holdout identity differs")
+        actual[str(version)] = {
+            "file_sha256": hashes[name],
+            "content_sha256": claimed_content,
+        }
+    expansion_bindings = expansion.get("bindings")
+    expansion_retired = (expansion_bindings.get("retired_holdouts")
+                         if isinstance(expansion_bindings, Mapping) else None)
+    if (actual != EXPECTED_RETIRED_HOLDOUTS
+            or expansion_retired != EXPECTED_RETIRED_HOLDOUTS):
+        raise ValueError(
+            "Retired v1/v2 bytes must match the fixed development expansion")
+    return deepcopy(actual)
+
+
 def _validate_bilingual_question_bank(payload: Mapping[str, Any]) -> None:
     items = payload.get("items")
     if not isinstance(items, list) or len(items) != 8:
@@ -484,6 +653,13 @@ def _same_parent(files: Mapping[str, Path], names: Sequence[str], label: str) ->
     return next(iter(parents))
 
 
+def _require_fixed_final_once_registry(registry: Path, campaign_key: str) -> None:
+    expected = final_once_api._ledger_root() / _sha(
+        campaign_key, "final-once campaign key")
+    if registry != expected:
+        raise ValueError("Final-once permanent registry layout differs")
+
+
 def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
     if not isinstance(paths, Mapping) or set(paths) != set(ARTIFACT_NAMES):
         raise ValueError("Exact r4.1 diagnostic v8 admission artifact set required")
@@ -525,6 +701,7 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
             or selection.get("ordinary_sampler_fallback") is not False):
         raise ValueError("Exact passing six-family scene selection required")
     expansion = _validate_expansion(files, hashes, actor, manifest)
+    _validate_retired_holdout_bindings(files, hashes, expansion)
     rcpd_dir = _same_parent(files, ("prior_v7_rcpd_report", "prior_v7_rcpd_rows",
         "development_expansion_rows", "v8_fit_config", "final_rcpd_report",
         "final_rcpd_rows", "final_rcpd_program"), "v8 RCPD")
@@ -558,6 +735,15 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
     holdout = holdout_api.read_saved_holdout(holdout_dir,
         expected_holdout_sha256=hashes["fresh_final_holdout"],
         expected_report_sha256=hashes["fresh_final_holdout_report"])
+    holdout_sources = holdout_api.producer_sources()
+    holdout_report = _strict_json(
+        files["fresh_final_holdout_report"], "fresh-final report")
+    _require_exact_producer_source_closure(
+        holdout_report.get("producer_sources"), holdout_sources,
+        label="Fresh-final")
+    if (holdout_report.get("bindings", {}).get("producer_sources_sha256")
+            != digest(holdout_sources)):
+        raise ValueError("Fresh-final producer source binding differs")
     if (holdout.get("status") != "passed_program_blind_registry"
             or holdout.get("program_access") is not False
             or holdout.get("program_predictions_access") is not False
@@ -578,15 +764,27 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
     final_campaign_key = final_once_api.campaign_key()
     if final_campaign_key != digest(expected_identity):
         raise ValueError("Final-once campaign identity differs")
+    candidate_marker = _strict_json(
+        files["final_once_candidate_authenticated"],
+        "strict candidate authentication phase")
+    candidate_artifacts = _validate_candidate_authentication_marker(
+        candidate_marker, files=files, hashes=hashes, singles=singles,
+        row_paths=row_paths, development_paths=dev_paths,
+        campaign_key=final_campaign_key,
+        candidate_identity_sha256=digest(expected_identity),
+    )
     v3_exclusion = _strict_json(
         files["fresh_final_v3_exclusion"], "fresh-final v3 exclusion")
     v3_content = dict(v3_exclusion)
     claimed_v3_content = v3_content.pop("content_sha256", None)
-    expected_claim = {
-        "campaign_key": final_campaign_key,
-        "attempt_started_sha256": hashes["final_once_attempt_started"],
-        "candidate_identity_sha256": digest(expected_identity),
-    }
+    expected_claim = _final_claim_binding(
+        campaign_key=final_campaign_key,
+        attempt_started_sha256=hashes["final_once_attempt_started"],
+        candidate_identity_sha256=digest(expected_identity),
+        candidate_authenticated_sha256=hashes[
+            "final_once_candidate_authenticated"],
+    )
+    _require_v3_claim_binding(v3_exclusion.get("claim_binding"), expected_claim)
     if (set(v3_exclusion) != {
             "version", "status", "legacy_selection_version",
             "legacy_selection_source_sha256",
@@ -603,7 +801,6 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
                 != file_hash(Path(retired_v3_api.__file__).resolve())
             or v3_exclusion.get("legacy_selection_contract_sha256")
                 != digest(retired_v3_api.contract())
-            or v3_exclusion.get("claim_binding") != expected_claim
             or not isinstance(v3_exclusion.get("scenes"), list)
             or len(v3_exclusion["scenes"]) != retired_v3_api.TOTAL_SCENES
             or len({row.get("fingerprint") for row in v3_exclusion["scenes"]
@@ -647,6 +844,7 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
                    for relative, name in ledger_layout.items())
             or registry.name != final_campaign_key):
         raise ValueError("Final-once permanent registry layout differs")
+    _require_fixed_final_once_registry(registry, final_campaign_key)
     completion = final_once_api.read_completion(registry,
         expected_completion_sha256=hashes["final_once_attempt_completed"],
         expected_identity=expected_identity)
@@ -686,6 +884,11 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
             or completion.get("program_fits") != 0 or completion.get("actor_updates") != 0
             or completion.get("candidate_authentication_status")
                 != "passed_strict_reader_and_refit"
+            or completion.get("candidate_authenticated_sha256")
+                != hashes["final_once_candidate_authenticated"]
+            or completion.get("candidate_artifacts") != candidate_artifacts
+            or completion.get("candidate_artifacts_sha256")
+                != digest(candidate_artifacts)
             or completion.get("development_authentication_refit") is not True
             or completion.get("phase_receipts") != expected_phase_receipts
             or completion.get("runtime_action_override") is not False
@@ -698,6 +901,12 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
     audit_dir = _same_parent(files, ("explanation_audit_inputs", "explanation_audit_evidence",
         "explanation_audit_report"), "explanation audit")
     audit_report = _strict_json(files["explanation_audit_report"], "explanation audit")
+    audit_sources = explanation_api.producer_sources()
+    audit_inputs = _strict_json(
+        files["explanation_audit_inputs"], "explanation audit inputs")
+    _require_exact_producer_source_closure(
+        audit_inputs.get("producer_sources"), audit_sources,
+        label="Explanation-audit")
     expected_audit_bindings = {"actor_sha256": FIXED_ACTOR_SHA256,
         "actor_parameters_sha256": actor.metadata["actor_parameters_sha256"],
         "protocol_file_sha256": hashes["protocol"], "protocol_content_sha256": digest(protocol),
@@ -711,13 +920,19 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
         "fresh_holdout_content_sha256": holdout["content_sha256"],
         "fresh_holdout_report_file_sha256": hashes["fresh_final_holdout_report"],
         "development_rows": {files["final_rcpd_rows"].name: hashes["final_rcpd_rows"]},
+        **_audit_candidate_bindings(
+            candidate_authenticated_sha256=hashes[
+                "final_once_candidate_authenticated"],
+            candidate_artifacts=candidate_artifacts,
+        ),
         "runtime_signature": runtime.signature,
         "runtime_manifest_signature": runtime.runtime_manifest_signature,
+        **_audit_runtime_source_bindings(runtime),
         "holdout_fingerprints_sha256": digest(sorted(row["fingerprint"] for row in holdout["scenes"])),
         "contract_sha256": digest(explanation_api.contract()),
-        "producer_sources_sha256": digest(explanation_api.producer_sources())}
-    if audit_report.get("bindings") != expected_audit_bindings:
-        raise ValueError("Final explanation-audit external bindings differ")
+        "producer_sources_sha256": digest(audit_sources)}
+    _require_exact_audit_bindings(
+        audit_report.get("bindings"), expected_audit_bindings)
     explanation = explanation_api.read_saved_report(audit_dir,
         expected_report_sha256=hashes["explanation_audit_report"],
         program_path=files["final_rcpd_program"], development_rows_paths=[files["final_rcpd_rows"]],
@@ -919,6 +1134,7 @@ __all__ = ["VERSION", "STATUS", "NAMESPACE", "FIXED_ACTOR_SHA256",
     "FINAL_ONCE_LEDGER_ARTIFACTS",
     "BINDING_FIELDS", "TOP_LEVEL_FIELDS", "MAX_PROGRAM_BYTES",
     "MAX_COMPONENT_ITERATIONS", "MAX_TOTAL_ITERATIONS", "MAX_TOTAL_TREES",
-    "MAX_TOTAL_NODES", "MAXIMUM_TREE_DEPTH", "validate_v8_program_identity",
+    "MAX_TOTAL_NODES", "MAXIMUM_TREE_DEPTH", "EXPECTED_RETIRED_HOLDOUTS",
+    "validate_v8_program_identity",
     "source_closure", "package_contract", "validate_components",
     "build_admission", "read_saved_admission"]

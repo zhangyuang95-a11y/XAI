@@ -29,8 +29,8 @@ from backend.warehouse_alignment_online_runtime import (
 from backend.warehouse_r41_online_runtime import (
     DEFAULT_REWARD_CONFIG,
     R41OnlineAlignmentRuntime,
-    r41_runtime_sources,
 )
+from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from env.warehouse.domain import collaborative_study_config
 from env.warehouse_native.observations import observation_names
 from env.warehouse_native.r41_diagnostic_conflict import (
@@ -71,17 +71,29 @@ def _file_identity(path: Path) -> tuple[int, int, int, int, int]:
 
 
 def diagnostic_runtime_sources() -> dict[str, str]:
+    """Return the complete static Python closure used by physical replay.
+
+    The old hand-written list omitted transitive environment modules such as
+    ``transition_outcome.py`` and ``state_support.py``.  Hash the recursive
+    local import closure from this runtime entry point so serving, audit, and
+    admission all authenticate the same physics implementation.
+    """
+    # The final-once CLI imports common environment modules before this adapter,
+    # so ``core.__init__`` can execute before the runtime's namespace-package
+    # guard.  Bind the complete closure for that real launch order.
+    return dict(sorted(local_source_hashes((Path(__file__).resolve(),)).items()))
+
+
+def _runtime_source_identities(sources: Mapping[str, str]) -> dict[str, tuple[int, ...]]:
     root = Path(__file__).resolve().parents[1]
-    result = r41_runtime_sources()
-    # The strict conflict environment changes successor-task sampling and reset
-    # validation, so its bytes are part of the serving runtime contract rather
-    # than merely data referenced by the scene manifest.
-    for path in (
-        Path(__file__).resolve(),
-        root / "env" / "warehouse_native" / "r41_diagnostic_conflict.py",
-    ):
-        result[str(path.relative_to(root))] = file_hash(path)
-    return dict(sorted(result.items()))
+    result = {}
+    for relative in sources:
+        path = (root / relative).absolute()
+        if (path.is_symlink() or not path.is_file() or path.resolve() != path
+                or path == root or root not in path.parents):
+            raise ValueError("Diagnostic runtime source path changed")
+        result[relative] = _file_identity(path)
+    return result
 
 
 class R41DiagnosticConflictWarehouseEnv(
@@ -239,6 +251,7 @@ class R41DiagnosticOnlineAlignmentRuntime(R41OnlineAlignmentRuntime):
             "collision_training_cost": 0.05,
         }
         self._sources = diagnostic_runtime_sources()
+        self._source_file_identities = _runtime_source_identities(self._sources)
         self._metadata_sha256 = digest(metadata)
         self._weights_sha256 = self._weight_digest()
         self._external_bindings = deepcopy(actual)
@@ -328,9 +341,13 @@ class R41DiagnosticOnlineAlignmentRuntime(R41OnlineAlignmentRuntime):
             if current != self._external_bindings or claimed != digest(content):
                 raise ValueError("Diagnostic runtime external binding changed")
             self._external_file_identities = identities
+        current_source_identities = _runtime_source_identities(self._sources)
+        if current_source_identities != self._source_file_identities:
+            if diagnostic_runtime_sources() != self._sources:
+                raise ValueError("Diagnostic runtime binding changed")
+            self._source_file_identities = current_source_identities
         if (digest(self.actor.metadata) != self._metadata_sha256
-                or self._weight_digest() != self._weights_sha256
-                or diagnostic_runtime_sources() != self._sources):
+                or self._weight_digest() != self._weights_sha256):
             raise ValueError("Diagnostic runtime binding changed")
         return self.signature
 

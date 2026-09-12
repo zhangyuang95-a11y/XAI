@@ -26,6 +26,7 @@ import numpy as np
 
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 from backend.training.warehouse_native_evaluation import critical_groups
+from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training import warehouse_r41_diagnostic_fresh_final_holdout_v4 as holdout_api
 from backend.warehouse_r41_diagnostic_public_tree_program_v8 import (
     R41DiagnosticPublicTreeProgramV8,
@@ -48,13 +49,17 @@ GROUPS = ("narrow_passage", "shared_pickup", "shared_charger")
 EXPLANATION_SCENES = 64
 MAX_JSON_BYTES = 512 * 1024 * 1024
 MAX_NPZ_BYTES = 2 * 1024 * 1024 * 1024
+CANDIDATE_ARTIFACT_NAMES = (
+    "program.json", "report.json", "rows.npz", "prior_v7_report.json",
+    "prior_v7_rows.npz", "expansion_rows.npz", "fit_config.json",
+)
 ROOT = Path(__file__).resolve().parents[2]
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _ACTION_INDEX = {name: index for index, name in enumerate(ACTIONS)}
 _GROUP_INDEX = {name: index for index, name in enumerate(GROUPS)}
 LEDGER_ENV = "WAREHOUSE_R41_FINAL_LEDGER_DIR"
 DEFAULT_LEDGER_ROOT = (
-    Path.home() / ".local/state/policylens/warehouse_r41_diagnostic_v8_final_once"
+    holdout_api.DEFAULT_LEDGER_ROOT
 )
 
 AGENT_PHYSICS = (
@@ -127,25 +132,7 @@ def contract() -> dict[str, Any]:
 
 
 def producer_sources() -> dict[str, str]:
-    paths = (
-        Path(__file__).resolve(),
-        Path(holdout_api.__file__).resolve(),
-        ROOT / "backend/warehouse_r41_diagnostic_public_tree_program_v8.py",
-        ROOT / "backend/warehouse_r41_diagnostic_public_features_v8.py",
-        ROOT / "backend/warehouse_r41_diagnostic_boosted_tree.py",
-        ROOT / "backend/warehouse_r41_diagnostic_online_runtime.py",
-        ROOT / "backend/training/warehouse_native_evaluation.py",
-        ROOT / "env/warehouse_native/partners.py",
-    )
-    result = {}
-    for path in paths:
-        path = path.resolve()
-        if not path.is_file() or path.is_symlink():
-            raise ValueError("Explanation-audit source closure is unsafe")
-        result[path.relative_to(ROOT.resolve()).as_posix()] = file_hash(path)
-    for name, value in diagnostic_runtime_sources().items():
-        result["runtime/" + name] = value
-    return dict(sorted(result.items()))
+    return dict(sorted(local_source_hashes((Path(__file__).resolve(),)).items()))
 
 
 def _regular(value: str | Path, label: str, *, maximum: int = MAX_JSON_BYTES) -> Path:
@@ -193,8 +180,7 @@ def _write_json(path: Path, value: Any) -> None:
 
 
 def _ledger_root() -> Path:
-    raw = os.environ.get(LEDGER_ENV)
-    return Path(raw).expanduser().absolute() if raw else DEFAULT_LEDGER_ROOT.absolute()
+    return holdout_api._ledger_root()
 
 
 def _claim_receipt(
@@ -215,6 +201,9 @@ def _claim_receipt(
     holdout_completed = _regular(
         claim_dir / "holdout_completed.json", "holdout completion phase")
     marker = _read_json(holdout_completed, "holdout completion phase")
+    candidate_marker_path = _regular(
+        claim_dir / "candidate_authenticated.json",
+        "strict candidate authentication phase")
     if (file_hash(holdout_completed) != expected_holdout_completion_sha256
             or marker.get("version") != FRESH_HOLDOUT_VERSION
             or marker.get("status") != "completed_program_blind"
@@ -223,13 +212,107 @@ def _claim_receipt(
                 != expected_candidate_identity_sha256
             or marker.get("attempt_started_sha256") != expected_claim_sha256):
         raise ValueError("Final claim/holdout phase receipt differs")
+    if marker.get("candidate_authenticated_sha256") != file_hash(
+            candidate_marker_path):
+        raise ValueError("Final holdout/candidate phase lineage differs")
     return claim_dir, receipt
+
+
+def _candidate_artifacts_from_marker(marker: Mapping[str, Any]) -> dict[str, str]:
+    artifacts = marker.get("candidate_artifacts")
+    if (not isinstance(artifacts, Mapping)
+            or set(artifacts) != set(CANDIDATE_ARTIFACT_NAMES)
+            or any(_HEX.fullmatch(str(value)) is None
+                   for value in artifacts.values())
+            or marker.get("candidate_artifacts_sha256")
+                != digest(dict(artifacts))):
+        raise ValueError("Strict candidate artifact marker differs")
+    return {str(name): str(value) for name, value in sorted(artifacts.items())}
+
+
+def _candidate_artifact_paths(
+    program_path: Path, rcpd_report_path: Path, row_paths: Sequence[Path],
+) -> dict[str, Path]:
+    candidate = program_path.parent
+    if (len(row_paths) != 1
+            or program_path != candidate / "program.json"
+            or rcpd_report_path != candidate / "report.json"
+            or row_paths[0] != candidate / "rows.npz"):
+        raise ValueError("Audit candidate artifacts must share one exact directory")
+    result = {
+        "program.json": program_path,
+        "report.json": rcpd_report_path,
+        "rows.npz": row_paths[0],
+    }
+    for name in CANDIDATE_ARTIFACT_NAMES[3:]:
+        result[name] = _regular(
+            candidate / name, "embedded RCPD v8 " + name,
+            maximum=MAX_NPZ_BYTES if name.endswith(".npz") else MAX_JSON_BYTES)
+    return result
+
+
+def _verify_candidate_artifacts(
+    marker: Mapping[str, Any], *, program_path: Path,
+    rcpd_report_path: Path, row_paths: Sequence[Path],
+) -> dict[str, str]:
+    frozen = _candidate_artifacts_from_marker(marker)
+    paths = _candidate_artifact_paths(program_path, rcpd_report_path, row_paths)
+    actual = {name: file_hash(path) for name, path in sorted(paths.items())}
+    if actual != frozen:
+        raise ValueError("Claim-authenticated RCPD candidate artifacts changed")
+    return actual
 
 
 def _claim_marker(directory: Path, name: str, value: Mapping[str, Any]) -> Path:
     path = directory / name
-    _write_json(path, dict(value))
+    _write_phase_json(path, dict(value))
     return path
+
+
+def _write_phase_payload(stream: Any, raw: bytes) -> None:
+    """Finish the private phase payload before it can acquire its final name."""
+    stream.write(raw)
+    stream.flush()
+    os.fsync(stream.fileno())
+
+
+def _link_no_replace(source: Path, target: Path) -> None:
+    """Atomically publish ``source`` and fail if ``target`` already exists."""
+    os.link(source, target, follow_symlinks=False)
+
+
+def _write_phase_json(path: Path, value: Any) -> None:
+    """Publish a complete claim phase without exposing partial final bytes."""
+    if (path.exists() or path.is_symlink() or path.parent.is_symlink()
+            or path.parent.resolve() != path.parent.absolute()):
+        raise ValueError("Explanation-audit phase destination is unsafe")
+    raw = (canonical(value) + "\n").encode("utf-8")
+    temporary = path.parent / ("." + path.name + ".partial")
+    descriptor = None
+    temporary_created = False
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        temporary_created = True
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = None
+            _write_phase_payload(stream, raw)
+        _link_no_replace(temporary, path)
+        temporary.unlink()
+        temporary_created = False
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temporary_created:
+            temporary.unlink(missing_ok=True)
 
 
 def _write_npz(path: Path, arrays: Mapping[str, np.ndarray]) -> None:
@@ -895,12 +978,20 @@ def audit(
         expected_candidate_identity_sha256=expected_candidate_identity_sha256,
         expected_holdout_completion_sha256=expected_holdout_completion_sha256,
     )
+    candidate_marker_path = _regular(
+        claim_dir / "candidate_authenticated.json",
+        "strict candidate authentication phase")
+    candidate_marker = _read_json(
+        candidate_marker_path, "strict candidate authentication phase")
+    candidate_artifacts = _candidate_artifacts_from_marker(candidate_marker)
     _claim_marker(claim_dir, "audit_started.json", {
         "version": VERSION, "status": "started_no_retry",
         "campaign_key": expected_campaign_key,
         "candidate_identity_sha256": expected_candidate_identity_sha256,
         "attempt_started_sha256": expected_claim_sha256,
         "holdout_completed_sha256": expected_holdout_completion_sha256,
+        "candidate_authenticated_sha256": file_hash(candidate_marker_path),
+        "candidate_artifacts_sha256": digest(candidate_artifacts),
     })
     paths = {
         "actor": _regular(actor_path, "frozen Actor"),
@@ -930,6 +1021,9 @@ def audit(
         raise ValueError("Audit inputs differ from the claimed holdout phase")
     row_paths = [_regular(path, "development rows", maximum=MAX_NPZ_BYTES)
                  for path in development_rows_paths]
+    _verify_candidate_artifacts(
+        candidate_marker, program_path=paths["program"],
+        rcpd_report_path=paths["rcpd_report"], row_paths=row_paths)
     protocol, manifest, scenes, rcpd_report, holdout = _validate_inputs(
         actor_path=paths["actor"], protocol_path=paths["protocol"],
         program_path=paths["program"], rcpd_report_path=paths["rcpd_report"],
@@ -966,6 +1060,9 @@ def audit(
         "fresh_holdout_content_sha256": holdout["content_sha256"],
         "fresh_holdout_report_file_sha256": file_hash(paths["fresh_holdout_report"]),
         "development_rows": {path.name: file_hash(path) for path in row_paths},
+        "candidate_authenticated_sha256": file_hash(candidate_marker_path),
+        "candidate_artifacts": deepcopy(candidate_artifacts),
+        "candidate_artifacts_sha256": digest(candidate_artifacts),
         "runtime_signature": runtime.signature,
         "runtime_manifest_signature": runtime.runtime_manifest_signature,
         "source_full_manifest_bindings": runtime.source_full_manifest_bindings,
@@ -1022,6 +1119,12 @@ def audit(
                 if name != "development_rows"}
             or digest([{"path": str(path), "sha256": file_hash(path)}
                        for path in row_paths]) != initial_hashes["development_rows"]
+            or _verify_candidate_artifacts(
+                candidate_marker, program_path=paths["program"],
+                rcpd_report_path=paths["rcpd_report"], row_paths=row_paths)
+                != candidate_artifacts
+            or file_hash(candidate_marker_path)
+                != bindings["candidate_authenticated_sha256"]
             or producer_sources() != sources):
         raise RuntimeError("Frozen final-audit input changed during execution")
     _write_json(output_path / "report.json", report)
@@ -1039,6 +1142,8 @@ def audit(
         "candidate_identity_sha256": expected_candidate_identity_sha256,
         "attempt_started_sha256": expected_claim_sha256,
         "holdout_completed_sha256": expected_holdout_completion_sha256,
+        "candidate_authenticated_sha256": file_hash(candidate_marker_path),
+        "candidate_artifacts_sha256": digest(candidate_artifacts),
         "report_file_sha256": file_hash(output_path / "report.json"),
         "evidence_file_sha256": file_hash(output_path / "evidence.npz"),
     })
@@ -1109,6 +1214,19 @@ def read_saved_report(
     if ({path.name: file_hash(path) for path in row_paths}
             != expected_bindings.get("development_rows")):
         raise ValueError("Development rows binding differs")
+    candidate_artifacts = expected_bindings.get("candidate_artifacts")
+    candidate_paths = _candidate_artifact_paths(
+        program_path, _regular(program_path.parent / "report.json", "v8 RCPD report"),
+        row_paths)
+    if (not isinstance(candidate_artifacts, Mapping)
+            or set(candidate_artifacts) != set(CANDIDATE_ARTIFACT_NAMES)
+            or {name: file_hash(path) for name, path in sorted(candidate_paths.items())}
+                != dict(candidate_artifacts)
+            or expected_bindings.get("candidate_artifacts_sha256")
+                != digest(dict(candidate_artifacts))
+            or _HEX.fullmatch(str(expected_bindings.get(
+                "candidate_authenticated_sha256"))) is None):
+        raise ValueError("Explanation candidate artifact binding differs")
     expected_rows_input = digest([
         {"path": str(path), "sha256": file_hash(path)} for path in row_paths
     ])
@@ -1178,6 +1296,21 @@ def replay_saved_audit(
     ):
         if actual != expected_bindings.get(key):
             raise ValueError("Physical replay input binding differs: " + key)
+    candidate_artifacts = expected_bindings.get("candidate_artifacts")
+    candidate_paths = _candidate_artifact_paths(
+        program_path,
+        _regular(program_path.parent / "report.json", "v8 RCPD report"),
+        [_regular(program_path.parent / "rows.npz", "development rows",
+                  maximum=MAX_NPZ_BYTES)],
+    )
+    if (not isinstance(candidate_artifacts, Mapping)
+            or {name: file_hash(path) for name, path in sorted(candidate_paths.items())}
+                != dict(candidate_artifacts)
+            or expected_bindings.get("candidate_artifacts_sha256")
+                != digest(dict(candidate_artifacts))
+            or _HEX.fullmatch(str(expected_bindings.get(
+                "candidate_authenticated_sha256"))) is None):
+        raise ValueError("Physical replay candidate artifact binding differs")
     holdout = _read_json(fresh_holdout_path, "fresh final holdout")
     scenes = holdout.get("scenes")
     if (holdout.get("version") != FRESH_HOLDOUT_VERSION

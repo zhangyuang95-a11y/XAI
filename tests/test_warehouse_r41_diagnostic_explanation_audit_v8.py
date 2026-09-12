@@ -2,11 +2,13 @@ import ast
 from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
+import time
 
 import numpy as np
 import pytest
 
 from backend.training import warehouse_r41_diagnostic_explanation_audit_v8 as subject
+from backend import warehouse_r41_diagnostic_online_runtime as runtime_api
 
 
 class _Program:
@@ -99,6 +101,17 @@ def test_audit_source_has_no_training_pickle_cli_or_public_writer():
                    or module == "pickle" for module in modules)
     assert not hasattr(subject, "main")
     assert "audit" not in subject.__all__
+    sources = subject.producer_sources()
+    assert {
+        "backend/training/warehouse_r41_diagnostic_workload_screen.py",
+        "backend/training/warehouse_r41_diagnostic_fresh_final_holdout_v3.py",
+        "backend/training/warehouse_r41_diagnostic_conflict_scenarios.py",
+        "backend/warehouse_r41_diagnostic_public_tree_program_v8.py",
+        "env/warehouse/transition_outcome.py",
+        "env/warehouse_native/environment.py",
+    }.issubset(sources)
+    assert "core/__init__.py" in sources
+    assert not any("admission" in path or "release" in path for path in sources)
 
 
 def test_metrics_pass_complete_matrix_and_fail_any_direction_group():
@@ -181,15 +194,75 @@ def test_audit_claim_authentication_reuses_permanent_anchor_validation(monkeypat
             expected_holdout_completion_sha256="d" * 64)
 
 
+def test_claim_phase_partial_payload_never_gets_final_name(tmp_path, monkeypatch):
+    marker = tmp_path / "audit_started.json"
+
+    def partial_then_fail(stream, raw):
+        stream.write(raw[: max(1, len(raw) // 2)])
+        stream.flush()
+        raise OSError("synthetic phase payload failure")
+
+    monkeypatch.setattr(subject, "_write_phase_payload", partial_then_fail)
+    with pytest.raises(OSError, match="payload failure"):
+        subject._claim_marker(tmp_path, marker.name, {
+            "status": "started_no_retry", "campaign_key": "a" * 64,
+        })
+    assert not marker.exists()
+    assert not (tmp_path / ".audit_started.json.partial").exists()
+
+
+def test_runtime_source_closure_contains_transitive_physics_dependencies():
+    sources = runtime_api.diagnostic_runtime_sources()
+    assert {
+        "env/warehouse_native/environment.py",
+        "env/warehouse/transition_outcome.py",
+        "env/warehouse/layouts.py",
+        "env/warehouse/state_support.py",
+    }.issubset(sources)
+    assert "core/__init__.py" in sources
+    assert not any("admission" in path or "release" in path for path in sources)
+
+
+def test_candidate_artifact_binding_rejects_embedded_file_replacement(
+        tmp_path):
+    candidate = tmp_path / "candidate"; candidate.mkdir()
+    paths = {}
+    for name in subject.CANDIDATE_ARTIFACT_NAMES:
+        path = candidate / name
+        path.write_bytes(name.encode("utf-8"))
+        paths[name] = path
+    frozen = {name: subject.file_hash(path) for name, path in sorted(paths.items())}
+    marker = {
+        "candidate_artifacts": frozen,
+        "candidate_artifacts_sha256": subject.digest(frozen),
+    }
+    assert subject._verify_candidate_artifacts(
+        marker, program_path=paths["program.json"],
+        rcpd_report_path=paths["report.json"],
+        row_paths=[paths["rows.npz"]]) == frozen
+    paths["prior_v7_report.json"].write_bytes(b"self-consistent replacement")
+    with pytest.raises(ValueError, match="candidate artifacts changed"):
+        subject._verify_candidate_artifacts(
+            marker, program_path=paths["program.json"],
+            rcpd_report_path=paths["report.json"],
+            row_paths=[paths["rows.npz"]])
+
+
 def test_physical_replay_rejects_runtime_source_identity_mismatch(tmp_path, monkeypatch):
     output = tmp_path / "audit"
     output.mkdir()
     evidence = output / "evidence.npz"; evidence.write_bytes(b"evidence")
     paths = {}
-    for name in ("actor", "protocol", "program", "manifest", "holdout"):
+    for name in ("actor", "protocol", "manifest", "holdout"):
         path = tmp_path / name
         path.write_bytes(name.encode())
         paths[name] = path
+    candidate = tmp_path / "candidate"; candidate.mkdir()
+    for name in subject.CANDIDATE_ARTIFACT_NAMES:
+        path = candidate / name
+        path.write_bytes(name.encode())
+        paths[name] = path
+    paths["program"] = paths["program.json"]
     holdout = {
         "version": subject.FRESH_HOLDOUT_VERSION,
         "scenes": [{"fingerprint": f"{index:064x}"} for index in range(64)],
@@ -219,7 +292,14 @@ def test_physical_replay_rejects_runtime_source_identity_mismatch(tmp_path, monk
         "runtime_sources": {"runtime.py": "r" * 64},
         "runtime_sources_sha256": subject.digest({"runtime.py": "r" * 64}),
         "producer_sources_sha256": subject.digest(subject.producer_sources()),
+        "candidate_authenticated_sha256": "c" * 64,
+        "candidate_artifacts": {
+            name: subject.file_hash(paths[name])
+            for name in subject.CANDIDATE_ARTIFACT_NAMES
+        },
     }
+    bindings["candidate_artifacts_sha256"] = subject.digest(
+        bindings["candidate_artifacts"])
     with pytest.raises(ValueError, match="runtime/source"):
         subject.replay_saved_audit(
             output, actor_path=paths["actor"], protocol_path=paths["protocol"],
@@ -228,3 +308,48 @@ def test_physical_replay_rejects_runtime_source_identity_mismatch(tmp_path, monk
             expected_evidence_sha256=subject.file_hash(evidence),
             expected_bindings=bindings,
         )
+
+
+def test_runtime_verify_binding_rejects_changed_transitive_physics_source(
+        monkeypatch):
+    root = Path(runtime_api.__file__).resolve().parents[1]
+    actor_path = root / (
+        "output/warehouse_native/r41_active_2m_20260911/"
+        "boundaries/step_2000000/actor.npz")
+    protocol_path = root / "output/warehouse_native/r41_active_2m_20260911/protocol.json"
+    manifest_path = root / (
+        "output/warehouse_native/r41_diagnostic_conflict_scenes_v3_20260912/"
+        "manifest.json")
+    if not all(path.is_file() for path in (actor_path, protocol_path, manifest_path)):
+        pytest.skip("diagnostic runtime development artifacts are not present")
+    protocol = subject._read_json(protocol_path, "training protocol")
+    manifest = subject._read_json(manifest_path, "conflict manifest")
+    content = dict(manifest); content_sha = content.pop("content_sha256")
+    runtime = runtime_api.R41DiagnosticOnlineAlignmentRuntime(
+        actor_path, training_protocol_path=protocol_path, manifest_path=manifest_path,
+        expected_actor_sha256=subject.file_hash(actor_path),
+        expected_training_protocol_file_sha256=subject.file_hash(protocol_path),
+        expected_training_protocol_content_sha256=subject.digest(protocol),
+        expected_manifest_file_sha256=subject.file_hash(manifest_path),
+        expected_manifest_content_sha256=content_sha,
+        expected_manifest_semantic_sha256=subject.digest(manifest),
+    )
+    original = runtime_api.diagnostic_runtime_sources()
+    calls = []
+    monkeypatch.setattr(
+        runtime_api, "diagnostic_runtime_sources",
+        lambda: calls.append("full-hash") or dict(original))
+    started = time.perf_counter()
+    for _ in range(20):
+        runtime.verify_binding()
+    assert calls == []
+    assert time.perf_counter() - started < 1.0
+
+    changed = dict(original)
+    changed["env/warehouse/transition_outcome.py"] = "0" * 64
+    monkeypatch.setattr(runtime_api, "diagnostic_runtime_sources", lambda: changed)
+    identities = dict(runtime._source_file_identities)
+    identities["env/warehouse/transition_outcome.py"] = (0, 0, 0, 0, 0)
+    monkeypatch.setattr(runtime_api, "_runtime_source_identities", lambda _: identities)
+    with pytest.raises(ValueError, match="runtime binding changed"):
+        runtime.verify_binding()

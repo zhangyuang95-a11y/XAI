@@ -20,10 +20,12 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 from typing import Any, Mapping, Sequence
 
 from backend.training.warehouse_native_common import canonical, digest, file_hash
+from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training import warehouse_r41_diagnostic_fresh_final_holdout_v4 as holdout_api
 from backend.training import warehouse_r41_diagnostic_explanation_audit_v8 as audit_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as rcpd_api
@@ -34,14 +36,11 @@ ROOT = Path(__file__).resolve().parents[2]
 LEDGER_ENV = "WAREHOUSE_R41_FINAL_LEDGER_DIR"
 PERMANENT_ANCHOR_ENV = "WAREHOUSE_R41_FINAL_PERMANENT_ANCHOR"
 SALT_FILE_ENV = "WAREHOUSE_R41_FINAL_HOLDOUT_SALT_FILE"
-REGISTRY_ROOT = (
-    Path.home() / ".local/state/policylens/warehouse_r41_diagnostic_v8_final_once"
-)
-PERMANENT_ANCHOR = (
-    Path.home() / ".local/state/policylens/warehouse_r41_diagnostic_v8_final_once.anchor"
-)
+REGISTRY_ROOT = holdout_api.DEFAULT_LEDGER_ROOT
+PERMANENT_ANCHOR = holdout_api.DEFAULT_PERMANENT_ANCHOR
+_ACCOUNT_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
 DEFAULT_SALT_FILE = (
-    Path.home() / ".config/policylens/warehouse_r41_diagnostic_v8_holdout_salt.bin"
+    _ACCOUNT_HOME / ".config/policylens/warehouse_r41_diagnostic_v8_holdout_salt.bin"
 )
 MAX_JSON_BYTES = 512 * 1024 * 1024
 MAX_INPUT_BYTES = 2 * 1024 * 1024 * 1024
@@ -50,6 +49,15 @@ PHASE_RECEIPT_NAMES = (
     "candidate_authenticated.json", "holdout_started.json",
     "holdout_completed.json", "audit_started.json", "audit_completed.json",
 )
+CANDIDATE_ARTIFACT_KEYS = {
+    "program.json": "program",
+    "report.json": "rcpd_report",
+    "rows.npz": "development_rows",
+    "prior_v7_report.json": "candidate_prior_v7_report_json",
+    "prior_v7_rows.npz": "candidate_prior_v7_rows_npz",
+    "expansion_rows.npz": "candidate_expansion_rows_npz",
+    "fit_config.json": "candidate_fit_config_json",
+}
 
 # These identities describe the one frozen diagnostic campaign.  Changing the
 # program or any producer source cannot create a new campaign key.  A new
@@ -72,6 +80,8 @@ EXPECTED_SELECTED_SCENES_SHA256 = (
 EXPECTED_EXPANSION_REGISTRY_SHA256 = (
     "abbced9b99eb51857ad36c2d7b9351864c4472f5f9de922228d5744ae4d49d0a"
 )
+EXPECTED_RETIRED_HOLDOUT_SHA256 = dict(
+    holdout_api.EXPECTED_RETIRED_HOLDOUT_SHA256)
 
 
 def contract() -> dict[str, Any]:
@@ -89,12 +99,14 @@ def contract() -> dict[str, Any]:
         "campaign_key_inputs": [
             "actor_file_sha256", "manifest_file_sha256",
             "designation_file_sha256", "development_expansion_registry_sha256",
-            "holdout_version",
+            "retired_holdout_sha256", "holdout_version",
             "selection_salt_commitment",
         ],
         "campaign_key_excludes": [
             "program", "rcpd_report", "producer_sources", "output",
+            "ledger_environment", "anchor_environment",
         ],
+        "caller_selectable_ledger_or_anchor": False,
         "retry_after_failure": False,
         "retry_after_interruption": False,
         "retry_after_output_removal": False,
@@ -110,32 +122,21 @@ def contract() -> dict[str, Any]:
 
 
 def producer_sources() -> dict[str, str]:
-    paths = (
-        Path(__file__).resolve(),
-        Path(holdout_api.__file__).resolve(),
-        Path(audit_api.__file__).resolve(),
-        Path(rcpd_api.__file__).resolve(),
-        ROOT / "backend/warehouse_r41_diagnostic_public_tree_program_v8.py",
-        ROOT / "backend/warehouse_r41_diagnostic_public_features_v8.py",
-        ROOT / "backend/warehouse_r41_diagnostic_boosted_tree.py",
-    )
-    result = {}
-    for path in paths:
-        path = path.resolve()
-        if not path.is_file() or path.is_symlink():
-            raise ValueError("Final-once source closure is unsafe")
-        result[path.relative_to(ROOT.resolve()).as_posix()] = file_hash(path)
-    return dict(sorted(result.items()))
+    return dict(sorted(local_source_hashes((Path(__file__).resolve(),)).items()))
 
 
 def _ledger_root() -> Path:
-    raw = os.environ.get(LEDGER_ENV)
-    return Path(raw).expanduser().absolute() if raw else Path(REGISTRY_ROOT).absolute()
+    path = Path(REGISTRY_ROOT).expanduser().absolute()
+    if path == ROOT.resolve() or path.is_relative_to(ROOT.resolve()):
+        raise ValueError("Final-once ledger must be at its fixed repository-external path")
+    return path
 
 
 def _anchor_path() -> Path:
-    raw = os.environ.get(PERMANENT_ANCHOR_ENV)
-    return Path(raw).expanduser().absolute() if raw else Path(PERMANENT_ANCHOR).absolute()
+    path = Path(PERMANENT_ANCHOR).expanduser().absolute()
+    if path == ROOT.resolve() or path.is_relative_to(ROOT.resolve()):
+        raise ValueError("Final-once anchor must be at its fixed repository-external path")
+    return path
 
 
 def _salt_path(value: str | Path | None) -> Path:
@@ -156,6 +157,8 @@ def _campaign_identity() -> dict[str, Any]:
         "development_expansion_registry_sha256": (
             EXPECTED_EXPANSION_REGISTRY_SHA256
         ),
+        "retired_holdout_sha256": dict(
+            sorted(EXPECTED_RETIRED_HOLDOUT_SHA256.items())),
         "holdout_version": holdout_api.VERSION,
         "selection_salt_commitment": commitment,
     }
@@ -219,6 +222,51 @@ def _write_exclusive(path: Path, raw: bytes) -> None:
         os.fsync(directory)
     finally:
         os.close(directory)
+
+
+def _write_phase_payload(stream: Any, raw: bytes) -> None:
+    """Finish the private phase payload before it can acquire its final name."""
+    stream.write(raw)
+    stream.flush()
+    os.fsync(stream.fileno())
+
+
+def _link_no_replace(source: Path, target: Path) -> None:
+    """Atomically publish ``source`` and fail if ``target`` already exists."""
+    os.link(source, target, follow_symlinks=False)
+
+
+def _write_phase_exclusive(path: Path, raw: bytes) -> None:
+    """Publish a complete phase record without exposing partial final bytes."""
+    if (path.exists() or path.is_symlink() or path.parent.is_symlink()
+            or path.parent.resolve() != path.parent.absolute()):
+        raise ValueError("Final-once phase destination is unsafe")
+    temporary = path.parent / ("." + path.name + ".partial")
+    descriptor = None
+    temporary_created = False
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        temporary_created = True
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = None
+            _write_phase_payload(stream, raw)
+        _link_no_replace(temporary, path)
+        temporary.unlink()
+        temporary_created = False
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temporary_created:
+            temporary.unlink(missing_ok=True)
 
 
 def _input_paths(
@@ -286,6 +334,42 @@ def _preclaim_identity(
     return _campaign_identity()
 
 
+def _candidate_artifact_hashes(
+    singles: Mapping[str, Path], row_paths: Sequence[Path],
+) -> dict[str, str]:
+    if len(row_paths) != 1:
+        raise ValueError("Exactly one RCPD v8 rows artifact is required")
+    paths = {
+        name: (row_paths[0] if key == "development_rows" else singles[key])
+        for name, key in CANDIDATE_ARTIFACT_KEYS.items()
+    }
+    return {name: file_hash(path) for name, path in sorted(paths.items())}
+
+
+def _validate_candidate_artifact_binding(
+    marker: Mapping[str, Any], *, singles: Mapping[str, Path],
+    row_paths: Sequence[Path],
+) -> dict[str, str]:
+    expected = _candidate_artifact_hashes(singles, row_paths)
+    frozen = marker.get("candidate_artifacts")
+    if (not isinstance(frozen, Mapping) or dict(frozen) != expected
+            or set(frozen) != set(CANDIDATE_ARTIFACT_KEYS)
+            or marker.get("candidate_artifacts_sha256") != digest(expected)
+            or marker.get("program_file_sha256") != expected["program.json"]
+            or marker.get("rcpd_report_file_sha256") != expected["report.json"]
+            or marker.get("rows_file_sha256") != expected["rows.npz"]
+            or marker.get("prior_v7_report_file_sha256")
+                != expected["prior_v7_report.json"]
+            or marker.get("prior_v7_rows_file_sha256")
+                != expected["prior_v7_rows.npz"]
+            or marker.get("expansion_rows_file_sha256")
+                != expected["expansion_rows.npz"]
+            or marker.get("fit_config_file_sha256")
+                != expected["fit_config.json"]):
+        raise ValueError("Claim-authenticated RCPD candidate artifacts changed")
+    return expected
+
+
 def _versioned_json_paths(
     paths: Sequence[Path], *, label: str, expected_versions: set[str],
 ) -> dict[str, tuple[Path, dict[str, Any]]]:
@@ -304,8 +388,12 @@ def _versioned_json_paths(
 def _authenticate_candidate_after_claim(
     *, singles: Mapping[str, Path], development_paths: Sequence[Path],
     row_paths: Sequence[Path], retired_paths: Sequence[Path],
-) -> tuple[dict[str, Any], dict[str, str], dict[str, tuple[Path, dict[str, Any]]]]:
+) -> tuple[
+    dict[str, Any], dict[str, str],
+    dict[str, tuple[Path, dict[str, Any]]], dict[str, str],
+]:
     """Strictly refit/authenticate the same saved RCPD candidate post-claim."""
+    candidate_artifacts = _candidate_artifact_hashes(singles, row_paths)
     developments = _versioned_json_paths(
         development_paths, label="development registry",
         expected_versions={
@@ -313,7 +401,7 @@ def _authenticate_candidate_after_claim(
             holdout_api.DEVELOPMENT_EXPANSION_VERSION,
         },
     )
-    _versioned_json_paths(
+    retired = _versioned_json_paths(
         retired_paths, label="retired fresh-final registry",
         expected_versions=set(holdout_api.EXTERNAL_RETIRED_VERSIONS),
     )
@@ -321,6 +409,22 @@ def _authenticate_candidate_after_claim(
     supplement_path = developments[holdout_api.DEVELOPMENT_SUPPLEMENT_VERSION][0]
     if file_hash(expansion_path) != EXPECTED_EXPANSION_REGISTRY_SHA256:
         raise ValueError("Exact fixed development expansion registry required")
+    actual_retired = {
+        version: {
+            "file_sha256": file_hash(path),
+            "content_sha256": value.get("content_sha256"),
+        }
+        for version, (path, value) in sorted(retired.items())
+    }
+    expansion_retired = developments[
+        holdout_api.DEVELOPMENT_EXPANSION_VERSION][1].get(
+            "bindings", {}).get("retired_holdouts")
+    if (any(actual_retired[version]["file_sha256"]
+            != EXPECTED_RETIRED_HOLDOUT_SHA256[version]
+            for version in holdout_api.EXTERNAL_RETIRED_VERSIONS)
+            or actual_retired != expansion_retired):
+        raise ValueError(
+            "Retired v1/v2 bytes must match the fixed development expansion")
     report_envelope = _read_json(singles["rcpd_report"], "v8 RCPD report")
     bindings = report_envelope.get("bindings")
     if not isinstance(bindings, Mapping):
@@ -328,6 +432,7 @@ def _authenticate_candidate_after_claim(
     required_binding_names = (
         "prior_v7_report_file_sha256", "expansion_rows_file_sha256",
         "fit_config_file_sha256", "expansion_registry_file_sha256",
+        "previous_development_file_sha256",
     )
     if any(_HEX.fullmatch(str(bindings.get(name))) is None
            for name in required_binding_names):
@@ -367,7 +472,10 @@ def _authenticate_candidate_after_claim(
             or designation.get("formal_sample_eligible") is not False):
         raise ValueError("Exact strictly refit passing RCPD v8 candidate required")
     sources = producer_sources()
-    return deepcopy(authenticated), sources, developments
+    if _candidate_artifact_hashes(singles, row_paths) != candidate_artifacts:
+        raise RuntimeError(
+            "RCPD candidate artifacts changed during strict authentication")
+    return deepcopy(authenticated), sources, developments, candidate_artifacts
 
 
 def _ensure_private_parent(path: Path, label: str) -> None:
@@ -484,34 +592,156 @@ def _phase_receipt_hashes(registry: Path) -> dict[str, str]:
     }
 
 
+def _candidate_artifacts_from_marker(value: Mapping[str, Any]) -> dict[str, str]:
+    expected_fields = {
+        "version", "status", "campaign_key", "candidate_identity_sha256",
+        "attempt_started_sha256", "candidate_artifacts",
+        "candidate_artifacts_sha256", "rcpd_report_file_sha256",
+        "program_file_sha256", "rows_file_sha256",
+        "prior_v7_report_file_sha256", "prior_v7_rows_file_sha256",
+        "expansion_rows_file_sha256", "fit_config_file_sha256",
+        "actor_file_sha256", "protocol_file_sha256", "manifest_file_sha256",
+        "designation_file_sha256", "selected_scenes_file_sha256",
+        "development_registries", "require_passed", "refit", "formal_ready",
+    }
+    artifacts = value.get("candidate_artifacts")
+    development = value.get("development_registries")
+    if (set(value) != expected_fields
+            or value.get("version") != VERSION + ".candidate-authentication.v1"
+            or value.get("status") != "passed_strict_reader_and_refit"
+            or not isinstance(artifacts, Mapping)
+            or set(artifacts) != set(CANDIDATE_ARTIFACT_KEYS)
+            or any(_HEX.fullmatch(str(item)) is None
+                   for item in artifacts.values())
+            or value.get("candidate_artifacts_sha256") != digest(dict(artifacts))
+            or value.get("program_file_sha256") != artifacts.get("program.json")
+            or value.get("rcpd_report_file_sha256") != artifacts.get("report.json")
+            or value.get("rows_file_sha256") != artifacts.get("rows.npz")
+            or value.get("prior_v7_report_file_sha256")
+                != artifacts.get("prior_v7_report.json")
+            or value.get("prior_v7_rows_file_sha256")
+                != artifacts.get("prior_v7_rows.npz")
+            or value.get("expansion_rows_file_sha256")
+                != artifacts.get("expansion_rows.npz")
+            or value.get("fit_config_file_sha256")
+                != artifacts.get("fit_config.json")
+            or value.get("require_passed") is not True
+            or value.get("refit") is not True
+            or value.get("formal_ready") is not False):
+        raise ValueError("Strict candidate authentication marker differs")
+    if (value.get("actor_file_sha256") != EXPECTED_ACTOR_SHA256
+            or value.get("protocol_file_sha256") != EXPECTED_PROTOCOL_SHA256
+            or value.get("manifest_file_sha256") != EXPECTED_MANIFEST_SHA256
+            or value.get("designation_file_sha256") != EXPECTED_DESIGNATION_SHA256
+            or value.get("selected_scenes_file_sha256")
+                != EXPECTED_SELECTED_SCENES_SHA256
+            or not isinstance(development, Mapping)
+            or set(development) != {
+                holdout_api.DEVELOPMENT_SUPPLEMENT_VERSION,
+                holdout_api.DEVELOPMENT_EXPANSION_VERSION,
+            }
+            or development.get(holdout_api.DEVELOPMENT_EXPANSION_VERSION)
+                != EXPECTED_EXPANSION_REGISTRY_SHA256
+            or any(_HEX.fullmatch(str(item)) is None
+                   for item in development.values())):
+        raise ValueError("Strict candidate fixed-input marker differs")
+    return {str(name): str(item) for name, item in sorted(artifacts.items())}
+
+
+def _validate_candidate_marker_before_publish(
+    marker: Mapping[str, Any], *, authenticated_report: Mapping[str, Any],
+    singles: Mapping[str, Path], development_paths: Sequence[Path],
+    row_paths: Sequence[Path], identity: Mapping[str, Any], key: str,
+    claim_sha256: str,
+) -> dict[str, str]:
+    """Authenticate the complete marker before its irrevocable publication."""
+    artifacts = _candidate_artifacts_from_marker(marker)
+    actual_artifacts = _validate_candidate_artifact_binding(
+        marker, singles=singles, row_paths=row_paths)
+    bindings = authenticated_report.get("bindings")
+    developments = marker.get("development_registries")
+    supplement_version = holdout_api.DEVELOPMENT_SUPPLEMENT_VERSION
+    expansion_version = holdout_api.DEVELOPMENT_EXPANSION_VERSION
+    if (not isinstance(bindings, Mapping)
+            or not isinstance(developments, Mapping)
+            or artifacts != actual_artifacts
+            or marker.get("campaign_key") != key
+            or key != campaign_key()
+            or marker.get("candidate_identity_sha256") != digest(dict(identity))
+            or marker.get("attempt_started_sha256") != claim_sha256
+            or developments.get(supplement_version)
+                != bindings.get("previous_development_file_sha256")
+            or developments.get(expansion_version)
+                != bindings.get("expansion_registry_file_sha256")
+            or _preclaim_identity(singles, development_paths) != dict(identity)):
+        raise RuntimeError(
+            "Complete candidate authentication marker/fixed input changed "
+            "before publication")
+    return artifacts
+
+
 def _validate_phase_receipts(
     registry: Path, *, key: str, candidate_identity_sha256: str,
     attempt_started_sha256: str, require_complete: bool,
+    terminal_status: str | None = None,
+    ignored_receipts: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    receipts = _phase_receipt_hashes(registry)
+    all_receipts = _phase_receipt_hashes(registry)
+    ignored = {} if ignored_receipts is None else dict(ignored_receipts)
+    if (not set(ignored).issubset({"candidate_authenticated.json"})
+            or any(all_receipts.get(name) != value
+                   or _HEX.fullmatch(str(value)) is None
+                   for name, value in ignored.items())
+            or (require_complete and ignored)):
+        raise ValueError("Final-once uncommitted phase residue differs")
+    receipts = {
+        name: value for name, value in all_receipts.items()
+        if name not in ignored
+    }
     if require_complete and set(receipts) != set(PHASE_RECEIPT_NAMES):
         raise ValueError("Passing final-once chain lacks a phase receipt")
     if not set(receipts).issubset(PHASE_RECEIPT_NAMES):
         raise ValueError("Final-once phase receipt registry differs")
+    expected_prefix = set(PHASE_RECEIPT_NAMES[:len(receipts)])
+    if set(receipts) != expected_prefix:
+        raise ValueError("Final-once phase receipts are not one ordered prefix")
     values = {
         name: _read_json(registry / name, "final-once phase " + name)
         for name in receipts
     }
-    status_by_name = {
-        "candidate_authenticated.json": "passed_strict_reader_and_refit",
-        "holdout_started.json": "started_no_retry",
-        "holdout_completed.json": "completed_program_blind",
-        "audit_started.json": "started_no_retry",
-        "audit_completed.json": "passed",
+    status_by_name: dict[str, set[str]] = {
+        "candidate_authenticated.json": {"passed_strict_reader_and_refit"},
+        "holdout_started.json": {"started_no_retry"},
+        "holdout_completed.json": {"completed_program_blind"},
+        "audit_started.json": {"started_no_retry"},
+        "audit_completed.json": (
+            {"passed"} if terminal_status == "completed_passed"
+            else {"passed", "failed"}
+        ),
     }
     for name, value in values.items():
-        if (value.get("status") != status_by_name[name]
+        if (value.get("status") not in status_by_name[name]
                 or value.get("campaign_key") != key
                 or value.get("candidate_identity_sha256")
                     != candidate_identity_sha256
                 or value.get("attempt_started_sha256")
                     != attempt_started_sha256):
             raise ValueError("Final-once phase receipt differs: " + name)
+    candidate_hash = receipts.get("candidate_authenticated.json")
+    candidate_artifacts = None
+    if "candidate_authenticated.json" in values:
+        candidate_artifacts = _candidate_artifacts_from_marker(
+            values["candidate_authenticated.json"])
+    if any(name in values for name in PHASE_RECEIPT_NAMES[1:]) and candidate_hash is None:
+        raise ValueError("Final-once downstream phase lacks candidate authentication")
+    for name in PHASE_RECEIPT_NAMES[1:]:
+        if (name in values and values[name].get("candidate_authenticated_sha256")
+                != candidate_hash):
+            raise ValueError("Final-once candidate phase lineage differs: " + name)
+    for name in ("audit_started.json", "audit_completed.json"):
+        if (name in values and values[name].get("candidate_artifacts_sha256")
+                != digest(candidate_artifacts)):
+            raise ValueError("Final-once audit candidate binding differs: " + name)
     holdout_completed_hash = receipts.get("holdout_completed.json")
     for name in ("audit_started.json", "audit_completed.json"):
         if name in values and values[name].get(
@@ -553,6 +783,7 @@ def run_final_once(
     output_created = False
     failure: BaseException | None = None
     holdout_report = audit_report = replay_report = candidate_report = None
+    candidate_artifacts: dict[str, str] | None = None
     sources: dict[str, str] = {}
     try:
         output_path.mkdir(parents=True, mode=0o700)
@@ -562,21 +793,30 @@ def run_final_once(
         # saved-candidate reader with an authenticated refit before final access.
         if _preclaim_identity(singles, development_paths) != identity:
             raise RuntimeError("Fixed final campaign input changed after claim")
-        candidate_report, sources, developments = _authenticate_candidate_after_claim(
+        authenticated_report, sources, developments, pending_artifacts = (
+            _authenticate_candidate_after_claim(
             singles=singles, development_paths=development_paths,
             row_paths=row_paths, retired_paths=retired_paths,
-        )
-        _write_exclusive(registry / "candidate_authenticated.json", _bytes({
+        ))
+        candidate_marker = {
             "version": VERSION + ".candidate-authentication.v1",
             "status": "passed_strict_reader_and_refit",
             "campaign_key": key,
             "candidate_identity_sha256": candidate_identity_sha256,
             "attempt_started_sha256": claim_sha256,
+            "candidate_artifacts": deepcopy(pending_artifacts),
+            "candidate_artifacts_sha256": digest(pending_artifacts),
             "rcpd_report_file_sha256": file_hash(singles["rcpd_report"]),
             "program_file_sha256": file_hash(singles["program"]),
             "rows_file_sha256": file_hash(row_paths[0]),
+            "prior_v7_report_file_sha256": file_hash(
+                singles["candidate_prior_v7_report_json"]),
             "prior_v7_rows_file_sha256": file_hash(
                 singles["candidate_prior_v7_rows_npz"]),
+            "expansion_rows_file_sha256": file_hash(
+                singles["candidate_expansion_rows_npz"]),
+            "fit_config_file_sha256": file_hash(
+                singles["candidate_fit_config_json"]),
             "actor_file_sha256": file_hash(singles["actor"]),
             "protocol_file_sha256": file_hash(singles["protocol"]),
             "manifest_file_sha256": file_hash(singles["manifest"]),
@@ -589,7 +829,21 @@ def run_final_once(
             "require_passed": True,
             "refit": True,
             "formal_ready": False,
-        }))
+        }
+        if _validate_candidate_marker_before_publish(
+                candidate_marker, authenticated_report=authenticated_report,
+                singles=singles, development_paths=development_paths,
+                row_paths=row_paths, identity=identity, key=key,
+                claim_sha256=claim_sha256) != pending_artifacts:
+            raise RuntimeError(
+                "Strictly authenticated candidate artifact lineage changed")
+        _write_phase_exclusive(
+            registry / "candidate_authenticated.json", _bytes(candidate_marker))
+        # Only a successfully returned durable marker establishes this
+        # lineage.  A write/fsync failure is recorded separately as a burned
+        # phase residue and never masquerades as authenticated evidence.
+        candidate_report = authenticated_report
+        candidate_artifacts = pending_artifacts
         holdout_dir = output_path / "fresh_holdout"
         holdout_report = holdout_api.build(
             actor_path=singles["actor"],
@@ -617,6 +871,11 @@ def run_final_once(
         holdout_completion_sha256 = file_hash(holdout_completion)
         expansion_path = developments[holdout_api.DEVELOPMENT_EXPANSION_VERSION][0]
         audit_dir = output_path / "explanation_audit"
+        _validate_candidate_artifact_binding(
+            _read_json(
+                registry / "candidate_authenticated.json",
+                "strict candidate authentication phase"),
+            singles=singles, row_paths=row_paths)
         audit_report = audit_api.audit(
             actor_path=singles["actor"],
             protocol_path=singles["protocol"],
@@ -653,11 +912,17 @@ def run_final_once(
             expected_evidence_sha256=file_hash(audit_dir / "evidence.npz"),
             expected_bindings=audit_report["bindings"],
         )
+        _validate_candidate_artifact_binding(
+            _read_json(
+                registry / "candidate_authenticated.json",
+                "strict candidate authentication phase"),
+            singles=singles, row_paths=row_paths)
         _write_exclusive(output_path / "physical_replay.json", _bytes(replay_report))
         _validate_phase_receipts(
             registry, key=key,
             candidate_identity_sha256=candidate_identity_sha256,
-            attempt_started_sha256=claim_sha256, require_complete=True)
+            attempt_started_sha256=claim_sha256, require_complete=True,
+            terminal_status="completed_passed")
         if producer_sources() != sources:
             raise RuntimeError("Final-once source closure changed during execution")
     except BaseException as error:
@@ -665,6 +930,12 @@ def run_final_once(
 
     status = "completed_passed" if failure is None else (
         "burned_failed" if isinstance(failure, Exception) else "burned_interrupted")
+    phase_receipts = _phase_receipt_hashes(registry)
+    phase_residues: dict[str, str] = {}
+    if (candidate_report is None
+            and "candidate_authenticated.json" in phase_receipts):
+        phase_residues["candidate_authenticated.json"] = phase_receipts.pop(
+            "candidate_authenticated.json")
     completion = {
         "version": VERSION,
         "key": key,
@@ -675,7 +946,8 @@ def run_final_once(
         "producer_sources": sources,
         "attempt_started_sha256": claim_sha256,
         "permanent_anchor_sha256": started["permanent_anchor_sha256"],
-        "phase_receipts": _phase_receipt_hashes(registry),
+        "phase_receipts": phase_receipts,
+        "uncommitted_phase_residues": phase_residues,
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "automatic_retry": False,
         "retry_allowed": False,
@@ -684,6 +956,14 @@ def run_final_once(
         "output_identity": str(output_path),
         "candidate_authentication_status": (
             None if candidate_report is None else "passed_strict_reader_and_refit"
+        ),
+        "candidate_authenticated_sha256": (
+            file_hash(registry / "candidate_authenticated.json")
+            if candidate_report is not None else None
+        ),
+        "candidate_artifacts": deepcopy(candidate_artifacts),
+        "candidate_artifacts_sha256": (
+            None if candidate_artifacts is None else digest(candidate_artifacts)
         ),
         "holdout_status": None if holdout_report is None else holdout_report.get("status"),
         "audit_status": None if audit_report is None else audit_report.get("status"),
@@ -698,9 +978,9 @@ def run_final_once(
     completion_raw = _bytes(completion)
     completion_error = None
     try:
-        _write_exclusive(registry / "attempt_completed.json", completion_raw)
+        _write_phase_exclusive(registry / "attempt_completed.json", completion_raw)
         if output_created:
-            _write_exclusive(output_path / "attempt_completed.json", completion_raw)
+            _write_phase_exclusive(output_path / "attempt_completed.json", completion_raw)
     except BaseException as error:
         completion_error = error
     if completion_error is not None:
@@ -745,10 +1025,37 @@ def read_completion(registry: str | Path, *, expected_completion_sha256: str,
     actual_phase_receipts = _validate_phase_receipts(
         path, key=key, candidate_identity_sha256=identity_sha256,
         attempt_started_sha256=file_hash(started_path),
-        require_complete=completion.get("status") == "completed_passed")
+        require_complete=completion.get("status") == "completed_passed",
+        terminal_status=completion.get("status"),
+        ignored_receipts=completion.get("uncommitted_phase_residues", {}))
     if (not isinstance(phase_receipts, Mapping)
             or dict(phase_receipts) != actual_phase_receipts):
         raise ValueError("Final-once phase receipt registry differs")
+    candidate_marker_path = path / "candidate_authenticated.json"
+    candidate_is_residue = candidate_marker_path.name in completion.get(
+        "uncommitted_phase_residues", {})
+    if (candidate_marker_path.is_file() and not candidate_marker_path.is_symlink()
+            and not candidate_is_residue):
+        marker = _read_json(
+            candidate_marker_path, "strict candidate authentication phase")
+        frozen_candidate = _candidate_artifacts_from_marker(marker)
+        if (completion.get("candidate_authenticated_sha256")
+                != file_hash(candidate_marker_path)
+                or completion.get("candidate_artifacts") != frozen_candidate
+                or completion.get("candidate_artifacts_sha256")
+                    != digest(frozen_candidate)):
+            raise ValueError("Final-once completion candidate binding differs")
+    elif (not candidate_is_residue
+          and (completion.get("candidate_authenticated_sha256") is not None
+          or completion.get("candidate_artifacts") is not None
+          or completion.get("candidate_artifacts_sha256") is not None)):
+        raise ValueError("Final-once completion has an unauthenticated candidate")
+    if candidate_is_residue and (
+            completion.get("status") == "completed_passed"
+            or completion.get("candidate_authenticated_sha256") is not None
+            or completion.get("candidate_artifacts") is not None
+            or completion.get("candidate_artifacts_sha256") is not None):
+        raise ValueError("Final-once candidate residue was treated as authenticated")
     if (started.get("key") != key or started.get("campaign_key") != key
             or completion.get("key") != key or completion.get("campaign_key") != key
             or anchor.get("campaign_key") != key

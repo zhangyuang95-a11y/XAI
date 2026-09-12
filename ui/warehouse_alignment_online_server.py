@@ -39,6 +39,19 @@ SERVICE_FAMILY = "warehouse_alignment_online_r2"
 R41_RELEASE_CONTEXT_VERSION = "warehouse-r41-online-release.v1"
 R41_PUBLIC_RELEASE_VERSION = "r4.1"
 R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION = "warehouse-r41-diagnostic-online-release.v3"
+R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V4 = "warehouse-r41-diagnostic-online-release.v4"
+R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V5 = "warehouse-r41-diagnostic-online-release.v5"
+R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V6 = "warehouse-r41-diagnostic-online-release.v6"
+R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V7 = "warehouse-r41-diagnostic-online-release.v7"
+R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V8 = "warehouse-r41-diagnostic-online-release.v8"
+R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS = (
+    R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION,
+    R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V4,
+    R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V5,
+    R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V6,
+    R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V7,
+    R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V8,
+)
 R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION = "r4.1-diagnostic"
 NAMESPACE = "online_demo"
 COOKIE = "warehouse_alignment_online_session_v1"
@@ -51,8 +64,18 @@ PERSISTENT_DATABASE_ROOT = Path("/var/data")
 DEFAULT_RELEASE_MODULE = "ui.warehouse_alignment_online_release"
 R41_RELEASE_MODULE = "ui.warehouse_alignment_r41_online_release"
 R41_DIAGNOSTIC_RELEASE_MODULE = "ui.warehouse_alignment_r41_diagnostic_release"
+R41_DIAGNOSTIC_RELEASE_MODULE_V4 = "ui.warehouse_alignment_r41_diagnostic_release_v4"
+R41_DIAGNOSTIC_RELEASE_MODULE_V5 = "ui.warehouse_alignment_r41_diagnostic_release_v5"
+R41_DIAGNOSTIC_RELEASE_MODULE_V6 = "ui.warehouse_alignment_r41_diagnostic_release_v6"
+R41_DIAGNOSTIC_RELEASE_MODULE_V7 = "ui.warehouse_alignment_r41_diagnostic_release_v7"
+R41_DIAGNOSTIC_RELEASE_MODULE_V8 = "ui.warehouse_alignment_r41_diagnostic_release_v8"
 RELEASE_MODULES = (DEFAULT_RELEASE_MODULE, R41_RELEASE_MODULE,
-                   R41_DIAGNOSTIC_RELEASE_MODULE)
+                   R41_DIAGNOSTIC_RELEASE_MODULE,
+                   R41_DIAGNOSTIC_RELEASE_MODULE_V4,
+                   R41_DIAGNOSTIC_RELEASE_MODULE_V5,
+                   R41_DIAGNOSTIC_RELEASE_MODULE_V6,
+                   R41_DIAGNOSTIC_RELEASE_MODULE_V7,
+                   R41_DIAGNOSTIC_RELEASE_MODULE_V8)
 MAX_BODY = 20_000
 MAX_SECRET_FILE_BYTES = 1_000_000
 _ACTIONS = {"UP", "DOWN", "LEFT", "RIGHT", "WAIT"}
@@ -505,7 +528,7 @@ class OnlineAlignmentStudyStore:
                 or release.get("formal_ready") is not False):
             raise ValueError("a genuine technically verified local-pilot release is required")
         context_version = str(getattr(context, "provenance", {}).get("version", ""))
-        self.is_diagnostic = context_version == R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION
+        self.is_diagnostic = context_version in R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS
         if self.is_diagnostic and (
                 release.get("release_version")
                     != R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION

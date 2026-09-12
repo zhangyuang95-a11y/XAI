@@ -19,12 +19,17 @@ from backend.warehouse_r41_online_runtime import R41OnlineAlignmentRuntime
 from backend.warehouse_r41_diagnostic_model_tree import (
     R41DiagnosticModelTreeProgram,
 )
+from backend.warehouse_r41_diagnostic_model_tree_ensemble import (
+    ENVELOPE_VERSION as ENSEMBLE_ENVELOPE_VERSION,
+    R41DiagnosticModelTreeEnsemble,
+    load_program_envelope,
+)
 from core.program import ExecutableProgram
 
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "warehouse-r41-alignment-online-readable-answers.v1"
-DIAGNOSTIC_VERSION = "warehouse-r41-diagnostic-online-readable-answers.v3"
+DIAGNOSTIC_VERSION = "warehouse-r41-diagnostic-online-readable-answers.v4"
 
 
 def explanation_sources() -> dict[str, str]:
@@ -50,6 +55,7 @@ def diagnostic_explanation_sources() -> dict[str, str]:
         ROOT / "backend/warehouse_alignment_online_runtime.py",
         ROOT / "backend/warehouse_r41_diagnostic_online_runtime.py",
         ROOT / "backend/warehouse_r41_diagnostic_model_tree.py",
+        ROOT / "backend/warehouse_r41_diagnostic_model_tree_ensemble.py",
         ROOT / "env/warehouse_native/r41_diagnostic_conflict.py",
         ROOT / "core/program.py",
     )
@@ -170,23 +176,39 @@ class R41DiagnosticOnlineAlignmentExplainer(base.OnlineAlignmentExplainer):
                 or sha256(raw).hexdigest() != expected_program_sha256):
             raise ValueError("Program differs from its external hash")
         payload = json.loads(raw)
-        self.program = R41DiagnosticModelTreeProgram.from_dict(payload)
+        if payload.get("version") == ENSEMBLE_ENVELOPE_VERSION:
+            self.program = load_program_envelope(payload)
+            ensemble = True
+        else:
+            self.program = R41DiagnosticModelTreeProgram.from_dict(payload)
+            ensemble = False
         if (tuple(self.program.feature_names)
                 != tuple(runtime.actor.metadata["feature_names"])
                 or tuple(self.program.action_names) != ACTIONS
                 or self.program.metadata.get("native_source_actor_sha256")
                     != runtime.actor_sha256
-                or self.program.metadata.get("diagnostic_rcpd_version")
-                    != "warehouse-r41-diagnostic-rcpd.v3"
                 or self.program.metadata.get("source_full_manifest_bindings")
                     != runtime.source_full_manifest_bindings
                 or self.program.metadata.get("action_legality_features")
-                or self.program.metadata.get("action_constraint_reason_features")
+                or self.program.metadata.get("action_constraint_reason_features")):
+            raise ValueError("Program source, diagnostic schema or unmasked action contract differs")
+        if ensemble:
+            complexity = self.program.complexity()
+            if (type(self.program) is not R41DiagnosticModelTreeEnsemble
+                    or self.program.metadata.get("diagnostic_rcpd_version")
+                        != "warehouse-r41-diagnostic-rcpd.v4"
+                    or self.program.metadata.get("program_family")
+                        != "four_axis_router_sparse_public_linear_softmax_ensemble"
+                    or complexity["maximum_member_router_depth"] > 12
+                    or complexity["maximum_member_router_leaves"] > 256):
+                raise ValueError("Program source, diagnostic ensemble schema or bounds differ")
+        elif (self.program.metadata.get("diagnostic_rcpd_version")
+                  != "warehouse-r41-diagnostic-rcpd.v3"
                 or self.program.metadata.get("program_family")
-                    != "axis_router_sparse_public_linear_softmax_leaves"
+                   != "axis_router_sparse_public_linear_softmax_leaves"
                 or self.program.router_depth > 8
                 or self.program.router_leaf_count > 32):
-            raise ValueError("Program source, diagnostic schema or unmasked action contract differs")
+            raise ValueError("Program source, diagnostic model-tree schema or bounds differ")
         self.actor_sha256 = runtime.actor_sha256
         self.runtime_signature = runtime.signature
         self.program_sha256 = expected_program_sha256

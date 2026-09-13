@@ -928,9 +928,8 @@ def build(
                     != bindings["actor_feature_names_sha256"]
                 or tuple(program.base_feature_names) != actor_feature_names):
             raise ValueError("Executing v9 program and Actor feature registries differ")
-        rows_api._validate_arrays(
-            arrays, actor=actor, train_scenes=[],
-            validation_scenes=registry["development_outer"])
+        projection_api._validate_projection_replay_arrays(
+            arrays, actor=actor, scenes=registry["development_outer"])
         if (not np.all(arrays["split_validation"])
                 or _decode(arrays["observation_hashes"], "outer observation hashes")
                     != projection["projection"]["ordered_observation_hashes"]

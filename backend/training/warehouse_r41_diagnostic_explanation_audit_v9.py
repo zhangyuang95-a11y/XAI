@@ -17,6 +17,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from backend.training import warehouse_r41_diagnostic_outer_collection_v9 as collection_api
+from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v9 as projection_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v7 as rows_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as metrics_api
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
@@ -192,10 +193,10 @@ def audit_rows(
 
     collection_api._validate_static_rows(arrays)
     collection_api._validate_static_rows(replay_arrays)
-    rows_api._validate_arrays(
-        arrays, actor=actor, train_scenes=[], validation_scenes=scene_rows)
-    rows_api._validate_arrays(
-        replay_arrays, actor=actor, train_scenes=[], validation_scenes=scene_rows)
+    projection_api._validate_projection_replay_arrays(
+        arrays, actor=actor, scenes=scene_rows)
+    projection_api._validate_projection_replay_arrays(
+        replay_arrays, actor=actor, scenes=scene_rows)
     _assert_exact_replay(arrays, replay_arrays)
     if not np.all(arrays["split_validation"]):
         raise ValueError("Every final row must belong to the final split")

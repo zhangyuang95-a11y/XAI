@@ -90,7 +90,9 @@ def _fixture(tmp_path: Path, monkeypatch):
     # the hard boundary is zero overlap across splits, not uniqueness within an episode.
     monkeypatch.setattr(subject, "NumPyNativeActor", _Actor)
     monkeypatch.setattr(subject, "R41DiagnosticPublicTreeProgramV9", _Program)
-    monkeypatch.setattr(subject.rows_api, "_validate_arrays", lambda *a, **k: None)
+    monkeypatch.setattr(
+        subject.projection_api, "_validate_projection_replay_arrays",
+        lambda *a, **k: None)
     monkeypatch.setattr(subject, "producer_sources", lambda: {"audit.py": _fp("audit")})
     bindings = {
         "actor_sha256": file_hash(actor), "program_sha256": file_hash(program),

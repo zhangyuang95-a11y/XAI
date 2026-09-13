@@ -305,6 +305,27 @@ def test_run_final_once_has_no_caller_materializer_override():
         subject.run_final_once).parameters
 
 
+def test_final_collection_uses_validation_only_row_encoder(monkeypatch):
+    monkeypatch.setattr(
+        subject.manifest_api, "build_runtime", lambda **unused: object())
+    monkeypatch.setattr(
+        subject.rows_api, "_collect",
+        lambda *unused_args, **unused_kwargs: ([{"row": 1}], 37))
+    monkeypatch.setattr(
+        subject.rows_api, "_rows_to_arrays",
+        lambda *unused_args, **unused_kwargs: pytest.fail(
+            "fit-weight encoder used for validation-only final rows"))
+    expected = {"split_validation": np.ones(1, dtype=np.bool_)}
+    monkeypatch.setattr(
+        subject.projection_api, "_projection_rows_to_arrays",
+        lambda rows: (expected, {"raw_validation_rows": len(rows)}))
+    arrays, steps = subject._collect_final_rows(
+        actor_path=Path("actor"), protocol_path=Path("protocol"),
+        manifest_path=Path("manifest"), scenes=[{"scene": 1}])
+    assert arrays is expected
+    assert steps == 37
+
+
 def test_official_materializer_binding_matches_frozen_transitive_digest():
     source, sources = subject._official_materializer_binding()
     assert source == (

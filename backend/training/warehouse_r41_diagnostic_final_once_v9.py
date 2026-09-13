@@ -57,7 +57,7 @@ OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH = (
 # claim; any later producer change requires a new protocol version rather than
 # silently changing a consumed final evaluator.
 OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256 = (
-    "8e7824e279381d136bb7345482601838169625e30353eae46a6e499ab0769ce7"
+    "833c1f56549c43ba0797329185828c8906965d22f879e19af3cd6ef78c217288"
 )
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _MATERIAL_FIELDS = frozenset((
@@ -398,7 +398,7 @@ def _collect_final_rows(
     rows, steps = rows_api._collect(
         runtime, scenes, scene_offset=FINAL_SCENE_OFFSET,
         dense_critical=False, progress_label=None)
-    arrays, _ = rows_api._rows_to_arrays([], rows)
+    arrays, _ = projection_api._projection_rows_to_arrays(rows)
     return arrays, steps
 
 

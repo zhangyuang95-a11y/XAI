@@ -325,7 +325,9 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
         subject.collection_api, "load_authenticated_rows",
         lambda *unused_args, **unused_kwargs: {
             name: value.copy() for name, value in outer_arrays.items()})
-    monkeypatch.setattr(subject.rows_api, "_validate_arrays", lambda *a, **k: None)
+    monkeypatch.setattr(
+        subject.projection_api, "_validate_projection_replay_arrays",
+        lambda *a, **k: None)
     monkeypatch.setattr(subject.rows_api, "_effective_pairs",
                         lambda arrays, mask: np.empty((0, 2), dtype=np.int64))
     monkeypatch.setattr(subject.metrics_api, "_pair_group_bits",

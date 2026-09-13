@@ -34,6 +34,7 @@ from backend.training import warehouse_r41_diagnostic_pair_weights_v8 as pair_we
 from backend.training import warehouse_r41_diagnostic_prior_rows_v8 as prior_rows_api
 from backend.training import warehouse_r41_diagnostic_question_bank as question_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as rcpd_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v8_outer_split as outer_split_api
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 from backend.warehouse_r41_diagnostic_boosted_tree import VERSION as BOOSTED_TREE_VERSION
 from backend.warehouse_r41_diagnostic_online_explanation_v8 import R41DiagnosticOnlineAlignmentExplainer
@@ -74,6 +75,14 @@ ARTIFACT_NAMES = (
     "prior_rows_reauthentication_report", "prior_v7_source_report",
     "prior_v7_rows", "expansion_rows_reauthentication_report",
     "expansion_source_collection_report", "expansion_rows", "v8_fit_config",
+    "final_rcpd_fit_selector_report", "final_rcpd_fit_selector_fit_only_rows",
+    "final_rcpd_fit_selector_scope", "final_rcpd_fit_selector_config_registry",
+    "final_rcpd_fit_selector_inner_split_audit",
+    "final_rcpd_fit_selector_inner_selection",
+    "final_rcpd_fit_selector_selected_config",
+    "final_rcpd_fit_selector_inner_fit_program",
+    "final_rcpd_fit_selector_source_v8_report",
+    "final_rcpd_fit_selector_source_v8_rows",
     "final_rcpd_inputs",
     "final_rcpd_development_expansion_registry",
     "final_rcpd_development_expansion_report",
@@ -121,6 +130,24 @@ RCPD_CANDIDATE_ARTIFACTS = {
     "development_expansion_report.json": (
         "final_rcpd_development_expansion_report"),
     "fit_config.json": "v8_fit_config",
+    "fit_selector_report.json": "final_rcpd_fit_selector_report",
+    "fit_selector_fit_only_rows.npz": (
+        "final_rcpd_fit_selector_fit_only_rows"),
+    "fit_selector_scope.json": "final_rcpd_fit_selector_scope",
+    "fit_selector_config_registry.json": (
+        "final_rcpd_fit_selector_config_registry"),
+    "fit_selector_inner_split_audit.json": (
+        "final_rcpd_fit_selector_inner_split_audit"),
+    "fit_selector_inner_selection.json": (
+        "final_rcpd_fit_selector_inner_selection"),
+    "fit_selector_selected_config.json": (
+        "final_rcpd_fit_selector_selected_config"),
+    "fit_selector_inner_fit_program.json": (
+        "final_rcpd_fit_selector_inner_fit_program"),
+    "fit_selector_source_v8_report.json": (
+        "final_rcpd_fit_selector_source_v8_report"),
+    "fit_selector_source_v8_rows.npz": (
+        "final_rcpd_fit_selector_source_v8_rows"),
     "rows.npz": "final_rcpd_rows",
     "pairs.npz": "final_rcpd_pairs",
     "weights_audit.json": "final_rcpd_weights_audit",
@@ -140,6 +167,10 @@ FINAL_ONCE_CANDIDATE_AUTH_FIELDS = frozenset((
     "expansion_rows_file_sha256",
     "development_expansion_registry_file_sha256",
     "development_expansion_report_file_sha256", "fit_config_file_sha256",
+    "fit_selector_report_file_sha256", "fit_selector_scope_file_sha256",
+    "fit_selector_selected_config_file_sha256",
+    "fit_selector_source_v8_report_file_sha256",
+    "fit_selector_source_v8_rows_file_sha256",
     "actor_file_sha256", "protocol_file_sha256", "manifest_file_sha256",
     "designation_file_sha256", "selected_scenes_file_sha256",
     "development_registries", "require_passed", "refit", "formal_ready",
@@ -176,6 +207,16 @@ BINDING_FIELDS = frozenset((
     "expansion_rows_reauthentication_report_sha256",
     "expansion_source_collection_report_sha256", "expansion_rows_sha256",
     "v8_fit_config_sha256",
+    "v8_fit_selector_report_sha256",
+    "v8_fit_selector_fit_only_rows_sha256",
+    "v8_fit_selector_scope_sha256",
+    "v8_fit_selector_config_registry_sha256",
+    "v8_fit_selector_inner_split_audit_sha256",
+    "v8_fit_selector_inner_selection_sha256",
+    "v8_fit_selector_selected_config_sha256",
+    "v8_fit_selector_inner_fit_program_sha256",
+    "v8_fit_selector_source_v8_report_sha256",
+    "v8_fit_selector_source_v8_rows_sha256",
     "final_rcpd_inputs_sha256", "final_rcpd_report_sha256",
     "final_rcpd_rows_sha256", "final_rcpd_pairs_sha256",
     "final_rcpd_weights_audit_sha256", "final_rcpd_candidate_sha256",
@@ -701,27 +742,45 @@ def _validate_expansion(files: Mapping[str, Path], hashes: Mapping[str, str],
     report = _strict_json(
         content_files["development_expansion_report"],
         "development expansion report")
-    content = {key: value for key, value in registry.items() if key != "content_sha256"}
-    report_content = {key: value for key, value in report.items() if key != "content_sha256"}
-    if (registry.get("version") != expansion_api.VERSION or registry.get("status") != expansion_api.STATUS
-            or registry.get("content_sha256") != digest(content)
-            or registry.get("contract") != expansion_api.contract()
-            or any(registry.get(key) is not False for key in (
-                "program_access", "program_predictions_access", "final_audit_rows_access",
-                "final_labels_used_for_selection", "runtime_action_override"))
-            or report.get("version") != expansion_api.VERSION or report.get("status") != expansion_api.STATUS
-            or report.get("content_sha256") != digest(report_content)
-            or report.get("registry_file_sha256") != hashes["development_expansion_registry"]
-            or report.get("registry_content_sha256") != registry["content_sha256"]
-            or report.get("bindings") != registry.get("bindings")
-            or registry.get("bindings", {}).get("actor_sha256") != FIXED_ACTOR_SHA256
-            or registry.get("bindings", {}).get("actor_parameters_sha256")
+    # Admission consumes the identity-only fresh outer registry.  The retired
+    # aa687... expansion is a source bound *inside* this registry and can never
+    # be supplied as the active development outer fold.
+    if (hashes["development_expansion_registry"]
+            != holdout_api.EXPECTED_EXPANSION_REGISTRY_SHA256
+            or hashes["development_expansion_report"]
+                != holdout_api.EXPECTED_EXPANSION_REPORT_SHA256
+            or hashes["development_expansion_registry"]
+                == outer_split_api.EXPECTED_SOURCE_EXPANSION_SHA256
+            or registry.get("version") != outer_split_api.VERSION
+            or report.get("version") != outer_split_api.REPORT_VERSION):
+        raise ValueError("Exact fresh outer development expansion required")
+    holdout_api._validate_fresh_outer_registry(registry)
+    holdout_api._validate_fresh_outer_report(report, registry)
+    bindings = registry.get("bindings", {})
+    if (bindings.get("actor_sha256") != FIXED_ACTOR_SHA256
+            or bindings.get("actor_parameters_sha256")
                 != actor.metadata["actor_parameters_sha256"]
-            or registry.get("bindings", {}).get("source_manifest_file_sha256")
+            or bindings.get("manifest_file_sha256")
                 != hashes["conflict_manifest"]
-            or registry.get("bindings", {}).get("source_manifest_content_sha256")
-                != manifest.get("content_sha256")):
-        raise ValueError("Exact program-blind development expansion required")
+            or bindings.get("source_manifest_file_sha256")
+                != hashes["conflict_manifest"]
+            or bindings.get("designation_file_sha256")
+                != hashes["diagnostic_designation"]
+            or bindings.get("source_rows_file_sha256")
+                != outer_split_api.EXPECTED_SOURCE_ROWS_SHA256
+            or bindings.get("source_expansion_file_sha256")
+                != outer_split_api.EXPECTED_SOURCE_EXPANSION_SHA256
+            or bindings.get("formal_selection_file_sha256")
+                != outer_split_api.EXPECTED_FORMAL_SELECTION_SHA256
+            or bindings.get("previous_development_file_sha256")
+                != outer_split_api.EXPECTED_PREVIOUS_DEVELOPMENT_SHA256
+            or bindings.get("retired_projection_file_sha256")
+                != outer_split_api.EXPECTED_RETIRED_PROJECTION_SHA256
+            or bindings.get("retired_projection_report_file_sha256")
+                != outer_split_api.EXPECTED_RETIRED_REPORT_SHA256
+            or report.get("registry_file_sha256")
+                != hashes["development_expansion_registry"]):
+        raise ValueError("Fresh outer component binding differs")
     return registry
 
 
@@ -895,7 +954,8 @@ def source_closure() -> dict[str, str]:
     sources = source_closure_api.local_source_hashes((Path(__file__),
         ROOT / "scripts/build_warehouse_r41_diagnostic_admission_v6.py",
         Path(designation_api.__file__), Path(scenes_api.__file__), Path(selection_api.__file__),
-        Path(expansion_api.__file__), Path(rcpd_api.__file__), Path(pair_weight_api.__file__),
+        Path(expansion_api.__file__), Path(outer_split_api.__file__),
+        Path(rcpd_api.__file__), Path(pair_weight_api.__file__),
         Path(final_once_api.__file__), Path(holdout_api.__file__),
         Path(retired_v3_api.__file__), Path(explanation_api.__file__),
         Path(question_api.__file__), ROOT / "backend/warehouse_r41_diagnostic_online_runtime.py",
@@ -912,6 +972,11 @@ def source_closure() -> dict[str, str]:
         if name in sources and sources[name] != source_sha256:
             raise ValueError("Admission designation source closure differs")
         sources[name] = source_sha256
+    for upstream in (rcpd_api.producer_sources(), outer_split_api.producer_sources()):
+        for name, source_sha256 in upstream.items():
+            if name in sources and sources[name] != source_sha256:
+                raise ValueError("Admission upstream source closure differs")
+            sources[name] = source_sha256
     return dict(sorted(sources.items()))
 
 
@@ -1220,7 +1285,9 @@ def _validate_components_snapshot(
         previous_development_path=files["development_supplement"],
         expected_expansion_rows_report_sha256=hashes[
             "expansion_rows_reauthentication_report"],
-        expected_config_sha256=hashes["v8_fit_config"], require_passed=True, refit=False)
+        expected_selector_report_sha256=hashes[
+            "final_rcpd_fit_selector_report"],
+        require_passed=True, refit=False)
     program_identity = validate_v8_program_identity(
         semantic_files["final_rcpd_program"],
         actor_feature_names=actor.metadata["feature_names"], actor_sha256=FIXED_ACTOR_SHA256,
@@ -1536,6 +1603,26 @@ def _validate_components_snapshot(
             "expansion_source_collection_report"],
         "expansion_rows_sha256": hashes["expansion_rows"],
         "v8_fit_config_sha256": hashes["v8_fit_config"],
+        "v8_fit_selector_report_sha256": hashes[
+            "final_rcpd_fit_selector_report"],
+        "v8_fit_selector_fit_only_rows_sha256": hashes[
+            "final_rcpd_fit_selector_fit_only_rows"],
+        "v8_fit_selector_scope_sha256": hashes[
+            "final_rcpd_fit_selector_scope"],
+        "v8_fit_selector_config_registry_sha256": hashes[
+            "final_rcpd_fit_selector_config_registry"],
+        "v8_fit_selector_inner_split_audit_sha256": hashes[
+            "final_rcpd_fit_selector_inner_split_audit"],
+        "v8_fit_selector_inner_selection_sha256": hashes[
+            "final_rcpd_fit_selector_inner_selection"],
+        "v8_fit_selector_selected_config_sha256": hashes[
+            "final_rcpd_fit_selector_selected_config"],
+        "v8_fit_selector_inner_fit_program_sha256": hashes[
+            "final_rcpd_fit_selector_inner_fit_program"],
+        "v8_fit_selector_source_v8_report_sha256": hashes[
+            "final_rcpd_fit_selector_source_v8_report"],
+        "v8_fit_selector_source_v8_rows_sha256": hashes[
+            "final_rcpd_fit_selector_source_v8_rows"],
         "final_rcpd_inputs_sha256": hashes["final_rcpd_inputs"],
         "final_rcpd_report_sha256": hashes["final_rcpd_report"],
         "final_rcpd_rows_sha256": hashes["final_rcpd_rows"],

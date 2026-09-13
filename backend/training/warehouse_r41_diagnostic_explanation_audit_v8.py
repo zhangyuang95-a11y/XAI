@@ -30,6 +30,8 @@ from backend.training.warehouse_native_common import canonical, digest, file_has
 from backend.training.warehouse_native_evaluation import critical_groups
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training import warehouse_r41_diagnostic_fresh_final_holdout_v4 as holdout_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v8 as rcpd_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v8_outer_split as outer_split_api
 from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_binding
 from backend.training import warehouse_r41_diagnostic_designation_v2 as designation_api
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_binding
@@ -150,11 +152,25 @@ def contract() -> dict[str, Any]:
 
 
 def producer_sources() -> dict[str, str]:
-    sources = local_source_hashes((Path(__file__).resolve(),))
-    for name, source_sha256 in designation_api.source_closure().items():
-        if name in sources and sources[name] != source_sha256:
-            raise ValueError("Explanation-audit designation source closure differs")
-        sources[name] = source_sha256
+    # final_once imports this module, so its file is hashed directly here rather
+    # than imported back and creating a cycle.  RCPD and fresh-outer expose
+    # recursive closures and must be merged so their CLI wrappers are covered.
+    sources = local_source_hashes((
+        Path(__file__).resolve(),
+        Path(holdout_api.__file__).resolve(),
+        ROOT / "backend/training/warehouse_r41_diagnostic_final_once_v8.py",
+    ))
+    upstreams = (
+        ("designation", designation_api.source_closure()),
+        ("RCPD", rcpd_api.producer_sources()),
+        ("fresh outer", outer_split_api.producer_sources()),
+    )
+    for label, upstream in upstreams:
+        for name, source_sha256 in upstream.items():
+            if name in sources and sources[name] != source_sha256:
+                raise ValueError(
+                    "Explanation-audit " + label + " source closure differs")
+            sources[name] = source_sha256
     return dict(sorted(sources.items()))
 
 
@@ -312,6 +328,10 @@ def _validate_completed_claim_chain(
         "expansion_rows_file_sha256",
         "development_expansion_registry_file_sha256",
         "development_expansion_report_file_sha256", "fit_config_file_sha256",
+        "fit_selector_report_file_sha256", "fit_selector_scope_file_sha256",
+        "fit_selector_selected_config_file_sha256",
+        "fit_selector_source_v8_report_file_sha256",
+        "fit_selector_source_v8_rows_file_sha256",
         "actor_file_sha256", "protocol_file_sha256", "manifest_file_sha256",
         "designation_file_sha256", "selected_scenes_file_sha256",
         "development_registries", "require_passed", "refit", "formal_ready",
@@ -355,6 +375,18 @@ def _validate_completed_claim_chain(
                 != candidate_artifacts.get("development_expansion_report.json")
             or candidate.get("fit_config_file_sha256")
                 != candidate_artifacts.get("fit_config.json")
+            or candidate.get("fit_selector_report_file_sha256")
+                != candidate_artifacts.get("fit_selector_report.json")
+            or candidate.get("fit_selector_scope_file_sha256")
+                != candidate_artifacts.get("fit_selector_scope.json")
+            or candidate.get("fit_selector_selected_config_file_sha256")
+                != candidate_artifacts.get(
+                    "fit_selector_selected_config.json")
+            or candidate.get("fit_selector_source_v8_report_file_sha256")
+                != candidate_artifacts.get(
+                    "fit_selector_source_v8_report.json")
+            or candidate.get("fit_selector_source_v8_rows_file_sha256")
+                != candidate_artifacts.get("fit_selector_source_v8_rows.npz")
             or candidate.get("actor_file_sha256")
                 != holdout_api.EXPECTED_ACTOR_SHA256
             or candidate.get("protocol_file_sha256")

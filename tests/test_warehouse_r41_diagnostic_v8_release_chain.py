@@ -58,12 +58,31 @@ def test_active_release_chain_requires_cycle_free_designation_v2():
         admission.final_once_api.CANDIDATE_ARTIFACT_KEYS)
     assert set(admission.RCPD_CANDIDATE_ARTIFACTS.values()) <= set(
         admission.ARTIFACT_NAMES)
+    assert len(admission.ARTIFACT_NAMES) == 64
+    assert len(admission.RCPD_CANDIDATE_ARTIFACTS) == 26
     assert admission.RCPD_CANDIDATE_ARTIFACTS[
         "development_expansion.json"] == (
             "final_rcpd_development_expansion_registry")
     assert admission.RCPD_CANDIDATE_ARTIFACTS[
         "development_expansion_report.json"] == (
             "final_rcpd_development_expansion_report")
+    assert admission.RCPD_CANDIDATE_ARTIFACTS[
+        "fit_selector_report.json"] == "final_rcpd_fit_selector_report"
+    assert admission.RCPD_CANDIDATE_ARTIFACTS[
+        "fit_selector_scope.json"] == "final_rcpd_fit_selector_scope"
+    assert admission.RCPD_CANDIDATE_ARTIFACTS[
+        "fit_selector_selected_config.json"] == (
+            "final_rcpd_fit_selector_selected_config")
+    assert set(admission.RCPD_CANDIDATE_ARTIFACTS) == (
+        {"report.json"}
+        | {"inputs.json", "prior_rows_reauthentication_report.json",
+           "prior_v7_rows.npz", "source_v7_report.json",
+           "expansion_rows_reauthentication_report.json",
+           "source_expansion_collection_report.json", "expansion_rows.npz",
+           "development_expansion.json", "development_expansion_report.json",
+           "fit_config.json", "rows.npz", "pairs.npz", "weights_audit.json",
+           "program.json", "candidate.json"}
+        | set(admission.rcpd_api._CANDIDATE_SELECTOR_ARTIFACTS))
 
 
 def test_admission_requires_full_replay_publication_authentication(
@@ -1502,6 +1521,16 @@ def test_release_schema_binds_final_once_and_v8_program_identity():
         "expansion_source_collection_report_sha256",
         "expansion_rows_sha256", "development_expansion_registry_sha256",
         "development_expansion_report_sha256", "v8_fit_config_sha256",
+        "v8_fit_selector_report_sha256",
+        "v8_fit_selector_fit_only_rows_sha256",
+        "v8_fit_selector_scope_sha256",
+        "v8_fit_selector_config_registry_sha256",
+        "v8_fit_selector_inner_split_audit_sha256",
+        "v8_fit_selector_inner_selection_sha256",
+        "v8_fit_selector_selected_config_sha256",
+        "v8_fit_selector_inner_fit_program_sha256",
+        "v8_fit_selector_source_v8_report_sha256",
+        "v8_fit_selector_source_v8_rows_sha256",
         "retired_identity_projection_sha256",
         "retired_identity_projection_content_sha256",
         "retired_identity_projection_report_sha256",
@@ -1879,6 +1908,84 @@ def test_admission_pins_identity_projection_and_report_to_expansion(
             files, replacement_hashes, expansion)
 
 
+def test_admission_delegates_fresh_outer_validation_and_rejects_retired_registry(
+        tmp_path, monkeypatch):
+    expansion_dir = tmp_path / "fresh-outer"
+    expansion_dir.mkdir()
+    registry_path = expansion_dir / "development_expansion.json"
+    report_path = expansion_dir / "report.json"
+    registry_sha = "1" * 64
+    report_sha = "2" * 64
+    manifest_sha = "3" * 64
+    designation_sha = "4" * 64
+    actor_parameters_sha = "5" * 64
+    registry = {
+        "version": admission.outer_split_api.VERSION,
+        "bindings": {
+            "actor_sha256": admission.FIXED_ACTOR_SHA256,
+            "actor_parameters_sha256": actor_parameters_sha,
+            "manifest_file_sha256": manifest_sha,
+            "source_manifest_file_sha256": manifest_sha,
+            "designation_file_sha256": designation_sha,
+            "source_rows_file_sha256": (
+                admission.outer_split_api.EXPECTED_SOURCE_ROWS_SHA256),
+            "source_expansion_file_sha256": (
+                admission.outer_split_api.EXPECTED_SOURCE_EXPANSION_SHA256),
+            "formal_selection_file_sha256": (
+                admission.outer_split_api.EXPECTED_FORMAL_SELECTION_SHA256),
+            "previous_development_file_sha256": (
+                admission.outer_split_api.EXPECTED_PREVIOUS_DEVELOPMENT_SHA256),
+            "retired_projection_file_sha256": (
+                admission.outer_split_api.EXPECTED_RETIRED_PROJECTION_SHA256),
+            "retired_projection_report_file_sha256": (
+                admission.outer_split_api.EXPECTED_RETIRED_REPORT_SHA256),
+        },
+    }
+    report = {
+        "version": admission.outer_split_api.REPORT_VERSION,
+        "registry_file_sha256": registry_sha,
+    }
+    registry_path.write_text(canonical(registry) + "\n", encoding="utf-8")
+    report_path.write_text(canonical(report) + "\n", encoding="utf-8")
+    files = {
+        "development_expansion_registry": registry_path,
+        "development_expansion_report": report_path,
+    }
+    hashes = {
+        "development_expansion_registry": registry_sha,
+        "development_expansion_report": report_sha,
+        "conflict_manifest": manifest_sha,
+        "diagnostic_designation": designation_sha,
+    }
+    calls = []
+    monkeypatch.setattr(
+        admission.holdout_api, "EXPECTED_EXPANSION_REGISTRY_SHA256",
+        registry_sha)
+    monkeypatch.setattr(
+        admission.holdout_api, "EXPECTED_EXPANSION_REPORT_SHA256", report_sha)
+    monkeypatch.setattr(
+        admission.holdout_api, "_validate_fresh_outer_registry",
+        lambda value: calls.append(("registry", value)))
+    monkeypatch.setattr(
+        admission.holdout_api, "_validate_fresh_outer_report",
+        lambda value, parent: calls.append(("report", value, parent)))
+    actor = SimpleNamespace(metadata={
+        "actor_parameters_sha256": actor_parameters_sha,
+    })
+    assert admission._validate_expansion(
+        files, hashes, actor, {}) == registry
+    assert calls == [
+        ("registry", registry),
+        ("report", report, registry),
+    ]
+
+    monkeypatch.setattr(
+        admission.outer_split_api, "EXPECTED_SOURCE_EXPANSION_SHA256",
+        registry_sha)
+    with pytest.raises(ValueError, match="Exact fresh outer"):
+        admission._validate_expansion(files, hashes, actor, {})
+
+
 def test_admission_binds_final_candidate_to_strict_refit_marker_bytes(tmp_path):
     candidate = tmp_path / "candidate"
     candidate.mkdir()
@@ -1937,6 +2044,16 @@ def test_admission_binds_final_candidate_to_strict_refit_marker_bytes(tmp_path):
         "development_expansion_report_file_sha256": artifacts[
             "development_expansion_report.json"],
         "fit_config_file_sha256": artifacts["fit_config.json"],
+        "fit_selector_report_file_sha256": artifacts[
+            "fit_selector_report.json"],
+        "fit_selector_scope_file_sha256": artifacts[
+            "fit_selector_scope.json"],
+        "fit_selector_selected_config_file_sha256": artifacts[
+            "fit_selector_selected_config.json"],
+        "fit_selector_source_v8_report_file_sha256": artifacts[
+            "fit_selector_source_v8_report.json"],
+        "fit_selector_source_v8_rows_file_sha256": artifacts[
+            "fit_selector_source_v8_rows.npz"],
         "actor_file_sha256": file_hash(simple["actor"]),
         "protocol_file_sha256": file_hash(simple["protocol"]),
         "manifest_file_sha256": file_hash(simple["manifest"]),

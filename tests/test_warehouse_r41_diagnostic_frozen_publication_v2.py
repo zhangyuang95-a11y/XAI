@@ -251,6 +251,16 @@ def _write_successful_ledger(tmp_path, monkeypatch):
         "development_expansion_report_file_sha256": candidate_artifacts[
             "development_expansion_report.json"],
         "fit_config_file_sha256": candidate_artifacts["fit_config.json"],
+        "fit_selector_report_file_sha256": candidate_artifacts[
+            "fit_selector_report.json"],
+        "fit_selector_scope_file_sha256": candidate_artifacts[
+            "fit_selector_scope.json"],
+        "fit_selector_selected_config_file_sha256": candidate_artifacts[
+            "fit_selector_selected_config.json"],
+        "fit_selector_source_v8_report_file_sha256": candidate_artifacts[
+            "fit_selector_source_v8_report.json"],
+        "fit_selector_source_v8_rows_file_sha256": candidate_artifacts[
+            "fit_selector_source_v8_rows.npz"],
         "actor_file_sha256": subject.final_once.EXPECTED_ACTOR_SHA256,
         "protocol_file_sha256": subject.final_once.EXPECTED_PROTOCOL_SHA256,
         "manifest_file_sha256": subject.final_once.EXPECTED_MANIFEST_SHA256,

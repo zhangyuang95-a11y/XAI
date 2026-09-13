@@ -115,6 +115,16 @@ _PARENT_FIELDS = frozenset((
     "expansion_rows_reauthentication_report_sha256",
     "expansion_source_collection_report_sha256",
     "expansion_rows_sha256", "v8_fit_config_sha256",
+    "v8_fit_selector_report_sha256",
+    "v8_fit_selector_fit_only_rows_sha256",
+    "v8_fit_selector_scope_sha256",
+    "v8_fit_selector_config_registry_sha256",
+    "v8_fit_selector_inner_split_audit_sha256",
+    "v8_fit_selector_inner_selection_sha256",
+    "v8_fit_selector_selected_config_sha256",
+    "v8_fit_selector_inner_fit_program_sha256",
+    "v8_fit_selector_source_v8_report_sha256",
+    "v8_fit_selector_source_v8_rows_sha256",
     "final_rcpd_inputs_sha256", "final_rcpd_report_sha256",
     "final_rcpd_rows_sha256", "final_rcpd_pairs_sha256",
     "final_rcpd_weights_audit_sha256", "final_rcpd_candidate_sha256",
@@ -1433,6 +1443,26 @@ def _assemble_from_frozen_admitted_components(*,
             "expansion_source_collection_report_sha256"],
         "expansion_rows_sha256": bindings["expansion_rows_sha256"],
         "v8_fit_config_sha256": bindings["v8_fit_config_sha256"],
+        "v8_fit_selector_report_sha256": bindings[
+            "v8_fit_selector_report_sha256"],
+        "v8_fit_selector_fit_only_rows_sha256": bindings[
+            "v8_fit_selector_fit_only_rows_sha256"],
+        "v8_fit_selector_scope_sha256": bindings[
+            "v8_fit_selector_scope_sha256"],
+        "v8_fit_selector_config_registry_sha256": bindings[
+            "v8_fit_selector_config_registry_sha256"],
+        "v8_fit_selector_inner_split_audit_sha256": bindings[
+            "v8_fit_selector_inner_split_audit_sha256"],
+        "v8_fit_selector_inner_selection_sha256": bindings[
+            "v8_fit_selector_inner_selection_sha256"],
+        "v8_fit_selector_selected_config_sha256": bindings[
+            "v8_fit_selector_selected_config_sha256"],
+        "v8_fit_selector_inner_fit_program_sha256": bindings[
+            "v8_fit_selector_inner_fit_program_sha256"],
+        "v8_fit_selector_source_v8_report_sha256": bindings[
+            "v8_fit_selector_source_v8_report_sha256"],
+        "v8_fit_selector_source_v8_rows_sha256": bindings[
+            "v8_fit_selector_source_v8_rows_sha256"],
         "final_rcpd_inputs_sha256": bindings["final_rcpd_inputs_sha256"],
         "final_rcpd_report_sha256": bindings["final_rcpd_report_sha256"],
         "final_rcpd_rows_sha256": bindings["final_rcpd_rows_sha256"],

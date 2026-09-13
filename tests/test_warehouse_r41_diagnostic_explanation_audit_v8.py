@@ -152,8 +152,11 @@ def test_audit_source_has_no_training_pickle_cli_or_public_writer():
         "backend/training/warehouse_r41_diagnostic_workload_screen.py",
         "backend/training/warehouse_r41_diagnostic_fresh_final_holdout_v3.py",
         "backend/training/warehouse_r41_diagnostic_conflict_scenarios.py",
+        "backend/training/warehouse_r41_diagnostic_rcpd_v8_fit_selector.py",
         "backend/warehouse_r41_diagnostic_public_tree_program_v8.py",
         "scripts/build_warehouse_r41_diagnostic_designation_v2.py",
+        "scripts/build_warehouse_r41_diagnostic_rcpd_v8_fit_selector.py",
+        "scripts/build_warehouse_r41_diagnostic_rcpd_v8_outer_split.py",
         "env/warehouse/transition_outcome.py",
         "env/warehouse_native/environment.py",
     }.issubset(sources)
@@ -390,6 +393,16 @@ def _strict_claim_chain_fixture(tmp_path, monkeypatch):
         "development_expansion_report_file_sha256": artifact_hashes[
             "development_expansion_report.json"],
         "fit_config_file_sha256": artifact_hashes["fit_config.json"],
+        "fit_selector_report_file_sha256": artifact_hashes[
+            "fit_selector_report.json"],
+        "fit_selector_scope_file_sha256": artifact_hashes[
+            "fit_selector_scope.json"],
+        "fit_selector_selected_config_file_sha256": artifact_hashes[
+            "fit_selector_selected_config.json"],
+        "fit_selector_source_v8_report_file_sha256": artifact_hashes[
+            "fit_selector_source_v8_report.json"],
+        "fit_selector_source_v8_rows_file_sha256": artifact_hashes[
+            "fit_selector_source_v8_rows.npz"],
         "actor_file_sha256": subject.holdout_api.EXPECTED_ACTOR_SHA256,
         "protocol_file_sha256": subject.holdout_api.EXPECTED_PROTOCOL_SHA256,
         "manifest_file_sha256": subject.holdout_api.EXPECTED_MANIFEST_SHA256,

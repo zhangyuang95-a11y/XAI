@@ -1049,6 +1049,8 @@ def load_online_release(*, expected_package_sha256: str,
                 != identities["runtime_program_sha256"]
                 or digest(compact_program.to_dict())
                     != identities["runtime_program_content_sha256"]
+                or compact_header["source"]["content_sha256"]
+                    != identities["program_content_sha256"]
                 or digest(compact_header["audit"])
                     != identities["compact_program_audit_sha256"]
                 or compact_header["audit"]["row_count"]

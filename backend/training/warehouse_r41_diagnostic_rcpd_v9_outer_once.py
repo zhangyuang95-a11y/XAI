@@ -544,7 +544,7 @@ def _row_identity_hashes(arrays: Mapping[str, np.ndarray]) -> list[str]:
 def _preflight_outer_rows(
     *, rows_path: Path, rows_sha256: str, projection: Mapping[str, Any],
     development_rows_path: Path, development_rows_sha256: str,
-    registry: Mapping[str, Any],
+    registry: Mapping[str, Any], validation_wins: Mapping[str, Any],
 ) -> dict[str, Any]:
     outer = _safe_row_projection(
         rows_path, expected_sha256=rows_sha256, fields=_SAFE_ROW_FIELDS,
@@ -566,8 +566,31 @@ def _preflight_outer_rows(
     development = _safe_row_projection(
         development_rows_path, expected_sha256=development_rows_sha256,
         fields=frozenset(("observation_hashes",)), label="locked development rows")
-    development_hashes = set(_decode(
-        development["observation_hashes"], "development observation hashes"))
+    development_ordered = _decode(
+        development["observation_hashes"], "development observation hashes")
+    outer_unique = expected["unique_observation_hashes"]
+    keep = ~np.isin(
+        np.asarray(development_ordered, dtype="U64"),
+        np.asarray(outer_unique, dtype="U64"))
+    retained = [value for value, selected in zip(development_ordered, keep)
+                if bool(selected)]
+    packed = np.ascontiguousarray(keep.astype(np.uint8))
+    recomputed = {
+        "source_rows": len(development_ordered),
+        "retained_rows": len(retained),
+        "removed_rows": int(np.sum(~keep)),
+        "source_unique_observations": len(set(development_ordered)),
+        "retained_unique_observations": len(set(retained)),
+        "fresh_outer_unique_observations": len(outer_unique),
+        "retained_fresh_outer_observation_overlap": 0,
+        "keep_mask_sha256": sha256(memoryview(packed).cast("B")).hexdigest(),
+        "retained_observation_hashes_sha256": digest(retained),
+    }
+    if (not isinstance(validation_wins, Mapping)
+            or any(validation_wins.get(name) != value
+                   for name, value in recomputed.items())):
+        raise ValueError("Locked validation-wins projection differs")
+    development_hashes = set(retained)
     overlap = set(ordered) & development_hashes
     if overlap:
         raise ValueError(
@@ -578,6 +601,10 @@ def _preflight_outer_rows(
         "outer_unique_observation_count": len(set(ordered)),
         "outer_scene_count": len(set(scenes)),
         "development_unique_observation_count": len(development_hashes),
+        "development_source_row_count": len(development_ordered),
+        "development_retained_row_count": len(retained),
+        "development_removed_overlap_row_count": int(np.sum(~keep)),
+        "validation_wins_keep_mask_sha256": recomputed["keep_mask_sha256"],
         "development_outer_observation_overlap": 0,
         "ordered_observation_hashes_sha256": digest(ordered),
         "ordered_row_identity_hashes_sha256": digest(row_ids),
@@ -775,7 +802,7 @@ def build(
         outer_hash_projection_receipt=outer_hash_projection_receipt_path,
         development_rows=development_rows_path, program=program_path,
         selector_report=selector_report_path)
-    collection_api.authenticate_locked_candidate_selector(
+    selector_report = collection_api.authenticate_locked_candidate_selector(
         lock=lock, selector_report_path=paths["selector_report"],
         expected_selector_report_sha256=bindings["selector_report_sha256"],
         expected_program_sha256=bindings["program_sha256"],
@@ -831,7 +858,8 @@ def build(
         rows_path=rows_path, rows_sha256=file_hash(rows_path),
         projection=projection, development_rows_path=paths["development_rows"],
         development_rows_sha256=bindings["development_rows_sha256"],
-        registry=registry)
+        registry=registry,
+        validation_wins=selector_report["development"]["validation_wins"])
     attempt_key, attempt_inputs = _attempt_identity(
         bindings=bindings, projection=projection, registry=registry,
         registry_report=registry_report,

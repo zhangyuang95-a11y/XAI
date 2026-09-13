@@ -294,9 +294,33 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
     monkeypatch.setattr(
         subject.collection_api, "authenticate_saved_collection",
         lambda **unused: deepcopy(collection_report))
+    development_hashes = np.char.decode(
+        development_arrays["observation_hashes"], "ascii").astype(str).tolist()
+    outer_unique = sorted(set(np.char.decode(
+        outer_arrays["observation_hashes"], "ascii").astype(str).tolist()))
+    keep = ~np.isin(
+        np.asarray(development_hashes, dtype="U64"),
+        np.asarray(outer_unique, dtype="U64"))
+    retained = [value for value, selected in zip(development_hashes, keep)
+                if bool(selected)]
+    packed = np.ascontiguousarray(keep.astype(np.uint8))
+    validation_wins = {
+        "source_rows": len(development_hashes),
+        "retained_rows": len(retained),
+        "removed_rows": int(np.sum(~keep)),
+        "source_unique_observations": len(set(development_hashes)),
+        "retained_unique_observations": len(set(retained)),
+        "fresh_outer_unique_observations": len(outer_unique),
+        "retained_fresh_outer_observation_overlap": 0,
+        "keep_mask_sha256": sha256(memoryview(packed).cast("B")).hexdigest(),
+        "retained_observation_hashes_sha256": digest(retained),
+    }
     monkeypatch.setattr(
         subject.collection_api, "authenticate_locked_candidate_selector",
-        lambda **unused: {"status": subject.collection_api.SELECTOR_STATUS})
+        lambda **unused: {
+            "status": subject.collection_api.SELECTOR_STATUS,
+            "development": {"validation_wins": deepcopy(validation_wins)},
+        })
     monkeypatch.setattr(
         subject.collection_api, "load_authenticated_rows",
         lambda *unused_args, **unused_kwargs: {
@@ -614,6 +638,6 @@ def test_development_observation_overlap_fails_before_claim(tmp_path, monkeypatc
     monkeypatch.setattr(
         subject.collection_api, "authenticate_saved_collection",
         lambda **unused: deepcopy(report))
-    with pytest.raises(ValueError, match="overlap locked development rows"):
+    with pytest.raises(ValueError, match="validation-wins projection"):
         subject.build(**args)
     assert list(permanent.iterdir()) == []

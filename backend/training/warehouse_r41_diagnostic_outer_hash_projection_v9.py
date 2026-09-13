@@ -295,11 +295,183 @@ def _replay_outer(
     rows, environment_steps = rows_v7._collect(
         runtime, scenes, scene_offset=SCENE_OFFSET, dense_critical=False,
         progress_label=progress_label)
-    arrays, accounting = rows_v7._rows_to_arrays([], rows)
+    arrays, accounting = _projection_rows_to_arrays(rows)
     actor = NumPyNativeActor(actor_path)
-    rows_v7._validate_arrays(
-        arrays, actor=actor, train_scenes=[], validation_scenes=scenes)
+    _validate_projection_replay_arrays(arrays, actor=actor, scenes=scenes)
     return arrays, accounting, environment_steps
+
+
+def _projection_rows_to_arrays(
+    rows: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, np.ndarray], dict[str, int]]:
+    """Encode one validation-only replay without invoking fit-weight logic.
+
+    The legacy evidence encoder expects at least one development-fit row because
+    it normalises class-balancing weights.  A fresh outer projection has no fit
+    partition by construction.  Its placeholder weights exist only to retain
+    the authenticated row schema and are never published or used for fitting.
+    """
+    if not rows:
+        raise ValueError("Fresh outer projection replay is empty")
+    actions = rows_v7.ACTIONS
+    arrays = {
+        "observations": np.stack(
+            [row["observation"] for row in rows]).astype(np.float32),
+        "probabilities": np.stack(
+            [row["probabilities"] for row in rows]).astype(np.float32),
+        "action_indices": np.asarray(
+            [actions.index(row["action"]) for row in rows], dtype=np.uint8),
+        "weights": np.ones(len(rows), dtype=np.float32),
+        "observation_hashes": np.asarray([
+            rows_v7.legacy._obs_hash(row["observation"]) for row in rows
+        ], dtype="S64"),
+        "scene_fingerprints": np.asarray(
+            [row["scene"] for row in rows], dtype="S64"),
+        "episode_ids": np.asarray(
+            [row["episode"] for row in rows], dtype="S180"),
+        "frames": np.asarray([row["frame"] for row in rows], dtype=np.int16),
+        "group_bits": np.asarray([
+            rows_v7.legacy._group_bits(row["groups"]) for row in rows
+        ], dtype=np.uint8),
+        "kinds": np.asarray([row["kind"] for row in rows], dtype="S16"),
+        "anchor_ids": np.asarray(
+            [row["anchor"] for row in rows], dtype="S240"),
+        "branch_actions": np.asarray(
+            [row["branch_action"] for row in rows], dtype="S8"),
+        "physical_hashes": np.asarray(
+            [row["physical_hash"] for row in rows], dtype="S64"),
+        "source_state_hashes": np.asarray(
+            [row["source_state_hash"] for row in rows], dtype="S64"),
+        "submitted_equal": np.asarray(
+            [row["submitted_equal"] for row in rows], dtype=np.bool_),
+        "trajectory_done": np.asarray(
+            [row["trajectory_done"] for row in rows], dtype=np.bool_),
+        "split_validation": np.ones(len(rows), dtype=np.bool_),
+    }
+    accounting = {
+        "raw_train_rows": 0,
+        "raw_validation_rows": len(rows),
+        "raw_collection_environment_steps": 0,
+    }
+    return arrays, accounting
+
+
+def _validate_projection_replay_arrays(
+    arrays: Mapping[str, np.ndarray], *, actor: NumPyNativeActor,
+    scenes: Sequence[Mapping[str, Any]],
+) -> None:
+    """Validate Actor parity and fixed replay coordinates without fit weights."""
+    if set(arrays) != rows_v7._FIELDS:
+        raise ValueError("Fresh outer projection row schema differs")
+    count = len(arrays["observations"])
+    expected_dtypes = {
+        "action_indices": np.dtype(np.uint8),
+        "weights": np.dtype(np.float32),
+        "observation_hashes": np.dtype("S64"),
+        "scene_fingerprints": np.dtype("S64"),
+        "episode_ids": np.dtype("S180"),
+        "frames": np.dtype(np.int16),
+        "group_bits": np.dtype(np.uint8),
+        "kinds": np.dtype("S16"),
+        "anchor_ids": np.dtype("S240"),
+        "branch_actions": np.dtype("S8"),
+        "physical_hashes": np.dtype("S64"),
+        "source_state_hashes": np.dtype("S64"),
+        "submitted_equal": np.dtype(np.bool_),
+        "trajectory_done": np.dtype(np.bool_),
+        "split_validation": np.dtype(np.bool_),
+    }
+    if (count <= 0
+            or arrays["observations"].shape != (count, actor.obs_dim)
+            or arrays["observations"].dtype != np.dtype(np.float32)
+            or arrays["probabilities"].shape != (count, len(rows_v7.ACTIONS))
+            or arrays["probabilities"].dtype != np.dtype(np.float32)
+            or any(arrays[name].shape != (count,)
+                   or arrays[name].dtype != dtype
+                   for name, dtype in expected_dtypes.items())
+            or not np.all(arrays["split_validation"])
+            or not np.array_equal(
+                arrays["weights"], np.ones(count, dtype=np.float32))):
+        raise ValueError("Fresh outer projection array shape or split differs")
+
+    observations = arrays["observations"]
+    probabilities = arrays["probabilities"]
+    labels = arrays["action_indices"]
+    if (not np.isfinite(observations).all()
+            or not np.isfinite(probabilities).all()
+            or np.any(probabilities < 0.0)
+            or not np.allclose(
+                probabilities.sum(1), 1.0, rtol=0.0, atol=2e-6)
+            or np.any(labels >= len(rows_v7.ACTIONS))
+            or not np.all(arrays["submitted_equal"])
+            or np.any(arrays["frames"] < 0)
+            or np.any(arrays["group_bits"] >= (1 << len(rows_v7.GROUPS)))):
+        raise ValueError("Fresh outer projection numeric evidence differs")
+    expected_hashes = np.asarray([
+        rows_v7.legacy._obs_hash(row) for row in observations
+    ], dtype="S64")
+    if not np.array_equal(expected_hashes, arrays["observation_hashes"]):
+        raise ValueError("Fresh outer projection observation hashes differ")
+    logits = actor.logits(observations)
+    expected_probabilities = np.exp(
+        logits - logits.max(axis=1, keepdims=True))
+    expected_probabilities /= expected_probabilities.sum(axis=1, keepdims=True)
+    if (not np.allclose(
+            probabilities, expected_probabilities, rtol=8e-6, atol=4e-6)
+            or not np.array_equal(
+                labels, expected_probabilities.argmax(1).astype(np.uint8))):
+        raise ValueError("Fresh outer projection rows differ from frozen Actor")
+
+    scene_fingerprints = rows_v7._decode(arrays["scene_fingerprints"])
+    episode_ids = rows_v7._decode(arrays["episode_ids"])
+    registered_fingerprints = {row["fingerprint"] for row in scenes}
+    expected_episodes = {
+        f"{scene['id']}:{scene['fingerprint']}:{partner}"
+        for scene in scenes for partner in rows_v7.PARTNERS
+    }
+    if (len(registered_fingerprints) != len(scenes)
+            or set(map(str, scene_fingerprints)) != registered_fingerprints
+            or set(map(str, episode_ids)) != expected_episodes):
+        raise ValueError("Fresh outer projection registered replay differs")
+
+    kinds = rows_v7._decode(arrays["kinds"])
+    anchors = rows_v7._decode(arrays["anchor_ids"])
+    branches = rows_v7._decode(arrays["branch_actions"])
+    physical = rows_v7._decode(arrays["physical_hashes"])
+    source_states = rows_v7._decode(arrays["source_state_hashes"])
+    ordinary = kinds == "ordinary"
+    intervention = kinds == "intervention"
+    if (not np.all(ordinary | intervention)
+            or np.any(arrays["trajectory_done"][intervention])
+            or not np.all(branches[ordinary] == "")
+            or not np.all(physical[ordinary] == "")
+            or np.any(anchors[intervention] == "")
+            or not set(map(str, branches[intervention])).issubset(
+                rows_v7.ACTIONS)
+            or any(_HEX.fullmatch(str(value)) is None
+                   for value in physical[intervention])
+            or any(_HEX.fullmatch(str(value)) is None
+                   for value in source_states)):
+        raise ValueError("Fresh outer projection row-kind schema differs")
+    frames = arrays["frames"]
+    bits = arrays["group_bits"]
+    ordinary_indices = np.flatnonzero(ordinary)
+    expected_anchors = np.asarray([
+        (f"{episode_ids[index]}:{int(frames[index])}"
+         if bits[index] != 0 and int(frames[index]) % 5 == 0 else "")
+        for index in ordinary_indices
+    ], dtype="U240")
+    if not np.array_equal(anchors[ordinary], expected_anchors):
+        raise ValueError("Fresh outer projection intervention schedule differs")
+    for episode in expected_episodes:
+        indices = np.flatnonzero(ordinary & (episode_ids == episode))
+        ordered = indices[np.argsort(frames[indices], kind="stable")]
+        if (not len(ordered)
+                or not np.array_equal(
+                    frames[ordered], np.arange(len(ordered)))
+                or np.any(arrays["trajectory_done"][ordered[:-1]])
+                or not bool(arrays["trajectory_done"][ordered[-1]])):
+            raise ValueError("Fresh outer projection trajectory is incomplete")
 
 
 def _decode_ascii(array: np.ndarray, label: str) -> list[str]:

@@ -49,6 +49,36 @@ def _projection(arrays: dict[str, np.ndarray] | None = None) -> dict:
         selected_identity_sha256="3" * 64, environment_steps=17)
 
 
+class _Actor:
+    obs_dim = 197
+
+    def logits(self, observations: np.ndarray) -> np.ndarray:
+        probabilities = np.asarray(
+            [.10, .15, .20, .40, .15], dtype=np.float32)
+        return np.tile(np.log(probabilities), (len(observations), 1))
+
+
+def _validation_only_rows() -> tuple[list[dict], list[dict]]:
+    fingerprint = digest({"fresh-scene": 1})
+    scene = {"id": "diagnostic_v9_fresh_outer_0000",
+             "fingerprint": fingerprint}
+    rows = []
+    for index, partner in enumerate(subject.rows_v7.PARTNERS):
+        rows.append({
+            "observation": np.full(197, index, dtype=np.float32),
+            "probabilities": np.asarray(
+                [.10, .15, .20, .40, .15], dtype=np.float32),
+            "action": "RIGHT", "scene": fingerprint,
+            "episode": f"{scene['id']}:{fingerprint}:{partner}",
+            "frame": 0, "groups": (), "kind": "ordinary", "anchor": "",
+            "branch_action": "", "physical_hash": "",
+            "source_state_hash": digest({"state": index}),
+            "submitted_equal": True, "actor_changed_pair": False,
+            "trajectory_done": True,
+        })
+    return rows, [scene]
+
+
 def test_contract_fixes_identity_first_label_blind_schedule():
     value = subject.contract()
     assert value["scene_count"] == 64
@@ -75,6 +105,34 @@ def test_projection_publishes_only_hashes_and_preserves_order():
     assert b'"observations"' not in serialized
     assert b'"probabilities"' not in serialized
     assert b'"action_indices"' not in serialized
+
+
+def test_validation_only_projection_does_not_invoke_fit_weight_normalisation(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    rows, scenes = _validation_only_rows()
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("fit-weight normalisation must not run")
+
+    monkeypatch.setattr(subject.rows_v7.legacy, "_sample_weights", forbidden)
+    arrays, accounting = subject._projection_rows_to_arrays(rows)
+    assert np.all(arrays["split_validation"])
+    assert np.array_equal(
+        arrays["weights"], np.ones(len(rows), dtype=np.float32))
+    assert accounting["raw_train_rows"] == 0
+    assert accounting["raw_validation_rows"] == len(rows)
+    subject._validate_projection_replay_arrays(
+        arrays, actor=_Actor(), scenes=scenes)
+
+
+def test_validation_only_projection_rejects_actor_mismatch():
+    rows, scenes = _validation_only_rows()
+    arrays, _accounting = subject._projection_rows_to_arrays(rows)
+    arrays["action_indices"][0] = np.uint8(0)
+    with pytest.raises(ValueError, match="frozen Actor"):
+        subject._validate_projection_replay_arrays(
+            arrays, actor=_Actor(), scenes=scenes)
 
 
 def test_projection_validation_rejects_order_and_unique_set_tampering():
@@ -121,4 +179,3 @@ def test_build_rechecks_sources_and_inputs_at_publish_boundary():
     assert source.count("producer_sources() != sources") >= 3
     assert source.index("_validate_registry") < source.index("_replay_outer")
     assert source.index("_replay_outer") < source.index("os.rename(temporary, destination)")
-

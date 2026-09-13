@@ -151,6 +151,13 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
     development_rows = tmp_path / "development_rows.npz"
     _write_rows(development_rows, development_arrays)
 
+    prior_hashes = [_fp("prior-outer-observation")]
+    prior_projection = _content({
+        "outer_observation_hashes": prior_hashes,
+    })
+    prior_projection_path = tmp_path / "prior_outer_observation_hashes.json"
+    _write_json(prior_projection_path, prior_projection)
+
     projection = subject.projection_api.projection_from_arrays(
         outer_arrays, registry_file_sha256=file_hash(registry_path),
         registry_content_sha256=registry["content_sha256"],
@@ -208,6 +215,10 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
         "failed_outer_closeout_sha256": file_hash(files["failed_outer_closeout"]),
         "fresh_outer_registry_sha256": file_hash(registry_path),
         "fresh_outer_registry_report_sha256": file_hash(registry_report_path),
+        "prior_outer_hash_projection_sha256": file_hash(
+            prior_projection_path),
+        "prior_outer_hash_projection_content_sha256": prior_projection[
+            "content_sha256"],
         "outer_hash_projection_sha256": file_hash(projection_path),
         "outer_hash_projection_receipt_sha256": file_hash(projection_receipt),
         "development_rows_sha256": file_hash(development_rows),
@@ -228,7 +239,9 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
         "information_boundary": {
             "candidate_locked_before_full_fresh_outer_collection": True,
             "fresh_outer_hashes_used_only_for_validation_wins": True,
+            "prior_outer_hashes_used_for_validation_wins": True,
             "consumed_v9_outer_labels_or_probabilities_read": False,
+            "consumed_v10_outer_labels_or_probabilities_read": False,
             "fresh_outer_actions_or_probabilities_read": False,
             "protected_final_access": False,
             "runtime_action_override": False,
@@ -252,6 +265,10 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
             "fresh_outer_registry_sha256": bindings["fresh_outer_registry_sha256"],
             "fresh_outer_registry_report_sha256": bindings[
                 "fresh_outer_registry_report_sha256"],
+            "prior_outer_hash_projection_sha256": bindings[
+                "prior_outer_hash_projection_sha256"],
+            "prior_outer_hash_projection_content_sha256": bindings[
+                "prior_outer_hash_projection_content_sha256"],
             "outer_hash_projection_sha256": bindings["outer_hash_projection_sha256"],
             "outer_hash_projection_receipt_sha256": file_hash(projection_receipt),
             "development_rows_sha256": bindings["development_rows_sha256"],
@@ -271,6 +288,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
         "information_boundary": {
             "candidate_lock_authenticated_before_outer_replay": True,
             "selector_report_and_passed_gates_authenticated_before_outer_replay": True,
+            "prior_outer_hash_projection_authenticated_before_outer_replay": True,
             "labels_and_probabilities_collected_only_after_candidate_lock": True,
             "outer_metrics_or_candidate_score_computed": False,
             "program_loaded_or_executed": False,
@@ -297,8 +315,9 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
         lambda **unused: deepcopy(collection_report))
     development_hashes = np.char.decode(
         development_arrays["observation_hashes"], "ascii").astype(str).tolist()
-    outer_unique = sorted(set(np.char.decode(
+    fresh_unique = sorted(set(np.char.decode(
         outer_arrays["observation_hashes"], "ascii").astype(str).tolist()))
+    outer_unique = sorted(set(prior_hashes) | set(fresh_unique))
     keep = ~np.isin(
         np.asarray(development_hashes, dtype="U64"),
         np.asarray(outer_unique, dtype="U64"))
@@ -316,11 +335,30 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
         "keep_mask_sha256": sha256(memoryview(packed).cast("B")).hexdigest(),
         "retained_observation_hashes_sha256": digest(retained),
     }
+    validation_hash_inputs = {
+        "prior_outer_file_sha256": file_hash(prior_projection_path),
+        "prior_outer_content_sha256": prior_projection["content_sha256"],
+        "prior_outer_unique_observations": len(prior_hashes),
+        "prior_outer_observation_hashes_sha256": digest(prior_hashes),
+        "fresh_outer_file_sha256": file_hash(projection_path),
+        "fresh_outer_content_sha256": projection["content_sha256"],
+        "fresh_outer_unique_observations": len(fresh_unique),
+        "fresh_outer_observation_hashes_sha256": digest(fresh_unique),
+        "prior_fresh_observation_overlap": len(
+            set(prior_hashes) & set(fresh_unique)),
+        "combined_unique_observations": len(outer_unique),
+        "combined_observation_hashes_sha256": digest(outer_unique),
+        "labels_or_probabilities_included": False,
+    }
+    validation_hash_inputs["content_sha256"] = digest(validation_hash_inputs)
     monkeypatch.setattr(
         subject.collection_api, "authenticate_locked_candidate_selector",
         lambda **unused: {
             "status": subject.collection_api.SELECTOR_STATUS,
-            "development": {"validation_wins": deepcopy(validation_wins)},
+            "development": {
+                "validation_wins": deepcopy(validation_wins),
+                "validation_hash_inputs": deepcopy(validation_hash_inputs),
+            },
         })
     monkeypatch.setattr(
         subject.collection_api, "load_authenticated_rows",
@@ -349,6 +387,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
         "failed_outer_closeout_path": files["failed_outer_closeout"],
         "fresh_outer_registry_path": registry_path,
         "fresh_outer_registry_report_path": registry_report_path,
+        "prior_outer_hash_projection_path": prior_projection_path,
         "outer_hash_projection_path": projection_path,
         "outer_hash_projection_receipt_path": projection_receipt,
         "expected_outer_hash_projection_receipt_sha256": file_hash(projection_receipt),
@@ -399,6 +438,32 @@ def test_source_closure_has_no_protected_final_or_holdout_module():
     assert not [name for name in runtime_sources
                 if "fresh_final" in name or "final_once" in name]
     assert subject.contract()["attempt_anchor_before_private_outer_read"] is True
+
+
+def test_attempt_identity_binds_authenticated_prior_outer_projection():
+    bindings = {
+        "fresh_outer_registry_sha256": "1" * 64,
+        "fresh_outer_registry_report_sha256": "2" * 64,
+        "prior_outer_hash_projection_sha256": "3" * 64,
+        "prior_outer_hash_projection_content_sha256": "4" * 64,
+        "outer_hash_projection_sha256": "5" * 64,
+    }
+    projection = {
+        "content_sha256": "6" * 64,
+        "projection": {"ordered_replay_sha256": "7" * 64},
+    }
+    registry = {"content_sha256": "8" * 64}
+    registry_report = {"content_sha256": "9" * 64}
+    first, inputs = subject._attempt_identity(
+        bindings=bindings, projection=projection, registry=registry,
+        registry_report=registry_report, selected_identity_sha256="a" * 64)
+    changed = dict(bindings)
+    changed["prior_outer_hash_projection_sha256"] = "b" * 64
+    second, _ = subject._attempt_identity(
+        bindings=changed, projection=projection, registry=registry,
+        registry_report=registry_report, selected_identity_sha256="a" * 64)
+    assert inputs["prior_outer_hash_projection_content_sha256"] == "4" * 64
+    assert first != second
 
 
 def test_runtime_source_drift_fails_before_claim_or_private_outer_read(

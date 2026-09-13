@@ -5,7 +5,8 @@ The label-blind ordered hash projection is authenticated first.  A permanent
 public observations, Actor probabilities, or action labels in the full outer
 row archive.  The fresh outer is consequently consumed even if validation or
 scoring later fails.  A different candidate cannot reuse the same projected
-outer because the permanent attempt key depends only on the outer identity.
+outer because the permanent attempt key binds the outer identity and its
+authenticated prior-exclusion history.
 
 This module has no protected final/holdout input and never fits or modifies a
 program.  It evaluates the already locked explicit public-tree program once.
@@ -63,6 +64,8 @@ _LOCK_BINDINGS = frozenset((
     "actor_feature_names_sha256", "public_feature_contract_sha256",
     "designation_sha256", "failed_outer_closeout_sha256",
     "fresh_outer_registry_sha256", "fresh_outer_registry_report_sha256",
+    "prior_outer_hash_projection_sha256",
+    "prior_outer_hash_projection_content_sha256",
     "outer_hash_projection_sha256", "outer_hash_projection_receipt_sha256",
     "development_rows_sha256", "candidate_grid_sha256", "program_sha256",
     "selector_report_sha256", "source_closure_sha256",
@@ -109,7 +112,9 @@ def contract() -> dict[str, Any]:
     return {
         "version": VERSION,
         "purpose": "one irrevocable score of a locked program on fresh development outer",
-        "attempt_key_scope": "outer identity, independent of candidate and private row payload",
+        "attempt_key_scope": (
+            "outer identity and authenticated prior exclusions, independent "
+            "of candidate and private row payload"),
         "attempt_anchor_before_private_outer_read": True,
         "preclaim_row_fields": sorted(_SAFE_ROW_FIELDS),
         "preclaim_forbidden_row_fields": sorted(_PRIVATE_ROW_FIELDS),
@@ -117,6 +122,7 @@ def contract() -> dict[str, Any]:
         "program_mutation": False,
         "candidate_runtime_source_closure_authenticated_before_attempt_anchor": True,
         "actor_program_feature_registry_authenticated_before_attempt_anchor": True,
+        "prior_outer_hash_projection_authenticated_before_attempt_anchor": True,
         "runtime_action_override": False,
         "protected_final_access": False,
         "formal_ready": False,
@@ -254,6 +260,7 @@ def _verify_lock_files(bindings: Mapping[str, str], **paths: str | Path) -> dict
         "failed_outer_closeout": "failed_outer_closeout_sha256",
         "fresh_outer_registry": "fresh_outer_registry_sha256",
         "fresh_outer_registry_report": "fresh_outer_registry_report_sha256",
+        "prior_outer_hash_projection": "prior_outer_hash_projection_sha256",
         "outer_hash_projection": "outer_hash_projection_sha256",
         "outer_hash_projection_receipt": "outer_hash_projection_receipt_sha256",
         "development_rows": "development_rows_sha256",
@@ -543,8 +550,11 @@ def _row_identity_hashes(arrays: Mapping[str, np.ndarray]) -> list[str]:
 
 def _preflight_outer_rows(
     *, rows_path: Path, rows_sha256: str, projection: Mapping[str, Any],
+    projection_sha256: str, prior_projection: Mapping[str, Any],
+    prior_projection_sha256: str,
     development_rows_path: Path, development_rows_sha256: str,
     registry: Mapping[str, Any], validation_wins: Mapping[str, Any],
+    validation_hash_inputs: Mapping[str, Any],
 ) -> dict[str, Any]:
     outer = _safe_row_projection(
         rows_path, expected_sha256=rows_sha256, fields=_SAFE_ROW_FIELDS,
@@ -568,7 +578,34 @@ def _preflight_outer_rows(
         fields=frozenset(("observation_hashes",)), label="locked development rows")
     development_ordered = _decode(
         development["observation_hashes"], "development observation hashes")
-    outer_unique = expected["unique_observation_hashes"]
+    fresh_unique = expected["unique_observation_hashes"]
+    prior_unique = prior_projection.get("outer_observation_hashes")
+    if (not isinstance(prior_unique, list) or not prior_unique
+            or prior_unique != sorted(set(prior_unique))
+            or any(type(value) is not str or _HEX.fullmatch(value) is None
+                   for value in prior_unique)
+            or not _content_valid(prior_projection)):
+        raise ValueError("Prior outer observation-hash projection differs")
+    outer_unique = sorted(set(prior_unique) | set(fresh_unique))
+    expected_hash_inputs = {
+        "prior_outer_file_sha256": prior_projection_sha256,
+        "prior_outer_content_sha256": prior_projection["content_sha256"],
+        "prior_outer_unique_observations": len(prior_unique),
+        "prior_outer_observation_hashes_sha256": digest(prior_unique),
+        "fresh_outer_file_sha256": projection_sha256,
+        "fresh_outer_content_sha256": projection["content_sha256"],
+        "fresh_outer_unique_observations": len(fresh_unique),
+        "fresh_outer_observation_hashes_sha256": digest(fresh_unique),
+        "prior_fresh_observation_overlap": len(
+            set(prior_unique) & set(fresh_unique)),
+        "combined_unique_observations": len(outer_unique),
+        "combined_observation_hashes_sha256": digest(outer_unique),
+        "labels_or_probabilities_included": False,
+    }
+    expected_hash_inputs["content_sha256"] = digest(expected_hash_inputs)
+    if (not isinstance(validation_hash_inputs, Mapping)
+            or dict(validation_hash_inputs) != expected_hash_inputs):
+        raise ValueError("Locked validation hash union differs")
     keep = ~np.isin(
         np.asarray(development_ordered, dtype="U64"),
         np.asarray(outer_unique, dtype="U64"))
@@ -605,6 +642,10 @@ def _preflight_outer_rows(
         "development_retained_row_count": len(retained),
         "development_removed_overlap_row_count": int(np.sum(~keep)),
         "validation_wins_keep_mask_sha256": recomputed["keep_mask_sha256"],
+        "prior_outer_unique_observation_count": len(prior_unique),
+        "fresh_outer_unique_observation_count": len(fresh_unique),
+        "combined_validation_unique_observation_count": len(outer_unique),
+        "combined_validation_observation_hashes_sha256": digest(outer_unique),
         "development_outer_observation_overlap": 0,
         "ordered_observation_hashes_sha256": digest(ordered),
         "ordered_row_identity_hashes_sha256": digest(row_ids),
@@ -642,6 +683,10 @@ def _collection_report(
         "fresh_outer_registry_sha256": bindings["fresh_outer_registry_sha256"],
         "fresh_outer_registry_report_sha256": bindings[
             "fresh_outer_registry_report_sha256"],
+        "prior_outer_hash_projection_sha256": bindings[
+            "prior_outer_hash_projection_sha256"],
+        "prior_outer_hash_projection_content_sha256": bindings[
+            "prior_outer_hash_projection_content_sha256"],
         "outer_hash_projection_sha256": bindings["outer_hash_projection_sha256"],
         "outer_hash_projection_receipt_sha256": projection_receipt_sha256,
         "development_rows_sha256": bindings["development_rows_sha256"],
@@ -669,6 +714,9 @@ def _collection_report(
             or boundary.get("candidate_lock_authenticated_before_outer_replay") is not True
             or boundary.get(
                 "selector_report_and_passed_gates_authenticated_before_outer_replay")
+                is not True
+            or boundary.get(
+                "prior_outer_hash_projection_authenticated_before_outer_replay")
                 is not True
             or boundary.get("labels_and_probabilities_collected_only_after_candidate_lock")
                 is not True
@@ -732,6 +780,10 @@ def _attempt_identity(
         "fresh_outer_registry_report_content_sha256": registry_report[
             "content_sha256"],
         "selected_identity_sha256": selected_identity_sha256,
+        "prior_outer_hash_projection_sha256": bindings[
+            "prior_outer_hash_projection_sha256"],
+        "prior_outer_hash_projection_content_sha256": bindings[
+            "prior_outer_hash_projection_content_sha256"],
         "outer_hash_projection_sha256": bindings["outer_hash_projection_sha256"],
         "outer_hash_projection_content_sha256": projection["content_sha256"],
         "ordered_replay_sha256": projection["projection"]["ordered_replay_sha256"],
@@ -769,6 +821,7 @@ def build(
     failed_outer_closeout_path: str | Path,
     fresh_outer_registry_path: str | Path,
     fresh_outer_registry_report_path: str | Path,
+    prior_outer_hash_projection_path: str | Path,
     outer_hash_projection_path: str | Path,
     outer_hash_projection_receipt_path: str | Path,
     expected_outer_hash_projection_receipt_sha256: str,
@@ -798,6 +851,7 @@ def build(
         failed_outer_closeout=failed_outer_closeout_path,
         fresh_outer_registry=fresh_outer_registry_path,
         fresh_outer_registry_report=fresh_outer_registry_report_path,
+        prior_outer_hash_projection=prior_outer_hash_projection_path,
         outer_hash_projection=outer_hash_projection_path,
         outer_hash_projection_receipt=outer_hash_projection_receipt_path,
         development_rows=development_rows_path, program=program_path,
@@ -817,6 +871,13 @@ def build(
         _authenticate_program_actor_features(
             program_payload=program_payload, actor_path=paths["actor"],
             bindings=bindings))
+    prior_projection = _strict_json_bytes(
+        paths["prior_outer_hash_projection"].read_bytes(),
+        "prior outer observation-hash projection")
+    if (not _content_valid(prior_projection)
+            or prior_projection.get("content_sha256") != bindings[
+                "prior_outer_hash_projection_content_sha256"]):
+        raise ValueError("Prior outer observation-hash projection differs")
     projection, projection_receipt = projection_api.read_saved_projection(
         projection_path=paths["outer_hash_projection"],
         receipt_path=paths["outer_hash_projection_receipt"],
@@ -856,10 +917,17 @@ def build(
             paths["outer_hash_projection_receipt"]))
     preflight = _preflight_outer_rows(
         rows_path=rows_path, rows_sha256=file_hash(rows_path),
-        projection=projection, development_rows_path=paths["development_rows"],
+        projection=projection,
+        projection_sha256=bindings["outer_hash_projection_sha256"],
+        prior_projection=prior_projection,
+        prior_projection_sha256=bindings[
+            "prior_outer_hash_projection_sha256"],
+        development_rows_path=paths["development_rows"],
         development_rows_sha256=bindings["development_rows_sha256"],
         registry=registry,
-        validation_wins=selector_report["development"]["validation_wins"])
+        validation_wins=selector_report["development"]["validation_wins"],
+        validation_hash_inputs=selector_report["development"][
+            "validation_hash_inputs"])
     attempt_key, attempt_inputs = _attempt_identity(
         bindings=bindings, projection=projection, registry=registry,
         registry_report=registry_report,
@@ -888,6 +956,13 @@ def build(
             "fresh_outer_registry_report_content_sha256": registry_report[
                 "content_sha256"],
             "selected_identity_sha256": selected_identity_sha256,
+            "prior_outer_hash_projection_sha256": file_hash(
+                paths["prior_outer_hash_projection"]),
+            "prior_outer_hash_projection_content_sha256": prior_projection[
+                "content_sha256"],
+            "combined_validation_observation_hashes_sha256": (
+                selector_report["development"]["validation_hash_inputs"]
+                ["combined_observation_hashes_sha256"]),
             "outer_hash_projection_receipt_sha256": file_hash(
                 paths["outer_hash_projection_receipt"]),
             "candidate_source_closure_sha256": digest(candidate_sources),
@@ -985,6 +1060,8 @@ def build(
                 or file_hash(paths["program"]) != bindings["program_sha256"]
                 or file_hash(paths["fresh_outer_registry_report"])
                     != bindings["fresh_outer_registry_report_sha256"]
+                or file_hash(paths["prior_outer_hash_projection"])
+                    != bindings["prior_outer_hash_projection_sha256"]
                 or file_hash(paths["outer_hash_projection_receipt"])
                     != bindings["outer_hash_projection_receipt_sha256"]
                 or file_hash(rows_path) != expected_outer_rows_sha256
@@ -1072,6 +1149,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--failed-outer-closeout", required=True)
     parser.add_argument("--fresh-outer-registry", required=True)
     parser.add_argument("--fresh-outer-registry-report", required=True)
+    parser.add_argument("--prior-outer-hash-projection", required=True)
     parser.add_argument("--outer-hash-projection", required=True)
     parser.add_argument("--outer-hash-projection-receipt", required=True)
     parser.add_argument("--expected-outer-hash-projection-receipt-sha256", required=True)
@@ -1096,6 +1174,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         failed_outer_closeout_path=args.failed_outer_closeout,
         fresh_outer_registry_path=args.fresh_outer_registry,
         fresh_outer_registry_report_path=args.fresh_outer_registry_report,
+        prior_outer_hash_projection_path=args.prior_outer_hash_projection,
         outer_hash_projection_path=args.outer_hash_projection,
         outer_hash_projection_receipt_path=args.outer_hash_projection_receipt,
         expected_outer_hash_projection_receipt_sha256=(

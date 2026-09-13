@@ -206,6 +206,16 @@ def contract() -> dict[str, Any]:
 
 def producer_sources() -> dict[str, str]:
     sources = local_source_hashes((Path(__file__).resolve(),))
+    # The selector's standalone CLI is part of the scientific producer even
+    # though it is not imported by this module.  Merge its own authenticated
+    # closure so the pre/post-fit source check also catches selector drift.
+    from backend.training import (  # noqa: PLC0415
+        warehouse_r41_diagnostic_rcpd_v8_fit_selector as selector_api,
+    )
+    for path, source_sha256 in selector_api.producer_sources().items():
+        if path in sources and sources[path] != source_sha256:
+            raise RuntimeError("Selector/source closure hash disagreement: " + path)
+        sources[path] = source_sha256
     for path, sha256 in designation_binding.designation.source_closure().items():
         if path in sources and sources[path] != sha256:
             raise RuntimeError("Designation/source closure hash disagreement: " + path)

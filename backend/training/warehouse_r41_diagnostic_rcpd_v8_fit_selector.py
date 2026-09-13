@@ -108,7 +108,7 @@ FROZEN_ACTOR_PARAMETERS_SHA256 = (
 # identity-only outer registry.  Pinning it prevents a caller from relabelling
 # scenes across the six families and thereby changing the inner split.
 FROZEN_FIT_SCOPE_SHA256 = (
-    "5456759c7fd28bd7eefbc150be2a6dbf6bbbb85017e1f40b44b76027b8c359b5"
+    "e578f21ff845a7d5ea15e695f5c5d22aa7533692aa38598963cf71c7a8ea3804"
 )
 FROZEN_SOURCE_ROW_COUNT = 516_565
 FROZEN_SOURCE_SCENE_COUNT = 448

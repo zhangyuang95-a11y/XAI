@@ -773,6 +773,15 @@ def _candidate_probabilities(
     source_probabilities: np.ndarray, validation_mask: np.ndarray,
     fit_config: Mapping[str, Any], mix_weight: float,
 ) -> np.ndarray:
+    """Return one candidate's probabilities on the inner-validation rows.
+
+    ``_metrics_from_probabilities`` accepts a full-row matrix even though it
+    scores only its supplied mask.  The unscored rows retain the source Actor's
+    class distribution, but must be renormalized after their float32-to-float64
+    conversion: source rows use a 2e-6 tolerance while candidate matrices use
+    2e-12.  The validation rows are then replaced by the program candidate and
+    are the only rows used as candidate evidence.
+    """
     config = deepcopy(fit_config)
     config["mix_weights"] = {
         "narrow_passage": 0.0,
@@ -788,7 +797,18 @@ def _candidate_probabilities(
         mix_weights=config["mix_weights"], routes=v8._fixed_routes(),
         metadata=deepcopy(fitted_program.metadata),
     )
+    selected = np.asarray(validation_mask)
+    if (selected.shape != (len(observations),)
+            or selected.dtype != np.dtype(np.bool_)):
+        raise ValueError("Fit-only candidate validation mask differs")
     result = np.asarray(source_probabilities, dtype=np.float64).copy()
+    if (result.shape != (len(observations), len(v8.ACTIONS))
+            or not np.isfinite(result).all() or np.any(result < 0.0)):
+        raise ValueError("Fit-only source Actor probabilities differ")
+    totals = result.sum(axis=1, keepdims=True)
+    if np.any(totals <= 0.0):
+        raise ValueError("Fit-only source Actor probability mass differs")
+    result /= totals
     result[validation_mask] = v8._predict_in_batches(
         wrapper, observations[validation_mask])
     return result

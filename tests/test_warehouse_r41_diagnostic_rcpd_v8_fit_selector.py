@@ -665,6 +665,71 @@ def test_candidate_registry_changes_only_frozen_charger_capacity_and_mix():
         assert row["use_action_factor"] is True
 
 
+def test_four_candidate_probability_matrices_normalize_unscored_actor_rows(
+        monkeypatch):
+    rows = _rows([
+        (_fingerprint(index + 1), index >= 4, index % len(v8.ACTIONS))
+        for index in range(8)
+    ])
+    validation = rows["split_validation"]
+    # Frozen Actor rows are float32 and legitimately use the looser source-row
+    # normalization tolerance.  Copying them into the float64 candidate matrix
+    # was the production failure this test guards against.
+    source_sums = rows["probabilities"].astype(np.float64).sum(axis=1)
+    assert np.any(np.abs(source_sums - 1.0) > 2e-12)
+
+    class FittedProgram:
+        base_feature_names = ("test",)
+        base_program = object()
+        _specialist_programs = {
+            "narrow_passage": object(),
+            "shared_pickup": object(),
+            "shared_charger": object(),
+        }
+        metadata = {"kind": "fit-only-test"}
+
+    seen_mixes = []
+
+    def fake_assemble(*args, **kwargs):
+        mix = float(kwargs["mix_weights"]["shared_charger"])
+        seen_mixes.append(mix)
+        return mix
+
+    def fake_predict(mix, observations):
+        result = np.zeros(
+            (len(observations), len(v8.ACTIONS)), dtype=np.float64)
+        result[:, subject.MIX_CANDIDATES.index(mix)] = 1.0
+        return result
+
+    monkeypatch.setattr(
+        subject, "assemble_public_tree_program_v8", fake_assemble)
+    monkeypatch.setattr(subject.v8, "_predict_in_batches", fake_predict)
+    pairs = subject.v7._effective_pairs(rows, validation)
+    pair_bits = np.empty(len(pairs), dtype=np.uint8)
+
+    for mix in subject.MIX_CANDIDATES:
+        probabilities = subject._candidate_probabilities(
+            FittedProgram(), rows["observations"], rows["probabilities"],
+            validation, _config(), mix)
+        assert probabilities.shape == rows["probabilities"].shape
+        assert np.allclose(
+            probabilities.sum(axis=1), 1.0, rtol=0.0, atol=2e-12)
+        assert np.array_equal(
+            np.argmax(probabilities[~validation], axis=1),
+            np.argmax(rows["probabilities"][~validation], axis=1))
+        expected_validation = np.zeros(
+            (int(np.sum(validation)), len(v8.ACTIONS)), dtype=np.float64)
+        expected_validation[:, subject.MIX_CANDIDATES.index(mix)] = 1.0
+        assert np.array_equal(
+            probabilities[validation], expected_validation)
+        metrics = v8._metrics_from_probabilities(
+            probabilities, rows, validation,
+            pairs=pairs, pair_group_bits=pair_bits)
+        assert metrics["overall"]["rows"] == int(np.sum(validation))
+
+    assert seen_mixes == list(subject.MIX_CANDIDATES)
+
+
 def test_outer_label_and_probability_mutation_cannot_change_fit_only_projection():
     eligible = [_fingerprint(index) for index in range(1, 5)]
     exposed = [_fingerprint(99)]

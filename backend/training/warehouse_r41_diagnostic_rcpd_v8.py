@@ -97,7 +97,9 @@ _MODEL_FIELDS = frozenset((
     "l2_regularization", "max_depth", "max_bins", "random_state",
 ))
 _SELECTOR_REQUIRED_ARTIFACTS = frozenset((
-    "fit_scope.json", "selected_config.json",
+    "fit_only_rows.npz", "fit_scope.json", "config_registry.json",
+    "inner_split_audit.json", "inner_selection.json", "selected_config.json",
+    "inner_fit_program.json",
 ))
 _CANDIDATE_SELECTOR_ARTIFACTS = frozenset((
     "fit_selector_report.json", "fit_selector_scope.json",
@@ -177,6 +179,8 @@ def contract() -> dict[str, Any]:
             "source": "authenticated fit-only selector evidence",
             "direct_config_input": False,
             "selector_report_scope_and_selected_config_copied": True,
+            "all_selector_artifacts_authenticated_before_fit": True,
+            "inner_program_metrics_and_selection_deterministically_refit": True,
             "fresh_outer_registry_bound_without_outer_labels": True,
         },
         "effective_pair_group_assignment": (
@@ -352,7 +356,7 @@ def _read_json_bytes(raw: bytes, label: str) -> dict[str, Any]:
 def _selector_snapshot_inputs(
     evidence: str | Path, *, expected_report_sha256: str,
 ) -> tuple[dict[str, Path], dict[str, str]]:
-    """Resolve only the selector artifacts needed by the candidate fit.
+    """Resolve all selector artifacts needed for deterministic refit.
 
     The report is read with ``O_NOFOLLOW`` under its caller-supplied exact
     hash.  Its artifact registry supplies the hashes used by the subsequent
@@ -378,20 +382,24 @@ def _selector_snapshot_inputs(
                    or _HEX.fullmatch(artifacts[name]) is None
                    for name in _SELECTOR_REQUIRED_ARTIFACTS)):
         raise ValueError("Fit-only selector artifact registry differs")
-    originals = {
-        "selector_report": report_path,
-        "selector_scope": _regular(
-            directory / "fit_scope.json", "Fit-only selector scope",
-            maximum=MAX_JSON_BYTES),
-        "selector_selected_config": _regular(
-            directory / "selected_config.json", "Fit-only selected config",
-            maximum=MAX_JSON_BYTES),
+    names = {
+        "fit_only_rows.npz": "selector_fit_only_rows",
+        "fit_scope.json": "selector_scope",
+        "config_registry.json": "selector_config_registry",
+        "inner_split_audit.json": "selector_inner_split_audit",
+        "inner_selection.json": "selector_inner_selection",
+        "selected_config.json": "selector_selected_config",
+        "inner_fit_program.json": "selector_inner_fit_program",
     }
-    expected = {
-        "selector_report": report_sha256,
-        "selector_scope": artifacts["fit_scope.json"],
-        "selector_selected_config": artifacts["selected_config.json"],
-    }
+    originals = {"selector_report": report_path}
+    expected = {"selector_report": report_sha256}
+    for artifact_name, snapshot_name in names.items():
+        originals[snapshot_name] = _regular(
+            directory / artifact_name, "Fit-only selector " + artifact_name,
+            maximum=(MAX_NPZ_COMPRESSED_BYTES
+                     if artifact_name.endswith(".npz") else MAX_JSON_BYTES),
+        )
+        expected[snapshot_name] = artifacts[artifact_name]
     return originals, expected
 
 
@@ -450,6 +458,11 @@ def _snapshot_expected_hashes(
     expected_expansion_rows_report_sha256: str,
     expected_selector_report_sha256: str,
     expected_selector_scope_sha256: str,
+    expected_selector_fit_only_rows_sha256: str,
+    expected_selector_config_registry_sha256: str,
+    expected_selector_inner_split_audit_sha256: str,
+    expected_selector_inner_selection_sha256: str,
+    expected_selector_inner_fit_program_sha256: str,
     expected_selector_selected_config_sha256: str,
 ) -> dict[str, str]:
     return {
@@ -462,6 +475,12 @@ def _snapshot_expected_hashes(
         "expansion_registry_report": expected_expansion_report_sha256,
         "selector_report": expected_selector_report_sha256,
         "selector_scope": expected_selector_scope_sha256,
+        "selector_fit_only_rows": expected_selector_fit_only_rows_sha256,
+        "selector_config_registry": expected_selector_config_registry_sha256,
+        "selector_inner_split_audit": (
+            expected_selector_inner_split_audit_sha256),
+        "selector_inner_selection": expected_selector_inner_selection_sha256,
+        "selector_inner_fit_program": expected_selector_inner_fit_program_sha256,
         "selector_selected_config": expected_selector_selected_config_sha256,
         "previous_development": expansion_api.EXPECTED_PREVIOUS_DEVELOPMENT_SHA256,
         "prior_reauth_report": expected_prior_rows_report_sha256,
@@ -1457,6 +1476,10 @@ def _authenticate_inputs(
     expected_expansion_rows_report_sha256: str,
     previous_development_path: Path, selector_report_path: Path,
     expected_selector_report_sha256: str, selector_scope_path: Path,
+    selector_fit_only_rows_path: Path, selector_config_registry_path: Path,
+    selector_inner_split_audit_path: Path,
+    selector_inner_selection_path: Path,
+    selector_inner_fit_program_path: Path,
     selector_selected_config_path: Path,
     designation_original_path: Path,
     designation_snapshot_components: Mapping[str, Path],
@@ -1576,12 +1599,23 @@ def _authenticate_inputs(
     from backend.training import (  # noqa: PLC0415
         warehouse_r41_diagnostic_rcpd_v8_fit_selector as selector_api,
     )
+    expected_selector_paths = {
+        "fit_only_rows.npz": selector_fit_only_rows_path,
+        "fit_scope.json": selector_scope_path,
+        "config_registry.json": selector_config_registry_path,
+        "inner_split_audit.json": selector_inner_split_audit_path,
+        "inner_selection.json": selector_inner_selection_path,
+        "selected_config.json": selector_selected_config_path,
+        "inner_fit_program.json": selector_inner_fit_program_path,
+    }
+    if any(path.parent != selector_report_path.parent
+           for path in expected_selector_paths.values()):
+        raise ValueError("Fit-only selector immutable snapshot layout differs")
     selector = selector_api.authenticate_selected_config_snapshot(
-        report_path=selector_report_path,
+        evidence_directory=selector_report_path.parent,
         expected_report_sha256=expected_selector_report_sha256,
-        scope_path=selector_scope_path,
-        selected_config_path=selector_selected_config_path,
-        actor_file_sha256=file_hash(actor_path),
+        actor_path=actor_path,
+        source_full_manifest_bindings=runtime.source_full_manifest_bindings,
         fresh_outer_registry_path=expansion_registry_path,
         expected_fresh_outer_registry_sha256=(
             expected_expansion_registry_sha256),
@@ -1686,6 +1720,10 @@ def _bindings(
             selector["selected_config_record"]),
         "fit_selector_selected_config_sha256": digest(
             authenticated["config"]),
+        "fit_selector_evidence_artifacts_sha256": digest(
+            selector["report"]["evidence_artifacts"]),
+        "fit_selector_strict_refit_receipt_sha256": selector[
+            "strict_refit_receipt_sha256"],
         "fit_selector_fresh_outer_registry_file_sha256": selector["report"][
             "bindings"]["fresh_outer_registry_file_sha256"],
         "fit_selector_fresh_outer_report_file_sha256": selector["report"][
@@ -2090,6 +2128,16 @@ def build(
                     "selector_report"],
                 expected_selector_scope_sha256=selector_expected[
                     "selector_scope"],
+                expected_selector_fit_only_rows_sha256=selector_expected[
+                    "selector_fit_only_rows"],
+                expected_selector_config_registry_sha256=selector_expected[
+                    "selector_config_registry"],
+                expected_selector_inner_split_audit_sha256=selector_expected[
+                    "selector_inner_split_audit"],
+                expected_selector_inner_selection_sha256=selector_expected[
+                    "selector_inner_selection"],
+                expected_selector_inner_fit_program_sha256=selector_expected[
+                    "selector_inner_fit_program"],
                 expected_selector_selected_config_sha256=selector_expected[
                     "selector_selected_config"],
             ),
@@ -2104,12 +2152,19 @@ def build(
                     "expansion/source_collection_report.json"),
                 "expansion_rows": "expansion/expansion_rows.npz",
                 "selector_report": "selector/report.json",
+                "selector_fit_only_rows": "selector/fit_only_rows.npz",
                 "selector_scope": "selector/fit_scope.json",
+                "selector_config_registry": "selector/config_registry.json",
+                "selector_inner_split_audit": (
+                    "selector/inner_split_audit.json"),
+                "selector_inner_selection": "selector/inner_selection.json",
+                "selector_inner_fit_program": "selector/inner_fit_program.json",
                 "selector_selected_config": "selector/selected_config.json",
             },
             maximum_bytes={
                 "prior_rows": MAX_NPZ_COMPRESSED_BYTES,
                 "expansion_rows": MAX_NPZ_COMPRESSED_BYTES,
+                "selector_fit_only_rows": MAX_NPZ_COMPRESSED_BYTES,
             },
             prefix="warehouse-r41-rcpd-v8-inputs-",
         ) as frozen:
@@ -2138,6 +2193,15 @@ def build(
                 expected_selector_report_sha256=(
                     expected_selector_report_sha256),
                 selector_scope_path=paths["selector_scope"],
+                selector_fit_only_rows_path=paths["selector_fit_only_rows"],
+                selector_config_registry_path=paths[
+                    "selector_config_registry"],
+                selector_inner_split_audit_path=paths[
+                    "selector_inner_split_audit"],
+                selector_inner_selection_path=paths[
+                    "selector_inner_selection"],
+                selector_inner_fit_program_path=paths[
+                    "selector_inner_fit_program"],
                 selector_selected_config_path=paths[
                     "selector_selected_config"],
                 designation_original_path=originals["designation"],
@@ -2440,7 +2504,7 @@ def _read_saved_report_snapshot(
     from backend.training import (  # noqa: PLC0415
         warehouse_r41_diagnostic_rcpd_v8_fit_selector as selector_api,
     )
-    selector = selector_api.authenticate_selected_config_snapshot(
+    selector = selector_api.authenticate_embedded_selected_config_snapshot(
         report_path=external_paths["selector_report"],
         expected_report_sha256=expected_selector_report_sha256,
         scope_path=external_paths["selector_scope"],

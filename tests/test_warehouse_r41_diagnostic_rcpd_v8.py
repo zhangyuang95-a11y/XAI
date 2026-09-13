@@ -251,12 +251,20 @@ def test_complete_binding_requires_authenticated_previous_and_row_semantics(
         "relations": Relations(),
         "config": config(),
         "selector": {
-            "report": {"bindings": {
-                "fresh_outer_registry_file_sha256": "u" * 64,
-                "fresh_outer_report_file_sha256": "v" * 64,
-            }},
+            "report": {
+                "bindings": {
+                    "fresh_outer_registry_file_sha256": "u" * 64,
+                    "fresh_outer_report_file_sha256": "v" * 64,
+                },
+                "evidence_artifacts": {
+                    name: str(index) * 64
+                    for index, name in enumerate(sorted(
+                        subject._SELECTOR_REQUIRED_ARTIFACTS), start=1)
+                },
+            },
             "scope": {"content_sha256": "w" * 64},
             "selected_config_record": {"selected": True},
+            "strict_refit_receipt_sha256": "1" * 64,
         },
         "source_full_manifest_bindings": {"manifest": "m" * 64},
     }
@@ -279,6 +287,9 @@ def test_complete_binding_requires_authenticated_previous_and_row_semantics(
     assert bindings["fit_selector_fresh_outer_report_file_sha256"] == "v" * 64
     assert bindings["fit_selector_selected_config_sha256"] == subject.digest(
         authenticated["config"])
+    assert bindings["fit_selector_evidence_artifacts_sha256"] == subject.digest(
+        authenticated["selector"]["report"]["evidence_artifacts"])
+    assert bindings["fit_selector_strict_refit_receipt_sha256"] == "1" * 64
     assert bindings["fit_config_file_sha256"] == subject._canonical_json_file_sha256(
         authenticated["config"])
 
@@ -581,21 +592,31 @@ def _toctou_build_inputs(tmp_path):
         paths[name] = path
     selector = tmp_path / "selector"
     selector.mkdir()
-    selector_scope = selector / "fit_scope.json"
-    selector_scope.write_text("{}\n", encoding="utf-8")
-    selector_config = selector / "selected_config.json"
-    selector_config.write_text("{}\n", encoding="utf-8")
+    selector_artifacts = {}
+    for artifact_name in sorted(subject._SELECTOR_REQUIRED_ARTIFACTS):
+        path = selector / artifact_name
+        path.write_bytes((artifact_name + "\n").encode("ascii"))
+        selector_artifacts[artifact_name] = path
     selector_report = selector / "report.json"
     selector_report.write_text(json.dumps({
         "evidence_artifacts": {
-            "fit_scope.json": subject.file_hash(selector_scope),
-            "selected_config.json": subject.file_hash(selector_config),
+            name: subject.file_hash(path)
+            for name, path in sorted(selector_artifacts.items())
         },
     }, sort_keys=True) + "\n", encoding="utf-8")
     paths["selector"] = selector
     paths["selector_report"] = selector_report
-    paths["selector_scope"] = selector_scope
-    paths["selector_selected_config"] = selector_config
+    snapshot_names = {
+        "fit_only_rows.npz": "selector_fit_only_rows",
+        "fit_scope.json": "selector_scope",
+        "config_registry.json": "selector_config_registry",
+        "inner_split_audit.json": "selector_inner_split_audit",
+        "inner_selection.json": "selector_inner_selection",
+        "selected_config.json": "selector_selected_config",
+        "inner_fit_program.json": "selector_inner_fit_program",
+    }
+    for artifact_name, snapshot_name in snapshot_names.items():
+        paths[snapshot_name] = selector_artifacts[artifact_name]
     paths["manifest_validation"] = tmp_path / "validation.json"
     paths["manifest_validation"].write_bytes(b"validation\n")
     paths["designation_actor"] = paths["actor"]
@@ -642,7 +663,17 @@ def _patch_toctou_manifest_validation(paths, monkeypatch):
             "expansion_registry": subject.file_hash(paths["expansion_registry"]),
             "expansion_registry_report": subject.file_hash(paths["expansion_report"]),
             "selector_report": subject.file_hash(paths["selector_report"]),
+            "selector_fit_only_rows": subject.file_hash(
+                paths["selector_fit_only_rows"]),
             "selector_scope": subject.file_hash(paths["selector_scope"]),
+            "selector_config_registry": subject.file_hash(
+                paths["selector_config_registry"]),
+            "selector_inner_split_audit": subject.file_hash(
+                paths["selector_inner_split_audit"]),
+            "selector_inner_selection": subject.file_hash(
+                paths["selector_inner_selection"]),
+            "selector_inner_fit_program": subject.file_hash(
+                paths["selector_inner_fit_program"]),
             "selector_selected_config": subject.file_hash(
                 paths["selector_selected_config"]),
             "previous_development": subject.file_hash(paths["previous"]),
@@ -695,14 +726,19 @@ def _toctou_build_kwargs(paths, output):
     }
 
 
-def test_selector_bootstrap_pins_report_scope_and_selected_config(tmp_path):
+def test_selector_bootstrap_pins_report_and_all_refit_evidence(tmp_path):
     paths = _toctou_build_inputs(tmp_path)
     originals, expected = subject._selector_snapshot_inputs(
         paths["selector"],
         expected_report_sha256=subject.file_hash(paths["selector_report"]))
     assert originals == {
         "selector_report": paths["selector_report"],
+        "selector_fit_only_rows": paths["selector_fit_only_rows"],
         "selector_scope": paths["selector_scope"],
+        "selector_config_registry": paths["selector_config_registry"],
+        "selector_inner_split_audit": paths["selector_inner_split_audit"],
+        "selector_inner_selection": paths["selector_inner_selection"],
+        "selector_inner_fit_program": paths["selector_inner_fit_program"],
         "selector_selected_config": paths["selector_selected_config"],
     }
     assert expected == {

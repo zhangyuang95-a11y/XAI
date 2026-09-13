@@ -76,6 +76,102 @@ CHARGER_MODEL = {
     "max_bins": 255,
     "random_state": 967,
 }
+# The selector is a one-shot continuation of this exact failed v8 candidate.
+# These identities are code constants rather than caller-controlled CLI values:
+# accepting another source report would reopen the already-used development
+# evidence and would also let a caller change the base/narrow/pickup capacity.
+FROZEN_SOURCE_V8_REPORT_SHA256 = (
+    "2781af5fe845796a99907ceb0bfcc8bd6e0150ad2fe1f4e64ad2d15650bb2eef"
+)
+FROZEN_SOURCE_V8_ROWS_SHA256 = (
+    "d3e8d505aefa5573825a454fc118f7a3b801bbc239498d7416fef744bd2535c0"
+)
+FROZEN_SOURCE_V8_CONFIG_FILE_SHA256 = (
+    "d53e225e6b0a37da68e44e89bc0052629ad3dd064ceb566342c8af34413b3cec"
+)
+FROZEN_SOURCE_V8_CONFIG_CONTENT_SHA256 = (
+    "8a3d26ce27258caae3b8040f61c79a4444c4ca3405c931652431e29752e7e9e9"
+)
+FROZEN_SOURCE_V8_PROGRAM_SHA256 = (
+    "5f2b197e70c67f4f5c4cd672806dcff256f2c3d7b5facaba828413e40937a4a3"
+)
+FROZEN_SOURCE_V8_WEIGHTS_AUDIT_SHA256 = (
+    "00ac0026b0e62c0f6413cf3ba6cd7db849d5d23652a3ef71d580217509425e5d"
+)
+FROZEN_ACTOR_FILE_SHA256 = (
+    "4ac2ba7782b5556761edaab22bfad50c831c1d8b41b174245e2d81486287ff6b"
+)
+FROZEN_ACTOR_PARAMETERS_SHA256 = (
+    "fc9095d0c0e230f4edf0004d66be42e0d176be166d0b071a0576d9954c057ea3"
+)
+# This scope was produced label-blind from the fixed source rows and the fresh
+# identity-only outer registry.  Pinning it prevents a caller from relabelling
+# scenes across the six families and thereby changing the inner split.
+FROZEN_FIT_SCOPE_SHA256 = (
+    "5456759c7fd28bd7eefbc150be2a6dbf6bbbb85017e1f40b44b76027b8c359b5"
+)
+FROZEN_SOURCE_ROW_COUNT = 516_565
+FROZEN_SOURCE_SCENE_COUNT = 448
+FROZEN_SOURCE_ELIGIBLE_ROW_COUNT = 480_642
+FROZEN_SOURCE_CONFIG = {
+    "version": v8.CONFIG_VERSION,
+    "pair_pool_multiplier": 16.0,
+    "use_action_factor": True,
+    "models": {
+        "base": {
+            "learning_rate": 0.1, "max_iter": 70, "max_leaf_nodes": 63,
+            "min_samples_leaf": 10, "l2_regularization": 0.1,
+            "max_depth": None, "max_bins": 255, "random_state": 941,
+        },
+        "narrow_passage": {
+            "learning_rate": 0.1, "max_iter": 1, "max_leaf_nodes": 2,
+            "min_samples_leaf": 10, "l2_regularization": 0.1,
+            "max_depth": None, "max_bins": 255, "random_state": 947,
+        },
+        "shared_pickup": {
+            "learning_rate": 0.1, "max_iter": 1, "max_leaf_nodes": 2,
+            "min_samples_leaf": 10, "l2_regularization": 0.1,
+            "max_depth": None, "max_bins": 255, "random_state": 953,
+        },
+        "shared_charger": {
+            "learning_rate": 0.1, "max_iter": 1, "max_leaf_nodes": 2,
+            "min_samples_leaf": 10, "l2_regularization": 0.1,
+            "max_depth": None, "max_bins": 255, "random_state": 967,
+        },
+    },
+    "mix_weights": {group: 0.0 for group in v8.GROUPS},
+}
+FROZEN_SOURCE_IDENTITY = {
+    "native_source_actor_sha256": FROZEN_ACTOR_FILE_SHA256,
+    "source_actor_parameters_sha256": FROZEN_ACTOR_PARAMETERS_SHA256,
+    "source_full_manifest_bindings": {
+        "conflict_families_sha256": (
+            "2769631844e8038b61b1b330e6afa1e528b91dd026c702926604e2495d1a0129"
+        ),
+        "conflict_validation_version": (
+            "warehouse-r41-diagnostic-conflict-scene-validation.v3"
+        ),
+        "diagnostic_conflict_graph_sha256": (
+            "2c02e6cbbed0b83bde25ddcc6b78911906ffeec82f69f8e3b927f9f137caa2d1"
+        ),
+        "diagnostic_contract_sha256": (
+            "84fce104c5699ca8376f5c9f3fc6bf5a2a8d636b809addee352bc665a7641db0"
+        ),
+        "diagnostic_contract_version": "warehouse-r41-diagnostic-conflict.v2",
+        "manifest_content_sha256": (
+            "99bf5a84f409e1411f2ee6da9b8c785aa2bec1fe6fc55161a84b412f260d57c9"
+        ),
+        "manifest_file_sha256": (
+            "af985e9d6f041668ff1250e19da21a078ab5ccc68ecc7aca8d696f2c56845d4c"
+        ),
+        "manifest_semantic_sha256": (
+            "fa8875550bfecf2ea5fa3d47634e2f1f3c064fc8ed42db19f63af7c9fd521c2c"
+        ),
+        "manifest_version": "warehouse-r41-diagnostic-conflict-scene-manifest.v3",
+    },
+}
+if digest(FROZEN_SOURCE_CONFIG) != FROZEN_SOURCE_V8_CONFIG_CONTENT_SHA256:
+    raise RuntimeError("Frozen fit-only selector source config constant differs")
 MAX_JSON_BYTES = 512 * 1024 * 1024
 MAX_NPZ_BYTES = 512 * 1024 * 1024
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
@@ -88,6 +184,11 @@ SELECTED_CONFIG_FIELDS = frozenset((
     "version", "status", "selected_mix_weight", "selected_config",
     "selected_config_sha256", "outer_evaluation_performed",
     "final_rows_accessed", "final_labels_accessed",
+))
+STRICT_REFIT_BINDING_FIELDS = frozenset((
+    "fit_only_rows_semantic_sha256", "config_registry_content_sha256",
+    "inner_split_audit_content_sha256", "inner_selection_content_sha256",
+    "selected_config_content_sha256", "inner_fit_program_content_sha256",
 ))
 
 
@@ -352,10 +453,10 @@ def normalize_scope(value: Mapping[str, Any]) -> dict[str, Any]:
 
 def candidate_configs(source_config: Mapping[str, Any]) -> list[dict[str, Any]]:
     source = v8.normalize_config(source_config)
-    if (source["pair_pool_multiplier"] != 16.0
-            or source["use_action_factor"] is not True
-            or any(source["mix_weights"][group] != 0.0 for group in v8.GROUPS)):
-        raise ValueError("Fit-only selector requires the frozen v8 base config")
+    frozen = v8.normalize_config(FROZEN_SOURCE_CONFIG)
+    if source != frozen:
+        raise ValueError(
+            "Fit-only selector requires the exact frozen v8 source config")
     configs = []
     for weight in MIX_CANDIDATES:
         item = deepcopy(source)
@@ -367,6 +468,64 @@ def candidate_configs(source_config: Mapping[str, Any]) -> list[dict[str, Any]]:
         }
         configs.append(v8.normalize_config(item))
     return configs
+
+
+def _config_registry(configs: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    normalized = [v8.normalize_config(item) for item in configs]
+    preregistered = candidate_configs(FROZEN_SOURCE_CONFIG)
+    if normalized != preregistered:
+        raise ValueError("Fit-only candidate configs differ from preregistration")
+    return {
+        "version": VERSION,
+        "candidate_count": len(normalized),
+        "candidates": [
+            {"mix_weight": mix, "config": config,
+             "config_sha256": digest(config)}
+            for mix, config in zip(MIX_CANDIDATES, normalized)
+        ],
+        "selection_fields": [
+            "models.shared_charger", "mix_weights.shared_charger",
+        ],
+        "all_other_fields_frozen": True,
+    }
+
+
+def _selected_config_record(
+    selection: Mapping[str, Any], configs: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    selected_weight = selection.get("selected_mix_weight")
+    selected_config = next(
+        (v8.normalize_config(config)
+         for mix, config in zip(MIX_CANDIDATES, configs)
+         if mix == selected_weight), None)
+    return {
+        "version": VERSION,
+        "status": selection.get("status"),
+        "selected_mix_weight": selected_weight,
+        "selected_config": selected_config,
+        "selected_config_sha256": (
+            digest(selected_config) if selected_config is not None else None),
+        "outer_evaluation_performed": False,
+        "final_rows_accessed": False,
+        "final_labels_accessed": False,
+    }
+
+
+def _selector_binding(
+    *, scope_file_sha256: str, fit_only_rows_semantic_sha256: str,
+    sources: Mapping[str, str], configs: Sequence[Mapping[str, Any]],
+) -> str:
+    return digest({
+        "version": VERSION,
+        "contract_sha256": digest(contract()),
+        "source_report_sha256": FROZEN_SOURCE_V8_REPORT_SHA256,
+        "fit_scope_sha256": scope_file_sha256,
+        "fit_only_rows_semantic_sha256": fit_only_rows_semantic_sha256,
+        "config_registry_sha256": digest([
+            v8.normalize_config(config) for config in configs
+        ]),
+        "producer_sources_sha256": digest(dict(sources)),
+    })
 
 
 def _inner_holdout(
@@ -554,6 +713,11 @@ def choose_candidate(
         eligible = all(checks.values())
         decision = {
             "mix_weight": weight,
+            "config_sha256": row.get("config_sha256"),
+            "validation_probabilities_sha256": row.get(
+                "validation_probabilities_sha256"),
+            "validation_predictions_sha256": row.get(
+                "validation_predictions_sha256"),
             "gate": gate,
             "metric_values": values,
             "shared_charger_direction_gain": gain,
@@ -645,6 +809,15 @@ def _select_projected(
         scored.append({
             "mix_weight": mix,
             "config_sha256": digest(config),
+            "validation_probabilities_sha256": _arrays_digest({
+                "probabilities": np.asarray(
+                    probabilities[validation], dtype=np.float64),
+            }),
+            "validation_predictions_sha256": _arrays_digest({
+                "predictions": np.asarray(
+                    np.argmax(probabilities[validation], axis=1),
+                    dtype=np.uint8),
+            }),
             "metrics": metrics,
         })
     result = choose_candidate(scored)
@@ -664,6 +837,9 @@ def _select_projected(
 def _validate_source_evidence(
     directory: Path, expected_report_sha256: str,
 ) -> tuple[dict[str, Any], dict[str, Path]]:
+    if (_sha(expected_report_sha256, "source report")
+            != FROZEN_SOURCE_V8_REPORT_SHA256):
+        raise ValueError("Fit-only selector source report is not preregistered")
     report_path = _regular(
         directory / "report.json", "Source v8 report", maximum=MAX_JSON_BYTES)
     if file_hash(report_path) != _sha(expected_report_sha256, "source report"):
@@ -678,6 +854,17 @@ def _validate_source_evidence(
     required = (
         "rows.npz", "fit_config.json", "program.json", "weights_audit.json",
     )
+    frozen_artifacts = {
+        "rows.npz": FROZEN_SOURCE_V8_ROWS_SHA256,
+        "fit_config.json": FROZEN_SOURCE_V8_CONFIG_FILE_SHA256,
+        "program.json": FROZEN_SOURCE_V8_PROGRAM_SHA256,
+        "weights_audit.json": FROZEN_SOURCE_V8_WEIGHTS_AUDIT_SHA256,
+    }
+    if (report.get("bindings", {}).get("fit_config_content_sha256")
+            != FROZEN_SOURCE_V8_CONFIG_CONTENT_SHA256
+            or any(artifacts.get(name) != expected
+                   for name, expected in frozen_artifacts.items())):
+        raise ValueError("Source v8 preregistered artifact binding differs")
     paths = {"report": report_path}
     for name in required:
         path = _regular(
@@ -686,6 +873,10 @@ def _validate_source_evidence(
         if artifacts.get(name) != file_hash(path):
             raise ValueError("Source v8 evidence artifact differs: " + name)
         paths[name] = path
+    if (v8.normalize_config(_read_json(
+            paths["fit_config.json"], "Source v8 fit config"))
+            != v8.normalize_config(FROZEN_SOURCE_CONFIG)):
+        raise ValueError("Source v8 preregistered config differs")
     return report, paths
 
 
@@ -704,6 +895,8 @@ def _snapshot_build_inputs(
         raise ValueError("Source v8 evidence directory is unsafe")
     report_path = source_directory / "report.json"
     report_sha256 = _sha(expected_source_report_sha256, "source report")
+    if report_sha256 != FROZEN_SOURCE_V8_REPORT_SHA256:
+        raise ValueError("Fit-only selector source report is not preregistered")
     report = _parse_json_bytes(read_authenticated_bytes(
         report_path, label="Source v8 report",
         expected_sha256=report_sha256, maximum=MAX_JSON_BYTES,
@@ -714,6 +907,12 @@ def _snapshot_build_inputs(
     )
     if (report.get("version") != v8.VERSION
             or not isinstance(artifacts, Mapping)
+            or artifacts.get("rows.npz") != FROZEN_SOURCE_V8_ROWS_SHA256
+            or artifacts.get("fit_config.json")
+                != FROZEN_SOURCE_V8_CONFIG_FILE_SHA256
+            or artifacts.get("program.json") != FROZEN_SOURCE_V8_PROGRAM_SHA256
+            or artifacts.get("weights_audit.json")
+                != FROZEN_SOURCE_V8_WEIGHTS_AUDIT_SHA256
             or any(_HEX.fullmatch(str(artifacts.get(name))) is None
                    for name in required)):
         raise ValueError("Source v8 snapshot evidence differs")
@@ -908,7 +1107,99 @@ def _validate_scope_family_registry(
     return actual
 
 
-def authenticate_selected_config_snapshot(
+def _projected_fit_only_audit(
+    arrays: Mapping[str, np.ndarray], *, scope: Mapping[str, Any],
+    actor: NumPyNativeActor,
+) -> dict[str, Any]:
+    """Recompute every derivable inner-split isolation claim."""
+    normalized = normalize_scope(scope)
+    v8._validate_base_shapes(arrays, actor, "Authenticated fit-only rows")
+    scenes = v8._decode(
+        arrays["scene_fingerprints"], "Authenticated fit-only scenes")
+    split = arrays["split_validation"]
+    eligible = set(normalized["eligible_fit_scene_fingerprints"])
+    exposed = set(
+        normalized["previously_exposed_outer_scene_fingerprints"])
+    fresh = set(normalized["fresh_outer_scene_fingerprints"])
+    inner, family_counts = _inner_holdout(
+        normalized["inner_candidate_scenes"])
+    inner_set = set(inner)
+    fit_scenes = set(map(str, scenes[~split]))
+    validation_scenes = set(map(str, scenes[split]))
+    all_scenes = set(map(str, scenes))
+    episodes = v8._decode(
+        arrays["episode_ids"], "Authenticated fit-only episodes")
+    anchors = v8._decode(
+        arrays["anchor_ids"], "Authenticated fit-only anchors")
+    fit_episodes = set(map(str, episodes[~split]))
+    validation_episodes = set(map(str, episodes[split]))
+    fit_anchors = {str(value) for value in anchors[~split] if str(value)}
+    validation_anchors = {str(value) for value in anchors[split] if str(value)}
+    fit_observations = set(map(bytes, arrays["observation_hashes"][~split]))
+    validation_observations = set(map(
+        bytes, arrays["observation_hashes"][split]))
+    if (all_scenes != eligible
+            or validation_scenes != inner_set
+            or fit_scenes != eligible - inner_set
+            or all_scenes & (exposed | fresh)
+            or fit_episodes & validation_episodes
+            or fit_anchors & validation_anchors
+            or fit_observations & validation_observations):
+        raise ValueError("Authenticated fit-only inner split differs")
+    removed_overlap = FROZEN_SOURCE_ELIGIBLE_ROW_COUNT - len(scenes)
+    if removed_overlap < 0:
+        raise ValueError("Authenticated fit-only row count exceeds source")
+    return {
+        "source_rows": FROZEN_SOURCE_ROW_COUNT,
+        "source_scenes": FROZEN_SOURCE_SCENE_COUNT,
+        "previously_exposed_outer_scenes_removed": len(exposed),
+        "fresh_outer_scenes_registered_absent_from_source": len(fresh),
+        "eligible_fit_scenes": len(eligible),
+        "inner_fit_scenes": len(fit_scenes),
+        "inner_holdout_scenes": len(validation_scenes),
+        "inner_holdout_family_counts": family_counts,
+        "inner_fit_rows": int(np.sum(~split)),
+        "inner_holdout_rows": int(np.sum(split)),
+        "inner_fit_rows_removed_for_exact_holdout_overlap": removed_overlap,
+        "scene_identity_overlap": 0,
+        "episode_identity_overlap": 0,
+        "nonempty_anchor_identity_overlap": 0,
+        "exact_observation_overlap": 0,
+        "outer_labels_or_probabilities_used_for_projection": False,
+    }
+
+
+def _strict_refit_receipt(
+    *, report_file_sha256: str, report: Mapping[str, Any],
+) -> str:
+    artifacts = report["evidence_artifacts"]
+    bindings = report["bindings"]
+    return digest({
+        "version": VERSION,
+        "report_file_sha256": report_file_sha256,
+        "selector_binding_sha256": bindings["selector_binding_sha256"],
+        "fit_only_rows_file_sha256": artifacts["fit_only_rows.npz"],
+        "fit_only_rows_semantic_sha256": bindings[
+            "fit_only_rows_semantic_sha256"],
+        "config_registry_file_sha256": artifacts["config_registry.json"],
+        "config_registry_content_sha256": bindings[
+            "config_registry_content_sha256"],
+        "inner_split_audit_file_sha256": artifacts["inner_split_audit.json"],
+        "inner_split_audit_content_sha256": bindings[
+            "inner_split_audit_content_sha256"],
+        "inner_selection_file_sha256": artifacts["inner_selection.json"],
+        "inner_selection_content_sha256": bindings[
+            "inner_selection_content_sha256"],
+        "inner_fit_program_file_sha256": artifacts["inner_fit_program.json"],
+        "inner_fit_program_content_sha256": bindings[
+            "inner_fit_program_content_sha256"],
+        "selected_config_file_sha256": artifacts["selected_config.json"],
+        "selected_config_content_sha256": bindings[
+            "selected_config_content_sha256"],
+    })
+
+
+def authenticate_embedded_selected_config_snapshot(
     *, report_path: str | Path, expected_report_sha256: str,
     scope_path: str | Path, selected_config_path: str | Path,
     actor_file_sha256: str,
@@ -917,12 +1208,11 @@ def authenticate_selected_config_snapshot(
     fresh_outer_report_path: str | Path,
     expected_fresh_outer_report_sha256: str,
 ) -> dict[str, Any]:
-    """Authenticate the three selector artifacts needed by a candidate fit.
+    """Authenticate the three selector artifacts copied into an RCPD candidate.
 
-    Callers must pass immutable private copies.  The RCPD v8 producer includes
-    these files in its own :class:`ImmutableInputSnapshot`; this function then
-    checks the selector protocol, source closure, chosen config, scope, and
-    fresh-outer pair without refitting or reading an outer label.
+    Candidate construction must first call the strict refitting reader below.
+    This compact reader exists so a saved candidate can reproduce its binding
+    from the three copied selector files without embedding the large fit rows.
     """
     report_file = _regular(
         report_path, "Fit-only selector report", maximum=MAX_JSON_BYTES)
@@ -940,6 +1230,9 @@ def authenticate_selected_config_snapshot(
             or not isinstance(bindings, Mapping)
             or bindings.get("producer_sources_sha256")
                 != digest(sources)
+            or any(type(bindings.get(name)) is not str
+                   or _HEX.fullmatch(bindings[name]) is None
+                   for name in STRICT_REFIT_BINDING_FIELDS)
             or report.get("outer_evaluation_performed") is not False
             or report.get("outer_labels_used_for_projection_fit_or_selection")
                 is not False
@@ -968,11 +1261,26 @@ def authenticate_selected_config_snapshot(
     selected = _read_json(selected_file, "Fit-only selected config")
     if set(selected) != SELECTED_CONFIG_FIELDS:
         raise ValueError("Fit-only selected-config schema differs")
-    if (bindings.get("fit_scope_file_sha256") != artifacts["fit_scope.json"]
+    if (report_sha256 == ""  # keeps the exact report hash visibly consumed
+            or bindings.get("source_v8_report_sha256")
+                != FROZEN_SOURCE_V8_REPORT_SHA256
+            or bindings.get("source_v8_rows_sha256")
+                != FROZEN_SOURCE_V8_ROWS_SHA256
+            or bindings.get("source_v8_config_sha256")
+                != FROZEN_SOURCE_V8_CONFIG_FILE_SHA256
+            or bindings.get("source_v8_program_sha256")
+                != FROZEN_SOURCE_V8_PROGRAM_SHA256
+            or bindings.get("source_v8_weights_audit_sha256")
+                != FROZEN_SOURCE_V8_WEIGHTS_AUDIT_SHA256
+            or bindings.get("fit_scope_file_sha256")
+                != FROZEN_FIT_SCOPE_SHA256
+            or artifacts["fit_scope.json"] != FROZEN_FIT_SCOPE_SHA256
+            or bindings.get("fit_scope_file_sha256") != artifacts["fit_scope.json"]
             or bindings.get("fit_scope_content_sha256")
                 != scope["content_sha256"]
             or bindings.get("actor_file_sha256")
                 != _sha(actor_file_sha256, "candidate Actor")
+            or bindings.get("actor_file_sha256") != FROZEN_ACTOR_FILE_SHA256
             or scope["source_report_sha256"]
                 != bindings.get("source_v8_report_sha256")
             or scope["source_rows_sha256"]
@@ -1020,6 +1328,10 @@ def authenticate_selected_config_snapshot(
     config = v8.normalize_config(selected.get("selected_config"))
     mix = selected.get("selected_mix_weight")
     selection = report.get("selection")
+    expected_configs = candidate_configs(FROZEN_SOURCE_CONFIG)
+    expected_config = next(
+        (candidate for weight, candidate in zip(MIX_CANDIDATES, expected_configs)
+         if weight == mix), None)
     if (type(mix) not in (int, float) or isinstance(mix, bool)
             or float(mix) not in MIX_CANDIDATES
             or selected.get("version") != VERSION
@@ -1033,6 +1345,7 @@ def authenticate_selected_config_snapshot(
             or selected.get("outer_evaluation_performed") is not False
             or selected.get("final_rows_accessed") is not False
             or selected.get("final_labels_accessed") is not False
+            or config != expected_config
             or config["mix_weights"]["shared_charger"] != float(mix)
             or config["mix_weights"]["narrow_passage"] != 0.0
             or config["mix_weights"]["shared_pickup"] != 0.0
@@ -1048,7 +1361,145 @@ def authenticate_selected_config_snapshot(
         "report_file_sha256": report_sha256,
         "scope_file_sha256": artifacts["fit_scope.json"],
         "selected_config_file_sha256": artifacts["selected_config.json"],
+        "strict_refit_receipt_sha256": _strict_refit_receipt(
+            report_file_sha256=report_sha256, report=report),
     }
+
+
+def authenticate_selected_config_snapshot(
+    *, evidence_directory: str | Path, expected_report_sha256: str,
+    actor_path: str | Path,
+    source_full_manifest_bindings: Mapping[str, Any],
+    fresh_outer_registry_path: str | Path,
+    expected_fresh_outer_registry_sha256: str,
+    fresh_outer_report_path: str | Path,
+    expected_fresh_outer_report_sha256: str,
+) -> dict[str, Any]:
+    """Strictly refit and authenticate a fit-only selector decision.
+
+    Every selector artifact is hash checked.  The four preregistered mixtures,
+    all nine gate metrics, the selection rule, prediction summaries, and the
+    explicit program are then recomputed from the physically projected rows.
+    No fresh-outer observation, Actor probability, or label is read.
+    """
+    directory = Path(evidence_directory).expanduser().absolute()
+    if (not directory.is_dir() or directory.is_symlink()
+            or directory.resolve() != directory):
+        raise ValueError("Fit-only selector evidence directory is unsafe")
+    report_path = directory / "report.json"
+    report_sha256 = _sha(expected_report_sha256, "fit-only selector report")
+    report = _read_json(report_path, "Fit-only selector report")
+    artifacts = report.get("evidence_artifacts")
+    if (file_hash(report_path) != report_sha256
+            or not isinstance(artifacts, Mapping)
+            or set(artifacts) != EVIDENCE_ARTIFACT_NAMES):
+        raise ValueError("Fit-only selector complete artifact registry differs")
+    paths: dict[str, Path] = {}
+    for name in sorted(EVIDENCE_ARTIFACT_NAMES):
+        path = _regular(
+            directory / name, "Fit-only selector " + name,
+            maximum=MAX_NPZ_BYTES if name.endswith(".npz") else MAX_JSON_BYTES,
+        )
+        if path.parent != directory or file_hash(path) != artifacts.get(name):
+            raise ValueError("Fit-only selector artifact hash differs: " + name)
+        paths[name] = path
+
+    summary = authenticate_embedded_selected_config_snapshot(
+        report_path=report_path, expected_report_sha256=report_sha256,
+        scope_path=paths["fit_scope.json"],
+        selected_config_path=paths["selected_config.json"],
+        actor_file_sha256=file_hash(actor_path),
+        fresh_outer_registry_path=fresh_outer_registry_path,
+        expected_fresh_outer_registry_sha256=(
+            expected_fresh_outer_registry_sha256),
+        fresh_outer_report_path=fresh_outer_report_path,
+        expected_fresh_outer_report_sha256=expected_fresh_outer_report_sha256,
+    )
+    if dict(source_full_manifest_bindings) != FROZEN_SOURCE_IDENTITY[
+            "source_full_manifest_bindings"]:
+        raise ValueError("Fit-only selector source manifest identity differs")
+    actor_file = _regular(actor_path, "Frozen selector Actor", maximum=MAX_NPZ_BYTES)
+    if file_hash(actor_file) != FROZEN_ACTOR_FILE_SHA256:
+        raise ValueError("Fit-only selector Actor is not preregistered")
+    actor = NumPyNativeActor(actor_file)
+    if (actor.artifact_sha256 != FROZEN_ACTOR_FILE_SHA256
+            or actor.metadata.get("actor_parameters_sha256")
+                != FROZEN_ACTOR_PARAMETERS_SHA256):
+        raise ValueError("Fit-only selector Actor identity differs")
+
+    configs = candidate_configs(FROZEN_SOURCE_CONFIG)
+    config_registry = _read_json(
+        paths["config_registry.json"], "Fit-only config registry")
+    expected_registry = _config_registry(configs)
+    if config_registry != expected_registry:
+        raise ValueError("Fit-only candidate registry differs from preregistration")
+    fit_only = _load_npz(paths["fit_only_rows.npz"], "Fit-only selector rows")
+    projection = _projected_fit_only_audit(
+        fit_only, scope=summary["scope"], actor=actor)
+    saved_projection = _read_json(
+        paths["inner_split_audit.json"], "Fit-only inner split audit")
+    if (saved_projection != projection
+            or report.get("projection") != projection):
+        raise ValueError("Fit-only inner split audit differs from rows")
+
+    sources = producer_sources()
+    rows_semantic = _arrays_digest(fit_only)
+    binding = _selector_binding(
+        scope_file_sha256=FROZEN_FIT_SCOPE_SHA256,
+        fit_only_rows_semantic_sha256=rows_semantic,
+        sources=sources, configs=configs)
+    bindings = report["bindings"]
+    if (report.get("sources") != sources
+            or bindings.get("producer_sources_sha256") != digest(sources)
+            or bindings.get("selector_binding_sha256") != binding
+            or bindings.get("fit_only_rows_semantic_sha256") != rows_semantic
+            or bindings.get("config_registry_content_sha256")
+                != digest(config_registry)
+            or bindings.get("inner_split_audit_content_sha256")
+                != digest(saved_projection)):
+        raise ValueError("Fit-only selector strict source binding differs")
+
+    scene_families = {
+        str(row["fingerprint"]): str(row["family_id"])
+        for row in summary["scope"]["inner_candidate_scenes"]
+    }
+    selection, program, recomputed_configs = _select_projected(
+        fit_only, actor=actor, source_config=FROZEN_SOURCE_CONFIG,
+        source_identity=FROZEN_SOURCE_IDENTITY, selector_binding=binding,
+        scene_families=scene_families)
+    if recomputed_configs != configs:
+        raise RuntimeError("Fit-only selector refit candidate configs changed")
+    saved_selection = _read_json(
+        paths["inner_selection.json"], "Fit-only inner selection")
+    if (saved_selection != selection or report.get("selection") != selection
+            or bindings.get("inner_selection_content_sha256")
+                != digest(saved_selection)):
+        raise ValueError("Fit-only selector metrics or selection differ from refit")
+    saved_program_payload = _read_json(
+        paths["inner_fit_program.json"], "Fit-only inner program")
+    saved_program = v8.R41DiagnosticPublicTreeProgramV8.from_dict(
+        saved_program_payload)
+    recomputed_program_payload = program.to_dict()
+    if (saved_program.to_dict() != saved_program_payload
+            or saved_program_payload != recomputed_program_payload
+            or bindings.get("inner_fit_program_content_sha256")
+                != digest(saved_program_payload)):
+        raise ValueError("Fit-only selector program differs from deterministic refit")
+    expected_selected = _selected_config_record(selection, configs)
+    if (summary["selected_config_record"] != expected_selected
+            or bindings.get("selected_config_content_sha256")
+                != digest(expected_selected)
+            or selection.get("status") != STATUS_SELECTED):
+        raise ValueError("Fit-only selected config differs from refit selection")
+    result = dict(summary)
+    result.update({
+        "selection": deepcopy(selection),
+        "projection": deepcopy(projection),
+        "strict_refit_performed": True,
+        "strict_refit_receipt_sha256": _strict_refit_receipt(
+            report_file_sha256=report_sha256, report=report),
+    })
+    return result
 
 
 def prepare_scope(
@@ -1125,6 +1576,10 @@ def prepare_scope(
     }
     payload["content_sha256"] = digest(payload)
     normalized = normalize_scope(payload)
+    scope_file_sha256 = sha256(
+        (canonical(normalized) + "\n").encode("utf-8")).hexdigest()
+    if scope_file_sha256 != FROZEN_FIT_SCOPE_SHA256:
+        raise ValueError("Prepared fit-only scope differs from preregistration")
     destination = Path(output).expanduser().absolute()
     if (not destination.parent.is_dir() or destination.parent.is_symlink()
             or destination.parent.resolve() != destination.parent
@@ -1160,7 +1615,9 @@ def _build_frozen(
         raise ValueError("Selector Actor differs from source v8 evidence")
     scope_file = _regular(
         fit_scope_path, "Fit-only selector scope", maximum=MAX_JSON_BYTES)
-    if file_hash(scope_file) != _sha(expected_fit_scope_sha256, "fit scope"):
+    if (_sha(expected_fit_scope_sha256, "fit scope")
+            != FROZEN_FIT_SCOPE_SHA256
+            or file_hash(scope_file) != FROZEN_FIT_SCOPE_SHA256):
         raise ValueError("Fit-only selector scope hash differs")
     scope = normalize_scope(_read_json(scope_file, "Fit-only selector scope"))
     if (scope["source_report_sha256"] != expected_source_report_sha256
@@ -1230,45 +1687,17 @@ def _build_frozen(
         scene_families = {
             scene: all_scene_families[scene] for scene in fit_scene_set
         }
-        selector_binding = digest({
-            "version": VERSION,
-            "contract_sha256": digest(contract()),
-            "source_report_sha256": expected_source_report_sha256,
-            "fit_scope_sha256": expected_fit_scope_sha256,
-            "fit_only_rows_semantic_sha256": _arrays_digest(fit_only),
-            "config_registry_sha256": digest(configs),
-            "producer_sources_sha256": digest(sources),
-        })
+        fit_only_rows_semantic_sha256 = _arrays_digest(fit_only)
+        selector_binding = _selector_binding(
+            scope_file_sha256=FROZEN_FIT_SCOPE_SHA256,
+            fit_only_rows_semantic_sha256=fit_only_rows_semantic_sha256,
+            sources=sources, configs=configs)
         selection, fitted_program, configs = _select_projected(
             fit_only, actor=actor, source_config=source_config,
             source_identity=source_identity, selector_binding=selector_binding,
             scene_families=scene_families)
-        selected_weight = selection["selected_mix_weight"]
-        selected_config = next(
-            (config for mix, config in zip(MIX_CANDIDATES, configs)
-             if mix == selected_weight), None)
-        config_registry = {
-            "version": VERSION,
-            "candidate_count": len(configs),
-            "candidates": [
-                {"mix_weight": mix, "config": config,
-                 "config_sha256": digest(config)}
-                for mix, config in zip(MIX_CANDIDATES, configs)
-            ],
-            "selection_fields": ["models.shared_charger", "mix_weights.shared_charger"],
-            "all_other_fields_frozen": True,
-        }
-        selected_payload = {
-            "version": VERSION,
-            "status": selection["status"],
-            "selected_mix_weight": selected_weight,
-            "selected_config": selected_config,
-            "selected_config_sha256": (
-                digest(selected_config) if selected_config is not None else None),
-            "outer_evaluation_performed": False,
-            "final_rows_accessed": False,
-            "final_labels_accessed": False,
-        }
+        config_registry = _config_registry(configs)
+        selected_payload = _selected_config_record(selection, configs)
         _write_json(temporary / "fit_scope.json", scope)
         _write_json(temporary / "config_registry.json", config_registry)
         _write_json(temporary / "inner_split_audit.json", projection_audit)
@@ -1305,6 +1734,14 @@ def _build_frozen(
                     "content_sha256"],
                 "selector_binding_sha256": selector_binding,
                 "producer_sources_sha256": digest(sources),
+                "fit_only_rows_semantic_sha256": (
+                    fit_only_rows_semantic_sha256),
+                "config_registry_content_sha256": digest(config_registry),
+                "inner_split_audit_content_sha256": digest(projection_audit),
+                "inner_selection_content_sha256": digest(selection),
+                "selected_config_content_sha256": digest(selected_payload),
+                "inner_fit_program_content_sha256": digest(
+                    fitted_program.to_dict()),
             },
             "projection": projection_audit,
             "selection": selection,
@@ -1341,6 +1778,11 @@ def build(
     output: str | Path,
 ) -> dict[str, Any]:
     """Run selection entirely from immutable copies, then recheck originals."""
+    if (_sha(expected_source_report_sha256, "source report")
+            != FROZEN_SOURCE_V8_REPORT_SHA256
+            or _sha(expected_fit_scope_sha256, "fit scope")
+                != FROZEN_FIT_SCOPE_SHA256):
+        raise ValueError("Fit-only selector preregistered source/scope differs")
     sources = producer_sources()
     with _snapshot_build_inputs(
         source_evidence=source_evidence,
@@ -1456,8 +1898,11 @@ __all__ = [
     "MIX_CANDIDATES", "INNER_HOLDOUT_SCENES",
     "INNER_HOLDOUT_FAMILY_QUOTAS", "INNER_ORDER_SALT", "CHARGER_MODEL",
     "MIN_CHARGER_DIRECTION_IMPROVEMENT", "MAX_OTHER_METRIC_DEGRADATION",
+    "FROZEN_SOURCE_V8_REPORT_SHA256", "FROZEN_FIT_SCOPE_SHA256",
+    "FROZEN_SOURCE_CONFIG",
     "contract", "producer_sources", "normalize_scope", "candidate_configs",
     "choose_candidate", "prepare_scope", "authenticate_selected_config_snapshot",
+    "authenticate_embedded_selected_config_snapshot",
     "build", "main", "_inner_holdout",
     "_project_fit_only", "_arrays_digest",
 ]

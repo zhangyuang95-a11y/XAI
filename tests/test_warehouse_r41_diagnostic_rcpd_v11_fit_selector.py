@@ -227,3 +227,22 @@ def test_v11_validation_union_includes_prior_and_fresh_hashes():
     combined = subject.validation_hash_union(prior, fresh)
     assert combined == sorted(set(prior) | set(fresh))
     assert len(combined) == 3
+
+
+def test_v11_validation_union_removes_burned_v10_1505_unique_1902_rows():
+    consumed_unique = sorted(
+        _fingerprint(f"consumed-v10-{index}") for index in range(1505))
+    consumed_rows = consumed_unique + consumed_unique[:397]
+    retained = [_fingerprint(f"retained-{index}") for index in range(11)]
+    public = {
+        "observation_hashes": np.asarray(
+            consumed_rows + retained, dtype="S64"),
+    }
+    validation_union = subject.validation_hash_union(consumed_unique, [])
+    keep, audit = subject.freeze_validation_wins(public, validation_union)
+    kept_hashes = set(np.char.decode(
+        public["observation_hashes"][keep], "ascii").astype(str))
+    assert len(consumed_unique) == 1505
+    assert audit["removed_rows"] == 1902
+    assert audit["retained_rows"] == len(retained)
+    assert not kept_hashes.intersection(consumed_unique)

@@ -68,7 +68,9 @@ def _candidate_lock(**overrides) -> dict:
         "information_boundary": {
             "candidate_locked_before_full_fresh_outer_collection": True,
             "fresh_outer_hashes_used_only_for_validation_wins": True,
+            "prior_outer_hashes_used_for_validation_wins": True,
             "consumed_v9_outer_labels_or_probabilities_read": False,
+            "consumed_v10_outer_labels_or_probabilities_read": False,
             "fresh_outer_actions_or_probabilities_read": False,
             "protected_final_access": False,
             "runtime_action_override": False,
@@ -161,19 +163,44 @@ def _selector_report(lock: dict) -> dict:
         "source_archive_reauthenticated_after_private_read": True,
     }
     validation_wins["content_sha256"] = digest(validation_wins)
+    validation_hash_inputs = {
+        "prior_outer_file_sha256": lock["bindings"][
+            "prior_outer_hash_projection_sha256"],
+        "prior_outer_content_sha256": lock["bindings"][
+            "prior_outer_hash_projection_content_sha256"],
+        "prior_outer_unique_observations": 40,
+        "prior_outer_observation_hashes_sha256": digest(["p"]),
+        "fresh_outer_file_sha256": lock["bindings"][
+            "outer_hash_projection_sha256"],
+        "fresh_outer_content_sha256": digest({"fresh": "content"}),
+        "fresh_outer_unique_observations": 32,
+        "fresh_outer_observation_hashes_sha256": digest(["f"]),
+        "prior_fresh_observation_overlap": 8,
+        "combined_unique_observations": 64,
+        "combined_observation_hashes_sha256": digest(["combined"]),
+        "labels_or_probabilities_included": False,
+    }
+    validation_hash_inputs["content_sha256"] = digest(validation_hash_inputs)
     final_binding_sha = digest({
         "selector": subject.SELECTOR_VERSION,
         "development_rows_sha256": lock["bindings"]["development_rows_sha256"],
         "retained_rows_semantic_sha256": retained_semantic_sha,
         "selected_config_sha256": config_sha,
+        "prior_outer_projection_sha256": lock["bindings"][
+            "prior_outer_hash_projection_sha256"],
+        "prior_outer_projection_content_sha256": lock["bindings"][
+            "prior_outer_hash_projection_content_sha256"],
         "fresh_outer_projection_sha256": lock["bindings"][
             "outer_hash_projection_sha256"],
+        "combined_validation_observation_hashes_sha256": (
+            validation_hash_inputs["combined_observation_hashes_sha256"]),
     })
     value = {
         "version": subject.SELECTOR_VERSION, "status": subject.SELECTOR_STATUS,
         "contract": {
             "version": subject.SELECTOR_VERSION,
             "consumed_v9_outer_labels_or_probabilities_read": False,
+            "consumed_v10_outer_labels_or_probabilities_read": False,
             "fresh_v11_outer_labels_or_probabilities_read": False,
             "protected_final_access": False, "runtime_action_override": False,
             "formal_ready": False,
@@ -185,6 +212,7 @@ def _selector_report(lock: dict) -> dict:
             "failed_v8_outer_permanently_closed": True,
             "failed_v8_outer_reclassified_as_development": True,
             "validation_wins": validation_wins,
+            "validation_hash_inputs": validation_hash_inputs,
             "scene_families": {"scene_count": 48},
             "retained_scene_count": 48,
             "retained_row_count": 192,
@@ -214,8 +242,10 @@ def _selector_report(lock: dict) -> dict:
         "sources": deepcopy(lock["source_closure"]),
         "information_boundary": {
             "fresh_outer_projection_authenticated_before_development_targets": True,
+            "prior_outer_projection_authenticated_before_development_targets": True,
             "validation_wins_keep_mask_frozen_before_action_or_probability_read": True,
             "consumed_v9_outer_labels_or_probabilities_read": False,
+            "consumed_v10_outer_labels_or_probabilities_read": False,
             "fresh_outer_actions_or_probabilities_read": False,
             "fresh_outer_full_collection_access": False,
             "protected_final_access": False, "runtime_action_override": False,
@@ -265,6 +295,8 @@ def test_candidate_lock_is_validated_before_any_outer_replay(tmp_path, monkeypat
         registry_report_path="registry-report",
         expected_registry_sha256="1" * 64,
         expected_registry_report_sha256="2" * 64,
+        prior_projection_path="prior-projection",
+        expected_prior_projection_sha256="5" * 64,
         projection_path="projection", projection_receipt_path="projection-receipt",
         expected_projection_sha256="3" * 64,
         expected_projection_receipt_sha256="4" * 64,
@@ -291,6 +323,8 @@ def test_failed_cv_lock_is_rejected_before_any_outer_replay(tmp_path, monkeypatc
         registry_report_path="registry-report",
         expected_registry_sha256="1" * 64,
         expected_registry_report_sha256="2" * 64,
+        prior_projection_path="prior-projection",
+        expected_prior_projection_sha256="5" * 64,
         projection_path="projection", projection_receipt_path="projection-receipt",
         expected_projection_sha256="3" * 64,
         expected_projection_receipt_sha256="4" * 64,
@@ -445,7 +479,8 @@ def test_candidate_bindings_include_registry_report_and_projection_receipt(
         tmp_path, monkeypatch):
     names = (
         "actor", "protocol", "manifest", "designation", "failure_closeout",
-        "registry", "registry_report", "projection", "projection_receipt",
+        "registry", "registry_report", "prior_projection", "projection",
+        "projection_receipt",
         "development_rows", "program", "selector_report",
     )
     paths = {}
@@ -461,6 +496,8 @@ def test_candidate_bindings_include_registry_report_and_projection_receipt(
         "failed_outer_closeout_sha256": file_hash(paths["failure_closeout"]),
         "fresh_outer_registry_sha256": file_hash(paths["registry"]),
         "fresh_outer_registry_report_sha256": file_hash(paths["registry_report"]),
+        "prior_outer_hash_projection_sha256": file_hash(
+            paths["prior_projection"]),
         "outer_hash_projection_sha256": file_hash(paths["projection"]),
         "outer_hash_projection_receipt_sha256": file_hash(
             paths["projection_receipt"]),

@@ -56,6 +56,8 @@ _REQUIRED_LOCK_BINDINGS = frozenset((
     "runtime_manifest_sha256", "public_feature_contract_sha256",
     "designation_sha256", "failed_outer_closeout_sha256",
     "fresh_outer_registry_sha256", "fresh_outer_registry_report_sha256",
+    "prior_outer_hash_projection_sha256",
+    "prior_outer_hash_projection_content_sha256",
     "outer_hash_projection_sha256", "outer_hash_projection_receipt_sha256",
     "development_rows_sha256", "candidate_grid_sha256", "program_sha256",
     "selector_report_sha256", "source_closure_sha256",
@@ -71,7 +73,9 @@ _LOCK_SELECTION_FIELDS = frozenset((
 _LOCK_BOUNDARY_FIELDS = frozenset((
     "candidate_locked_before_full_fresh_outer_collection",
     "fresh_outer_hashes_used_only_for_validation_wins",
+    "prior_outer_hashes_used_for_validation_wins",
     "consumed_v9_outer_labels_or_probabilities_read",
+    "consumed_v10_outer_labels_or_probabilities_read",
     "fresh_outer_actions_or_probabilities_read", "protected_final_access",
     "runtime_action_override", "formal_ready",
 ))
@@ -85,6 +89,8 @@ _SELECTOR_BINDINGS = frozenset((
     "runtime_manifest_sha256", "public_feature_contract_sha256",
     "designation_sha256", "failed_outer_closeout_sha256",
     "fresh_outer_registry_sha256", "fresh_outer_registry_report_sha256",
+    "prior_outer_hash_projection_sha256",
+    "prior_outer_hash_projection_content_sha256",
     "outer_hash_projection_sha256", "outer_hash_projection_receipt_sha256",
     "development_rows_sha256", "candidate_grid_sha256", "program_sha256",
     "source_closure_sha256",
@@ -116,7 +122,8 @@ _SELECTION_FIELDS = frozenset((
 _DEVELOPMENT_FIELDS = frozenset((
     "failed_v8_outer_permanently_closed",
     "failed_v8_outer_reclassified_as_development", "validation_wins",
-    "scene_families", "retained_scene_count", "retained_row_count",
+    "validation_hash_inputs", "scene_families", "retained_scene_count",
+    "retained_row_count",
 ))
 _VALIDATION_WINS_FIELDS = frozenset((
     "source_rows", "retained_rows", "removed_rows",
@@ -129,10 +136,23 @@ _VALIDATION_WINS_FIELDS = frozenset((
     "private_members_read_only_after_mask_frozen",
     "source_archive_reauthenticated_after_private_read", "content_sha256",
 ))
+_VALIDATION_HASH_INPUT_FIELDS = frozenset((
+    "prior_outer_file_sha256", "prior_outer_content_sha256",
+    "prior_outer_unique_observations",
+    "prior_outer_observation_hashes_sha256",
+    "fresh_outer_file_sha256", "fresh_outer_content_sha256",
+    "fresh_outer_unique_observations",
+    "fresh_outer_observation_hashes_sha256",
+    "prior_fresh_observation_overlap", "combined_unique_observations",
+    "combined_observation_hashes_sha256",
+    "labels_or_probabilities_included", "content_sha256",
+))
 _SELECTOR_BOUNDARY_FIELDS = frozenset((
     "fresh_outer_projection_authenticated_before_development_targets",
+    "prior_outer_projection_authenticated_before_development_targets",
     "validation_wins_keep_mask_frozen_before_action_or_probability_read",
     "consumed_v9_outer_labels_or_probabilities_read",
+    "consumed_v10_outer_labels_or_probabilities_read",
     "fresh_outer_actions_or_probabilities_read", "fresh_outer_full_collection_access",
     "protected_final_access", "runtime_action_override", "formal_ready",
 ))
@@ -147,6 +167,7 @@ def contract() -> dict[str, Any]:
         "partners": list(rows_v7.PARTNERS),
         "candidate_lock_required_before_actor_output_collection": True,
         "selector_cv_and_full_development_refit_authenticated_before_collection": True,
+        "prior_outer_hash_projection_authenticated_before_collection": True,
         "ordered_projection_required_row_for_row": True,
         "row_schema": sorted(rows_v7._FIELDS),
         "score_computed": False,
@@ -355,8 +376,11 @@ def _validate_candidate_lock_shape(value: Mapping[str, Any]) -> dict[str, str]:
             or boundary.get("candidate_locked_before_full_fresh_outer_collection")
                 is not True
             or boundary.get("fresh_outer_hashes_used_only_for_validation_wins") is not True
+            or boundary.get("prior_outer_hashes_used_for_validation_wins") is not True
             or boundary.get(
                 "consumed_v9_outer_labels_or_probabilities_read") is not False
+            or boundary.get(
+                "consumed_v10_outer_labels_or_probabilities_read") is not False
             or boundary.get("fresh_outer_actions_or_probabilities_read") is not False
             or boundary.get("protected_final_access") is not False
             or boundary.get("runtime_action_override") is not False
@@ -450,6 +474,37 @@ def _validate_validation_wins(
     return value["retained_rows_semantic_sha256"]
 
 
+def _validate_validation_hash_inputs(value: Mapping[str, Any]) -> None:
+    if (set(value) != _VALIDATION_HASH_INPUT_FIELDS
+            or not _content_valid(value)
+            or any(type(value.get(name)) is not str
+                   or _HEX.fullmatch(value[name]) is None
+                   for name in (
+                       "prior_outer_file_sha256",
+                       "prior_outer_content_sha256",
+                       "prior_outer_observation_hashes_sha256",
+                       "fresh_outer_file_sha256",
+                       "fresh_outer_content_sha256",
+                       "fresh_outer_observation_hashes_sha256",
+                       "combined_observation_hashes_sha256"))
+            or any(type(value.get(name)) is not int or value[name] <= 0
+                   for name in (
+                       "prior_outer_unique_observations",
+                       "fresh_outer_unique_observations",
+                       "combined_unique_observations"))
+            or type(value.get("prior_fresh_observation_overlap")) is not int
+            or value["prior_fresh_observation_overlap"] < 0
+            or value["prior_fresh_observation_overlap"] > min(
+                value["prior_outer_unique_observations"],
+                value["fresh_outer_unique_observations"])
+            or value["combined_unique_observations"] != (
+                value["prior_outer_unique_observations"]
+                + value["fresh_outer_unique_observations"]
+                - value["prior_fresh_observation_overlap"])
+            or value.get("labels_or_probabilities_included") is not False):
+        raise ValueError("Locked v11 selector validation hash inputs differ")
+
+
 def _validate_selector_report(
     lock: Mapping[str, Any], report: Mapping[str, Any], *,
     expected_report_sha256: str, expected_program_sha256: str,
@@ -479,11 +534,15 @@ def _validate_selector_report(
     development = report.get("development")
     validation_wins = development.get("validation_wins") \
         if isinstance(development, Mapping) else None
+    validation_hash_inputs = development.get("validation_hash_inputs") \
+        if isinstance(development, Mapping) else None
     boundary = report.get("information_boundary")
     if (not isinstance(contract_value, Mapping)
             or contract_value.get("version") != SELECTOR_VERSION
             or contract_value.get(
                 "consumed_v9_outer_labels_or_probabilities_read") is not False
+            or contract_value.get(
+                "consumed_v10_outer_labels_or_probabilities_read") is not False
             or contract_value.get(
                 "fresh_v11_outer_labels_or_probabilities_read") is not False
             or contract_value.get("protected_final_access") is not False
@@ -494,6 +553,17 @@ def _validate_selector_report(
             or development.get("failed_v8_outer_permanently_closed") is not True
             or development.get("failed_v8_outer_reclassified_as_development") is not True
             or not isinstance(validation_wins, Mapping)
+            or not isinstance(validation_hash_inputs, Mapping)
+            or validation_hash_inputs.get("prior_outer_file_sha256")
+                != bindings.get("prior_outer_hash_projection_sha256")
+            or validation_hash_inputs.get("prior_outer_content_sha256")
+                != bindings.get("prior_outer_hash_projection_content_sha256")
+            or validation_hash_inputs.get("fresh_outer_file_sha256")
+                != bindings.get("outer_hash_projection_sha256")
+            or validation_hash_inputs.get("labels_or_probabilities_included")
+                is not False
+            or validation_wins.get("fresh_outer_unique_observations")
+                != validation_hash_inputs.get("combined_unique_observations")
             or validation_wins.get("retained_fresh_outer_observation_overlap") != 0
             or validation_wins.get("private_development_members_read_before_mask_frozen")
                 is not False
@@ -503,16 +573,21 @@ def _validate_selector_report(
             or set(boundary) != _SELECTOR_BOUNDARY_FIELDS
             or boundary.get("fresh_outer_projection_authenticated_before_development_targets")
                 is not True
+            or boundary.get("prior_outer_projection_authenticated_before_development_targets")
+                is not True
             or boundary.get("validation_wins_keep_mask_frozen_before_action_or_probability_read")
                 is not True
             or boundary.get(
                 "consumed_v9_outer_labels_or_probabilities_read") is not False
+            or boundary.get(
+                "consumed_v10_outer_labels_or_probabilities_read") is not False
             or boundary.get("fresh_outer_actions_or_probabilities_read") is not False
             or boundary.get("fresh_outer_full_collection_access") is not False
             or boundary.get("protected_final_access") is not False
             or boundary.get("runtime_action_override") is not False
             or boundary.get("formal_ready") is not False):
         raise ValueError("Locked v11 selector information boundary differs")
+    _validate_validation_hash_inputs(validation_hash_inputs)
     if (type(development.get("retained_row_count")) is not int
             or development["retained_row_count"] <= 0):
         raise ValueError("Locked v11 selector development row count differs")
@@ -688,8 +763,14 @@ def _validate_selector_report(
         "development_rows_sha256": bindings["development_rows_sha256"],
         "retained_rows_semantic_sha256": retained_rows_semantic_sha256,
         "selected_config_sha256": selection["selected_config_sha256"],
+        "prior_outer_projection_sha256": bindings[
+            "prior_outer_hash_projection_sha256"],
+        "prior_outer_projection_content_sha256": bindings[
+            "prior_outer_hash_projection_content_sha256"],
         "fresh_outer_projection_sha256": bindings[
             "outer_hash_projection_sha256"],
+        "combined_validation_observation_hashes_sha256": (
+            validation_hash_inputs["combined_observation_hashes_sha256"]),
     })
     if (final_fit.get("binding_sha256") != expected_final_binding_sha256
             or not isinstance(final_fit.get("diagnostics"), Mapping)
@@ -752,6 +833,8 @@ def _validate_candidate_bindings(
         "failed_outer_closeout_sha256": file_hash(paths["failure_closeout"]),
         "fresh_outer_registry_sha256": file_hash(paths["registry"]),
         "fresh_outer_registry_report_sha256": file_hash(paths["registry_report"]),
+        "prior_outer_hash_projection_sha256": file_hash(
+            paths["prior_projection"]),
         "outer_hash_projection_sha256": file_hash(paths["projection"]),
         "outer_hash_projection_receipt_sha256": file_hash(
             paths["projection_receipt"]),
@@ -788,8 +871,10 @@ def _resolve_snapshot(
     protocol_path: str | Path, manifest_path: str | Path,
     designation_path: str | Path, registry_path: str | Path,
     registry_report_path: str | Path, projection_path: str | Path,
+    prior_projection_path: str | Path,
     projection_receipt_path: str | Path, expected_registry_sha256: str,
     expected_registry_report_sha256: str, expected_projection_sha256: str,
+    expected_prior_projection_sha256: str,
     expected_projection_receipt_sha256: str, candidate_lock_path: str | Path,
     expected_candidate_lock_sha256: str, failure_closeout_path: str | Path,
     development_rows_path: str | Path, program_path: str | Path,
@@ -803,6 +888,8 @@ def _resolve_snapshot(
         "designation": _regular(designation_path, "Actor designation"),
         "registry": _regular(registry_path, "fresh outer registry"),
         "registry_report": _regular(registry_report_path, "fresh outer registry report"),
+        "prior_projection": _regular(
+            prior_projection_path, "prior outer observation-hash projection"),
         "projection": _regular(projection_path, "outer hash projection"),
         "projection_receipt": _regular(
             projection_receipt_path, "outer hash projection receipt"),
@@ -829,6 +916,9 @@ def _resolve_snapshot(
         "registry": _sha(expected_registry_sha256, "fresh outer registry"),
         "registry_report": _sha(
             expected_registry_report_sha256, "fresh outer registry report"),
+        "prior_projection": _sha(
+            expected_prior_projection_sha256,
+            "prior outer observation-hash projection"),
         "projection": _sha(expected_projection_sha256, "outer hash projection"),
         "projection_receipt": _sha(
             expected_projection_receipt_sha256, "outer projection receipt"),
@@ -886,6 +976,7 @@ def _projection_matches_arrays(
 def _report(
     *, paths: Mapping[str, Path], lock: Mapping[str, Any],
     projection: Mapping[str, Any], projection_receipt: Mapping[str, Any],
+    prior_projection: Mapping[str, Any],
     registry: Mapping[str, Any], registry_report: Mapping[str, Any],
     arrays: Mapping[str, np.ndarray], accounting: Mapping[str, Any],
     environment_steps: int, rows_path: Path, projection_copy_path: Path,
@@ -909,6 +1000,10 @@ def _report(
             "fresh_outer_registry_content_sha256": registry["content_sha256"],
             "fresh_outer_registry_report_sha256": file_hash(paths["registry_report"]),
             "fresh_outer_registry_report_content_sha256": registry_report[
+                "content_sha256"],
+            "prior_outer_hash_projection_sha256": file_hash(
+                paths["prior_projection"]),
+            "prior_outer_hash_projection_content_sha256": prior_projection[
                 "content_sha256"],
             "outer_hash_projection_sha256": file_hash(paths["projection"]),
             "outer_hash_projection_content_sha256": projection["content_sha256"],
@@ -958,6 +1053,7 @@ def _report(
         "information_boundary": {
             "candidate_lock_authenticated_before_outer_replay": True,
             "selector_report_and_passed_gates_authenticated_before_outer_replay": True,
+            "prior_outer_hash_projection_authenticated_before_outer_replay": True,
             "labels_and_probabilities_collected_only_after_candidate_lock": True,
             "projection_verified_before_rows_publication": True,
             "outer_metrics_or_candidate_score_computed": False,
@@ -991,6 +1087,8 @@ def build(
     manifest_path: str | Path, designation_path: str | Path,
     registry_path: str | Path, registry_report_path: str | Path,
     expected_registry_sha256: str, expected_registry_report_sha256: str,
+    prior_projection_path: str | Path,
+    expected_prior_projection_sha256: str,
     projection_path: str | Path, projection_receipt_path: str | Path,
     expected_projection_sha256: str, expected_projection_receipt_sha256: str,
     candidate_lock_path: str | Path, expected_candidate_lock_sha256: str,
@@ -1012,10 +1110,12 @@ def build(
         lock=candidate_lock, actor_path=actor_path, protocol_path=protocol_path,
         manifest_path=manifest_path, designation_path=designation_path,
         registry_path=registry_path, registry_report_path=registry_report_path,
+        prior_projection_path=prior_projection_path,
         projection_path=projection_path,
         projection_receipt_path=projection_receipt_path,
         expected_registry_sha256=expected_registry_sha256,
         expected_registry_report_sha256=expected_registry_report_sha256,
+        expected_prior_projection_sha256=expected_prior_projection_sha256,
         expected_projection_sha256=expected_projection_sha256,
         expected_projection_receipt_sha256=expected_projection_receipt_sha256,
         candidate_lock_path=candidate_lock_path,
@@ -1040,12 +1140,48 @@ def build(
             | getattr(os, "O_NOFOLLOW", 0), 0o600)
         locked = _strict_json(paths["candidate_lock"], "snapshotted v11 candidate lock")
         _validate_candidate_bindings(lock=locked, paths=paths)
+        selector_report = _strict_json(
+            paths["selector_report"], "locked v11 selector report")
+        validation_hash_inputs = selector_report["development"][
+            "validation_hash_inputs"]
+        prior_projection = _strict_json(
+            paths["prior_projection"], "prior outer observation-hash projection")
+        prior_hashes = prior_projection.get("outer_observation_hashes")
+        if (not _content_valid(prior_projection)
+                or prior_projection.get("content_sha256") != locked[
+                    "bindings"]["prior_outer_hash_projection_content_sha256"]
+                or not isinstance(prior_hashes, list) or not prior_hashes
+                or prior_hashes != sorted(set(prior_hashes))
+                or any(type(item) is not str or _HEX.fullmatch(item) is None
+                       for item in prior_hashes)):
+            raise ValueError("Locked prior outer projection content differs")
         # Projection authentication still does not expose outer labels/probabilities.
         projection, projection_receipt = projection_api.read_saved_projection(
             projection_path=paths["projection"],
             receipt_path=paths["projection_receipt"],
             expected_projection_sha256=expected_projection_sha256,
             expected_receipt_sha256=expected_projection_receipt_sha256)
+        fresh_hashes = projection["projection"]["unique_observation_hashes"]
+        combined_hashes = sorted(set(prior_hashes) | set(fresh_hashes))
+        actual_validation_hash_inputs = {
+            "prior_outer_file_sha256": file_hash(paths["prior_projection"]),
+            "prior_outer_content_sha256": prior_projection["content_sha256"],
+            "prior_outer_unique_observations": len(prior_hashes),
+            "prior_outer_observation_hashes_sha256": digest(prior_hashes),
+            "fresh_outer_file_sha256": file_hash(paths["projection"]),
+            "fresh_outer_content_sha256": projection["content_sha256"],
+            "fresh_outer_unique_observations": len(fresh_hashes),
+            "fresh_outer_observation_hashes_sha256": digest(fresh_hashes),
+            "prior_fresh_observation_overlap": len(
+                set(prior_hashes) & set(fresh_hashes)),
+            "combined_unique_observations": len(combined_hashes),
+            "combined_observation_hashes_sha256": digest(combined_hashes),
+            "labels_or_probabilities_included": False,
+        }
+        actual_validation_hash_inputs["content_sha256"] = digest(
+            actual_validation_hash_inputs)
+        if validation_hash_inputs != actual_validation_hash_inputs:
+            raise ValueError("Locked validation hash union differs")
         actor, scenes, registry, registry_report = projection_api._validate_registry(
             paths=paths, component_originals=components,
             designation_original=designation_original)
@@ -1091,7 +1227,8 @@ def build(
         _write_exclusive(projection_copy, paths["projection"].read_bytes())
         report = _report(
             paths=paths, lock=locked, projection=projection,
-            projection_receipt=projection_receipt, registry=registry,
+            projection_receipt=projection_receipt,
+            prior_projection=prior_projection, registry=registry,
             registry_report=registry_report, arrays=arrays, accounting=accounting,
             environment_steps=environment_steps, rows_path=rows_path,
             projection_copy_path=projection_copy, sources=sources)
@@ -1173,6 +1310,9 @@ def authenticate_saved_collection(
             or boundary.get(
                 "selector_report_and_passed_gates_authenticated_before_outer_replay")
                 is not True
+            or boundary.get(
+                "prior_outer_hash_projection_authenticated_before_outer_replay")
+                is not True
             or boundary.get("labels_and_probabilities_collected_only_after_candidate_lock")
                 is not True
             or boundary.get("projection_verified_before_rows_publication") is not True
@@ -1197,6 +1337,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--registry-report", required=True)
     parser.add_argument("--expected-registry-sha256", required=True)
     parser.add_argument("--expected-registry-report-sha256", required=True)
+    parser.add_argument("--prior-outer-hash-projection", required=True)
+    parser.add_argument(
+        "--expected-prior-outer-hash-projection-sha256", required=True)
     parser.add_argument("--projection", required=True)
     parser.add_argument("--projection-receipt", required=True)
     parser.add_argument("--expected-projection-sha256", required=True)
@@ -1215,6 +1358,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         registry_path=args.registry, registry_report_path=args.registry_report,
         expected_registry_sha256=args.expected_registry_sha256,
         expected_registry_report_sha256=args.expected_registry_report_sha256,
+        prior_projection_path=args.prior_outer_hash_projection,
+        expected_prior_projection_sha256=(
+            args.expected_prior_outer_hash_projection_sha256),
         projection_path=args.projection,
         projection_receipt_path=args.projection_receipt,
         expected_projection_sha256=args.expected_projection_sha256,

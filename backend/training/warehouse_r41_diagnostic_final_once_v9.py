@@ -1,0 +1,647 @@
+"""Irrevocable v9 final-test controller for the warehouse explanation program.
+
+The controller authenticates the locked candidate and its passed one-shot
+fresh outer before it creates a permanent ``O_EXCL`` claim. Final identities
+are materialised only after it imports a source-bound producer after that
+claim. A failure burns the attempt and is never retryable.
+
+This module intentionally contains no final salt and importing or testing it
+cannot reveal a final identity.  The final materializer is a separate, source-
+bound component that may read its secret only after this controller calls it.
+"""
+from __future__ import annotations
+
+from copy import deepcopy
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from typing import Any, Mapping, Sequence
+
+import numpy as np
+
+from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_api
+from backend.training import warehouse_r41_diagnostic_explanation_audit_v9 as audit_api
+from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_api
+from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v9 as projection_api
+from backend.training import warehouse_r41_diagnostic_outer_collection_v9 as collection_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v7 as rows_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v8 as metrics_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v9_outer_once as outer_api
+from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
+from backend.training.warehouse_native_common import canonical, digest, file_hash
+
+
+VERSION = "warehouse-r41-diagnostic-final-once.v9"
+ROOT = Path(__file__).resolve().parents[2]
+MATERIAL_VERSION = "warehouse-r41-diagnostic-final-material.v9"
+MATERIAL_STATUS = "materialized_after_irrevocable_final_claim"
+STATUS_PASSED = "completed_passed"
+STATUS_FAILED = "burned_failed"
+ANCHOR_NAME = "attempt_anchor.json"
+COMPLETION_NAME = "attempt_completed.json"
+MATERIAL_NAME = "final_material.json"
+ROWS_NAME = "final_rows.npz"
+AUDIT_NAME = "explanation_audit.json"
+FINAL_SCENE_OFFSET = 900_000
+MAX_JSON_BYTES = 512 * 1024 * 1024
+_HEX = re.compile(r"[0-9a-f]{64}\Z")
+_MATERIAL_FIELDS = frozenset((
+    "version", "status", "claim", "scenes", "selection",
+    "producer_sources", "producer_sources_sha256", "formal_ready",
+    "content_sha256",
+))
+_MATERIAL_SELECTION_FIELDS = frozenset((
+    "whole_scene_selection", "scene_count", "program_access",
+    "program_predictions_access", "actor_outputs_access",
+    "action_labels_access", "salt_access_after_permanent_claim",
+    "candidate_adaptation", "runtime_action_override",
+))
+_SUCCESS_COMPLETION_FIELDS = frozenset((
+    "version", "status", "attempt_key", "attempt_anchor_content_sha256",
+    "artifacts", "final_material_content_sha256", "audit_content_sha256",
+    "final_nine_gates_passed", "physical_counterfactual_replay_passed",
+    "whole_scene_and_observation_isolation_passed", "program_fits",
+    "actor_updates", "runtime_action_override", "retry_allowed",
+    "producer_sources_sha256", "formal_ready", "content_sha256",
+))
+_FAILURE_COMPLETION_FIELDS = frozenset((
+    "version", "status", "attempt_key", "attempt_anchor_content_sha256",
+    "reason", "final_consumed", "retry_allowed", "program_fits",
+    "actor_updates", "runtime_action_override", "producer_sources_sha256",
+    "formal_ready", "content_sha256",
+))
+
+def contract() -> dict[str, Any]:
+    return {
+        "version": VERSION,
+        "required_predecessor": outer_api.STATUS_PASSED,
+        "permanent_o_excl_claim_before_final_identity_or_rows": True,
+        "attempt_key_independent_of_final_identity_output_and_materializer": True,
+        "whole_scene_isolation": True,
+        "zero_cross_split_public_observation_overlap": True,
+        "independent_physical_counterfactual_replay": True,
+        "final_hard_gate_count": 9,
+        "program_controls_runtime_actions": False,
+        "runtime_action_override": False,
+        "retry_allowed": False,
+        "formal_ready": False,
+    }
+
+
+def producer_sources() -> dict[str, str]:
+    return dict(sorted(local_source_hashes((Path(__file__).resolve(),)).items()))
+
+
+def _sha(value: Any, label: str) -> str:
+    if type(value) is not str or _HEX.fullmatch(value) is None:
+        raise ValueError("Exact lowercase SHA-256 required for " + label)
+    return value
+
+
+def _content_valid(value: Mapping[str, Any]) -> bool:
+    claimed = value.get("content_sha256")
+    return (type(claimed) is str and _HEX.fullmatch(claimed) is not None
+            and claimed == digest({key: child for key, child in value.items()
+                                   if key != "content_sha256"}))
+
+
+def _json_bytes(value: Mapping[str, Any]) -> bytes:
+    return (canonical(value) + "\n").encode("utf-8")
+
+
+def _write_exclusive(path: Path, raw: bytes) -> None:
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _write_npz_exclusive(path: Path, arrays: Mapping[str, np.ndarray]) -> None:
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(descriptor, "wb") as stream:
+        np.savez_compressed(stream, **arrays)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _directory(value: str | Path, label: str) -> Path:
+    path = Path(value).expanduser().absolute()
+    if not path.is_dir() or path.is_symlink() or path.resolve() != path:
+        raise ValueError(label + " must be a canonical directory")
+    return path
+
+
+def _materializer_identity(source_path: str | Path) -> dict[str, str]:
+    """Bind materializer source without importing or executing it."""
+    source = Path(source_path).expanduser().absolute()
+    if (not source.is_file() or source.is_symlink() or source.resolve() != source
+            or source.suffix != ".py"):
+        raise ValueError("Final materializer must be one canonical Python source")
+    return dict(sorted(local_source_hashes((source,)).items()))
+
+
+def _run_materializer(
+    source_path: str | Path, anchor: Mapping[str, Any], campaign: Path,
+) -> Mapping[str, Any]:
+    """Execute the salt-bearing producer in an isolated post-claim process."""
+    source = Path(source_path).expanduser().absolute()
+    output = campaign / "materializer_output.json"
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(ROOT) + (
+        os.pathsep + environment["PYTHONPATH"]
+        if environment.get("PYTHONPATH") else "")
+    subprocess.run(
+        [sys.executable, str(source), "--claim", str(campaign / ANCHOR_NAME),
+         "--output", str(output)], check=True, stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600,
+        cwd=ROOT, env=environment)
+    if (not output.is_file() or output.is_symlink() or output.resolve() != output
+            or output.stat(follow_symlinks=False).st_size <= 0
+            or output.stat(follow_symlinks=False).st_size > MAX_JSON_BYTES):
+        raise ValueError("Final materializer did not publish one bounded result")
+    value = outer_api._strict_json_bytes(
+        output.read_bytes(), "post-claim final materializer output")
+    if not isinstance(value, Mapping):
+        raise ValueError("Final materializer must return one mapping")
+    return value
+
+
+def _strict_outer_pass(value: Mapping[str, Any], *, bindings: Mapping[str, str],
+                       candidate_lock_sha256: str) -> None:
+    metrics = value.get("metrics")
+    gate = value.get("gate")
+    try:
+        recomputed = metrics_api._gate(metrics)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("V9 outer result metrics cannot be gated") from error
+    if (value.get("status") != outer_api.STATUS_PASSED
+            or value.get("candidate_lock_sha256") != candidate_lock_sha256
+            or value.get("program_sha256") != bindings["program_sha256"]
+            or value.get("actor_feature_names_sha256")
+                != bindings["actor_feature_names_sha256"]
+            or value.get("explanation_eligible") is not True
+            or gate != recomputed or recomputed.get("passed") is not True
+            or value.get("row_accounting", {}).get(
+                "all_submitted_actions_equal_policy_actions") is not True
+            or value.get("row_accounting", {}).get("runtime_action_overrides") != 0
+            or value.get("execution", {}).get("candidate_refit") is not False
+            or value.get("execution", {}).get("program_mutated") is not False):
+        raise ValueError("A passed immutable v9 fresh outer is required")
+
+
+def _authenticate_preclaim(
+    *, candidate_lock_path: str | Path, expected_candidate_lock_sha256: str,
+    actor_path: str | Path, protocol_path: str | Path,
+    runtime_manifest_path: str | Path, designation_path: str | Path,
+    failed_outer_closeout_path: str | Path,
+    fresh_outer_registry_path: str | Path,
+    fresh_outer_registry_report_path: str | Path,
+    outer_hash_projection_path: str | Path,
+    outer_hash_projection_receipt_path: str | Path,
+    development_rows_path: str | Path, program_path: str | Path,
+    selector_report_path: str | Path, outer_result_path: str | Path,
+    expected_outer_result_sha256: str, outer_permanent_registry: str | Path,
+) -> dict[str, Any]:
+    """Authenticate only public/development evidence; never accepts final input."""
+    lock_path, lock, bindings = outer_api._candidate_lock(
+        candidate_lock_path, expected_sha256=expected_candidate_lock_sha256)
+    paths = outer_api._verify_lock_files(
+        bindings, actor=actor_path, protocol=protocol_path,
+        runtime_manifest=runtime_manifest_path, designation=designation_path,
+        failed_outer_closeout=failed_outer_closeout_path,
+        fresh_outer_registry=fresh_outer_registry_path,
+        fresh_outer_registry_report=fresh_outer_registry_report_path,
+        outer_hash_projection=outer_hash_projection_path,
+        outer_hash_projection_receipt=outer_hash_projection_receipt_path,
+        development_rows=development_rows_path, program=program_path,
+        selector_report=selector_report_path)
+    collection_api.authenticate_locked_candidate_selector(
+        lock=lock, selector_report_path=paths["selector_report"],
+        expected_selector_report_sha256=bindings["selector_report_sha256"],
+        expected_program_sha256=bindings["program_sha256"])
+    candidate_sources, runtime_sources = outer_api._validate_candidate_source_closure(
+        lock, paths["selector_report"], bindings)
+    registry, registry_report, selected_identity_sha256 = outer_api._registry_bundle(
+        paths["fresh_outer_registry"], paths["fresh_outer_registry_report"],
+        bindings=bindings)
+    program_payload = outer_api._program_payload(paths["program"])
+    actor_feature_names, feature_sha256 = outer_api._authenticate_program_actor_features(
+        program_payload=program_payload, actor_path=paths["actor"],
+        bindings=bindings)
+    projection, projection_receipt = projection_api.read_saved_projection(
+        projection_path=paths["outer_hash_projection"],
+        receipt_path=paths["outer_hash_projection_receipt"],
+        expected_projection_sha256=bindings["outer_hash_projection_sha256"],
+        expected_receipt_sha256=bindings["outer_hash_projection_receipt_sha256"])
+    if (projection["identity"].get("registry_file_sha256")
+            != bindings["fresh_outer_registry_sha256"]
+            or projection["identity"].get("selected_identity_sha256")
+                != selected_identity_sha256
+            or projection_receipt.get("bindings", {}).get("actor_sha256")
+                != bindings["actor_sha256"]):
+        raise ValueError("V9 outer identity/projection binding differs")
+
+    # These strict readers authenticate the frozen runtime and designation but
+    # deliberately use no full/final manifest replay.
+    manifest_api.read_saved_manifest(
+        paths["runtime_manifest"],
+        expected_sha256=bindings["runtime_manifest_sha256"],
+        actor_path=paths["actor"], replay_scope="none")
+    designation = designation_api.read_bound_designation(
+        paths["designation"], expected_sha256=bindings["designation_sha256"])
+    if (designation.get("runtime_action_override") is not False
+            or designation.get("bindings", {}).get("actor_sha256")
+                != bindings["actor_sha256"]):
+        raise ValueError("Frozen designation does not preserve Actor authority")
+
+    outer_result = outer_api.read_saved_result(
+        outer_result_path, expected_result_sha256=expected_outer_result_sha256,
+        permanent_registry=outer_permanent_registry)
+    _strict_outer_pass(
+        outer_result, bindings=bindings,
+        candidate_lock_sha256=file_hash(lock_path))
+    development = outer_api._safe_row_projection(
+        paths["development_rows"],
+        expected_sha256=bindings["development_rows_sha256"],
+        fields=frozenset(("observation_hashes", "scene_fingerprints")),
+        label="locked v9 development rows")
+    development_hashes = set(outer_api._decode(
+        development["observation_hashes"], "development observation hashes"))
+    development_scenes = set(outer_api._decode(
+        development["scene_fingerprints"], "development scene fingerprints"))
+    outer_hashes = set(projection["projection"]["ordered_observation_hashes"])
+    outer_scenes = {str(scene["fingerprint"])
+                    for scene in registry["development_outer"]}
+    if development_hashes & outer_hashes or development_scenes & outer_scenes:
+        raise ValueError("Locked development and passed outer splits overlap")
+    return {
+        "lock_path": lock_path, "lock": lock, "bindings": bindings,
+        "paths": paths, "program_payload": program_payload,
+        "actor_feature_names": actor_feature_names,
+        "actor_feature_names_sha256": feature_sha256,
+        "candidate_sources": candidate_sources, "runtime_sources": runtime_sources,
+        "outer_result": outer_result,
+        "outer_result_sha256": expected_outer_result_sha256,
+        "outer_registry": registry, "outer_registry_report": registry_report,
+        "development_hashes": development_hashes,
+        "development_scenes": development_scenes,
+        "outer_hashes": outer_hashes, "outer_scenes": outer_scenes,
+    }
+
+
+def _validate_material(
+    value: Mapping[str, Any], *, anchor: Mapping[str, Any],
+    materializer_sources: Mapping[str, str],
+) -> list[dict[str, Any]]:
+    selection = value.get("selection")
+    claim = value.get("claim")
+    sources = value.get("producer_sources")
+    scenes = value.get("scenes")
+    if (set(value) != _MATERIAL_FIELDS or value.get("version") != MATERIAL_VERSION
+            or value.get("status") != MATERIAL_STATUS
+            or value.get("formal_ready") is not False or not _content_valid(value)
+            or claim != {
+                "attempt_key": anchor["attempt_key"],
+                "attempt_anchor_content_sha256": anchor["content_sha256"],
+            }
+            or not isinstance(selection, Mapping)
+            or set(selection) != _MATERIAL_SELECTION_FIELDS
+            or selection.get("whole_scene_selection") is not True
+            or selection.get("scene_count") != audit_api.FINAL_SCENE_COUNT
+            or any(selection.get(name) is not False for name in (
+                "program_access", "program_predictions_access",
+                "actor_outputs_access", "action_labels_access",
+                "candidate_adaptation", "runtime_action_override"))
+            or selection.get("salt_access_after_permanent_claim") is not True
+            or not isinstance(sources, Mapping)
+            or dict(sources) != dict(materializer_sources)
+            or value.get("producer_sources_sha256") != digest(dict(sources))
+            or not isinstance(scenes, list)
+            or len(scenes) != audit_api.FINAL_SCENE_COUNT):
+        raise ValueError("Final materializer output contract differs")
+    fingerprints, seeds = [], []
+    for scene in scenes:
+        if (not isinstance(scene, Mapping)
+                or type(scene.get("fingerprint")) is not str
+                or _HEX.fullmatch(scene["fingerprint"]) is None
+                or type(scene.get("seed")) is not int
+                or isinstance(scene.get("seed"), bool)
+                or type(scene.get("id")) is not str or not scene["id"]
+                or type(scene.get("family_id")) is not str or not scene["family_id"]):
+            raise ValueError("Final scene public identity differs")
+        fingerprints.append(scene["fingerprint"])
+        seeds.append(scene["seed"])
+    if len(set(fingerprints)) != len(scenes) or len(set(seeds)) != len(scenes):
+        raise ValueError("Final scene identities must be unique")
+    return deepcopy(scenes)
+
+
+def _collect_final_rows(
+    *, actor_path: Path, protocol_path: Path, manifest_path: Path,
+    scenes: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, np.ndarray], int]:
+    runtime = manifest_api.build_runtime(
+        actor_path=actor_path, protocol_path=protocol_path,
+        manifest_path=manifest_path)
+    rows, steps = rows_api._collect(
+        runtime, scenes, scene_offset=FINAL_SCENE_OFFSET,
+        dense_critical=False, progress_label=None)
+    arrays, _ = rows_api._rows_to_arrays([], rows)
+    return arrays, steps
+
+
+def _failure_completion(anchor: Mapping[str, Any], sources: Mapping[str, str]) -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "version": VERSION, "status": STATUS_FAILED,
+        "attempt_key": anchor["attempt_key"],
+        "attempt_anchor_content_sha256": anchor["content_sha256"],
+        "reason": "protected_final_phase_failed",
+        "final_consumed": True, "retry_allowed": False,
+        "program_fits": 0, "actor_updates": 0,
+        "runtime_action_override": False,
+        "producer_sources_sha256": digest(dict(sources)),
+        "formal_ready": False,
+    }
+    value["content_sha256"] = digest(value)
+    return value
+
+
+def run_final_once(
+    *, candidate_lock_path: str | Path, expected_candidate_lock_sha256: str,
+    actor_path: str | Path, protocol_path: str | Path,
+    runtime_manifest_path: str | Path, designation_path: str | Path,
+    failed_outer_closeout_path: str | Path,
+    fresh_outer_registry_path: str | Path,
+    fresh_outer_registry_report_path: str | Path,
+    outer_hash_projection_path: str | Path,
+    outer_hash_projection_receipt_path: str | Path,
+    development_rows_path: str | Path, program_path: str | Path,
+    selector_report_path: str | Path, outer_result_path: str | Path,
+    expected_outer_result_sha256: str, outer_permanent_registry: str | Path,
+    permanent_final_registry: str | Path, output: str | Path,
+    final_materializer_source_path: str | Path,
+) -> dict[str, Any]:
+    """Run one final attempt. No final identity is supplied before the claim."""
+    sources = producer_sources()
+    materializer_sources = _materializer_identity(final_materializer_source_path)
+    preclaim = _authenticate_preclaim(
+        candidate_lock_path=candidate_lock_path,
+        expected_candidate_lock_sha256=expected_candidate_lock_sha256,
+        actor_path=actor_path, protocol_path=protocol_path,
+        runtime_manifest_path=runtime_manifest_path,
+        designation_path=designation_path,
+        failed_outer_closeout_path=failed_outer_closeout_path,
+        fresh_outer_registry_path=fresh_outer_registry_path,
+        fresh_outer_registry_report_path=fresh_outer_registry_report_path,
+        outer_hash_projection_path=outer_hash_projection_path,
+        outer_hash_projection_receipt_path=outer_hash_projection_receipt_path,
+        development_rows_path=development_rows_path, program_path=program_path,
+        selector_report_path=selector_report_path,
+        outer_result_path=outer_result_path,
+        expected_outer_result_sha256=expected_outer_result_sha256,
+        outer_permanent_registry=outer_permanent_registry)
+    bindings = preclaim["bindings"]
+    attempt_inputs = {
+        "scheme": VERSION + ".candidate-and-outer.v1",
+        "candidate_lock_sha256": file_hash(preclaim["lock_path"]),
+        "candidate_lock_content_sha256": preclaim["lock"]["content_sha256"],
+        "actor_sha256": bindings["actor_sha256"],
+        "protocol_sha256": bindings["protocol_sha256"],
+        "runtime_manifest_sha256": bindings["runtime_manifest_sha256"],
+        "designation_sha256": bindings["designation_sha256"],
+        "program_sha256": bindings["program_sha256"],
+        "public_feature_contract_sha256": bindings[
+            "public_feature_contract_sha256"],
+        "candidate_source_closure_sha256": bindings["source_closure_sha256"],
+        "outer_result_sha256": preclaim["outer_result_sha256"],
+        "outer_attempt_key": preclaim["outer_result"]["attempt_key"],
+    }
+    attempt_key = digest(attempt_inputs)
+    permanent = _directory(permanent_final_registry, "permanent final registry")
+    destination = Path(output).expanduser().absolute()
+    parent = _directory(destination.parent, "final output parent")
+    if destination.exists() or destination.is_symlink():
+        raise ValueError("Final output must be a new path")
+    anchor: dict[str, Any] = {
+        "version": VERSION + ".attempt-anchor.v1",
+        "status": "final_attempt_irrevocably_claimed",
+        "attempt_key": attempt_key,
+        "attempt_key_inputs": attempt_inputs,
+        "bindings": {
+            "outer_result_content_sha256": preclaim["outer_result"]["content_sha256"],
+            "candidate_runtime_source_closure_sha256": digest(
+                preclaim["runtime_sources"]),
+            "final_controller_source_closure_sha256": digest(sources),
+            "final_materializer_source_closure_sha256": digest(materializer_sources),
+            "actor_feature_names_sha256": preclaim[
+                "actor_feature_names_sha256"],
+        },
+        "candidate_and_outer_authenticated_before_claim": True,
+        "final_identity_or_rows_accessed_before_claim": False,
+        "retry_allowed": False, "formal_ready": False,
+    }
+    anchor["content_sha256"] = digest(anchor)
+    campaign = permanent / attempt_key
+    try:
+        os.mkdir(campaign, 0o700)
+    except FileExistsError:
+        raise FileExistsError(
+            "This candidate/outer final attempt is already consumed") from None
+    _write_exclusive(campaign / ANCHOR_NAME, _json_bytes(anchor))
+    descriptor = os.open(permanent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+    completion: dict[str, Any]
+    temporary: Path | None = None
+    try:
+        # First protected operation: the bound producer may now read its salt
+        # and reveal final scene identities.
+        material = dict(_run_materializer(
+            final_materializer_source_path, anchor, campaign))
+        if (_materializer_identity(final_materializer_source_path) != materializer_sources
+                or producer_sources() != sources):
+            raise RuntimeError("Final producer/controller source changed")
+        scenes = _validate_material(
+            material, anchor=anchor, materializer_sources=materializer_sources)
+        final_fingerprints = {str(scene["fingerprint"]) for scene in scenes}
+        if (final_fingerprints & preclaim["development_scenes"]
+                or final_fingerprints & preclaim["outer_scenes"]):
+            raise ValueError("Final whole-scene identity overlaps a prior split")
+
+        temporary = Path(tempfile.mkdtemp(
+            prefix="." + destination.name + ".tmp-", dir=parent)).absolute()
+        _write_exclusive(temporary / ANCHOR_NAME, _json_bytes(anchor))
+        _write_exclusive(temporary / MATERIAL_NAME, _json_bytes(material))
+        arrays, environment_steps = _collect_final_rows(
+            actor_path=preclaim["paths"]["actor"],
+            protocol_path=preclaim["paths"]["protocol"],
+            manifest_path=preclaim["paths"]["runtime_manifest"], scenes=scenes)
+        _write_npz_exclusive(temporary / ROWS_NAME, arrays)
+        # Independent replay uses a new runtime and the program is still not
+        # given to either collection call.
+        replay_arrays, replay_environment_steps = _collect_final_rows(
+            actor_path=preclaim["paths"]["actor"],
+            protocol_path=preclaim["paths"]["protocol"],
+            manifest_path=preclaim["paths"]["runtime_manifest"], scenes=scenes)
+        audit_bindings = {
+            "candidate_lock_sha256": file_hash(preclaim["lock_path"]),
+            "outer_result_sha256": preclaim["outer_result_sha256"],
+            "attempt_anchor_content_sha256": anchor["content_sha256"],
+            "actor_sha256": bindings["actor_sha256"],
+            "program_sha256": bindings["program_sha256"],
+            "public_feature_contract_sha256": bindings[
+                "public_feature_contract_sha256"],
+            "final_material_file_sha256": file_hash(temporary / MATERIAL_NAME),
+            "final_material_content_sha256": material["content_sha256"],
+            "final_rows_sha256": file_hash(temporary / ROWS_NAME),
+        }
+        audit = audit_api.audit_rows(
+            actor_path=preclaim["paths"]["actor"],
+            program_path=preclaim["paths"]["program"],
+            program_payload=preclaim["program_payload"],
+            program_sha256=bindings["program_sha256"], arrays=arrays,
+            replay_arrays=replay_arrays, scenes=scenes,
+            development_observation_hashes=preclaim["development_hashes"],
+            outer_observation_hashes=preclaim["outer_hashes"],
+            development_scene_fingerprints=preclaim["development_scenes"],
+            outer_scene_fingerprints=preclaim["outer_scenes"],
+            bindings=audit_bindings, environment_steps=environment_steps,
+            replay_environment_steps=replay_environment_steps)
+        audit_api.validate_report(
+            audit, expected_bindings=audit_bindings, require_passed=True)
+        _write_exclusive(temporary / AUDIT_NAME, _json_bytes(audit))
+        if (producer_sources() != sources
+                or _materializer_identity(final_materializer_source_path)
+                    != materializer_sources
+                or file_hash(preclaim["lock_path"])
+                    != expected_candidate_lock_sha256
+                or file_hash(preclaim["paths"]["program"])
+                    != bindings["program_sha256"]):
+            raise RuntimeError("Frozen final inputs changed during audit")
+        artifacts = {
+            name: file_hash(temporary / name)
+            for name in (ANCHOR_NAME, MATERIAL_NAME, ROWS_NAME, AUDIT_NAME)
+        }
+        completion = {
+            "version": VERSION, "status": STATUS_PASSED,
+            "attempt_key": attempt_key,
+            "attempt_anchor_content_sha256": anchor["content_sha256"],
+            "artifacts": artifacts,
+            "final_material_content_sha256": material["content_sha256"],
+            "audit_content_sha256": audit["content_sha256"],
+            "final_nine_gates_passed": True,
+            "physical_counterfactual_replay_passed": True,
+            "whole_scene_and_observation_isolation_passed": True,
+            "program_fits": 0, "actor_updates": 0,
+            "runtime_action_override": False,
+            "retry_allowed": False,
+            "producer_sources_sha256": digest(sources),
+            "formal_ready": False,
+        }
+        completion["content_sha256"] = digest(completion)
+        _write_exclusive(temporary / COMPLETION_NAME, _json_bytes(completion))
+        os.rename(temporary, destination)
+        temporary = None
+        _write_exclusive(campaign / COMPLETION_NAME, _json_bytes(completion))
+    except BaseException:
+        if temporary is not None:
+            shutil.rmtree(temporary, ignore_errors=True)
+        completion = _failure_completion(anchor, sources)
+        try:
+            _write_exclusive(campaign / COMPLETION_NAME, _json_bytes(completion))
+        finally:
+            # Never retain or publish a private-final exception or traceback.
+            raise RuntimeError("protected_final_phase_failed") from None
+    return deepcopy(completion)
+
+
+def read_completion(
+    path: str | Path, *, expected_completion_sha256: str,
+    permanent_final_registry: str | Path,
+) -> dict[str, Any]:
+    result_path = Path(path).expanduser().absolute()
+    if (not result_path.is_file() or result_path.is_symlink()
+            or result_path.resolve() != result_path
+            or file_hash(result_path) != _sha(
+                expected_completion_sha256, "v9 final completion")):
+        raise ValueError("Exact v9 final completion bytes required")
+    value = outer_api._strict_json_bytes(
+        result_path.read_bytes(), "v9 final completion")
+    if (not isinstance(value, Mapping) or not _content_valid(value)
+            or value.get("version") != VERSION
+            or value.get("status") not in {STATUS_PASSED, STATUS_FAILED}
+            or value.get("retry_allowed") is not False
+            or value.get("runtime_action_override") is not False
+            or value.get("formal_ready") is not False
+            or type(value.get("attempt_key")) is not str
+            or _HEX.fullmatch(value["attempt_key"]) is None
+            or value.get("producer_sources_sha256") != digest(producer_sources())
+            or value.get("program_fits") != 0
+            or value.get("actor_updates") != 0):
+        raise ValueError("V9 final completion semantics differ")
+    if value["status"] == STATUS_PASSED:
+        artifacts = value.get("artifacts")
+        if (set(value) != _SUCCESS_COMPLETION_FIELDS
+                or value.get("final_nine_gates_passed") is not True
+                or value.get("physical_counterfactual_replay_passed") is not True
+                or value.get(
+                    "whole_scene_and_observation_isolation_passed") is not True
+                or not isinstance(artifacts, Mapping)
+                or set(artifacts) != {
+                    ANCHOR_NAME, MATERIAL_NAME, ROWS_NAME, AUDIT_NAME}
+                or any(type(child) is not str or _HEX.fullmatch(child) is None
+                       for child in artifacts.values())
+                or any(not (result_path.parent / name).is_file()
+                       or file_hash(result_path.parent / name) != child
+                       for name, child in artifacts.items())):
+            raise ValueError("Successful v9 final completion differs")
+    elif (set(value) != _FAILURE_COMPLETION_FIELDS
+            or value.get("reason") != "protected_final_phase_failed"
+            or value.get("final_consumed") is not True):
+        raise ValueError("Failed v9 final completion differs")
+    permanent = _directory(permanent_final_registry, "permanent final registry")
+    campaign = _directory(
+        permanent / value["attempt_key"], "permanent final campaign")
+    anchor_path = campaign / ANCHOR_NAME
+    completion_path = campaign / COMPLETION_NAME
+    if (not anchor_path.is_file() or anchor_path.is_symlink()
+            or not completion_path.is_file() or completion_path.is_symlink()
+            or completion_path.read_bytes() != result_path.read_bytes()
+            or file_hash(completion_path) != expected_completion_sha256):
+        raise ValueError("Permanent v9 final claim/completion differs")
+    anchor = outer_api._strict_json_bytes(
+        anchor_path.read_bytes(), "permanent v9 final anchor")
+    if (not isinstance(anchor, Mapping) or not _content_valid(anchor)
+            or anchor.get("version") != VERSION + ".attempt-anchor.v1"
+            or anchor.get("status") != "final_attempt_irrevocably_claimed"
+            or anchor.get("attempt_key") != value["attempt_key"]
+            or anchor.get("retry_allowed") is not False
+            or anchor.get("candidate_and_outer_authenticated_before_claim") is not True
+            or anchor.get("final_identity_or_rows_accessed_before_claim") is not False
+            or anchor.get("bindings", {}).get(
+                "final_controller_source_closure_sha256")
+                != digest(producer_sources())
+            or value.get("attempt_anchor_content_sha256")
+                != anchor.get("content_sha256")):
+        raise ValueError("Permanent v9 final anchor differs")
+    return deepcopy(dict(value))
+
+
+__all__ = [
+    "VERSION", "MATERIAL_VERSION", "MATERIAL_STATUS", "STATUS_PASSED",
+    "STATUS_FAILED", "ANCHOR_NAME", "COMPLETION_NAME", "MATERIAL_NAME",
+    "ROWS_NAME", "AUDIT_NAME", "contract", "producer_sources",
+    "run_final_once", "read_completion",
+]

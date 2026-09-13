@@ -909,7 +909,11 @@ def _validate_source_evidence(
             or any(artifacts.get(name) != expected
                    for name, expected in frozen_artifacts.items())):
         raise ValueError("Source v8 preregistered artifact binding differs")
-    paths = {"report": report_path}
+    # Use the artifact filename as the key, matching the remaining source
+    # evidence mapping.  During ``build`` this path already points into the
+    # no-follow ImmutableInputSnapshot, so publication copies the exact report
+    # bytes authenticated at transaction start.
+    paths = {"report.json": report_path}
     for name in required:
         path = _regular(
             directory / name, "Source v8 " + name,

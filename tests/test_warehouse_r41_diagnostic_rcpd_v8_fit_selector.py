@@ -967,6 +967,178 @@ def test_strict_selector_refits_all_candidates_and_accepts_exact_evidence(
     assert len(result["strict_refit_receipt_sha256"]) == 64
 
 
+def test_build_atomically_publishes_complete_evidence_then_passes_strict_reader(
+        tmp_path, monkeypatch):
+    """Exercise real snapshot/publication I/O with a deterministic fake fit."""
+    fixture = _strict_selector_evidence(tmp_path, monkeypatch)
+    source = tmp_path / "source_candidate"
+    source.mkdir()
+    source_rows_path = source / "rows.npz"
+    source_rows_path.write_bytes(
+        (fixture["evidence"] / "source_v8_rows.npz").read_bytes())
+    source_rows_sha = file_hash(source_rows_path)
+
+    source_config = deepcopy(subject.FROZEN_SOURCE_CONFIG)
+    _write_json(source / "fit_config.json", source_config)
+    _write_json(source / "program.json", {"kind": "source-program"})
+    scope = json.loads(
+        (fixture["evidence"] / "fit_scope.json").read_text(encoding="utf-8"))
+    families = {
+        row["fingerprint"]: row["family_id"]
+        for row in scope["inner_candidate_scenes"]
+    }
+    weight_audit = {"balance": {"combined_training": {"scene_totals": [
+        {"scene": scene, "family": family, "mass": 1.0}
+        for scene, family in sorted(families.items())
+    ]}}}
+    _write_json(source / "weights_audit.json", weight_audit)
+    source_artifacts = {
+        name: file_hash(source / name)
+        for name in (
+            "rows.npz", "fit_config.json", "program.json",
+            "weights_audit.json",
+        )
+    }
+    monkeypatch.setattr(
+        subject, "FROZEN_SOURCE_V8_ROWS_SHA256",
+        source_artifacts["rows.npz"])
+    monkeypatch.setattr(
+        subject, "FROZEN_SOURCE_V8_CONFIG_FILE_SHA256",
+        source_artifacts["fit_config.json"])
+    monkeypatch.setattr(
+        subject, "FROZEN_SOURCE_V8_CONFIG_CONTENT_SHA256",
+        subject.digest(source_config))
+    monkeypatch.setattr(
+        subject, "FROZEN_SOURCE_V8_PROGRAM_SHA256",
+        source_artifacts["program.json"])
+    monkeypatch.setattr(
+        subject, "FROZEN_SOURCE_V8_WEIGHTS_AUDIT_SHA256",
+        source_artifacts["weights_audit.json"])
+
+    source_bindings = {
+        "actor_file_sha256": file_hash(fixture["actor"]),
+        "actor_parameters_sha256": subject.FROZEN_ACTOR_PARAMETERS_SHA256,
+        "source_full_manifest_bindings": deepcopy(
+            fixture["source_identity"]["source_full_manifest_bindings"]),
+    }
+    source_bindings["source_full_manifest_bindings_sha256"] = subject.digest(
+        source_bindings["source_full_manifest_bindings"])
+    source_bindings["fit_config_content_sha256"] = subject.digest(source_config)
+    source_report = {
+        "version": v8.VERSION,
+        "status": v8.STATUS_FAILED,
+        "bindings": source_bindings,
+        "execution": {
+            "final_rows_accessed": False,
+            "final_labels_accessed": False,
+        },
+        "evidence_artifacts": source_artifacts,
+    }
+    _write_json(source / "report.json", source_report)
+    source_report_sha = file_hash(source / "report.json")
+    monkeypatch.setattr(
+        subject, "FROZEN_SOURCE_V8_REPORT_SHA256", source_report_sha)
+
+    scope["source_report_sha256"] = source_report_sha
+    scope["source_rows_sha256"] = source_rows_sha
+    scope["content_sha256"] = subject.digest({
+        key: value for key, value in scope.items() if key != "content_sha256"
+    })
+    scope_path = tmp_path / "published_fit_scope.json"
+    _write_json(scope_path, scope)
+    monkeypatch.setattr(
+        subject, "FROZEN_FIT_SCOPE_SHA256", file_hash(scope_path))
+
+    class PublishedProgram:
+        def __init__(self, payload):
+            self.payload = deepcopy(payload)
+
+        def to_dict(self):
+            return deepcopy(self.payload)
+
+    class PublishedProgramReader:
+        @classmethod
+        def from_dict(cls, payload):
+            return PublishedProgram(payload)
+
+    monkeypatch.setattr(
+        subject.v8, "R41DiagnosticPublicTreeProgramV8",
+        PublishedProgramReader)
+
+    def fake_select(arrays, **kwargs):
+        configs = subject.candidate_configs(kwargs["source_config"])
+        metrics = (
+            _metrics(charger_direction=0.84),
+            _metrics(charger_direction=0.851, other=0.919),
+            _metrics(charger_direction=0.87, other=0.917),
+            _metrics(charger_direction=0.88, other=0.919),
+        )
+        selection = subject.choose_candidate([
+            {
+                "mix_weight": mix,
+                "config_sha256": subject.digest(config),
+                "validation_probabilities_sha256": subject.digest({
+                    "mix": mix, "kind": "publication-probabilities",
+                }),
+                "validation_predictions_sha256": subject.digest({
+                    "mix": mix, "kind": "publication-predictions",
+                }),
+                "metrics": metric,
+            }
+            for mix, config, metric in zip(
+                subject.MIX_CANDIDATES, configs, metrics)
+        ])
+        selection.update({
+            "fit_diagnostics": {"publication_test": True},
+            "weight_audit": {"publication_test": True},
+            "fit_pair_group_bits_sha256": "6" * 64,
+            "validation_pair_group_bits_sha256": "7" * 64,
+        })
+        program = PublishedProgram({
+            "kind": "published-test-program",
+            "selector_binding_sha256": kwargs["selector_binding"],
+        })
+        return selection, program, configs
+
+    monkeypatch.setattr(subject, "_select_projected", fake_select)
+    output = tmp_path / "published_selector"
+    report = subject.build(
+        source_evidence=source,
+        expected_source_report_sha256=source_report_sha,
+        actor_path=fixture["actor"],
+        fit_scope_path=scope_path,
+        expected_fit_scope_sha256=file_hash(scope_path),
+        fresh_outer_registry_path=fixture["registry"],
+        expected_fresh_outer_registry_sha256=file_hash(fixture["registry"]),
+        fresh_outer_report_path=fixture["outer_report"],
+        expected_fresh_outer_report_sha256=file_hash(fixture["outer_report"]),
+        output=output,
+    )
+    assert output.is_dir()
+    assert {path.name for path in output.iterdir()} == {
+        "report.json", *subject.EVIDENCE_ARTIFACT_NAMES,
+    }
+    assert len(report["evidence_artifacts"]) == 9
+    assert (output / "source_v8_report.json").read_bytes() == (
+        source / "report.json").read_bytes()
+    assert report["evidence_artifacts"]["source_v8_report.json"] == (
+        source_report_sha)
+
+    strict = subject.authenticate_selected_config_snapshot(
+        evidence_directory=output,
+        expected_report_sha256=file_hash(output / "report.json"),
+        actor_path=fixture["actor"],
+        source_full_manifest_bindings=fixture["source_identity"][
+            "source_full_manifest_bindings"],
+        fresh_outer_registry_path=fixture["registry"],
+        expected_fresh_outer_registry_sha256=file_hash(fixture["registry"]),
+        fresh_outer_report_path=fixture["outer_report"],
+        expected_fresh_outer_report_sha256=file_hash(fixture["outer_report"]),
+    )
+    assert strict["strict_refit_performed"] is True
+    assert strict["selection"] == report["selection"]
+
+
 @pytest.mark.parametrize("component", ("base", "narrow_passage", "shared_pickup"))
 def test_strict_selector_rejects_preregistered_model_parameter_substitution(
         component, tmp_path, monkeypatch):

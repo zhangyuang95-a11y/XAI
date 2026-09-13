@@ -82,6 +82,7 @@ def test_contract_is_irrevocable_fixed_campaign_and_program_independent():
     assert contract["program_fits"] == 0
     assert contract["actor_updates"] == 0
     assert "development_expansion_registry_sha256" in contract["campaign_key_inputs"]
+    assert "development_expansion_report_sha256" in contract["campaign_key_inputs"]
     assert "retired_identity_projection_file_sha256" in (
         contract["campaign_key_inputs"])
     assert "retired_identity_projection_report_sha256" in (
@@ -93,6 +94,11 @@ def test_contract_is_irrevocable_fixed_campaign_and_program_independent():
     assert identity == subject.holdout_api._campaign_identity()
     assert identity["development_expansion_registry_sha256"] == (
         subject.EXPECTED_EXPANSION_REGISTRY_SHA256)
+    assert subject.EXPECTED_EXPANSION_REGISTRY_SHA256 == (
+        subject.EXPECTED_FRESH_OUTER_REGISTRY_SHA256
+    ) == "bf5346f9dd70ff02773b3335efd36018eae1b9abf4da1c035108a89ec5bcb923"
+    assert identity["development_expansion_report_sha256"] == (
+        subject.EXPECTED_FRESH_OUTER_REPORT_SHA256)
     assert identity["retired_identity_projection_file_sha256"] == (
         subject.EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256)
     assert identity["retired_identity_projection_report_sha256"] == (
@@ -119,7 +125,7 @@ def test_placeholder_commitment_refuses_before_claim(monkeypatch):
 def test_preclaim_does_not_hash_program_or_report_and_authenticates_projection(
         tmp_path, monkeypatch):
     names = ("actor", "protocol", "program", "rcpd_report", "manifest",
-             "designation", "selected_scenes")
+             "designation", "selected_scenes", "fresh_outer_registry_report")
     singles = {name: tmp_path / name for name in names}
     developments = [tmp_path / "supplement", tmp_path / "expansion"]
     projection_paths = [tmp_path / "projection", tmp_path / "report.json"]
@@ -137,6 +143,8 @@ def test_preclaim_does_not_hash_program_or_report_and_authenticates_projection(
         singles["manifest"]: subject.EXPECTED_MANIFEST_SHA256,
         singles["designation"]: subject.EXPECTED_DESIGNATION_SHA256,
         singles["selected_scenes"]: subject.EXPECTED_SELECTED_SCENES_SHA256,
+        singles["fresh_outer_registry_report"]: (
+            subject.EXPECTED_FRESH_OUTER_REPORT_SHA256),
         developments[0]: subject.EXPECTED_DEVELOPMENT_SUPPLEMENT_SHA256,
         developments[1]: subject.EXPECTED_EXPANSION_REGISTRY_SHA256,
         projection_paths[0]: subject.EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256,
@@ -178,6 +186,14 @@ def test_preclaim_does_not_hash_program_or_report_and_authenticates_projection(
         subject.holdout_api, "_validate_retired_expansion_binding",
         lambda actual, expansion: actual == binding or (_ for _ in ()).throw(
             AssertionError("projection binding differs")))
+    monkeypatch.setattr(
+        subject.holdout_api, "_validate_fresh_outer_registry", lambda value: None)
+    monkeypatch.setattr(
+        subject.holdout_api, "_read_exact_json",
+        lambda path, label, expected_sha256=None: ({}, expected_sha256))
+    monkeypatch.setattr(
+        subject.holdout_api, "_validate_fresh_outer_report",
+        lambda report, registry: None)
     monkeypatch.setattr(
         subject.holdout_api, "_development_registry_evidence",
         lambda paths: (
@@ -361,6 +377,81 @@ def test_input_paths_accept_only_projection_pair_and_one_candidate_directory(tmp
         subject._input_paths(**kwargs)
 
 
+def test_fresh_outer_report_is_a_fixed_sibling_input(tmp_path, monkeypatch):
+    supplement = tmp_path / "supplement.json"
+    supplement.write_text('{"kind":"supplement"}\n', encoding="utf-8")
+    outer = tmp_path / "outer"; outer.mkdir()
+    registry = outer / "development_expansion.json"
+    registry.write_text("{}\n", encoding="utf-8")
+    report = outer / "report.json"
+    report.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        subject, "EXPECTED_FRESH_OUTER_REGISTRY_SHA256",
+        subject.file_hash(registry))
+    monkeypatch.setattr(
+        subject, "EXPECTED_FRESH_OUTER_REPORT_SHA256",
+        subject.file_hash(report))
+
+    assert subject._fresh_outer_report_input([supplement, registry]) == report
+    report.write_text('{"changed":true}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="registry report"):
+        subject._fresh_outer_report_input([supplement, registry])
+
+
+def test_candidate_selector_artifacts_are_individually_frozen(tmp_path):
+    candidate = tmp_path / "candidate"; candidate.mkdir()
+    files = {}
+    singles = {}
+    for name, key in subject.CANDIDATE_ARTIFACT_KEYS.items():
+        path = candidate / name
+        path.write_bytes(name.encode())
+        files[name] = path
+        if key != "development_rows":
+            singles[key] = path
+    rows = [files["rows.npz"]]
+    artifacts = subject._candidate_artifact_hashes(singles, rows)
+    marker = {
+        "candidate_artifacts": artifacts,
+        "candidate_artifacts_sha256": subject.digest(artifacts),
+        "program_file_sha256": artifacts["program.json"],
+        "rcpd_report_file_sha256": artifacts["report.json"],
+        "rows_file_sha256": artifacts["rows.npz"],
+        "prior_rows_reauthentication_report_file_sha256": artifacts[
+            "prior_rows_reauthentication_report.json"],
+        "prior_v7_source_report_file_sha256": artifacts[
+            "source_v7_report.json"],
+        "prior_v7_rows_file_sha256": artifacts["prior_v7_rows.npz"],
+        "expansion_rows_reauthentication_report_file_sha256": artifacts[
+            "expansion_rows_reauthentication_report.json"],
+        "expansion_source_collection_report_file_sha256": artifacts[
+            "source_expansion_collection_report.json"],
+        "expansion_rows_file_sha256": artifacts["expansion_rows.npz"],
+        "development_expansion_registry_file_sha256": artifacts[
+            "development_expansion.json"],
+        "development_expansion_report_file_sha256": artifacts[
+            "development_expansion_report.json"],
+        "fit_config_file_sha256": artifacts["fit_config.json"],
+        "fit_selector_report_file_sha256": artifacts[
+            "fit_selector_report.json"],
+        "fit_selector_scope_file_sha256": artifacts[
+            "fit_selector_scope.json"],
+        "fit_selector_selected_config_file_sha256": artifacts[
+            "fit_selector_selected_config.json"],
+    }
+    assert subject._validate_candidate_artifact_binding(
+        marker, singles=singles, row_paths=rows) == artifacts
+    for field in (
+        "fit_selector_report_file_sha256",
+        "fit_selector_scope_file_sha256",
+        "fit_selector_selected_config_file_sha256",
+    ):
+        changed = dict(marker)
+        changed[field] = "f" * 64
+        with pytest.raises(ValueError, match="candidate artifacts changed"):
+            subject._validate_candidate_artifact_binding(
+                changed, singles=singles, row_paths=rows)
+
+
 def test_candidate_authentication_uses_same_directory_strict_refit(tmp_path, monkeypatch):
     candidate = tmp_path / "candidate"; candidate.mkdir()
     files = {}
@@ -402,8 +493,7 @@ def test_candidate_authentication_uses_same_directory_strict_refit(tmp_path, mon
     monkeypatch.setattr(
         subject.holdout_api, "_validate_retired_expansion_binding",
         lambda actual, expansion: None if actual == projection_binding
-        and expansion.get("bindings", {}).get("retired_identity_projection")
-        == projection_binding else (_ for _ in ()).throw(
+        else (_ for _ in ()).throw(
             ValueError("projection differs")))
     expansion = tmp_path / "expansion.json"
     expansion.write_text(json.dumps({
@@ -412,6 +502,20 @@ def test_candidate_authentication_uses_same_directory_strict_refit(tmp_path, mon
     }), encoding="utf-8")
     monkeypatch.setattr(subject, "EXPECTED_EXPANSION_REGISTRY_SHA256",
                         subject.file_hash(expansion))
+    files["development_expansion_report.json"].write_text(
+        "{}", encoding="utf-8")
+    files["development_expansion_report.json"].write_text("{}\n", encoding="utf-8")
+    outer_report = tmp_path / "report.json"
+    outer_report.write_bytes(files["development_expansion_report.json"].read_bytes())
+    monkeypatch.setattr(
+        subject, "EXPECTED_FRESH_OUTER_REPORT_SHA256",
+        subject.file_hash(outer_report))
+    monkeypatch.setattr(
+        subject.holdout_api, "_validate_fresh_outer_registry",
+        lambda value: None)
+    monkeypatch.setattr(
+        subject.holdout_api, "_validate_fresh_outer_report",
+        lambda report, registry: None)
     bindings = {
         "prior_rows_reauthentication_receipt_file_sha256": subject.file_hash(
             files["prior_rows_reauthentication_report.json"]),
@@ -427,6 +531,12 @@ def test_candidate_authentication_uses_same_directory_strict_refit(tmp_path, mon
         "expansion_registry_report_file_sha256": subject.file_hash(
             files["development_expansion_report.json"]),
         "previous_development_file_sha256": subject.file_hash(supplement),
+        "fit_selector_report_file_sha256": subject.file_hash(
+            files["fit_selector_report.json"]),
+        "fit_selector_scope_file_sha256": subject.file_hash(
+            files["fit_selector_scope.json"]),
+        "fit_selector_selected_config_file_sha256": subject.file_hash(
+            files["fit_selector_selected_config.json"]),
     }
     report = {
         "version": subject.audit_api.RCPD_VERSION,
@@ -452,6 +562,7 @@ def test_candidate_authentication_uses_same_directory_strict_refit(tmp_path, mon
         "actor": external["actor"], "protocol": external["protocol"],
         "manifest": external["manifest"], "designation": external["designation"],
         "program": files["program.json"], "rcpd_report": files["report.json"],
+        "fresh_outer_registry_report": outer_report,
     }
     for name, key in subject.CANDIDATE_ARTIFACT_KEYS.items():
         if key not in {"program", "rcpd_report", "development_rows"}:
@@ -473,6 +584,9 @@ def test_candidate_authentication_uses_same_directory_strict_refit(tmp_path, mon
         files["prior_rows_reauthentication_report.json"])
     assert calls[0][1]["expected_expansion_rows_report_sha256"] == subject.file_hash(
         files["expansion_rows_reauthentication_report.json"])
+    assert calls[0][1]["expected_selector_report_sha256"] == subject.file_hash(
+        files["fit_selector_report.json"])
+    assert "expected_config_sha256" not in calls[0][1]
     assert developments[subject.holdout_api.DEVELOPMENT_EXPANSION_VERSION][0] == expansion
 
 
@@ -506,6 +620,13 @@ def _fake_run_setup(tmp_path, monkeypatch, audit_error):
     monkeypatch.setattr(
         subject, "EXPECTED_EXPANSION_REGISTRY_SHA256",
         subject.file_hash(development[1]))
+    outer_report = tmp_path / "fresh-outer-report.json"
+    outer_report.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        subject, "EXPECTED_FRESH_OUTER_REPORT_SHA256",
+        subject.file_hash(outer_report))
+    monkeypatch.setattr(
+        subject, "_fresh_outer_report_input", lambda paths: outer_report)
     rows = tmp_path / "rows.npz"; rows.write_bytes(b"rows")
     implicit_paths = {}
     implicit_constants = {
@@ -800,6 +921,36 @@ def _run_args(files, development, rows, projection_paths, output):
         retired_identity_projection_path=projection_paths[0],
         output=output, selection_salt_path=output.parent / "unread-private-salt",
     )
+
+
+@pytest.mark.parametrize("stale_schema", [False, True])
+def test_candidate_interface_mismatch_is_rejected_before_permanent_claim(
+        tmp_path, monkeypatch, stale_schema):
+    setup = _fake_run_setup(tmp_path, monkeypatch, None)
+    files, development, rows, retired, _, calls = setup
+    if stale_schema:
+        monkeypatch.setattr(
+            subject.rcpd_api, "_CANDIDATE_SELECTOR_ARTIFACTS",
+            frozenset({"fit_selector_report.json"}))
+    else:
+        def stale_reader(
+            output, *, expected_report_sha256, actor_path, protocol_path,
+            manifest_path, designation_path, expansion_registry_path,
+            expected_expansion_registry_sha256, expansion_report_path,
+            expected_expansion_report_sha256,
+            expected_prior_rows_report_sha256, previous_development_path,
+            expected_expansion_rows_report_sha256,
+            expected_config_sha256, require_passed=True, refit=True,
+        ):
+            raise AssertionError("stale reader must not run")
+
+        monkeypatch.setattr(subject.rcpd_api, "read_saved_report", stale_reader)
+    with pytest.raises(RuntimeError, match="incompatible"):
+        subject.run_final_once(**_run_args(
+            files, development, rows, retired, tmp_path / "never-claimed"))
+    assert calls == []
+    assert not (tmp_path / "permanent" / "campaign.anchor").exists()
+    assert not (tmp_path / "external" / "ledger").exists()
 
 
 def test_failure_is_completed_as_burned_and_output_deletion_does_not_refund(

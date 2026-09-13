@@ -46,6 +46,7 @@ from backend.training import warehouse_r41_diagnostic_designation_v2_binding as 
 from backend.training import warehouse_r41_diagnostic_designation_v2 as designation_api
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_binding
 from backend.training import warehouse_r41_diagnostic_input_snapshot_v8 as input_snapshot_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v8_outer_split as outer_split_api
 from backend.training import warehouse_r41_diagnostic_retired_identity_projection_v8 as retired_identity_api
 from backend.training.warehouse_r41_diagnostic_workload_screen import (
     CONTRACT_SHA256 as WORKLOAD_CONTRACT_SHA256,
@@ -63,7 +64,7 @@ from env.warehouse_native.partners import partner_action
 VERSION = "warehouse-r41-diagnostic-fresh-final-holdout.v4"
 FINAL_ONCE_VERSION = "warehouse-r41-diagnostic-final-once.v8"
 V3_TOMBSTONE_VERSION = "warehouse-r41-diagnostic-retired-v3-exclusion.v1"
-DEVELOPMENT_EXPANSION_VERSION = "warehouse-r41-diagnostic-development-expansion.v8"
+DEVELOPMENT_EXPANSION_VERSION = outer_split_api.VERSION
 DEVELOPMENT_SUPPLEMENT_VERSION = "warehouse-r41-diagnostic-development-supplement.v1"
 PARTNERS = ("skilled", "assertive", "noisy")
 TOTAL_SCENES = 64
@@ -96,11 +97,25 @@ EXPECTED_DESIGNATION_SHA256 = (
     "b42323e3bc4543c4f4e1af96be4de4d90489a38459240bfb494dcc2d6120a815"
 )
 EXPECTED_EXPANSION_REGISTRY_SHA256 = (
-    "a687fd3fd4b145ed432af77f3ce26726d4e328df4875e4d69fc3ed351ad98748"
+    "bf5346f9dd70ff02773b3335efd36018eae1b9abf4da1c035108a89ec5bcb923"
+)
+EXPECTED_EXPANSION_REPORT_SHA256 = (
+    "742c45a3c970e7e0cce1c35b9e43934b9e9efcc77a52dc43b5089307db112fc5"
 )
 EXPECTED_SELECTED_SCENES_SHA256 = (
     "30accfb01d5e022fc42734622cc38481bde639ba9ed2edfb789ddbdf8a6f4fd8"
 )
+EXPECTED_SOURCE_EXPANSION_FILE_SHA256 = (
+    "a687fd3fd4b145ed432af77f3ce26726d4e328df4875e4d69fc3ed351ad98748"
+)
+EXPECTED_FORMAL_SELECTION_FILE_SHA256 = EXPECTED_SELECTED_SCENES_SHA256
+EXPECTED_OLD_OUTER_ORDERED_FINGERPRINTS_SHA256 = (
+    "91b6e38343142ba4c478cde51c79e749432bb72899e241c5c7ba26975ee9a6f5"
+)
+EXPECTED_OLD_OUTER_ORDERED_SEEDS_SHA256 = (
+    "1daeae625a859b4b000989c3364bbadbe9f0b88c2653d69e97a6bbac736860bc"
+)
+OLD_OUTER_COLLECTION_SCENE_OFFSET = 320
 EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256 = (
     "cdd17b1a8d46b54dfeec70f74fb3acb43dc1b575c54f58cf9be982ad89d5f111"
 )
@@ -113,7 +128,9 @@ CANDIDATE_ARTIFACT_NAMES = frozenset({
     "expansion_rows_reauthentication_report.json",
     "source_expansion_collection_report.json", "expansion_rows.npz",
     "development_expansion.json", "development_expansion_report.json",
-    "fit_config.json", "rows.npz", "pairs.npz", "weights_audit.json",
+    "fit_config.json", "fit_selector_report.json", "fit_selector_scope.json",
+    "fit_selector_selected_config.json", "rows.npz", "pairs.npz",
+    "weights_audit.json",
     "program.json", "candidate.json", "report.json",
 })
 MAX_JSON_BYTES = 512 * 1024 * 1024
@@ -221,6 +238,8 @@ def _campaign_identity() -> dict[str, Any]:
         "development_expansion_registry_sha256": (
             EXPECTED_EXPANSION_REGISTRY_SHA256
         ),
+        "development_expansion_report_sha256": (
+            EXPECTED_EXPANSION_REPORT_SHA256),
         "retired_identity_projection_file_sha256": (
             EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256),
         "retired_identity_projection_report_sha256": (
@@ -340,6 +359,12 @@ def _claim_receipt(
                 != candidate_artifacts.get("development_expansion_report.json")
             or candidate_marker.get("fit_config_file_sha256")
                 != candidate_artifacts.get("fit_config.json")
+            or candidate_marker.get("fit_selector_report_file_sha256")
+                != candidate_artifacts.get("fit_selector_report.json")
+            or candidate_marker.get("fit_selector_scope_file_sha256")
+                != candidate_artifacts.get("fit_selector_scope.json")
+            or candidate_marker.get("fit_selector_selected_config_file_sha256")
+                != candidate_artifacts.get("fit_selector_selected_config.json")
             or candidate_marker.get("actor_file_sha256") != EXPECTED_ACTOR_SHA256
             or candidate_marker.get("protocol_file_sha256")
                 != EXPECTED_PROTOCOL_SHA256
@@ -523,6 +548,8 @@ def _build_claimed_historical_final_observation_exclusion(
                 "retired identity projection"))
         expansion = development_values[DEVELOPMENT_EXPANSION_VERSION]
         _validate_retired_expansion_binding(projected_binding, expansion)
+        old_outer_scenes, fresh_outer_scenes = _outer_split_exclusion_scenes(
+            authenticated_manifest, expansion)
         projected_fingerprints, projected_seeds, _ = (
             _projected_identity_exclusions(
                 manifest=authenticated_manifest, identities=projected_identities))
@@ -561,6 +588,7 @@ def _build_claimed_historical_final_observation_exclusion(
             row["fingerprint"]
             for row in [
                 *registered, *xy, *development_scenes,
+                *old_outer_scenes, *fresh_outer_scenes,
                 *expected_v3["scenes"],
             ]
         } | projected_fingerprints | v3_fingerprints
@@ -568,6 +596,7 @@ def _build_claimed_historical_final_observation_exclusion(
             row["seed"]
             for row in [
                 *registered, *xy, *development_scenes,
+                *old_outer_scenes, *fresh_outer_scenes,
                 *expected_v3["scenes"],
             ]
         } | projected_seeds | v3_seeds
@@ -581,8 +610,11 @@ def _build_claimed_historical_final_observation_exclusion(
                     authenticated_manifest["splits"][split_name]):
                 auxiliary_observations.update(_auxiliary_workload_observations(
                     runtime, scene, split=split_name, scene_index=index))
+        old_outer_observations = _old_outer_collection_observations(
+            runtime, old_outer_scenes)
         expected_replayed_observations = (
-            set(v3_observations) | xy_observations | auxiliary_observations)
+            set(v3_observations) | xy_observations | auxiliary_observations
+            | old_outer_observations)
         expected_row_observations = set().union(*(
             evidence[2] for evidence in row_artifact_evidence.values()))
         if (set(excluded_fingerprints) != expected_fingerprints
@@ -611,6 +643,20 @@ def _build_claimed_historical_final_observation_exclusion(
             "retired_actor_executed": False,
             "retired_observations_derived": False,
             "v3_exclusion_content_sha256": expected_v3["content_sha256"],
+            "old_exposed_outer_scene_count": len(old_outer_scenes),
+            "old_exposed_outer_fingerprints_sha256": digest(sorted(
+                row["fingerprint"] for row in old_outer_scenes)),
+            "old_exposed_outer_seeds_sha256": digest(sorted(
+                row["seed"] for row in old_outer_scenes)),
+            "old_exposed_outer_public_observation_count": len(
+                old_outer_observations),
+            "old_exposed_outer_public_observations_sha256": digest(
+                sorted(old_outer_observations)),
+            "fresh_outer_scene_count": len(fresh_outer_scenes),
+            "fresh_outer_fingerprints_sha256": digest(sorted(
+                row["fingerprint"] for row in fresh_outer_scenes)),
+            "fresh_outer_seeds_sha256": digest(sorted(
+                row["seed"] for row in fresh_outer_scenes)),
         }
         if input_guard is not None:
             input_guard("historical selection input reconstruction")
@@ -1298,11 +1344,251 @@ def _scene_rows(value: Any, *, label: str, expected_count: int | None = None) ->
     return result
 
 
+def _expected_fresh_outer_bindings() -> dict[str, str]:
+    """Return the complete, flat binding schema for the frozen outer registry."""
+    return {
+        "actor_parameters_sha256": (
+            manifest_binding.EXPECTED_ACTOR_PARAMETERS_SHA256),
+        "actor_sha256": EXPECTED_ACTOR_SHA256,
+        "candidate_batch_reports_sha256": (
+            manifest_binding.EXPECTED_CANDIDATE_REPORTS_SHA256),
+        "candidate_batches_identity_sha256": (
+            manifest_binding.EXPECTED_CANDIDATE_BATCHES_SHA256),
+        "contract_sha256": digest(outer_split_api.contract()),
+        "designation_file_sha256": EXPECTED_DESIGNATION_SHA256,
+        "formal_selection_file_sha256": (
+            EXPECTED_FORMAL_SELECTION_FILE_SHA256),
+        "manifest_development_projection_sha256": (
+            manifest_binding.EXPECTED_DEVELOPMENT_PROJECTION_SHA256),
+        "manifest_file_sha256": EXPECTED_MANIFEST_SHA256,
+        "manifest_validation_file_sha256": (
+            manifest_binding.EXPECTED_VALIDATION_SHA256),
+        "previous_development_file_sha256": (
+            outer_split_api.EXPECTED_PREVIOUS_DEVELOPMENT_SHA256),
+        "retired_projection_file_sha256": (
+            EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256),
+        "retired_projection_report_file_sha256": (
+            EXPECTED_RETIRED_IDENTITY_PROJECTION_REPORT_SHA256),
+        "source_expansion_file_sha256": (
+            EXPECTED_SOURCE_EXPANSION_FILE_SHA256),
+        "source_manifest_file_sha256": EXPECTED_MANIFEST_SHA256,
+        "source_rows_file_sha256": outer_split_api.EXPECTED_SOURCE_ROWS_SHA256,
+    }
+
+
+def _expected_fresh_outer_information_boundary() -> dict[str, Any]:
+    """Freeze every negative-information claim made before outer collection."""
+    return {
+        "actor_loaded_or_inferred": False,
+        "candidate_identity_selection_frozen_before_materialisation": True,
+        "candidate_population_disjoint_from_all_manifest_base_splits_authenticated": True,
+        "candidate_program_or_metrics_read": False,
+        "formal_ready": False,
+        "full_manifest_json_parsed": False,
+        "observations_generated": False,
+        "old_outer_previously_exposed": True,
+        "outer_actor_rows_collected": False,
+        "outer_candidate_scored": False,
+        "protected_final_access": False,
+        "source_fit_payload_copied": True,
+        "source_fit_payload_used_for_selection": False,
+        "source_rows_action_labels_read": False,
+        "source_rows_fields_read": ["scene_fingerprints"],
+        "source_rows_observations_read": False,
+        "source_rows_probabilities_read": False,
+        "workload_screen_or_replay_run": False,
+    }
+
+
+def _validate_fresh_outer_registry(value: Mapping[str, Any]) -> None:
+    """Authenticate the identity-only outer split before any final access."""
+    if (not isinstance(value, Mapping)
+            or value.get("version") != outer_split_api.VERSION
+            or value.get("status") != outer_split_api.STATUS
+            or not _content_valid(value)
+            or value.get("contract") != outer_split_api.contract()
+            or value.get("information_boundary")
+                != _expected_fresh_outer_information_boundary()
+            or value.get("bindings") != _expected_fresh_outer_bindings()
+            or value.get("program_access") is not False
+            or value.get("program_predictions_access") is not False
+            or value.get("final_audit_rows_access") is not False
+            or value.get("final_labels_used_for_selection") is not False
+            or value.get("runtime_action_override") is not False
+            or value.get("formal_ready") is not False):
+        raise ValueError("Fresh outer development registry contract differs")
+
+    fit = _scene_rows(
+        value.get("fit_supplement"), label="development fit supplement",
+        expected_count=outer_split_api.FIT_SUPPLEMENT_SCENES)
+    outer = _scene_rows(
+        value.get("development_validation"), label="fresh outer validation",
+        expected_count=outer_split_api.VALIDATION_SCENES)
+    identities = _scene_rows(
+        value.get("selected_outer_identities"),
+        label="selected fresh outer identity",
+        expected_count=outer_split_api.VALIDATION_SCENES)
+    identity_keys = {"batch_index", "family_id", "seed", "fingerprint"}
+    projected = []
+    for row in outer:
+        if (row.get("split") != "development_validation"
+                or row.get("family_id") not in outer_split_api.FAMILY_IDS
+                or type(row.get("batch_index")) is not int
+                or row["batch_index"] < 0):
+            raise ValueError("Fresh outer validation identity differs")
+        projected.append({key: row[key] for key in identity_keys})
+    if (any(row.get("split") != "fit_supplement" for row in fit)
+            or any(set(row) != identity_keys for row in identities)
+            or identities != projected
+            or ({row["seed"] for row in fit} & {row["seed"] for row in outer})
+            or ({row["fingerprint"] for row in fit}
+                & {row["fingerprint"] for row in outer})):
+        raise ValueError("Fresh outer development split identity differs")
+
+    family_counts = dict(sorted(Counter(
+        row["family_id"] for row in outer).items()))
+    if (family_counts != dict(sorted(outer_split_api.FAMILY_QUOTAS.items()))
+            or value.get("statistics", {}).get("fresh_outer_scenes")
+                != outer_split_api.VALIDATION_SCENES
+            or value.get("statistics", {}).get("fresh_outer_family_counts")
+                != family_counts):
+        raise ValueError("Fresh outer family quota differs")
+
+    exposed = value.get("previously_exposed_validation_scene_fingerprints")
+    if (not isinstance(exposed, list)
+            or len(exposed) != outer_split_api.OLD_OUTER_SCENE_COUNT
+            or len(set(exposed)) != outer_split_api.OLD_OUTER_SCENE_COUNT
+            or any(_HEX.fullmatch(str(item)) is None for item in exposed)
+            or set(exposed) & {row["fingerprint"] for row in outer}):
+        raise ValueError("Previously exposed outer identity differs")
+
+
+def _validate_fresh_outer_report(
+    report: Mapping[str, Any], registry: Mapping[str, Any],
+) -> None:
+    """Authenticate the registry's frozen sibling report as a separate input."""
+    expected_keys = {
+        "bindings", "content_sha256", "formal_ready", "information_boundary",
+        "producer_sources", "producer_sources_sha256", "registry_content_sha256",
+        "registry_file_sha256", "selection", "statistics", "status", "version",
+    }
+    selection = report.get("selection") if isinstance(report, Mapping) else None
+    selected = registry.get("selected_outer_identities")
+    exposed = registry.get("previously_exposed_validation_scene_fingerprints")
+    if (not isinstance(report, Mapping)
+            or set(report) != expected_keys
+            or report.get("version") != outer_split_api.REPORT_VERSION
+            or report.get("status") != outer_split_api.STATUS
+            or not _content_valid(report)
+            or report.get("registry_file_sha256")
+                != EXPECTED_EXPANSION_REGISTRY_SHA256
+            or report.get("registry_content_sha256")
+                != registry.get("content_sha256")
+            or report.get("bindings") != registry.get("bindings")
+            or report.get("statistics") != registry.get("statistics")
+            or report.get("information_boundary")
+                != registry.get("information_boundary")
+            or report.get("producer_sources") != registry.get("producer_sources")
+            or report.get("producer_sources_sha256")
+                != registry.get("producer_sources_sha256")
+            or report.get("formal_ready") is not False
+            or not isinstance(selection, Mapping)
+            or set(selection) != {
+                "salt", "family_quotas", "selected_identity_sha256",
+                "source_rows_scene_fingerprints_sha256",
+                "previously_exposed_outer_fingerprints_sha256",
+                "prior_expansion_trace_fingerprints_sha256",
+            }
+            or selection.get("salt") != outer_split_api.SELECTION_SALT
+            or selection.get("family_quotas")
+                != dict(sorted(outer_split_api.FAMILY_QUOTAS.items()))
+            or selection.get("selected_identity_sha256") != digest(selected)
+            or selection.get("previously_exposed_outer_fingerprints_sha256")
+                != digest(exposed)
+            or _HEX.fullmatch(str(selection.get(
+                "source_rows_scene_fingerprints_sha256"))) is None
+            or _HEX.fullmatch(str(selection.get(
+                "prior_expansion_trace_fingerprints_sha256"))) is None):
+        raise ValueError("Fresh outer development registry report differs")
+
+
+def _outer_split_exclusion_scenes(
+    manifest: Mapping[str, Any], expansion: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Recover old-outer seeds from the authenticated manifest and bind fresh64."""
+    _validate_fresh_outer_registry(expansion)
+    authentication = manifest.get("authentication")
+    batches = manifest.get("candidate_batches")
+    if (manifest.get("content_sha256")
+            != manifest_binding.EXPECTED_MANIFEST_CONTENT_SHA256
+            or not isinstance(authentication, Mapping)
+            or authentication.get(
+                "candidate_scenes_disjoint_from_all_base_splits_authenticated")
+                is not True
+            or not isinstance(batches, list)):
+        raise ValueError("Authenticated candidate manifest is required")
+
+    exposed = set(expansion["previously_exposed_validation_scene_fingerprints"])
+    by_fingerprint: dict[str, list[dict[str, Any]]] = {
+        fingerprint: [] for fingerprint in exposed
+    }
+    for batch in batches:
+        if not isinstance(batch, list):
+            raise ValueError("Authenticated candidate manifest batches differ")
+        for scene in batch:
+            if (isinstance(scene, Mapping)
+                    and scene.get("fingerprint") in by_fingerprint):
+                by_fingerprint[str(scene["fingerprint"])].append(deepcopy(dict(scene)))
+    if any(len(rows) != 1 for rows in by_fingerprint.values()):
+        raise ValueError("Exposed outer fingerprint does not map uniquely to a seed")
+    # The old expansion collector seeded each partner trajectory from the
+    # accepted scene's position (320..383), so recover the exact historical
+    # selection order rather than sorting the exposed identities themselves.
+    old_outer = []
+    for family in outer_split_api.FAMILY_IDS:
+        candidates = [
+            deepcopy(dict(scene))
+            for batch in batches
+            for scene in batch
+            if isinstance(scene, Mapping) and scene.get("family_id") == family
+        ]
+        candidates.sort(key=lambda scene: digest({
+            "salt": outer_split_api.expansion_api.VALIDATION_ORDER_SALT,
+            "family_id": family,
+            "fingerprint": scene["fingerprint"],
+        }))
+        old_outer.extend(
+            scene for scene in candidates if scene["fingerprint"] in exposed)
+    fresh_outer = [deepcopy(row) for row in expansion["development_validation"]]
+    old_seeds = {row.get("seed") for row in old_outer}
+    fresh_seeds = {row.get("seed") for row in fresh_outer}
+    old_fingerprints = {row.get("fingerprint") for row in old_outer}
+    fresh_fingerprints = {row.get("fingerprint") for row in fresh_outer}
+    expected_families = Counter(outer_split_api.FAMILY_QUOTAS)
+    if (len(old_outer) != outer_split_api.OLD_OUTER_SCENE_COUNT
+            or len(old_seeds) != outer_split_api.OLD_OUTER_SCENE_COUNT
+            or len(fresh_outer) != outer_split_api.VALIDATION_SCENES
+            or len(fresh_seeds) != outer_split_api.VALIDATION_SCENES
+            or old_seeds & fresh_seeds
+            or old_fingerprints & fresh_fingerprints
+            or Counter(row.get("family_id") for row in old_outer)
+                != expected_families
+            or Counter(row.get("family_id") for row in fresh_outer)
+                != expected_families
+            or digest([row["fingerprint"] for row in old_outer])
+                != EXPECTED_OLD_OUTER_ORDERED_FINGERPRINTS_SHA256
+            or digest([row["seed"] for row in old_outer])
+                != EXPECTED_OLD_OUTER_ORDERED_SEEDS_SHA256):
+        raise ValueError("Old and fresh outer exclusion closure differs")
+    return old_outer, fresh_outer
+
+
 def _development_registry_evidence(
     paths: Sequence[Path],
 ) -> tuple[list[dict], dict[str, dict], dict[str, dict]]:
     values: dict[str, dict] = {}
     file_hashes: dict[str, str] = {}
+    report_bindings: dict[str, dict[str, str]] = {}
     scenes: list[dict] = []
     for path in paths:
         value, file_sha256 = _read_exact_json(path, "development registry")
@@ -1318,10 +1604,19 @@ def _development_registry_evidence(
             scenes.extend(_scene_rows(value.get("scenes"), label="development supplement",
                                      expected_count=64))
         else:
-            if (value.get("status") != "passed_program_blind_registry"
-                    or value.get("program_predictions_access") is not False
-                    or value.get("final_labels_used_for_selection") is not False):
-                raise ValueError("Development expansion boundary differs")
+            if file_sha256 != EXPECTED_EXPANSION_REGISTRY_SHA256:
+                raise ValueError("Exact fresh outer development registry required")
+            _validate_fresh_outer_registry(value)
+            report_path = _regular(
+                path.parent / "report.json", "fresh outer registry report")
+            report, report_file_sha256 = _read_exact_json(
+                report_path, "fresh outer registry report",
+                expected_sha256=EXPECTED_EXPANSION_REPORT_SHA256)
+            _validate_fresh_outer_report(report, value)
+            report_bindings[str(version)] = {
+                "report_file_sha256": report_file_sha256,
+                "report_content_sha256": report["content_sha256"],
+            }
             scenes.extend(_scene_rows(value.get("fit_supplement"),
                                      label="development fit supplement", expected_count=128))
             scenes.extend(_scene_rows(value.get("development_validation"),
@@ -1334,7 +1629,8 @@ def _development_registry_evidence(
         raise ValueError("Development registries overlap one another")
     bindings = {
         version: {"file_sha256": file_hashes[version],
-                  "content_sha256": values[version]["content_sha256"]}
+                  "content_sha256": values[version]["content_sha256"],
+                  **report_bindings.get(version, {})}
         for version in sorted(values)
     }
     return scenes, bindings, values
@@ -1388,9 +1684,12 @@ def _validate_retired_expansion_binding(
     projection_binding: Mapping[str, Any], expansion: Mapping[str, Any],
 ) -> None:
     expansion_bindings = expansion.get("bindings")
-    frozen = (expansion_bindings.get("retired_identity_projection")
-              if isinstance(expansion_bindings, Mapping) else None)
-    if (dict(projection_binding) != frozen
+    if (not isinstance(expansion_bindings, Mapping)
+            or "retired_identity_projection" in expansion_bindings
+            or expansion_bindings.get("retired_projection_file_sha256")
+                != projection_binding.get("file_sha256")
+            or expansion_bindings.get("retired_projection_report_file_sha256")
+                != projection_binding.get("audit_file_sha256")
             or projection_binding.get("file_sha256")
                 != EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256
             or projection_binding.get("audit_file_sha256")
@@ -1463,6 +1762,50 @@ def _exact_final_workload_observations(
                 result.add(_observation_hash(
                     branch.observations()["robot_2"]))
                 runtime.step(branch, "WAIT")
+    return result
+
+
+def _old_outer_collection_observations(
+    runtime: R41DiagnosticOnlineAlignmentRuntime,
+    scenes: Sequence[Mapping[str, Any]],
+) -> set[str]:
+    """Replay the exact public inputs used by the retired outer collector."""
+    if len(scenes) != outer_split_api.OLD_OUTER_SCENE_COUNT:
+        raise ValueError("Old outer observation replay scene count differs")
+    result: set[str] = set()
+    for local_index, scene in enumerate(scenes):
+        scene_index = OLD_OUTER_COLLECTION_SCENE_OFFSET + local_index
+        for partner_index, partner in enumerate(PARTNERS):
+            env = runtime.environment(scene)
+            rng = np.random.default_rng(
+                41_900_000 + scene_index * 101 + partner_index)
+            while not env.done:
+                source = env.snapshot()
+                source_sha256 = digest(source)
+                result.add(_observation_hash(env.observations()["robot_2"]))
+                groups = tuple(critical_groups(env, "robot_2"))
+                if groups and env.state.frame % 5 == 0:
+                    for player_action in ACTIONS:
+                        branch = runtime.from_snapshot(source)
+                        transition = runtime.step(branch, player_action)
+                        if (transition["submitted_actions"]["robot_2"]
+                                != transition["policy_actions"]["robot_2"]):
+                            raise RuntimeError(
+                                "Old outer replay overrode the frozen Actor")
+                        if not branch.done:
+                            result.add(_observation_hash(
+                                branch.observations()["robot_2"]))
+                player = partner_action(env, "robot_1", partner, rng)
+                if digest(env.snapshot()) != source_sha256:
+                    raise RuntimeError(
+                        "Old outer partner changed the observation source")
+                transition = runtime.step(env, player)
+                if (transition["submitted_actions"]["robot_2"]
+                        != transition["policy_actions"]["robot_2"]):
+                    raise RuntimeError(
+                        "Old outer replay overrode the frozen Actor")
+    if not result:
+        raise RuntimeError("Old outer observation replay is empty")
     return result
 
 
@@ -1961,6 +2304,17 @@ def build(
         selected_path = _regular(selected_scenes_path, "formal X/Y selection")
         development_paths = [_regular(path, "development registry")
                              for path in development_registry_paths]
+        fresh_outer_paths = [
+            path for path in development_paths
+            if file_hash(path) == EXPECTED_EXPANSION_REGISTRY_SHA256
+        ]
+        if len(fresh_outer_paths) != 1:
+            raise ValueError("Exact fresh outer development registry required")
+        fresh_outer_path = fresh_outer_paths[0]
+        fresh_outer_report_path = _regular(
+            fresh_outer_path.parent / "report.json", "fresh outer registry report")
+        if file_hash(fresh_outer_report_path) != EXPECTED_EXPANSION_REPORT_SHA256:
+            raise ValueError("Exact fresh outer development registry report required")
         row_paths = [_regular(path, "development rows", maximum=MAX_NPZ_BYTES)
                      for path in development_rows_paths]
         legacy_rows_path = _regular(
@@ -1993,6 +2347,7 @@ def build(
         input_paths.update({
             "retired_identity_projection": retired_projection_path,
             "retired_identity_projection_report": retired_projection_report_path,
+            "fresh_outer_registry_report": fresh_outer_report_path,
         })
         input_paths.update(_implicit_input_paths(
             manifest_path=manifest_path,
@@ -2005,6 +2360,8 @@ def build(
             "actor": actor_path,
             "protocol": protocol_path,
             "designation": designation_path,
+            "fresh_outer_registry": fresh_outer_path,
+            "fresh_outer_registry_report": fresh_outer_report_path,
             **{
                 "designation_" + name.split(":", 1)[1]: path
                 for name, path in input_paths.items()
@@ -2015,6 +2372,8 @@ def build(
             "actor": EXPECTED_ACTOR_SHA256,
             "protocol": EXPECTED_PROTOCOL_SHA256,
             "designation": EXPECTED_DESIGNATION_SHA256,
+            "fresh_outer_registry": EXPECTED_EXPANSION_REGISTRY_SHA256,
+            "fresh_outer_registry_report": EXPECTED_EXPANSION_REPORT_SHA256,
             "designation_actor": designation_api.EXPECTED_ACTOR_SHA256,
             "designation_protocol": designation_api.EXPECTED_PROTOCOL_FILE_SHA256,
             "designation_training_ledger": designation_api.EXPECTED_LEDGER_SHA256,
@@ -2028,6 +2387,8 @@ def build(
             "actor": "runtime/actor.npz",
             "protocol": "runtime/protocol.json",
             "designation": "designation/designation.json",
+            "fresh_outer_registry": "fresh_outer/development_expansion.json",
+            "fresh_outer_registry_report": "fresh_outer/report.json",
             **{
                 name: "designation/components/" + name.removeprefix(
                     "designation_") + path.suffix
@@ -2066,6 +2427,11 @@ def build(
                 semantic_originals, expected_sha256=semantic_expected,
                 relative_names=semantic_relative, maximum_bytes=semantic_maximum,
                 prefix="warehouse-r41-fresh-final-") as semantic_snapshot:
+            frozen_development_paths = [
+                semantic_snapshot.paths["fresh_outer_registry"]
+                if path == fresh_outer_path else path
+                for path in development_paths
+            ]
             guard("pre-holdout authentication")
             # Re-run the semantic claim/anchor/candidate validation against the bytes
             # now covered by the transaction snapshot.  This closes the interval
@@ -2154,13 +2520,16 @@ def build(
                 raise ValueError("Frozen diagnostic Actor/scene designation differs")
 
             (development_scenes, development_bindings,
-             development_values) = _development_registry_evidence(development_paths)
+             development_values) = _development_registry_evidence(
+                 frozen_development_paths)
             retired_identities, retired_projection_binding = (
                 _retired_identity_projection(retired_projection_path))
             supplement = development_values[DEVELOPMENT_SUPPLEMENT_VERSION]
             expansion = development_values[DEVELOPMENT_EXPANSION_VERSION]
             _validate_retired_expansion_binding(
                 retired_projection_binding, expansion)
+            old_outer_scenes, fresh_outer_scenes = (
+                _outer_split_exclusion_scenes(manifest, expansion))
             if (candidate_marker.get("development_registries") != {
                     version: binding["file_sha256"]
                     for version, binding in sorted(development_bindings.items())
@@ -2175,7 +2544,7 @@ def build(
                     or expansion.get("bindings", {}).get("actor_sha256") != actor_sha256
                     or expansion.get("bindings", {}).get("source_manifest_file_sha256")
                         != file_hash(manifest_path)
-                    or expansion.get("bindings", {}).get("selected_scenes_file_sha256")
+                    or expansion.get("bindings", {}).get("formal_selection_file_sha256")
                         != selected_file_sha256
                     or expansion.get("bindings", {}).get("designation_file_sha256")
                         != file_hash(designation_path)
@@ -2270,6 +2639,7 @@ def build(
                 **v3_exposure_stats,
             }
             all_excluded = [*registered, *xy, *development_scenes,
+                            *old_outer_scenes, *fresh_outer_scenes,
                             *(row for registry in v3_exposure_registries
                               for row in registry["scenes"])]
             excluded_fingerprints = (
@@ -2293,6 +2663,8 @@ def build(
                     auxiliary_development_observations.update(
                         _auxiliary_workload_observations(
                             runtime, scene, split=split_name, scene_index=index))
+            old_outer_observations = _old_outer_collection_observations(
+                runtime, old_outer_scenes)
             all_development_hashes = (
                 set(development_hashes)
                 | set(legacy_development_hashes)
@@ -2307,6 +2679,7 @@ def build(
                 set(exposed_observations)
                 | set(xy_observations)
                 | set(auxiliary_development_observations)
+                | set(old_outer_observations)
             )
             preexisting_observations = (
                 set(all_development_hashes) | set(replayed_preexisting_observations)
@@ -2319,7 +2692,7 @@ def build(
                     selection_manifest=manifest,
                     selection_salt=selection_salt,
                     selected_scenes_path=selected_path,
-                    development_registry_paths=development_paths,
+                    development_registry_paths=frozen_development_paths,
                     retired_identity_projection_path=retired_projection_path,
                     v3_tombstone=v3_tombstone,
                     claim_receipt_path=claim_receipt_path,
@@ -2374,6 +2747,13 @@ def build(
                 "retired_touched_observation_count": len(exposed_observations),
                 "retired_v1_v2_actor_executed": False,
                 "retired_v1_v2_observations_derived": False,
+                "old_exposed_outer_scene_count": len(old_outer_scenes),
+                "old_exposed_outer_public_observation_count": len(
+                    old_outer_observations),
+                "old_exposed_outer_public_observations_sha256": digest(
+                    sorted(old_outer_observations)),
+                "fresh_outer_scene_count": len(fresh_outer_scenes),
+                "old_and_fresh_outer_identity_overlap": 0,
             })
             guard("final evidence construction")
             sources = dict(initial_sources)
@@ -2390,6 +2770,11 @@ def build(
                 "selected_scenes_file_sha256": selected_file_sha256,
                 "selected_scenes_semantic_sha256": digest(selected),
                 "development_registries": development_bindings,
+                "fresh_outer_registry_report_file_sha256": (
+                    EXPECTED_EXPANSION_REPORT_SHA256),
+                "fresh_outer_registry_report_content_sha256": (
+                    development_bindings[DEVELOPMENT_EXPANSION_VERSION][
+                        "report_content_sha256"]),
                 "development_rows": row_bindings,
                 "legacy_v3_rows": legacy_rows_binding,
                 "expansion_rows": expansion_rows_binding,

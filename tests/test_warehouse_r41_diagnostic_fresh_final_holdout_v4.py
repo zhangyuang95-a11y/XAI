@@ -1,4 +1,5 @@
 import ast
+from collections import Counter
 from copy import deepcopy
 from hashlib import sha256
 import inspect
@@ -17,6 +18,92 @@ from ui import warehouse_alignment_r41_tutorial as tutorial_base
 
 
 ROOT = Path(subject.__file__).resolve().parents[2]
+
+
+def _fresh_outer_registry_fixture():
+    fit = [
+        {
+            "id": f"fit-{index}", "split": "fit_supplement",
+            "seed": 10_000 + index,
+            "fingerprint": sha256(f"fit:{index}".encode()).hexdigest(),
+        }
+        for index in range(subject.outer_split_api.FIT_SUPPLEMENT_SCENES)
+    ]
+    outer = []
+    index = 0
+    for family in subject.outer_split_api.FAMILY_IDS:
+        for _ in range(subject.outer_split_api.FAMILY_QUOTAS[family]):
+            outer.append({
+                "id": f"outer-{index}", "split": "development_validation",
+                "batch_index": index % 3, "family_id": family,
+                "seed": 20_000 + index,
+                "fingerprint": sha256(f"outer:{index}".encode()).hexdigest(),
+            })
+            index += 1
+    identities = [
+        {key: row[key] for key in (
+            "batch_index", "family_id", "seed", "fingerprint")}
+        for row in outer
+    ]
+    exposed = [sha256(f"old-outer:{index}".encode()).hexdigest()
+               for index in range(subject.outer_split_api.OLD_OUTER_SCENE_COUNT)]
+    sources = {"frozen/source.py": "a" * 64}
+    registry = {
+        "version": subject.outer_split_api.VERSION,
+        "status": subject.outer_split_api.STATUS,
+        "contract": subject.outer_split_api.contract(),
+        "bindings": subject._expected_fresh_outer_bindings(),
+        "fit_supplement": fit,
+        "development_validation": outer,
+        "selected_outer_identities": identities,
+        "previously_exposed_validation_scene_fingerprints": exposed,
+        "statistics": {
+            "fresh_outer_scenes": len(outer),
+            "fresh_outer_family_counts": dict(sorted(
+                subject.outer_split_api.FAMILY_QUOTAS.items())),
+        },
+        "information_boundary": (
+            subject._expected_fresh_outer_information_boundary()),
+        "program_access": False,
+        "program_predictions_access": False,
+        "final_audit_rows_access": False,
+        "final_labels_used_for_selection": False,
+        "runtime_action_override": False,
+        "producer_sources": sources,
+        "producer_sources_sha256": subject.digest(sources),
+        "formal_ready": False,
+    }
+    registry["content_sha256"] = subject.digest(registry)
+    return registry
+
+
+def _fresh_outer_report_fixture(registry, *, registry_file_sha256):
+    selection = {
+        "salt": subject.outer_split_api.SELECTION_SALT,
+        "family_quotas": dict(sorted(
+            subject.outer_split_api.FAMILY_QUOTAS.items())),
+        "selected_identity_sha256": subject.digest(
+            registry["selected_outer_identities"]),
+        "source_rows_scene_fingerprints_sha256": "b" * 64,
+        "previously_exposed_outer_fingerprints_sha256": subject.digest(
+            registry["previously_exposed_validation_scene_fingerprints"]),
+        "prior_expansion_trace_fingerprints_sha256": "c" * 64,
+    }
+    report = {
+        "version": subject.outer_split_api.REPORT_VERSION,
+        "status": subject.outer_split_api.STATUS,
+        "registry_content_sha256": registry["content_sha256"],
+        "registry_file_sha256": registry_file_sha256,
+        "bindings": deepcopy(registry["bindings"]),
+        "selection": selection,
+        "statistics": deepcopy(registry["statistics"]),
+        "information_boundary": deepcopy(registry["information_boundary"]),
+        "producer_sources": deepcopy(registry["producer_sources"]),
+        "producer_sources_sha256": registry["producer_sources_sha256"],
+        "formal_ready": False,
+    }
+    report["content_sha256"] = subject.digest(report)
+    return report
 
 
 def _exception_module_material(error, module_names):
@@ -83,6 +170,59 @@ def test_v4_contract_is_program_blind_and_claim_burns_v3_internally():
     assert contract["retired_identity_count"] == 139
     assert contract["full_retired_holdout_access"] is False
     assert contract["internal_v3_exclusion_registry"] == subject.V3_TOMBSTONE_VERSION
+
+
+def test_fresh_outer_registry_contract_is_accepted_and_old_registry_is_rejected():
+    registry = _fresh_outer_registry_fixture()
+    subject._validate_fresh_outer_registry(registry)
+    old = deepcopy(registry)
+    old["version"] = "warehouse-r41-diagnostic-development-expansion.v8"
+    old["status"] = "passed_program_blind_registry"
+    old["content_sha256"] = subject.digest({
+        key: value for key, value in old.items() if key != "content_sha256"})
+    with pytest.raises(ValueError, match="registry contract differs"):
+        subject._validate_fresh_outer_registry(old)
+
+
+def test_fresh_outer_registry_rejects_nested_retired_binding():
+    registry = _fresh_outer_registry_fixture()
+    bindings = registry["bindings"]
+    projection = {
+        "file_sha256": bindings.pop("retired_projection_file_sha256"),
+        "audit_file_sha256": bindings.pop(
+            "retired_projection_report_file_sha256"),
+    }
+    bindings["retired_identity_projection"] = projection
+    registry["content_sha256"] = subject.digest({
+        key: value for key, value in registry.items() if key != "content_sha256"})
+    with pytest.raises(ValueError, match="registry contract differs"):
+        subject._validate_fresh_outer_registry(registry)
+
+
+def test_fresh_outer_registry_rejects_wrong_formal_selection_binding():
+    registry = _fresh_outer_registry_fixture()
+    registry["bindings"]["formal_selection_file_sha256"] = "f" * 64
+    registry["content_sha256"] = subject.digest({
+        key: value for key, value in registry.items() if key != "content_sha256"})
+    with pytest.raises(ValueError, match="registry contract differs"):
+        subject._validate_fresh_outer_registry(registry)
+
+
+def test_fresh_outer_registry_rejects_wrong_family_quota():
+    registry = _fresh_outer_registry_fixture()
+    outer = registry["development_validation"]
+    moved = next(row for row in outer
+                 if row["family_id"] == subject.outer_split_api.FAMILY_IDS[0])
+    moved["family_id"] = subject.outer_split_api.FAMILY_IDS[1]
+    selected = next(row for row in registry["selected_outer_identities"]
+                    if row["fingerprint"] == moved["fingerprint"])
+    selected["family_id"] = moved["family_id"]
+    registry["statistics"]["fresh_outer_family_counts"] = dict(sorted(
+        Counter(row["family_id"] for row in outer).items()))
+    registry["content_sha256"] = subject.digest({
+        key: value for key, value in registry.items() if key != "content_sha256"})
+    with pytest.raises(ValueError, match="family quota differs"):
+        subject._validate_fresh_outer_registry(registry)
 
 
 def test_holdout_has_no_program_import_cli_or_public_writer_export():
@@ -154,6 +294,12 @@ def test_post_claim_input_drift_burns_without_output_or_completion(
         path.write_bytes(b"input\n")
         inputs[name] = path
     (tmp_path / "report.json").write_bytes(b"input\n")
+    monkeypatch.setattr(
+        subject, "EXPECTED_EXPANSION_REGISTRY_SHA256",
+        subject.file_hash(inputs["development"]))
+    monkeypatch.setattr(
+        subject, "EXPECTED_EXPANSION_REPORT_SHA256",
+        subject.file_hash(tmp_path / "report.json"))
     output = tmp_path / "public-holdout"
     monkeypatch.setattr(
         subject, "_claim_receipt", lambda *args, **kwargs: (claim_dir, {}))
@@ -169,7 +315,8 @@ def test_post_claim_input_drift_burns_without_output_or_completion(
         })
     class Snapshot:
         def __init__(self, *args, **kwargs):
-            self.paths = {}
+            self.paths = dict(args[0])
+            self.original_paths = dict(args[0])
         def __enter__(self):
             return self
         def __exit__(self, *args):
@@ -482,14 +629,161 @@ def test_expansion_must_bind_the_same_identity_only_projection():
         "identity_count": 139,
     }
     subject._validate_retired_expansion_binding(
-        binding, {"bindings": {"retired_identity_projection": binding}})
+        binding, {"bindings": {
+            "retired_projection_file_sha256": binding["file_sha256"],
+            "retired_projection_report_file_sha256": binding["audit_file_sha256"],
+        }})
+    with pytest.raises(ValueError, match="identity projection differs"):
+        subject._validate_retired_expansion_binding(
+            binding, {"bindings": {"retired_identity_projection": binding}})
     replacement = dict(binding)
     replacement["file_sha256"] = "f" * 64
     with pytest.raises(ValueError, match="identity projection differs"):
         subject._validate_retired_expansion_binding(
             replacement,
-            {"bindings": {"retired_identity_projection": replacement}},
+            {"bindings": {
+                "retired_projection_file_sha256": replacement["file_sha256"],
+                "retired_projection_report_file_sha256": replacement[
+                    "audit_file_sha256"],
+            }},
         )
+
+
+def test_old_and_fresh_outer_scenes_are_both_in_identity_exclusion_closure(
+        monkeypatch):
+    registry = _fresh_outer_registry_fixture()
+    old = []
+    for index, fingerprint in enumerate(
+            registry["previously_exposed_validation_scene_fingerprints"]):
+        family = subject.outer_split_api.FAMILY_IDS[
+            min(index // 11, len(subject.outer_split_api.FAMILY_IDS) - 1)]
+        # The final two families have ten rows; derive the exact frozen order.
+        old.append({
+            "seed": 30_000 + index, "fingerprint": fingerprint,
+            "family_id": family,
+        })
+    # Reassign by the authoritative quotas rather than relying on division.
+    cursor = 0
+    for family in subject.outer_split_api.FAMILY_IDS:
+        for row in old[cursor:cursor + subject.outer_split_api.FAMILY_QUOTAS[family]]:
+            row["family_id"] = family
+        cursor += subject.outer_split_api.FAMILY_QUOTAS[family]
+    manifest = {
+        "content_sha256": subject.manifest_binding.EXPECTED_MANIFEST_CONTENT_SHA256,
+        "authentication": {
+            "candidate_scenes_disjoint_from_all_base_splits_authenticated": True,
+        },
+        "candidate_batches": [old],
+    }
+    ordered = []
+    for family in subject.outer_split_api.FAMILY_IDS:
+        candidates = [row for row in old if row["family_id"] == family]
+        candidates.sort(key=lambda row: subject.digest({
+            "salt": subject.outer_split_api.expansion_api.VALIDATION_ORDER_SALT,
+            "family_id": family,
+            "fingerprint": row["fingerprint"],
+        }))
+        ordered.extend(candidates)
+    monkeypatch.setattr(
+        subject, "EXPECTED_OLD_OUTER_ORDERED_FINGERPRINTS_SHA256",
+        subject.digest([row["fingerprint"] for row in ordered]))
+    monkeypatch.setattr(
+        subject, "EXPECTED_OLD_OUTER_ORDERED_SEEDS_SHA256",
+        subject.digest([row["seed"] for row in ordered]))
+    old_result, fresh_result = subject._outer_split_exclusion_scenes(
+        manifest, registry)
+    assert len(old_result) == len(fresh_result) == 64
+    assert {row["seed"] for row in old_result} == {
+        30_000 + index for index in range(64)}
+    assert {row["fingerprint"] for row in fresh_result} == {
+        row["fingerprint"] for row in registry["development_validation"]}
+    assert [row["fingerprint"] for row in old_result] == [
+        row["fingerprint"] for row in ordered]
+
+
+def test_old_outer_observation_replay_uses_retired_collection_schedule(
+        monkeypatch):
+    class State:
+        frame = 0
+
+    class Environment:
+        def __init__(self, token):
+            self.token = token
+            self.state = State()
+            self.done = False
+
+        def snapshot(self):
+            return {"token": self.token, "frame": self.state.frame}
+
+        def observations(self):
+            value = np.zeros(197, dtype=np.float32)
+            value[0] = self.token
+            return {"robot_2": value}
+
+    class Runtime:
+        def __init__(self):
+            self.calls = 0
+
+        def environment(self, scene):
+            self.calls += 1
+            return Environment(scene["seed"] * 10 + self.calls % 3)
+
+        def step(self, env, action):
+            env.state.frame += 1
+            env.done = True
+            return {
+                "submitted_actions": {"robot_2": "WAIT"},
+                "policy_actions": {"robot_2": "WAIT"},
+            }
+
+    monkeypatch.setattr(subject, "critical_groups", lambda *args: ())
+    monkeypatch.setattr(subject, "partner_action", lambda *args: "WAIT")
+    scenes = [{"seed": index + 1} for index in range(
+        subject.outer_split_api.OLD_OUTER_SCENE_COUNT)]
+    runtime = Runtime()
+    observations = subject._old_outer_collection_observations(runtime, scenes)
+    assert runtime.calls == len(scenes) * len(subject.PARTNERS)
+    assert len(observations) == runtime.calls
+
+
+def test_development_registry_authenticates_and_binds_sibling_report(
+        tmp_path, monkeypatch):
+    supplement = {
+        "version": subject.DEVELOPMENT_SUPPLEMENT_VERSION,
+        "status": "passed", "program_access": False,
+        "final_audit_rows_access": False,
+        "scenes": [
+            {"seed": 40_000 + index,
+             "fingerprint": sha256(f"supplement:{index}".encode()).hexdigest()}
+            for index in range(64)
+        ],
+    }
+    supplement["content_sha256"] = subject.digest(supplement)
+    supplement_path = tmp_path / "supplement.json"
+    supplement_path.write_text(subject.canonical(supplement) + "\n", encoding="utf-8")
+
+    outer_dir = tmp_path / "outer"; outer_dir.mkdir()
+    registry = _fresh_outer_registry_fixture()
+    registry_path = outer_dir / "development_expansion.json"
+    registry_path.write_text(subject.canonical(registry) + "\n", encoding="utf-8")
+    registry_sha = subject.file_hash(registry_path)
+    monkeypatch.setattr(subject, "EXPECTED_EXPANSION_REGISTRY_SHA256", registry_sha)
+    report = _fresh_outer_report_fixture(
+        registry, registry_file_sha256=registry_sha)
+    report_path = outer_dir / "report.json"
+    report_path.write_text(subject.canonical(report) + "\n", encoding="utf-8")
+    monkeypatch.setattr(
+        subject, "EXPECTED_EXPANSION_REPORT_SHA256", subject.file_hash(report_path))
+
+    _, bindings, _ = subject._development_registry_evidence(
+        [supplement_path, registry_path])
+    frozen = bindings[subject.DEVELOPMENT_EXPANSION_VERSION]
+    assert frozen["report_file_sha256"] == subject.file_hash(report_path)
+    assert frozen["report_content_sha256"] == report["content_sha256"]
+
+    report_path.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="report"):
+        subject._development_registry_evidence([supplement_path, registry_path])
 
 
 def test_retired_projection_maps_only_identity_and_never_executes_actor():
@@ -699,6 +993,19 @@ def _historical_phase_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(
         subject, "_validate_retired_expansion_binding",
         lambda *args, **kwargs: None)
+    old_outer_scene = {
+        "fingerprint": sha256(b"old-outer-scene").hexdigest(), "seed": 3501,
+    }
+    old_outer_observation = sha256(b"old-outer-observation").hexdigest()
+    monkeypatch.setattr(
+        subject, "_outer_split_exclusion_scenes",
+        lambda *args, **kwargs: ([old_outer_scene], []))
+    monkeypatch.setattr(
+        subject, "_old_outer_collection_observations",
+        lambda runtime, scenes: (
+            {old_outer_observation}
+            if scenes == [old_outer_scene]
+            else (_ for _ in ()).throw(AssertionError("old outer scenes differ"))))
     monkeypatch.setattr(
         subject, "_projected_identity_exclusions",
         lambda **kwargs: ({projected_fp}, {projected_seed}, {}))
@@ -791,12 +1098,14 @@ def _historical_phase_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(
         subject, "_claim_receipt", lambda *args, **kwargs: (claim_dir, {}))
 
-    replayed = {v3_observation, *xy_observations.values()}
+    replayed = {
+        v3_observation, old_outer_observation, *xy_observations.values()}
     row_observations = set().union(*(value[2] for value in evidence.values()))
     excluded_fingerprints = {
-        projected_fp, v3_scene["fingerprint"], *xy_observations.keys()}
+        projected_fp, v3_scene["fingerprint"], old_outer_scene["fingerprint"],
+        *xy_observations.keys()}
     excluded_seeds = {
-        projected_seed, v3_scene["seed"],
+        projected_seed, v3_scene["seed"], old_outer_scene["seed"],
         *(row["seed"] for rows in selected.values() for row in rows),
     }
     args = {
@@ -1153,6 +1462,12 @@ def test_public_build_redacts_post_salt_exception_and_worker_is_not_callable(
         inputs[name] = path
     (tmp_path / "report.json").write_bytes(b"input\n")
     monkeypatch.setattr(
+        subject, "EXPECTED_EXPANSION_REGISTRY_SHA256",
+        subject.file_hash(inputs["development"]))
+    monkeypatch.setattr(
+        subject, "EXPECTED_EXPANSION_REPORT_SHA256",
+        subject.file_hash(tmp_path / "report.json"))
+    monkeypatch.setattr(
         subject, "_claim_receipt", lambda *args, **kwargs: (claim_dir, {}))
     monkeypatch.setattr(subject, "producer_sources", lambda: {"source.py": "a" * 64})
     monkeypatch.setattr(
@@ -1167,7 +1482,8 @@ def test_public_build_redacts_post_salt_exception_and_worker_is_not_callable(
 
     class Snapshot:
         def __init__(self, *args, **kwargs):
-            self.paths = {}
+            self.paths = dict(args[0])
+            self.original_paths = dict(args[0])
         def __enter__(self):
             return self
         def __exit__(self, *args):

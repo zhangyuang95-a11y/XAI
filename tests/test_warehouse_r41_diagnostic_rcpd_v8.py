@@ -216,6 +216,7 @@ def test_complete_binding_requires_authenticated_previous_and_row_semantics(
             "expansion_reauth_report", "expansion_collection_report",
             "expansion_rows",
             "previous_development", "selector_report", "selector_scope",
+            "selector_source_v8_report", "selector_source_v8_rows",
             "selector_selected_config",
         )
     }
@@ -264,6 +265,9 @@ def test_complete_binding_requires_authenticated_previous_and_row_semantics(
             },
             "scope": {"content_sha256": "w" * 64},
             "selected_config_record": {"selected": True},
+            "source_projection": {
+                "source_rows_semantic_sha256": "z" * 64,
+            },
             "strict_refit_receipt_sha256": "1" * 64,
         },
         "source_full_manifest_bindings": {"manifest": "m" * 64},
@@ -285,6 +289,11 @@ def test_complete_binding_requires_authenticated_previous_and_row_semantics(
     assert bindings["expansion_rows_semantic_sha256"] == "x" * 64
     assert bindings["fit_selector_fresh_outer_registry_file_sha256"] == "u" * 64
     assert bindings["fit_selector_fresh_outer_report_file_sha256"] == "v" * 64
+    assert bindings["fit_selector_source_v8_report_file_sha256"] \
+        == subject.file_hash(artifact)
+    assert bindings["fit_selector_source_v8_rows_file_sha256"] \
+        == subject.file_hash(artifact)
+    assert bindings["fit_selector_source_v8_rows_semantic_sha256"] == "z" * 64
     assert bindings["fit_selector_selected_config_sha256"] == subject.digest(
         authenticated["config"])
     assert bindings["fit_selector_evidence_artifacts_sha256"] == subject.digest(
@@ -607,6 +616,8 @@ def _toctou_build_inputs(tmp_path):
     paths["selector"] = selector
     paths["selector_report"] = selector_report
     snapshot_names = {
+        "source_v8_report.json": "selector_source_v8_report",
+        "source_v8_rows.npz": "selector_source_v8_rows",
         "fit_only_rows.npz": "selector_fit_only_rows",
         "fit_scope.json": "selector_scope",
         "config_registry.json": "selector_config_registry",
@@ -663,6 +674,10 @@ def _patch_toctou_manifest_validation(paths, monkeypatch):
             "expansion_registry": subject.file_hash(paths["expansion_registry"]),
             "expansion_registry_report": subject.file_hash(paths["expansion_report"]),
             "selector_report": subject.file_hash(paths["selector_report"]),
+            "selector_source_v8_report": subject.file_hash(
+                paths["selector_source_v8_report"]),
+            "selector_source_v8_rows": subject.file_hash(
+                paths["selector_source_v8_rows"]),
             "selector_fit_only_rows": subject.file_hash(
                 paths["selector_fit_only_rows"]),
             "selector_scope": subject.file_hash(paths["selector_scope"]),
@@ -733,6 +748,8 @@ def test_selector_bootstrap_pins_report_and_all_refit_evidence(tmp_path):
         expected_report_sha256=subject.file_hash(paths["selector_report"]))
     assert originals == {
         "selector_report": paths["selector_report"],
+        "selector_source_v8_report": paths["selector_source_v8_report"],
+        "selector_source_v8_rows": paths["selector_source_v8_rows"],
         "selector_fit_only_rows": paths["selector_fit_only_rows"],
         "selector_scope": paths["selector_scope"],
         "selector_config_registry": paths["selector_config_registry"],

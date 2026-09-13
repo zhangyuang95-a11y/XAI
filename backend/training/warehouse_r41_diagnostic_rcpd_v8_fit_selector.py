@@ -176,6 +176,7 @@ MAX_JSON_BYTES = 512 * 1024 * 1024
 MAX_NPZ_BYTES = 512 * 1024 * 1024
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 EVIDENCE_ARTIFACT_NAMES = frozenset((
+    "source_v8_report.json", "source_v8_rows.npz",
     "fit_only_rows.npz", "fit_scope.json", "config_registry.json",
     "inner_split_audit.json", "inner_selection.json", "selected_config.json",
     "inner_fit_program.json",
@@ -186,6 +187,7 @@ SELECTED_CONFIG_FIELDS = frozenset((
     "final_rows_accessed", "final_labels_accessed",
 ))
 STRICT_REFIT_BINDING_FIELDS = frozenset((
+    "source_v8_rows_semantic_sha256",
     "fit_only_rows_semantic_sha256", "config_registry_content_sha256",
     "inner_split_audit_content_sha256", "inner_selection_content_sha256",
     "selected_config_content_sha256", "inner_fit_program_content_sha256",
@@ -333,6 +335,25 @@ def _write_npz(path: Path, arrays: Mapping[str, np.ndarray]) -> None:
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _copy_exclusive(source: Path, destination: Path) -> None:
+    """Copy one already-snapshotted input without following either symlink."""
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError(destination)
+    source_fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    destination_fd = os.open(
+        destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        with os.fdopen(source_fd, "rb", closefd=True) as incoming, \
+                os.fdopen(destination_fd, "wb", closefd=True) as outgoing:
+            shutil.copyfileobj(incoming, outgoing, length=1024 * 1024)
+            outgoing.flush()
+            os.fsync(outgoing.fileno())
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
 
 
 def _arrays_digest(arrays: Mapping[str, np.ndarray]) -> str:
@@ -513,12 +534,15 @@ def _selected_config_record(
 
 def _selector_binding(
     *, scope_file_sha256: str, fit_only_rows_semantic_sha256: str,
+    source_rows_semantic_sha256: str,
     sources: Mapping[str, str], configs: Sequence[Mapping[str, Any]],
 ) -> str:
     return digest({
         "version": VERSION,
         "contract_sha256": digest(contract()),
         "source_report_sha256": FROZEN_SOURCE_V8_REPORT_SHA256,
+        "source_rows_file_sha256": FROZEN_SOURCE_V8_ROWS_SHA256,
+        "source_rows_semantic_sha256": source_rows_semantic_sha256,
         "fit_scope_sha256": scope_file_sha256,
         "fit_only_rows_semantic_sha256": fit_only_rows_semantic_sha256,
         "config_registry_sha256": digest([
@@ -1178,6 +1202,10 @@ def _strict_refit_receipt(
         "version": VERSION,
         "report_file_sha256": report_file_sha256,
         "selector_binding_sha256": bindings["selector_binding_sha256"],
+        "source_v8_report_file_sha256": artifacts["source_v8_report.json"],
+        "source_v8_rows_file_sha256": artifacts["source_v8_rows.npz"],
+        "source_v8_rows_semantic_sha256": bindings[
+            "source_v8_rows_semantic_sha256"],
         "fit_only_rows_file_sha256": artifacts["fit_only_rows.npz"],
         "fit_only_rows_semantic_sha256": bindings[
             "fit_only_rows_semantic_sha256"],
@@ -1199,21 +1227,97 @@ def _strict_refit_receipt(
     })
 
 
+def _authenticate_frozen_source_projection(
+    *, source_report_path: str | Path, source_rows_path: str | Path,
+    fit_only_rows_path: str | Path, expected_fit_only_rows_sha256: str,
+    scope: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Recreate the fit-only archive from the fixed failed-v8 source rows."""
+    originals = {
+        "source_report": _regular(
+            source_report_path, "Frozen source v8 report",
+            maximum=MAX_JSON_BYTES),
+        "source_rows": _regular(
+            source_rows_path, "Frozen source v8 rows", maximum=MAX_NPZ_BYTES),
+        "fit_only_rows": _regular(
+            fit_only_rows_path, "Fit-only selector rows",
+            maximum=MAX_NPZ_BYTES),
+    }
+    expected = {
+        "source_report": FROZEN_SOURCE_V8_REPORT_SHA256,
+        "source_rows": FROZEN_SOURCE_V8_ROWS_SHA256,
+        "fit_only_rows": _sha(
+            expected_fit_only_rows_sha256, "fit-only selector rows"),
+    }
+    with ImmutableInputSnapshot(
+        originals, expected_sha256=expected,
+        relative_names={
+            "source_report": "source/report.json",
+            "source_rows": "source/rows.npz",
+            "fit_only_rows": "selector/fit_only_rows.npz",
+        },
+        maximum_bytes={
+            "source_report": MAX_JSON_BYTES,
+            "source_rows": MAX_NPZ_BYTES,
+            "fit_only_rows": MAX_NPZ_BYTES,
+        },
+        prefix="warehouse-r41-selector-source-projection-",
+    ) as frozen:
+        source_report = _parse_json_bytes(read_authenticated_bytes(
+            frozen.paths["source_report"], label="Frozen source v8 report",
+            expected_sha256=FROZEN_SOURCE_V8_REPORT_SHA256,
+            maximum=MAX_JSON_BYTES,
+        ), "Frozen source v8 report")
+        artifacts = source_report.get("evidence_artifacts")
+        if (source_report.get("version") != v8.VERSION
+                or source_report.get("status") != v8.STATUS_FAILED
+                or not isinstance(artifacts, Mapping)
+                or artifacts.get("rows.npz") != FROZEN_SOURCE_V8_ROWS_SHA256
+                or artifacts.get("fit_config.json")
+                    != FROZEN_SOURCE_V8_CONFIG_FILE_SHA256
+                or artifacts.get("program.json")
+                    != FROZEN_SOURCE_V8_PROGRAM_SHA256
+                or artifacts.get("weights_audit.json")
+                    != FROZEN_SOURCE_V8_WEIGHTS_AUDIT_SHA256
+                or source_report.get("bindings", {}).get("actor_file_sha256")
+                    != FROZEN_ACTOR_FILE_SHA256):
+            raise ValueError("Frozen source v8 report lineage differs")
+        source = _load_npz(
+            frozen.paths["source_rows"], "Frozen source v8 rows")
+        source_rows_semantic_sha256 = _arrays_digest(source)
+        projected, projection = _project_fit_only(source, scope)
+        fit_only = _load_npz(
+            frozen.paths["fit_only_rows"], "Fit-only selector rows")
+        if (set(projected) != set(fit_only)
+                or any(projected[name].dtype != fit_only[name].dtype
+                       or projected[name].shape != fit_only[name].shape
+                       or not np.array_equal(projected[name], fit_only[name])
+                       for name in projected)):
+            raise ValueError(
+                "Fit-only rows are not the exact fixed-source projection")
+        projected_semantic_sha256 = _arrays_digest(projected)
+        if projected_semantic_sha256 != _arrays_digest(fit_only):
+            raise ValueError("Fit-only source projection semantic identity differs")
+        frozen.verify()
+    return {
+        "source_rows_semantic_sha256": source_rows_semantic_sha256,
+        "projected_rows_semantic_sha256": projected_semantic_sha256,
+        "projection": projection,
+    }
+
+
 def authenticate_embedded_selected_config_snapshot(
     *, report_path: str | Path, expected_report_sha256: str,
     scope_path: str | Path, selected_config_path: str | Path,
+    source_report_path: str | Path, source_rows_path: str | Path,
+    fit_only_rows_path: str | Path,
     actor_file_sha256: str,
     fresh_outer_registry_path: str | Path,
     expected_fresh_outer_registry_sha256: str,
     fresh_outer_report_path: str | Path,
     expected_fresh_outer_report_sha256: str,
 ) -> dict[str, Any]:
-    """Authenticate the three selector artifacts copied into an RCPD candidate.
-
-    Candidate construction must first call the strict refitting reader below.
-    This compact reader exists so a saved candidate can reproduce its binding
-    from the three copied selector files without embedding the large fit rows.
-    """
+    """Authenticate compact selector metadata and its fixed source projection."""
     report_file = _regular(
         report_path, "Fit-only selector report", maximum=MAX_JSON_BYTES)
     report_sha256 = _sha(expected_report_sha256, "fit-only selector report")
@@ -1254,8 +1358,22 @@ def authenticate_embedded_selected_config_snapshot(
         scope_path, "Fit-only selector scope", maximum=MAX_JSON_BYTES)
     selected_file = _regular(
         selected_config_path, "Fit-only selected config", maximum=MAX_JSON_BYTES)
+    source_report_file = _regular(
+        source_report_path, "Frozen source v8 report", maximum=MAX_JSON_BYTES)
+    source_rows_file = _regular(
+        source_rows_path, "Frozen source v8 rows", maximum=MAX_NPZ_BYTES)
+    fit_only_rows_file = _regular(
+        fit_only_rows_path, "Fit-only selector rows", maximum=MAX_NPZ_BYTES)
     if (file_hash(scope_file) != artifacts["fit_scope.json"]
-            or file_hash(selected_file) != artifacts["selected_config.json"]):
+            or file_hash(selected_file) != artifacts["selected_config.json"]
+            or file_hash(source_report_file)
+                != artifacts["source_v8_report.json"]
+            or file_hash(source_rows_file) != artifacts["source_v8_rows.npz"]
+            or file_hash(fit_only_rows_file) != artifacts["fit_only_rows.npz"]
+            or artifacts["source_v8_report.json"]
+                != FROZEN_SOURCE_V8_REPORT_SHA256
+            or artifacts["source_v8_rows.npz"]
+                != FROZEN_SOURCE_V8_ROWS_SHA256):
         raise ValueError("Fit-only selector artifact hash differs")
     scope = normalize_scope(_read_json(scope_file, "Fit-only selector scope"))
     selected = _read_json(selected_file, "Fit-only selected config")
@@ -1325,6 +1443,19 @@ def authenticate_embedded_selected_config_snapshot(
                 != outer_report["content_sha256"]):
         raise ValueError("Fit-only selector fresh-outer identity binding differs")
 
+    source_projection = _authenticate_frozen_source_projection(
+        source_report_path=source_report_file,
+        source_rows_path=source_rows_file,
+        fit_only_rows_path=fit_only_rows_file,
+        expected_fit_only_rows_sha256=artifacts["fit_only_rows.npz"],
+        scope=scope,
+    )
+    if (bindings.get("source_v8_rows_semantic_sha256")
+            != source_projection["source_rows_semantic_sha256"]
+            or bindings.get("fit_only_rows_semantic_sha256")
+                != source_projection["projected_rows_semantic_sha256"]):
+        raise ValueError("Fit-only selector fixed-source projection differs")
+
     config = v8.normalize_config(selected.get("selected_config"))
     mix = selected.get("selected_mix_weight")
     selection = report.get("selection")
@@ -1358,6 +1489,7 @@ def authenticate_embedded_selected_config_snapshot(
         "report": deepcopy(report),
         "scope": scope,
         "selected_config_record": deepcopy(selected),
+        "source_projection": source_projection,
         "report_file_sha256": report_sha256,
         "scope_file_sha256": artifacts["fit_scope.json"],
         "selected_config_file_sha256": artifacts["selected_config.json"],
@@ -1367,7 +1499,118 @@ def authenticate_embedded_selected_config_snapshot(
 
 
 def authenticate_selected_config_snapshot(
-    *, evidence_directory: str | Path, expected_report_sha256: str,
+    *, evidence_directory: str | Path | None, expected_report_sha256: str,
+    evidence_artifact_paths: Mapping[str, str | Path] | None = None,
+    actor_path: str | Path,
+    source_full_manifest_bindings: Mapping[str, Any],
+    fresh_outer_registry_path: str | Path,
+    expected_fresh_outer_registry_sha256: str,
+    fresh_outer_report_path: str | Path,
+    expected_fresh_outer_report_sha256: str,
+) -> dict[str, Any]:
+    """Authenticate one selector from a single immutable evidence snapshot."""
+    if evidence_artifact_paths is None:
+        if evidence_directory is None:
+            raise ValueError("Fit-only selector evidence directory is required")
+        directory = Path(evidence_directory).expanduser().absolute()
+        if (not directory.is_dir() or directory.is_symlink()
+                or directory.resolve() != directory):
+            raise ValueError("Fit-only selector evidence directory is unsafe")
+        supplied = {
+            "report.json": directory / "report.json",
+            **{name: directory / name for name in EVIDENCE_ARTIFACT_NAMES},
+        }
+    else:
+        if evidence_directory is not None or set(evidence_artifact_paths) != {
+                "report.json", *EVIDENCE_ARTIFACT_NAMES}:
+            raise ValueError("Exact fit-only selector artifact paths required")
+        supplied = dict(evidence_artifact_paths)
+
+    report_path = _regular(
+        supplied["report.json"], "Fit-only selector report",
+        maximum=MAX_JSON_BYTES)
+    report_sha256 = _sha(expected_report_sha256, "fit-only selector report")
+    report_raw = read_authenticated_bytes(
+        report_path, label="Fit-only selector report",
+        expected_sha256=report_sha256, maximum=MAX_JSON_BYTES)
+    report = _parse_json_bytes(report_raw, "Fit-only selector report")
+    artifacts = report.get("evidence_artifacts")
+    if (not isinstance(artifacts, Mapping)
+            or set(artifacts) != EVIDENCE_ARTIFACT_NAMES
+            or any(type(value) is not str or _HEX.fullmatch(value) is None
+                   for value in artifacts.values())):
+        raise ValueError("Fit-only selector complete artifact registry differs")
+
+    originals: dict[str, Path] = {
+        "selector_report": report_path,
+        "actor": _regular(actor_path, "Frozen selector Actor", maximum=MAX_NPZ_BYTES),
+        "fresh_outer_registry": _regular(
+            fresh_outer_registry_path, "Fresh outer registry",
+            maximum=MAX_JSON_BYTES),
+        "fresh_outer_report": _regular(
+            fresh_outer_report_path, "Fresh outer report",
+            maximum=MAX_JSON_BYTES),
+    }
+    expected = {
+        "selector_report": report_sha256,
+        "actor": FROZEN_ACTOR_FILE_SHA256,
+        "fresh_outer_registry": _sha(
+            expected_fresh_outer_registry_sha256, "fresh outer registry"),
+        "fresh_outer_report": _sha(
+            expected_fresh_outer_report_sha256, "fresh outer report"),
+    }
+    relative_names = {
+        "selector_report": "selector/report.json",
+        "fresh_outer_registry": "outer/development_expansion.json",
+        "fresh_outer_report": "outer/development_expansion_report.json",
+    }
+    maximum_bytes: dict[str, int] = {"actor": MAX_NPZ_BYTES}
+    frozen_artifact_keys: dict[str, str] = {}
+    for name in sorted(EVIDENCE_ARTIFACT_NAMES):
+        key = "selector_" + name.replace(".", "_")
+        path = _regular(
+            supplied[name], "Fit-only selector " + name,
+            maximum=MAX_NPZ_BYTES if name.endswith(".npz") else MAX_JSON_BYTES)
+        originals[key] = path
+        expected[key] = str(artifacts[name])
+        relative_names[key] = "selector/" + name
+        if name.endswith(".npz"):
+            maximum_bytes[key] = MAX_NPZ_BYTES
+        frozen_artifact_keys[name] = key
+
+    sources = producer_sources()
+    with ImmutableInputSnapshot(
+        originals, expected_sha256=expected, relative_names=relative_names,
+        maximum_bytes=maximum_bytes,
+        prefix="warehouse-r41-selector-strict-reader-",
+    ) as frozen:
+        result = _authenticate_selected_config_snapshot_from_paths(
+            evidence_directory=None,
+            evidence_artifact_paths={
+                "report.json": frozen.paths["selector_report"],
+                **{
+                    name: frozen.paths[key]
+                    for name, key in frozen_artifact_keys.items()
+                },
+            },
+            expected_report_sha256=report_sha256,
+            actor_path=frozen.paths["actor"],
+            source_full_manifest_bindings=source_full_manifest_bindings,
+            fresh_outer_registry_path=frozen.paths["fresh_outer_registry"],
+            expected_fresh_outer_registry_sha256=expected[
+                "fresh_outer_registry"],
+            fresh_outer_report_path=frozen.paths["fresh_outer_report"],
+            expected_fresh_outer_report_sha256=expected["fresh_outer_report"],
+        )
+        frozen.verify()
+    if producer_sources() != sources:
+        raise RuntimeError("Fit-only selector sources changed during strict refit")
+    return result
+
+
+def _authenticate_selected_config_snapshot_from_paths(
+    *, evidence_directory: str | Path | None, expected_report_sha256: str,
+    evidence_artifact_paths: Mapping[str, str | Path] | None = None,
     actor_path: str | Path,
     source_full_manifest_bindings: Mapping[str, Any],
     fresh_outer_registry_path: str | Path,
@@ -1382,11 +1625,26 @@ def authenticate_selected_config_snapshot(
     explicit program are then recomputed from the physically projected rows.
     No fresh-outer observation, Actor probability, or label is read.
     """
-    directory = Path(evidence_directory).expanduser().absolute()
-    if (not directory.is_dir() or directory.is_symlink()
-            or directory.resolve() != directory):
-        raise ValueError("Fit-only selector evidence directory is unsafe")
-    report_path = directory / "report.json"
+    if evidence_artifact_paths is None:
+        if evidence_directory is None:
+            raise ValueError("Fit-only selector evidence directory is required")
+        directory = Path(evidence_directory).expanduser().absolute()
+        if (not directory.is_dir() or directory.is_symlink()
+                or directory.resolve() != directory):
+            raise ValueError("Fit-only selector evidence directory is unsafe")
+        supplied = {
+            "report.json": directory / "report.json",
+            **{name: directory / name for name in EVIDENCE_ARTIFACT_NAMES},
+        }
+    else:
+        if evidence_directory is not None or set(evidence_artifact_paths) != {
+                "report.json", *EVIDENCE_ARTIFACT_NAMES}:
+            raise ValueError("Exact fit-only selector artifact paths required")
+        supplied = dict(evidence_artifact_paths)
+        directory = None
+    report_path = _regular(
+        supplied["report.json"], "Fit-only selector report",
+        maximum=MAX_JSON_BYTES)
     report_sha256 = _sha(expected_report_sha256, "fit-only selector report")
     report = _read_json(report_path, "Fit-only selector report")
     artifacts = report.get("evidence_artifacts")
@@ -1397,10 +1655,11 @@ def authenticate_selected_config_snapshot(
     paths: dict[str, Path] = {}
     for name in sorted(EVIDENCE_ARTIFACT_NAMES):
         path = _regular(
-            directory / name, "Fit-only selector " + name,
+            supplied[name], "Fit-only selector " + name,
             maximum=MAX_NPZ_BYTES if name.endswith(".npz") else MAX_JSON_BYTES,
         )
-        if path.parent != directory or file_hash(path) != artifacts.get(name):
+        if ((directory is not None and path.parent != directory)
+                or file_hash(path) != artifacts.get(name)):
             raise ValueError("Fit-only selector artifact hash differs: " + name)
         paths[name] = path
 
@@ -1408,6 +1667,9 @@ def authenticate_selected_config_snapshot(
         report_path=report_path, expected_report_sha256=report_sha256,
         scope_path=paths["fit_scope.json"],
         selected_config_path=paths["selected_config.json"],
+        source_report_path=paths["source_v8_report.json"],
+        source_rows_path=paths["source_v8_rows.npz"],
+        fit_only_rows_path=paths["fit_only_rows.npz"],
         actor_file_sha256=file_hash(actor_path),
         fresh_outer_registry_path=fresh_outer_registry_path,
         expected_fresh_outer_registry_sha256=(
@@ -1438,7 +1700,8 @@ def authenticate_selected_config_snapshot(
         fit_only, scope=summary["scope"], actor=actor)
     saved_projection = _read_json(
         paths["inner_split_audit.json"], "Fit-only inner split audit")
-    if (saved_projection != projection
+    if (summary["source_projection"]["projection"] != projection
+            or saved_projection != projection
             or report.get("projection") != projection):
         raise ValueError("Fit-only inner split audit differs from rows")
 
@@ -1447,6 +1710,8 @@ def authenticate_selected_config_snapshot(
     binding = _selector_binding(
         scope_file_sha256=FROZEN_FIT_SCOPE_SHA256,
         fit_only_rows_semantic_sha256=rows_semantic,
+        source_rows_semantic_sha256=summary["source_projection"][
+            "source_rows_semantic_sha256"],
         sources=sources, configs=configs)
     bindings = report["bindings"]
     if (report.get("sources") != sources
@@ -1672,6 +1937,7 @@ def _build_frozen(
         prefix="." + destination.name + ".tmp-", dir=parent)).absolute()
     try:
         source_arrays = _load_npz(paths["rows.npz"], "Source v8 rows")
+        source_rows_semantic_sha256 = _arrays_digest(source_arrays)
         projected, projection_audit = _project_fit_only(source_arrays, scope)
         del source_arrays
         fit_only_path = temporary / "fit_only_rows.npz"
@@ -1691,6 +1957,7 @@ def _build_frozen(
         selector_binding = _selector_binding(
             scope_file_sha256=FROZEN_FIT_SCOPE_SHA256,
             fit_only_rows_semantic_sha256=fit_only_rows_semantic_sha256,
+            source_rows_semantic_sha256=source_rows_semantic_sha256,
             sources=sources, configs=configs)
         selection, fitted_program, configs = _select_projected(
             fit_only, actor=actor, source_config=source_config,
@@ -1704,7 +1971,12 @@ def _build_frozen(
         _write_json(temporary / "inner_selection.json", selection)
         _write_json(temporary / "selected_config.json", selected_payload)
         _write_json(temporary / "inner_fit_program.json", fitted_program.to_dict())
+        _copy_exclusive(
+            paths["report.json"], temporary / "source_v8_report.json")
+        _copy_exclusive(
+            paths["rows.npz"], temporary / "source_v8_rows.npz")
         evidence_names = (
+            "source_v8_report.json", "source_v8_rows.npz",
             "fit_only_rows.npz", "fit_scope.json", "config_registry.json",
             "inner_split_audit.json", "inner_selection.json",
             "selected_config.json", "inner_fit_program.json",
@@ -1734,6 +2006,8 @@ def _build_frozen(
                     "content_sha256"],
                 "selector_binding_sha256": selector_binding,
                 "producer_sources_sha256": digest(sources),
+                "source_v8_rows_semantic_sha256": (
+                    source_rows_semantic_sha256),
                 "fit_only_rows_semantic_sha256": (
                     fit_only_rows_semantic_sha256),
                 "config_registry_content_sha256": digest(config_registry),

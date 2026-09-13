@@ -97,13 +97,24 @@ _MODEL_FIELDS = frozenset((
     "l2_regularization", "max_depth", "max_bins", "random_state",
 ))
 _SELECTOR_REQUIRED_ARTIFACTS = frozenset((
+    "source_v8_report.json", "source_v8_rows.npz",
     "fit_only_rows.npz", "fit_scope.json", "config_registry.json",
     "inner_split_audit.json", "inner_selection.json", "selected_config.json",
     "inner_fit_program.json",
 ))
+_SELECTOR_TO_CANDIDATE_ARTIFACT = {
+    "source_v8_report.json": "fit_selector_source_v8_report.json",
+    "source_v8_rows.npz": "fit_selector_source_v8_rows.npz",
+    "fit_only_rows.npz": "fit_selector_fit_only_rows.npz",
+    "fit_scope.json": "fit_selector_scope.json",
+    "config_registry.json": "fit_selector_config_registry.json",
+    "inner_split_audit.json": "fit_selector_inner_split_audit.json",
+    "inner_selection.json": "fit_selector_inner_selection.json",
+    "selected_config.json": "fit_selector_selected_config.json",
+    "inner_fit_program.json": "fit_selector_inner_fit_program.json",
+}
 _CANDIDATE_SELECTOR_ARTIFACTS = frozenset((
-    "fit_selector_report.json", "fit_selector_scope.json",
-    "fit_selector_selected_config.json",
+    "fit_selector_report.json", *_SELECTOR_TO_CANDIDATE_ARTIFACT.values(),
 ))
 
 
@@ -377,12 +388,14 @@ def _selector_snapshot_inputs(
     report = _read_json_bytes(raw, "Fit-only selector report")
     artifacts = report.get("evidence_artifacts")
     if (not isinstance(artifacts, Mapping)
-            or not _SELECTOR_REQUIRED_ARTIFACTS.issubset(artifacts)
+            or set(artifacts) != _SELECTOR_REQUIRED_ARTIFACTS
             or any(type(artifacts[name]) is not str
                    or _HEX.fullmatch(artifacts[name]) is None
                    for name in _SELECTOR_REQUIRED_ARTIFACTS)):
         raise ValueError("Fit-only selector artifact registry differs")
     names = {
+        "source_v8_report.json": "selector_source_v8_report",
+        "source_v8_rows.npz": "selector_source_v8_rows",
         "fit_only_rows.npz": "selector_fit_only_rows",
         "fit_scope.json": "selector_scope",
         "config_registry.json": "selector_config_registry",
@@ -457,6 +470,8 @@ def _snapshot_expected_hashes(
     expected_prior_rows_report_sha256: str,
     expected_expansion_rows_report_sha256: str,
     expected_selector_report_sha256: str,
+    expected_selector_source_v8_report_sha256: str,
+    expected_selector_source_v8_rows_sha256: str,
     expected_selector_scope_sha256: str,
     expected_selector_fit_only_rows_sha256: str,
     expected_selector_config_registry_sha256: str,
@@ -474,6 +489,9 @@ def _snapshot_expected_hashes(
         "expansion_registry": expected_expansion_registry_sha256,
         "expansion_registry_report": expected_expansion_report_sha256,
         "selector_report": expected_selector_report_sha256,
+        "selector_source_v8_report": (
+            expected_selector_source_v8_report_sha256),
+        "selector_source_v8_rows": expected_selector_source_v8_rows_sha256,
         "selector_scope": expected_selector_scope_sha256,
         "selector_fit_only_rows": expected_selector_fit_only_rows_sha256,
         "selector_config_registry": expected_selector_config_registry_sha256,
@@ -1476,6 +1494,8 @@ def _authenticate_inputs(
     expected_expansion_rows_report_sha256: str,
     previous_development_path: Path, selector_report_path: Path,
     expected_selector_report_sha256: str, selector_scope_path: Path,
+    selector_source_v8_report_path: Path,
+    selector_source_v8_rows_path: Path,
     selector_fit_only_rows_path: Path, selector_config_registry_path: Path,
     selector_inner_split_audit_path: Path,
     selector_inner_selection_path: Path,
@@ -1600,6 +1620,8 @@ def _authenticate_inputs(
         warehouse_r41_diagnostic_rcpd_v8_fit_selector as selector_api,
     )
     expected_selector_paths = {
+        "source_v8_report.json": selector_source_v8_report_path,
+        "source_v8_rows.npz": selector_source_v8_rows_path,
         "fit_only_rows.npz": selector_fit_only_rows_path,
         "fit_scope.json": selector_scope_path,
         "config_registry.json": selector_config_registry_path,
@@ -1710,6 +1732,12 @@ def _bindings(
         "fit_selector_report_file_sha256": file_hash(
             paths["selector_report"]),
         "fit_selector_report_semantic_sha256": digest(selector["report"]),
+        "fit_selector_source_v8_report_file_sha256": file_hash(
+            paths["selector_source_v8_report"]),
+        "fit_selector_source_v8_rows_file_sha256": file_hash(
+            paths["selector_source_v8_rows"]),
+        "fit_selector_source_v8_rows_semantic_sha256": selector[
+            "source_projection"]["source_rows_semantic_sha256"],
         "fit_selector_scope_file_sha256": file_hash(
             paths["selector_scope"]),
         "fit_selector_scope_content_sha256": selector["scope"][
@@ -1857,11 +1885,23 @@ def _build_into(
         destination / "development_expansion_report.json")
     _copy_exclusive(
         paths["selector_report"], destination / "fit_selector_report.json")
-    _copy_exclusive(
-        paths["selector_scope"], destination / "fit_selector_scope.json")
-    _copy_exclusive(
-        paths["selector_selected_config"],
-        destination / "fit_selector_selected_config.json")
+    selector_snapshot_keys = {
+        "source_v8_report.json": "selector_source_v8_report",
+        "source_v8_rows.npz": "selector_source_v8_rows",
+        "fit_only_rows.npz": "selector_fit_only_rows",
+        "fit_scope.json": "selector_scope",
+        "config_registry.json": "selector_config_registry",
+        "inner_split_audit.json": "selector_inner_split_audit",
+        "inner_selection.json": "selector_inner_selection",
+        "selected_config.json": "selector_selected_config",
+        "inner_fit_program.json": "selector_inner_fit_program",
+    }
+    if set(selector_snapshot_keys) != set(_SELECTOR_TO_CANDIDATE_ARTIFACT):
+        raise RuntimeError("Fit selector candidate copy registry differs")
+    for selector_name, snapshot_key in selector_snapshot_keys.items():
+        _copy_exclusive(
+            paths[snapshot_key],
+            destination / _SELECTOR_TO_CANDIDATE_ARTIFACT[selector_name])
     _write_json(destination / "fit_config.json", config)
     _write_npz(destination / "rows.npz", arrays)
     _write_npz(destination / "pairs.npz", {
@@ -2126,6 +2166,10 @@ def build(
                     "expansion-row reauthentication report"),
                 expected_selector_report_sha256=selector_expected[
                     "selector_report"],
+                expected_selector_source_v8_report_sha256=selector_expected[
+                    "selector_source_v8_report"],
+                expected_selector_source_v8_rows_sha256=selector_expected[
+                    "selector_source_v8_rows"],
                 expected_selector_scope_sha256=selector_expected[
                     "selector_scope"],
                 expected_selector_fit_only_rows_sha256=selector_expected[
@@ -2152,6 +2196,8 @@ def build(
                     "expansion/source_collection_report.json"),
                 "expansion_rows": "expansion/expansion_rows.npz",
                 "selector_report": "selector/report.json",
+                "selector_source_v8_report": "selector/source_v8_report.json",
+                "selector_source_v8_rows": "selector/source_v8_rows.npz",
                 "selector_fit_only_rows": "selector/fit_only_rows.npz",
                 "selector_scope": "selector/fit_scope.json",
                 "selector_config_registry": "selector/config_registry.json",
@@ -2164,6 +2210,7 @@ def build(
             maximum_bytes={
                 "prior_rows": MAX_NPZ_COMPRESSED_BYTES,
                 "expansion_rows": MAX_NPZ_COMPRESSED_BYTES,
+                "selector_source_v8_rows": MAX_NPZ_COMPRESSED_BYTES,
                 "selector_fit_only_rows": MAX_NPZ_COMPRESSED_BYTES,
             },
             prefix="warehouse-r41-rcpd-v8-inputs-",
@@ -2193,6 +2240,10 @@ def build(
                 expected_selector_report_sha256=(
                     expected_selector_report_sha256),
                 selector_scope_path=paths["selector_scope"],
+                selector_source_v8_report_path=paths[
+                    "selector_source_v8_report"],
+                selector_source_v8_rows_path=paths[
+                    "selector_source_v8_rows"],
                 selector_fit_only_rows_path=paths["selector_fit_only_rows"],
                 selector_config_registry_path=paths[
                     "selector_config_registry"],
@@ -2385,7 +2436,21 @@ def _read_saved_report_snapshot(
             maximum=MAX_JSON_BYTES),
         "expansion_rows": directory / "expansion_rows.npz",
         "selector_report": directory / "fit_selector_report.json",
+        "selector_source_v8_report": (
+            directory / "fit_selector_source_v8_report.json"),
+        "selector_source_v8_rows": (
+            directory / "fit_selector_source_v8_rows.npz"),
+        "selector_fit_only_rows": (
+            directory / "fit_selector_fit_only_rows.npz"),
         "selector_scope": directory / "fit_selector_scope.json",
+        "selector_config_registry": (
+            directory / "fit_selector_config_registry.json"),
+        "selector_inner_split_audit": (
+            directory / "fit_selector_inner_split_audit.json"),
+        "selector_inner_selection": (
+            directory / "fit_selector_inner_selection.json"),
+        "selector_inner_fit_program": (
+            directory / "fit_selector_inner_fit_program.json"),
         "selector_selected_config": (
             directory / "fit_selector_selected_config.json"),
         "previous_development": _regular(
@@ -2504,18 +2569,53 @@ def _read_saved_report_snapshot(
     from backend.training import (  # noqa: PLC0415
         warehouse_r41_diagnostic_rcpd_v8_fit_selector as selector_api,
     )
-    selector = selector_api.authenticate_embedded_selected_config_snapshot(
-        report_path=external_paths["selector_report"],
-        expected_report_sha256=expected_selector_report_sha256,
-        scope_path=external_paths["selector_scope"],
-        selected_config_path=external_paths["selector_selected_config"],
-        actor_file_sha256=file_hash(external_paths["actor"]),
-        fresh_outer_registry_path=external_paths["expansion_registry"],
-        expected_fresh_outer_registry_sha256=(
-            expected_expansion_registry_sha256),
-        fresh_outer_report_path=external_paths["expansion_registry_report"],
-        expected_fresh_outer_report_sha256=expected_expansion_report_sha256,
-    )
+    selector_paths = {
+        "report.json": external_paths["selector_report"],
+        "source_v8_report.json": external_paths["selector_source_v8_report"],
+        "source_v8_rows.npz": external_paths["selector_source_v8_rows"],
+        "fit_only_rows.npz": external_paths["selector_fit_only_rows"],
+        "fit_scope.json": external_paths["selector_scope"],
+        "config_registry.json": external_paths["selector_config_registry"],
+        "inner_split_audit.json": external_paths[
+            "selector_inner_split_audit"],
+        "inner_selection.json": external_paths["selector_inner_selection"],
+        "selected_config.json": external_paths["selector_selected_config"],
+        "inner_fit_program.json": external_paths[
+            "selector_inner_fit_program"],
+    }
+    if refit:
+        selector = selector_api.authenticate_selected_config_snapshot(
+            evidence_directory=None,
+            evidence_artifact_paths=selector_paths,
+            expected_report_sha256=expected_selector_report_sha256,
+            actor_path=external_paths["actor"],
+            source_full_manifest_bindings=runtime.source_full_manifest_bindings,
+            fresh_outer_registry_path=external_paths["expansion_registry"],
+            expected_fresh_outer_registry_sha256=(
+                expected_expansion_registry_sha256),
+            fresh_outer_report_path=external_paths[
+                "expansion_registry_report"],
+            expected_fresh_outer_report_sha256=(
+                expected_expansion_report_sha256),
+        )
+    else:
+        selector = selector_api.authenticate_embedded_selected_config_snapshot(
+            report_path=external_paths["selector_report"],
+            expected_report_sha256=expected_selector_report_sha256,
+            scope_path=external_paths["selector_scope"],
+            selected_config_path=external_paths["selector_selected_config"],
+            source_report_path=external_paths["selector_source_v8_report"],
+            source_rows_path=external_paths["selector_source_v8_rows"],
+            fit_only_rows_path=external_paths["selector_fit_only_rows"],
+            actor_file_sha256=file_hash(external_paths["actor"]),
+            fresh_outer_registry_path=external_paths["expansion_registry"],
+            expected_fresh_outer_registry_sha256=(
+                expected_expansion_registry_sha256),
+            fresh_outer_report_path=external_paths[
+                "expansion_registry_report"],
+            expected_fresh_outer_report_sha256=(
+                expected_expansion_report_sha256),
+        )
     if normalize_config(selector["config"]) != config:
         raise ValueError("Diagnostic v8 selector/config binding differs")
     relations = R41DiagnosticPublicRelationsV8(actor.metadata["feature_names"])

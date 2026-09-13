@@ -214,7 +214,24 @@ def _write_json(path, value):
 def _selector_evidence(tmp_path, monkeypatch):
     sources = {"selector.py": "1" * 64}
     monkeypatch.setattr(subject, "producer_sources", lambda: sources)
-    registry, outer_report, _, _ = _fresh_outer_pair("b" * 64)
+    evidence = tmp_path / "selector"
+    evidence.mkdir()
+    source_report_path = evidence / "source_v8_report.json"
+    source_report_path.write_bytes(b"fixed-source-report\n")
+    source_rows_path = evidence / "source_v8_rows.npz"
+    source_rows_path.write_bytes(b"fixed-source-rows\n")
+    source_report_sha = file_hash(source_report_path)
+    source_rows_sha = file_hash(source_rows_path)
+    monkeypatch.setattr(
+        subject, "FROZEN_SOURCE_V8_REPORT_SHA256", source_report_sha)
+    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_ROWS_SHA256", source_rows_sha)
+    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_CONFIG_FILE_SHA256", "2" * 64)
+    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_PROGRAM_SHA256", "3" * 64)
+    monkeypatch.setattr(
+        subject, "FROZEN_SOURCE_V8_WEIGHTS_AUDIT_SHA256", "4" * 64)
+    monkeypatch.setattr(subject, "FROZEN_ACTOR_FILE_SHA256", "5" * 64)
+
+    registry, outer_report, _, _ = _fresh_outer_pair(source_rows_sha)
     registry_path = tmp_path / "development_expansion.json"
     _write_json(registry_path, registry)
     registry_sha = file_hash(registry_path)
@@ -231,6 +248,8 @@ def _selector_evidence(tmp_path, monkeypatch):
     families = {scene: FAMILIES[index] for index, scene in enumerate(eligible)}
     scope = _scope(eligible=eligible, exposed=[], families=families)
     scope.update({
+        "source_report_sha256": source_report_sha,
+        "source_rows_sha256": source_rows_sha,
         "fresh_outer_scene_fingerprints": sorted(
             row["fingerprint"] for row in registry["selected_outer_identities"]),
         "fresh_outer_registry_file_sha256": registry_sha,
@@ -241,8 +260,6 @@ def _selector_evidence(tmp_path, monkeypatch):
     scope["content_sha256"] = subject.digest({
         key: value for key, value in scope.items() if key != "content_sha256"
     })
-    evidence = tmp_path / "selector"
-    evidence.mkdir()
     scope_path = evidence / "fit_scope.json"
     _write_json(scope_path, scope)
     config = subject.candidate_configs(_config())[1]
@@ -258,32 +275,32 @@ def _selector_evidence(tmp_path, monkeypatch):
     }
     selected_path = evidence / "selected_config.json"
     _write_json(selected_path, selected)
-    artifacts = {}
     for name in subject.EVIDENCE_ARTIFACT_NAMES:
         path = evidence / name
-        if name == "fit_scope.json":
-            pass
-        elif name == "selected_config.json":
-            pass
-        else:
+        if not path.exists():
             path.write_bytes((name + "\n").encode("ascii"))
-        artifacts[name] = file_hash(path)
-    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_REPORT_SHA256", "a" * 64)
-    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_ROWS_SHA256", "b" * 64)
-    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_CONFIG_FILE_SHA256", "2" * 64)
-    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_PROGRAM_SHA256", "3" * 64)
+    artifacts = {
+        name: file_hash(evidence / name)
+        for name in subject.EVIDENCE_ARTIFACT_NAMES
+    }
     monkeypatch.setattr(
-        subject, "FROZEN_SOURCE_V8_WEIGHTS_AUDIT_SHA256", "4" * 64)
-    monkeypatch.setattr(subject, "FROZEN_ACTOR_FILE_SHA256", "5" * 64)
-    monkeypatch.setattr(subject, "FROZEN_FIT_SCOPE_SHA256",
-                        artifacts["fit_scope.json"])
+        subject, "FROZEN_FIT_SCOPE_SHA256", artifacts["fit_scope.json"])
+    source_semantic = "0" * 64
+    fit_semantic = "7" * 64
+    monkeypatch.setattr(
+        subject, "_authenticate_frozen_source_projection",
+        lambda **kwargs: {
+            "source_rows_semantic_sha256": source_semantic,
+            "projected_rows_semantic_sha256": fit_semantic,
+            "projection": {},
+        })
     report = {
         "version": subject.VERSION,
         "status": subject.STATUS_SELECTED,
         "contract": subject.contract(),
         "bindings": {
-            "source_v8_report_sha256": "a" * 64,
-            "source_v8_rows_sha256": "b" * 64,
+            "source_v8_report_sha256": source_report_sha,
+            "source_v8_rows_sha256": source_rows_sha,
             "source_v8_config_sha256": "2" * 64,
             "source_v8_program_sha256": "3" * 64,
             "source_v8_weights_audit_sha256": "4" * 64,
@@ -296,7 +313,8 @@ def _selector_evidence(tmp_path, monkeypatch):
             "fresh_outer_report_content_sha256": outer_report["content_sha256"],
             "selector_binding_sha256": "6" * 64,
             "producer_sources_sha256": subject.digest(sources),
-            "fit_only_rows_semantic_sha256": "7" * 64,
+            "source_v8_rows_semantic_sha256": source_semantic,
+            "fit_only_rows_semantic_sha256": fit_semantic,
             "config_registry_content_sha256": "8" * 64,
             "inner_split_audit_content_sha256": "9" * 64,
             "inner_selection_content_sha256": "c" * 64,
@@ -325,27 +343,16 @@ def _selector_evidence(tmp_path, monkeypatch):
     _write_json(report_path, report)
     return {
         "evidence": evidence, "report": report_path, "scope": scope_path,
-        "selected": selected_path, "registry": registry_path,
-        "outer_report": outer_report_path, "config": config,
+        "selected": selected_path, "source_report": source_report_path,
+        "source_rows": source_rows_path,
+        "fit_only_rows": evidence / "fit_only_rows.npz",
+        "registry": registry_path, "outer_report": outer_report_path,
+        "config": config,
     }
-
 
 def _strict_selector_evidence(tmp_path, monkeypatch):
     sources = {"selector.py": "1" * 64}
     monkeypatch.setattr(subject, "producer_sources", lambda: sources)
-
-    registry, outer_report, _, _ = _fresh_outer_pair("b" * 64)
-    registry_path = tmp_path / "development_expansion.json"
-    _write_json(registry_path, registry)
-    registry_sha = file_hash(registry_path)
-    outer_report["registry_file_sha256"] = registry_sha
-    outer_report["content_sha256"] = subject.digest({
-        key: value for key, value in outer_report.items()
-        if key != "content_sha256"
-    })
-    outer_report_path = tmp_path / "development_expansion_report.json"
-    _write_json(outer_report_path, outer_report)
-    outer_report_sha = file_hash(outer_report_path)
 
     eligible = []
     families = {}
@@ -360,8 +367,67 @@ def _strict_selector_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(subject, "FROZEN_SOURCE_SCENE_COUNT", len(eligible))
     monkeypatch.setattr(
         subject, "FROZEN_SOURCE_ELIGIBLE_ROW_COUNT", len(eligible))
+
+    actor_path = tmp_path / "actor.npz"
+    actor_path.write_bytes(b"frozen-test-actor\n")
+    actor_sha = file_hash(actor_path)
+    actor_parameters_sha = "5" * 64
+    monkeypatch.setattr(subject, "FROZEN_ACTOR_FILE_SHA256", actor_sha)
+    monkeypatch.setattr(
+        subject, "FROZEN_ACTOR_PARAMETERS_SHA256", actor_parameters_sha)
+    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_CONFIG_FILE_SHA256", "2" * 64)
+    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_PROGRAM_SHA256", "3" * 64)
+    monkeypatch.setattr(
+        subject, "FROZEN_SOURCE_V8_WEIGHTS_AUDIT_SHA256", "4" * 64)
+    source_identity = deepcopy(subject.FROZEN_SOURCE_IDENTITY)
+    source_identity["native_source_actor_sha256"] = actor_sha
+    source_identity["source_actor_parameters_sha256"] = actor_parameters_sha
+    monkeypatch.setattr(subject, "FROZEN_SOURCE_IDENTITY", source_identity)
+
+    evidence = tmp_path / "strict_selector"
+    evidence.mkdir()
+    source_rows = _rows([
+        (scene, False, index % len(v8.ACTIONS))
+        for index, scene in enumerate(eligible)
+    ])
+    source_rows_path = evidence / "source_v8_rows.npz"
+    subject._write_npz(source_rows_path, source_rows)
+    source_rows_sha = file_hash(source_rows_path)
+    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_ROWS_SHA256", source_rows_sha)
+    source_report = {
+        "version": v8.VERSION,
+        "status": v8.STATUS_FAILED,
+        "evidence_artifacts": {
+            "rows.npz": source_rows_sha,
+            "fit_config.json": "2" * 64,
+            "program.json": "3" * 64,
+            "weights_audit.json": "4" * 64,
+        },
+        "bindings": {"actor_file_sha256": actor_sha},
+    }
+    source_report_path = evidence / "source_v8_report.json"
+    _write_json(source_report_path, source_report)
+    source_report_sha = file_hash(source_report_path)
+    monkeypatch.setattr(
+        subject, "FROZEN_SOURCE_V8_REPORT_SHA256", source_report_sha)
+
+    registry, outer_report, _, _ = _fresh_outer_pair(source_rows_sha)
+    registry_path = tmp_path / "development_expansion.json"
+    _write_json(registry_path, registry)
+    registry_sha = file_hash(registry_path)
+    outer_report["registry_file_sha256"] = registry_sha
+    outer_report["content_sha256"] = subject.digest({
+        key: value for key, value in outer_report.items()
+        if key != "content_sha256"
+    })
+    outer_report_path = tmp_path / "development_expansion_report.json"
+    _write_json(outer_report_path, outer_report)
+    outer_report_sha = file_hash(outer_report_path)
+
     scope = _scope(eligible=eligible, exposed=[], families=families)
     scope.update({
+        "source_report_sha256": source_report_sha,
+        "source_rows_sha256": source_rows_sha,
         "fresh_outer_scene_fingerprints": sorted(
             row["fingerprint"] for row in registry["selected_outer_identities"]),
         "fresh_outer_registry_file_sha256": registry_sha,
@@ -372,40 +438,15 @@ def _strict_selector_evidence(tmp_path, monkeypatch):
     scope["content_sha256"] = subject.digest({
         key: value for key, value in scope.items() if key != "content_sha256"
     })
-    inner, _ = subject._inner_holdout(scope["inner_candidate_scenes"])
-    inner_set = set(inner)
-    rows = _rows([
-        (scene, scene in inner_set, index % len(v8.ACTIONS))
-        for index, scene in enumerate(eligible)
-    ])
-
-    evidence = tmp_path / "strict_selector"
-    evidence.mkdir()
     scope_path = evidence / "fit_scope.json"
     _write_json(scope_path, scope)
+    monkeypatch.setattr(subject, "FROZEN_FIT_SCOPE_SHA256", file_hash(scope_path))
+    rows, source_projection = subject._project_fit_only(source_rows, scope)
+    subject._write_npz(evidence / "fit_only_rows.npz", rows)
+
     configs = subject.candidate_configs(subject.FROZEN_SOURCE_CONFIG)
     config_registry = subject._config_registry(configs)
     _write_json(evidence / "config_registry.json", config_registry)
-    subject._write_npz(evidence / "fit_only_rows.npz", rows)
-
-    actor_path = tmp_path / "actor.npz"
-    actor_path.write_bytes(b"frozen-test-actor\n")
-    actor_sha = file_hash(actor_path)
-    actor_parameters_sha = "5" * 64
-    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_REPORT_SHA256", "a" * 64)
-    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_ROWS_SHA256", "b" * 64)
-    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_CONFIG_FILE_SHA256", "2" * 64)
-    monkeypatch.setattr(subject, "FROZEN_SOURCE_V8_PROGRAM_SHA256", "3" * 64)
-    monkeypatch.setattr(
-        subject, "FROZEN_SOURCE_V8_WEIGHTS_AUDIT_SHA256", "4" * 64)
-    monkeypatch.setattr(subject, "FROZEN_ACTOR_FILE_SHA256", actor_sha)
-    monkeypatch.setattr(
-        subject, "FROZEN_ACTOR_PARAMETERS_SHA256", actor_parameters_sha)
-    monkeypatch.setattr(subject, "FROZEN_FIT_SCOPE_SHA256", file_hash(scope_path))
-    source_identity = deepcopy(subject.FROZEN_SOURCE_IDENTITY)
-    source_identity["native_source_actor_sha256"] = actor_sha
-    source_identity["source_actor_parameters_sha256"] = actor_parameters_sha
-    monkeypatch.setattr(subject, "FROZEN_SOURCE_IDENTITY", source_identity)
 
     class FakeActor:
         artifact_sha256 = actor_sha
@@ -431,10 +472,12 @@ def _strict_selector_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(
         subject.v8, "R41DiagnosticPublicTreeProgramV8", FakeProgramReader)
 
+    source_rows_semantic = subject._arrays_digest(source_rows)
     rows_semantic = subject._arrays_digest(rows)
     selector_binding = subject._selector_binding(
         scope_file_sha256=file_hash(scope_path),
         fit_only_rows_semantic_sha256=rows_semantic,
+        source_rows_semantic_sha256=source_rows_semantic,
         sources=sources, configs=configs)
     program_payload = {
         "kind": "deterministic-test-program",
@@ -477,6 +520,7 @@ def _strict_selector_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(subject, "_select_projected", fake_select)
     projection = subject._projected_fit_only_audit(
         rows, scope=scope, actor=FakeActor())
+    assert projection == source_projection
     selected = subject._selected_config_record(selection, configs)
     _write_json(evidence / "inner_split_audit.json", projection)
     _write_json(evidence / "inner_selection.json", selection)
@@ -491,8 +535,8 @@ def _strict_selector_evidence(tmp_path, monkeypatch):
         "status": subject.STATUS_SELECTED,
         "contract": subject.contract(),
         "bindings": {
-            "source_v8_report_sha256": "a" * 64,
-            "source_v8_rows_sha256": "b" * 64,
+            "source_v8_report_sha256": source_report_sha,
+            "source_v8_rows_sha256": source_rows_sha,
             "source_v8_config_sha256": "2" * 64,
             "source_v8_program_sha256": "3" * 64,
             "source_v8_weights_audit_sha256": "4" * 64,
@@ -505,6 +549,7 @@ def _strict_selector_evidence(tmp_path, monkeypatch):
             "fresh_outer_report_content_sha256": outer_report["content_sha256"],
             "selector_binding_sha256": selector_binding,
             "producer_sources_sha256": subject.digest(sources),
+            "source_v8_rows_semantic_sha256": source_rows_semantic,
             "fit_only_rows_semantic_sha256": rows_semantic,
             "config_registry_content_sha256": subject.digest(config_registry),
             "inner_split_audit_content_sha256": subject.digest(projection),
@@ -537,8 +582,8 @@ def _strict_selector_evidence(tmp_path, monkeypatch):
         "source_identity": source_identity,
         "selection": selection,
         "program": program_payload,
+        "source_rows": source_rows,
     }
-
 
 def _refresh_strict_selector_report(paths):
     evidence = paths["evidence"]
@@ -811,6 +856,9 @@ def test_authenticated_selected_config_extracts_wrapper_and_binds_fresh_outer(
         report_path=paths["report"],
         expected_report_sha256=file_hash(paths["report"]),
         scope_path=paths["scope"], selected_config_path=paths["selected"],
+        source_report_path=paths["source_report"],
+        source_rows_path=paths["source_rows"],
+        fit_only_rows_path=paths["fit_only_rows"],
         actor_file_sha256="5" * 64,
         fresh_outer_registry_path=paths["registry"],
         expected_fresh_outer_registry_sha256=file_hash(paths["registry"]),
@@ -833,6 +881,9 @@ def test_authenticated_selected_config_rejects_wrapper_or_scope_substitution(
             report_path=paths["report"],
             expected_report_sha256=file_hash(paths["report"]),
             scope_path=paths["scope"], selected_config_path=paths["selected"],
+            source_report_path=paths["source_report"],
+            source_rows_path=paths["source_rows"],
+            fit_only_rows_path=paths["fit_only_rows"],
             actor_file_sha256="5" * 64,
             fresh_outer_registry_path=paths["registry"],
             expected_fresh_outer_registry_sha256=file_hash(paths["registry"]),
@@ -895,7 +946,53 @@ def test_strict_selector_rejects_unregistered_artifact_bytes(
     paths = _strict_selector_evidence(tmp_path, monkeypatch)
     (paths["evidence"] / "config_registry.json").write_text(
         "{}\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="artifact hash differs"):
+    with pytest.raises(ValueError, match="bytes required|artifact hash differs"):
+        _strict_authenticate(paths)
+
+
+def test_strict_selector_rejects_rehashed_forged_fit_observation(
+        tmp_path, monkeypatch):
+    """A self-consistent selector archive must still match fixed source rows."""
+    paths = _strict_selector_evidence(tmp_path, monkeypatch)
+    fit_path = paths["evidence"] / "fit_only_rows.npz"
+    arrays = subject._load_npz(fit_path, "Test fit-only rows")
+    arrays["observations"] = arrays["observations"].copy()
+    arrays["observations"][0, 0] = np.float32(123.0)
+    arrays["observation_hashes"] = arrays["observation_hashes"].copy()
+    arrays["observation_hashes"][0] = np.bytes_(_fingerprint(999_999))
+    fit_path.unlink()
+    subject._write_npz(fit_path, arrays)
+
+    # Model the attacker's strongest self-report: refresh the artifact registry
+    # and semantic binding after substituting a public observation belonging to
+    # an otherwise eligible scene.  The fixed source projection remains the
+    # independent authority and must reject it before any refit or metric use.
+    report = json.loads(paths["report"].read_text(encoding="utf-8"))
+    report["bindings"]["fit_only_rows_semantic_sha256"] = \
+        subject._arrays_digest(arrays)
+    _write_json(paths["report"], report)
+    _refresh_strict_selector_report(paths)
+    with pytest.raises(ValueError, match="exact fixed-source projection"):
+        _strict_authenticate(paths)
+
+
+def test_strict_reader_rejects_evidence_race_after_snapshot(
+        tmp_path, monkeypatch):
+    paths = _strict_selector_evidence(tmp_path, monkeypatch)
+
+    def mutate_original(**kwargs):
+        frozen_config = Path(kwargs["evidence_artifact_paths"][
+            "config_registry.json"])
+        assert frozen_config.read_bytes() == (
+            paths["evidence"] / "config_registry.json").read_bytes()
+        (paths["evidence"] / "config_registry.json").write_bytes(b"changed\n")
+        return {"unreachable": True}
+
+    from pathlib import Path
+    monkeypatch.setattr(
+        subject, "_authenticate_selected_config_snapshot_from_paths",
+        mutate_original)
+    with pytest.raises(RuntimeError, match="changed during transaction"):
         _strict_authenticate(paths)
 
 

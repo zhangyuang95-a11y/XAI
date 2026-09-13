@@ -11,7 +11,7 @@ from backend.training.warehouse_native_common import file_hash
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIR = ROOT / (
     "output/warehouse_native/"
-    "r41_diagnostic_expansion_collection_v8_sourceclosure4_20260913"
+    "r41_diagnostic_expansion_collection_v8_fresh_outer_v1_20260913"
 )
 SOURCE_COLLECTION_REPORT = SOURCE_DIR / "report.json"
 SOURCE_ROWS = SOURCE_DIR / "expansion_rows.npz"

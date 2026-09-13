@@ -173,6 +173,14 @@ def test_source_closure_has_both_v9_identity_and_replay_producers_only():
     assert not [name for name in sources if any(token in name for token in forbidden)]
 
 
+def test_frozen_source_receipt_survives_later_checkout_evolution():
+    frozen = {"producer.py": "a" * 64, "dependency.py": "b" * 64}
+    assert subject._frozen_sources_valid(frozen, digest(frozen))
+    assert not subject._frozen_sources_valid(
+        {"producer.py": "not-a-sha"}, digest({"producer.py": "not-a-sha"}))
+    assert not subject._frozen_sources_valid(frozen, "c" * 64)
+
+
 def test_build_rechecks_sources_and_inputs_at_publish_boundary():
     source = inspect.getsource(subject.build)
     assert source.count("snapshot.verify()") >= 3

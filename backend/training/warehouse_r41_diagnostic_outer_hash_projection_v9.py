@@ -110,6 +110,29 @@ def _content_valid(value: Mapping[str, Any]) -> bool:
                                    if key != "content_sha256"}))
 
 
+def _frozen_sources_valid(value: Any, claimed_sha256: Any) -> bool:
+    """Validate a producer closure captured when an artifact was written.
+
+    Historical evidence is authenticated by its caller-supplied file hash and
+    immutable content digest.  Its frozen source receipt must remain internally
+    valid, but later serving or audit code may evolve without invalidating the
+    already anchored evidence.
+    """
+    return (
+        isinstance(value, Mapping)
+        and bool(value)
+        and all(
+            type(path) is str and bool(path)
+            and type(source_sha256) is str
+            and _HEX.fullmatch(source_sha256) is not None
+            for path, source_sha256 in value.items()
+        )
+        and type(claimed_sha256) is str
+        and _HEX.fullmatch(claimed_sha256) is not None
+        and digest(dict(value)) == claimed_sha256
+    )
+
+
 def _regular(value: str | Path, label: str, *, maximum: int = MAX_JSON_BYTES) -> Path:
     path = Path(value).expanduser().absolute()
     if (not path.is_file() or path.is_symlink() or path.resolve() != path
@@ -225,7 +248,7 @@ def _validate_registry(
     actor = NumPyNativeActor(paths["actor"])
     registry = _strict_json(paths["registry"], "fresh v9 outer registry")
     report = _strict_json(paths["registry_report"], "fresh v9 outer registry report")
-    registry_sources = registry_api.producer_sources()
+    registry_sources = registry.get("producer_sources")
     scenes = registry.get("development_outer")
     identities = registry.get("selected_outer_identities")
     if (registry.get("version") != registry_api.VERSION
@@ -239,9 +262,8 @@ def _validate_registry(
             or registry.get("probabilities_access") is not False
             or registry.get("final_audit_rows_access") is not False
             or registry.get("formal_ready") is not False
-            or registry.get("producer_sources") != registry_sources
-            or registry.get("producer_sources_sha256")
-                != digest(registry_sources)):
+            or not _frozen_sources_valid(
+                registry_sources, registry.get("producer_sources_sha256"))):
         raise ValueError("Exact identity-frozen fresh v9 outer registry required")
     public_identities: list[dict[str, Any]] = []
     seen: set[tuple[int, str]] = set()
@@ -275,7 +297,9 @@ def _validate_registry(
             or report.get("registry_content_sha256") != registry["content_sha256"]
             or report.get("bindings") != bindings
             or report.get("producer_sources") != registry_sources
-            or report.get("producer_sources_sha256") != digest(registry_sources)
+            or not _frozen_sources_valid(
+                report.get("producer_sources"),
+                report.get("producer_sources_sha256"))
             or report.get("selection", {}).get("selected_identity_sha256")
                 != digest(public_identities)
             or report.get("formal_ready") is not False
@@ -771,7 +795,7 @@ def read_saved_projection(
     projection = validate_projection(_strict_json(
         projection_file, "v9 outer hash projection"))
     receipt = _strict_json(receipt_file, "v9 outer projection receipt")
-    sources = producer_sources()
+    sources = receipt.get("sources")
     bindings = receipt.get("bindings")
     if (receipt.get("version") != RECEIPT_VERSION
             or receipt.get("status") != STATUS or not _content_valid(receipt)
@@ -783,8 +807,8 @@ def read_saved_projection(
                 != projection["content_sha256"]
             or bindings.get("ordered_replay_sha256")
                 != projection["projection"]["ordered_replay_sha256"]
-            or bindings.get("source_closure_sha256") != digest(sources)
-            or receipt.get("sources") != sources
+            or not _frozen_sources_valid(
+                sources, bindings.get("source_closure_sha256"))
             or receipt.get("raw_observations_published") is not False
             or receipt.get("actor_actions_published") is not False
             or receipt.get("actor_probabilities_published") is not False

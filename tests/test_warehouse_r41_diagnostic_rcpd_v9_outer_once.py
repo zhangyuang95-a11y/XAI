@@ -129,7 +129,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
         path = tmp_path / (name + (".npz" if name == "actor" else ".json"))
         path.write_bytes((name + "\n").encode("ascii"))
         files[name] = path
-    closure = {"candidate/source.py": _fp("candidate-source")}
+    closure = subject.runtime_program_sources()
     selector = {"sources": closure}
     _write_json(files["selector_report"], selector)
 
@@ -266,10 +266,48 @@ class _FakeActor:
 
 def test_source_closure_has_no_protected_final_or_holdout_module():
     sources = subject.producer_sources()
+    runtime_sources = subject.runtime_program_sources()
     assert "backend/training/warehouse_r41_diagnostic_rcpd_v9_outer_once.py" in sources
+    assert "backend/warehouse_r41_diagnostic_public_features_v9.py" in runtime_sources
+    assert "backend/warehouse_r41_diagnostic_public_tree_program_v9.py" in runtime_sources
+    assert "backend/warehouse_r41_diagnostic_boosted_tree.py" in runtime_sources
     assert not [name for name in sources
                 if "fresh_final" in name or "final_once" in name]
+    assert not [name for name in runtime_sources
+                if "fresh_final" in name or "final_once" in name]
     assert subject.contract()["attempt_anchor_before_private_outer_read"] is True
+
+
+def test_runtime_source_drift_fails_before_claim_or_private_outer_read(
+        tmp_path, monkeypatch):
+    args, _, _, permanent = _fixture(tmp_path, monkeypatch)
+    lock_path = Path(args["candidate_lock_path"])
+    selector_path = Path(args["selector_report_path"])
+    lock = json.loads(lock_path.read_text("utf-8"))
+    selector = json.loads(selector_path.read_text("utf-8"))
+    target = "backend/warehouse_r41_diagnostic_public_features_v9.py"
+    assert target in lock["source_closure"]
+    changed = _fp("semantically-different-public-feature-source")
+    assert changed != lock["source_closure"][target]
+    lock["source_closure"][target] = changed
+    selector["sources"][target] = changed
+    _write_json(selector_path, selector)
+    lock["bindings"]["selector_report_sha256"] = file_hash(selector_path)
+    lock["bindings"]["source_closure_sha256"] = digest(lock["source_closure"])
+    lock["content_sha256"] = digest({
+        key: value for key, value in lock.items() if key != "content_sha256"
+    })
+    _write_json(lock_path, lock)
+    args["expected_candidate_lock_sha256"] = file_hash(lock_path)
+
+    monkeypatch.setattr(
+        subject.collection_api, "load_authenticated_rows",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("private outer rows opened before source rejection")),
+    )
+    with pytest.raises(ValueError, match="runtime source closure differs"):
+        subject.build(**args)
+    assert list(permanent.iterdir()) == []
 
 
 def test_claim_precedes_private_rows_and_program_execution_and_second_call_fails(

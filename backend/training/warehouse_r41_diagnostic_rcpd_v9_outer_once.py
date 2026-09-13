@@ -27,6 +27,9 @@ import zipfile
 
 import numpy as np
 
+from backend import warehouse_r41_diagnostic_boosted_tree as boosted_tree_api
+from backend import warehouse_r41_diagnostic_public_features_v9 as public_features_api
+from backend import warehouse_r41_diagnostic_public_tree_program_v9 as program_api
 from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v9 as projection_api
 from backend.training import warehouse_r41_diagnostic_outer_collection_v9 as collection_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v7 as rows_api
@@ -84,6 +87,7 @@ def contract() -> dict[str, Any]:
         "preclaim_forbidden_row_fields": sorted(_PRIVATE_ROW_FIELDS),
         "candidate_refit": False,
         "program_mutation": False,
+        "candidate_runtime_source_closure_authenticated_before_attempt_anchor": True,
         "runtime_action_override": False,
         "protected_final_access": False,
         "formal_ready": False,
@@ -92,6 +96,21 @@ def contract() -> dict[str, Any]:
 
 def producer_sources() -> dict[str, str]:
     return dict(sorted(local_source_hashes((Path(__file__).resolve(),)).items()))
+
+
+def runtime_program_sources() -> dict[str, str]:
+    """Return the exact local source closure that interprets a v9 program.
+
+    The saved relations contract fixes names and ordering, but a source edit
+    could change how one of those names is computed without changing the JSON
+    payload.  These hashes therefore authenticate executable semantics before
+    a fresh outer is irrevocably claimed.
+    """
+    return dict(sorted(local_source_hashes((
+        Path(program_api.__file__).resolve(),
+        Path(public_features_api.__file__).resolve(),
+        Path(boosted_tree_api.__file__).resolve(),
+    )).items()))
 
 
 def _sha(value: Any, label: str) -> str:
@@ -217,7 +236,7 @@ def _verify_lock_files(bindings: Mapping[str, str], **paths: str | Path) -> dict
 def _validate_candidate_source_closure(
     lock: Mapping[str, Any], selector_report_path: Path,
     bindings: Mapping[str, str],
-) -> None:
+) -> tuple[dict[str, str], dict[str, str]]:
     selector = _strict_json_bytes(
         selector_report_path.read_bytes(), "locked v9 selector report")
     closure = None
@@ -229,18 +248,29 @@ def _validate_candidate_source_closure(
             closure = dict(candidate)
             break
     if closure is None:
-        report_binding = selector.get("bindings", {}).get(
-            "source_closure_sha256") if isinstance(
-                selector.get("bindings"), Mapping) else None
-        if report_binding != bindings["source_closure_sha256"]:
-            raise ValueError("V9 candidate source closure is not authenticated")
-        return
+        raise ValueError(
+            "V9 candidate source closure mapping is required for runtime authentication")
     if (not closure
             or any(type(name) is not str or type(value) is not str
                    or _HEX.fullmatch(value) is None
                    for name, value in closure.items())
             or digest(closure) != bindings["source_closure_sha256"]):
         raise ValueError("V9 candidate source closure binding differs")
+    runtime = runtime_program_sources()
+    missing = sorted(set(runtime) - set(closure))
+    changed = sorted(
+        name for name, value in runtime.items()
+        if name in closure and closure[name] != value
+    )
+    if missing or changed:
+        details = []
+        if missing:
+            details.append("missing=" + ",".join(missing))
+        if changed:
+            details.append("changed=" + ",".join(changed))
+        raise ValueError(
+            "V9 candidate runtime source closure differs: " + "; ".join(details))
+    return closure, runtime
 
 
 def _registry(path: Path) -> dict[str, Any]:
@@ -557,7 +587,8 @@ def build(
         outer_hash_projection=outer_hash_projection_path,
         development_rows=development_rows_path, program=program_path,
         selector_report=selector_report_path)
-    _validate_candidate_source_closure(lock, paths["selector_report"], bindings)
+    candidate_sources, runtime_sources = _validate_candidate_source_closure(
+        lock, paths["selector_report"], bindings)
     registry = _registry(paths["fresh_outer_registry"])
     program_payload = _program_payload(paths["program"])
     projection, projection_receipt = projection_api.read_saved_projection(
@@ -620,6 +651,8 @@ def build(
             "outer_rows_sha256": file_hash(rows_path),
             "outer_hash_projection_receipt_sha256": file_hash(
                 Path(outer_hash_projection_receipt_path).expanduser().absolute()),
+            "candidate_source_closure_sha256": digest(candidate_sources),
+            "runtime_program_source_closure_sha256": digest(runtime_sources),
             "source_closure_sha256": digest(sources),
         },
         "preflight": preflight,

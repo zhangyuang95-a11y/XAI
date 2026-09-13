@@ -33,6 +33,7 @@ import numpy as np
 from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_api
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_api
 from backend.training import warehouse_r41_diagnostic_fresh_final_holdout_v4 as v4
+from backend.training import warehouse_r41_diagnostic_outer_collection_v10 as collection_api
 from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v10 as projection_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v10_outer_once as outer_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v10_outer_split as registry_api
@@ -81,6 +82,7 @@ _ANCHOR_BINDING_FIELDS = frozenset((
 _CONFIG_PATH_FIELDS = frozenset((
     "permanent_final_registry", "candidate_lock", "actor", "protocol",
     "runtime_manifest", "designation", "development_rows",
+    "selector_report",
     "fresh_outer_registry", "fresh_outer_registry_report",
     "fresh_outer_hash_projection", "fresh_outer_hash_projection_receipt",
     "failed_rows", "failed_outer_closeout",
@@ -313,6 +315,7 @@ def _authenticate_public_inputs(
         "runtime_manifest": "runtime_manifest_sha256",
         "designation": "designation_sha256",
         "development_rows": "development_rows_sha256",
+        "selector_report": "selector_report_sha256",
         "fresh_outer_registry": "fresh_outer_registry_sha256",
         "fresh_outer_registry_report": "fresh_outer_registry_report_sha256",
         "fresh_outer_hash_projection": "outer_hash_projection_sha256",
@@ -336,6 +339,12 @@ def _authenticate_public_inputs(
                 != lock_bindings["protocol_sha256"]
             or designation.get("evidence", {}).get("action_authority_exact") is not True):
         raise ValueError("Final materializer Actor designation differs")
+
+    selector_report = collection_api.authenticate_locked_candidate_selector(
+        lock=lock, selector_report_path=authenticated["selector_report"],
+        expected_selector_report_sha256=lock_bindings[
+            "selector_report_sha256"],
+        expected_program_sha256=lock_bindings["program_sha256"])
 
     registry, registry_report, selected_identity_sha256 = (
         outer_api._registry_bundle(
@@ -363,8 +372,12 @@ def _authenticate_public_inputs(
         expected_sha256=lock_bindings["development_rows_sha256"],
         fields=frozenset(("observation_hashes", "scene_fingerprints")),
         label="locked v9 development rows")
-    development_hashes = set(outer_api._decode(
-        development["observation_hashes"], "development observation hashes"))
+    development_ordered = outer_api._decode(
+        development["observation_hashes"], "development observation hashes")
+    development_hashes = _retained_development_hashes(
+        development_ordered=development_ordered,
+        outer_unique_hashes=projection["projection"]["unique_observation_hashes"],
+        validation_wins=selector_report["development"]["validation_wins"])
     development_scenes = set(outer_api._decode(
         development["scene_fingerprints"], "development scene fingerprints"))
     fresh_outer_hashes = set(projection["projection"][
@@ -388,6 +401,38 @@ def _authenticate_public_inputs(
         "fresh_outer_hashes": fresh_outer_hashes,
         "fresh_outer_scenes": fresh_outer_scenes,
     }
+
+
+def _retained_development_hashes(
+    *, development_ordered: Sequence[str], outer_unique_hashes: Sequence[str],
+    validation_wins: Mapping[str, Any],
+) -> set[str]:
+    """Authenticate the validation-wins mask frozen before candidate fitting."""
+    keep = ~np.isin(
+        np.asarray(development_ordered, dtype="U64"),
+        np.asarray(outer_unique_hashes, dtype="U64"))
+    retained = [value for value, selected in zip(development_ordered, keep)
+                if bool(selected)]
+    packed = np.ascontiguousarray(keep.astype(np.uint8))
+    recomputed = {
+        "source_rows": len(development_ordered),
+        "retained_rows": len(retained),
+        "removed_rows": int(np.sum(~keep)),
+        "source_unique_observations": len(set(development_ordered)),
+        "retained_unique_observations": len(set(retained)),
+        "fresh_outer_unique_observations": len(outer_unique_hashes),
+        "retained_fresh_outer_observation_overlap": 0,
+        "keep_mask_sha256": sha256(memoryview(packed).cast("B")).hexdigest(),
+        "retained_observation_hashes_sha256": digest(retained),
+    }
+    if (not isinstance(validation_wins, Mapping)
+            or any(validation_wins.get(name) != value
+                   for name, value in recomputed.items())):
+        raise ValueError("Locked v10 validation-wins projection differs")
+    result = set(retained)
+    if result & set(outer_unique_hashes):
+        raise ValueError("Development and fresh outer isolation differs")
+    return result
 
 
 def _prior_outer_hashes(

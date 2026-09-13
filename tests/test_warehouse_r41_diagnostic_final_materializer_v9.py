@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from backend.training import warehouse_r41_diagnostic_final_materializer_v9 as subject
@@ -284,6 +285,34 @@ def test_selection_never_replaces_actor_action_or_opens_program(monkeypatch):
     assert subject.contract()["runtime_action_override"] is False
 
 
+def test_public_authentication_reproduces_locked_validation_wins():
+    development = [_fp("same-a"), _fp("outer"), _fp("same-a"), _fp("same-c")]
+    outer = [_fp("outer")]
+    keep = ~np.isin(
+        np.asarray(development, dtype="U64"), np.asarray(outer, dtype="U64"))
+    retained = [value for value, selected in zip(development, keep)
+                if bool(selected)]
+    packed = np.ascontiguousarray(keep.astype(np.uint8))
+    validation_wins = {
+        "source_rows": 4,
+        "retained_rows": 3,
+        "removed_rows": 1,
+        "source_unique_observations": 3,
+        "retained_unique_observations": 2,
+        "fresh_outer_unique_observations": 1,
+        "retained_fresh_outer_observation_overlap": 0,
+        "keep_mask_sha256": sha256(memoryview(packed).cast("B")).hexdigest(),
+        "retained_observation_hashes_sha256": digest(retained),
+    }
+    assert subject._retained_development_hashes(
+        development_ordered=development, outer_unique_hashes=outer,
+        validation_wins=validation_wins) == {_fp("same-a"), _fp("same-c")}
+    with pytest.raises(ValueError, match="validation-wins projection differs"):
+        subject._retained_development_hashes(
+            development_ordered=development, outer_unique_hashes=outer,
+            validation_wins=dict(validation_wins, retained_rows=4))
+
+
 def test_source_orders_claim_config_public_preparation_then_salt():
     source = inspect.getsource(subject.materialize)
     positions = [source.index(token) for token in (
@@ -294,6 +323,7 @@ def test_source_orders_claim_config_public_preparation_then_salt():
 
 
 def test_config_is_strict_and_does_not_embed_secret(tmp_path, monkeypatch):
+    assert "selector_report" in subject._CONFIG_PATH_FIELDS
     paths = {name: str((tmp_path / name).absolute())
              for name in subject._CONFIG_PATH_FIELDS}
     value = {"version": subject.CONFIG_VERSION, "paths": paths}

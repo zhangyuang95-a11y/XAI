@@ -44,6 +44,7 @@ R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V5 = "warehouse-r41-diagnostic-online-rel
 R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V6 = "warehouse-r41-diagnostic-online-release.v6"
 R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V7 = "warehouse-r41-diagnostic-online-release.v7"
 R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V8 = "warehouse-r41-diagnostic-online-release.v8"
+R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V9 = "warehouse-r41-diagnostic-online-release.v9"
 R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS = (
     R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION,
     R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V4,
@@ -51,6 +52,7 @@ R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS = (
     R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V6,
     R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V7,
     R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V8,
+    R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V9,
 )
 R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION = "r4.1-diagnostic"
 NAMESPACE = "online_demo"
@@ -69,13 +71,15 @@ R41_DIAGNOSTIC_RELEASE_MODULE_V5 = "ui.warehouse_alignment_r41_diagnostic_releas
 R41_DIAGNOSTIC_RELEASE_MODULE_V6 = "ui.warehouse_alignment_r41_diagnostic_release_v6"
 R41_DIAGNOSTIC_RELEASE_MODULE_V7 = "ui.warehouse_alignment_r41_diagnostic_release_v7"
 R41_DIAGNOSTIC_RELEASE_MODULE_V8 = "ui.warehouse_alignment_r41_diagnostic_release_v8"
+R41_DIAGNOSTIC_RELEASE_MODULE_V9 = "ui.warehouse_alignment_r41_diagnostic_release_v9"
 RELEASE_MODULES = (DEFAULT_RELEASE_MODULE, R41_RELEASE_MODULE,
                    R41_DIAGNOSTIC_RELEASE_MODULE,
                    R41_DIAGNOSTIC_RELEASE_MODULE_V4,
                    R41_DIAGNOSTIC_RELEASE_MODULE_V5,
                    R41_DIAGNOSTIC_RELEASE_MODULE_V6,
                    R41_DIAGNOSTIC_RELEASE_MODULE_V7,
-                   R41_DIAGNOSTIC_RELEASE_MODULE_V8)
+                   R41_DIAGNOSTIC_RELEASE_MODULE_V8,
+                   R41_DIAGNOSTIC_RELEASE_MODULE_V9)
 MAX_BODY = 20_000
 MAX_SECRET_FILE_BYTES = 1_000_000
 _ACTIONS = {"UP", "DOWN", "LEFT", "RIGHT", "WAIT"}
@@ -749,6 +753,43 @@ class OnlineAlignmentStudyStore:
         run = self._run(db, session["id"])
         return run["signature"] == self.signature and run["stage"] == "task1"
 
+    def _explanation_access_context(self, db, session, question, *,
+                                    request_kind="new_question"):
+        """Bind v9 authorization to the exact run/frame being rendered.
+
+        The generic study gate remains authoritative for older releases.  The
+        v9 renderer additionally verifies whether the selected frame belongs
+        to the live view, an open-round history view, or the closed-round
+        review.  Computing that surface in the server keeps the renderer from
+        inferring participant permissions from explanation evidence.
+        """
+
+        run = self._run(db, session["id"], question["run_id"])
+        frames = [int(row[0]) for row in db.execute(
+            "SELECT frame FROM frames WHERE run_id=? ORDER BY frame",
+            (run["id"],),
+        )]
+        selected = int(question["frame"])
+        if not frames or selected not in frames:
+            raise CommandError("frame_not_found", 404)
+        if bool(run["ended"]):
+            surface = "round_review"
+        elif selected == frames[-1]:
+            surface = "live"
+        else:
+            surface = "history"
+        return {
+            "condition": session["condition"],
+            "stage": session["stage"],
+            "surface": surface,
+            "request_kind": request_kind,
+            "active_run_id": session["active_run"],
+            "bound_run_id": run["id"],
+            "selected_frame": selected,
+            "available_frames": frames,
+            "round_closed": bool(run["ended"]),
+        }
+
     def _metrics(self, env, old=None, outcome=None):
         state = _state(env)
         result = dict(old or {"ai_waits": 0, "ai_blocked": 0, "overrides": 0})
@@ -1282,10 +1323,20 @@ class OnlineAlignmentStudyStore:
                     db.execute("UPDATE questions SET status='expired',answer=NULL,evidence_detail=NULL WHERE id=?", (qid,))
                     db.commit(); return
                 row = db.execute("SELECT internal FROM frames WHERE run_id=? AND frame=?", (q["run_id"], q["frame"])).fetchone()
+                access_context = self._explanation_access_context(
+                    db, session, q, request_kind="new_question")
                 db.execute("UPDATE questions SET status='running' WHERE id=?", (qid,))
                 db.commit()
             record = json.loads(row[0])
-            answer_result = self.explainer.answer(dict(q), record, self.runtime)
+            answer_study = getattr(self.explainer, "answer_study", None)
+            if callable(answer_study):
+                answer_result = answer_study(
+                    dict(q), record, self.runtime,
+                    access_context=access_context,
+                )
+            else:
+                answer_result = self.explainer.answer(
+                    dict(q), record, self.runtime)
             evidence_detail = ""
             if isinstance(answer_result, dict):
                 evidence_detail = answer_result.get("evidence_detail", "")

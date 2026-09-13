@@ -26,11 +26,11 @@ import numpy as np
 from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_api
 from backend.training import warehouse_r41_diagnostic_explanation_audit_v9 as audit_api
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_api
-from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v9 as projection_api
-from backend.training import warehouse_r41_diagnostic_outer_collection_v9 as collection_api
+from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v10 as projection_api
+from backend.training import warehouse_r41_diagnostic_outer_collection_v10 as collection_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v7 as rows_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as metrics_api
-from backend.training import warehouse_r41_diagnostic_rcpd_v9_outer_once as outer_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v10_outer_once as outer_api
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 
@@ -57,7 +57,7 @@ OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH = (
 # claim; any later producer change requires a new protocol version rather than
 # silently changing a consumed final evaluator.
 OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256 = (
-    "833c1f56549c43ba0797329185828c8906965d22f879e19af3cd6ef78c217288"
+    "6924a7982159c50697835c2bf0755737c1f8235551d713e4c9491e30e2b9fec9"
 )
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _MATERIAL_FIELDS = frozenset((

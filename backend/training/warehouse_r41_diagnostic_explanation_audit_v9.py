@@ -16,8 +16,8 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from backend.training import warehouse_r41_diagnostic_outer_collection_v9 as collection_api
-from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v9 as projection_api
+from backend.training import warehouse_r41_diagnostic_outer_collection_v10 as collection_api
+from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v10 as projection_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v7 as rows_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as metrics_api
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes

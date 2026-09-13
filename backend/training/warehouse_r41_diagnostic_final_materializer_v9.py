@@ -33,9 +33,9 @@ import numpy as np
 from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_api
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_api
 from backend.training import warehouse_r41_diagnostic_fresh_final_holdout_v4 as v4
-from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v9 as projection_api
-from backend.training import warehouse_r41_diagnostic_rcpd_v9_outer_once as outer_api
-from backend.training import warehouse_r41_diagnostic_rcpd_v9_outer_split as registry_api
+from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v10 as projection_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v10_outer_once as outer_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v10_outer_split as registry_api
 from backend.training import warehouse_r41_diagnostic_retired_identity_projection_v8 as retired_api
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training.warehouse_native_common import canonical, digest, file_hash
@@ -83,17 +83,24 @@ _CONFIG_PATH_FIELDS = frozenset((
     "runtime_manifest", "designation", "development_rows",
     "fresh_outer_registry", "fresh_outer_registry_report",
     "fresh_outer_hash_projection", "fresh_outer_hash_projection_receipt",
-    "failed_rows", "original_expansion", "consumed_outer_registry",
+    "failed_rows", "failed_outer_closeout",
+    "permanent_failure_closeout_registry", "original_expansion",
+    "consumed_outer_registry",
     "consumed_outer_report", "formal_selection", "previous_development",
-    "retired_identity_projection", "prior_outer_hash_projection",
+    "retired_identity_projection", "consumed_v9_attempt_closeout",
+    "permanent_v9_attempt_registry", "prior_outer_hash_projection",
     "private_salt",
 ))
 _PRIOR_OUTER_PROJECTION_FIELDS = frozenset((
-    "version", "source_closeout_content_sha256",
-    "source_projection_content_sha256", "outer_observation_hashes",
-    "unique_outer_observation_hash_count", "selector_rule",
+    "version", "source_v8_closeout_content_sha256",
+    "source_v8_projection_content_sha256",
+    "source_v9_closeout_content_sha256",
+    "source_v9_projection_content_sha256", "outer_observation_hashes",
+    "unique_outer_observation_hash_count", "outer_observation_hashes_sha256",
+    "component_unique_counts", "component_hashes_sha256", "selector_rule",
     "raw_observations_included", "actions_included",
-    "probabilities_included", "labels_included", "formal_ready",
+    "probabilities_included", "labels_included",
+    "selection_used_this_projection", "formal_ready",
     "content_sha256",
 ))
 
@@ -399,11 +406,22 @@ def _prior_outer_hashes(
             or not isinstance(values, list) or not values
             or values != sorted(set(values))
             or value.get("unique_outer_observation_hash_count") != len(values)
+            or value.get("outer_observation_hashes_sha256") != digest(values)
+            or set(value.get("component_unique_counts", {}))
+                != {"consumed_v8", "consumed_v9"}
+            or set(value.get("component_hashes_sha256", {}))
+                != {"consumed_v8", "consumed_v9"}
+            or sum(value["component_unique_counts"].values()) < len(values)
+            or any(type(child) is not int or child <= 0
+                   for child in value["component_unique_counts"].values())
+            or any(type(child) is not str or _HEX.fullmatch(child) is None
+                   for child in value["component_hashes_sha256"].values())
             or any(type(child) is not str or _HEX.fullmatch(child) is None
                    for child in values)
             or any(value.get(name) is not False for name in (
                 "raw_observations_included", "actions_included",
-                "probabilities_included", "labels_included", "formal_ready"))):
+                "probabilities_included", "labels_included",
+                "selection_used_this_projection", "formal_ready"))):
         raise ValueError("Prior failed-outer hash projection differs")
     return set(values)
 
@@ -443,74 +461,38 @@ def _read_frozen_retired_projection(
 def _exposure_closure(
     *, paths: Mapping[str, Path], registry: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], set[int], set[str], set[str]]:
-    """Rebuild the identity-only v9 exclusion closure from frozen sources."""
+    """Rebuild the identity-only replacement-outer exclusion closure."""
     bindings = registry.get("bindings")
     if not isinstance(bindings, Mapping):
         raise ValueError("Fresh outer registry bindings are missing")
-    _, row_fingerprints = registry_api._scene_fingerprints_only(
-        paths["failed_rows"],
-        expected_sha256=bindings["failed_rows_file_sha256"])
-    _, original = registry_api._strict_json(
-        paths["original_expansion"], "original development expansion",
-        expected_sha256=bindings["original_expansion_file_sha256"])
-    trace_seeds, trace_fingerprints, old_outer_seeds, old_outer_fingerprints = (
-        registry_api._source_expansion(original))
-    current_file, current = registry_api._strict_json(
-        paths["consumed_outer_registry"], "consumed v8 outer registry",
-        expected_sha256=bindings["consumed_outer_registry_file_sha256"])
-    _, current_report = registry_api._strict_json(
-        paths["consumed_outer_report"], "consumed v8 outer report",
-        expected_sha256=bindings["consumed_outer_report_file_sha256"])
-    current_identities, current_seeds, current_fingerprints, registered_old = (
-        registry_api._current_outer(
-            current, current_report, registry_sha256=file_hash(current_file)))
-    if registered_old != old_outer_fingerprints:
-        raise ValueError("Prior outer exposure closure differs")
-    _, formal = registry_api._strict_json(
-        paths["formal_selection"], "formal X/Y selection",
-        expected_sha256=bindings["formal_selection_file_sha256"])
-    formal_seeds, formal_fingerprints = registry_api._formal_identities(formal)
-    _, previous = registry_api._strict_json(
-        paths["previous_development"], "previous development supplement",
-        expected_sha256=bindings["previous_development_file_sha256"])
-    previous_seeds, previous_fingerprints = registry_api._previous_identities(
-        previous)
-    retired = _read_frozen_retired_projection(
-        paths["retired_identity_projection"],
-        expected_projection_sha256=bindings["retired_projection_file_sha256"],
-        expected_report_sha256=bindings[
-            "retired_projection_report_file_sha256"])
-    retired_seeds, retired_fingerprints = registry_api._unique_identities(
-        retired.get("exposed_identities"),
-        expected_count=retired_api.EXPECTED_GLOBAL_EXPOSED_IDENTITIES,
-        label="retired exposed projection")
-
-    candidates = registry_api._candidate_identity_population()
-    by_fingerprint = {row["fingerprint"]: row for row in candidates}
-    if len(by_fingerprint) != registry_api.FIXED_CANDIDATE_SCENE_COUNT:
-        raise ValueError("Fixed candidate identity population differs")
-    row_candidate_fingerprints = row_fingerprints & set(by_fingerprint)
-    row_candidate_seeds = {
-        int(by_fingerprint[fingerprint]["seed"])
-        for fingerprint in row_candidate_fingerprints
-    }
-    excluded_seeds = (
-        trace_seeds | old_outer_seeds | current_seeds | formal_seeds
-        | previous_seeds | retired_seeds | row_candidate_seeds
-        | {int(row["seed"]) for row in current_identities}
+    closure = registry_api.replay_exclusion_closure(
+        manifest_path=paths["runtime_manifest"],
+        failed_rows_path=paths["failed_rows"],
+        original_expansion_path=paths["original_expansion"],
+        current_outer_registry_path=paths["consumed_outer_registry"],
+        current_outer_report_path=paths["consumed_outer_report"],
+        failure_closeout_path=paths["failed_outer_closeout"],
+        expected_failure_closeout_sha256=bindings[
+            "failure_closeout_file_sha256"],
+        permanent_closeout_registry=paths[
+            "permanent_failure_closeout_registry"],
+        formal_selection_path=paths["formal_selection"],
+        previous_development_path=paths["previous_development"],
+        retired_projection_path=paths["retired_identity_projection"],
+        consumed_v9_attempt_closeout_path=paths[
+            "consumed_v9_attempt_closeout"],
+        expected_consumed_v9_attempt_closeout_sha256=bindings[
+            "consumed_v9_attempt_closeout_file_sha256"],
+        permanent_v9_attempt_registry=paths["permanent_v9_attempt_registry"],
     )
-    excluded_fingerprints = (
-        trace_fingerprints | old_outer_fingerprints | current_fingerprints
-        | registered_old | formal_fingerprints | previous_fingerprints
-        | retired_fingerprints | row_fingerprints
-        | {str(row["fingerprint"]) for row in current_identities}
-    )
+    candidates = closure["candidates"]
+    excluded_seeds = set(closure["excluded_seeds"])
+    excluded_fingerprints = set(closure["excluded_fingerprints"])
+    row_fingerprints = set(closure["row_fingerprints"])
     remaining, selected, remaining_counts = registry_api._remaining_and_selected(
         candidates, excluded_seeds=excluded_seeds,
         excluded_fingerprints=excluded_fingerprints)
-    selected_public = [{key: row[key] for key in (
-        "batch_index", "family_id", "seed", "fingerprint")}
-        for row in selected]
+    selected_public = [registry_api._public_identity(row) for row in selected]
     actual_outer = registry.get("selected_outer_identities")
     report_selection = registry.get("statistics", {})
     exclusion_counts = registry.get("exclusion_counts")
@@ -523,12 +505,17 @@ def _exposure_closure(
             or exclusion_counts != {
                 "source_row_scene_fingerprints": len(row_fingerprints),
                 "source_rows_in_fixed_candidate_population": len(
-                    row_candidate_fingerprints),
-                "original_expansion_trace_identities": len(trace_fingerprints),
-                "consumed_outer_identities": len(current_identities),
-                "formal_xy_identities": len(formal_fingerprints),
-                "previous_development_identities": len(previous_fingerprints),
-                "retired_exposed_identities": len(retired_fingerprints),
+                    closure["row_candidate_fingerprints"]),
+                "original_expansion_trace_identities": len(
+                    closure["trace_fingerprints"]),
+                "consumed_outer_identities": len(closure["current_identities"]),
+                "consumed_v9_outer_identities": len(
+                    closure["v9_consumed_identities"]),
+                "formal_xy_identities": len(closure["formal_fingerprints"]),
+                "previous_development_identities": len(
+                    closure["previous_fingerprints"]),
+                "retired_exposed_identities": len(
+                    closure["retired_fingerprints"]),
                 "union_candidate_identities_excluded": (
                     len(candidates) - len(remaining)),
             }
@@ -539,16 +526,19 @@ def _exposure_closure(
                 "source_row_scene_fingerprints_sha256": digest(
                     sorted(row_fingerprints)),
                 "original_expansion_trace_fingerprints_sha256": digest(
-                    sorted(trace_fingerprints)),
-                "consumed_outer_identities_sha256": digest(current_identities),
+                    sorted(closure["trace_fingerprints"])),
+                "consumed_outer_identities_sha256": digest(
+                    closure["current_identities"]),
+                "consumed_v9_outer_identities_sha256": digest(
+                    closure["v9_consumed_identities"]),
                 "retired_exposed_fingerprints_sha256": digest(
-                    sorted(retired_fingerprints)),
+                    sorted(closure["retired_fingerprints"])),
             }):
         raise ValueError("Fresh outer exposed-identity closure does not replay")
 
-    fresh_seeds, fresh_fingerprints = registry_api._unique_identities(
+    fresh_seeds, fresh_fingerprints = registry_api.v9._unique_identities(
         actual_outer, expected_count=registry_api.FRESH_OUTER_SCENE_COUNT,
-        label="fresh v9 outer")
+        label="fresh replacement outer")
     excluded_seeds.update(fresh_seeds)
     excluded_fingerprints.update(fresh_fingerprints)
     return candidates, excluded_seeds, excluded_fingerprints, row_fingerprints

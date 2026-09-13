@@ -74,11 +74,29 @@ _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _EARLY_DEVELOPMENT_MEMBERS = (
     "observation_hashes", "scene_fingerprints", "observations",
 )
+_PRIOR_PROJECTION_COMPONENTS = frozenset((
+    "consumed_v8", "consumed_v9", "consumed_v10",
+))
+_PRIOR_PROJECTION_FIELDS = frozenset((
+    "version", "source_v8_closeout_content_sha256",
+    "source_v8_projection_content_sha256",
+    "source_v9_closeout_content_sha256",
+    "source_v9_projection_content_sha256",
+    "source_v10_final_closeout_content_sha256",
+    "source_v10_projection_content_sha256", "outer_observation_hashes",
+    "unique_outer_observation_hash_count", "outer_observation_hashes_sha256",
+    "component_unique_counts", "component_hashes_sha256", "selector_rule",
+    "raw_observations_included", "actions_included",
+    "probabilities_included", "labels_included",
+    "selection_used_this_projection", "formal_ready", "content_sha256",
+))
 _LOCK_BINDINGS = frozenset((
     "actor_sha256", "actor_feature_names_sha256", "protocol_sha256",
     "runtime_manifest_sha256", "public_feature_contract_sha256",
     "designation_sha256", "failed_outer_closeout_sha256",
     "fresh_outer_registry_sha256", "fresh_outer_registry_report_sha256",
+    "prior_outer_hash_projection_sha256",
+    "prior_outer_hash_projection_content_sha256",
     "outer_hash_projection_sha256", "outer_hash_projection_receipt_sha256",
     "development_rows_sha256", "candidate_grid_sha256", "program_sha256",
     "selector_report_sha256", "source_closure_sha256",
@@ -94,6 +112,17 @@ def contract() -> dict[str, Any]:
             "identity exclusion is bound by the v11 registry; labels and "
             "probabilities are not selector inputs"
         ),
+        "consumed_v10_outer_input": (
+            "the registry-bound label-free observation-hash projection is "
+            "included in validation-wins before development labels are read"
+        ),
+        "prior_outer_input": (
+            "registry-bound union of consumed v8, v9, and v10 one-way "
+            "observation hashes only"
+        ),
+        "prior_outer_projection_bindings": [
+            "file_sha256", "content_sha256",
+        ],
         "fresh_outer_input": "ordered v11 label-blind observation SHA-256 projection only",
         "validation_wins_before_private_member_read": True,
         "early_development_members": list(_EARLY_DEVELOPMENT_MEMBERS),
@@ -120,6 +149,7 @@ def contract() -> dict[str, Any]:
             "runtime_action_override": False,
         },
         "consumed_v9_outer_labels_or_probabilities_read": False,
+        "consumed_v10_outer_labels_or_probabilities_read": False,
         "fresh_v11_outer_labels_or_probabilities_read": False,
         "protected_final_access": False,
         "runtime_action_override": False,
@@ -224,6 +254,83 @@ def read_candidate_grid(path: str | Path, *, expected_sha256: str) -> dict[str, 
         raise ValueError("V9 candidate grid contains duplicate configurations")
     return {"version": GRID_VERSION, "configs": normalized,
             "content_sha256": value["content_sha256"]}
+
+
+def read_prior_outer_hash_projection(
+    path: str | Path, *, expected_sha256: str,
+    expected_content_sha256: str,
+) -> dict[str, Any]:
+    """Authenticate the registry-bound v8/v9/v10 hash-only projection."""
+    candidate = _regular(path, "prior outer observation-hash projection")
+    value = _strict_json(
+        candidate, "prior outer observation-hash projection",
+        expected_sha256=expected_sha256)
+    expected_content = _sha(
+        expected_content_sha256, "prior outer projection content")
+    hashes = value.get("outer_observation_hashes")
+    counts = value.get("component_unique_counts")
+    component_hashes = value.get("component_hashes_sha256")
+    source_fields = (
+        "source_v8_closeout_content_sha256",
+        "source_v8_projection_content_sha256",
+        "source_v9_closeout_content_sha256",
+        "source_v9_projection_content_sha256",
+        "source_v10_final_closeout_content_sha256",
+        "source_v10_projection_content_sha256",
+    )
+    if (set(value) != _PRIOR_PROJECTION_FIELDS
+            or value.get("version") != registry_api.VERSION
+                + ".validation-wins-exclusion.v1"
+            or not _content_valid(value)
+            or value.get("content_sha256") != expected_content
+            or not isinstance(hashes, list) or not hashes
+            or hashes != sorted(set(hashes))
+            or any(type(item) is not str or _HEX.fullmatch(item) is None
+                   for item in hashes)
+            or value.get("unique_outer_observation_hash_count") != len(hashes)
+            or value.get("outer_observation_hashes_sha256") != digest(hashes)
+            or not isinstance(counts, Mapping)
+            or set(counts) != _PRIOR_PROJECTION_COMPONENTS
+            or any(type(counts[name]) is not int or counts[name] <= 0
+                   for name in _PRIOR_PROJECTION_COMPONENTS)
+            or not isinstance(component_hashes, Mapping)
+            or set(component_hashes) != _PRIOR_PROJECTION_COMPONENTS
+            or any(type(component_hashes[name]) is not str
+                   or _HEX.fullmatch(component_hashes[name]) is None
+                   for name in _PRIOR_PROJECTION_COMPONENTS)
+            or any(type(value.get(name)) is not str
+                   or _HEX.fullmatch(value[name]) is None
+                   for name in source_fields)
+            or value.get("selector_rule") != (
+                "remove fit rows matching any prior outer observation hash "
+                "before reading actions, probabilities, or raw observations")
+            or value.get("raw_observations_included") is not False
+            or value.get("actions_included") is not False
+            or value.get("probabilities_included") is not False
+            or value.get("labels_included") is not False
+            or value.get("selection_used_this_projection") is not False
+            or value.get("formal_ready") is not False
+            or file_hash(candidate) != expected_sha256):
+        raise ValueError("Prior outer observation-hash projection differs")
+    return value
+
+
+def validation_hash_union(
+    prior_hashes: Sequence[str], fresh_hashes: Sequence[str],
+) -> list[str]:
+    """Return the sorted union used to freeze the development keep mask."""
+    normalized: list[list[str]] = []
+    for label, values in (("prior", prior_hashes), ("fresh", fresh_hashes)):
+        if (not isinstance(values, Sequence)
+                or isinstance(values, (str, bytes))):
+            raise ValueError(label + " observation hashes differ")
+        rows = list(values)
+        if (rows != sorted(set(rows))
+                or any(type(item) is not str or _HEX.fullmatch(item) is None
+                       for item in rows)):
+            raise ValueError(label + " observation hashes differ")
+        normalized.append(rows)
+    return sorted(set(normalized[0]) | set(normalized[1]))
 
 
 def _safe_npz_directory(path: Path) -> dict[str, zipfile.ZipInfo]:
@@ -720,7 +827,9 @@ def make_candidate_lock(*, bindings: Mapping[str, str],
         "information_boundary": {
             "candidate_locked_before_full_fresh_outer_collection": True,
             "fresh_outer_hashes_used_only_for_validation_wins": True,
+            "prior_outer_hashes_used_for_validation_wins": True,
             "consumed_v9_outer_labels_or_probabilities_read": False,
+            "consumed_v10_outer_labels_or_probabilities_read": False,
             "fresh_outer_actions_or_probabilities_read": False,
             "protected_final_access": False,
             "runtime_action_override": False,
@@ -738,6 +847,8 @@ def _resolve_snapshot(
     permanent_closeout_registry: str | Path,
     registry_path: str | Path, registry_report_path: str | Path,
     expected_registry_sha256: str, expected_registry_report_sha256: str,
+    prior_projection_path: str | Path,
+    expected_prior_projection_sha256: str,
     projection_path: str | Path, projection_receipt_path: str | Path,
     expected_projection_sha256: str, expected_projection_receipt_sha256: str,
     development_rows_path: str | Path, candidate_grid_path: str | Path,
@@ -765,6 +876,8 @@ def _resolve_snapshot(
         "failure_closeout": closeout_original,
         "registry": _regular(registry_path, "fresh outer registry"),
         "registry_report": _regular(registry_report_path, "fresh outer registry report"),
+        "prior_projection": _regular(
+            prior_projection_path, "prior outer observation-hash projection"),
         "projection": _regular(projection_path, "fresh outer hash projection"),
         "projection_receipt": _regular(
             projection_receipt_path, "fresh outer projection receipt"),
@@ -788,6 +901,9 @@ def _resolve_snapshot(
         "registry": _sha(expected_registry_sha256, "fresh outer registry"),
         "registry_report": _sha(
             expected_registry_report_sha256, "fresh outer registry report"),
+        "prior_projection": _sha(
+            expected_prior_projection_sha256,
+            "prior outer observation-hash projection"),
         "projection": _sha(expected_projection_sha256, "fresh outer projection"),
         "projection_receipt": _sha(
             expected_projection_receipt_sha256, "fresh outer projection receipt"),
@@ -822,6 +938,8 @@ def build(
     permanent_closeout_registry: str | Path,
     registry_path: str | Path, registry_report_path: str | Path,
     expected_registry_sha256: str, expected_registry_report_sha256: str,
+    prior_projection_path: str | Path,
+    expected_prior_projection_sha256: str,
     projection_path: str | Path, projection_receipt_path: str | Path,
     expected_projection_sha256: str, expected_projection_receipt_sha256: str,
     development_rows_path: str | Path, candidate_grid_path: str | Path,
@@ -837,6 +955,8 @@ def build(
         registry_path=registry_path, registry_report_path=registry_report_path,
         expected_registry_sha256=expected_registry_sha256,
         expected_registry_report_sha256=expected_registry_report_sha256,
+        prior_projection_path=prior_projection_path,
+        expected_prior_projection_sha256=expected_prior_projection_sha256,
         projection_path=projection_path, projection_receipt_path=projection_receipt_path,
         expected_projection_sha256=expected_projection_sha256,
         expected_projection_receipt_sha256=expected_projection_receipt_sha256,
@@ -877,6 +997,25 @@ def build(
         closed_rows_sha = closeout["source"]["v8_combined_rows_sha256"]
         receipt_bindings = projection_receipt.get("bindings", {})
         registry_bindings = registry.get("bindings", {})
+        prior_projection_file_sha256 = _sha(
+            registry_bindings.get(
+                "outer_observation_hash_projection_file_sha256"),
+            "registry-bound prior outer projection file")
+        prior_projection_content_sha256 = _sha(
+            registry_bindings.get(
+                "outer_observation_hash_projection_content_sha256"),
+            "registry-bound prior outer projection content")
+        if (prior_projection_file_sha256
+                != _sha(expected_prior_projection_sha256,
+                        "prior outer projection")
+                or file_hash(paths["prior_projection"])
+                    != prior_projection_file_sha256):
+            raise ValueError(
+                "Prior outer projection does not match the v11 registry")
+        prior_projection = read_prior_outer_hash_projection(
+            paths["prior_projection"],
+            expected_sha256=prior_projection_file_sha256,
+            expected_content_sha256=prior_projection_content_sha256)
         if (designation.get("bindings", {}).get("actor_sha256") != actor.artifact_sha256
                 or receipt_bindings.get("actor_sha256") != actor.artifact_sha256
                 or receipt_bindings.get("protocol_sha256") != file_hash(paths["protocol"])
@@ -895,7 +1034,26 @@ def build(
                     != file_hash(paths["manifest"])):
             raise ValueError("V11 selector evidence bindings differ")
 
-        outer_hashes = projection["projection"]["unique_observation_hashes"]
+        prior_hashes = prior_projection["outer_observation_hashes"]
+        fresh_hashes = projection["projection"]["unique_observation_hashes"]
+        outer_hashes = validation_hash_union(prior_hashes, fresh_hashes)
+        validation_hash_inputs = {
+            "prior_outer_file_sha256": prior_projection_file_sha256,
+            "prior_outer_content_sha256": prior_projection_content_sha256,
+            "prior_outer_unique_observations": len(prior_hashes),
+            "prior_outer_observation_hashes_sha256": digest(prior_hashes),
+            "fresh_outer_file_sha256": file_hash(paths["projection"]),
+            "fresh_outer_content_sha256": projection["content_sha256"],
+            "fresh_outer_unique_observations": len(fresh_hashes),
+            "fresh_outer_observation_hashes_sha256": digest(fresh_hashes),
+            "prior_fresh_observation_overlap": len(
+                set(prior_hashes) & set(fresh_hashes)),
+            "combined_unique_observations": len(outer_hashes),
+            "combined_observation_hashes_sha256": digest(outer_hashes),
+            "labels_or_probabilities_included": False,
+        }
+        validation_hash_inputs["content_sha256"] = digest(
+            validation_hash_inputs)
         arrays, overlap_audit = prepare_development_rows(
             paths["development_rows"], expected_sha256=closed_rows_sha,
             outer_observation_hashes=outer_hashes, actor=actor)
@@ -919,7 +1077,12 @@ def build(
             "retained_rows_semantic_sha256": overlap_audit[
                 "retained_rows_semantic_sha256"],
             "selected_config_sha256": selection["selected_config_sha256"],
+            "prior_outer_projection_sha256": prior_projection_file_sha256,
+            "prior_outer_projection_content_sha256": (
+                prior_projection_content_sha256),
             "fresh_outer_projection_sha256": file_hash(paths["projection"]),
+            "combined_validation_observation_hashes_sha256": digest(
+                outer_hashes),
         })
         program, final_diagnostics = fit_api.fit_program(
             final_arrays, all_fit, relations=relations,
@@ -963,6 +1126,10 @@ def build(
             "failed_outer_closeout_sha256": file_hash(paths["failure_closeout"]),
             "fresh_outer_registry_sha256": file_hash(paths["registry"]),
             "fresh_outer_registry_report_sha256": file_hash(paths["registry_report"]),
+            "prior_outer_hash_projection_sha256": (
+                prior_projection_file_sha256),
+            "prior_outer_hash_projection_content_sha256": (
+                prior_projection_content_sha256),
             "outer_hash_projection_sha256": file_hash(paths["projection"]),
             "outer_hash_projection_receipt_sha256": file_hash(paths["projection_receipt"]),
             "development_rows_sha256": file_hash(paths["development_rows"]),
@@ -979,6 +1146,7 @@ def build(
                 "failed_v8_outer_permanently_closed": True,
                 "failed_v8_outer_reclassified_as_development": True,
                 "validation_wins": overlap_audit,
+                "validation_hash_inputs": validation_hash_inputs,
                 "scene_families": family_audit,
                 "retained_scene_count": len(set(map(str, scene_values))),
                 "retained_row_count": len(arrays["observations"]),
@@ -1003,8 +1171,10 @@ def build(
             "sources": deepcopy(sources),
             "information_boundary": {
                 "fresh_outer_projection_authenticated_before_development_targets": True,
+                "prior_outer_projection_authenticated_before_development_targets": True,
                 "validation_wins_keep_mask_frozen_before_action_or_probability_read": True,
                 "consumed_v9_outer_labels_or_probabilities_read": False,
+                "consumed_v10_outer_labels_or_probabilities_read": False,
                 "fresh_outer_actions_or_probabilities_read": False,
                 "fresh_outer_full_collection_access": False,
                 "protected_final_access": False,
@@ -1078,6 +1248,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--expected-fresh-outer-registry-sha256", required=True)
     parser.add_argument("--fresh-outer-registry-report", required=True)
     parser.add_argument("--expected-fresh-outer-registry-report-sha256", required=True)
+    parser.add_argument("--prior-outer-hash-projection", required=True)
+    parser.add_argument(
+        "--expected-prior-outer-hash-projection-sha256", required=True)
     parser.add_argument("--outer-hash-projection", required=True)
     parser.add_argument("--expected-outer-hash-projection-sha256", required=True)
     parser.add_argument("--outer-hash-projection-receipt", required=True)
@@ -1097,6 +1270,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         registry_report_path=args.fresh_outer_registry_report,
         expected_registry_sha256=args.expected_fresh_outer_registry_sha256,
         expected_registry_report_sha256=args.expected_fresh_outer_registry_report_sha256,
+        prior_projection_path=args.prior_outer_hash_projection,
+        expected_prior_projection_sha256=(
+            args.expected_prior_outer_hash_projection_sha256),
         projection_path=args.outer_hash_projection,
         projection_receipt_path=args.outer_hash_projection_receipt,
         expected_projection_sha256=args.expected_outer_hash_projection_sha256,
@@ -1118,6 +1294,7 @@ __all__ = [
     "VERSION", "STATUS", "LOCK_SCHEMA", "GRID_VERSION",
     "FROZEN_CANDIDATE_GRID_SHA256", "CV_SALTS",
     "FOLD_COUNT", "contract", "producer_sources", "read_candidate_grid",
+    "read_prior_outer_hash_projection", "validation_hash_union",
     "read_public_development_projection", "freeze_validation_wins",
     "prepare_development_rows", "scene_families_from_public_geometry",
     "assign_blocked_scene_folds", "family_exact_bit_direction_cells",

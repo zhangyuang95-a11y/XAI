@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from backend.training import warehouse_r41_diagnostic_rcpd_v11_fit_selector as subject
-from backend.training.warehouse_native_common import file_hash
+from backend.training.warehouse_native_common import digest, file_hash
 
 
 def _fingerprint(label: str) -> str:
@@ -78,8 +78,26 @@ def test_v11_selector_uses_replacement_registry_without_consumed_v9_targets():
     assert contract["candidate_grid_sha256"] == \
         subject.FROZEN_CANDIDATE_GRID_SHA256
     assert contract["consumed_v9_outer_labels_or_probabilities_read"] is False
+    assert contract["consumed_v10_outer_labels_or_probabilities_read"] is False
     assert contract["fresh_v11_outer_labels_or_probabilities_read"] is False
     assert "v11 registry" in contract["consumed_v9_outer_input"]
+    assert contract["prior_outer_projection_bindings"] == [
+        "file_sha256", "content_sha256"]
+
+
+def test_v11_candidate_lock_binds_prior_validation_projection():
+    sources = {"producer.py": "b" * 64}
+    bindings = {name: "a" * 64 for name in subject._LOCK_BINDINGS}
+    bindings["source_closure_sha256"] = digest(sources)
+    lock = subject.make_candidate_lock(
+        bindings=bindings, source_closure=sources,
+        selected_config_sha256="c" * 64)
+    assert lock["bindings"]["prior_outer_hash_projection_sha256"] == "a" * 64
+    assert lock["bindings"][
+        "prior_outer_hash_projection_content_sha256"] == "a" * 64
+    boundary = lock["information_boundary"]
+    assert boundary["prior_outer_hashes_used_for_validation_wins"] is True
+    assert boundary["consumed_v10_outer_labels_or_probabilities_read"] is False
 
 
 def test_v11_selector_rejects_a_replacement_candidate_grid_before_file_access():
@@ -94,6 +112,8 @@ def test_v11_selector_rejects_a_replacement_candidate_grid_before_file_access():
             registry_path="missing", registry_report_path="missing",
             expected_registry_sha256=wrong,
             expected_registry_report_sha256=wrong,
+            prior_projection_path="missing",
+            expected_prior_projection_sha256=wrong,
             projection_path="missing", projection_receipt_path="missing",
             expected_projection_sha256=wrong,
             expected_projection_receipt_sha256=wrong,
@@ -142,3 +162,68 @@ def test_v11_validation_wins_mask_precedes_private_development_read(
     assert audit["retained_fresh_outer_observation_overlap"] == 0
     assert audit["private_development_members_read_before_mask_frozen"] is False
     assert audit["private_members_read_only_after_mask_frozen"] is True
+
+
+def _prior_projection() -> dict:
+    hashes = sorted([_fingerprint("prior-a"), _fingerprint("prior-b")])
+    value = {
+        "version": subject.registry_api.VERSION
+            + ".validation-wins-exclusion.v1",
+        "source_v8_closeout_content_sha256": _fingerprint("v8-closeout"),
+        "source_v8_projection_content_sha256": _fingerprint("v8-projection"),
+        "source_v9_closeout_content_sha256": _fingerprint("v9-closeout"),
+        "source_v9_projection_content_sha256": _fingerprint("v9-projection"),
+        "source_v10_final_closeout_content_sha256": _fingerprint("v10-closeout"),
+        "source_v10_projection_content_sha256": _fingerprint("v10-projection"),
+        "outer_observation_hashes": hashes,
+        "unique_outer_observation_hash_count": len(hashes),
+        "outer_observation_hashes_sha256": digest(hashes),
+        "component_unique_counts": {
+            "consumed_v8": 1, "consumed_v9": 1, "consumed_v10": 1},
+        "component_hashes_sha256": {
+            "consumed_v8": _fingerprint("v8-hashes"),
+            "consumed_v9": _fingerprint("v9-hashes"),
+            "consumed_v10": _fingerprint("v10-hashes"),
+        },
+        "selector_rule": (
+            "remove fit rows matching any prior outer observation hash before "
+            "reading actions, probabilities, or raw observations"),
+        "raw_observations_included": False,
+        "actions_included": False,
+        "probabilities_included": False,
+        "labels_included": False,
+        "selection_used_this_projection": False,
+        "formal_ready": False,
+    }
+    value["content_sha256"] = digest(value)
+    return value
+
+
+def test_v11_prior_outer_projection_is_strict_and_label_free(tmp_path: Path):
+    value = _prior_projection()
+    path = tmp_path / "prior.json"
+    path.write_bytes(subject._json_bytes(value))
+    loaded = subject.read_prior_outer_hash_projection(
+        path, expected_sha256=file_hash(path),
+        expected_content_sha256=value["content_sha256"])
+    assert loaded == value
+
+    unsafe = dict(value)
+    unsafe["labels_included"] = True
+    unsafe["content_sha256"] = digest({
+        key: child for key, child in unsafe.items() if key != "content_sha256"})
+    unsafe_path = tmp_path / "unsafe.json"
+    unsafe_path.write_bytes(subject._json_bytes(unsafe))
+    with pytest.raises(ValueError, match="Prior outer"):
+        subject.read_prior_outer_hash_projection(
+            unsafe_path, expected_sha256=file_hash(unsafe_path),
+            expected_content_sha256=unsafe["content_sha256"])
+
+
+def test_v11_validation_union_includes_prior_and_fresh_hashes():
+    shared = _fingerprint("shared")
+    prior = sorted([_fingerprint("prior"), shared])
+    fresh = sorted([_fingerprint("fresh"), shared])
+    combined = subject.validation_hash_union(prior, fresh)
+    assert combined == sorted(set(prior) | set(fresh))
+    assert len(combined) == 3

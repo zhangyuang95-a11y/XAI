@@ -511,6 +511,19 @@ def validate_v8_program_identity(program_path: str | Path, *,
     for name, component in (("base", program.base_program),
             *((group, program._specialist_programs[group]) for group in GROUPS)):
         metadata = component.metadata
+        fit_population = metadata.get("fit_population")
+        if name == "narrow_passage":
+            if (not isinstance(fit_population, Mapping)
+                    or any(fit_population.get(key) != value for key, value in
+                           rcpd_api.NARROW_PAIR_ENDPOINT_FIT.items())):
+                raise ValueError(
+                    "narrow_passage public-tree fit population differs")
+        elif fit_population != {
+                "population": "component_public_group_mask_rows",
+                "validation_labels_used": False,
+                "final_rows_accessed": False,
+        }:
+            raise ValueError(name + " public-tree fit population differs")
         expected_component_metadata = {
             "diagnostic_rcpd_version": rcpd_api.VERSION,
             "diagnostic_rcpd_binding_sha256": rcpd_report.get(
@@ -518,6 +531,7 @@ def validate_v8_program_identity(program_path: str | Path, *,
             "component": name,
             "fit_rows": metadata.get("fit_rows"),
             "fit_config": config["models"][name],
+            "fit_population": fit_population,
             "prediction_input": "349 deterministic public features",
             "validation_labels_used_for_fit": False,
             "actor_logits_used_as_program_input": False,

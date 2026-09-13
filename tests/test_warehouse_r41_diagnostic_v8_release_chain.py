@@ -779,6 +779,13 @@ def _component(relations, name, binding, model_config):
                      "diagnostic_rcpd_binding_sha256": binding,
                      "component": name, "fit_rows": 20,
                      "fit_config": model_config,
+                     "fit_population": (
+                         deepcopy(rcpd.NARROW_PAIR_ENDPOINT_FIT)
+                         if name == "narrow_passage" else {
+                             "population": "component_public_group_mask_rows",
+                             "validation_labels_used": False,
+                             "final_rows_accessed": False,
+                         }),
                      "prediction_input": "349 deterministic public features",
                      "validation_labels_used_for_fit": False,
                      "actor_logits_used_as_program_input": False,
@@ -864,6 +871,10 @@ def test_external_program_identity_accepts_exact_explicit_public_tree(tmp_path):
     lambda p: p["metadata"]["classes"].__setitem__(0, 9),
     lambda p: p["metadata"].update(unregistered_identity="unexpected"),
     lambda p: p["base"]["metadata"].update(unregistered_identity="unexpected"),
+    lambda p: p["base"]["metadata"]["fit_population"].update(
+        population="unregistered_rows"),
+    lambda p: p["specialists"][0]["program"]["metadata"][
+        "fit_population"].update(validation_labels_used=True),
     lambda p: p["specialists"][0]["route"].update(threshold=0.6),
     lambda p: p["specialists"][1].update(mix_weight=0.9),
     lambda p: p["metadata"].update(runtime_controller="tree_controller"),

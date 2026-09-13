@@ -405,7 +405,8 @@ def scene_families_from_public_geometry(
             raise ValueError("Development scene row differs")
         fingerprint = row.get("fingerprint")
         snapshot = row.get("snapshot")
-        tasks = snapshot.get("tasks") if isinstance(snapshot, Mapping) else None
+        state = snapshot.get("state") if isinstance(snapshot, Mapping) else None
+        tasks = state.get("tasks") if isinstance(state, Mapping) else None
         if (type(fingerprint) is not str or _HEX.fullmatch(fingerprint) is None
                 or not isinstance(tasks, list) or len(tasks) != 2):
             raise ValueError("Development public task geometry differs")

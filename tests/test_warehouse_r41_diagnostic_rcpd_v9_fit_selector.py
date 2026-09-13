@@ -221,7 +221,7 @@ def test_scene_family_is_recomputed_from_public_task_geometry():
 
     def row(label):
         return {"fingerprint": _fp(label), "family_id": family,
-                "snapshot": {"tasks": deepcopy(tasks)}}
+                "snapshot": {"state": {"tasks": deepcopy(tasks)}}}
 
     manifest = {
         "candidate_batches": [[row("candidate")]],

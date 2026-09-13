@@ -1059,8 +1059,15 @@ def build(
             environment_steps=environment_steps)
         # The frozen Actor is checked again after projection parity; no program
         # prediction is evaluated by this collection producer.
-        rows_v7._validate_arrays(
-            arrays, actor=actor, train_scenes=[], validation_scenes=scenes)
+        # Fresh outer rows are validation-only and intentionally carry unit
+        # placeholder weights.  The legacy development validator requires a
+        # non-empty fit partition to derive class-balancing weights, so it is
+        # not a valid contract for this archive.  Reuse the projection
+        # validator that authenticates the same complete row schema, frozen
+        # Actor outputs, episode matrix, intervention schedule, and unit
+        # weights without consulting a fit split.
+        projection_api._validate_projection_replay_arrays(
+            arrays, actor=actor, scenes=scenes)
 
         temporary = Path(tempfile.mkdtemp(
             prefix=".warehouse-r41-v9-outer-collection-", dir=destination.parent))

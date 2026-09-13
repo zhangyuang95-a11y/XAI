@@ -552,3 +552,14 @@ def test_build_has_lock_then_replay_then_ordered_compare_then_publish_order():
     assert shape < selector < replay < compare < write < rename
     assert source.count("snapshot.verify()") >= 3
     assert source.count("producer_sources() != sources") >= 3
+
+
+def test_build_uses_validation_only_outer_contract_after_replay():
+    source = inspect.getsource(subject.build)
+    replay = source.index("projection_api._replay_outer")
+    compare = source.index("_projection_matches_arrays", replay)
+    validate = source.index(
+        "projection_api._validate_projection_replay_arrays", compare)
+    write = source.index("_write_npz", validate)
+    assert replay < compare < validate < write
+    assert "rows_v7._validate_arrays(" not in source

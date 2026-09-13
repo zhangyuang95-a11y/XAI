@@ -53,10 +53,11 @@ OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH = (
 )
 # Frozen before the protected-final attempt.  This is the digest of the
 # materializer's complete transitive local source closure, not merely the
-# entry-point file.  Changing any producer dependency therefore requires a
-# new protocol version rather than silently changing the final evaluator.
+# entry-point file.  It may be re-frozen only before the first protected-final
+# claim; any later producer change requires a new protocol version rather than
+# silently changing a consumed final evaluator.
 OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256 = (
-    "43bffabd55c325c59a547dbce16409bc3be757a63d589e1349b1f952be7f2071"
+    "d4d1fb5ab3de2f9ab1bd01611ca841801f0203c49f9deb496a557670e687f7c8"
 )
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _MATERIAL_FIELDS = frozenset((

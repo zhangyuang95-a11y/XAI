@@ -113,7 +113,12 @@ def _config() -> dict:
     }
 
 
-def _metrics(*, charger_direction: float, other: float = 0.92) -> dict:
+def _metrics(
+    *, charger_direction: float, other: float = 0.92,
+    narrow_direction: float | None = None,
+) -> dict:
+    if narrow_direction is None:
+        narrow_direction = other
     return {
         "overall": {"rows": 100, "scenes": 12, "fidelity": other},
         "nonwait": {"rows": 80, "scenes": 12, "fidelity": other},
@@ -129,8 +134,11 @@ def _metrics(*, charger_direction: float, other: float = 0.92) -> dict:
                 group: {
                     "pairs": 20,
                     "scenes": 12,
-                    "fidelity": charger_direction
-                    if group == "shared_charger" else other,
+                    "fidelity": (
+                        charger_direction if group == "shared_charger"
+                        else narrow_direction if group == "narrow_passage"
+                        else other
+                    ),
                 }
                 for group in v8.GROUPS
             },
@@ -298,6 +306,7 @@ def _selector_evidence(tmp_path, monkeypatch):
         "version": subject.VERSION,
         "status": subject.STATUS_SELECTED,
         "contract": subject.contract(),
+        "development_diagnosis": deepcopy(subject.DEVELOPMENT_DIAGNOSIS),
         "bindings": {
             "source_v8_report_sha256": source_report_sha,
             "source_v8_rows_sha256": source_rows_sha,
@@ -534,6 +543,7 @@ def _strict_selector_evidence(tmp_path, monkeypatch):
         "version": subject.VERSION,
         "status": subject.STATUS_SELECTED,
         "contract": subject.contract(),
+        "development_diagnosis": deepcopy(subject.DEVELOPMENT_DIAGNOSIS),
         "bindings": {
             "source_v8_report_sha256": source_report_sha,
             "source_v8_rows_sha256": source_rows_sha,
@@ -644,25 +654,66 @@ def test_contract_freezes_fit_only_search_and_has_no_outer_or_final_metric_input
         "fresh_outer_binding"]
     assert value["source"]["final_rows_accessed"] is False
     assert value["source"]["final_labels_accessed"] is False
-    assert value["frozen_model_change"]["mix_candidates"] == [0.0, 0.25, 0.5, 1.0]
+    assert value["frozen_model_change"]["shared_charger"][
+        "mix_candidates"] == [0.0, 0.25, 0.5, 1.0]
+    assert value["frozen_model_change"]["narrow_passage"] == {
+        "model": subject.NARROW_MODEL,
+        "fit_population": v8.NARROW_PAIR_ENDPOINT_FIT,
+        "mix_weight": 1.0,
+    }
+    assert value["selection"]["primary"] == (
+        "maximum minimum margin across all nine v8 gates")
+    assert value["development_diagnosis_sha256"] == subject.digest(
+        subject.DEVELOPMENT_DIAGNOSIS)
     assert value["inner_split"]["holdout_scenes"] == 64
     assert sum(value["inner_split"]["family_quotas"].values()) == 64
 
 
-def test_candidate_registry_changes_only_frozen_charger_capacity_and_mix():
+def test_candidate_registry_freezes_pair_narrow_capacity_and_component_mixes():
     source = _config()
     candidates = subject.candidate_configs(source)
     assert [row["mix_weights"]["shared_charger"] for row in candidates] == [
         0.0, 0.25, 0.5, 1.0]
     for row in candidates:
         assert row["models"]["base"] == source["models"]["base"]
-        assert row["models"]["narrow_passage"] == source["models"]["narrow_passage"]
+        assert row["models"]["narrow_passage"] == subject.NARROW_MODEL
         assert row["models"]["shared_pickup"] == source["models"]["shared_pickup"]
         assert row["models"]["shared_charger"] == subject.CHARGER_MODEL
-        assert row["mix_weights"]["narrow_passage"] == 0.0
-        assert row["mix_weights"]["shared_pickup"] == 0.0
+        assert row["mix_weights"]["narrow_passage"] == 1.0
+        assert row["mix_weights"]["shared_pickup"] == 1.0
         assert row["pair_pool_multiplier"] == 16.0
         assert row["use_action_factor"] is True
+
+
+def test_narrow_pair_fit_allocates_each_fit_occurrence_two_to_one():
+    arrays = {
+        "split_validation": np.zeros(5, dtype=np.bool_),
+        "branch_actions": np.asarray(
+            ["WAIT", "LEFT", "DOWN", "WAIT", "RIGHT"], dtype="S8"),
+    }
+    pairs = np.asarray([[0, 1], [0, 2], [3, 4]], dtype=np.int64)
+    pair_bits = np.asarray([1, 3, 2], dtype=np.uint8)
+    occurrences = [
+        {"wait_row": 0, "branch_row": 1, "weighted_occurrence_mass": 9.0,
+         "group_bits": 1},
+        {"wait_row": 0, "branch_row": 2, "weighted_occurrence_mass": 3.0,
+         "group_bits": 3},
+        {"wait_row": 3, "branch_row": 4, "weighted_occurrence_mass": 12.0,
+         "group_bits": 2},
+    ]
+    indices, weights, audit = v8._narrow_pair_endpoint_fit(
+        arrays, {"pairs": pairs, "audit": {"pair_occurrences": occurrences}},
+        pair_bits)
+    assert indices.tolist() == [0, 1, 2]
+    # Row zero is the shared WAIT endpoint: 9*(2/3) + 3*(2/3).
+    assert weights.tolist() == pytest.approx([8.0, 3.0, 1.0])
+    assert sum(weights) == pytest.approx(12.0)
+    assert audit["fit_pair_occurrences"] == 2
+    assert audit["fit_endpoint_rows"] == 3
+    assert audit["fit_wait_endpoint_rows"] == 1
+    assert audit["fit_changed_branch_endpoint_rows"] == 2
+    assert audit["validation_labels_used"] is False
+    assert audit["final_rows_accessed"] is False
 
 
 def test_four_candidate_probability_matrices_normalize_unscored_actor_rows(
@@ -692,6 +743,8 @@ def test_four_candidate_probability_matrices_normalize_unscored_actor_rows(
 
     def fake_assemble(*args, **kwargs):
         mix = float(kwargs["mix_weights"]["shared_charger"])
+        assert kwargs["mix_weights"]["narrow_passage"] == 1.0
+        assert kwargs["mix_weights"]["shared_pickup"] == 1.0
         seen_mixes.append(mix)
         return mix
 
@@ -963,7 +1016,7 @@ def test_strict_selector_refits_all_candidates_and_accepts_exact_evidence(
     result = _strict_authenticate(paths)
     assert result["strict_refit_performed"] is True
     assert result["selection"] == paths["selection"]
-    assert result["config"]["mix_weights"]["shared_charger"] == 0.25
+    assert result["config"]["mix_weights"]["shared_charger"] == 1.0
     assert len(result["strict_refit_receipt_sha256"]) == 64
 
 
@@ -1233,24 +1286,24 @@ def test_strict_reader_rejects_evidence_race_after_snapshot(
         _strict_authenticate(paths)
 
 
-def test_selection_uses_all_gates_gain_guardrail_and_smallest_mix():
-    baseline = _metrics(charger_direction=0.84)
-    quarter = _metrics(charger_direction=0.851, other=0.919)
-    half = _metrics(charger_direction=0.87, other=0.917)
-    full = _metrics(charger_direction=0.88, other=0.919)
+def test_selection_maximizes_the_minimum_nine_gate_margin():
+    baseline = _metrics(charger_direction=0.86, narrow_direction=0.851)
+    quarter = _metrics(charger_direction=0.88, narrow_direction=0.854)
+    half = _metrics(charger_direction=0.90, narrow_direction=0.852)
+    full = _metrics(charger_direction=0.88, narrow_direction=0.856)
     result = subject.choose_candidate([
         {"mix_weight": mix, "metrics": metrics}
         for mix, metrics in zip(subject.MIX_CANDIDATES,
                                 (baseline, quarter, half, full))
     ])
     assert result["status"] == subject.STATUS_SELECTED
-    assert result["selected_mix_weight"] == 0.25
+    assert result["selected_mix_weight"] == 1.0
     by_mix = {row["mix_weight"]: row for row in result["candidates"]}
-    assert not by_mix[0.0]["eligible"]
+    assert by_mix[0.0]["eligible"]
     assert by_mix[0.25]["eligible"]
-    assert not by_mix[0.5]["selection_checks"][
-        "other_metrics_within_degradation_limit"]
+    assert by_mix[0.5]["eligible"]
     assert by_mix[1.0]["eligible"]
+    assert by_mix[1.0]["minimum_gate_margin"] == pytest.approx(0.006)
     assert result["outer_evaluation_performed"] is False
 
 

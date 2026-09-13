@@ -87,6 +87,14 @@ def tree_program(relations, *, component, binding, fit_config):
             "component": component,
             "fit_rows": 25,
             "fit_config": fit_config,
+            "fit_population": (
+                deepcopy(subject.NARROW_PAIR_ENDPOINT_FIT)
+                if component == "narrow_passage" else {
+                    "population": "component_public_group_mask_rows",
+                    "validation_labels_used": False,
+                    "final_rows_accessed": False,
+                }
+            ),
             "prediction_input": "349 deterministic public features",
             "validation_labels_used_for_fit": False,
             "actor_logits_used_as_program_input": False,

@@ -4,8 +4,9 @@ This producer is deliberately narrower than the v8 candidate fitter.  It
 removes every row outside a caller-frozen fit registry before validating an
 Actor label, fitting a model, or computing a metric.  It then freezes one
 scene-grouped inner holdout and compares four pre-registered mixtures of one
-fixed shared-charger specialist.  No outer-development or final-test metric is
-an input to the selection rule.
+fixed shared-charger specialist after one frozen, pair-aligned narrow-passage
+fit revision.  No outer-development or final-test metric is an input to the
+selection rule.
 
 The selected config is intended for one subsequent, independently bound v8
 candidate fit.  This module never evaluates that outer candidate itself.
@@ -45,7 +46,7 @@ from backend.warehouse_r41_diagnostic_public_tree_program_v8 import (
 from env.warehouse_native.policy import NumPyNativeActor
 
 
-VERSION = "warehouse-r41-diagnostic-rcpd-v8-fit-selector.v1"
+VERSION = "warehouse-r41-diagnostic-rcpd-v8-fit-selector.v2"
 SCOPE_VERSION = "warehouse-r41-diagnostic-rcpd-v8-fit-scope.v1"
 STATUS_SELECTED = "passed_fit_only_inner_selection"
 STATUS_FAILED = "failed_fit_only_inner_selection"
@@ -64,8 +65,27 @@ INNER_HOLDOUT_FAMILY_QUOTAS = {
 INNER_ORDER_SALT = (
     "r41-diagnostic-v8-fit-only-shared-charger-inner-holdout-20260913"
 )
-MIN_CHARGER_DIRECTION_IMPROVEMENT = 0.01
-MAX_OTHER_METRIC_DEGRADATION = 0.002
+GATE_THRESHOLDS = {
+    "overall": v8.MIN_OVERALL,
+    "nonwait": v8.MIN_NONWAIT,
+    "critical_narrow_passage": v8.MIN_CRITICAL,
+    "critical_shared_pickup": v8.MIN_CRITICAL,
+    "critical_shared_charger": v8.MIN_CRITICAL,
+    "direction_overall": v8.MIN_DIRECTION,
+    "direction_narrow_passage": v8.MIN_DIRECTION,
+    "direction_shared_pickup": v8.MIN_DIRECTION,
+    "direction_shared_charger": v8.MIN_DIRECTION,
+}
+NARROW_MODEL = {
+    "learning_rate": 0.1,
+    "max_iter": 100,
+    "max_leaf_nodes": 127,
+    "min_samples_leaf": 5,
+    "l2_regularization": 0.1,
+    "max_depth": None,
+    "max_bins": 255,
+    "random_state": 947,
+}
 CHARGER_MODEL = {
     "learning_rate": 0.1,
     "max_iter": 70,
@@ -76,10 +96,109 @@ CHARGER_MODEL = {
     "max_bins": 255,
     "random_state": 967,
 }
+
+# Append-only account of fit-only inner-development trials that led to the
+# single revision below.  These figures are descriptive evidence, never an
+# additional selector input.  In particular, no fresh outer or final Actor row
+# was collected or scored while making this choice.
+DEVELOPMENT_DIAGNOSIS = {
+    "version": "warehouse-r41-diagnostic-rcpd-v8-fit-diagnosis.v1",
+    "failed_selector_report_sha256": (
+        "3baff28bd2befdf9d55a3200d5706c05d6c8fa4b176057ae85a7827c55ccf4af"
+    ),
+    "failure": {
+        "only_failed_gate": "direction_narrow_passage",
+        "fidelity": 0.829456,
+        "threshold": v8.MIN_DIRECTION,
+        "pair_count": 4556,
+        "ordinary_anchor_endpoint_fidelity": 0.85448,
+        "changed_branch_endpoint_fidelity": 0.96730,
+        "dominant_public_pattern": (
+            "collision recovery after a submitted move was cancelled by an "
+            "occupied stationary teammate"
+        ),
+    },
+    "fit_only_trials": [
+        {
+            "name": "full_row_narrow_hgb_70_63",
+            "best_direction_narrow_passage": 0.836699,
+            "passed": False,
+        },
+        {
+            "name": "full_row_wait_overlap_hgb_100_127",
+            "best_direction_narrow_passage": 0.839333,
+            "passed": False,
+        },
+        {
+            "name": "pair_endpoint_hgb_70_63_symmetric",
+            "best_direction_narrow_passage": 0.837138,
+            "passed": False,
+        },
+        {
+            "name": "public_group_direct_routing_and_bit_3_5_specialists",
+            "best_direction_narrow_passage_below": 0.845,
+            "passed": False,
+        },
+        {
+            "name": "pair_endpoint_hgb_100_127_wait_two_to_one_pool_24",
+            "pair_pool_multiplier": 24.0,
+            "direction_narrow_passage": 0.8410886742756805,
+            "passed": False,
+        },
+        {
+            "name": "pair_endpoint_hgb_100_127_wait_two_to_one_pool_32",
+            "pair_pool_multiplier": 32.0,
+            "direction_narrow_passage": 0.852721685689201,
+            "nine_gate_minimum_margin": 0.002721685689201,
+            "passed": True,
+        },
+        {
+            "name": "pair_endpoint_hgb_100_127_wait_two_to_one",
+            "mix_weights": {
+                "narrow_passage": 1.0,
+                "shared_pickup": 1.0,
+                "shared_charger": 1.0,
+            },
+            "nine_gate_minimum_margin": 0.0060140474100087715,
+            "metrics": {
+                "overall": 0.9193212723187891,
+                "nonwait": 0.9132090739138927,
+                "critical_narrow_passage": 0.9035665229953109,
+                "critical_shared_pickup": 0.915086637031661,
+                "critical_shared_charger": 0.9318798134287883,
+                "direction_overall": 0.8662744243480788,
+                "direction_narrow_passage": 0.8560140474100087,
+                "direction_shared_pickup": 0.8661087866108786,
+                "direction_shared_charger": 0.8725578988226161,
+            },
+            "passed": True,
+        },
+    ],
+    "decision": {
+        "narrow_fit_population": deepcopy(v8.NARROW_PAIR_ENDPOINT_FIT),
+        "narrow_model": deepcopy(NARROW_MODEL),
+        "fixed_narrow_mix_weight": 1.0,
+        "fixed_pickup_mix_weight": 1.0,
+        "charger_mix_candidates": list(MIX_CANDIDATES),
+        "pair_pool_multiplier": 16.0,
+        "pair_pool_decision": (
+            "kept frozen source multiplier because its passing fit-only inner "
+            "minimum margin 0.006014047 exceeded pool 32 margin 0.002721686; pool "
+            "24 failed"
+        ),
+    },
+    "fit_rows_only": True,
+    "inner_validation_used_for_development_selection": True,
+    "fresh_outer_rows_accessed": False,
+    "fresh_outer_labels_accessed": False,
+    "final_rows_accessed": False,
+    "final_labels_accessed": False,
+}
 # The selector is a one-shot continuation of this exact failed v8 candidate.
 # These identities are code constants rather than caller-controlled CLI values:
 # accepting another source report would reopen the already-used development
-# evidence and would also let a caller change the base/narrow/pickup capacity.
+# evidence and would also let a caller change the base or pickup capacity, or
+# choose a different starting population for the one frozen narrow revision.
 FROZEN_SOURCE_V8_REPORT_SHA256 = (
     "2781af5fe845796a99907ceb0bfcc8bd6e0150ad2fe1f4e64ad2d15650bb2eef"
 )
@@ -197,7 +316,10 @@ STRICT_REFIT_BINDING_FIELDS = frozenset((
 def contract() -> dict[str, Any]:
     return {
         "version": VERSION,
-        "purpose": "one-shot fit-only shared-charger config selection",
+        "purpose": (
+            "one-shot fit-only narrow-pair endpoint revision and "
+            "shared-charger config selection"
+        ),
         "source": {
             "rows": "authenticated diagnostic RCPD v8 development rows",
             "fit_scope": "separately frozen label-blind scene registry",
@@ -222,25 +344,35 @@ def contract() -> dict[str, Any]:
             "episode_or_intervention_pair_crosses_split": False,
         },
         "frozen_model_change": {
-            "component": "shared_charger",
-            "model": deepcopy(CHARGER_MODEL),
-            "mix_candidates": list(MIX_CANDIDATES),
-            "base_narrow_pickup_models_unchanged": True,
-            "narrow_pickup_mix_weights": 0.0,
+            "narrow_passage": {
+                "model": deepcopy(NARROW_MODEL),
+                "fit_population": deepcopy(v8.NARROW_PAIR_ENDPOINT_FIT),
+                "mix_weight": 1.0,
+            },
+            "shared_pickup": {
+                "model_unchanged": True,
+                "mix_weight": 1.0,
+            },
+            "shared_charger": {
+                "model": deepcopy(CHARGER_MODEL),
+                "mix_candidates": list(MIX_CANDIDATES),
+            },
+            "base_model_unchanged": True,
             "pair_pool_multiplier_unchanged": True,
             "action_factor_unchanged": True,
         },
         "selection": {
             "all_nine_v8_gates_must_pass": True,
-            "minimum_shared_charger_direction_gain_over_zero_mix": (
-                MIN_CHARGER_DIRECTION_IMPROVEMENT
-            ),
-            "maximum_degradation_for_each_other_gate_metric": (
-                MAX_OTHER_METRIC_DEGRADATION
-            ),
-            "tie_break": "smallest shared_charger mix weight",
+            "primary": "maximum minimum margin across all nine v8 gates",
+            "gate_thresholds": deepcopy(GATE_THRESHOLDS),
+            "tie_break": [
+                "lower active specialist count",
+                "higher overall fidelity",
+                "smaller shared_charger mix weight",
+            ],
             "no_candidate_means_stop_before_outer": True,
         },
+        "development_diagnosis_sha256": digest(DEVELOPMENT_DIAGNOSIS),
         "runtime_action_override": False,
         "actor_changed": False,
         "formal_ready": False,
@@ -481,10 +613,11 @@ def candidate_configs(source_config: Mapping[str, Any]) -> list[dict[str, Any]]:
     configs = []
     for weight in MIX_CANDIDATES:
         item = deepcopy(source)
+        item["models"]["narrow_passage"] = deepcopy(NARROW_MODEL)
         item["models"]["shared_charger"] = deepcopy(CHARGER_MODEL)
         item["mix_weights"] = {
-            "narrow_passage": 0.0,
-            "shared_pickup": 0.0,
+            "narrow_passage": 1.0,
+            "shared_pickup": 1.0,
             "shared_charger": weight,
         }
         configs.append(v8.normalize_config(item))
@@ -505,7 +638,9 @@ def _config_registry(configs: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             for mix, config in zip(MIX_CANDIDATES, normalized)
         ],
         "selection_fields": [
-            "models.shared_charger", "mix_weights.shared_charger",
+            "models.narrow_passage", "models.shared_charger",
+            "mix_weights.narrow_passage", "mix_weights.shared_pickup",
+            "mix_weights.shared_charger",
         ],
         "all_other_fields_frozen": True,
     }
@@ -712,27 +847,21 @@ def choose_candidate(
             or tuple(float(row.get("mix_weight", -1.0)) for row in candidates)
                 != MIX_CANDIDATES):
         raise ValueError("Fit-only candidate registry differs")
-    baseline_values = _metric_vector(candidates[0]["metrics"])
-    charger_key = "direction_shared_charger"
     decisions = []
     qualified = []
     for row in candidates:
         weight = float(row["mix_weight"])
         values = _metric_vector(row["metrics"])
         gate = v8._gate(row["metrics"])
-        gain = values[charger_key] - baseline_values[charger_key]
-        degradations = {
-            name: baseline_values[name] - value
-            for name, value in values.items() if name != charger_key
+        margins = {
+            name: values[name] - threshold
+            for name, threshold in GATE_THRESHOLDS.items()
         }
+        minimum_margin = min(margins.values())
+        active_specialists = 2 + int(weight > 0.0)
         checks = {
             "all_nine_v8_gates": bool(gate["passed"]),
-            "minimum_charger_direction_gain": (
-                gain + 1e-15 >= MIN_CHARGER_DIRECTION_IMPROVEMENT),
-            "other_metrics_within_degradation_limit": all(
-                amount <= MAX_OTHER_METRIC_DEGRADATION + 1e-15
-                for amount in degradations.values()
-            ),
+            "all_nine_margins_nonnegative": minimum_margin >= -1e-15,
         }
         eligible = all(checks.values())
         decision = {
@@ -744,16 +873,24 @@ def choose_candidate(
                 "validation_predictions_sha256"),
             "gate": gate,
             "metric_values": values,
-            "shared_charger_direction_gain": gain,
-            "other_metric_degradations": degradations,
+            "gate_margins": margins,
+            "minimum_gate_margin": minimum_margin,
+            "active_specialist_count": active_specialists,
             "selection_checks": checks,
             "eligible": eligible,
         }
         decisions.append(decision)
         if eligible:
             qualified.append(decision)
-    selected = min(qualified, key=lambda row: row["mix_weight"]) \
-        if qualified else None
+    selected = max(
+        qualified,
+        key=lambda row: (
+            row["minimum_gate_margin"],
+            -row["active_specialist_count"],
+            row["metric_values"]["overall"],
+            -row["mix_weight"],
+        ),
+    ) if qualified else None
     return {
         "status": STATUS_SELECTED if selected is not None else STATUS_FAILED,
         "baseline_mix_weight": 0.0,
@@ -784,8 +921,8 @@ def _candidate_probabilities(
     """
     config = deepcopy(fit_config)
     config["mix_weights"] = {
-        "narrow_passage": 0.0,
-        "shared_pickup": 0.0,
+        "narrow_passage": 1.0,
+        "shared_pickup": 1.0,
         "shared_charger": float(mix_weight),
     }
     wrapper = assemble_public_tree_program_v8(
@@ -1354,6 +1491,7 @@ def authenticate_embedded_selected_config_snapshot(
     if (report.get("version") != VERSION
             or report.get("status") != STATUS_SELECTED
             or report.get("contract") != contract()
+            or report.get("development_diagnosis") != DEVELOPMENT_DIAGNOSIS
             or report.get("sources") != sources
             or not isinstance(bindings, Mapping)
             or bindings.get("producer_sources_sha256")
@@ -1502,8 +1640,9 @@ def authenticate_embedded_selected_config_snapshot(
             or selected.get("final_labels_accessed") is not False
             or config != expected_config
             or config["mix_weights"]["shared_charger"] != float(mix)
-            or config["mix_weights"]["narrow_passage"] != 0.0
-            or config["mix_weights"]["shared_pickup"] != 0.0
+            or config["mix_weights"]["narrow_passage"] != 1.0
+            or config["mix_weights"]["shared_pickup"] != 1.0
+            or config["models"]["narrow_passage"] != NARROW_MODEL
             or config["models"]["shared_charger"] != CHARGER_MODEL
             or config["pair_pool_multiplier"] != 16.0
             or config["use_action_factor"] is not True):
@@ -2012,6 +2151,7 @@ def _build_frozen(
             "version": VERSION,
             "status": selection["status"],
             "contract": contract(),
+            "development_diagnosis": deepcopy(DEVELOPMENT_DIAGNOSIS),
             "bindings": {
                 "source_v8_report_sha256": expected_source_report_sha256,
                 "source_v8_rows_sha256": file_hash(paths["rows.npz"]),
@@ -2194,8 +2334,8 @@ if __name__ == "__main__":
 __all__ = [
     "VERSION", "SCOPE_VERSION", "STATUS_SELECTED", "STATUS_FAILED",
     "MIX_CANDIDATES", "INNER_HOLDOUT_SCENES",
-    "INNER_HOLDOUT_FAMILY_QUOTAS", "INNER_ORDER_SALT", "CHARGER_MODEL",
-    "MIN_CHARGER_DIRECTION_IMPROVEMENT", "MAX_OTHER_METRIC_DEGRADATION",
+    "INNER_HOLDOUT_FAMILY_QUOTAS", "INNER_ORDER_SALT", "GATE_THRESHOLDS",
+    "NARROW_MODEL", "CHARGER_MODEL", "DEVELOPMENT_DIAGNOSIS",
     "FROZEN_SOURCE_V8_REPORT_SHA256", "FROZEN_FIT_SCOPE_SHA256",
     "FROZEN_SOURCE_CONFIG",
     "contract", "producer_sources", "normalize_scope", "candidate_configs",

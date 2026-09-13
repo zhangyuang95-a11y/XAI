@@ -73,6 +73,22 @@ STATUS_FAILED = "failed_development_gates"
 ACTIONS = ("UP", "DOWN", "LEFT", "RIGHT", "WAIT")
 CLASSES = (0, 1, 2, 3, 4)
 COMPONENTS = ("base", *GROUPS)
+
+# The narrow-passage intervention metric scores an action pair only when both
+# endpoints are reproduced.  The generic component mask also contains many
+# ordinary rows and therefore under-represents this paired objective.  For the
+# narrow specialist we fit the exact fit-side effective-pair endpoints.  Pair
+# occurrences keep their already-balanced total mass, with a fixed 2:1 split
+# toward the WAIT-intervention endpoint.  This split was frozen after the
+# fit-only inner diagnosis and never reads validation or final labels.
+NARROW_PAIR_ENDPOINT_FIT = {
+    "population": "fit_effective_narrow_pair_endpoints",
+    "wait_endpoint_share": 2.0 / 3.0,
+    "changed_branch_endpoint_share": 1.0 / 3.0,
+    "source": "fit-only public intervention rows and pair-group bits",
+    "validation_labels_used": False,
+    "final_rows_accessed": False,
+}
 MIN_OVERALL = 0.90
 MIN_NONWAIT = 0.90
 MIN_CRITICAL = 0.85
@@ -177,6 +193,7 @@ def contract() -> dict[str, Any]:
                 "that group; the endpoint union is used only when exact-overlap "
                 "removal omitted that ordinary source row"
             ),
+            "narrow_specialist_rows": deepcopy(NARROW_PAIR_ENDPOINT_FIT),
             "validation_labels_used_for_fit": False,
             "candidate_search_inside_producer": False,
         },
@@ -1140,6 +1157,78 @@ def _component_fit_masks(
     return result
 
 
+def _narrow_pair_endpoint_fit(
+    arrays: Mapping[str, np.ndarray], weights: Mapping[str, Any],
+    pair_group_bits: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Return the fixed fit-only population for the narrow specialist.
+
+    ``build_pair_weights`` records the balanced mass of every effective pair
+    occurrence.  A WAIT endpoint can occur in several pairs, so the fixed 2:1
+    allocation must be accumulated occurrence by occurrence rather than by
+    rescaling an already-aggregated endpoint vector.
+    """
+    pairs = np.asarray(weights.get("pairs"))
+    bits = _validated_pair_group_bits(pairs, pair_group_bits)
+    count = len(arrays["split_validation"])
+    occurrences = weights.get("audit", {}).get("pair_occurrences")
+    if not isinstance(occurrences, list) or len(occurrences) != len(pairs):
+        raise ValueError("Diagnostic v8 pair occurrence audit differs")
+    endpoint_weights = np.zeros(count, dtype=np.float64)
+    selected_occurrences = 0
+    occurrence_masses: list[float] = []
+    for pair_index, occurrence in enumerate(occurrences):
+        if not isinstance(occurrence, Mapping):
+            raise ValueError("Diagnostic v8 pair occurrence audit differs")
+        wait = int(occurrence.get("wait_row", -1))
+        branch = int(occurrence.get("branch_row", -1))
+        mass = float(occurrence.get("weighted_occurrence_mass", float("nan")))
+        occurrence_bits = int(occurrence.get("group_bits", -1))
+        if (wait != int(pairs[pair_index, 0])
+                or branch != int(pairs[pair_index, 1])
+                or occurrence_bits != int(bits[pair_index])
+                or not math.isfinite(mass) or mass <= 0.0):
+            raise ValueError("Diagnostic v8 pair occurrence binding differs")
+        if occurrence_bits & 1:
+            endpoint_weights[wait] += mass * (2.0 / 3.0)
+            endpoint_weights[branch] += mass * (1.0 / 3.0)
+            occurrence_masses.append(mass)
+            selected_occurrences += 1
+    if not selected_occurrences:
+        raise ValueError("Narrow specialist has no fit effective pairs")
+    indices = np.flatnonzero(endpoint_weights > 0.0).astype(np.int64)
+    split = np.asarray(arrays["split_validation"])
+    branches = _decode(
+        np.asarray(arrays["branch_actions"]), "Narrow endpoint branches")
+    selected_pairs = pairs[(bits & 1) != 0]
+    if (np.any(split[indices])
+            or np.any(branches[selected_pairs[:, 0]] != "WAIT")
+            or np.any(branches[selected_pairs[:, 1]] == "WAIT")):
+        raise ValueError("Narrow specialist pair endpoint population differs")
+    row_weights = endpoint_weights[indices]
+    if not np.isfinite(row_weights).all() or np.any(row_weights <= 0.0):
+        raise ValueError("Narrow specialist endpoint weights differ")
+    before = float(math.fsum(occurrence_masses))
+    after = float(math.fsum(map(float, row_weights)))
+    tolerance = max(
+        1e-10,
+        16.0 * np.finfo(np.float64).eps * max(1.0, before, after),
+    )
+    if abs(before - after) > tolerance:
+        raise ValueError("Narrow specialist endpoint allocation changed pair mass")
+    audit = {
+        **deepcopy(NARROW_PAIR_ENDPOINT_FIT),
+        "fit_pair_occurrences": selected_occurrences,
+        "fit_endpoint_rows": int(len(indices)),
+        "fit_wait_endpoint_rows": int(np.sum(branches[indices] == "WAIT")),
+        "fit_changed_branch_endpoint_rows": int(np.sum(branches[indices] != "WAIT")),
+        "symmetric_pair_contribution_mass": before,
+        "allocated_endpoint_mass": after,
+        "pair_mass_preserved_within_float64_tolerance": True,
+    }
+    return indices, row_weights, audit
+
+
 def _fit_program(
     arrays: Mapping[str, np.ndarray], *, relations: R41DiagnosticPublicRelationsV8,
     weights: Mapping[str, Any], config: Mapping[str, Any], binding: str,
@@ -1150,11 +1239,24 @@ def _fit_program(
         raise RuntimeError("Diagnostic v8 expanded feature shape differs")
     masks = _component_fit_masks(
         arrays, weights["pairs"], pair_group_bits)
+    narrow_indices, narrow_weights, narrow_audit = _narrow_pair_endpoint_fit(
+        arrays, weights, pair_group_bits)
     fit_labels = arrays["action_indices"]  # sliced before each estimator sees it
     programs: dict[str, R41DiagnosticBoostedTreeProgram] = {}
     diagnostics: dict[str, Any] = {}
     for name in COMPONENTS:
-        indices = np.flatnonzero(masks[name])
+        if name == "narrow_passage":
+            indices = narrow_indices
+            sample_weight = narrow_weights
+            fit_population = narrow_audit
+        else:
+            indices = np.flatnonzero(masks[name])
+            sample_weight = weights["weights"][indices].astype(np.float64)
+            fit_population = {
+                "population": "component_public_group_mask_rows",
+                "validation_labels_used": False,
+                "final_rows_accessed": False,
+            }
         labels = fit_labels[indices].copy()
         if tuple(map(int, np.unique(labels))) != CLASSES:
             raise ValueError(name + " fit rows do not cover the exact five classes")
@@ -1171,7 +1273,7 @@ def _fit_program(
         )
         estimator.fit(
             expanded[indices], labels,
-            sample_weight=weights["weights"][indices].astype(np.float64),
+            sample_weight=sample_weight,
         )
         if tuple(map(int, estimator.classes_)) != CLASSES:
             raise RuntimeError(name + " fitted class order differs")
@@ -1181,6 +1283,7 @@ def _fit_program(
             "component": name,
             "fit_rows": len(indices),
             "fit_config": deepcopy(settings),
+            "fit_population": deepcopy(fit_population),
             "prediction_input": "349 deterministic public features",
             "validation_labels_used_for_fit": False,
             "actor_logits_used_as_program_input": False,
@@ -1218,6 +1321,7 @@ def _fit_program(
             "parity_rows": len(parity_indices),
             "sklearn_explicit_max_probability_error": maximum_error,
             "sklearn_explicit_actions_equal": actions_equal,
+            "fit_population": deepcopy(fit_population),
         }
     wrapper = assemble_public_tree_program_v8(
         relations.base_feature_names,
@@ -2048,6 +2152,18 @@ def _validate_program_identity(
         *((group, program._specialist_programs[group]) for group in GROUPS),
     ):
         metadata = component.metadata
+        report_population = metadata.get("fit_population")
+        if name == "narrow_passage":
+            if (not isinstance(report_population, Mapping)
+                    or any(report_population.get(key) != value
+                           for key, value in NARROW_PAIR_ENDPOINT_FIT.items())):
+                raise ValueError("narrow_passage fit population binding differs")
+        elif report_population != {
+                "population": "component_public_group_mask_rows",
+                "validation_labels_used": False,
+                "final_rows_accessed": False,
+        }:
+            raise ValueError(name + " fit population binding differs")
         if (component.classes != CLASSES or component.action_names != ACTIONS
                 or component.feature_names != relations.feature_names
                 or metadata.get("component") != name
@@ -3072,6 +3188,7 @@ if __name__ == "__main__":
 __all__ = [
     "VERSION", "CONFIG_VERSION", "STATUS_PASSED", "STATUS_FAILED",
     "ACTIONS", "CLASSES", "COMPONENTS", "GROUPS",
+    "NARROW_PAIR_ENDPOINT_FIT",
     "MIN_OVERALL", "MIN_NONWAIT", "MIN_CRITICAL", "MIN_DIRECTION",
     "contract", "producer_sources", "normalize_config", "build",
     "read_saved_report", "main", "_validation_wins_merge", "_gate",

@@ -12,7 +12,7 @@ exact float64 patch.  Encoding is accepted only when every supplied audited
 public observation has exactly the same action before and after compaction.
 The resulting program is still an explicit, traceable tree and never controls
 or modifies the neural policy.  The v9 format widens the lossless threshold
-dictionary index to uint32 for the larger 668-feature program family.
+dictionary index to uint32 for the larger 671-feature program family.
 """
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ def transport_contract() -> dict[str, Any]:
         "version": VERSION,
         "source_program": "warehouse-r41-diagnostic-public-tree-program.v9",
         "raw_public_feature_count": 197,
-        "derived_public_feature_count": 668,
+        "derived_public_feature_count": 671,
         "explicit_preorder_topology_preserved": True,
         "thresholds_preserved_as_ieee754_binary64": True,
         "threshold_dictionary_index_dtype": "uint32",
@@ -221,6 +221,7 @@ def _program_header(payload: Mapping[str, Any]) -> dict[str, Any]:
         "specialists": [{
             "group": item["group"],
             "route": deepcopy(item["route"]),
+            "combination": item["combination"],
             "mix_weight": item["mix_weight"],
         } for item in payload["specialists"]],
     }

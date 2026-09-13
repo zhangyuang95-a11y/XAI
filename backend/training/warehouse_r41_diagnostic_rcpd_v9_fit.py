@@ -37,14 +37,31 @@ from backend.warehouse_r41_diagnostic_public_tree_program_v9 import (
 VERSION = "warehouse-r41-diagnostic-rcpd-v9-fit.v1"
 ACTIONS = tuple(v8.ACTIONS)
 CLASSES = tuple(range(len(ACTIONS)))
-CONFIG_VERSION = "warehouse-r41-diagnostic-rcpd-v9-fit-config.v2"
+CONFIG_VERSION = "warehouse-r41-diagnostic-rcpd-v9-fit-config.v3"
+REPLACEMENT_VERSION = (
+    "warehouse-r41-diagnostic-rcpd-v9-shared-pickup-replacement.v1")
+REPLACEMENT_ROUTE_FEATURE = (
+    "derived.v9.route.shared_pickup_stationary_delivery_block")
 _MODEL_FIELDS = frozenset((
     "learning_rate", "max_iter", "max_leaf_nodes", "min_samples_leaf",
     "l2_regularization", "max_depth", "max_bins", "random_state",
 ))
 _CONFIG_FIELDS = frozenset((
     "version", "pair_pool_multiplier", "wait_endpoint_share", "model",
+    "shared_pickup_replacement",
 ))
+_REPLACEMENT_FIELDS = frozenset((
+    "version", "enabled", "group", "combination", "route", "fit_source",
+    "estimator", "minimum_rows_per_partition",
+    "minimum_scenes_per_partition", "minimum_episodes_per_partition",
+))
+_REPLACEMENT_ROUTE_FIELDS = frozenset((
+    "feature_name", "operator", "threshold",
+))
+
+
+class ReplacementSupportError(ValueError):
+    """A preregistered replacement route lacks one fold's public support."""
 
 
 def normalize_config(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -74,6 +91,34 @@ def normalize_config(value: Mapping[str, Any]) -> dict[str, Any]:
 
     if value.get("version") != CONFIG_VERSION:
         raise ValueError("V9 fit config version differs")
+    replacement = value.get("shared_pickup_replacement")
+    route = replacement.get("route") if isinstance(replacement, Mapping) else None
+    if (not isinstance(replacement, Mapping)
+            or set(replacement) != _REPLACEMENT_FIELDS
+            or replacement.get("version") != REPLACEMENT_VERSION
+            or type(replacement.get("enabled")) is not bool
+            or replacement.get("group") != "shared_pickup"
+            or replacement.get("combination") != "replacement"
+            or replacement.get("fit_source") != "fit_only_public_route_rows"
+            or replacement.get("estimator") != "fit_only_weighted_majority"
+            or not isinstance(route, Mapping)
+            or set(route) != _REPLACEMENT_ROUTE_FIELDS
+            or route.get("feature_name") != REPLACEMENT_ROUTE_FEATURE
+            or route.get("operator") != ">"
+            or type(route.get("threshold")) not in (int, float)
+            or float(route["threshold"]) != 0.5):
+        raise ValueError("V9 shared-pickup replacement config differs")
+    minimums = {
+        name: replacement.get(name) for name in (
+            "minimum_rows_per_partition", "minimum_scenes_per_partition",
+            "minimum_episodes_per_partition",
+        )
+    }
+    if (any(type(item) is not int for item in minimums.values())
+            or not 1 <= minimums["minimum_rows_per_partition"] <= 1_000_000
+            or not 1 <= minimums["minimum_scenes_per_partition"] <= 10_000
+            or not 1 <= minimums["minimum_episodes_per_partition"] <= 1_000_000):
+        raise ValueError("V9 shared-pickup replacement support differs")
     integers = {
         name: model.get(name) for name in (
             "max_iter", "max_leaf_nodes", "min_samples_leaf", "max_bins",
@@ -97,6 +142,20 @@ def normalize_config(value: Mapping[str, Any]) -> dict[str, Any]:
             high=pair_weights_v8.MAX_PAIR_POOL_MULTIPLIER),
         "wait_endpoint_share": number(
             "wait_endpoint_share", low=0.5, high=0.8),
+        "shared_pickup_replacement": {
+            "version": REPLACEMENT_VERSION,
+            "enabled": replacement["enabled"],
+            "group": "shared_pickup",
+            "combination": "replacement",
+            "route": {
+                "feature_name": REPLACEMENT_ROUTE_FEATURE,
+                "operator": ">",
+                "threshold": 0.5,
+            },
+            "fit_source": "fit_only_public_route_rows",
+            "estimator": "fit_only_weighted_majority",
+            **minimums,
+        },
         "model": {
             "learning_rate": model_number("learning_rate", low=1e-4, high=1.0),
             "max_iter": integers["max_iter"],
@@ -255,6 +314,126 @@ def constant_component(
     })
 
 
+def _replacement_route_mask(
+    observations: np.ndarray, relations: R41DiagnosticPublicRelationsV9,
+    *, batch_size: int = 16_384,
+) -> np.ndarray:
+    """Evaluate the frozen conjunctive route from raw public rows only."""
+    values = np.asarray(observations)
+    if values.ndim != 2 or values.shape[1] != 197:
+        raise ValueError("V9 replacement public observations differ")
+    feature_index = relations.feature_names.index(REPLACEMENT_ROUTE_FEATURE)
+    parts = [
+        relations.transform_batch(values[start:start + batch_size])[:, feature_index] > .5
+        for start in range(0, len(values), batch_size)
+    ]
+    return np.concatenate(parts) if parts else np.empty(0, dtype=np.bool_)
+
+
+def _partition_support(mask: np.ndarray, scenes: np.ndarray,
+                       episodes: np.ndarray) -> dict[str, Any]:
+    selected = np.flatnonzero(mask)
+    return {
+        "rows": len(selected),
+        "scenes": len(set(map(str, scenes[selected]))),
+        "episodes": len(set(map(str, episodes[selected]))),
+        "scene_registry_sha256": digest(sorted(set(map(str, scenes[selected])))),
+        "episode_registry_sha256": digest(sorted(set(map(str, episodes[selected])))),
+    }
+
+
+def _replacement_support(
+    arrays: Mapping[str, np.ndarray], fit_mask: np.ndarray,
+    relations: R41DiagnosticPublicRelationsV9, config: Mapping[str, Any],
+) -> tuple[np.ndarray, dict[str, Any]]:
+    route = _replacement_route_mask(arrays["observations"], relations)
+    scenes = _decode(np.asarray(arrays["scene_fingerprints"]), "scene fingerprints")
+    episodes = _decode(np.asarray(arrays["episode_ids"]), "episode ids")
+    selected = np.asarray(fit_mask, dtype=np.bool_)
+    if route.shape != selected.shape or scenes.shape != route.shape \
+            or episodes.shape != route.shape:
+        raise ValueError("V9 replacement support registry differs")
+    replacement = config["shared_pickup_replacement"]
+    fit = _partition_support(route & selected, scenes, episodes)
+    validation = (_partition_support(route & ~selected, scenes, episodes)
+                  if np.any(~selected) else None)
+    minimum = {
+        "rows": replacement["minimum_rows_per_partition"],
+        "scenes": replacement["minimum_scenes_per_partition"],
+        "episodes": replacement["minimum_episodes_per_partition"],
+    }
+    for label, support in (("fit", fit), ("validation", validation)):
+        if support is None:
+            continue
+        if any(support[name] < minimum[name] for name in minimum):
+            raise ReplacementSupportError(
+                "V9 replacement route lacks preregistered " + label + " support")
+    return route, {
+        "version": REPLACEMENT_VERSION + ".support.v1",
+        "route": deepcopy(replacement["route"]),
+        "minimum_per_partition": minimum,
+        "fit": fit,
+        "validation": validation,
+        "support_uses_action_labels": False,
+        "runtime_identifiers_used": False,
+        "protected_final_access": False,
+    }
+
+
+def fit_only_weighted_majority_component(
+    relations: R41DiagnosticPublicRelationsV9, labels: np.ndarray,
+    weights: np.ndarray, *, binding_sha256: str,
+) -> tuple[R41DiagnosticBoostedTreeProgram, dict[str, Any]]:
+    """Fit a constant replacement class using only fit-route labels."""
+    selected_labels = np.asarray(labels, dtype=np.int64)
+    selected_weights = np.asarray(weights, dtype=np.float64)
+    if (selected_labels.ndim != 1 or selected_weights.shape != selected_labels.shape
+            or not len(selected_labels) or not np.isfinite(selected_weights).all()
+            or np.any(selected_weights <= 0)
+            or np.any(selected_labels < 0) or np.any(selected_labels >= len(ACTIONS))):
+        raise ValueError("V9 replacement fit-only rows differ")
+    counts = np.bincount(
+        selected_labels, weights=selected_weights, minlength=len(ACTIONS)).astype(np.float64)
+    # Add the same fixed pseudocount to every action.  It keeps logits finite
+    # while preserving the deterministic weighted-majority class.
+    probabilities = (counts + 1e-9) / (float(counts.sum()) + 1e-9 * len(ACTIONS))
+    baseline = np.log(probabilities)
+    majority = int(np.argmax(counts))
+    trees = [{
+        "iteration": 0,
+        "output_index": output,
+        "nodes": [{"kind": "leaf", "value": 0.0}],
+    } for output in CLASSES]
+    program = R41DiagnosticBoostedTreeProgram.from_dict({
+        "version": BOOSTED_TREE_VERSION,
+        "kind": MODEL_KIND,
+        "feature_names": list(relations.feature_names),
+        "classes": list(CLASSES),
+        "action_names": list(ACTIONS),
+        "output_kind": "multiclass_logits",
+        "baseline": [float(value) for value in baseline],
+        "leaf_value_semantics": LEAF_VALUE_SEMANTICS,
+        "n_iterations": 1,
+        "trees": trees,
+        "metadata": {
+            "purpose": "fit-only public-route replacement explanation specialist",
+            "binding_sha256": binding_sha256,
+            "fit_source": "fit_only_public_route_rows",
+            "estimator": "fit_only_weighted_majority",
+            "majority_action": ACTIONS[majority],
+            "held_labels_used": False,
+            "runtime_action_override": False,
+        },
+    })
+    return program, {
+        "fit_rows": len(selected_labels),
+        "weighted_action_mass": {
+            action: float(counts[index]) for index, action in enumerate(ACTIONS)},
+        "majority_action": ACTIONS[majority],
+        "held_labels_used": False,
+    }
+
+
 def fit_program(
     arrays: Mapping[str, np.ndarray], fit_mask: np.ndarray, *,
     relations: R41DiagnosticPublicRelationsV9,
@@ -303,9 +482,48 @@ def fit_program(
             np.argmax(native, axis=1), np.argmax(explicit, axis=1)):
         raise RuntimeError("V9 sklearn/explicit tree parity differs")
     dummy = constant_component(relations)
+    specialists = {group: dummy for group in GROUPS}
+    routes = {
+        group: {
+            "feature_name": "derived.critical." + group,
+            "operator": ">", "threshold": 0.5,
+        } for group in GROUPS
+    }
+    mix_weights = {group: 0.0 for group in GROUPS}
+    combinations = {group: "weighted_average" for group in GROUPS}
+    replacement_diagnostics: dict[str, Any] = {
+        "enabled": False,
+        "route": deepcopy(normalized["shared_pickup_replacement"]["route"]),
+        "fit_source": "fit_only_public_route_rows",
+        "held_labels_used": False,
+    }
+    if normalized["shared_pickup_replacement"]["enabled"]:
+        route_mask, support = _replacement_support(
+            arrays, fit_mask, relations, normalized)
+        route_indices = np.flatnonzero(route_mask & fit_mask)
+        route_labels = np.asarray(arrays["action_indices"])[route_indices].astype(
+            np.int64, copy=True)
+        replacement_program, majority_audit = fit_only_weighted_majority_component(
+            relations, route_labels, weights[route_indices],
+            binding_sha256=binding_sha256)
+        specialists["shared_pickup"] = replacement_program
+        routes["shared_pickup"] = deepcopy(
+            normalized["shared_pickup_replacement"]["route"])
+        mix_weights["shared_pickup"] = 1.0
+        combinations["shared_pickup"] = "replacement"
+        replacement_diagnostics = {
+            "enabled": True,
+            "combination": "replacement",
+            "support": support,
+            "fit": majority_audit,
+            "held_labels_used": False,
+            "runtime_action_override": False,
+        }
     program = assemble_public_tree_program_v9(
-        relations.base_feature_names, base, dummy, dummy, dummy,
-        mix_weights={group: 0.0 for group in GROUPS},
+        relations.base_feature_names, base,
+        specialists["narrow_passage"], specialists["shared_pickup"],
+        specialists["shared_charger"],
+        mix_weights=mix_weights, routes=routes, combinations=combinations,
         metadata={
             "version": VERSION,
             "binding_sha256": binding_sha256,
@@ -314,6 +532,7 @@ def fit_program(
             "runtime_controller": "native_neural_actor_only",
             "runtime_action_override": False,
             "program_feedback_into_actor": False,
+            "replacement_specialist_explanation_only": True,
             "formal_ready": False,
         },
     )
@@ -332,6 +551,7 @@ def fit_program(
             group: int(np.sum((pair_bits & (1 << index)) != 0))
             for index, group in enumerate(GROUPS)
         },
+        "shared_pickup_replacement": replacement_diagnostics,
     }
     return program, diagnostics
 
@@ -346,7 +566,8 @@ def predict_in_batches(
 
 
 __all__ = [
-    "VERSION", "CONFIG_VERSION", "ACTIONS", "CLASSES", "normalize_config",
-    "build_fit_weights", "constant_component", "fit_program",
-    "predict_in_batches",
+    "VERSION", "CONFIG_VERSION", "REPLACEMENT_VERSION",
+    "REPLACEMENT_ROUTE_FEATURE", "ReplacementSupportError", "ACTIONS",
+    "CLASSES", "normalize_config", "build_fit_weights", "constant_component",
+    "fit_only_weighted_majority_component", "fit_program", "predict_in_batches",
 ]

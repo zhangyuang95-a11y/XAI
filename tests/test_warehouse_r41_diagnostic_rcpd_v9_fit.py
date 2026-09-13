@@ -17,11 +17,28 @@ ACTOR = (
 )
 
 
-def config(pair_pool_multiplier=16.0, wait_endpoint_share=0.62):
+def config(pair_pool_multiplier=16.0, wait_endpoint_share=0.62, *,
+           replacement=False, minimum_rows=1, minimum_scenes=1,
+           minimum_episodes=1):
     return {
         "version": subject.CONFIG_VERSION,
         "pair_pool_multiplier": pair_pool_multiplier,
         "wait_endpoint_share": wait_endpoint_share,
+        "shared_pickup_replacement": {
+            "version": subject.REPLACEMENT_VERSION,
+            "enabled": replacement,
+            "group": "shared_pickup",
+            "combination": "replacement",
+            "route": {
+                "feature_name": subject.REPLACEMENT_ROUTE_FEATURE,
+                "operator": ">", "threshold": 0.5,
+            },
+            "fit_source": "fit_only_public_route_rows",
+            "estimator": "fit_only_weighted_majority",
+            "minimum_rows_per_partition": minimum_rows,
+            "minimum_scenes_per_partition": minimum_scenes,
+            "minimum_episodes_per_partition": minimum_episodes,
+        },
         "model": {
             "learning_rate": 0.1,
             "max_iter": 2,
@@ -93,6 +110,31 @@ def rows():
         "split_validation": np.zeros(count, dtype=np.bool_),
     }
     return actor, arrays
+
+
+def activate_replacement_route(actor, arrays, selected):
+    observations = arrays["observations"].copy()
+    index = {name: i for i, name in enumerate(actor.metadata["feature_names"])}
+    for task in range(2):
+        observations[:, index[f"task.{task}.available"]] = 0.0
+        observations[:, index[f"task.{task}.carried_other"]] = 0.0
+    observations[:, index["history.valid"]] = 0.0
+    observations[:, index["history.self.move_canceled"]] = 0.0
+    observations[:, index["history.other.submitted.WAIT"]] = 0.0
+    for row in selected:
+        observations[row, index["task.0.exists"]] = 1.0
+        observations[row, index["task.0.available"]] = 1.0
+        observations[row, index["task.0.carried_other"]] = 1.0
+        observations[row, index["task.0.delivery.self.path_distance"]] = 0.0
+        observations[row, index["task.0.pickup.self.path_distance"]] = 0.0
+        observations[row, index["task.0.pickup.other.path_distance"]] = 0.0
+        observations[row, index["history.valid"]] = 1.0
+        observations[row, index["history.self.move_canceled"]] = 1.0
+        observations[row, index["history.other.submitted.WAIT"]] = 1.0
+        observations[row, index["other.battery"]] = .8
+    result = dict(arrays)
+    result["observations"] = observations
+    return result
 
 
 def test_weights_are_fit_only_finite_and_pair_stratified():
@@ -172,3 +214,51 @@ def test_config_and_masks_are_strict():
             arrays, np.ones(29, dtype=np.bool_),
             scene_families={"a" * 64: "conflict_family_01"},
             config=config())
+
+
+def test_replacement_specialist_uses_fit_route_labels_and_held_poison_is_inert():
+    actor, arrays = rows()
+    arrays = activate_replacement_route(actor, arrays, (0, 1, 2, 15, 16))
+    arrays["action_indices"] = arrays["action_indices"].copy()
+    arrays["action_indices"][:3] = np.uint8(4)
+    arrays["probabilities"] = np.eye(5, dtype=np.float32)[arrays["action_indices"]]
+    relations = R41DiagnosticPublicRelationsV9(actor.metadata["feature_names"])
+    mask = np.arange(30) < 15
+    kwargs = {
+        "relations": relations,
+        "scene_families": {"a" * 64: "conflict_family_01",
+                           "b" * 64: "conflict_family_02"},
+        "config": config(replacement=True),
+        "binding_sha256": "e" * 64,
+    }
+    expected, diagnostics = subject.fit_program(arrays, mask, **kwargs)
+    poisoned = dict(arrays)
+    poisoned["action_indices"] = arrays["action_indices"].copy()
+    poisoned["action_indices"][~mask] = np.uint8(255)
+    poisoned["probabilities"] = arrays["probabilities"].copy()
+    poisoned["probabilities"][~mask] = np.nan
+    actual, poisoned_diagnostics = subject.fit_program(poisoned, mask, **kwargs)
+    assert actual.to_dict() == expected.to_dict()
+    assert poisoned_diagnostics == diagnostics
+    payload = expected.to_dict()
+    pickup = payload["specialists"][1]
+    assert pickup["combination"] == "replacement"
+    assert pickup["mix_weight"] == 1.0
+    assert pickup["route"]["feature_name"] == subject.REPLACEMENT_ROUTE_FEATURE
+    assert diagnostics["shared_pickup_replacement"]["fit"][
+        "held_labels_used"] is False
+
+
+def test_replacement_candidate_fails_when_either_fold_partition_lacks_support():
+    actor, arrays = rows()
+    arrays = activate_replacement_route(actor, arrays, (0, 15))
+    relations = R41DiagnosticPublicRelationsV9(actor.metadata["feature_names"])
+    mask = np.arange(30) < 15
+    with pytest.raises(subject.ReplacementSupportError, match="fit support"):
+        subject.fit_program(
+            arrays, mask, relations=relations,
+            scene_families={"a" * 64: "conflict_family_01",
+                            "b" * 64: "conflict_family_02"},
+            config=config(replacement=True, minimum_rows=2),
+            binding_sha256="d" * 64,
+        )

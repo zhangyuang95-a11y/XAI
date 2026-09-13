@@ -101,6 +101,14 @@ def contract() -> dict[str, Any]:
             "both salts pass all nine gates; maximise worst family-by-exact-bit "
             "intervention direction cell; then minimise observed explicit capacity"
         ),
+        "optional_replacement_specialist": {
+            "group": "shared_pickup",
+            "route_input": "197-value public observation only",
+            "fit_target_scope": "fit-only public-route rows",
+            "held_labels_choose_output": False,
+            "minimum_fit_and_validation_partition_support_required": True,
+            "runtime_action_override": False,
+        },
         "fresh_outer_labels_or_probabilities_read": False,
         "protected_final_access": False,
         "runtime_action_override": False,

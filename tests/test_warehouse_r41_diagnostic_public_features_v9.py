@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import inspect
 
 from backend.warehouse_r41_diagnostic_public_features_v9 import (
     R41DiagnosticPublicRelationsV9,
@@ -21,6 +22,7 @@ def transformer():
 def test_registry_is_public_and_extends_v8():
     actor, subject = transformer()
     assert len(subject.base_feature_names) == actor.obs_dim == 197
+    assert len(subject.feature_names) == 671
     assert len(subject.feature_names) > 349
     assert subject.feature_names[:349] == (
         *subject.base_feature_names, *subject.v8.derived_feature_names)
@@ -67,3 +69,37 @@ def test_missing_nonfinite_and_forbidden_registry_are_rejected():
         subject.transform_mapping({})
     with pytest.raises(ValueError):
         R41DiagnosticPublicRelationsV9((*subject.base_feature_names, "actor.hidden.0"))
+
+
+def test_replacement_route_is_an_explicit_conjunction_of_two_public_relations():
+    _, subject = transformer()
+    index = {name: i for i, name in enumerate(subject.base_feature_names)}
+    row = np.zeros((1, 197), dtype=np.float32)
+    row[0, index["task.0.exists"]] = 1.0
+    row[0, index["task.0.available"]] = 1.0
+    row[0, index["task.0.carried_other"]] = 1.0
+    row[0, index["history.valid"]] = 1.0
+    row[0, index["history.self.move_canceled"]] = 1.0
+    row[0, index["history.other.submitted.WAIT"]] = 1.0
+    row[0, index["other.battery"]] = .8
+    expanded = subject.transform_batch(row)[0]
+    values = dict(zip(subject.feature_names, expanded))
+    first = "derived.v9.coordination.self_blocks_other_active_delivery"
+    second = "derived.v9.coordination.stationary_other_blocked_self"
+    route = "derived.v9.route.shared_pickup_stationary_delivery_block"
+    assert values[first] == values[second] == values[route] == 1.0
+    for raw_name in ("task.0.carried_other", "history.valid",
+                     "history.self.move_canceled",
+                     "history.other.submitted.WAIT"):
+        changed = row.copy()
+        changed[0, index[raw_name]] = 0.0
+        assert subject.transform_batch(changed)[0, subject.feature_names.index(route)] == 0.0
+    contract = subject.contract()
+    assert contract["auditable_routes"][
+        "shared_pickup_stationary_delivery_block"]["runtime_inputs"] == [
+            "public_observation"]
+    assert contract["collision_count_modulo_input"] is False
+    assert contract["frame_phase_input"] is False
+    source = inspect.getsource(subject._append_v9).casefold()
+    for forbidden in ("scene_fingerprint", "anchor_id", "branch_actions", "%"):
+        assert forbidden not in source

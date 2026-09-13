@@ -28,6 +28,21 @@ def _config(pair_pool_multiplier: float = 16.0, *, iterations: int = 2) -> dict:
         "version": subject.fit_api.CONFIG_VERSION,
         "pair_pool_multiplier": pair_pool_multiplier,
         "wait_endpoint_share": 0.62,
+        "shared_pickup_replacement": {
+            "version": subject.fit_api.REPLACEMENT_VERSION,
+            "enabled": False,
+            "group": "shared_pickup",
+            "combination": "replacement",
+            "route": {
+                "feature_name": subject.fit_api.REPLACEMENT_ROUTE_FEATURE,
+                "operator": ">", "threshold": 0.5,
+            },
+            "fit_source": "fit_only_public_route_rows",
+            "estimator": "fit_only_weighted_majority",
+            "minimum_rows_per_partition": 1,
+            "minimum_scenes_per_partition": 1,
+            "minimum_episodes_per_partition": 1,
+        },
         "model": {
             "learning_rate": 0.1,
             "max_iter": iterations,
@@ -108,6 +123,19 @@ def test_candidate_grid_is_hash_bound_normalized_and_unique(tmp_path: Path):
     with pytest.raises(ValueError, match="duplicate"):
         subject.read_candidate_grid(
             duplicate_path, expected_sha256=file_hash(duplicate_path))
+
+    replacement = _config()
+    replacement["shared_pickup_replacement"]["enabled"] = True
+    replacement_value = {
+        "version": subject.GRID_VERSION, "configs": [replacement],
+    }
+    replacement_value["content_sha256"] = digest(replacement_value)
+    replacement_path = tmp_path / "replacement.json"
+    _json(replacement_path, replacement_value)
+    restored = subject.read_candidate_grid(
+        replacement_path, expected_sha256=file_hash(replacement_path))
+    assert restored["configs"][0]["shared_pickup_replacement"] == \
+        subject.fit_api.normalize_config(replacement)["shared_pickup_replacement"]
 
 
 def test_validation_wins_is_frozen_before_any_private_member_read(

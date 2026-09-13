@@ -149,7 +149,7 @@ def _weighted_average(base, specialists) -> np.ndarray:
 def test_general_constructor_binds_exact_relations_and_four_programs(program):
     payload = program.to_dict()
     assert len(program.base_feature_names) == 197
-    assert len(program.feature_names) == 668
+    assert len(program.feature_names) == 671
     assert payload["aggregation"] == AGGREGATION
     assert [item["group"] for item in payload["specialists"]] == list(GROUPS)
     assert [item["route"]["feature_name"] for item in payload["specialists"]] == [
@@ -157,7 +157,7 @@ def test_general_constructor_binds_exact_relations_and_four_programs(program):
     ]
     assert program.mix_weights == WEIGHTS
     assert payload["metadata"] == {"candidate": "development-only", "seed": 8}
-    assert all(len(item["program"]["feature_names"]) == 668
+    assert all(len(item["program"]["feature_names"]) == 671
                for item in payload["specialists"])
     complexity = program.complexity()
     assert complexity == {
@@ -301,6 +301,55 @@ def test_custom_public_route_has_identical_batch_and_trace_boundary_semantics(
     assert trace["routes"][0]["observed"] == 1.0
 
 
+def test_public_replacement_specialist_overrides_only_its_explicit_route(
+    components,
+):
+    names, _, programs = components
+    combinations = {group: "weighted_average" for group in GROUPS}
+    combinations["shared_pickup"] = "replacement"
+    weights = {group: 0.0 for group in GROUPS}
+    weights["shared_pickup"] = 1.0
+    routes = {
+        group: {"feature_name": "derived.critical." + group,
+                "operator": ">", "threshold": 0.5}
+        for group in GROUPS
+    }
+    routes["shared_pickup"] = {
+        "feature_name": (
+            "derived.v9.route.shared_pickup_stationary_delivery_block"),
+        "operator": ">", "threshold": 0.5,
+    }
+    subject = R41DiagnosticPublicTreeProgramV9.from_programs(
+        names, programs["base"], programs["narrow_passage"],
+        programs["shared_pickup"], programs["shared_charger"],
+        mix_weights=weights, routes=routes, combinations=combinations,
+    )
+    rows = _critical_rows(names)[[0, 2]].copy()
+    index = {name: i for i, name in enumerate(names)}
+    rows[1, index["task.0.exists"]] = 1.0
+    rows[1, index["task.0.carried_other"]] = 1.0
+    rows[1, index["history.valid"]] = 1.0
+    rows[1, index["history.self.move_canceled"]] = 1.0
+    rows[1, index["history.other.submitted.WAIT"]] = 1.0
+    expected_base = _softmax(LOGITS["base"])
+    expected_replacement = _softmax(LOGITS["shared_pickup"])
+    actual = subject.predict_proba_batch(rows)
+    np.testing.assert_array_equal(actual[0], expected_base)
+    np.testing.assert_array_equal(actual[1], expected_replacement)
+    trace = subject.trace(dict(zip(names, rows[1])))
+    assert trace["replacement_group"] == "shared_pickup"
+    assert trace["routes"][1]["combination"] == "replacement"
+    assert trace["routes"][1]["replacement_distribution"] \
+        == list(expected_replacement)
+    assert trace["routes"][1]["program_trace"] is not None
+    assert subject.combinations["shared_pickup"] == "replacement"
+
+    invalid = subject.to_dict()
+    invalid["specialists"][1]["mix_weight"] = 0.5
+    with pytest.raises(ValueError, match="replacement mix weight"):
+        R41DiagnosticPublicTreeProgramV9.from_dict(invalid)
+
+
 def test_json_round_trip_is_exact_and_payload_is_defensively_copied(
     program, components,
 ):
@@ -341,7 +390,7 @@ def test_schema_program_bindings_routes_and_weights_are_strict(program):
     payload = program.to_dict()
     first, second = payload["base"]["feature_names"][:2]
     payload["base"]["feature_names"][:2] = [second, first]
-    with pytest.raises(ValueError, match="exactly 668"):
+    with pytest.raises(ValueError, match="exactly 671"):
         R41DiagnosticPublicTreeProgramV9.from_dict(payload)
     payload = program.to_dict()
     payload["specialists"][2]["program"]["action_names"][0] = "OTHER"

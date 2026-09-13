@@ -1,9 +1,11 @@
 """Traceable v9 public-tree composition with a NumPy-only runtime.
 
 The program accepts only the frozen 197-value public observation.  It derives
-the registered 668 public relation features deterministically, evaluates a
+the registered 671 public relation features deterministically, evaluates a
 base explicit boosted tree, then applies three routed specialist trees in the
-order recorded by the payload.
+order recorded by the payload.  A specialist is either combined by a weighted
+probability average or explicitly replaces the explanation-program output on
+its public route.  This program never controls the neural Actor.
 """
 from __future__ import annotations
 
@@ -28,11 +30,15 @@ GROUPS = ("narrow_passage", "shared_pickup", "shared_charger")
 
 def _aggregation() -> dict[str, Any]:
     return {
-        "kind": "active_specialist_weighted_probability_average",
+        "kind": "active_specialist_public_route_composition",
         "trace_order": list(GROUPS),
         "base_weight": 1.0,
         "normalizer": "base_weight_plus_active_specialist_weights",
-        "order_independent": True,
+        "weighted_average_order_independent": True,
+        "replacement_semantics": (
+            "at_most_one_configured_replacement_overrides_the_"
+            "weighted_average_on_its_public_route"),
+        "runtime_controller": "native_neural_actor_only",
     }
 
 
@@ -42,9 +48,12 @@ _TOP_FIELDS = frozenset((
     "version", "relations", "action_names", "aggregation", "base",
     "specialists", "metadata",
 ))
-_SPECIALIST_FIELDS = frozenset(("group", "route", "mix_weight", "program"))
+_SPECIALIST_FIELDS = frozenset((
+    "group", "route", "combination", "mix_weight", "program",
+))
 _ROUTE_FIELDS = frozenset(("feature_name", "operator", "threshold"))
 _OPERATORS = frozenset(("<", "<=", ">", ">=", "==", "!="))
+COMBINATIONS = ("weighted_average", "replacement")
 
 
 def _finite_float(value: Any, label: str) -> float:
@@ -125,7 +134,7 @@ def _normalize_route(
 
 
 class R41DiagnosticPublicTreeProgramV9:
-    """Weighted average of one base and three routed public boosted trees."""
+    """Traceable composition of one base and three public specialist trees."""
 
     def __init__(self, payload: Mapping[str, Any]):
         if not isinstance(payload, Mapping) or set(payload) != _TOP_FIELDS:
@@ -142,9 +151,9 @@ class R41DiagnosticPublicTreeProgramV9:
         except (TypeError, ValueError) as exc:
             raise ValueError("Public-tree v9 relations contract differs") from exc
         if (len(self.relations.base_feature_names) != 197
-                or len(self.relations.feature_names) != 668
+                or len(self.relations.feature_names) != 671
                 or dict(relations_payload) != self.relations.contract()):
-            raise ValueError("Public-tree v9 requires the exact 197-to-668 relation contract")
+            raise ValueError("Public-tree v9 requires the exact 197-to-671 relation contract")
         self.base_feature_names = self.relations.base_feature_names
         self.feature_names = self.relations.feature_names
         self._feature_index = {
@@ -168,6 +177,7 @@ class R41DiagnosticPublicTreeProgramV9:
 
         normalized_specialists: list[dict[str, Any]] = []
         specialist_programs: dict[str, R41DiagnosticBoostedTreeProgram] = {}
+        replacement_count = 0
         for index, item in enumerate(specialists):
             group = GROUPS[index]
             if (not isinstance(item, Mapping) or set(item) != _SPECIALIST_FIELDS
@@ -178,6 +188,13 @@ class R41DiagnosticPublicTreeProgramV9:
             mix_weight = _finite_float(item.get("mix_weight"), group + " mix weight")
             if not 0.0 <= mix_weight <= 1.0:
                 raise ValueError(group + " mix weight must be in [0, 1]")
+            combination = item.get("combination")
+            if type(combination) is not str or combination not in COMBINATIONS:
+                raise ValueError(group + " combination differs")
+            if combination == "replacement":
+                replacement_count += 1
+                if mix_weight != 1.0:
+                    raise ValueError(group + " replacement mix weight must equal 1")
             program = _as_program(item.get("program"), group)
             self._validate_program(program, group)
             if program.classes != self.base_program.classes:
@@ -186,9 +203,12 @@ class R41DiagnosticPublicTreeProgramV9:
             normalized_specialists.append({
                 "group": group,
                 "route": route,
+                "combination": combination,
                 "mix_weight": mix_weight,
                 "program": program.to_dict(),
             })
+        if replacement_count > 1:
+            raise ValueError("Public-tree v9 permits at most one replacement specialist")
 
         metadata = _json_value(payload.get("metadata"))
         if not isinstance(metadata, dict):
@@ -210,7 +230,7 @@ class R41DiagnosticPublicTreeProgramV9:
         self, program: R41DiagnosticBoostedTreeProgram, label: str,
     ) -> None:
         if program.feature_names != self.feature_names:
-            raise ValueError(label + " program must consume exactly 668 public features")
+            raise ValueError(label + " program must consume exactly 671 public features")
         if program.action_names != self.action_names:
             raise ValueError(label + " action registry differs")
 
@@ -239,12 +259,13 @@ class R41DiagnosticPublicTreeProgramV9:
         *,
         mix_weights: Mapping[str, float],
         routes: Mapping[str, Mapping[str, Any]] | None = None,
+        combinations: Mapping[str, str] | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "R41DiagnosticPublicTreeProgramV9":
         """Assemble already-fitted/exported candidates into the v9 runtime."""
 
         relations = R41DiagnosticPublicRelationsV9(base_feature_names)
-        if len(relations.base_feature_names) != 197 or len(relations.feature_names) != 668:
+        if len(relations.base_feature_names) != 197 or len(relations.feature_names) != 671:
             raise ValueError("Public-tree v9 requires exactly 197 public base features")
         programs = {
             "base": _as_program(base_program, "Base"),
@@ -254,6 +275,14 @@ class R41DiagnosticPublicTreeProgramV9:
         }
         if not isinstance(mix_weights, Mapping) or set(mix_weights) != set(GROUPS):
             raise ValueError("Public-tree v9 requires one mix weight for every group")
+        combination_values = ({group: "weighted_average" for group in GROUPS}
+                              if combinations is None else combinations)
+        if (not isinstance(combination_values, Mapping)
+                or set(combination_values) != set(GROUPS)
+                or any(type(combination_values[group]) is not str
+                       or combination_values[group] not in COMBINATIONS
+                       for group in GROUPS)):
+            raise ValueError("Public-tree v9 requires one combination for every group")
         route_values = _default_routes() if routes is None else routes
         if not isinstance(route_values, Mapping) or set(route_values) != set(GROUPS):
             raise ValueError("Public-tree v9 requires one public route for every group")
@@ -276,6 +305,7 @@ class R41DiagnosticPublicTreeProgramV9:
             "specialists": [{
                 "group": group,
                 "route": normalized_routes[group],
+                "combination": combination_values[group],
                 "mix_weight": _builder_float(
                     mix_weights[group], group + " mix weight"),
                 "program": programs[group].to_dict(),
@@ -297,6 +327,10 @@ class R41DiagnosticPublicTreeProgramV9:
     @property
     def mix_weights(self) -> dict[str, float]:
         return {item["group"]: item["mix_weight"] for item in self._specialists}
+
+    @property
+    def combinations(self) -> dict[str, str]:
+        return {item["group"]: item["combination"] for item in self._specialists}
 
     def _mapping_vector(self, observation: Mapping[str, Any]) -> np.ndarray:
         if not isinstance(observation, Mapping):
@@ -337,6 +371,7 @@ class R41DiagnosticPublicTreeProgramV9:
     def _predict_expanded(self, expanded: np.ndarray) -> np.ndarray:
         weighted_sum = self.base_program.predict_proba_batch(expanded)
         total_weight = np.ones(len(expanded), dtype=np.float64)
+        replacement: tuple[np.ndarray, np.ndarray] | None = None
         for item in self._specialists:
             if item["mix_weight"] == 0.0:
                 continue
@@ -345,9 +380,15 @@ class R41DiagnosticPublicTreeProgramV9:
                 continue
             specialist = self._specialist_programs[item["group"]]
             local = specialist.predict_proba_batch(expanded[mask])
-            weighted_sum[mask] += item["mix_weight"] * local
-            total_weight[mask] += item["mix_weight"]
+            if item["combination"] == "replacement":
+                replacement = (mask, local)
+            else:
+                weighted_sum[mask] += item["mix_weight"] * local
+                total_weight[mask] += item["mix_weight"]
         probabilities = weighted_sum / total_weight[:, None]
+        if replacement is not None:
+            mask, local = replacement
+            probabilities[mask] = local
         if (not np.isfinite(probabilities).all()
                 or not np.allclose(probabilities.sum(axis=1), 1.0,
                                    rtol=0.0, atol=2e-15)):
@@ -454,6 +495,8 @@ class R41DiagnosticPublicTreeProgramV9:
         base_distribution = np.asarray(base_trace["probabilities"], dtype=np.float64)
         weighted_sum = base_distribution.copy()
         total_weight = 1.0
+        replacement_distribution = None
+        replacement_group = None
         route_traces: list[dict[str, Any]] = []
         triggered: list[str] = []
         for item in self._specialists:
@@ -464,20 +507,27 @@ class R41DiagnosticPublicTreeProgramV9:
             program_trace = None
             specialist_distribution = None
             weighted_distribution = None
+            replacement_output = None
             if active and item["mix_weight"] != 0.0:
                 triggered.append(item["group"])
                 program_trace = self._specialist_programs[item["group"]].trace(expanded)
                 specialist_distribution = np.asarray(
                     program_trace["probabilities"], dtype=np.float64)
-                weighted_distribution = item["mix_weight"] * specialist_distribution
-                weighted_sum += weighted_distribution
-                total_weight += item["mix_weight"]
+                if item["combination"] == "replacement":
+                    replacement_distribution = specialist_distribution.copy()
+                    replacement_group = item["group"]
+                    replacement_output = specialist_distribution.copy()
+                else:
+                    weighted_distribution = item["mix_weight"] * specialist_distribution
+                    weighted_sum += weighted_distribution
+                    total_weight += item["mix_weight"]
             route_traces.append({
                 "group": item["group"],
                 "route": deepcopy(route),
                 "observed": observed,
                 "condition_met": active,
                 "triggered": active and item["mix_weight"] != 0.0,
+                "combination": item["combination"],
                 "mix_weight": item["mix_weight"],
                 "specialist_distribution": (
                     None if specialist_distribution is None
@@ -487,9 +537,16 @@ class R41DiagnosticPublicTreeProgramV9:
                     None if weighted_distribution is None
                     else [float(value) for value in weighted_distribution]
                 ),
+                "replacement_distribution": (
+                    None if replacement_output is None
+                    else [float(value) for value in replacement_output]
+                ),
                 "program_trace": program_trace,
             })
-        final_probabilities = weighted_sum / total_weight
+        averaged_probabilities = weighted_sum / total_weight
+        final_probabilities = (
+            averaged_probabilities if replacement_distribution is None
+            else replacement_distribution)
         if (not np.isfinite(final_probabilities).all()
                 or not np.isclose(final_probabilities.sum(), 1.0,
                                   rtol=0.0, atol=2e-15)):
@@ -510,6 +567,9 @@ class R41DiagnosticPublicTreeProgramV9:
             "triggered_routes": triggered,
             "weighted_probability_sum": [float(value) for value in weighted_sum],
             "total_weight": float(total_weight),
+            "pre_replacement_probabilities": [
+                float(value) for value in averaged_probabilities],
+            "replacement_group": replacement_group,
             "final_probabilities": [float(value) for value in final_probabilities],
             "probabilities": [float(value) for value in final_probabilities],
             "prediction_index": prediction_index,
@@ -551,15 +611,18 @@ def assemble_public_tree_program_v9(
     *,
     mix_weights: Mapping[str, float],
     routes: Mapping[str, Mapping[str, Any]] | None = None,
+    combinations: Mapping[str, str] | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> R41DiagnosticPublicTreeProgramV9:
     return R41DiagnosticPublicTreeProgramV9.from_programs(
         base_feature_names, base_program, narrow_passage, shared_pickup,
-        shared_charger, mix_weights=mix_weights, routes=routes, metadata=metadata,
+        shared_charger, mix_weights=mix_weights, routes=routes,
+        combinations=combinations, metadata=metadata,
     )
 
 
 __all__ = [
-    "VERSION", "GROUPS", "AGGREGATION", "R41DiagnosticPublicTreeProgramV9",
+    "VERSION", "GROUPS", "COMBINATIONS", "AGGREGATION",
+    "R41DiagnosticPublicTreeProgramV9",
     "assemble_public_tree_program_v9",
 ]

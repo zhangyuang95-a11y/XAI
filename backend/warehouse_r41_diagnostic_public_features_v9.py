@@ -293,6 +293,42 @@ class R41DiagnosticPublicRelationsV9:
         add(topology[:, 3] > 0,
             "derived.v9.task_pair.has_shared_crossing")
 
+        # These two relations describe a generic, directly visible
+        # coordination state.  The first says that this robot is standing on
+        # the delivery endpoint of a task currently carried by its teammate.
+        # The second says that this robot's preceding move was cancelled while
+        # its teammate stayed still.  Neither relation depends on an episode,
+        # scene, intervention branch, frame number, or learned-model state.
+        self_blocks_other_active_delivery = np.zeros(len(values), dtype=np.bool_)
+        for task in range(2):
+            self_blocks_other_active_delivery |= (
+                (self._column(values, f"task.{task}.exists") > .5)
+                & (self._column(values, f"task.{task}.carried_other") > .5)
+                & (self._column(
+                    values, f"task.{task}.delivery.self.path_distance")
+                    <= EPSILON)
+            )
+        stationary_other_blocked_self = (
+            (self._column(values, "history.valid") > .5)
+            & (self._column(values, "history.self.move_canceled") > .5)
+            & (self._column(values, "history.other.submitted.WAIT") > .5)
+        )
+        add(self_blocks_other_active_delivery,
+            "derived.v9.coordination.self_blocks_other_active_delivery")
+        add(stationary_other_blocked_self,
+            "derived.v9.coordination.stationary_other_blocked_self")
+
+        # This route is deliberately an explicit conjunction over public
+        # relations.  It is exposed as a registered feature so a replacement
+        # explanation specialist cannot hide a different runtime predicate.
+        add(
+            critical["shared_pickup"]
+            & self_blocks_other_active_delivery
+            & stationary_other_blocked_self
+            & (self._column(values, "other.battery") > np.float32(.3)),
+            "derived.v9.route.shared_pickup_stationary_delivery_block",
+        )
+
         # Collision recovery and action-history interactions are public.  They
         # are especially useful for the ordinary WAIT endpoint of an isolated
         # counterfactual pair, which v8's shallow specialists underfit.
@@ -480,6 +516,29 @@ class R41DiagnosticPublicRelationsV9:
             "actor_hidden_state_input": False,
             "intervention_metadata_input": False,
             "action_label_input": False,
+            "collision_count_modulo_input": False,
+            "frame_phase_input": False,
+            "episode_identifier_input": False,
+            "anchor_identifier_input": False,
+            "intervention_kind_or_branch_input": False,
+            "auditable_routes": {
+                "shared_pickup_stationary_delivery_block": {
+                    "feature_name": (
+                        "derived.v9.route."
+                        "shared_pickup_stationary_delivery_block"),
+                    "operator": ">",
+                    "threshold": 0.5,
+                    "conjunction": [
+                        "derived.critical.shared_pickup",
+                        ("derived.v9.coordination."
+                         "self_blocks_other_active_delivery"),
+                        ("derived.v9.coordination."
+                         "stationary_other_blocked_self"),
+                        "other.battery > 0.3",
+                    ],
+                    "runtime_inputs": ["public_observation"],
+                },
+            },
         }
 
 

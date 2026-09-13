@@ -95,6 +95,7 @@ def _source_bytes():
             "group": group,
             "route": {"feature_name": "derived.critical." + group,
                       "operator": ">", "threshold": 0.5},
+            "combination": "weighted_average",
             "mix_weight": 0.0,
             "program": zero,
         } for group in GROUPS],
@@ -157,7 +158,7 @@ def test_compact_tree_roundtrip_preserves_audited_actions_topology_and_trace():
     assert trace["base"]["program_trace"]["trees"][0]["path"]
     assert len(compact) < len(raw)
     assert program_json_bytes(program).endswith(b"\n")
-    assert len(program.feature_names) == 668
+    assert len(program.feature_names) == 671
     assert report["runtime_action_override"] is False
     assert report["tree_controls_runtime"] is False
     assert report["neural_actor_modified"] is False
@@ -232,7 +233,7 @@ def test_compact_tree_reader_rejects_authenticated_public_feature_binding_tamper
 def test_v9_transport_contract_reserves_secret_file_capacity_and_is_explanation_only():
     contract = subject.transport_contract()
     assert contract["raw_public_feature_count"] == 197
-    assert contract["derived_public_feature_count"] == 668
+    assert contract["derived_public_feature_count"] == 671
     assert contract["threshold_dictionary_index_dtype"] == "uint32"
     assert contract["explicit_preorder_topology_preserved"] is True
     assert contract["trace_supported_after_decode"] is True
@@ -258,3 +259,34 @@ def test_v9_codec_has_no_actor_or_runtime_action_controller_dependency():
     assert "NumPyNativeActor" not in source
     assert "from env.warehouse_native.policy" not in source
     assert "tree_controls_runtime\": False" in source
+
+
+def test_compact_transport_preserves_replacement_route_and_trace_semantics():
+    raw, names = _source_bytes()
+    payload = json.loads(raw)
+    replacement = payload["specialists"][1]
+    replacement["combination"] = "replacement"
+    replacement["mix_weight"] = 1.0
+    replacement["route"] = {
+        "feature_name": names[0], "operator": ">", "threshold": 0.5,
+    }
+    source_raw = (canonical(payload) + "\n").encode()
+    observations = np.zeros((2, 197), dtype=np.float32)
+    observations[1, 0] = 1.0
+    compact, report = encode_program(source_raw, {"development": observations})
+    restored, _ = decode_program(
+        compact, expected_compact_sha256=sha256(compact).hexdigest(),
+        **_source_bindings(source_raw),
+    )
+    from backend.warehouse_r41_diagnostic_public_tree_program_v9 import (
+        R41DiagnosticPublicTreeProgramV9,
+    )
+    source = R41DiagnosticPublicTreeProgramV9.from_json(source_raw.decode())
+    assert np.array_equal(source.predict_batch(observations),
+                          restored.predict_batch(observations))
+    assert restored.combinations["shared_pickup"] == "replacement"
+    trace = restored.trace(dict(zip(names, observations[1])))
+    assert trace["replacement_group"] == "shared_pickup"
+    assert trace["routes"][1]["combination"] == "replacement"
+    assert trace["routes"][1]["replacement_distribution"] is not None
+    assert report["audit"]["exact_action_parity"] is True

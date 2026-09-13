@@ -14,8 +14,7 @@ _PATH_ARGUMENTS = (
     "fresh-outer-registry-report", "outer-hash-projection",
     "outer-hash-projection-receipt", "development-rows", "program",
     "selector-report", "outer-result", "outer-permanent-registry",
-    "permanent-final-registry", "output", "final-materializer-source",
-    "final-materializer-config",
+    "permanent-final-registry", "output", "final-materializer-config",
 )
 
 
@@ -38,6 +37,18 @@ def test_help_lists_every_required_input_without_a_sensitive_default(capsys):
         assert "--" + name in help_text
     assert "/Users/" not in help_text
     assert ".config/policylens" not in help_text
+    assert "--final-materializer-source" not in help_text
+
+
+def test_cli_rejects_caller_selected_materializer(tmp_path, capsys):
+    with pytest.raises(SystemExit) as stopped:
+        subject.main([
+            *_arguments(tmp_path),
+            "--final-materializer-source", str(tmp_path / "copied.py"),
+        ])
+    assert stopped.value.code == 2
+    assert "unrecognized arguments: --final-materializer-source" in (
+        capsys.readouterr().err)
 
 
 def test_main_passes_every_argument_and_scopes_materializer_config(
@@ -62,14 +73,12 @@ def test_main_passes_every_argument_and_scopes_materializer_config(
         "outer_hash_projection_receipt_path", "development_rows_path",
         "program_path", "selector_report_path", "outer_result_path",
         "expected_outer_result_sha256", "outer_permanent_registry",
-        "permanent_final_registry", "output", "final_materializer_source_path",
+        "permanent_final_registry", "output",
     }
     assert set(captured) == expected_names | {"materializer_config"}
     assert captured["expected_candidate_lock_sha256"] == "a" * 64
     assert captured["expected_outer_result_sha256"] == "b" * 64
     assert captured["candidate_lock_path"] == tmp_path / "candidate-lock"
-    assert captured["final_materializer_source_path"] == (
-        tmp_path / "final-materializer-source")
     assert captured["materializer_config"] == str(
         (tmp_path / "final-materializer-config").absolute())
     assert os.environ[subject.MATERIALIZER_CONFIG_ENV] == "previous-config"

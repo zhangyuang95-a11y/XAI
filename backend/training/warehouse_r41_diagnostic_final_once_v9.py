@@ -48,6 +48,16 @@ ROWS_NAME = "final_rows.npz"
 AUDIT_NAME = "explanation_audit.json"
 FINAL_SCENE_OFFSET = 900_000
 MAX_JSON_BYTES = 512 * 1024 * 1024
+OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH = (
+    "backend/training/warehouse_r41_diagnostic_final_materializer_v9.py"
+)
+# Frozen before the protected-final attempt.  This is the digest of the
+# materializer's complete transitive local source closure, not merely the
+# entry-point file.  Changing any producer dependency therefore requires a
+# new protocol version rather than silently changing the final evaluator.
+OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256 = (
+    "43bffabd55c325c59a547dbce16409bc3be757a63d589e1349b1f952be7f2071"
+)
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _MATERIAL_FIELDS = frozenset((
     "version", "status", "claim", "scenes", "selection",
@@ -147,6 +157,38 @@ def _materializer_identity(source_path: str | Path) -> dict[str, str]:
             or source.suffix != ".py"):
         raise ValueError("Final materializer must be one canonical Python source")
     return dict(sorted(local_source_hashes((source,)).items()))
+
+
+def _authenticate_official_materializer_source(
+    source_path: str | Path,
+) -> tuple[Path, dict[str, str]]:
+    """Authenticate the one repository materializer allowed in production.
+
+    ``source_path`` is an internal unit seam.  Production reaches this helper
+    only through :func:`_official_materializer_binding`, which supplies the
+    fixed repository path and exposes no caller-controlled override.
+    """
+
+    source = Path(source_path).expanduser().absolute()
+    official = (ROOT / OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH).absolute()
+    if (source != official or source.resolve() != official
+            or official.relative_to(ROOT).as_posix()
+                != OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH):
+        raise ValueError("Only the frozen repository final materializer is allowed")
+    sources = _materializer_identity(source)
+    if (sources.get(OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH)
+            != file_hash(official)
+            or digest(sources)
+                != OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256):
+        raise RuntimeError("Frozen final materializer source closure differs")
+    return official, sources
+
+
+def _official_materializer_binding() -> tuple[Path, dict[str, str]]:
+    """Return the fixed production materializer and its frozen source map."""
+
+    return _authenticate_official_materializer_source(
+        ROOT / OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH)
 
 
 def _run_materializer(
@@ -388,11 +430,10 @@ def run_final_once(
     selector_report_path: str | Path, outer_result_path: str | Path,
     expected_outer_result_sha256: str, outer_permanent_registry: str | Path,
     permanent_final_registry: str | Path, output: str | Path,
-    final_materializer_source_path: str | Path,
 ) -> dict[str, Any]:
     """Run one final attempt. No final identity is supplied before the claim."""
     sources = producer_sources()
-    materializer_sources = _materializer_identity(final_materializer_source_path)
+    materializer_source, materializer_sources = _official_materializer_binding()
     preclaim = _authenticate_preclaim(
         candidate_lock_path=candidate_lock_path,
         expected_candidate_lock_sha256=expected_candidate_lock_sha256,
@@ -469,8 +510,9 @@ def run_final_once(
         # First protected operation: the bound producer may now read its salt
         # and reveal final scene identities.
         material = dict(_run_materializer(
-            final_materializer_source_path, anchor, campaign))
-        if (_materializer_identity(final_materializer_source_path) != materializer_sources
+            materializer_source, anchor, campaign))
+        if (_official_materializer_binding()
+                != (materializer_source, materializer_sources)
                 or producer_sources() != sources):
             raise RuntimeError("Final producer/controller source changed")
         scenes = _validate_material(
@@ -523,8 +565,8 @@ def run_final_once(
             audit, expected_bindings=audit_bindings, require_passed=True)
         _write_exclusive(temporary / AUDIT_NAME, _json_bytes(audit))
         if (producer_sources() != sources
-                or _materializer_identity(final_materializer_source_path)
-                    != materializer_sources
+                or _official_materializer_binding()
+                    != (materializer_source, materializer_sources)
                 or file_hash(preclaim["lock_path"])
                     != expected_candidate_lock_sha256
                 or file_hash(preclaim["paths"]["program"])
@@ -623,6 +665,8 @@ def read_completion(
         raise ValueError("Permanent v9 final claim/completion differs")
     anchor = outer_api._strict_json_bytes(
         anchor_path.read_bytes(), "permanent v9 final anchor")
+    _materializer_source, official_materializer_sources = (
+        _official_materializer_binding())
     if (not isinstance(anchor, Mapping) or not _content_valid(anchor)
             or anchor.get("version") != VERSION + ".attempt-anchor.v1"
             or anchor.get("status") != "final_attempt_irrevocably_claimed"
@@ -633,6 +677,9 @@ def read_completion(
             or anchor.get("bindings", {}).get(
                 "final_controller_source_closure_sha256")
                 != digest(producer_sources())
+            or anchor.get("bindings", {}).get(
+                "final_materializer_source_closure_sha256")
+                != digest(official_materializer_sources)
             or value.get("attempt_anchor_content_sha256")
                 != anchor.get("content_sha256")):
         raise ValueError("Permanent v9 final anchor differs")
@@ -642,6 +689,7 @@ def read_completion(
 __all__ = [
     "VERSION", "MATERIAL_VERSION", "MATERIAL_STATUS", "STATUS_PASSED",
     "STATUS_FAILED", "ANCHOR_NAME", "COMPLETION_NAME", "MATERIAL_NAME",
-    "ROWS_NAME", "AUDIT_NAME", "contract", "producer_sources",
-    "run_final_once", "read_completion",
+    "ROWS_NAME", "AUDIT_NAME", "OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH",
+    "OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256", "contract",
+    "producer_sources", "run_final_once", "read_completion",
 ]

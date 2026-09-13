@@ -40,7 +40,6 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--outer-permanent-registry", type=Path, required=True)
     value.add_argument("--permanent-final-registry", type=Path, required=True)
     value.add_argument("--output", type=Path, required=True)
-    value.add_argument("--final-materializer-source", type=Path, required=True)
     value.add_argument(
         "--final-materializer-config",
         type=Path,
@@ -78,7 +77,6 @@ def main(argv: list[str] | None = None) -> int:
             outer_permanent_registry=args.outer_permanent_registry,
             permanent_final_registry=args.permanent_final_registry,
             output=args.output,
-            final_materializer_source_path=args.final_materializer_source,
         )
     finally:
         if previous_config is None:

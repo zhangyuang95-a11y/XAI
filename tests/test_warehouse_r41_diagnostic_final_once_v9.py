@@ -76,8 +76,9 @@ def _setup(tmp_path: Path, monkeypatch):
     controller_sources = {"final_once.py": _fp("controller")}
     materializer_sources = {"materializer.py": _fp("materializer")}
     monkeypatch.setattr(subject, "producer_sources", lambda: controller_sources)
-    monkeypatch.setattr(subject, "_materializer_identity",
-                        lambda _callback: materializer_sources)
+    monkeypatch.setattr(
+        subject, "_official_materializer_binding",
+        lambda: (paths["program"], materializer_sources))
     monkeypatch.setattr(subject, "_authenticate_preclaim", lambda **_kwargs: context)
     monkeypatch.setattr(subject, "_collect_final_rows",
                         lambda **_kwargs: (_arrays(), 17))
@@ -114,7 +115,6 @@ def _setup(tmp_path: Path, monkeypatch):
         "outer_permanent_registry": permanent,
         "permanent_final_registry": permanent,
         "output": output_parent / "final",
-        "final_materializer_source_path": paths["program"],
     }
     return common, context, permanent, materializer_sources
 
@@ -267,3 +267,49 @@ def test_bound_materializer_runs_only_from_existing_claim(tmp_path, monkeypatch)
         value, anchor=anchor, materializer_sources=sources)
     assert len(scenes) == subject.audit_api.FINAL_SCENE_COUNT
     assert (campaign / "materializer_output.json").is_file()
+
+
+def test_arbitrary_materializer_copy_is_rejected_before_claim(
+        tmp_path, monkeypatch):
+    common, _context, permanent, _sources = _setup(tmp_path, monkeypatch)
+    official = subject.ROOT / subject.OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH
+    copied = tmp_path / official.name
+    copied.write_bytes(official.read_bytes())
+    monkeypatch.setattr(
+        subject, "_official_materializer_binding",
+        lambda: subject._authenticate_official_materializer_source(copied))
+    with pytest.raises(ValueError, match="frozen repository final materializer"):
+        subject.run_final_once(**common)
+    assert list(permanent.iterdir()) == []
+
+
+def test_modified_official_materializer_closure_is_rejected_before_claim(
+        tmp_path, monkeypatch):
+    common, _context, permanent, _sources = _setup(tmp_path, monkeypatch)
+    official = subject.ROOT / subject.OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH
+    live_sources = subject._materializer_identity(official)
+    changed_sources = dict(live_sources)
+    changed_sources[subject.OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH] = "0" * 64
+    monkeypatch.setattr(
+        subject, "_materializer_identity", lambda _source: changed_sources)
+    monkeypatch.setattr(
+        subject, "_official_materializer_binding",
+        lambda: subject._authenticate_official_materializer_source(official))
+    with pytest.raises(RuntimeError, match="source closure differs"):
+        subject.run_final_once(**common)
+    assert list(permanent.iterdir()) == []
+
+
+def test_run_final_once_has_no_caller_materializer_override():
+    assert "final_materializer_source_path" not in inspect.signature(
+        subject.run_final_once).parameters
+
+
+def test_official_materializer_binding_matches_frozen_transitive_digest():
+    source, sources = subject._official_materializer_binding()
+    assert source == (
+        subject.ROOT / subject.OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH)
+    assert sources[subject.OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH] == (
+        file_hash(source))
+    assert digest(sources) == (
+        subject.OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256)

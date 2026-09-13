@@ -159,6 +159,39 @@ def package_contract() -> dict[str, Any]:
     }
 
 
+def _authenticate_official_final_materializer(
+    final_anchor: Mapping[str, Any], final_material: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Re-authenticate the protected-final producer at release admission."""
+
+    source, sources = final_api._official_materializer_binding()
+    official = (
+        final_api.ROOT / final_api.OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH
+    ).absolute()
+    closure_sha256 = digest(sources)
+    anchor_binding = final_anchor.get("bindings")
+    material_sources = final_material.get("producer_sources")
+    if (source != official
+            or closure_sha256
+                != final_api.OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256
+            or not isinstance(anchor_binding, Mapping)
+            or anchor_binding.get(
+                "final_materializer_source_closure_sha256")
+                != closure_sha256
+            or not isinstance(material_sources, Mapping)
+            or dict(material_sources) != sources
+            or final_material.get("producer_sources_sha256") != closure_sha256):
+        raise ValueError("Protected final does not use the official materializer")
+    final_api._validate_material(
+        final_material, anchor=final_anchor, materializer_sources=sources)
+    return {
+        "source_relative_path": final_api.OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH,
+        "source_sha256": sources[
+            final_api.OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH],
+        "source_closure_sha256": closure_sha256,
+    }
+
+
 def _paths(values: Mapping[str, str | Path]) -> dict[str, Path]:
     if not isinstance(values, Mapping) or set(values) != set(ARTIFACT_NAMES):
         raise ValueError("Exact v9 admission artifact set required")
@@ -449,6 +482,8 @@ def _validate_components_snapshot(
         raise ValueError("Protected-final attempt does not bind the admitted candidate")
     final_audit = json_values["final_audit"]
     final_material = json_values["final_material"]
+    final_materializer = _authenticate_official_final_materializer(
+        final_anchor, final_material)
     expected_audit_bindings = {
         "candidate_lock_sha256": initial_hashes["candidate_lock"],
         "outer_result_sha256": initial_hashes["outer_result"],
@@ -560,6 +595,10 @@ def _validate_components_snapshot(
             "final_completion_content_sha256": completion["content_sha256"],
             "final_audit_sha256": initial_hashes["final_audit"],
             "final_audit_content_sha256": final_audit["content_sha256"],
+            "final_materializer_source_sha256": final_materializer[
+                "source_sha256"],
+            "final_materializer_source_closure_sha256": final_materializer[
+                "source_closure_sha256"],
             "play_scene_fingerprints_sha256": digest(
                 [str(row["fingerprint"]) for row in play]),
             "formal_scene_fingerprints_sha256": digest(scene_fingerprints),

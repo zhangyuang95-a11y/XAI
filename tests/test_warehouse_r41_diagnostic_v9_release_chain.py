@@ -113,6 +113,63 @@ def test_admission_separates_full_and_portable_manifests_and_all_hard_gates():
     assert set(contract["archive_whitelist"]) == set(release.ARCHIVE_WHITELIST)
 
 
+def test_admission_rejects_nonofficial_final_materializer_producer_binding():
+    _source, official_sources = admission.final_api._official_materializer_binding()
+    anchor = {
+        "attempt_key": "a" * 64,
+        "content_sha256": "b" * 64,
+        "bindings": {
+            "final_materializer_source_closure_sha256": digest(official_sources),
+        },
+    }
+    scenes = [{
+        "id": f"final-{index}", "seed": 900_000 + index,
+        "family_id": f"family-{index % 6}",
+        "fingerprint": sha256(f"final-{index}".encode()).hexdigest(),
+    } for index in range(admission.audit_api.FINAL_SCENE_COUNT)]
+    material = {
+        "version": admission.final_api.MATERIAL_VERSION,
+        "status": admission.final_api.MATERIAL_STATUS,
+        "claim": {
+            "attempt_key": anchor["attempt_key"],
+            "attempt_anchor_content_sha256": anchor["content_sha256"],
+        },
+        "scenes": scenes,
+        "selection": {
+            "whole_scene_selection": True,
+            "scene_count": admission.audit_api.FINAL_SCENE_COUNT,
+            "program_access": False,
+            "program_predictions_access": False,
+            "actor_outputs_access": False,
+            "action_labels_access": False,
+            "salt_access_after_permanent_claim": True,
+            "candidate_adaptation": False,
+            "runtime_action_override": False,
+        },
+        "producer_sources": dict(official_sources),
+        "producer_sources_sha256": digest(official_sources),
+        "formal_ready": False,
+    }
+    material["content_sha256"] = digest(material)
+    authenticated = admission._authenticate_official_final_materializer(
+        anchor, material)
+    assert authenticated["source_closure_sha256"] == digest(official_sources)
+
+    copied_sources = {"copied/final_materializer.py": "c" * 64}
+    changed = deepcopy(material)
+    changed["producer_sources"] = copied_sources
+    changed["producer_sources_sha256"] = digest(copied_sources)
+    changed["content_sha256"] = digest({
+        key: value for key, value in changed.items() if key != "content_sha256"
+    })
+    changed_anchor = deepcopy(anchor)
+    changed_anchor["bindings"][
+        "final_materializer_source_closure_sha256"] = digest(copied_sources)
+    with pytest.raises(ValueError, match="official materializer"):
+        admission._authenticate_official_final_materializer(
+            changed_anchor, changed)
+
+
 def test_archive_roundtrip_is_deterministic_strict_and_under_960kb():
     artifacts = _artifacts(); manifest = _manifest(artifacts)
     first = release._archive_bytes(manifest, artifacts)

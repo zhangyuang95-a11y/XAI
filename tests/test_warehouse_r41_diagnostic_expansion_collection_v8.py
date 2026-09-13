@@ -15,7 +15,7 @@ from backend.training.warehouse_native_common import digest, file_hash
 ROOT = Path(__file__).resolve().parents[1]
 FRESH_OUTER = ROOT / (
     "output/warehouse_native/"
-    "r41_diagnostic_rcpd_v8_fresh_outer_registry_v1_20260913"
+    "r41_diagnostic_rcpd_v8_fresh_outer_registry_v2_sourceclosure_20260913"
 )
 FRESH_REGISTRY = FRESH_OUTER / "development_expansion.json"
 FRESH_REPORT = FRESH_OUTER / "report.json"

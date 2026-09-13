@@ -15,6 +15,13 @@ def _fp(value: str) -> str:
     return sha256(value.encode("utf-8")).hexdigest()
 
 
+def test_final_audit_uses_v11_row_and_projection_contracts():
+    assert subject.collection_api.VERSION == (
+        "warehouse-r41-diagnostic-outer-collection.v11")
+    assert subject.projection_api.VERSION == (
+        "warehouse-r41-diagnostic-outer-hash-projection.v11")
+
+
 class _Actor:
     def __init__(self, _path):
         self.metadata = {"feature_names": [f"feature-{i}" for i in range(197)]}

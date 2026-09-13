@@ -13,6 +13,11 @@ from backend import warehouse_r41_diagnostic_online_explanation_v9 as explanatio
 from scripts import build_warehouse_r41_diagnostic_study_materials_v9 as cli
 
 
+def test_study_materials_authenticate_v11_candidate_lock():
+    assert subject.outer_api.VERSION.startswith(
+        "warehouse-r41-diagnostic-rcpd-v11-")
+
+
 def _write(path: Path, value) -> Path:
     if isinstance(value, dict):
         path.write_text(canonical(value) + "\n", encoding="utf-8")

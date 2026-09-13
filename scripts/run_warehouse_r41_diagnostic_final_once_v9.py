@@ -30,6 +30,7 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--failed-outer-closeout", type=Path, required=True)
     value.add_argument("--fresh-outer-registry", type=Path, required=True)
     value.add_argument("--fresh-outer-registry-report", type=Path, required=True)
+    value.add_argument("--prior-outer-hash-projection", type=Path, required=True)
     value.add_argument("--outer-hash-projection", type=Path, required=True)
     value.add_argument("--outer-hash-projection-receipt", type=Path, required=True)
     value.add_argument("--development-rows", type=Path, required=True)
@@ -66,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
             failed_outer_closeout_path=args.failed_outer_closeout,
             fresh_outer_registry_path=args.fresh_outer_registry,
             fresh_outer_registry_report_path=args.fresh_outer_registry_report,
+            prior_outer_hash_projection_path=(
+                args.prior_outer_hash_projection),
             outer_hash_projection_path=args.outer_hash_projection,
             outer_hash_projection_receipt_path=(
                 args.outer_hash_projection_receipt),

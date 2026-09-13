@@ -27,11 +27,12 @@ import numpy as np
 from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_api
 from backend.training import warehouse_r41_diagnostic_explanation_audit_v9 as audit_api
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_api
-from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v10 as projection_api
-from backend.training import warehouse_r41_diagnostic_outer_collection_v10 as collection_api
+from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v11 as projection_api
+from backend.training import warehouse_r41_diagnostic_outer_collection_v11 as collection_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v11_fit_selector as selector_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v7 as rows_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as metrics_api
-from backend.training import warehouse_r41_diagnostic_rcpd_v10_outer_once as outer_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v11_outer_once as outer_api
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 
@@ -58,7 +59,7 @@ OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH = (
 # claim; any later producer change requires a new protocol version rather than
 # silently changing a consumed final evaluator.
 OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256 = (
-    "1e7a462acc3ea3195bafcc92055785eb23fa5f66e4ae0655c491873c5e5f8722"
+    "fea46d2c95fd59a4a3ab6b390fcb6065702e4a112a4fa21c511a07d8e8fb1c17"
 )
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _MATERIAL_FIELDS = frozenset((
@@ -226,7 +227,7 @@ def _strict_outer_pass(value: Mapping[str, Any], *, bindings: Mapping[str, str],
     try:
         recomputed = metrics_api._gate(metrics)
     except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("V9 outer result metrics cannot be gated") from error
+        raise ValueError("V11 outer result metrics cannot be gated") from error
     if (value.get("status") != outer_api.STATUS_PASSED
             or value.get("candidate_lock_sha256") != candidate_lock_sha256
             or value.get("program_sha256") != bindings["program_sha256"]
@@ -239,7 +240,7 @@ def _strict_outer_pass(value: Mapping[str, Any], *, bindings: Mapping[str, str],
             or value.get("row_accounting", {}).get("runtime_action_overrides") != 0
             or value.get("execution", {}).get("candidate_refit") is not False
             or value.get("execution", {}).get("program_mutated") is not False):
-        raise ValueError("A passed immutable v9 fresh outer is required")
+        raise ValueError("A passed immutable v11 fresh outer is required")
 
 
 def _authenticate_preclaim(
@@ -249,6 +250,7 @@ def _authenticate_preclaim(
     failed_outer_closeout_path: str | Path,
     fresh_outer_registry_path: str | Path,
     fresh_outer_registry_report_path: str | Path,
+    prior_outer_hash_projection_path: str | Path,
     outer_hash_projection_path: str | Path,
     outer_hash_projection_receipt_path: str | Path,
     development_rows_path: str | Path, program_path: str | Path,
@@ -264,6 +266,7 @@ def _authenticate_preclaim(
         failed_outer_closeout=failed_outer_closeout_path,
         fresh_outer_registry=fresh_outer_registry_path,
         fresh_outer_registry_report=fresh_outer_registry_report_path,
+        prior_outer_hash_projection=prior_outer_hash_projection_path,
         outer_hash_projection=outer_hash_projection_path,
         outer_hash_projection_receipt=outer_hash_projection_receipt_path,
         development_rows=development_rows_path, program=program_path,
@@ -277,6 +280,20 @@ def _authenticate_preclaim(
     registry, registry_report, selected_identity_sha256 = outer_api._registry_bundle(
         paths["fresh_outer_registry"], paths["fresh_outer_registry_report"],
         bindings=bindings)
+    registry_bindings = registry.get("bindings", {})
+    if (not isinstance(registry_bindings, Mapping)
+            or registry_bindings.get(
+                "outer_observation_hash_projection_file_sha256")
+                != bindings["prior_outer_hash_projection_sha256"]
+            or registry_bindings.get(
+                "outer_observation_hash_projection_content_sha256")
+                != bindings["prior_outer_hash_projection_content_sha256"]):
+        raise ValueError("V11 prior outer hash projection binding differs")
+    prior_projection = selector_api.read_prior_outer_hash_projection(
+        paths["prior_outer_hash_projection"],
+        expected_sha256=bindings["prior_outer_hash_projection_sha256"],
+        expected_content_sha256=bindings[
+            "prior_outer_hash_projection_content_sha256"])
     program_payload = outer_api._program_payload(paths["program"])
     actor_feature_names, feature_sha256 = outer_api._authenticate_program_actor_features(
         program_payload=program_payload, actor_path=paths["actor"],
@@ -286,13 +303,33 @@ def _authenticate_preclaim(
         receipt_path=paths["outer_hash_projection_receipt"],
         expected_projection_sha256=bindings["outer_hash_projection_sha256"],
         expected_receipt_sha256=bindings["outer_hash_projection_receipt_sha256"])
+    receipt_bindings = projection_receipt.get("bindings", {})
     if (projection["identity"].get("registry_file_sha256")
             != bindings["fresh_outer_registry_sha256"]
+            or projection["identity"].get("registry_content_sha256")
+                != registry["content_sha256"]
             or projection["identity"].get("selected_identity_sha256")
                 != selected_identity_sha256
-            or projection_receipt.get("bindings", {}).get("actor_sha256")
+            or receipt_bindings.get("actor_sha256")
                 != bindings["actor_sha256"]):
-        raise ValueError("V9 outer identity/projection binding differs")
+        raise ValueError("V11 outer identity/projection binding differs")
+    expected_receipt_bindings = {
+        "fresh_outer_registry_sha256": bindings[
+            "fresh_outer_registry_sha256"],
+        "fresh_outer_registry_content_sha256": registry["content_sha256"],
+        "fresh_outer_registry_report_sha256": bindings[
+            "fresh_outer_registry_report_sha256"],
+        "fresh_outer_registry_report_content_sha256": registry_report[
+            "content_sha256"],
+        "outer_hash_projection_sha256": bindings[
+            "outer_hash_projection_sha256"],
+        "outer_hash_projection_content_sha256": projection[
+            "content_sha256"],
+    }
+    if (not isinstance(receipt_bindings, Mapping)
+            or any(receipt_bindings.get(name) != expected
+                   for name, expected in expected_receipt_bindings.items())):
+        raise ValueError("V11 outer registry/report projection receipt differs")
 
     # These strict readers authenticate the frozen runtime and designation but
     # deliberately use no full/final manifest replay.
@@ -317,16 +354,19 @@ def _authenticate_preclaim(
         paths["development_rows"],
         expected_sha256=bindings["development_rows_sha256"],
         fields=frozenset(("observation_hashes", "scene_fingerprints")),
-        label="locked v9 development rows")
+        label="locked v11 development rows")
     development_ordered = outer_api._decode(
         development["observation_hashes"], "development observation hashes")
+    validation_hashes = selector_api.validation_hash_union(
+        prior_projection["outer_observation_hashes"],
+        projection["projection"]["unique_observation_hashes"])
     development_hashes = _retained_development_hashes(
         development_ordered=development_ordered,
-        outer_unique_hashes=projection["projection"]["unique_observation_hashes"],
+        outer_unique_hashes=validation_hashes,
         validation_wins=selector_report["development"]["validation_wins"])
     development_scenes = set(outer_api._decode(
         development["scene_fingerprints"], "development scene fingerprints"))
-    outer_hashes = set(projection["projection"]["ordered_observation_hashes"])
+    outer_hashes = set(validation_hashes)
     outer_scenes = {str(scene["fingerprint"])
                     for scene in registry["development_outer"]}
     if development_hashes & outer_hashes or development_scenes & outer_scenes:
@@ -350,7 +390,7 @@ def _retained_development_hashes(
     *, development_ordered: Sequence[str], outer_unique_hashes: Sequence[str],
     validation_wins: Mapping[str, Any],
 ) -> set[str]:
-    """Reproduce the locked v10 validation-wins projection before final use."""
+    """Reproduce the locked v11 validation-wins projection before final use."""
     keep = ~np.isin(
         np.asarray(development_ordered, dtype="U64"),
         np.asarray(outer_unique_hashes, dtype="U64"))
@@ -371,7 +411,7 @@ def _retained_development_hashes(
     if (not isinstance(validation_wins, Mapping)
             or any(validation_wins.get(name) != value
                    for name, value in recomputed.items())):
-        raise ValueError("Locked v10 validation-wins projection differs")
+        raise ValueError("Locked v11 validation-wins projection differs")
     result = set(retained)
     if result & set(outer_unique_hashes):
         raise ValueError("Locked development and passed outer splits overlap")
@@ -462,6 +502,7 @@ def run_final_once(
     failed_outer_closeout_path: str | Path,
     fresh_outer_registry_path: str | Path,
     fresh_outer_registry_report_path: str | Path,
+    prior_outer_hash_projection_path: str | Path,
     outer_hash_projection_path: str | Path,
     outer_hash_projection_receipt_path: str | Path,
     development_rows_path: str | Path, program_path: str | Path,
@@ -481,6 +522,7 @@ def run_final_once(
         failed_outer_closeout_path=failed_outer_closeout_path,
         fresh_outer_registry_path=fresh_outer_registry_path,
         fresh_outer_registry_report_path=fresh_outer_registry_report_path,
+        prior_outer_hash_projection_path=prior_outer_hash_projection_path,
         outer_hash_projection_path=outer_hash_projection_path,
         outer_hash_projection_receipt_path=outer_hash_projection_receipt_path,
         development_rows_path=development_rows_path, program_path=program_path,

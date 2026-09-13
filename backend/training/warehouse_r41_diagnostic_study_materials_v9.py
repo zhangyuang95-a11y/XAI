@@ -20,7 +20,7 @@ from typing import Any, Mapping
 
 from backend.training import warehouse_r41_diagnostic_explanation_audit_v9 as audit_api
 from backend.training import warehouse_r41_diagnostic_question_bank as question_api
-from backend.training import warehouse_r41_diagnostic_rcpd_v10_outer_once as outer_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v11_outer_once as outer_api
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 from backend.warehouse_r41_diagnostic_online_runtime import (

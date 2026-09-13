@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from hashlib import sha256
 import inspect
 import json
@@ -10,7 +11,7 @@ import numpy as np
 import pytest
 
 from backend.training import warehouse_r41_diagnostic_final_materializer_v9 as subject
-from backend.training.warehouse_native_common import canonical, digest
+from backend.training.warehouse_native_common import canonical, digest, file_hash
 
 
 def _fp(label: str) -> str:
@@ -285,7 +286,7 @@ def test_selection_never_replaces_actor_action_or_opens_program(monkeypatch):
     assert subject.contract()["runtime_action_override"] is False
 
 
-def test_public_authentication_reproduces_locked_validation_wins():
+def test_public_authentication_reproduces_locked_v11_validation_wins():
     development = [_fp("same-a"), _fp("outer"), _fp("same-a"), _fp("same-c")]
     outer = [_fp("outer")]
     keep = ~np.isin(
@@ -324,6 +325,9 @@ def test_source_orders_claim_config_public_preparation_then_salt():
 
 def test_config_is_strict_and_does_not_embed_secret(tmp_path, monkeypatch):
     assert "selector_report" in subject._CONFIG_PATH_FIELDS
+    assert "burned_v10_final_closeout" in subject._CONFIG_PATH_FIELDS
+    assert "permanent_v10_final_closeout_registry" in (
+        subject._CONFIG_PATH_FIELDS)
     paths = {name: str((tmp_path / name).absolute())
              for name in subject._CONFIG_PATH_FIELDS}
     value = {"version": subject.CONFIG_VERSION, "paths": paths}
@@ -337,9 +341,169 @@ def test_config_is_strict_and_does_not_embed_secret(tmp_path, monkeypatch):
     assert all(isinstance(value, Path) for value in actual.values())
 
 
+def _prior_projection() -> dict:
+    values = sorted({_fp("v8-observation"), _fp("v9-observation"),
+                     _fp("v10-observation")})
+    value = {
+        "version": subject.registry_api.VERSION
+            + ".validation-wins-exclusion.v1",
+        "source_v8_closeout_content_sha256": _fp("v8-closeout"),
+        "source_v8_projection_content_sha256": _fp("v8-projection"),
+        "source_v9_closeout_content_sha256": _fp("v9-closeout"),
+        "source_v9_projection_content_sha256": _fp("v9-projection"),
+        "source_v10_final_closeout_content_sha256": _fp("v10-closeout"),
+        "source_v10_projection_content_sha256": _fp("v10-projection"),
+        "outer_observation_hashes": values,
+        "unique_outer_observation_hash_count": len(values),
+        "outer_observation_hashes_sha256": digest(values),
+        "component_unique_counts": {
+            "consumed_v8": 1, "consumed_v9": 1, "consumed_v10": 1},
+        "component_hashes_sha256": {
+            "consumed_v8": digest([_fp("v8-observation")]),
+            "consumed_v9": digest([_fp("v9-observation")]),
+            "consumed_v10": digest([_fp("v10-observation")]),
+        },
+        "selector_rule": "validation-wins test projection",
+        "raw_observations_included": False,
+        "actions_included": False,
+        "probabilities_included": False,
+        "labels_included": False,
+        "selection_used_this_projection": False,
+        "formal_ready": False,
+    }
+    value["content_sha256"] = digest(value)
+    return value
+
+
+def test_prior_outer_projection_requires_exact_v11_three_campaign_union(tmp_path):
+    expected = _prior_projection()
+    path = tmp_path / "outer_observation_hashes.json"
+    path.write_text(canonical(expected) + "\n", encoding="utf-8")
+    assert subject._prior_outer_hashes(
+        path, expected_file_sha256=file_hash(path),
+        expected_content_sha256=expected["content_sha256"],
+        expected_projection=expected) == set(expected["outer_observation_hashes"])
+
+    changed = deepcopy(expected)
+    changed["source_v10_projection_content_sha256"] = _fp("other-v10")
+    changed["content_sha256"] = digest({
+        key: child for key, child in changed.items() if key != "content_sha256"})
+    path.write_text(canonical(changed) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Prior failed-outer hash projection differs"):
+        subject._prior_outer_hashes(
+            path, expected_file_sha256=file_hash(path),
+            expected_content_sha256=changed["content_sha256"],
+            expected_projection=expected)
+
+
+def test_exposure_closure_accepts_v11_hash_screened_selection(
+        tmp_path, monkeypatch):
+    selected = []
+    index = 0
+    for family in subject.FAMILY_IDS:
+        for _ in range(subject.FAMILY_QUOTAS[family]):
+            selected.append({
+                "batch_index": index % 3,
+                "family_id": family,
+                "seed": 900_000 + index,
+                "fingerprint": _fp(f"v11-selected-{index}"),
+            })
+            index += 1
+    remaining = selected + [{
+        "batch_index": 0, "family_id": subject.FAMILY_IDS[0],
+        "seed": 999_999, "fingerprint": _fp("identity-only-first"),
+    }]
+    consumed_v10_hash = _fp("consumed-v10-observations")
+    closure = {
+        "candidates": remaining,
+        "excluded_seeds": set(), "excluded_fingerprints": set(),
+        "row_fingerprints": set(), "row_candidate_fingerprints": set(),
+        "trace_fingerprints": set(), "current_identities": [],
+        "v9_consumed_identities": [], "v10_consumed_identities": [],
+        "formal_fingerprints": set(), "previous_fingerprints": set(),
+        "retired_fingerprints": set(),
+        "burned_final_closeout": {"consumed_outer": {
+            "observation_hash_projection": {
+                "outer_observation_hashes_sha256": consumed_v10_hash}}},
+    }
+    monkeypatch.setattr(
+        subject.registry_api, "replay_exclusion_closure",
+        lambda **_kwargs: closure)
+    remaining_counts = dict(sorted({
+        family: subject.FAMILY_QUOTAS[family]
+            + (1 if family == subject.FAMILY_IDS[0] else 0)
+        for family in subject.FAMILY_IDS}.items()))
+    # The identity-only prefix intentionally differs from the saved set.  V11
+    # may skip ranked identities whose replay hashes overlap consumed v10.
+    monkeypatch.setattr(
+        subject.registry_api, "_remaining_and_selected",
+        lambda *_args, **_kwargs: (
+            remaining, list(reversed(selected)), remaining_counts))
+    hash_screen = {
+        "selected": [{key: row[key] for key in (
+            "seed", "fingerprint", "family_id")} for row in selected],
+        "selected_scene_count": len(selected),
+        "selected_v10_observation_overlap": 0,
+        "consumed_v10_observation_hashes_sha256": consumed_v10_hash,
+    }
+    hash_screen["content_sha256"] = digest(hash_screen)
+    exclusion_counts = {
+        "source_row_scene_fingerprints": 0,
+        "source_rows_in_fixed_candidate_population": 0,
+        "original_expansion_trace_identities": 0,
+        "consumed_outer_identities": 0,
+        "consumed_v9_outer_identities": 0,
+        "consumed_v10_outer_identities": 0,
+        "formal_xy_identities": 0,
+        "previous_development_identities": 0,
+        "retired_exposed_identities": 0,
+        "union_candidate_identities_excluded": 0,
+    }
+    registry = {
+        "bindings": {
+            "failure_closeout_file_sha256": _fp("failed"),
+            "consumed_v9_attempt_closeout_file_sha256": _fp("v9"),
+            "burned_v10_final_closeout_file_sha256": _fp("v10"),
+        },
+        "selected_outer_identities": selected,
+        "statistics": {
+            "remaining_candidate_scene_count": len(remaining),
+            "remaining_family_counts": remaining_counts,
+            "selected_outer_scene_count": len(selected),
+            "selected_outer_family_counts": subject.FAMILY_QUOTAS,
+            "hash_screen": hash_screen,
+        },
+        "exclusion_counts": exclusion_counts,
+        "exclusion_digests": {
+            "excluded_seeds_sha256": digest([]),
+            "excluded_scene_fingerprints_sha256": digest([]),
+            "source_row_scene_fingerprints_sha256": digest([]),
+            "original_expansion_trace_fingerprints_sha256": digest([]),
+            "consumed_outer_identities_sha256": digest([]),
+            "consumed_v9_outer_identities_sha256": digest([]),
+            "consumed_v10_outer_identities_sha256": digest([]),
+            "consumed_v10_outer_observation_hashes_sha256": consumed_v10_hash,
+            "retired_exposed_fingerprints_sha256": digest([]),
+        },
+    }
+    paths = {name: tmp_path / name for name in subject._CONFIG_PATH_FIELDS}
+    result = subject._exposure_closure(paths=paths, registry=registry)
+    assert result[0] == remaining
+    assert result[4] is closure
+    assert {row["fingerprint"] for row in selected} <= result[2]
+
+
 def test_real_source_closure_is_nonempty_and_self_bound():
     sources = subject.producer_sources()
     relative = "backend/training/warehouse_r41_diagnostic_final_materializer_v9.py"
     assert relative in sources
     assert sources[relative] == sha256(
         Path(subject.__file__).read_bytes()).hexdigest()
+    for required in (
+        "backend/training/warehouse_r41_diagnostic_outer_collection_v11.py",
+        "backend/training/warehouse_r41_diagnostic_outer_hash_projection_v11.py",
+        "backend/training/warehouse_r41_diagnostic_rcpd_v11_outer_once.py",
+        "backend/training/warehouse_r41_diagnostic_rcpd_v11_outer_split.py",
+        "backend/training/warehouse_r41_diagnostic_final_attempt_closeout_v11.py",
+    ):
+        assert required in sources

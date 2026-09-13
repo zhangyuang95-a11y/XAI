@@ -8,7 +8,8 @@ committed private salt.
 
 The final identities come from the frozen 2,160-scene public candidate
 population.  Every identity exposed by development, the failed v8 campaign,
-the fresh v9 outer, the formal X/Y tasks, and retired holdouts is excluded.
+the consumed v9/v10 campaigns, the fresh v11 outer, the formal X/Y tasks, and
+retired holdouts is excluded.
 Selection uses the v4 salt-ranking and family-quota rules.  The frozen Actor
 may execute inside the fixed workload replay, but raw actions, logits, and
 probabilities are neither inspected as ranking inputs nor written to the
@@ -33,10 +34,11 @@ import numpy as np
 from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_api
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_api
 from backend.training import warehouse_r41_diagnostic_fresh_final_holdout_v4 as v4
-from backend.training import warehouse_r41_diagnostic_outer_collection_v10 as collection_api
-from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v10 as projection_api
-from backend.training import warehouse_r41_diagnostic_rcpd_v10_outer_once as outer_api
-from backend.training import warehouse_r41_diagnostic_rcpd_v10_outer_split as registry_api
+from backend.training import warehouse_r41_diagnostic_outer_collection_v11 as collection_api
+from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v11 as projection_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v11_outer_once as outer_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v11_outer_split as registry_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v11_fit_selector as selector_api
 from backend.training import warehouse_r41_diagnostic_retired_identity_projection_v8 as retired_api
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training.warehouse_native_common import canonical, digest, file_hash
@@ -46,7 +48,7 @@ from backend.training.warehouse_r41_diagnostic_workload_screen import screen_sce
 VERSION = "warehouse-r41-diagnostic-final-materializer.v9"
 MATERIAL_VERSION = "warehouse-r41-diagnostic-final-material.v9"
 MATERIAL_STATUS = "materialized_after_irrevocable_final_claim"
-CONFIG_VERSION = VERSION + ".config.v1"
+CONFIG_VERSION = VERSION + ".config.v2"
 CONFIG_ENV = "WAREHOUSE_R41_V9_FINAL_MATERIALIZER_CONFIG"
 FINAL_ONCE_VERSION = "warehouse-r41-diagnostic-final-once.v9"
 ANCHOR_VERSION = FINAL_ONCE_VERSION + ".attempt-anchor.v1"
@@ -90,14 +92,17 @@ _CONFIG_PATH_FIELDS = frozenset((
     "consumed_outer_registry",
     "consumed_outer_report", "formal_selection", "previous_development",
     "retired_identity_projection", "consumed_v9_attempt_closeout",
-    "permanent_v9_attempt_registry", "prior_outer_hash_projection",
+    "permanent_v9_attempt_registry", "burned_v10_final_closeout",
+    "permanent_v10_final_closeout_registry", "prior_outer_hash_projection",
     "private_salt",
 ))
 _PRIOR_OUTER_PROJECTION_FIELDS = frozenset((
     "version", "source_v8_closeout_content_sha256",
     "source_v8_projection_content_sha256",
     "source_v9_closeout_content_sha256",
-    "source_v9_projection_content_sha256", "outer_observation_hashes",
+    "source_v9_projection_content_sha256",
+    "source_v10_final_closeout_content_sha256",
+    "source_v10_projection_content_sha256", "outer_observation_hashes",
     "unique_outer_observation_hash_count", "outer_observation_hashes_sha256",
     "component_unique_counts", "component_hashes_sha256", "selector_rule",
     "raw_observations_included", "actions_included",
@@ -318,6 +323,7 @@ def _authenticate_public_inputs(
         "selector_report": "selector_report_sha256",
         "fresh_outer_registry": "fresh_outer_registry_sha256",
         "fresh_outer_registry_report": "fresh_outer_registry_report_sha256",
+        "prior_outer_hash_projection": "prior_outer_hash_projection_sha256",
         "fresh_outer_hash_projection": "outer_hash_projection_sha256",
         "fresh_outer_hash_projection_receipt": (
             "outer_hash_projection_receipt_sha256"),
@@ -351,6 +357,21 @@ def _authenticate_public_inputs(
             authenticated["fresh_outer_registry"],
             authenticated["fresh_outer_registry_report"],
             bindings=lock_bindings))
+    registry_bindings = registry.get("bindings", {})
+    if (not isinstance(registry_bindings, Mapping)
+            or registry_bindings.get(
+                "outer_observation_hash_projection_file_sha256")
+                != lock_bindings["prior_outer_hash_projection_sha256"]
+            or registry_bindings.get(
+                "outer_observation_hash_projection_content_sha256")
+                != lock_bindings[
+                    "prior_outer_hash_projection_content_sha256"]):
+        raise ValueError("Prior outer projection and candidate lock differ")
+    prior_projection = selector_api.read_prior_outer_hash_projection(
+        authenticated["prior_outer_hash_projection"],
+        expected_sha256=lock_bindings["prior_outer_hash_projection_sha256"],
+        expected_content_sha256=lock_bindings[
+            "prior_outer_hash_projection_content_sha256"])
     projection, projection_receipt = projection_api.read_saved_projection(
         projection_path=authenticated["fresh_outer_hash_projection"],
         receipt_path=authenticated["fresh_outer_hash_projection_receipt"],
@@ -360,23 +381,43 @@ def _authenticate_public_inputs(
             "outer_hash_projection_receipt_sha256"],
     )
     identity = projection.get("identity", {})
+    receipt_bindings = projection_receipt.get("bindings", {})
     if (identity.get("selected_identity_sha256") != selected_identity_sha256
             or identity.get("registry_file_sha256")
                 != lock_bindings["fresh_outer_registry_sha256"]
             or identity.get("registry_content_sha256")
-                != registry.get("content_sha256")):
+                != registry.get("content_sha256")
+            or not isinstance(receipt_bindings, Mapping)
+            or receipt_bindings.get("actor_sha256")
+                != lock_bindings["actor_sha256"]
+            or receipt_bindings.get("fresh_outer_registry_sha256")
+                != lock_bindings["fresh_outer_registry_sha256"]
+            or receipt_bindings.get("fresh_outer_registry_content_sha256")
+                != registry.get("content_sha256")
+            or receipt_bindings.get("fresh_outer_registry_report_sha256")
+                != lock_bindings["fresh_outer_registry_report_sha256"]
+            or receipt_bindings.get(
+                "fresh_outer_registry_report_content_sha256")
+                != registry_report.get("content_sha256")
+            or receipt_bindings.get("outer_hash_projection_sha256")
+                != lock_bindings["outer_hash_projection_sha256"]
+            or receipt_bindings.get("outer_hash_projection_content_sha256")
+                != projection.get("content_sha256")):
         raise ValueError("Fresh outer identity and observation projection differ")
 
     development = outer_api._safe_row_projection(
         authenticated["development_rows"],
         expected_sha256=lock_bindings["development_rows_sha256"],
         fields=frozenset(("observation_hashes", "scene_fingerprints")),
-        label="locked v9 development rows")
+        label="locked v11 development rows")
     development_ordered = outer_api._decode(
         development["observation_hashes"], "development observation hashes")
+    validation_hashes = selector_api.validation_hash_union(
+        prior_projection["outer_observation_hashes"],
+        projection["projection"]["unique_observation_hashes"])
     development_hashes = _retained_development_hashes(
         development_ordered=development_ordered,
-        outer_unique_hashes=projection["projection"]["unique_observation_hashes"],
+        outer_unique_hashes=validation_hashes,
         validation_wins=selector_report["development"]["validation_wins"])
     development_scenes = set(outer_api._decode(
         development["scene_fingerprints"], "development scene fingerprints"))
@@ -396,6 +437,7 @@ def _authenticate_public_inputs(
         "paths": authenticated, "designation": designation,
         "registry": registry, "registry_report": registry_report,
         "projection": projection, "projection_receipt": projection_receipt,
+        "prior_projection": prior_projection,
         "development_hashes": development_hashes,
         "development_scenes": development_scenes,
         "fresh_outer_hashes": fresh_outer_hashes,
@@ -428,7 +470,7 @@ def _retained_development_hashes(
     if (not isinstance(validation_wins, Mapping)
             or any(validation_wins.get(name) != value
                    for name, value in recomputed.items())):
-        raise ValueError("Locked v10 validation-wins projection differs")
+        raise ValueError("Locked v11 validation-wins projection differs")
     result = set(retained)
     if result & set(outer_unique_hashes):
         raise ValueError("Development and fresh outer isolation differs")
@@ -437,30 +479,35 @@ def _retained_development_hashes(
 
 def _prior_outer_hashes(
     path: Path, *, expected_file_sha256: str,
-    expected_content_sha256: str,
+    expected_content_sha256: str, expected_projection: Mapping[str, Any],
 ) -> set[str]:
     _, value, _ = _read_json_exact(
         path, "prior failed-outer hash projection",
         expected_sha256=expected_file_sha256)
     values = value.get("outer_observation_hashes")
+    component_counts = value.get("component_unique_counts")
+    component_hashes = value.get("component_hashes_sha256")
     if (set(value) != _PRIOR_OUTER_PROJECTION_FIELDS
             or value.get("version")
                 != registry_api.VERSION + ".validation-wins-exclusion.v1"
             or not _content_valid(value)
             or value.get("content_sha256") != expected_content_sha256
+            or value != dict(expected_projection)
             or not isinstance(values, list) or not values
             or values != sorted(set(values))
             or value.get("unique_outer_observation_hash_count") != len(values)
             or value.get("outer_observation_hashes_sha256") != digest(values)
-            or set(value.get("component_unique_counts", {}))
-                != {"consumed_v8", "consumed_v9"}
-            or set(value.get("component_hashes_sha256", {}))
-                != {"consumed_v8", "consumed_v9"}
-            or sum(value["component_unique_counts"].values()) < len(values)
+            or not isinstance(component_counts, Mapping)
+            or set(component_counts)
+                != {"consumed_v8", "consumed_v9", "consumed_v10"}
+            or not isinstance(component_hashes, Mapping)
+            or set(component_hashes)
+                != {"consumed_v8", "consumed_v9", "consumed_v10"}
             or any(type(child) is not int or child <= 0
-                   for child in value["component_unique_counts"].values())
+                   for child in component_counts.values())
+            or sum(component_counts.values()) < len(values)
             or any(type(child) is not str or _HEX.fullmatch(child) is None
-                   for child in value["component_hashes_sha256"].values())
+                   for child in component_hashes.values())
             or any(type(child) is not str or _HEX.fullmatch(child) is None
                    for child in values)
             or any(value.get(name) is not False for name in (
@@ -505,12 +552,14 @@ def _read_frozen_retired_projection(
 
 def _exposure_closure(
     *, paths: Mapping[str, Path], registry: Mapping[str, Any],
-) -> tuple[list[dict[str, Any]], set[int], set[str], set[str]]:
+) -> tuple[list[dict[str, Any]], set[int], set[str], set[str], dict[str, Any]]:
     """Rebuild the identity-only replacement-outer exclusion closure."""
     bindings = registry.get("bindings")
     if not isinstance(bindings, Mapping):
         raise ValueError("Fresh outer registry bindings are missing")
     closure = registry_api.replay_exclusion_closure(
+        actor_path=paths["actor"], protocol_path=paths["protocol"],
+        designation_path=paths["designation"],
         manifest_path=paths["runtime_manifest"],
         failed_rows_path=paths["failed_rows"],
         original_expansion_path=paths["original_expansion"],
@@ -529,24 +578,70 @@ def _exposure_closure(
         expected_consumed_v9_attempt_closeout_sha256=bindings[
             "consumed_v9_attempt_closeout_file_sha256"],
         permanent_v9_attempt_registry=paths["permanent_v9_attempt_registry"],
+        burned_v10_final_closeout_path=paths["burned_v10_final_closeout"],
+        expected_burned_v10_final_closeout_sha256=bindings[
+            "burned_v10_final_closeout_file_sha256"],
+        permanent_v10_final_closeout_registry=paths[
+            "permanent_v10_final_closeout_registry"],
     )
     candidates = closure["candidates"]
     excluded_seeds = set(closure["excluded_seeds"])
     excluded_fingerprints = set(closure["excluded_fingerprints"])
     row_fingerprints = set(closure["row_fingerprints"])
-    remaining, selected, remaining_counts = registry_api._remaining_and_selected(
+    remaining, _identity_only_selected, remaining_counts = (
+        registry_api._remaining_and_selected(
         candidates, excluded_seeds=excluded_seeds,
-        excluded_fingerprints=excluded_fingerprints)
-    selected_public = [registry_api._public_identity(row) for row in selected]
+        excluded_fingerprints=excluded_fingerprints))
     actual_outer = registry.get("selected_outer_identities")
     report_selection = registry.get("statistics", {})
     exclusion_counts = registry.get("exclusion_counts")
     exclusion_digests = registry.get("exclusion_digests")
-    if (actual_outer != selected_public
+    remaining_by_identity = {
+        (row["seed"], row["fingerprint"]): registry_api._public_identity(row)
+        for row in remaining
+    }
+    if not isinstance(actual_outer, list):
+        raise ValueError("Fresh outer selected identities are missing")
+    actual_public = [deepcopy(dict(row)) for row in actual_outer]
+    actual_keys = [(row.get("seed"), row.get("fingerprint"))
+                   for row in actual_public]
+    hash_screen = report_selection.get("hash_screen", {})
+    hash_selected = hash_screen.get("selected") \
+        if isinstance(hash_screen, Mapping) else None
+    hash_selected_keys = [
+        (row.get("seed"), row.get("fingerprint"), row.get("family_id"))
+        for row in hash_selected
+    ] if isinstance(hash_selected, list) else None
+    actual_selected_keys = [
+        (row.get("seed"), row.get("fingerprint"), row.get("family_id"))
+        for row in actual_public
+    ]
+    consumed_v10_observation_hashes_sha256 = (
+        closure["burned_final_closeout"]["consumed_outer"]
+        ["observation_hash_projection"]["outer_observation_hashes_sha256"])
+    if (len(actual_public) != registry_api.FRESH_OUTER_SCENE_COUNT
+            or len(set(actual_keys)) != len(actual_keys)
+            or any(remaining_by_identity.get(key) != row
+                   for key, row in zip(actual_keys, actual_public))
+            or dict(sorted(Counter(
+                row["family_id"] for row in actual_public).items()))
+                != registry_api.FAMILY_QUOTAS
+            or not isinstance(hash_screen, Mapping)
+            or not _content_valid(hash_screen)
+            or hash_selected_keys != actual_selected_keys
+            or hash_screen.get("selected_scene_count")
+                != registry_api.FRESH_OUTER_SCENE_COUNT
+            or hash_screen.get("selected_v10_observation_overlap") != 0
+            or hash_screen.get("consumed_v10_observation_hashes_sha256")
+                != consumed_v10_observation_hashes_sha256
             or report_selection.get("remaining_candidate_scene_count")
                 != len(remaining)
             or report_selection.get("remaining_family_counts")
                 != remaining_counts
+            or report_selection.get("selected_outer_scene_count")
+                != registry_api.FRESH_OUTER_SCENE_COUNT
+            or report_selection.get("selected_outer_family_counts")
+                != registry_api.FAMILY_QUOTAS
             or exclusion_counts != {
                 "source_row_scene_fingerprints": len(row_fingerprints),
                 "source_rows_in_fixed_candidate_population": len(
@@ -556,6 +651,8 @@ def _exposure_closure(
                 "consumed_outer_identities": len(closure["current_identities"]),
                 "consumed_v9_outer_identities": len(
                     closure["v9_consumed_identities"]),
+                "consumed_v10_outer_identities": len(
+                    closure["v10_consumed_identities"]),
                 "formal_xy_identities": len(closure["formal_fingerprints"]),
                 "previous_development_identities": len(
                     closure["previous_fingerprints"]),
@@ -576,6 +673,10 @@ def _exposure_closure(
                     closure["current_identities"]),
                 "consumed_v9_outer_identities_sha256": digest(
                     closure["v9_consumed_identities"]),
+                "consumed_v10_outer_identities_sha256": digest(
+                    closure["v10_consumed_identities"]),
+                "consumed_v10_outer_observation_hashes_sha256": (
+                    consumed_v10_observation_hashes_sha256),
                 "retired_exposed_fingerprints_sha256": digest(
                     sorted(closure["retired_fingerprints"])),
             }):
@@ -586,7 +687,8 @@ def _exposure_closure(
         label="fresh replacement outer")
     excluded_seeds.update(fresh_seeds)
     excluded_fingerprints.update(fresh_fingerprints)
-    return candidates, excluded_seeds, excluded_fingerprints, row_fingerprints
+    return (candidates, excluded_seeds, excluded_fingerprints,
+            row_fingerprints, closure)
 
 
 def _candidate_scene_population(
@@ -612,7 +714,7 @@ def _candidate_scene_population(
         raise ValueError("Authenticated public candidate projection required")
     rows = [deepcopy(dict(row)) for batch in batches for row in batch]
     mapping = {str(row.get("fingerprint")): row for row in rows}
-    identities = registry_api._candidate_identity_population()
+    identities = registry_api.v9._candidate_identity_population()
     expected = {(row["seed"], row["fingerprint"], row["family_id"],
                  row["batch_index"]) for row in identities}
     actual = {(row.get("seed"), row.get("fingerprint"), row.get("family_id"),
@@ -725,7 +827,8 @@ def _prepare_selection(
 ) -> dict[str, Any]:
     """Authenticate and reconstruct all public inputs before reading salt."""
     registry = authenticated["registry"]
-    identities, excluded_seeds, excluded_fingerprints, source_row_scenes = (
+    (identities, excluded_seeds, excluded_fingerprints, source_row_scenes,
+     exposure_closure) = (
         _exposure_closure(paths=paths, registry=registry))
     excluded_fingerprints.update(authenticated["development_scenes"])
     candidate_manifest, scene_by_fingerprint = _candidate_scene_population(
@@ -741,12 +844,17 @@ def _prepare_selection(
         if fingerprint in by_fingerprint)
 
     registry_bindings = registry["bindings"]
+    expected_prior_projection = registry_api._prior_validation_wins_projection(
+        old_closeout=exposure_closure["old_closeout"],
+        attempt_closeout=exposure_closure["attempt_closeout"],
+        final_closeout=exposure_closure["burned_final_closeout"])
     prior_hashes = _prior_outer_hashes(
         paths["prior_outer_hash_projection"],
         expected_file_sha256=registry_bindings[
             "outer_observation_hash_projection_file_sha256"],
         expected_content_sha256=registry_bindings[
-            "outer_observation_hash_projection_content_sha256"])
+            "outer_observation_hash_projection_content_sha256"],
+        expected_projection=expected_prior_projection)
     forbidden = (
         set(authenticated["development_hashes"])
         | set(authenticated["fresh_outer_hashes"])

@@ -105,6 +105,7 @@ def _setup(tmp_path: Path, monkeypatch):
         "failed_outer_closeout_path": paths["designation"],
         "fresh_outer_registry_path": paths["designation"],
         "fresh_outer_registry_report_path": paths["designation"],
+        "prior_outer_hash_projection_path": paths["designation"],
         "outer_hash_projection_path": paths["designation"],
         "outer_hash_projection_receipt_path": paths["designation"],
         "development_rows_path": paths["actor"],
@@ -232,7 +233,7 @@ def test_source_order_has_no_final_or_salt_preclaim_parameter():
         "material = dict(_run_materializer(")
 
 
-def test_preclaim_reproduces_locked_v10_validation_wins_projection():
+def test_preclaim_reproduces_locked_v11_validation_wins_projection():
     development = [_fp("same-a"), _fp("outer"), _fp("same-a"), _fp("same-c")]
     outer = [_fp("outer")]
     keep = ~np.isin(
@@ -363,3 +364,12 @@ def test_official_materializer_binding_matches_frozen_transitive_digest():
         file_hash(source))
     assert digest(sources) == (
         subject.OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256)
+
+
+def test_final_controller_uses_only_v11_outer_chain():
+    assert subject.outer_api.VERSION.startswith(
+        "warehouse-r41-diagnostic-rcpd-v11-")
+    assert subject.collection_api.VERSION == (
+        "warehouse-r41-diagnostic-outer-collection.v11")
+    assert subject.projection_api.VERSION == (
+        "warehouse-r41-diagnostic-outer-hash-projection.v11")

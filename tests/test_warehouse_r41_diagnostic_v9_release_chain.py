@@ -19,6 +19,11 @@ from ui import warehouse_alignment_online_release as portable
 from ui import warehouse_alignment_r41_diagnostic_release_v9 as release
 
 
+def test_admission_authenticates_v11_outer_result():
+    assert admission.outer_api.VERSION.startswith(
+        "warehouse-r41-diagnostic-rcpd-v11-")
+
+
 def _artifacts():
     return {
         "actor": b"actor",

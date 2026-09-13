@@ -20,7 +20,7 @@ from backend.training import warehouse_r41_diagnostic_final_once_v9 as final_api
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_api
 from backend.training import warehouse_r41_diagnostic_input_snapshot_v8 as snapshot_api
 from backend.training import warehouse_r41_diagnostic_question_bank as question_api
-from backend.training import warehouse_r41_diagnostic_rcpd_v10_outer_once as outer_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v11_outer_once as outer_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as metrics_api
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training.warehouse_native_common import canonical, digest, file_hash

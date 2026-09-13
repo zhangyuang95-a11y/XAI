@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 
 import numpy as np
 import pytest
 
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as v8
 from backend.training import warehouse_r41_diagnostic_rcpd_v8_fit_selector as subject
+from backend.training import warehouse_r41_diagnostic_rcpd_v8_outer_split as outer_api
+from backend.training.warehouse_native_common import file_hash
 
 
 FAMILIES = tuple(subject.INNER_HOLDOUT_FAMILY_QUOTAS)
@@ -20,6 +23,11 @@ def _scope(
     *, eligible: list[str], exposed: list[str], families: dict[str, str],
     fresh: list[str] | None = None,
 ) -> dict:
+    if fresh is None:
+        fresh = [
+            _fingerprint(100_000 + index)
+            for index in range(outer_api.FRESH_OUTER_SCENE_COUNT)
+        ]
     value = {
         "version": subject.SCOPE_VERSION,
         "source_report_sha256": "a" * 64,
@@ -30,7 +38,11 @@ def _scope(
             for scene in eligible
         ],
         "previously_exposed_outer_scene_fingerprints": exposed,
-        "fresh_outer_scene_fingerprints": [] if fresh is None else fresh,
+        "fresh_outer_scene_fingerprints": fresh,
+        "fresh_outer_registry_file_sha256": "c" * 64,
+        "fresh_outer_registry_content_sha256": "d" * 64,
+        "fresh_outer_report_file_sha256": "e" * 64,
+        "fresh_outer_report_content_sha256": "f" * 64,
         "label_blind": True,
         "final_rows_accessed": False,
         "final_labels_accessed": False,
@@ -127,14 +139,86 @@ def _metrics(*, charger_direction: float, other: float = 0.92) -> dict:
     }
 
 
+def _fresh_outer_pair(source_rows_sha256: str) -> tuple[dict, dict, str, str]:
+    identities = []
+    number = 200_000
+    for family, quota in outer_api.FAMILY_QUOTAS.items():
+        for offset in range(quota):
+            identities.append({
+                "batch_index": offset % 3,
+                "family_id": family,
+                "seed": number,
+                "fingerprint": _fingerprint(number),
+            })
+            number += 1
+    scenes = [
+        {**identity, "split": "development_validation"}
+        for identity in identities
+    ]
+    sources = outer_api.producer_sources()
+    boundaries = {
+        "outer_actor_rows_collected": False,
+        "outer_candidate_scored": False,
+        "actor_loaded_or_inferred": False,
+        "observations_generated": False,
+        "protected_final_access": False,
+    }
+    statistics = {
+        "fresh_outer_scenes": outer_api.FRESH_OUTER_SCENE_COUNT,
+    }
+    registry = {
+        "version": outer_api.VERSION,
+        "status": outer_api.STATUS,
+        "contract": outer_api.contract(),
+        "bindings": {"source_rows_file_sha256": source_rows_sha256},
+        "development_validation": scenes,
+        "selected_outer_identities": identities,
+        "statistics": statistics,
+        "information_boundary": boundaries,
+        "program_access": False,
+        "program_predictions_access": False,
+        "final_audit_rows_access": False,
+        "final_labels_used_for_selection": False,
+        "runtime_action_override": False,
+        "producer_sources": sources,
+        "producer_sources_sha256": subject.digest(sources),
+        "formal_ready": False,
+    }
+    registry["content_sha256"] = subject.digest(registry)
+    registry_file_sha256 = "7" * 64
+    report = {
+        "version": outer_api.REPORT_VERSION,
+        "status": outer_api.STATUS,
+        "registry_file_sha256": registry_file_sha256,
+        "registry_content_sha256": registry["content_sha256"],
+        "bindings": deepcopy(registry["bindings"]),
+        "selection": {
+            "salt": outer_api.SELECTION_SALT,
+            "family_quotas": deepcopy(outer_api.FAMILY_QUOTAS),
+            "selected_identity_sha256": subject.digest(identities),
+        },
+        "statistics": deepcopy(statistics),
+        "information_boundary": deepcopy(boundaries),
+        "producer_sources": sources,
+        "producer_sources_sha256": subject.digest(sources),
+        "formal_ready": False,
+    }
+    report["content_sha256"] = subject.digest(report)
+    return registry, report, registry_file_sha256, "8" * 64
+
+
 def test_contract_freezes_fit_only_search_and_has_no_outer_or_final_metric_input():
     value = subject.contract()
     assert value["source"][
         "previously_exposed_outer_rows_removed_before_label_validation"] is True
     assert value["source"][
-        "fresh_outer_fingerprints_forbidden_from_source_rows"] is True
-    assert value["source"]["outer_labels_accessed"] is False
-    assert value["source"]["outer_probabilities_accessed"] is False
+        "source_archive_values_decompressed_before_row_projection"] is True
+    assert value["source"][
+        "outer_labels_used_for_projection_fit_or_selection"] is False
+    assert value["source"][
+        "outer_probabilities_used_for_projection_fit_or_selection"] is False
+    assert "identity-only registry/report" in value["source"][
+        "fresh_outer_binding"]
     assert value["source"]["final_rows_accessed"] is False
     assert value["source"]["final_labels_accessed"] is False
     assert value["frozen_model_change"]["mix_candidates"] == [0.0, 0.25, 0.5, 1.0]
@@ -268,9 +352,13 @@ def test_fresh_outer_must_be_absent_from_source_rows():
         eligible[0]: FAMILIES[0], eligible[1]: FAMILIES[0],
         eligible[2]: FAMILIES[1], eligible[3]: FAMILIES[1],
     }
+    fresh = [
+        _fingerprint(400 + index)
+        for index in range(outer_api.FRESH_OUTER_SCENE_COUNT)
+    ]
     scope = _scope(
         eligible=eligible, exposed=exposed, families=families,
-        fresh=[_fingerprint(400)],
+        fresh=fresh,
     )
     rows = _rows([
         (eligible[0], False, 0), (eligible[1], False, 1),
@@ -280,7 +368,7 @@ def test_fresh_outer_must_be_absent_from_source_rows():
     projected, audit = subject._project_fit_only(
         rows, scope, quotas={FAMILIES[0]: 1, FAMILIES[1]: 1},
         salt="fresh-absent")
-    assert audit["fresh_outer_scenes_registered_absent_from_source"] == 1
+    assert audit["fresh_outer_scenes_registered_absent_from_source"] == 64
     contaminated = {name: value.copy() for name, value in rows.items()}
     extra = _rows([(_fingerprint(400), False, 0)])
     contaminated = {
@@ -291,6 +379,51 @@ def test_fresh_outer_must_be_absent_from_source_rows():
         subject._project_fit_only(
             contaminated, scope,
             quotas={FAMILIES[0]: 1, FAMILIES[1]: 1}, salt="fresh-absent")
+
+
+def test_fresh_outer_scope_requires_one_exact_authenticated_registry_report_pair():
+    source_rows_sha256 = "9" * 64
+    registry, report, registry_sha256, report_sha256 = _fresh_outer_pair(
+        source_rows_sha256)
+    selected = subject._validate_fresh_outer_binding(
+        registry,
+        report,
+        registry_file_sha256=registry_sha256,
+        report_file_sha256=report_sha256,
+        source_rows_sha256=source_rows_sha256,
+    )
+    assert selected == {
+        row["fingerprint"] for row in registry["selected_outer_identities"]
+    }
+
+    mismatched = deepcopy(report)
+    mismatched["registry_file_sha256"] = "6" * 64
+    mismatched["content_sha256"] = subject.digest({
+        key: value for key, value in mismatched.items()
+        if key != "content_sha256"
+    })
+    with pytest.raises(ValueError, match="registry/report differs"):
+        subject._validate_fresh_outer_binding(
+            registry,
+            mismatched,
+            registry_file_sha256=registry_sha256,
+            report_file_sha256=report_sha256,
+            source_rows_sha256=source_rows_sha256,
+        )
+
+    changed_scope = _scope(
+        eligible=[_fingerprint(1)],
+        exposed=[],
+        families={_fingerprint(1): FAMILIES[0]},
+        fresh=sorted(selected),
+    )
+    changed_scope.pop("fresh_outer_report_file_sha256")
+    changed_scope["content_sha256"] = subject.digest({
+        key: value for key, value in changed_scope.items()
+        if key != "content_sha256"
+    })
+    with pytest.raises(ValueError, match="scope schema differs"):
+        subject.normalize_scope(changed_scope)
 
 
 def test_selection_uses_all_gates_gain_guardrail_and_smallest_mix():
@@ -330,6 +463,76 @@ def test_weight_audit_recovers_one_true_family_per_fit_scene():
     })
     with pytest.raises(ValueError, match="two scene families"):
         subject._scene_families_from_weight_audit(audit, expected_scenes=scenes)
+
+
+def test_scope_family_swap_is_rejected_against_authenticated_weight_audit():
+    eligible = [_fingerprint(601), _fingerprint(602)]
+    families = {
+        eligible[0]: FAMILIES[0],
+        eligible[1]: FAMILIES[1],
+    }
+    scope = _scope(eligible=eligible, exposed=[], families=families)
+    assert subject._validate_scope_family_registry(
+        scope, authenticated_families=families) == families
+
+    swapped = deepcopy(scope)
+    swapped["inner_candidate_scenes"][0]["family_id"] = FAMILIES[1]
+    swapped["inner_candidate_scenes"][1]["family_id"] = FAMILIES[0]
+    swapped["content_sha256"] = subject.digest({
+        key: value for key, value in swapped.items()
+        if key != "content_sha256"
+    })
+    with pytest.raises(ValueError, match="authenticated v8 audit"):
+        subject._validate_scope_family_registry(
+            swapped, authenticated_families=families)
+
+
+def test_build_input_snapshot_rejects_original_change_before_publish(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    artifacts = {}
+    for name, raw in (
+        ("rows.npz", b"rows"),
+        ("fit_config.json", b"{}\n"),
+        ("program.json", b"{}\n"),
+        ("weights_audit.json", b"{}\n"),
+    ):
+        path = source / name
+        path.write_bytes(raw)
+        artifacts[name] = file_hash(path)
+    actor = tmp_path / "actor.npz"
+    actor.write_bytes(b"actor")
+    scope = tmp_path / "fit_scope.json"
+    scope.write_bytes(b"{}\n")
+    registry = tmp_path / "development_expansion.json"
+    registry.write_bytes(b"{}\n")
+    outer_report = tmp_path / "outer_report.json"
+    outer_report.write_bytes(b"{}\n")
+    report = {
+        "version": v8.VERSION,
+        "bindings": {"actor_file_sha256": file_hash(actor)},
+        "evidence_artifacts": artifacts,
+    }
+    report_path = source / "report.json"
+    report_path.write_text(
+        json.dumps(report, sort_keys=True) + "\n", encoding="utf-8")
+
+    with subject._snapshot_build_inputs(
+        source_evidence=source,
+        expected_source_report_sha256=file_hash(report_path),
+        actor_path=actor,
+        fit_scope_path=scope,
+        expected_fit_scope_sha256=file_hash(scope),
+        fresh_outer_registry_path=registry,
+        expected_fresh_outer_registry_sha256=file_hash(registry),
+        fresh_outer_report_path=outer_report,
+        expected_fresh_outer_report_sha256=file_hash(outer_report),
+    ) as snapshot:
+        assert snapshot.paths["actor"].read_bytes() == b"actor"
+        actor.write_bytes(b"changed actor")
+        assert snapshot.paths["actor"].read_bytes() == b"actor"
+        with pytest.raises(RuntimeError, match="changed during transaction"):
+            snapshot.verify()
 
 
 def test_source_closure_contains_no_release_or_final_evaluator():

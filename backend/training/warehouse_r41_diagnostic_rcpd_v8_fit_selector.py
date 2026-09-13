@@ -13,6 +13,7 @@ candidate fit.  This module never evaluates that outer candidate itself.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from copy import deepcopy
 from hashlib import sha256
 import json
@@ -21,15 +22,20 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
+from backend.training.warehouse_r41_diagnostic_input_snapshot_v8 import (
+    ImmutableInputSnapshot,
+    read_authenticated_bytes,
+)
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 from backend.training import warehouse_r41_diagnostic_pair_weights_v8 as weight_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v7 as v7
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as v8
+from backend.training import warehouse_r41_diagnostic_rcpd_v8_outer_split as outer_api
 from backend.warehouse_r41_diagnostic_public_features_v8 import (
     R41DiagnosticPublicRelationsV8,
 )
@@ -83,9 +89,13 @@ def contract() -> dict[str, Any]:
             "rows": "authenticated diagnostic RCPD v8 development rows",
             "fit_scope": "separately frozen label-blind scene registry",
             "previously_exposed_outer_rows_removed_before_label_validation": True,
-            "fresh_outer_fingerprints_forbidden_from_source_rows": True,
-            "outer_labels_accessed": False,
-            "outer_probabilities_accessed": False,
+            "source_archive_values_decompressed_before_row_projection": True,
+            "outer_labels_used_for_projection_fit_or_selection": False,
+            "outer_probabilities_used_for_projection_fit_or_selection": False,
+            "fresh_outer_binding": (
+                "exact identity-only registry/report, used only for exclusion "
+                "and provenance; no outer Actor rows exist at selection time"
+            ),
             "final_rows_accessed": False,
             "final_labels_accessed": False,
         },
@@ -148,14 +158,25 @@ def _regular(value: str | Path, label: str, *, maximum: int) -> Path:
 def _read_json(value: str | Path, label: str) -> dict[str, Any]:
     path = _regular(value, label, maximum=MAX_JSON_BYTES)
     try:
+        raw = path.read_bytes()
+    except UnicodeDecodeError as exc:
+        raise ValueError(label + " must be UTF-8 JSON") from exc
+    parsed = _parse_json_bytes(raw, label)
+    if file_hash(path) != sha256(raw).hexdigest():
+        raise RuntimeError(label + " changed while it was read")
+    return parsed
+
+
+def _parse_json_bytes(raw: bytes, label: str) -> dict[str, Any]:
+    try:
         parsed = json.loads(
-            path.read_text(encoding="utf-8"),
+            raw.decode("utf-8"),
             object_pairs_hook=lambda pairs: _unique_pairs(pairs, label),
             parse_constant=lambda token: (_ for _ in ()).throw(
                 ValueError("Non-finite JSON value in " + label + ": " + token)
             ),
         )
-    except UnicodeDecodeError as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(label + " must be UTF-8 JSON") from exc
     if not isinstance(parsed, dict):
         raise ValueError(label + " must be one JSON object")
@@ -227,8 +248,10 @@ def normalize_scope(value: Mapping[str, Any]) -> dict[str, Any]:
         "version", "source_report_sha256", "source_rows_sha256",
         "eligible_fit_scene_fingerprints", "inner_candidate_scenes",
         "previously_exposed_outer_scene_fingerprints",
-        "fresh_outer_scene_fingerprints", "label_blind", "final_rows_accessed",
-        "final_labels_accessed", "content_sha256",
+        "fresh_outer_scene_fingerprints", "fresh_outer_registry_file_sha256",
+        "fresh_outer_registry_content_sha256", "fresh_outer_report_file_sha256",
+        "fresh_outer_report_content_sha256", "label_blind",
+        "final_rows_accessed", "final_labels_accessed", "content_sha256",
     }
     if not isinstance(value, Mapping) or set(value) != required:
         raise ValueError("Fit-only selector scope schema differs")
@@ -244,6 +267,16 @@ def normalize_scope(value: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("Fit-only selector scope assurance differs")
     source_report = _sha(value.get("source_report_sha256"), "source report")
     source_rows = _sha(value.get("source_rows_sha256"), "source rows")
+    fresh_registry_file = _sha(
+        value.get("fresh_outer_registry_file_sha256"), "fresh outer registry")
+    fresh_registry_content = _sha(
+        value.get("fresh_outer_registry_content_sha256"),
+        "fresh outer registry content")
+    fresh_report_file = _sha(
+        value.get("fresh_outer_report_file_sha256"), "fresh outer report")
+    fresh_report_content = _sha(
+        value.get("fresh_outer_report_content_sha256"),
+        "fresh outer report content")
 
     def hashes(raw: Any, label: str) -> list[str]:
         if (not isinstance(raw, list)
@@ -282,10 +315,12 @@ def normalize_scope(value: Mapping[str, Any]) -> dict[str, Any]:
     eligible_set = set(eligible)
     exposed_set = set(exposed)
     fresh_set = set(fresh)
-    if (not eligible_set or exposed_set & fresh_set
+    if (len(fresh) != outer_api.FRESH_OUTER_SCENE_COUNT
+            or not eligible_set or exposed_set & fresh_set
             or eligible_set & exposed_set or eligible_set & fresh_set
             or seen != eligible_set):
-        raise ValueError("Fit-only selector scope scene populations overlap")
+        raise ValueError(
+            "Fit-only selector scope scene populations overlap or differ")
     return {
         "version": SCOPE_VERSION,
         "source_report_sha256": source_report,
@@ -294,6 +329,10 @@ def normalize_scope(value: Mapping[str, Any]) -> dict[str, Any]:
         "inner_candidate_scenes": candidates,
         "previously_exposed_outer_scene_fingerprints": exposed,
         "fresh_outer_scene_fingerprints": fresh,
+        "fresh_outer_registry_file_sha256": fresh_registry_file,
+        "fresh_outer_registry_content_sha256": fresh_registry_content,
+        "fresh_outer_report_file_sha256": fresh_report_file,
+        "fresh_outer_report_content_sha256": fresh_report_content,
         "label_blind": True,
         "final_rows_accessed": False,
         "final_labels_accessed": False,
@@ -640,6 +679,176 @@ def _validate_source_evidence(
     return report, paths
 
 
+def _snapshot_build_inputs(
+    *, source_evidence: str | Path, expected_source_report_sha256: str,
+    actor_path: str | Path, fit_scope_path: str | Path,
+    expected_fit_scope_sha256: str, fresh_outer_registry_path: str | Path,
+    expected_fresh_outer_registry_sha256: str,
+    fresh_outer_report_path: str | Path,
+    expected_fresh_outer_report_sha256: str,
+) -> ImmutableInputSnapshot:
+    """Freeze every build input from one authenticated no-follow read."""
+    source_directory = Path(source_evidence).expanduser().absolute()
+    if (not source_directory.is_dir() or source_directory.is_symlink()
+            or source_directory.resolve() != source_directory):
+        raise ValueError("Source v8 evidence directory is unsafe")
+    report_path = source_directory / "report.json"
+    report_sha256 = _sha(expected_source_report_sha256, "source report")
+    report = _parse_json_bytes(read_authenticated_bytes(
+        report_path, label="Source v8 report",
+        expected_sha256=report_sha256, maximum=MAX_JSON_BYTES,
+    ), "Source v8 report")
+    artifacts = report.get("evidence_artifacts")
+    required = (
+        "rows.npz", "fit_config.json", "program.json", "weights_audit.json",
+    )
+    if (report.get("version") != v8.VERSION
+            or not isinstance(artifacts, Mapping)
+            or any(_HEX.fullmatch(str(artifacts.get(name))) is None
+                   for name in required)):
+        raise ValueError("Source v8 snapshot evidence differs")
+    actor_sha256 = _sha(
+        report.get("bindings", {}).get("actor_file_sha256"), "source Actor")
+    scope_sha256 = _sha(expected_fit_scope_sha256, "fit scope")
+    originals = {
+        "source_report": report_path,
+        "source_rows": source_directory / "rows.npz",
+        "source_config": source_directory / "fit_config.json",
+        "source_program": source_directory / "program.json",
+        "source_weights_audit": source_directory / "weights_audit.json",
+        "actor": actor_path,
+        "fit_scope": fit_scope_path,
+        "fresh_outer_registry": fresh_outer_registry_path,
+        "fresh_outer_report": fresh_outer_report_path,
+    }
+    expected = {
+        "source_report": report_sha256,
+        "source_rows": str(artifacts["rows.npz"]),
+        "source_config": str(artifacts["fit_config.json"]),
+        "source_program": str(artifacts["program.json"]),
+        "source_weights_audit": str(artifacts["weights_audit.json"]),
+        "actor": actor_sha256,
+        "fit_scope": scope_sha256,
+        "fresh_outer_registry": _sha(
+            expected_fresh_outer_registry_sha256, "fresh outer registry"),
+        "fresh_outer_report": _sha(
+            expected_fresh_outer_report_sha256, "fresh outer report"),
+    }
+    return ImmutableInputSnapshot(
+        originals,
+        expected_sha256=expected,
+        relative_names={
+            "source_report": "source/report.json",
+            "source_rows": "source/rows.npz",
+            "source_config": "source/fit_config.json",
+            "source_program": "source/program.json",
+            "source_weights_audit": "source/weights_audit.json",
+            "actor": "actor/actor.npz",
+            "fit_scope": "scope/fit_scope.json",
+            "fresh_outer_registry": "fresh_outer/development_expansion.json",
+            "fresh_outer_report": "fresh_outer/report.json",
+        },
+        maximum_bytes={
+            "source_report": MAX_JSON_BYTES,
+            "source_rows": MAX_NPZ_BYTES,
+            "source_config": MAX_JSON_BYTES,
+            "source_program": MAX_JSON_BYTES,
+            "source_weights_audit": MAX_JSON_BYTES,
+            "actor": MAX_NPZ_BYTES,
+            "fit_scope": MAX_JSON_BYTES,
+            "fresh_outer_registry": MAX_JSON_BYTES,
+            "fresh_outer_report": MAX_JSON_BYTES,
+        },
+        prefix="warehouse-r41-v8-fit-selector-inputs-",
+    )
+
+
+def _validate_fresh_outer_binding(
+    registry: Mapping[str, Any], report: Mapping[str, Any], *,
+    registry_file_sha256: str, report_file_sha256: str,
+    source_rows_sha256: str,
+) -> set[str]:
+    """Authenticate the identity-only outer registry without Actor evidence."""
+    registry_sha = _sha(registry_file_sha256, "fresh outer registry")
+    report_sha = _sha(report_file_sha256, "fresh outer report")
+    registry_content = digest({
+        key: value for key, value in registry.items() if key != "content_sha256"
+    })
+    report_content = digest({
+        key: value for key, value in report.items() if key != "content_sha256"
+    })
+    boundaries = registry.get("information_boundary")
+    scenes = registry.get("development_validation")
+    identities = registry.get("selected_outer_identities")
+    selection = report.get("selection")
+    if (registry.get("version") != outer_api.VERSION
+            or registry.get("status") != outer_api.STATUS
+            or registry.get("contract") != outer_api.contract()
+            or registry.get("content_sha256") != registry_content
+            or report.get("version") != outer_api.REPORT_VERSION
+            or report.get("status") != outer_api.STATUS
+            or report.get("content_sha256") != report_content
+            or report.get("registry_file_sha256") != registry_sha
+            or report.get("registry_content_sha256") != registry_content
+            or report.get("bindings") != registry.get("bindings")
+            or report.get("producer_sources") != registry.get("producer_sources")
+            or registry.get("producer_sources") != outer_api.producer_sources()
+            or registry.get("producer_sources_sha256")
+                != digest(registry.get("producer_sources"))
+            or report.get("producer_sources_sha256")
+                != registry.get("producer_sources_sha256")
+            or report.get("information_boundary") != boundaries
+            or report.get("statistics") != registry.get("statistics")
+            or registry.get("formal_ready") is not False
+            or report.get("formal_ready") is not False
+            or registry.get("program_access") is not False
+            or registry.get("program_predictions_access") is not False
+            or registry.get("final_audit_rows_access") is not False
+            or registry.get("final_labels_used_for_selection") is not False
+            or registry.get("runtime_action_override") is not False
+            or not isinstance(boundaries, Mapping)
+            or boundaries.get("outer_actor_rows_collected") is not False
+            or boundaries.get("outer_candidate_scored") is not False
+            or boundaries.get("actor_loaded_or_inferred") is not False
+            or boundaries.get("observations_generated") is not False
+            or boundaries.get("protected_final_access") is not False
+            or registry.get("bindings", {}).get("source_rows_file_sha256")
+                != _sha(source_rows_sha256, "source rows")
+            or not isinstance(scenes, list)
+            or len(scenes) != outer_api.FRESH_OUTER_SCENE_COUNT
+            or not isinstance(identities, list)
+            or len(identities) != outer_api.FRESH_OUTER_SCENE_COUNT
+            or not isinstance(selection, Mapping)
+            or selection.get("salt") != outer_api.SELECTION_SALT
+            or selection.get("family_quotas") != outer_api.FAMILY_QUOTAS):
+        raise ValueError("Fresh outer identity-only registry/report differs")
+    identity_keys = {"batch_index", "family_id", "seed", "fingerprint"}
+    scene_identity = [
+        {key: row.get(key) for key in identity_keys}
+        for row in scenes if isinstance(row, Mapping)
+    ]
+    if (len(scene_identity) != len(scenes)
+            or scene_identity != identities
+            or any(not isinstance(row, Mapping) or set(row) != identity_keys
+                   for row in identities)
+            or any(row.get("split") != "development_validation" for row in scenes)
+            or Counter(row.get("family_id") for row in scenes)
+                != Counter(outer_api.FAMILY_QUOTAS)):
+        raise ValueError("Fresh outer scene identity or family registry differs")
+    fingerprints = [row.get("fingerprint") for row in identities]
+    if (any(type(value) is not str or _HEX.fullmatch(value) is None
+            for value in fingerprints)
+            or len(set(fingerprints)) != len(fingerprints)
+            or selection.get("selected_identity_sha256")
+                != digest(identities)):
+        raise ValueError("Fresh outer identity selection binding differs")
+    # report_sha is intentionally consumed above as an exact caller binding;
+    # its bytes are frozen by ImmutableInputSnapshot before this function runs.
+    if not report_sha:
+        raise RuntimeError("Unreachable empty report SHA")
+    return set(map(str, fingerprints))
+
+
 def _scene_families_from_weight_audit(
     value: Mapping[str, Any], *, expected_scenes: set[str],
 ) -> dict[str, str]:
@@ -670,10 +879,32 @@ def _scene_families_from_weight_audit(
     return result
 
 
+def _validate_scope_family_registry(
+    scope: Mapping[str, Any], *, authenticated_families: Mapping[str, str],
+) -> dict[str, str]:
+    """Require the inner split's family labels to equal authenticated labels."""
+    normalized = normalize_scope(scope)
+    scoped = {
+        str(row["fingerprint"]): str(row["family_id"])
+        for row in normalized["inner_candidate_scenes"]
+    }
+    actual = {
+        str(fingerprint): str(family)
+        for fingerprint, family in authenticated_families.items()
+    }
+    if scoped != actual:
+        raise ValueError(
+            "Fit-only scope family registry differs from authenticated v8 audit")
+    return actual
+
+
 def prepare_scope(
     *, source_evidence: str | Path, expected_source_report_sha256: str,
+    fresh_outer_registry_path: str | Path,
+    expected_fresh_outer_registry_sha256: str,
+    fresh_outer_report_path: str | Path,
+    expected_fresh_outer_report_sha256: str,
     output: str | Path,
-    fresh_outer_scene_fingerprints: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Freeze the label-blind fit population and six-family inner registry."""
     source_directory = Path(source_evidence).expanduser().absolute()
@@ -696,11 +927,27 @@ def prepare_scope(
     scenes = v8._decode(raw_scenes, "Source v8 scope scenes")
     eligible = set(map(str, scenes[~split]))
     exposed = set(map(str, scenes[split]))
-    fresh = list(fresh_outer_scene_fingerprints)
-    if (any(type(item) is not str or _HEX.fullmatch(item) is None for item in fresh)
-            or len(set(fresh)) != len(fresh)
-            or set(fresh) & set(map(str, scenes))):
-        raise ValueError("Fresh outer fingerprints must be unique and unseen")
+    registry_file = _regular(
+        fresh_outer_registry_path, "Fresh outer registry", maximum=MAX_JSON_BYTES)
+    report_file = _regular(
+        fresh_outer_report_path, "Fresh outer report", maximum=MAX_JSON_BYTES)
+    registry_sha256 = _sha(
+        expected_fresh_outer_registry_sha256, "fresh outer registry")
+    report_sha256 = _sha(
+        expected_fresh_outer_report_sha256, "fresh outer report")
+    if (file_hash(registry_file) != registry_sha256
+            or file_hash(report_file) != report_sha256):
+        raise ValueError("Exact fresh outer registry/report bytes required")
+    registry = _read_json(registry_file, "Fresh outer registry")
+    outer_report = _read_json(report_file, "Fresh outer report")
+    fresh = sorted(_validate_fresh_outer_binding(
+        registry, outer_report,
+        registry_file_sha256=registry_sha256,
+        report_file_sha256=report_sha256,
+        source_rows_sha256=file_hash(paths["rows.npz"]),
+    ))
+    if set(fresh) & set(map(str, scenes)):
+        raise ValueError("Fresh outer registry overlaps source v8 rows")
     audit = _read_json(paths["weights_audit.json"], "Source v8 weight audit")
     families = _scene_families_from_weight_audit(
         audit, expected_scenes=eligible)
@@ -714,7 +961,11 @@ def prepare_scope(
             for fingerprint in sorted(eligible)
         ],
         "previously_exposed_outer_scene_fingerprints": sorted(exposed),
-        "fresh_outer_scene_fingerprints": sorted(fresh),
+        "fresh_outer_scene_fingerprints": fresh,
+        "fresh_outer_registry_file_sha256": registry_sha256,
+        "fresh_outer_registry_content_sha256": registry["content_sha256"],
+        "fresh_outer_report_file_sha256": report_sha256,
+        "fresh_outer_report_content_sha256": outer_report["content_sha256"],
         "label_blind": True,
         "final_rows_accessed": False,
         "final_labels_accessed": False,
@@ -730,12 +981,20 @@ def prepare_scope(
     return normalized
 
 
-def build(
+def _build_frozen(
     *, source_evidence: str | Path, expected_source_report_sha256: str,
     actor_path: str | Path, fit_scope_path: str | Path,
-    expected_fit_scope_sha256: str, output: str | Path,
+    expected_fit_scope_sha256: str,
+    fresh_outer_registry_path: str | Path,
+    expected_fresh_outer_registry_sha256: str,
+    fresh_outer_report_path: str | Path,
+    expected_fresh_outer_report_sha256: str,
+    output: str | Path,
+    expected_sources: Mapping[str, str], prepublish: Callable[[], None],
 ) -> dict[str, Any]:
     sources = producer_sources()
+    if sources != dict(expected_sources):
+        raise RuntimeError("Fit-only selector sources changed before build")
     source_directory = Path(source_evidence).expanduser().absolute()
     if (not source_directory.is_dir() or source_directory.is_symlink()
             or source_directory.resolve() != source_directory):
@@ -754,9 +1013,45 @@ def build(
     if (scope["source_report_sha256"] != expected_source_report_sha256
             or scope["source_rows_sha256"] != file_hash(paths["rows.npz"])):
         raise ValueError("Fit-only scope/source v8 binding differs")
+    fresh_registry_file = _regular(
+        fresh_outer_registry_path, "Fresh outer registry", maximum=MAX_JSON_BYTES)
+    fresh_report_file = _regular(
+        fresh_outer_report_path, "Fresh outer report", maximum=MAX_JSON_BYTES)
+    fresh_registry_sha256 = _sha(
+        expected_fresh_outer_registry_sha256, "fresh outer registry")
+    fresh_report_sha256 = _sha(
+        expected_fresh_outer_report_sha256, "fresh outer report")
+    if (file_hash(fresh_registry_file) != fresh_registry_sha256
+            or file_hash(fresh_report_file) != fresh_report_sha256
+            or scope["fresh_outer_registry_file_sha256"]
+                != fresh_registry_sha256
+            or scope["fresh_outer_report_file_sha256"] != fresh_report_sha256):
+        raise ValueError("Fit-only scope/fresh outer file binding differs")
+    fresh_registry = _read_json(
+        fresh_registry_file, "Fresh outer registry")
+    fresh_report = _read_json(fresh_report_file, "Fresh outer report")
+    fresh_fingerprints = _validate_fresh_outer_binding(
+        fresh_registry, fresh_report,
+        registry_file_sha256=fresh_registry_sha256,
+        report_file_sha256=fresh_report_sha256,
+        source_rows_sha256=file_hash(paths["rows.npz"]),
+    )
+    if (fresh_fingerprints != set(scope["fresh_outer_scene_fingerprints"])
+            or scope["fresh_outer_registry_content_sha256"]
+                != fresh_registry["content_sha256"]
+            or scope["fresh_outer_report_content_sha256"]
+                != fresh_report["content_sha256"]):
+        raise ValueError("Fit-only scope/fresh outer identity binding differs")
     source_config = v8.normalize_config(_read_json(
         paths["fit_config.json"], "Source v8 fit config"))
     configs = candidate_configs(source_config)
+    source_weight_audit = _read_json(
+        paths["weights_audit.json"], "Source v8 weight audit")
+    all_source_fit_scenes = set(scope["eligible_fit_scene_fingerprints"])
+    all_scene_families = _scene_families_from_weight_audit(
+        source_weight_audit, expected_scenes=all_source_fit_scenes)
+    _validate_scope_family_registry(
+        scope, authenticated_families=all_scene_families)
 
     destination = Path(output).expanduser().absolute()
     parent = destination.parent
@@ -779,12 +1074,6 @@ def build(
         source_identity = v8._program_source_identity(source_report["bindings"])
         fit_scene_set = set(map(str, v8._decode(
             fit_only["scene_fingerprints"], "Physical fit-only scenes")))
-        source_weight_audit = _read_json(
-            paths["weights_audit.json"], "Source v8 weight audit")
-        all_source_fit_scenes = set(
-            scope["eligible_fit_scene_fingerprints"])
-        all_scene_families = _scene_families_from_weight_audit(
-            source_weight_audit, expected_scenes=all_source_fit_scenes)
         scene_families = {
             scene: all_scene_families[scene] for scene in fit_scene_set
         }
@@ -855,6 +1144,12 @@ def build(
                 "actor_file_sha256": file_hash(actor_file),
                 "fit_scope_file_sha256": expected_fit_scope_sha256,
                 "fit_scope_content_sha256": scope["content_sha256"],
+                "fresh_outer_registry_file_sha256": fresh_registry_sha256,
+                "fresh_outer_registry_content_sha256": fresh_registry[
+                    "content_sha256"],
+                "fresh_outer_report_file_sha256": fresh_report_sha256,
+                "fresh_outer_report_content_sha256": fresh_report[
+                    "content_sha256"],
                 "selector_binding_sha256": selector_binding,
                 "producer_sources_sha256": digest(sources),
             },
@@ -862,8 +1157,8 @@ def build(
             "selection": selection,
             "selected_config_sha256": selected_payload["selected_config_sha256"],
             "outer_evaluation_performed": False,
-            "outer_labels_accessed": False,
-            "outer_probabilities_accessed": False,
+            "outer_labels_used_for_projection_fit_or_selection": False,
+            "outer_probabilities_used_for_projection_fit_or_selection": False,
             "final_rows_accessed": False,
             "final_labels_accessed": False,
             "runtime_action_override": False,
@@ -873,6 +1168,7 @@ def build(
             "evidence_artifacts": evidence,
         }
         _write_json(temporary / "report.json", report)
+        prepublish()
         os.rename(temporary, destination)
         temporary = None
         return deepcopy(report)
@@ -881,13 +1177,66 @@ def build(
             shutil.rmtree(temporary, ignore_errors=True)
 
 
+def build(
+    *, source_evidence: str | Path, expected_source_report_sha256: str,
+    actor_path: str | Path, fit_scope_path: str | Path,
+    expected_fit_scope_sha256: str,
+    fresh_outer_registry_path: str | Path,
+    expected_fresh_outer_registry_sha256: str,
+    fresh_outer_report_path: str | Path,
+    expected_fresh_outer_report_sha256: str,
+    output: str | Path,
+) -> dict[str, Any]:
+    """Run selection entirely from immutable copies, then recheck originals."""
+    sources = producer_sources()
+    with _snapshot_build_inputs(
+        source_evidence=source_evidence,
+        expected_source_report_sha256=expected_source_report_sha256,
+        actor_path=actor_path,
+        fit_scope_path=fit_scope_path,
+        expected_fit_scope_sha256=expected_fit_scope_sha256,
+        fresh_outer_registry_path=fresh_outer_registry_path,
+        expected_fresh_outer_registry_sha256=(
+            expected_fresh_outer_registry_sha256),
+        fresh_outer_report_path=fresh_outer_report_path,
+        expected_fresh_outer_report_sha256=expected_fresh_outer_report_sha256,
+    ) as snapshot:
+        def prepublish() -> None:
+            snapshot.verify()
+            if producer_sources() != sources:
+                raise RuntimeError(
+                    "Fit-only selector sources changed during transaction")
+
+        return _build_frozen(
+            source_evidence=snapshot.root / "source",
+            expected_source_report_sha256=expected_source_report_sha256,
+            actor_path=snapshot.paths["actor"],
+            fit_scope_path=snapshot.paths["fit_scope"],
+            expected_fit_scope_sha256=expected_fit_scope_sha256,
+            fresh_outer_registry_path=snapshot.paths["fresh_outer_registry"],
+            expected_fresh_outer_registry_sha256=(
+                expected_fresh_outer_registry_sha256),
+            fresh_outer_report_path=snapshot.paths["fresh_outer_report"],
+            expected_fresh_outer_report_sha256=(
+                expected_fresh_outer_report_sha256),
+            output=output,
+            expected_sources=sources,
+            prepublish=prepublish,
+        )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     scope_parser = commands.add_parser("prepare-scope")
     scope_parser.add_argument("--source-evidence", required=True)
     scope_parser.add_argument("--expected-source-report-sha256", required=True)
-    scope_parser.add_argument("--fresh-outer-fingerprint", action="append", default=[])
+    scope_parser.add_argument("--fresh-outer-registry", required=True)
+    scope_parser.add_argument(
+        "--expected-fresh-outer-registry-sha256", required=True)
+    scope_parser.add_argument("--fresh-outer-report", required=True)
+    scope_parser.add_argument(
+        "--expected-fresh-outer-report-sha256", required=True)
     scope_parser.add_argument("--output", required=True)
     select_parser = commands.add_parser("select")
     select_parser.add_argument("--source-evidence", required=True)
@@ -895,13 +1244,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     select_parser.add_argument("--actor", required=True)
     select_parser.add_argument("--fit-scope", required=True)
     select_parser.add_argument("--expected-fit-scope-sha256", required=True)
+    select_parser.add_argument("--fresh-outer-registry", required=True)
+    select_parser.add_argument(
+        "--expected-fresh-outer-registry-sha256", required=True)
+    select_parser.add_argument("--fresh-outer-report", required=True)
+    select_parser.add_argument(
+        "--expected-fresh-outer-report-sha256", required=True)
     select_parser.add_argument("--output", required=True)
     args = parser.parse_args(argv)
     if args.command == "prepare-scope":
         scope = prepare_scope(
             source_evidence=args.source_evidence,
             expected_source_report_sha256=args.expected_source_report_sha256,
-            fresh_outer_scene_fingerprints=args.fresh_outer_fingerprint,
+            fresh_outer_registry_path=args.fresh_outer_registry,
+            expected_fresh_outer_registry_sha256=(
+                args.expected_fresh_outer_registry_sha256),
+            fresh_outer_report_path=args.fresh_outer_report,
+            expected_fresh_outer_report_sha256=(
+                args.expected_fresh_outer_report_sha256),
             output=args.output,
         )
         print(canonical({
@@ -918,6 +1278,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         expected_source_report_sha256=args.expected_source_report_sha256,
         actor_path=args.actor, fit_scope_path=args.fit_scope,
         expected_fit_scope_sha256=args.expected_fit_scope_sha256,
+        fresh_outer_registry_path=args.fresh_outer_registry,
+        expected_fresh_outer_registry_sha256=(
+            args.expected_fresh_outer_registry_sha256),
+        fresh_outer_report_path=args.fresh_outer_report,
+        expected_fresh_outer_report_sha256=(
+            args.expected_fresh_outer_report_sha256),
         output=args.output,
     )
     print(canonical({

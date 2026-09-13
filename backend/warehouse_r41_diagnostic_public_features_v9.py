@@ -250,7 +250,7 @@ class R41DiagnosticPublicRelationsV9:
             chosen = improvements[row_index, nearest]
             add(chosen, f"derived.v9.{who}.nearest_goal.improvement")
 
-        topology = np.empty((len(values), 8), dtype=np.float32)
+        topology = np.empty((len(values), 9), dtype=np.float32)
         task_coordinates = []
         for task in range(2):
             task_coordinates.append((
@@ -276,9 +276,22 @@ class R41DiagnosticPublicRelationsV9:
             "shared_bridge_fraction", "shared_crossing_fraction",
             "same_direction_fraction", "opposing_direction_fraction",
             "task_0_route_fraction", "task_1_route_fraction",
+            "shared_crossing_at_4_3",
         )
         for index, name in enumerate(topology_names):
             add(topology[:, index], "derived.v9.task_pair." + name)
+        ratio = topology[:, 0]
+        for index, selected in enumerate((
+            ratio < .37,
+            (ratio >= .37) & (ratio < .42),
+            (ratio >= .42) & (ratio < .49),
+            ratio >= .49,
+        )):
+            add(selected, f"derived.v9.task_pair.overlap_band_{index}")
+        add(topology[:, 2] * np.float32(ROWS * COLS - 1) >= 2,
+            "derived.v9.task_pair.multiple_shared_bridges")
+        add(topology[:, 3] > 0,
+            "derived.v9.task_pair.has_shared_crossing")
 
         # Collision recovery and action-history interactions are public.  They
         # are especially useful for the ordinary WAIT endpoint of an isolated
@@ -388,7 +401,7 @@ class R41DiagnosticPublicRelationsV9:
                      (point(pickup1), point(delivery1)))
         routes = tuple(paths(*pair) for pair in endpoints)
         if any(not item for item in routes):
-            return (0.0,) * 8
+            return (0.0,) * 9
         edge_sets = tuple(tuple(undirected(route) for route in item) for item in routes)
         ratios: list[float] = []
         shared_edges: set[frozenset[tuple[int, int]]] = set()
@@ -421,6 +434,7 @@ class R41DiagnosticPublicRelationsV9:
             same / scale, opposing / scale,
             (len(routes[0][0]) - 1) / scale,
             (len(routes[1][0]) - 1) / scale,
+            float((4, 3) in crossings),
         )
 
     def transform_batch(self, observations: np.ndarray) -> np.ndarray:

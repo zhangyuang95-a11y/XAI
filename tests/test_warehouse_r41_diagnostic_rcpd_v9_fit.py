@@ -17,13 +17,11 @@ ACTOR = (
 )
 
 
-def config(pair_mass_fraction=0.35):
+def config(pair_pool_multiplier=16.0, wait_endpoint_share=0.62):
     return {
         "version": subject.CONFIG_VERSION,
-        "pair_mass_fraction": pair_mass_fraction,
-        "duplicate_power": 0.5,
-        "balance_power": 0.5,
-        "maximum_row_weight": 30.0,
+        "pair_pool_multiplier": pair_pool_multiplier,
+        "wait_endpoint_share": wait_endpoint_share,
         "model": {
             "learning_rate": 0.1,
             "max_iter": 2,
@@ -111,8 +109,29 @@ def test_weights_are_fit_only_finite_and_pair_stratified():
     assert np.all(np.isfinite(weights[mask])) and np.all(weights[mask] > 0)
     assert np.all(weights[~mask] == 0)
     assert audit["effective_pair_count"] == 4
-    assert audit["requested_pair_mass"] == pytest.approx(15 * 0.35)
+    assert audit["pair_mass_after_redistribution"] == pytest.approx(
+        audit["pair_mass_before_redistribution"])
+    assert audit["pair_mass_preserved"] is True
     assert audit["validation_labels_used"] is False
+
+
+def test_held_fold_label_values_are_never_read_or_validated():
+    _, arrays = rows()
+    mask = np.arange(30) < 15
+    kwargs = {
+        "scene_families": {"a" * 64: "conflict_family_01",
+                           "b" * 64: "conflict_family_02"},
+        "config": config(),
+    }
+    expected = subject.build_fit_weights(arrays, mask, **kwargs)
+    poisoned = dict(arrays)
+    poisoned["action_indices"] = arrays["action_indices"].copy()
+    poisoned["action_indices"][~mask] = np.uint8(255)
+    actual = subject.build_fit_weights(poisoned, mask, **kwargs)
+    np.testing.assert_array_equal(actual[0], expected[0])
+    np.testing.assert_array_equal(actual[1], expected[1])
+    np.testing.assert_array_equal(actual[2], expected[2])
+    assert actual[3] == expected[3]
 
 
 def test_fit_exports_one_traceable_public_program_without_runtime_control():
@@ -131,6 +150,11 @@ def test_fit_exports_one_traceable_public_program_without_runtime_control():
     payload = program.to_dict()
     assert payload["metadata"]["runtime_action_override"] is False
     assert all(item["mix_weight"] == 0.0 for item in payload["specialists"])
+    trace = program.trace(dict(zip(relations.base_feature_names,
+                                   arrays["observations"][0])))
+    assert trace["triggered_routes"] == []
+    assert all(item["triggered"] is False for item in trace["routes"])
+    assert all(item["program_trace"] is None for item in trace["routes"])
     used = " ".join(program.complexity()["unique_split_feature_names"]).casefold()
     assert "logit" not in used and "hidden" not in used
 

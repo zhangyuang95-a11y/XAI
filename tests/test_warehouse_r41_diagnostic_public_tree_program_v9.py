@@ -149,7 +149,7 @@ def _weighted_average(base, specialists) -> np.ndarray:
 def test_general_constructor_binds_exact_relations_and_four_programs(program):
     payload = program.to_dict()
     assert len(program.base_feature_names) == 197
-    assert len(program.feature_names) == 661
+    assert len(program.feature_names) == 668
     assert payload["aggregation"] == AGGREGATION
     assert [item["group"] for item in payload["specialists"]] == list(GROUPS)
     assert [item["route"]["feature_name"] for item in payload["specialists"]] == [
@@ -157,7 +157,7 @@ def test_general_constructor_binds_exact_relations_and_four_programs(program):
     ]
     assert program.mix_weights == WEIGHTS
     assert payload["metadata"] == {"candidate": "development-only", "seed": 8}
-    assert all(len(item["program"]["feature_names"]) == 661
+    assert all(len(item["program"]["feature_names"]) == 668
                for item in payload["specialists"])
     complexity = program.complexity()
     assert complexity == {
@@ -341,7 +341,7 @@ def test_schema_program_bindings_routes_and_weights_are_strict(program):
     payload = program.to_dict()
     first, second = payload["base"]["feature_names"][:2]
     payload["base"]["feature_names"][:2] = [second, first]
-    with pytest.raises(ValueError, match="exactly 661"):
+    with pytest.raises(ValueError, match="exactly 668"):
         R41DiagnosticPublicTreeProgramV9.from_dict(payload)
     payload = program.to_dict()
     payload["specialists"][2]["program"]["action_names"][0] = "OTHER"
@@ -360,7 +360,7 @@ def test_runtime_accepts_only_finite_raw_197_feature_inputs(program, components)
     with pytest.raises(ValueError, match="exactly 197"):
         program.predict_proba(missing)
     with pytest.raises(ValueError, match="batch differs"):
-        program.predict_proba_batch(np.zeros((1, 661), dtype=np.float32))
+        program.predict_proba_batch(np.zeros((1, 668), dtype=np.float32))
     changed = row.copy()
     changed[0] = np.nan
     with pytest.raises(ValueError, match="batch differs"):

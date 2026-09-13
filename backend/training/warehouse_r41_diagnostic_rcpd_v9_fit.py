@@ -7,7 +7,6 @@ module cannot choose or inspect the fresh outer split.
 """
 from __future__ import annotations
 
-from collections import Counter, defaultdict
 from copy import deepcopy
 import math
 from typing import Any, Mapping
@@ -15,8 +14,8 @@ from typing import Any, Mapping
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier
 
-from backend.training import warehouse_r41_diagnostic_rcpd_v7 as v7
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as v8
+from backend.training import warehouse_r41_diagnostic_pair_weights_v8 as pair_weights_v8
 from backend.training.warehouse_native_common import digest
 from backend.warehouse_r41_diagnostic_boosted_tree import (
     LEAF_VALUE_SEMANTICS,
@@ -38,14 +37,13 @@ from backend.warehouse_r41_diagnostic_public_tree_program_v9 import (
 VERSION = "warehouse-r41-diagnostic-rcpd-v9-fit.v1"
 ACTIONS = tuple(v8.ACTIONS)
 CLASSES = tuple(range(len(ACTIONS)))
-CONFIG_VERSION = "warehouse-r41-diagnostic-rcpd-v9-fit-config.v1"
+CONFIG_VERSION = "warehouse-r41-diagnostic-rcpd-v9-fit-config.v2"
 _MODEL_FIELDS = frozenset((
     "learning_rate", "max_iter", "max_leaf_nodes", "min_samples_leaf",
     "l2_regularization", "max_depth", "max_bins", "random_state",
 ))
 _CONFIG_FIELDS = frozenset((
-    "version", "pair_mass_fraction", "duplicate_power", "balance_power",
-    "maximum_row_weight", "model",
+    "version", "pair_pool_multiplier", "wait_endpoint_share", "model",
 ))
 
 
@@ -94,10 +92,11 @@ def normalize_config(value: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("V9 model max_depth differs")
     return {
         "version": CONFIG_VERSION,
-        "pair_mass_fraction": number("pair_mass_fraction", low=0.0, high=4.0),
-        "duplicate_power": number("duplicate_power", low=0.0, high=1.0),
-        "balance_power": number("balance_power", low=0.0, high=1.0),
-        "maximum_row_weight": number("maximum_row_weight", low=1.0, high=100.0),
+        "pair_pool_multiplier": number(
+            "pair_pool_multiplier", low=1.0,
+            high=pair_weights_v8.MAX_PAIR_POOL_MULTIPLIER),
+        "wait_endpoint_share": number(
+            "wait_endpoint_share", low=0.5, high=0.8),
         "model": {
             "learning_rate": model_number("learning_rate", low=1e-4, high=1.0),
             "max_iter": integers["max_iter"],
@@ -121,26 +120,6 @@ def _decode(values: np.ndarray, label: str) -> np.ndarray:
         raise ValueError(label + " differs") from error
 
 
-def _partner(episode: str) -> str:
-    # Stored episode IDs end with the registered public partner name.
-    value = episode.rsplit(":", 1)[-1]
-    return value if value in v7.PARTNERS else "unknown"
-
-
-def _balanced_factor(values: np.ndarray, selected: np.ndarray,
-                     power: float) -> np.ndarray:
-    result = np.ones(len(values), dtype=np.float64)
-    chosen = values[selected]
-    if not len(chosen) or power == 0.0:
-        return result
-    counts = Counter(map(str, chosen))
-    target = len(chosen) / max(1, len(counts))
-    result[selected] = np.asarray([
-        (target / counts[str(item)]) ** power for item in chosen
-    ], dtype=np.float64)
-    return result
-
-
 def build_fit_weights(
     arrays: Mapping[str, np.ndarray], fit_mask: np.ndarray, *,
     scene_families: Mapping[str, str], config: Mapping[str, Any],
@@ -154,74 +133,66 @@ def build_fit_weights(
         raise ValueError("V9 fit mask differs")
     scenes = _decode(np.asarray(arrays["scene_fingerprints"]), "scene fingerprints")
     hashes = _decode(np.asarray(arrays["observation_hashes"]), "observation hashes")
-    episodes = _decode(np.asarray(arrays["episode_ids"]), "episode IDs")
     labels = np.asarray(arrays["action_indices"])
     bits = np.asarray(arrays["group_bits"])
     if (labels.shape != (count,) or labels.dtype.kind not in "iu"
-            or np.any(labels < 0) or np.any(labels >= len(ACTIONS))
             or bits.shape != (count,) or bits.dtype.kind not in "iu"):
         raise ValueError("V9 fit labels or public critical bits differ")
+    # Advanced indexing happens before validation so held-fold labels are never
+    # read, validated, summarized, or allowed to affect candidate selection.
+    fit_labels = labels[np.flatnonzero(selected)].astype(np.int64, copy=True)
+    if np.any(fit_labels < 0) or np.any(fit_labels >= len(ACTIONS)):
+        raise ValueError("V9 fit labels differ")
     if any(scene not in scene_families for scene in set(map(str, scenes[selected]))):
         raise ValueError("V9 scene-family registry is incomplete")
 
-    weights = np.ones(count, dtype=np.float64)
-    duplicate_counts = Counter(map(str, hashes[selected]))
-    power = normalized["duplicate_power"]
-    if power:
-        weights[selected] *= np.asarray([
-            duplicate_counts[str(value)] ** (-power) for value in hashes[selected]
-        ], dtype=np.float64)
-    balance_power = normalized["balance_power"]
-    families = np.asarray([
-        scene_families.get(str(scene), "excluded") for scene in scenes
-    ], dtype="U32")
-    partners = np.asarray([_partner(str(value)) for value in episodes], dtype="U32")
-    exact_bits = bits.astype(str)
-    weights *= _balanced_factor(labels.astype(str), selected, balance_power)
-    weights *= _balanced_factor(families, selected, balance_power / 2.0)
-    weights *= _balanced_factor(partners, selected, balance_power / 2.0)
-    weights *= _balanced_factor(exact_bits, selected, balance_power / 2.0)
+    # Recompute the established leakage-safe v8 hierarchy separately for every
+    # whole-scene fold.  Its implementation indexes fit labels only.  Reusing
+    # weights stored by an earlier split would indirectly expose that split's
+    # validation labels to this selector.
+    fold_arrays = dict(arrays)
+    fold_arrays["split_validation"] = (~selected).astype(np.bool_)
+    established = pair_weights_v8.build_pair_weights(
+        fold_arrays, scene_families=scene_families,
+        use_action_factor=True,
+        pair_pool_multiplier=normalized["pair_pool_multiplier"],
+    )
+    weights = np.asarray(established["weights"], dtype=np.float64)
     weights[~selected] = 0.0
-    base_sum = float(math.fsum(map(float, weights[selected])))
-    if not math.isfinite(base_sum) or base_sum <= 0.0:
-        raise ValueError("V9 base fit weight mass differs")
-    weights[selected] *= float(np.sum(selected)) / base_sum
+    pairs = np.asarray(established["pairs"], dtype=np.int64)
+    pair_bits = v8._pair_group_bits(fold_arrays, pairs)
 
-    pairs = v7._effective_pairs(arrays, selected)
-    pair_bits = v8._pair_group_bits(arrays, pairs)
-    pair_addition = np.zeros(count, dtype=np.float64)
-    pair_fraction = normalized["pair_mass_fraction"]
-    strata: dict[tuple[str, str, int, str, int], list[tuple[int, int]]] = defaultdict(list)
-    for pair_index, (wait_row, branch_row) in enumerate(pairs):
-        family = scene_families[str(scenes[wait_row])]
-        partner = _partner(str(episodes[wait_row]))
-        for endpoint, row in (("wait", int(wait_row)), ("branch", int(branch_row))):
-            strata[(family, partner, int(pair_bits[pair_index]), endpoint,
-                    int(labels[row]))].append((pair_index, row))
-    if pair_fraction and not strata:
-        raise ValueError("V9 fit has no effective intervention pairs")
-    pair_mass = float(np.sum(selected)) * pair_fraction
-    endpoint_share = {"wait": 0.62, "branch": 0.38}
-    by_endpoint = {
-        endpoint: [key for key in strata if key[3] == endpoint]
-        for endpoint in endpoint_share
-    }
-    for endpoint, share in endpoint_share.items():
-        keys = by_endpoint[endpoint]
-        if not keys:
-            continue
-        per_stratum = pair_mass * share / len(keys)
-        for key in keys:
-            occurrences = strata[key]
-            per_occurrence = per_stratum / len(occurrences)
-            for _, row in occurrences:
-                pair_addition[row] += per_occurrence
-    weights += pair_addition
-    positive = weights[selected]
-    median = float(np.median(positive))
-    maximum = normalized["maximum_row_weight"] * max(median, 1e-12)
-    clipped_rows = int(np.sum(positive > maximum))
-    weights[selected] = np.minimum(positive, maximum)
+    # Preserve the established family -> scene -> partner -> critical-bit pair
+    # allocation exactly.  The only v9 change is a preregistered redistribution
+    # within each occurrence from equal endpoints to WAIT/branch shares.  No
+    # clipping follows, so occurrence mass and the hierarchy remain intact.
+    old_pair = np.asarray(established["pair_contribution"], dtype=np.float64)
+    old_pair[~selected] = 0.0
+    old_pair_mass = float(math.fsum(map(float, old_pair[selected])))
+    occurrences = established["audit"]["pair_occurrences"]
+    occurrence_mass = float(math.fsum(
+        float(item["weighted_occurrence_mass"]) for item in occurrences))
+    replacement = np.zeros(count, dtype=np.float64)
+    wait_share = normalized["wait_endpoint_share"]
+    branch_share = 1.0 - wait_share
+    scale = old_pair_mass / occurrence_mass if occurrence_mass else 1.0
+    if len(pairs) != len(occurrences) or (len(pairs) and occurrence_mass <= 0.0):
+        raise ValueError("V9 established pair occurrence audit differs")
+    for pair_index, (pair, item) in enumerate(zip(pairs, occurrences)):
+        wait_row, branch_row = map(int, pair)
+        if (int(item["pair_index"]) != pair_index
+                or int(item["wait_row"]) != wait_row
+                or int(item["branch_row"]) != branch_row):
+            raise ValueError("V9 established pair occurrence rows differ")
+        mass = float(item["weighted_occurrence_mass"]) * scale
+        replacement[wait_row] += mass * wait_share
+        replacement[branch_row] += mass * branch_share
+    new_pair_mass = float(math.fsum(map(float, replacement[selected])))
+    tolerance = max(1e-9, 32 * np.finfo(np.float64).eps
+                    * max(1.0, old_pair_mass, new_pair_mass))
+    if abs(old_pair_mass - new_pair_mass) > tolerance:
+        raise ValueError("V9 pair endpoint redistribution changed pair mass")
+    weights = weights - old_pair + replacement
     weights[~selected] = 0.0
     if (not np.isfinite(weights).all() or np.any(weights[selected] <= 0.0)
             or np.any(weights[~selected] != 0.0)):
@@ -229,15 +200,22 @@ def build_fit_weights(
     audit = {
         "version": VERSION + ".weights.v1",
         "fit_rows": int(np.sum(selected)),
-        "unique_fit_observations": len(duplicate_counts),
+        "unique_fit_observations": len(set(map(str, hashes[selected]))),
         "effective_pair_count": len(pairs),
-        "pair_strata": len(strata),
-        "base_mass_before_pair_addition": float(np.sum(selected)),
-        "requested_pair_mass": pair_mass,
-        "actual_pair_addition_before_cap": float(math.fsum(map(float, pair_addition))),
+        "pair_pool_multiplier": normalized["pair_pool_multiplier"],
+        "wait_endpoint_share": wait_share,
+        "branch_endpoint_share": branch_share,
+        "pair_mass_before_redistribution": old_pair_mass,
+        "pair_mass_after_redistribution": new_pair_mass,
+        "pair_mass_preserved": True,
+        "pair_mass_preservation_tolerance": tolerance,
         "final_weight_mass": float(math.fsum(map(float, weights))),
-        "clipped_rows": clipped_rows,
+        "post_redistribution_clipping": False,
         "configuration": deepcopy(normalized),
+        "established_pair_weight_contract_sha256": digest(
+            pair_weights_v8.contract()),
+        "established_pair_weight_audit_content_sha256": digest(
+            established["audit"]),
         "validation_labels_used": False,
         "outer_labels_used": False,
         "protected_final_access": False,

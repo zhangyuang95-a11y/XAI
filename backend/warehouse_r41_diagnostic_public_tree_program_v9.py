@@ -1,7 +1,7 @@
 """Traceable v9 public-tree composition with a NumPy-only runtime.
 
 The program accepts only the frozen 197-value public observation.  It derives
-the registered 661 public relation features deterministically, evaluates a
+the registered 668 public relation features deterministically, evaluates a
 base explicit boosted tree, then applies three routed specialist trees in the
 order recorded by the payload.
 """
@@ -142,9 +142,9 @@ class R41DiagnosticPublicTreeProgramV9:
         except (TypeError, ValueError) as exc:
             raise ValueError("Public-tree v9 relations contract differs") from exc
         if (len(self.relations.base_feature_names) != 197
-                or len(self.relations.feature_names) != 661
+                or len(self.relations.feature_names) != 668
                 or dict(relations_payload) != self.relations.contract()):
-            raise ValueError("Public-tree v9 requires the exact 197-to-661 relation contract")
+            raise ValueError("Public-tree v9 requires the exact 197-to-668 relation contract")
         self.base_feature_names = self.relations.base_feature_names
         self.feature_names = self.relations.feature_names
         self._feature_index = {
@@ -210,7 +210,7 @@ class R41DiagnosticPublicTreeProgramV9:
         self, program: R41DiagnosticBoostedTreeProgram, label: str,
     ) -> None:
         if program.feature_names != self.feature_names:
-            raise ValueError(label + " program must consume exactly 661 public features")
+            raise ValueError(label + " program must consume exactly 668 public features")
         if program.action_names != self.action_names:
             raise ValueError(label + " action registry differs")
 
@@ -244,7 +244,7 @@ class R41DiagnosticPublicTreeProgramV9:
         """Assemble already-fitted/exported candidates into the v9 runtime."""
 
         relations = R41DiagnosticPublicRelationsV9(base_feature_names)
-        if len(relations.base_feature_names) != 197 or len(relations.feature_names) != 661:
+        if len(relations.base_feature_names) != 197 or len(relations.feature_names) != 668:
             raise ValueError("Public-tree v9 requires exactly 197 public base features")
         programs = {
             "base": _as_program(base_program, "Base"),
@@ -476,7 +476,8 @@ class R41DiagnosticPublicTreeProgramV9:
                 "group": item["group"],
                 "route": deepcopy(route),
                 "observed": observed,
-                "triggered": active,
+                "condition_met": active,
+                "triggered": active and item["mix_weight"] != 0.0,
                 "mix_weight": item["mix_weight"],
                 "specialist_distribution": (
                     None if specialist_distribution is None

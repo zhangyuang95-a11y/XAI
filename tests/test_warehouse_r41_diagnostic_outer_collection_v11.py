@@ -131,7 +131,9 @@ def _selector_report(lock: dict) -> dict:
         },
     } for salt in subject.CV_SALTS]
     candidate = {
-        "config": config, "config_sha256": config_sha, "salts": salts,
+        "config": config, "config_sha256": config_sha,
+        "evaluation": {"status": "completed", "failure": None},
+        "salts": salts,
         "both_salts_pass_all_aggregate_gates": True,
         "robust_minimum_family_exact_bit_direction_fidelity": 0.95,
         "observed_capacity": {
@@ -195,6 +197,71 @@ def _selector_report(lock: dict) -> dict:
         "combined_validation_observation_hashes_sha256": (
             validation_hash_inputs["combined_observation_hashes_sha256"]),
     })
+    minimum_support = {"rows": 2, "scenes": 2, "episodes": 2}
+
+    def support(rows: int, scenes: int, episodes: int, label: str) -> dict:
+        return {
+            "rows": rows, "scenes": scenes, "episodes": episodes,
+            "scene_registry_sha256": digest({"scenes": label}),
+            "episode_registry_sha256": digest({"episodes": label}),
+        }
+
+    legacy_support = {
+        "minimum_per_partition": minimum_support,
+        "partitions": {
+            "fit": support(116, 14, 14, "legacy-fit"),
+            "validation": support(1, 1, 1, "legacy-validation"),
+        },
+        "passed": False,
+        "support_uses_action_labels_or_probabilities": False,
+    }
+    legacy_failure = {
+        "assignment_version": subject.LEGACY_FOLD_ASSIGNMENT_VERSION,
+        "salt": subject.CV_SALTS[0], "fold": 0,
+        "fold_assignment_sha256": digest({"legacy": "assignment"}),
+        "support": legacy_support,
+        "reason": "frozen_replacement_support_prerequisite_not_met",
+        "action_labels_or_probabilities_used": False,
+    }
+    legacy_failure["content_sha256"] = digest(legacy_failure)
+    repair = {
+        "family": "conflict_family_04",
+        "route_scene": digest({"route": "scene"}),
+        "route_from_fold": 1, "route_to_fold": 0,
+        "zero_route_scene": digest({"zero": "scene"}),
+        "zero_route_from_fold": 0, "zero_route_to_fold": 1,
+    }
+
+    def assignment_audit(salt: str) -> dict:
+        repairs = [repair] if salt == subject.CV_SALTS[0] else []
+        before = {
+            "0": {"rows": 1, "scenes": 1, "episodes": 1},
+            "1": {"rows": 10, "scenes": 7, "episodes": 7},
+            "2": {"rows": 106, "scenes": 7, "episodes": 7},
+        } if repairs else {
+            "0": {"rows": 3, "scenes": 3, "episodes": 3},
+            "1": {"rows": 110, "scenes": 8, "episodes": 8},
+            "2": {"rows": 4, "scenes": 4, "episodes": 4},
+        }
+        after = deepcopy(before)
+        if repairs:
+            after["0"] = {"rows": 2, "scenes": 2, "episodes": 2}
+            after["1"] = {"rows": 9, "scenes": 6, "episodes": 6}
+        legacy_sha = digest({"legacy": salt})
+        value = {
+            "version": subject.FOLD_ASSIGNMENT_VERSION,
+            "legacy_assignment_sha256": legacy_sha,
+            "repaired_assignment_sha256": (
+                digest({"repaired": salt}) if repairs else legacy_sha),
+            "minimum_support": minimum_support,
+            "support_before": before, "support_after": after,
+            "repairs": repairs, "repairs_sha256": digest(repairs),
+            "x_only_public_inputs": True,
+            "action_labels_or_probabilities_used": False,
+        }
+        value["content_sha256"] = digest(value)
+        return value
+
     value = {
         "version": subject.SELECTOR_VERSION, "status": subject.SELECTOR_STATUS,
         "contract": {
@@ -203,6 +270,10 @@ def _selector_report(lock: dict) -> dict:
             "consumed_v10_outer_labels_or_probabilities_read": False,
             "fresh_v11_outer_labels_or_probabilities_read": False,
             "protected_final_access": False, "runtime_action_override": False,
+            "cross_validation": {
+                "assignment_version": subject.FOLD_ASSIGNMENT_VERSION,
+                "assignment_uses_action_labels_or_probabilities": False,
+            },
             "formal_ready": False,
         },
         "bindings": {
@@ -214,6 +285,11 @@ def _selector_report(lock: dict) -> dict:
             "validation_wins": validation_wins,
             "validation_hash_inputs": validation_hash_inputs,
             "scene_families": {"scene_count": 48},
+            "fold_assignment_version": subject.FOLD_ASSIGNMENT_VERSION,
+            "replacement_support_registry_sha256": digest({"support": "registry"}),
+            "fold_assignment_repairs": {
+                salt: assignment_audit(salt) for salt in subject.CV_SALTS},
+            "legacy_family_only_split_failure": legacy_failure,
             "retained_scene_count": 48,
             "retained_row_count": 192,
         },
@@ -427,6 +503,93 @@ def test_selector_report_authentication_rejects_forged_cv_and_full_refit(tmp_pat
             expected_selector_report_sha256=file_hash(missing_path),
             expected_program_sha256=missing_lock["bindings"]["program_sha256"],
         )
+
+
+def test_selector_report_accepts_ineligible_trace_before_eligible_candidate():
+    lock = _candidate_lock()
+    report = _selector_report(lock)
+    completed = report["candidate_grid"]["candidate_reports"][0]
+    config = {"version": "synthetic-ineligible-config"}
+    minimum = {"rows": 2, "scenes": 2, "episodes": 2}
+
+    def partition(count: int, label: str) -> dict:
+        return {
+            "rows": count, "scenes": count, "episodes": count,
+            "scene_registry_sha256": digest({"scene": label}),
+            "episode_registry_sha256": digest({"episode": label}),
+        }
+
+    support = {
+        "minimum_per_partition": minimum,
+        "partitions": {
+            "fit": partition(3, "fit"),
+            "validation": partition(1, "validation"),
+        },
+        "passed": False,
+        "support_uses_action_labels_or_probabilities": False,
+    }
+    failure = {
+        "type": "ReplacementSupportError",
+        "code": "frozen_replacement_support_prerequisite_not_met",
+        "salt": subject.CV_SALTS[0], "fold": 0,
+        "fold_assignment_sha256": digest({"failed": "assignment"}),
+        "support": support,
+        "action_labels_or_probabilities_used": False,
+    }
+    failure["content_sha256"] = digest(failure)
+    ineligible = {
+        "config": config, "config_sha256": digest(config),
+        "evaluation": {
+            "status": "ineligible_replacement_support", "failure": failure},
+        "salts": [], "both_salts_pass_all_aggregate_gates": False,
+        "robust_minimum_family_exact_bit_direction_fidelity": 0.0,
+        "observed_capacity": {
+            "maximum_total_nodes": 0, "maximum_tree_depth": 0,
+            "fold_program_count": 0,
+        },
+    }
+    candidates = [ineligible, completed]
+    configs = [row["config"] for row in candidates]
+    grid_payload = {
+        "version": subject.SELECTOR_GRID_VERSION, "configs": configs}
+    grid_payload["content_sha256"] = digest(grid_payload)
+    grid_sha = sha256((canonical(grid_payload) + "\n").encode()).hexdigest()
+    report["candidate_grid"] = {
+        "config_count": len(candidates),
+        "config_sha256s": [row["config_sha256"] for row in candidates],
+        "candidate_reports": candidates,
+    }
+    report["bindings"]["candidate_grid_sha256"] = grid_sha
+    lock["bindings"]["candidate_grid_sha256"] = grid_sha
+    report["content_sha256"] = digest({
+        key: child for key, child in report.items() if key != "content_sha256"})
+    report_sha = sha256((canonical(report) + "\n").encode()).hexdigest()
+    lock["bindings"]["selector_report_sha256"] = report_sha
+    lock["content_sha256"] = digest({
+        key: child for key, child in lock.items() if key != "content_sha256"})
+    subject._validate_selector_report(
+        lock, report, expected_report_sha256=report_sha,
+        expected_program_sha256=lock["bindings"]["program_sha256"])
+
+    forged = deepcopy(report)
+    failed = forged["candidate_grid"]["candidate_reports"][0]
+    failed["evaluation"]["failure"]["support"]["passed"] = True
+    failure_value = failed["evaluation"]["failure"]
+    failure_value["content_sha256"] = digest({
+        key: child for key, child in failure_value.items()
+        if key != "content_sha256"})
+    forged["content_sha256"] = digest({
+        key: child for key, child in forged.items() if key != "content_sha256"})
+    forged_sha = sha256((canonical(forged) + "\n").encode()).hexdigest()
+    forged_lock = deepcopy(lock)
+    forged_lock["bindings"]["selector_report_sha256"] = forged_sha
+    forged_lock["content_sha256"] = digest({
+        key: child for key, child in forged_lock.items()
+        if key != "content_sha256"})
+    with pytest.raises(ValueError, match="support failure|support result"):
+        subject._validate_selector_report(
+            forged_lock, forged, expected_report_sha256=forged_sha,
+            expected_program_sha256=forged_lock["bindings"]["program_sha256"])
 
 
 @pytest.mark.parametrize(

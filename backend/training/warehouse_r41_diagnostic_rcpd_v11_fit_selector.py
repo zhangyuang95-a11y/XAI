@@ -53,6 +53,16 @@ from env.warehouse_native.r41_diagnostic_conflict import conflict_family_id
 VERSION = "warehouse-r41-diagnostic-rcpd-v11-fit-selector.v1"
 STATUS = "locked_development_candidate_pending_fresh_outer"
 LOCK_SCHEMA = "warehouse_r41_diagnostic_rcpd_v11_candidate_lock_v1"
+FOLD_ASSIGNMENT_VERSION = (
+    "warehouse-r41-diagnostic-rcpd-v11-family-fold-support-repair.v1")
+LEGACY_FOLD_ASSIGNMENT_VERSION = (
+    "warehouse-r41-diagnostic-rcpd-v11-family-only-folds-retired.v1")
+OFFICIAL_FOLD_ASSIGNMENT_SHA256S = {
+    "warehouse-r41-v9-blocked-cv-a-20260913": (
+        "e06d3167af3783323cb943276ce4c83c0c5b6f3717115bbc8356a94d3dd2d218"),
+    "warehouse-r41-v9-blocked-cv-b-20260913": (
+        "99fb243bc9a834e4bd1963a3de17a1a7811252329e38429621ab0661ca30195e"),
+}
 GRID_VERSION = "warehouse-r41-diagnostic-rcpd-v9-candidate-grid.v1"
 FROZEN_CANDIDATE_GRID_SHA256 = (
     "900578faaf4aadc4d4b0d25494d2468f654d644a3aa3d23f9b1b155dc149680e"
@@ -103,6 +113,25 @@ _LOCK_BINDINGS = frozenset((
 ))
 
 
+class NoEligibleCandidateError(RuntimeError):
+    """The complete frozen grid was evaluated without an eligible candidate."""
+
+    def __init__(self, candidate_reports: Sequence[Mapping[str, Any]]) -> None:
+        failures = [{
+            "config_sha256": row.get("config_sha256"),
+            "evaluation": row.get("evaluation"),
+            "both_salts_pass_all_aggregate_gates": row.get(
+                "both_salts_pass_all_aggregate_gates"),
+        } for row in candidate_reports]
+        self.failure_summary_sha256 = digest(failures)
+        self.candidate_count = len(candidate_reports)
+        super().__init__(
+            "No v11 candidate passed both salted aggregate gate suites; "
+            "candidate_count=" + str(self.candidate_count)
+            + "; deterministic_failure_summary_sha256="
+            + self.failure_summary_sha256)
+
+
 def contract() -> dict[str, Any]:
     return {
         "version": VERSION,
@@ -133,7 +162,18 @@ def contract() -> dict[str, Any]:
         "cross_validation": {
             "salts": list(CV_SALTS),
             "folds": FOLD_COUNT,
-            "unit": "whole scene blocked within public family",
+            "unit": "whole scene family-blocked with minimal same-family support swaps",
+            "assignment_version": FOLD_ASSIGNMENT_VERSION,
+            "assignment_inputs": [
+                "public scene fingerprint", "public scene family",
+                "public replacement-route row count",
+                "public replacement-route episode count",
+            ],
+            "assignment_uses_action_labels_or_probabilities": False,
+            "replacement_support_registry_binding": (
+                "development.replacement_support_registry_sha256"),
+            "retired_family_only_failure_binding": (
+                "development.legacy_family_only_split_failure"),
             "hard_gate_scope": "aggregate out-of-fold rows for each salt",
         },
         "selection": (
@@ -563,8 +603,22 @@ def scene_families_from_public_geometry(
 
 def assign_blocked_scene_folds(
     scene_families: Mapping[str, str], *, salt: str,
+    replacement_support: Mapping[str, Mapping[str, int]] | None = None,
+    minimum_support: Mapping[str, int] | None = None,
     fold_count: int = FOLD_COUNT,
 ) -> dict[str, int]:
+    assignment, _audit = assign_blocked_scene_folds_with_audit(
+        scene_families, salt=salt, replacement_support=replacement_support,
+        minimum_support=minimum_support, fold_count=fold_count)
+    return assignment
+
+
+def assign_blocked_scene_folds_with_audit(
+    scene_families: Mapping[str, str], *, salt: str,
+    replacement_support: Mapping[str, Mapping[str, int]] | None = None,
+    minimum_support: Mapping[str, int] | None = None,
+    fold_count: int = FOLD_COUNT,
+) -> tuple[dict[str, int], dict[str, Any]]:
     if type(salt) is not str or not salt or type(fold_count) is not int or fold_count < 2:
         raise ValueError("Blocked-fold parameters differ")
     by_family: dict[str, list[str]] = defaultdict(list)
@@ -582,6 +636,145 @@ def assign_blocked_scene_folds(
         }), fingerprint))
         for index, fingerprint in enumerate(ranked):
             result[fingerprint] = index % fold_count
+    legacy_assignment_sha256 = digest(dict(sorted(result.items())))
+    if replacement_support is None:
+        audit = {
+            "version": LEGACY_FOLD_ASSIGNMENT_VERSION,
+            "legacy_assignment_sha256": legacy_assignment_sha256,
+            "repaired_assignment_sha256": legacy_assignment_sha256,
+            "repairs": [], "repairs_sha256": digest([]),
+            "x_only_public_inputs": True,
+            "action_labels_or_probabilities_used": False,
+        }
+        audit["content_sha256"] = digest(audit)
+        return result, audit
+    if (set(replacement_support) != set(scene_families)
+            or any(not isinstance(value, Mapping)
+                   or set(value) != {"rows", "episodes"}
+                   or type(value.get("rows")) is not int
+                   or type(value.get("episodes")) is not int
+                   or value["rows"] < 0 or value["episodes"] < 0
+                   or (value["rows"] == 0) != (value["episodes"] == 0)
+                   for value in replacement_support.values())):
+        raise ValueError("Public replacement-support scene registry differs")
+    minimum = dict(minimum_support or {
+        "rows": 2, "scenes": 2, "episodes": 2})
+    if (set(minimum) != {"rows", "scenes", "episodes"}
+            or any(type(value) is not int or value <= 0
+                   for value in minimum.values())):
+        raise ValueError("Replacement fold minimum support differs")
+
+    def fold_support(assignment: Mapping[str, int]) -> dict[int, dict[str, int]]:
+        return {fold: {
+            "rows": sum(replacement_support[fingerprint]["rows"]
+                        for fingerprint, assigned in assignment.items()
+                        if assigned == fold),
+            "scenes": sum(replacement_support[fingerprint]["rows"] > 0
+                          for fingerprint, assigned in assignment.items()
+                          if assigned == fold),
+            "episodes": sum(replacement_support[fingerprint]["episodes"]
+                            for fingerprint, assigned in assignment.items()
+                            if assigned == fold),
+        } for fold in range(fold_count)}
+
+    before = fold_support(result)
+    repairs: list[dict[str, Any]] = []
+    while True:
+        support = fold_support(result)
+        deficient = [fold for fold in range(fold_count)
+                     if any(support[fold][name] < minimum[name]
+                            for name in minimum)]
+        if not deficient:
+            break
+        target = deficient[0]
+        candidates: list[tuple[int, int, str, str, str, int]] = []
+        for route_scene, donor in result.items():
+            route_support = replacement_support[route_scene]
+            if donor == target or route_support["rows"] <= 0:
+                continue
+            if any(support[donor][name] - {
+                    "rows": route_support["rows"], "scenes": 1,
+                    "episodes": route_support["episodes"],
+                    }[name] < minimum[name] for name in minimum):
+                continue
+            family = scene_families[route_scene]
+            for zero_scene, assigned in result.items():
+                if (assigned == target and scene_families[zero_scene] == family
+                        and replacement_support[zero_scene]["rows"] == 0):
+                    rank = digest({
+                        "version": FOLD_ASSIGNMENT_VERSION, "salt": salt,
+                        "target_fold": target, "donor_fold": donor,
+                        "family": family, "route_scene": route_scene,
+                        "zero_route_scene": zero_scene,
+                    })
+                    # Every admissible same-family swap changes exactly two
+                    # scenes.  Minimise moved public route rows, then moved
+                    # public route episodes, before the salted public tie-break.
+                    candidates.append((
+                        route_support["rows"], route_support["episodes"],
+                        rank, route_scene, zero_scene, donor))
+        if not candidates:
+            raise fit_api.ReplacementSupportError(
+                "V11 public same-family swap cannot satisfy frozen support")
+        _rows, _episodes, _rank, route_scene, zero_scene, donor = min(candidates)
+        family = scene_families[route_scene]
+        result[route_scene] = target
+        result[zero_scene] = donor
+        repairs.append({
+            "family": family,
+            "route_scene": route_scene,
+            "route_from_fold": donor,
+            "route_to_fold": target,
+            "zero_route_scene": zero_scene,
+            "zero_route_from_fold": target,
+            "zero_route_to_fold": donor,
+        })
+        if len(repairs) > len(scene_families):
+            raise RuntimeError("Replacement fold repair did not converge")
+    after = fold_support(result)
+    if (set(result) != set(scene_families)
+            or any(any(not any(
+                assigned == fold and scene_families[fingerprint] == family
+                for fingerprint, assigned in result.items())
+                for fold in range(fold_count)) for family in by_family)
+            or any(any(after[fold][name] < minimum[name] for name in minimum)
+                   for fold in range(fold_count))):
+        raise ValueError("Support-repaired whole-scene fold coverage differs")
+    audit = {
+        "version": FOLD_ASSIGNMENT_VERSION,
+        "legacy_assignment_sha256": legacy_assignment_sha256,
+        "repaired_assignment_sha256": digest(dict(sorted(result.items()))),
+        "minimum_support": minimum,
+        "support_before": {str(key): value for key, value in before.items()},
+        "support_after": {str(key): value for key, value in after.items()},
+        "repairs": repairs,
+        "repairs_sha256": digest(repairs),
+        "x_only_public_inputs": True,
+        "action_labels_or_probabilities_used": False,
+    }
+    audit["content_sha256"] = digest(audit)
+    return result, audit
+
+
+def public_replacement_scene_support(
+    arrays: Mapping[str, np.ndarray],
+    relations: R41DiagnosticPublicRelationsV9,
+) -> dict[str, dict[str, int]]:
+    """Project only public route support needed for fold assignment."""
+    scenes = np.char.decode(
+        np.asarray(arrays["scene_fingerprints"]), "ascii").astype(str)
+    episodes = np.char.decode(
+        np.asarray(arrays["episode_ids"]), "ascii").astype(str)
+    route = fit_api._replacement_route_mask(arrays["observations"], relations)
+    if route.shape != scenes.shape or episodes.shape != scenes.shape:
+        raise ValueError("Public replacement-support rows differ")
+    result: dict[str, dict[str, int]] = {}
+    for fingerprint in sorted(set(map(str, scenes))):
+        selected = route & (scenes == fingerprint)
+        result[fingerprint] = {
+            "rows": int(np.sum(selected)),
+            "episodes": len(set(map(str, episodes[selected]))),
+        }
     return result
 
 
@@ -651,6 +844,108 @@ def _fit_arrays(arrays: Mapping[str, np.ndarray], fit_mask: np.ndarray) -> dict[
     return result
 
 
+def _replacement_support_audit(
+    arrays: Mapping[str, np.ndarray], *, fit_mask: np.ndarray,
+    relations: R41DiagnosticPublicRelationsV9, config: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Check the frozen replacement prerequisite without reading targets."""
+    route = fit_api._replacement_route_mask(arrays["observations"], relations)
+    scenes = np.char.decode(
+        np.asarray(arrays["scene_fingerprints"]), "ascii").astype(str)
+    episodes = np.char.decode(
+        np.asarray(arrays["episode_ids"]), "ascii").astype(str)
+    selected = np.asarray(fit_mask, dtype=np.bool_)
+    if (route.shape != selected.shape or scenes.shape != route.shape
+            or episodes.shape != route.shape):
+        raise ValueError("V11 replacement support registry differs")
+    replacement = config["shared_pickup_replacement"]
+    minimum = {
+        "rows": replacement["minimum_rows_per_partition"],
+        "scenes": replacement["minimum_scenes_per_partition"],
+        "episodes": replacement["minimum_episodes_per_partition"],
+    }
+    partitions = {
+        "fit": fit_api._partition_support(route & selected, scenes, episodes),
+        "validation": fit_api._partition_support(
+            route & ~selected, scenes, episodes),
+    }
+    passed = (replacement["enabled"] is False or all(
+        all(support[name] >= minimum[name] for name in minimum)
+        for support in partitions.values()))
+    return {
+        "minimum_per_partition": minimum,
+        "partitions": partitions,
+        "passed": bool(passed),
+        "support_uses_action_labels_or_probabilities": False,
+    }
+
+
+def legacy_family_only_support_failure(
+    arrays: Mapping[str, np.ndarray], *, scene_families: Mapping[str, str],
+    relations: R41DiagnosticPublicRelationsV9, config: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Record why the old public-family-only partition was retired."""
+    scenes = np.char.decode(
+        np.asarray(arrays["scene_fingerprints"]), "ascii").astype(str)
+    for salt in CV_SALTS:
+        assignment = assign_blocked_scene_folds(scene_families, salt=salt)
+        row_folds = np.asarray(
+            [assignment[str(scene)] for scene in scenes], dtype=np.int8)
+        for fold in range(FOLD_COUNT):
+            audit = _replacement_support_audit(
+                arrays, fit_mask=row_folds != fold, relations=relations,
+                config=config)
+            if audit["passed"] is False:
+                result = {
+                    "assignment_version": LEGACY_FOLD_ASSIGNMENT_VERSION,
+                    "salt": salt,
+                    "fold": fold,
+                    "fold_assignment_sha256": digest(
+                        dict(sorted(assignment.items()))),
+                    "support": audit,
+                    "reason": "frozen_replacement_support_prerequisite_not_met",
+                    "action_labels_or_probabilities_used": False,
+                }
+                result["content_sha256"] = digest(result)
+                return result
+    raise RuntimeError(
+        "Retired family-only assignment no longer reproduces its public failure")
+
+
+def _ineligible_support_report(
+    normalized: Mapping[str, Any], *, salt: str, fold: int,
+    assignment: Mapping[str, int], support_audit: Mapping[str, Any],
+) -> dict[str, Any]:
+    if support_audit.get("passed") is not False:
+        raise ValueError("Ineligible support report requires a failed public precheck")
+    failure = {
+        "type": "ReplacementSupportError",
+        "code": "frozen_replacement_support_prerequisite_not_met",
+        "salt": salt,
+        "fold": fold,
+        "fold_assignment_sha256": digest(dict(sorted(assignment.items()))),
+        "support": _json_safe(support_audit),
+        "action_labels_or_probabilities_used": False,
+    }
+    failure["content_sha256"] = digest(failure)
+    return {
+        "config": deepcopy(normalized),
+        "config_sha256": digest(normalized),
+        "evaluation": {
+            "status": "ineligible_replacement_support",
+            "failure": failure,
+        },
+        "salts": [],
+        "both_salts_pass_all_aggregate_gates": False,
+        "robust_minimum_family_exact_bit_direction_fidelity": 0.0,
+        "observed_capacity": {
+            "maximum_total_nodes": 0,
+            "maximum_tree_depth": 0,
+            "fold_program_count": 0,
+        },
+    }
+
+
 def evaluate_candidate(
     arrays: Mapping[str, np.ndarray], *, scene_families: Mapping[str, str],
     relations: R41DiagnosticPublicRelationsV9, config: Mapping[str, Any],
@@ -664,11 +959,23 @@ def evaluate_candidate(
     scenes = np.char.decode(
         np.asarray(arrays["scene_fingerprints"]), "ascii").astype(str)
     observations = np.asarray(arrays["observations"])
+    replacement_support = public_replacement_scene_support(arrays, relations)
     all_mask = np.ones(len(observations), dtype=np.bool_)
     salt_reports = []
     observed_complexities = []
+    minimum_support = {
+        "rows": normalized["shared_pickup_replacement"][
+            "minimum_rows_per_partition"],
+        "scenes": normalized["shared_pickup_replacement"][
+            "minimum_scenes_per_partition"],
+        "episodes": normalized["shared_pickup_replacement"][
+            "minimum_episodes_per_partition"],
+    }
     for salt in salts:
-        assignment = assign_blocked_scene_folds(scene_families, salt=salt)
+        assignment, _assignment_audit = assign_blocked_scene_folds_with_audit(
+            scene_families, salt=salt,
+            replacement_support=replacement_support,
+            minimum_support=minimum_support)
         row_folds = np.asarray([assignment[str(scene)] for scene in scenes], dtype=np.int8)
         oof = np.zeros((len(observations), len(fit_api.ACTIONS)), dtype=np.float64)
         fold_reports = []
@@ -677,6 +984,13 @@ def evaluate_candidate(
             fit_mask = ~validation
             if not np.any(validation) or not np.any(fit_mask):
                 raise ValueError("Blocked fold has an empty fit or validation partition")
+            support_audit = _replacement_support_audit(
+                arrays, fit_mask=fit_mask, relations=relations,
+                config=normalized)
+            if support_audit["passed"] is not True:
+                return _ineligible_support_report(
+                    normalized, salt=salt, fold=fold,
+                    assignment=assignment, support_audit=support_audit)
             fold_arrays = _fit_arrays(arrays, fit_mask)
             binding = digest({
                 "selector": VERSION, "config_sha256": digest(normalized),
@@ -686,10 +1000,18 @@ def evaluate_candidate(
                 "validation_scene_fingerprints_sha256": digest(sorted(set(
                     map(str, scenes[validation])))),
             })
-            program, diagnostics = fit_program(
-                fold_arrays, fit_mask, relations=relations,
-                scene_families=scene_families, config=normalized,
-                binding_sha256=binding)
+            try:
+                program, diagnostics = fit_program(
+                    fold_arrays, fit_mask, relations=relations,
+                    scene_families=scene_families, config=normalized,
+                    binding_sha256=binding)
+            except fit_api.ReplacementSupportError as error:
+                # The same public prerequisite was just authenticated.  A
+                # conflicting fit result is implementation drift, not an
+                # ineligible data partition that may be silently recorded.
+                raise RuntimeError(
+                    "Replacement support precheck and fit implementation disagree"
+                ) from error
             predicted = np.asarray(predict_program(
                 program, observations[validation]), dtype=np.float64)
             if (predicted.shape != (int(np.sum(validation)), len(fit_api.ACTIONS))
@@ -752,6 +1074,7 @@ def evaluate_candidate(
     return {
         "config": deepcopy(normalized),
         "config_sha256": digest(normalized),
+        "evaluation": {"status": "completed", "failure": None},
         "salts": salt_reports,
         "both_salts_pass_all_aggregate_gates": both_pass,
         "robust_minimum_family_exact_bit_direction_fidelity": float(robust_minimum),
@@ -765,9 +1088,10 @@ def evaluate_candidate(
 
 def select_candidate(candidate_reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     eligible = [deepcopy(dict(row)) for row in candidate_reports
-                if row.get("both_salts_pass_all_aggregate_gates") is True]
+                if row.get("evaluation", {}).get("status") == "completed"
+                and row.get("both_salts_pass_all_aggregate_gates") is True]
     if not eligible:
-        raise RuntimeError("No v9 candidate passed both salted aggregate gate suites")
+        raise NoEligibleCandidateError(candidate_reports)
     eligible.sort(key=lambda row: (
         -float(row["robust_minimum_family_exact_bit_direction_fidelity"]),
         int(row["observed_capacity"]["maximum_total_nodes"]),
@@ -1066,6 +1390,29 @@ def build(
         if relations.base_feature_names != actor_feature_names:
             raise ValueError("V11 relation base features differ from the frozen Actor")
         actor_feature_names_sha256 = digest(list(actor_feature_names))
+        replacement_support_registry = public_replacement_scene_support(
+            arrays, relations)
+        replacement_support_registry_sha256 = digest(
+            replacement_support_registry)
+        frozen_replacement = grid["configs"][0]["shared_pickup_replacement"]
+        minimum_support = {
+            "rows": frozen_replacement["minimum_rows_per_partition"],
+            "scenes": frozen_replacement["minimum_scenes_per_partition"],
+            "episodes": frozen_replacement["minimum_episodes_per_partition"],
+        }
+        fold_assignment_repairs = {}
+        for salt in CV_SALTS:
+            _assignment, assignment_audit = assign_blocked_scene_folds_with_audit(
+                scene_families, salt=salt,
+                replacement_support=replacement_support_registry,
+                minimum_support=minimum_support)
+            if (assignment_audit["repaired_assignment_sha256"]
+                    != OFFICIAL_FOLD_ASSIGNMENT_SHA256S[salt]):
+                raise RuntimeError("Official v11 fold-assignment regression differs")
+            fold_assignment_repairs[salt] = assignment_audit
+        legacy_support_failure = legacy_family_only_support_failure(
+            arrays, scene_families=scene_families, relations=relations,
+            config=grid["configs"][0])
         candidate_reports, selection = evaluate_grid(
             arrays, scene_families=scene_families, relations=relations,
             configs=grid["configs"])
@@ -1148,6 +1495,11 @@ def build(
                 "validation_wins": overlap_audit,
                 "validation_hash_inputs": validation_hash_inputs,
                 "scene_families": family_audit,
+                "fold_assignment_version": FOLD_ASSIGNMENT_VERSION,
+                "replacement_support_registry_sha256": (
+                    replacement_support_registry_sha256),
+                "fold_assignment_repairs": fold_assignment_repairs,
+                "legacy_family_only_split_failure": legacy_support_failure,
                 "retained_scene_count": len(set(map(str, scene_values))),
                 "retained_row_count": len(arrays["observations"]),
             },
@@ -1292,12 +1644,15 @@ if __name__ == "__main__":
 
 __all__ = [
     "VERSION", "STATUS", "LOCK_SCHEMA", "GRID_VERSION",
+    "FOLD_ASSIGNMENT_VERSION", "LEGACY_FOLD_ASSIGNMENT_VERSION",
+    "OFFICIAL_FOLD_ASSIGNMENT_SHA256S",
     "FROZEN_CANDIDATE_GRID_SHA256", "CV_SALTS",
     "FOLD_COUNT", "contract", "producer_sources", "read_candidate_grid",
     "read_prior_outer_hash_projection", "validation_hash_union",
     "read_public_development_projection", "freeze_validation_wins",
     "prepare_development_rows", "scene_families_from_public_geometry",
-    "assign_blocked_scene_folds", "family_exact_bit_direction_cells",
+    "assign_blocked_scene_folds", "public_replacement_scene_support",
+    "legacy_family_only_support_failure", "family_exact_bit_direction_cells",
     "evaluate_candidate", "select_candidate", "evaluate_grid",
-    "make_candidate_lock", "build", "main",
+    "NoEligibleCandidateError", "make_candidate_lock", "build", "main",
 ]

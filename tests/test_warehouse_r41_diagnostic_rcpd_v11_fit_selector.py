@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
@@ -246,3 +247,210 @@ def test_v11_validation_union_removes_burned_v10_1505_unique_1902_rows():
     assert audit["removed_rows"] == 1902
     assert audit["retained_rows"] == len(retained)
     assert not kept_hashes.intersection(consumed_unique)
+
+
+def _config() -> dict:
+    return {
+        "version": subject.fit_api.CONFIG_VERSION,
+        "pair_pool_multiplier": 32.0,
+        "wait_endpoint_share": 0.5,
+        "model": {
+            "learning_rate": 0.1, "max_iter": 120,
+            "max_leaf_nodes": 127, "min_samples_leaf": 10,
+            "l2_regularization": 0.1, "max_depth": 16,
+            "max_bins": 255, "random_state": 1941,
+        },
+        "shared_pickup_replacement": {
+            "version": subject.fit_api.REPLACEMENT_VERSION,
+            "enabled": True, "group": "shared_pickup",
+            "combination": "replacement",
+            "route": {
+                "feature_name": subject.fit_api.REPLACEMENT_ROUTE_FEATURE,
+                "operator": ">", "threshold": 0.5,
+            },
+            "fit_source": "fit_only_public_route_rows",
+            "estimator": "fit_only_weighted_majority",
+            "minimum_rows_per_partition": 2,
+            "minimum_scenes_per_partition": 2,
+            "minimum_episodes_per_partition": 2,
+        },
+    }
+
+
+def test_v11_support_stratified_assignment_is_deterministic_and_supported():
+    fingerprints = [_fingerprint(f"balanced-scene-{index}") for index in range(24)]
+    families = {
+        fingerprint: f"family-{index % 4}"
+        for index, fingerprint in enumerate(fingerprints)
+    }
+    support = {
+        fingerprint: {
+            "rows": (100 if index == 0 else 1) if index < 15 else 0,
+            "episodes": 1 if index < 15 else 0,
+        }
+        for index, fingerprint in enumerate(fingerprints)
+    }
+    for salt in subject.CV_SALTS:
+        first = subject.assign_blocked_scene_folds(
+            families, salt=salt, replacement_support=support)
+        second = subject.assign_blocked_scene_folds(
+            families, salt=salt, replacement_support=support)
+        assert first == second
+        assert set(first) == set(families)
+        for fold in range(subject.FOLD_COUNT):
+            route = [fingerprint for fingerprint, assigned in first.items()
+                     if assigned == fold and support[fingerprint]["rows"] > 0]
+            assert len(route) >= 2
+            assert sum(support[value]["rows"] for value in route) >= 2
+            assert sum(support[value]["episodes"] for value in route) >= 2
+            for family in set(families.values()):
+                assert any(assigned == fold and families[fingerprint] == family
+                           for fingerprint, assigned in first.items())
+
+
+def test_v11_failed_public_support_is_ineligible_without_calling_fit(monkeypatch):
+    arrays = _arrays(6)
+    families = {
+        value.decode(): "family-a"
+        for value in arrays["scene_fingerprints"]
+    }
+    support = {
+        fingerprint: {"rows": 1, "episodes": 1}
+        for fingerprint in families
+    }
+    audit = {
+        "minimum_per_partition": {"rows": 2, "scenes": 2, "episodes": 2},
+        "partitions": {
+            "fit": {
+                "rows": 4, "scenes": 4, "episodes": 4,
+                "scene_registry_sha256": _fingerprint("fit-scenes"),
+                "episode_registry_sha256": _fingerprint("fit-episodes"),
+            },
+            "validation": {
+                "rows": 2, "scenes": 2, "episodes": 2,
+                "scene_registry_sha256": _fingerprint("validation-scenes"),
+                "episode_registry_sha256": _fingerprint("validation-episodes"),
+            },
+        },
+        "passed": False,
+        "support_uses_action_labels_or_probabilities": False,
+    }
+    monkeypatch.setattr(
+        subject, "public_replacement_scene_support", lambda *args: support)
+    monkeypatch.setattr(
+        subject, "_replacement_support_audit", lambda *args, **kwargs: audit)
+
+    def fail(*args, **kwargs):
+        pytest.fail("fit must not run after the public support precheck fails")
+
+    report = subject.evaluate_candidate(
+        arrays, scene_families=families, relations=object(), config=_config(),
+        fit_program=fail)
+    assert report["evaluation"]["status"] == \
+        "ineligible_replacement_support"
+    assert report["evaluation"]["failure"]["fold"] == 0
+    assert report["evaluation"]["failure"][
+        "action_labels_or_probabilities_used"] is False
+    assert report["salts"] == []
+    assert report["both_salts_pass_all_aggregate_gates"] is False
+
+
+def test_v11_fit_support_disagreement_fails_closed(monkeypatch):
+    arrays = _arrays(6)
+    families = {
+        value.decode(): "family-a"
+        for value in arrays["scene_fingerprints"]
+    }
+    support = {
+        fingerprint: {"rows": 1, "episodes": 1}
+        for fingerprint in families
+    }
+    partition = {
+        "rows": 3, "scenes": 3, "episodes": 3,
+        "scene_registry_sha256": _fingerprint("scenes"),
+        "episode_registry_sha256": _fingerprint("episodes"),
+    }
+    audit = {
+        "minimum_per_partition": {"rows": 2, "scenes": 2, "episodes": 2},
+        "partitions": {"fit": partition, "validation": partition},
+        "passed": True,
+        "support_uses_action_labels_or_probabilities": False,
+    }
+    monkeypatch.setattr(
+        subject, "public_replacement_scene_support", lambda *args: support)
+    monkeypatch.setattr(
+        subject, "_replacement_support_audit", lambda *args, **kwargs: audit)
+
+    def fail(*args, **kwargs):
+        raise subject.fit_api.ReplacementSupportError("unsupported")
+
+    with pytest.raises(RuntimeError, match="precheck and fit implementation disagree"):
+        subject.evaluate_candidate(
+            arrays, scene_families=families, relations=object(),
+            config=_config(), fit_program=fail)
+
+
+def test_v11_grid_continues_after_an_ineligible_candidate(monkeypatch):
+    calls: list[str] = []
+
+    def evaluate(*args, config, **kwargs):
+        calls.append(config["id"])
+        if config["id"] == "unsupported":
+            return {
+                "config": config, "config_sha256": digest(config),
+                "evaluation": {
+                    "status": "ineligible_replacement_support",
+                    "failure": {"content_sha256": _fingerprint("failure")},
+                },
+                "salts": [],
+                "both_salts_pass_all_aggregate_gates": False,
+                "robust_minimum_family_exact_bit_direction_fidelity": 0.0,
+                "observed_capacity": {
+                    "maximum_total_nodes": 0, "maximum_tree_depth": 0,
+                    "fold_program_count": 0,
+                },
+            }
+        return {
+            "config": config, "config_sha256": digest(config),
+            "evaluation": {"status": "completed", "failure": None},
+            "salts": [], "both_salts_pass_all_aggregate_gates": True,
+            "robust_minimum_family_exact_bit_direction_fidelity": 0.91,
+            "observed_capacity": {
+                "maximum_total_nodes": 17, "maximum_tree_depth": 3,
+                "fold_program_count": 6,
+            },
+        }
+
+    monkeypatch.setattr(subject, "evaluate_candidate", evaluate)
+    reports, selection = subject.evaluate_grid(
+        {}, scene_families={}, relations=object(),
+        configs=[{"id": "unsupported"}, {"id": "usable"}])
+    assert calls == ["unsupported", "usable"]
+    assert len(reports) == 2
+    assert selection["selected_config"]["id"] == "usable"
+
+
+def test_v11_all_ineligible_has_deterministic_complete_summary_digest():
+    report = {
+        "config_sha256": _fingerprint("config"),
+        "evaluation": {
+            "status": "ineligible_replacement_support",
+            "failure": {"content_sha256": _fingerprint("failure")},
+        },
+        "both_salts_pass_all_aggregate_gates": False,
+    }
+    with pytest.raises(subject.NoEligibleCandidateError) as first:
+        subject.select_candidate([report])
+    with pytest.raises(subject.NoEligibleCandidateError) as second:
+        subject.select_candidate([report])
+    assert first.value.candidate_count == 1
+    assert first.value.failure_summary_sha256 == \
+        second.value.failure_summary_sha256
+    assert first.value.failure_summary_sha256 in str(first.value)
+
+    changed = deepcopy(report)
+    changed["both_salts_pass_all_aggregate_gates"] = True
+    with pytest.raises(subject.NoEligibleCandidateError) as third:
+        subject.select_candidate([changed])
+    assert third.value.failure_summary_sha256 != \
+        first.value.failure_summary_sha256

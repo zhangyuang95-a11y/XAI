@@ -44,6 +44,10 @@ CV_SALTS = (
     "warehouse-r41-v9-blocked-cv-b-20260913",
 )
 CV_FOLDS = 3
+FOLD_ASSIGNMENT_VERSION = (
+    "warehouse-r41-diagnostic-rcpd-v11-family-fold-support-repair.v1")
+LEGACY_FOLD_ASSIGNMENT_VERSION = (
+    "warehouse-r41-diagnostic-rcpd-v11-family-only-folds-retired.v1")
 REPORT_NAME = "collection_report.json"
 ROWS_NAME = "rows.npz"
 PROJECTION_COPY_NAME = projection_api.PROJECTION_NAME
@@ -96,9 +100,37 @@ _SELECTOR_BINDINGS = frozenset((
     "source_closure_sha256",
 ))
 _CANDIDATE_REPORT_FIELDS = frozenset((
-    "config", "config_sha256", "salts",
+    "config", "config_sha256", "evaluation", "salts",
     "both_salts_pass_all_aggregate_gates",
     "robust_minimum_family_exact_bit_direction_fidelity", "observed_capacity",
+))
+_CANDIDATE_EVALUATION_FIELDS = frozenset(("status", "failure"))
+_SUPPORT_FAILURE_FIELDS = frozenset((
+    "type", "code", "salt", "fold", "fold_assignment_sha256", "support",
+    "action_labels_or_probabilities_used", "content_sha256",
+))
+_SUPPORT_AUDIT_FIELDS = frozenset((
+    "minimum_per_partition", "partitions", "passed",
+    "support_uses_action_labels_or_probabilities",
+))
+_SUPPORT_PARTITION_FIELDS = frozenset((
+    "rows", "scenes", "episodes", "scene_registry_sha256",
+    "episode_registry_sha256",
+))
+_ASSIGNMENT_AUDIT_FIELDS = frozenset((
+    "version", "legacy_assignment_sha256", "repaired_assignment_sha256",
+    "minimum_support", "support_before", "support_after", "repairs",
+    "repairs_sha256", "x_only_public_inputs",
+    "action_labels_or_probabilities_used", "content_sha256",
+))
+_ASSIGNMENT_REPAIR_FIELDS = frozenset((
+    "family", "route_scene", "route_from_fold", "route_to_fold",
+    "zero_route_scene", "zero_route_from_fold", "zero_route_to_fold",
+))
+_LEGACY_SUPPORT_FAILURE_FIELDS = frozenset((
+    "assignment_version", "salt", "fold", "fold_assignment_sha256",
+    "support", "reason", "action_labels_or_probabilities_used",
+    "content_sha256",
 ))
 _SALT_REPORT_FIELDS = frozenset((
     "salt", "fold_assignment_sha256", "folds", "aggregate_metrics",
@@ -122,7 +154,10 @@ _SELECTION_FIELDS = frozenset((
 _DEVELOPMENT_FIELDS = frozenset((
     "failed_v8_outer_permanently_closed",
     "failed_v8_outer_reclassified_as_development", "validation_wins",
-    "validation_hash_inputs", "scene_families", "retained_scene_count",
+    "validation_hash_inputs", "scene_families", "fold_assignment_version",
+    "replacement_support_registry_sha256",
+    "fold_assignment_repairs",
+    "legacy_family_only_split_failure", "retained_scene_count",
     "retained_row_count",
 ))
 _VALIDATION_WINS_FIELDS = frozenset((
@@ -505,6 +540,128 @@ def _validate_validation_hash_inputs(value: Mapping[str, Any]) -> None:
         raise ValueError("Locked v11 selector validation hash inputs differ")
 
 
+def _validate_public_support_audit(value: Any, *, require_passed: bool) -> None:
+    minimum = value.get("minimum_per_partition") \
+        if isinstance(value, Mapping) else None
+    partitions = value.get("partitions") if isinstance(value, Mapping) else None
+    if (not isinstance(value, Mapping)
+            or set(value) != _SUPPORT_AUDIT_FIELDS
+            or value.get("passed") is not require_passed
+            or value.get("support_uses_action_labels_or_probabilities") is not False
+            or not isinstance(minimum, Mapping)
+            or set(minimum) != {"rows", "scenes", "episodes"}
+            or any(type(child) is not int or child <= 0
+                   for child in minimum.values())
+            or not isinstance(partitions, Mapping)
+            or set(partitions) != {"fit", "validation"}):
+        raise ValueError("Locked v11 public replacement support audit differs")
+    for partition in partitions.values():
+        if (not isinstance(partition, Mapping)
+                or set(partition) != _SUPPORT_PARTITION_FIELDS
+                or any(type(partition.get(name)) is not int
+                       or partition[name] < 0
+                       for name in ("rows", "scenes", "episodes"))
+                or any(type(partition.get(name)) is not str
+                       or _HEX.fullmatch(partition[name]) is None
+                       for name in ("scene_registry_sha256",
+                                    "episode_registry_sha256"))):
+            raise ValueError("Locked v11 public support partition differs")
+    computed = all(partition[name] >= minimum[name]
+                   for partition in partitions.values() for name in minimum)
+    if computed is not require_passed:
+        raise ValueError("Locked v11 public support result differs")
+
+
+def _validate_fold_assignment_revision(development: Mapping[str, Any]) -> None:
+    registry_sha = development.get("replacement_support_registry_sha256")
+    repairs_by_salt = development.get("fold_assignment_repairs")
+    legacy = development.get("legacy_family_only_split_failure")
+    if (development.get("fold_assignment_version") != FOLD_ASSIGNMENT_VERSION
+            or type(registry_sha) is not str or _HEX.fullmatch(registry_sha) is None
+            or not isinstance(repairs_by_salt, Mapping)
+            or list(repairs_by_salt) != list(CV_SALTS)
+            or not isinstance(legacy, Mapping)
+            or set(legacy) != _LEGACY_SUPPORT_FAILURE_FIELDS
+            or legacy.get("assignment_version") != LEGACY_FOLD_ASSIGNMENT_VERSION
+            or legacy.get("salt") != CV_SALTS[0]
+            or legacy.get("fold") != 0
+            or type(legacy.get("fold_assignment_sha256")) is not str
+            or _HEX.fullmatch(legacy["fold_assignment_sha256"]) is None
+            or legacy.get("reason")
+                != "frozen_replacement_support_prerequisite_not_met"
+            or legacy.get("action_labels_or_probabilities_used") is not False
+            or not _content_valid(legacy)):
+        raise ValueError("Locked v11 fold-assignment revision differs")
+    _validate_public_support_audit(legacy.get("support"), require_passed=False)
+    legacy_validation = legacy["support"]["partitions"]["validation"]
+    if any(legacy_validation.get(name) != 1
+           for name in ("rows", "scenes", "episodes")):
+        raise ValueError("Locked v11 retired family-only failure differs")
+
+    for salt, audit in repairs_by_salt.items():
+        if (not isinstance(audit, Mapping)
+                or set(audit) != _ASSIGNMENT_AUDIT_FIELDS
+                or audit.get("version") != FOLD_ASSIGNMENT_VERSION
+                or any(type(audit.get(name)) is not str
+                       or _HEX.fullmatch(audit[name]) is None
+                       for name in ("legacy_assignment_sha256",
+                                    "repaired_assignment_sha256",
+                                    "repairs_sha256"))
+                or audit.get("x_only_public_inputs") is not True
+                or audit.get("action_labels_or_probabilities_used") is not False
+                or not _content_valid(audit)
+                or not isinstance(audit.get("minimum_support"), Mapping)
+                or set(audit["minimum_support"])
+                    != {"rows", "scenes", "episodes"}
+                or any(type(value) is not int or value <= 0
+                       for value in audit["minimum_support"].values())
+                or not isinstance(audit.get("repairs"), list)
+                or audit.get("repairs_sha256") != digest(audit["repairs"])):
+            raise ValueError("Locked v11 fold-assignment repair audit differs")
+        for label in ("support_before", "support_after"):
+            support = audit.get(label)
+            if (not isinstance(support, Mapping)
+                    or set(support) != {str(index) for index in range(CV_FOLDS)}
+                    or any(not isinstance(row, Mapping)
+                           or set(row) != {"rows", "scenes", "episodes"}
+                           or any(type(value) is not int or value < 0
+                                  for value in row.values())
+                           for row in support.values())):
+                raise ValueError("Locked v11 fold support summary differs")
+        if any(audit["support_after"][str(fold)][name]
+               < audit["minimum_support"][name]
+               for fold in range(CV_FOLDS)
+               for name in audit["minimum_support"]):
+            raise ValueError("Locked v11 repaired fold remains unsupported")
+        expected_repairs = 1 if salt == CV_SALTS[0] else 0
+        if len(audit["repairs"]) != expected_repairs:
+            raise ValueError("Locked v11 minimal fold repair count differs")
+        for repair in audit["repairs"]:
+            if (not isinstance(repair, Mapping)
+                    or set(repair) != _ASSIGNMENT_REPAIR_FIELDS
+                    or type(repair.get("family")) is not str
+                    or not repair["family"]
+                    or any(type(repair.get(name)) is not str
+                           or _HEX.fullmatch(repair[name]) is None
+                           for name in ("route_scene", "zero_route_scene"))
+                    or any(type(repair.get(name)) is not int
+                           or not 0 <= repair[name] < CV_FOLDS
+                           for name in ("route_from_fold", "route_to_fold",
+                                        "zero_route_from_fold",
+                                        "zero_route_to_fold"))
+                    or repair["route_from_fold"] != repair["zero_route_to_fold"]
+                    or repair["route_to_fold"] != repair["zero_route_from_fold"]
+                    or repair["route_from_fold"] == repair["route_to_fold"]):
+                raise ValueError("Locked v11 same-family fold repair differs")
+        if ((not audit["repairs"]
+             and audit["legacy_assignment_sha256"]
+                 != audit["repaired_assignment_sha256"])
+                or (audit["repairs"]
+                    and audit["legacy_assignment_sha256"]
+                        == audit["repaired_assignment_sha256"])):
+            raise ValueError("Locked v11 fold repair assignment digest differs")
+
+
 def _validate_selector_report(
     lock: Mapping[str, Any], report: Mapping[str, Any], *,
     expected_report_sha256: str, expected_program_sha256: str,
@@ -531,6 +688,8 @@ def _validate_selector_report(
         raise ValueError("Locked v11 selector report identity or bindings differ")
 
     contract_value = report.get("contract")
+    cross_validation = contract_value.get("cross_validation") \
+        if isinstance(contract_value, Mapping) else None
     development = report.get("development")
     validation_wins = development.get("validation_wins") \
         if isinstance(development, Mapping) else None
@@ -548,6 +707,11 @@ def _validate_selector_report(
             or contract_value.get("protected_final_access") is not False
             or contract_value.get("runtime_action_override") is not False
             or contract_value.get("formal_ready") is not False
+            or not isinstance(cross_validation, Mapping)
+            or cross_validation.get("assignment_version")
+                != FOLD_ASSIGNMENT_VERSION
+            or cross_validation.get(
+                "assignment_uses_action_labels_or_probabilities") is not False
             or not isinstance(development, Mapping)
             or set(development) != _DEVELOPMENT_FIELDS
             or development.get("failed_v8_outer_permanently_closed") is not True
@@ -588,6 +752,7 @@ def _validate_selector_report(
             or boundary.get("formal_ready") is not False):
         raise ValueError("Locked v11 selector information boundary differs")
     _validate_validation_hash_inputs(validation_hash_inputs)
+    _validate_fold_assignment_revision(development)
     if (type(development.get("retained_row_count")) is not int
             or development["retained_row_count"] <= 0):
         raise ValueError("Locked v11 selector development row count differs")
@@ -617,15 +782,85 @@ def _validate_selector_report(
             raise ValueError("Locked v11 selector candidate report differs")
         config = candidate.get("config")
         config_sha = candidate.get("config_sha256")
+        evaluation = candidate.get("evaluation")
         salts = candidate.get("salts")
         capacity = candidate.get("observed_capacity")
         if (not isinstance(config, Mapping) or type(config_sha) is not str
                 or _HEX.fullmatch(config_sha) is None
                 or config_sha != digest(dict(config))
                 or expected_config_sha != config_sha
-                or not isinstance(salts, list) or len(salts) != len(CV_SALTS)
+                or not isinstance(evaluation, Mapping)
+                or set(evaluation) != _CANDIDATE_EVALUATION_FIELDS
+                or not isinstance(salts, list)
                 or not isinstance(capacity, Mapping)):
             raise ValueError("Locked v11 selector candidate report differs")
+        if evaluation.get("status") == "ineligible_replacement_support":
+            failure = evaluation.get("failure")
+            support = failure.get("support") \
+                if isinstance(failure, Mapping) else None
+            minimum = support.get("minimum_per_partition") \
+                if isinstance(support, Mapping) else None
+            partitions = support.get("partitions") \
+                if isinstance(support, Mapping) else None
+            if (not isinstance(failure, Mapping)
+                    or set(failure) != _SUPPORT_FAILURE_FIELDS
+                    or failure.get("type") != "ReplacementSupportError"
+                    or failure.get("code")
+                        != "frozen_replacement_support_prerequisite_not_met"
+                    or failure.get("salt") not in CV_SALTS
+                    or type(failure.get("fold")) is not int
+                    or not 0 <= failure["fold"] < CV_FOLDS
+                    or type(failure.get("fold_assignment_sha256")) is not str
+                    or _HEX.fullmatch(failure["fold_assignment_sha256"]) is None
+                    or failure.get("action_labels_or_probabilities_used") is not False
+                    or not _content_valid(failure)
+                    or not isinstance(support, Mapping)
+                    or set(support) != _SUPPORT_AUDIT_FIELDS
+                    or support.get("passed") is not False
+                    or support.get(
+                        "support_uses_action_labels_or_probabilities") is not False
+                    or not isinstance(minimum, Mapping)
+                    or set(minimum) != {"rows", "scenes", "episodes"}
+                    or any(type(value) is not int or value <= 0
+                           for value in minimum.values())
+                    or not isinstance(partitions, Mapping)
+                    or set(partitions) != {"fit", "validation"}):
+                raise ValueError("Locked v11 selector support failure differs")
+            for partition in partitions.values():
+                if (not isinstance(partition, Mapping)
+                        or set(partition) != _SUPPORT_PARTITION_FIELDS
+                        or any(type(partition.get(name)) is not int
+                               or partition[name] < 0
+                               for name in ("rows", "scenes", "episodes"))
+                        or any(type(partition.get(name)) is not str
+                               or _HEX.fullmatch(partition[name]) is None
+                               for name in ("scene_registry_sha256",
+                                            "episode_registry_sha256"))):
+                    raise ValueError("Locked v11 selector support partition differs")
+            all_supported = all(
+                partition[name] >= minimum[name]
+                for partition in partitions.values() for name in minimum)
+            if ((failure["code"]
+                    == "frozen_replacement_support_prerequisite_not_met")
+                    != (not all_supported)
+                    or support["passed"] is not all_supported
+                    or salts
+                    or candidate.get(
+                        "both_salts_pass_all_aggregate_gates") is not False
+                    or candidate.get(
+                        "robust_minimum_family_exact_bit_direction_fidelity") != 0.0
+                    or dict(capacity) != {
+                        "maximum_total_nodes": 0,
+                        "maximum_tree_depth": 0,
+                        "fold_program_count": 0,
+                    }):
+                raise ValueError("Locked v11 selector ineligible summary differs")
+            normalized_candidates.append(candidate)
+            continue
+        if (evaluation.get("status") != "completed"
+                or evaluation.get("failure") is not None
+                or len(salts) != len(CV_SALTS)):
+            raise ValueError("Locked v11 selector completed evaluation differs")
         salt_passes = []
         salt_minima = []
         complexities = []
@@ -723,7 +958,8 @@ def _validate_selector_report(
         raise ValueError("Locked v11 selector candidate-grid binding differs")
 
     eligible = [candidate for candidate in normalized_candidates
-                if candidate["both_salts_pass_all_aggregate_gates"] is True]
+                if candidate["evaluation"]["status"] == "completed"
+                and candidate["both_salts_pass_all_aggregate_gates"] is True]
     eligible.sort(key=lambda candidate: (
         -float(candidate["robust_minimum_family_exact_bit_direction_fidelity"]),
         int(candidate["observed_capacity"]["maximum_total_nodes"]),

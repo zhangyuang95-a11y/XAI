@@ -23,7 +23,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.training import warehouse_r41_diagnostic_admission_v6 as admission_api
-from backend.training import warehouse_r41_diagnostic_designation as designation_api
+from backend.training import warehouse_r41_diagnostic_designation_v2 as designation_api
+from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_binding
+from backend.training import warehouse_r41_diagnostic_input_snapshot_v8 as input_snapshot_api
 from backend.training import warehouse_r41_diagnostic_release_receipt_v6 as receipt_api
 from scripts.preflight_warehouse_r41_render import _render_service
 from ui import warehouse_alignment_r41_diagnostic_release_v8 as release
@@ -360,176 +362,283 @@ def preflight(*, release_root: str | Path, expected_receipt_sha256: str,
             or receipt.get("package_sha256") != _hash(paths["package"])
             or receipt.get("base64_sha256") != _hash(paths["base64"])):
         raise ValueError("Diagnostic release-root files differ from receipt")
-    if paths["package"].stat().st_size > 750_000:
-        raise ValueError("Diagnostic ZIP exceeds the 750 KB deployment limit")
-    if paths["base64"].stat().st_size > 1_000_000:
-        raise ValueError("Diagnostic Base64 Secret File exceeds the 1 MB limit")
-    admission = json.loads(paths["admission"].read_text(encoding="utf-8"))
-    designation = json.loads(paths["designation"].read_text(encoding="utf-8"))
-    if (admission.get("version") != admission_api.VERSION
-            or admission.get("status") != admission_api.STATUS
-            or admission.get("bindings", {}).get("diagnostic_designation_sha256")
-                != receipt["designation_sha256"]
-            or admission.get("bindings", {}).get("actor_sha256")
-                != admission_api.FIXED_ACTOR_SHA256
-            or receipt.get("actor_sha256") != admission_api.FIXED_ACTOR_SHA256
-            or admission.get("behavior_performance_gate_passed") is not False
-            or admission.get("behavior_performance_gate_waived") is not True
-            or admission.get("waiver_scope") != ["behavior_performance"]
-            or admission.get("formal_sample_eligible") is not False
-            or admission.get("data_persistent") is not False
-            or designation.get("version") != designation_api.VERSION
-            or designation.get("status") != designation_api.STATUS
-            or designation.get("bindings", {}).get("actor_sha256")
-                != receipt["actor_sha256"]):
-        raise ValueError("Diagnostic designation/admission boundary differs")
-    decoded = release._package_bytes(base64_path=paths["base64"])
-    package_bytes = release._package_bytes(package_path=paths["package"])
-    if (len(package_bytes) > release.MAX_PACKAGE_BYTES
-            or paths["base64"].stat().st_size > release.MAX_BASE64_BYTES):
-        raise ValueError("Diagnostic package exceeds the Render Secret File limits")
-    if decoded != package_bytes:
-        raise ValueError("Diagnostic Secret File does not encode the package")
-    manifest_sha = _manifest_sha(paths["package"])
-    if manifest_sha != receipt["manifest_sha256"]:
-        raise ValueError("Diagnostic manifest bytes differ from receipt")
-    manifest = release.inspect_online_release(
-        package_path=paths["package"],
-        expected_package_sha256=receipt["package_sha256"],
-        expected_manifest_sha256=manifest_sha,
-    )
-    if (manifest.get("version") != release.VERSION
-            or manifest.get("status") != release.STATUS
-            or manifest.get("release") != release._release_projection()
-            or manifest.get("parent", {}).get("diagnostic_admission_sha256")
-                != receipt["admission_sha256"]
-            or manifest.get("parent", {}).get("diagnostic_designation_sha256")
-                != receipt["designation_sha256"]
-            or manifest.get("identities", {}).get("actor_sha256")
-                != receipt["actor_sha256"]
-            or manifest.get("identities", {}).get("program_sha256")
-                != receipt["program_sha256"]
-            or manifest.get("identities", {}).get("program_content_sha256")
-                != receipt["program_content_sha256"]
-            or manifest.get("identities", {}).get("program_identity_sha256")
-                != receipt["program_identity_sha256"]
-            or manifest.get("identities", {}).get("public_feature_contract_sha256")
-                != receipt["public_feature_contract_sha256"]
-            or manifest.get("identities", {}).get("public_feature_registry_sha256")
-                != receipt["public_feature_registry_sha256"]
-            or manifest.get("identities", {}).get("program_complexity_sha256")
-                != receipt["program_complexity_sha256"]
-            or manifest.get("parent", {}).get("final_once_identity_sha256")
-                != receipt["final_once_identity_sha256"]
-            or manifest.get("parent", {}).get("final_once_campaign_key")
-                != receipt["final_once_campaign_key"]
-            or manifest.get("parent", {}).get(
-                "final_once_permanent_anchor_sha256")
-                != receipt["final_once_permanent_anchor_sha256"]
-            or manifest.get("parent", {}).get("final_once_attempt_started_sha256")
-                != receipt["final_once_attempt_started_sha256"]
-            or manifest.get("parent", {}).get(
-                "final_once_candidate_authenticated_sha256")
-                != receipt["final_once_candidate_authenticated_sha256"]
-            or manifest.get("parent", {}).get("final_once_holdout_started_sha256")
-                != receipt["final_once_holdout_started_sha256"]
-            or manifest.get("parent", {}).get("final_once_holdout_completed_sha256")
-                != receipt["final_once_holdout_completed_sha256"]
-            or manifest.get("parent", {}).get("final_once_audit_started_sha256")
-                != receipt["final_once_audit_started_sha256"]
-            or manifest.get("parent", {}).get("final_once_audit_completed_sha256")
-                != receipt["final_once_audit_completed_sha256"]
-            or manifest.get("parent", {}).get("final_once_attempt_completed_sha256")
-                != receipt["final_once_attempt_completed_sha256"]
-            or manifest.get("parent", {}).get("explanation_audit_inputs_sha256")
-                != receipt["explanation_audit_inputs_sha256"]
-            or manifest.get("parent", {}).get("explanation_audit_evidence_sha256")
-                != receipt["explanation_audit_evidence_sha256"]
-            or manifest.get("parent", {}).get("explanation_audit_sha256")
-                != receipt["explanation_audit_sha256"]
-            or manifest.get("parent", {}).get("physical_replay_sha256")
-                != receipt["physical_replay_sha256"]
-            or manifest.get("parent", {}).get(
-                "fresh_final_v3_exclusion_sha256")
-                != receipt["fresh_final_v3_exclusion_sha256"]
-            or manifest.get("parent", {}).get(
-                "fresh_final_v3_exclusion_content_sha256")
-                != receipt["fresh_final_v3_exclusion_content_sha256"]):
-        raise ValueError("Diagnostic package identity differs from receipt")
-    clean_load = check_clean_checkout_load(
-        ROOT, dict(manifest["sources"]["release"]),
-        base64_path=paths["base64"],
-        package_sha256=receipt["package_sha256"],
-        manifest_sha256=manifest_sha,
-    )
-    fingerprints = clean_load["play_scene_fingerprints"]
-    families = clean_load["formal_family_ids"]
-    if (clean_load.get("version") != release.VERSION
-                or clean_load.get("release_version")
-                    != release.PUBLIC_RELEASE_VERSION
-                or clean_load.get("formal_sample_eligible") is not False
-                or clean_load.get("data_persistent") is not False
-                or clean_load.get("actor_sha256") != receipt["actor_sha256"]
-                or clean_load.get("release") != release._release_projection()
-                or len(fingerprints) != 7 or len(set(fingerprints)) != 7
-                or len(families) != 6 or len(set(families)) != 6
-                or fingerprints != receipt["selected_scene_fingerprints"]):
-        raise ValueError("Loaded diagnostic context differs from receipt")
-    render = check_render_yaml(
-        render_yaml, package_sha256=receipt["package_sha256"],
-        manifest_sha256=manifest_sha,
-    )
-    return {
-        "version": VERSION, "status": STATUS,
-        "release_module": RELEASE_MODULE, "release_version": release.PUBLIC_RELEASE_VERSION,
-        "pilot_class": release.PILOT_CLASS, "secret_path": SECRET_PATH,
-        "receipt_sha256": expected_receipt_sha256,
-        "designation_sha256": receipt["designation_sha256"],
-        "admission_sha256": receipt["admission_sha256"],
-        "package_sha256": receipt["package_sha256"],
-        "manifest_sha256": manifest_sha,
-        "base64_sha256": receipt["base64_sha256"],
-        "actor_sha256": receipt["actor_sha256"],
-        "program_sha256": receipt["program_sha256"],
-        "program_content_sha256": receipt["program_content_sha256"],
-        "program_identity_sha256": receipt["program_identity_sha256"],
-        "public_feature_contract_sha256": receipt[
-            "public_feature_contract_sha256"],
-        "public_feature_registry_sha256": receipt[
-            "public_feature_registry_sha256"],
-        "program_complexity_sha256": receipt["program_complexity_sha256"],
-        "final_once_identity_sha256": receipt["final_once_identity_sha256"],
-        "final_once_campaign_key": receipt["final_once_campaign_key"],
-        "final_once_permanent_anchor_sha256": receipt[
-            "final_once_permanent_anchor_sha256"],
-        "final_once_attempt_completed_sha256": receipt[
-            "final_once_attempt_completed_sha256"],
-        "final_once_phase_receipts": {
-            "candidate_authenticated.json": receipt[
-                "final_once_candidate_authenticated_sha256"],
-            "holdout_started.json": receipt["final_once_holdout_started_sha256"],
-            "holdout_completed.json": receipt[
-                "final_once_holdout_completed_sha256"],
-            "audit_started.json": receipt["final_once_audit_started_sha256"],
-            "audit_completed.json": receipt["final_once_audit_completed_sha256"],
-        },
-        "fresh_final_v3_exclusion_sha256": receipt[
-            "fresh_final_v3_exclusion_sha256"],
-        "fresh_final_v3_exclusion_content_sha256": receipt[
-            "fresh_final_v3_exclusion_content_sha256"],
-        "explanation_audit_evidence_sha256": receipt[
-            "explanation_audit_evidence_sha256"],
-        "scene_fingerprints": {
-            "tutorial": fingerprints[0], "X": fingerprints[1:4],
-            "Y": fingerprints[4:7],
-        },
-        "behavior_performance_gate_passed": False,
-        "behavior_performance_gate_waived": True,
-        "waiver_scope": ["behavior_performance"],
-        "formal_ready": False, "formal_sample_eligible": False,
-        "data_persistent": False, "render": render,
-        "clean_checkout_load": clean_load,
-    }
+    # Re-run the complete admission reader against every registered evidence
+    # file.  Matching claims in admission, package and receipt are not enough:
+    # the lineage must still agree with the fixed final ledger and live files.
+    admission = receipt_api.read_strict_admission_anchor(
+        paths["admission"], expected_sha256=receipt["admission_sha256"])
+    with input_snapshot_api.ImmutableInputSnapshot(
+            {
+                "designation": paths["designation"],
+                "package": paths["package"],
+                "base64": paths["base64"],
+            },
+            expected_sha256={
+                "designation": receipt["designation_sha256"],
+                "package": receipt["package_sha256"],
+                "base64": receipt["base64_sha256"],
+            },
+            relative_names={
+                "designation": "release/designation.json",
+                "package": "release/package.zip",
+                "base64": "release/package.b64",
+            },
+            prefix="warehouse-r41-render-preflight-",
+    ) as immutable:
+        semantic_paths = immutable.paths
+        if semantic_paths["package"].stat().st_size > 750_000:
+            raise ValueError("Diagnostic ZIP exceeds the 750 KB deployment limit")
+        if semantic_paths["base64"].stat().st_size > 1_000_000:
+            raise ValueError("Diagnostic Base64 Secret File exceeds the 1 MB limit")
+        designation = json.loads(semantic_paths["designation"].read_text(encoding="utf-8"))
+        admission_bindings = admission.get("bindings", {})
+        if (admission.get("version") != admission_api.VERSION
+                or admission.get("status") != admission_api.STATUS
+                or admission.get("bindings", {}).get("diagnostic_designation_sha256")
+                    != receipt["designation_sha256"]
+                or admission.get("bindings", {}).get("actor_sha256")
+                    != admission_api.FIXED_ACTOR_SHA256
+                or receipt.get("actor_sha256") != admission_api.FIXED_ACTOR_SHA256
+                or receipt.get("designation_sha256")
+                    != designation_binding.EXPECTED_DESIGNATION_SHA256
+                or admission.get("behavior_performance_gate_passed") is not False
+                or admission.get("behavior_performance_gate_waived") is not True
+                or admission.get("waiver_scope") != ["behavior_performance"]
+                or admission.get("formal_sample_eligible") is not False
+                or admission.get("data_persistent") is not False
+                or designation.get("version") != designation_api.VERSION
+                or designation.get("status") != designation_api.STATUS
+                or designation.get("bindings", {}).get("actor_sha256")
+                    != receipt["actor_sha256"]):
+            raise ValueError("Diagnostic designation/admission boundary differs")
+        for name in receipt_api.FIELDS & admission_api.BINDING_FIELDS:
+            if receipt.get(name) != admission_bindings.get(name):
+                raise ValueError(
+                    "Diagnostic receipt differs from admitted binding: " + name)
+        decoded = release._package_bytes(base64_path=semantic_paths["base64"])
+        package_bytes = release._package_bytes(package_path=semantic_paths["package"])
+        if (len(package_bytes) > release.MAX_PACKAGE_BYTES
+                or semantic_paths["base64"].stat().st_size > release.MAX_BASE64_BYTES):
+            raise ValueError("Diagnostic package exceeds the Render Secret File limits")
+        if decoded != package_bytes:
+            raise ValueError("Diagnostic Secret File does not encode the package")
+        manifest_sha = _manifest_sha(semantic_paths["package"])
+        if manifest_sha != receipt["manifest_sha256"]:
+            raise ValueError("Diagnostic manifest bytes differ from receipt")
+        manifest = release.inspect_online_release(
+            package_path=semantic_paths["package"],
+            expected_package_sha256=receipt["package_sha256"],
+            expected_manifest_sha256=manifest_sha,
+        )
+        expected_parent = {
+            "version": admission["version"],
+            "status": admission["status"],
+            "diagnostic_admission_sha256": receipt["admission_sha256"],
+            **{
+                name: admission_bindings[name]
+                for name in release._PARENT_FIELDS
+                - {"version", "status", "diagnostic_admission_sha256"}
+            },
+        }
+        if manifest.get("parent") != expected_parent:
+            raise ValueError("Diagnostic package parent differs from admission")
+        expected_identity_bindings = {
+            "actor_sha256": "actor_sha256",
+            "protocol_file_sha256": "protocol_file_sha256",
+            "protocol_content_sha256": "protocol_content_sha256",
+            "program_sha256": "program_sha256",
+            "program_content_sha256": "program_content_sha256",
+            "program_identity_sha256": "program_identity_sha256",
+            "public_feature_contract_sha256": "public_feature_contract_sha256",
+            "public_feature_registry_sha256": "public_feature_registry_sha256",
+            "program_complexity_sha256": "program_complexity_sha256",
+            "parent_runtime_signature": "runtime_signature",
+            "runtime_manifest_signature": "runtime_manifest_signature",
+            "parent_explainer_signature": "explainer_signature",
+            "parent_question_bank_signature": "question_bank_signature",
+            "tutorial_signature": "tutorial_signature",
+        }
+        identities = manifest.get("identities", {})
+        if any(
+                identities.get(identity_name) != admission_bindings.get(binding_name)
+                for identity_name, binding_name in expected_identity_bindings.items()):
+            raise ValueError("Diagnostic package identity differs from admission")
+        if (manifest.get("version") != release.VERSION
+                or manifest.get("status") != release.STATUS
+                or manifest.get("release") != release._release_projection()
+                or manifest.get("parent", {}).get("diagnostic_admission_sha256")
+                    != receipt["admission_sha256"]
+                or manifest.get("parent", {}).get("diagnostic_designation_sha256")
+                    != receipt["designation_sha256"]
+                or manifest.get("parent", {}).get(
+                    "diagnostic_publication_authentication_sha256")
+                    != receipt["diagnostic_publication_authentication_sha256"]
+                or manifest.get("parent", {}).get(
+                    "portable_runtime_manifest_sha256")
+                    != receipt["portable_runtime_manifest_sha256"]
+                or manifest.get("parent", {}).get("question_bank_sha256")
+                    != receipt["question_bank_sha256"]
+                or manifest.get("parent", {}).get("tutorial_sha256")
+                    != receipt["tutorial_sha256"]
+                or manifest.get("parent", {}).get("release_sources_sha256")
+                    != receipt["release_sources_sha256"]
+                or manifest.get("parent", {}).get("package_contract_sha256")
+                    != receipt["package_contract_sha256"]
+                or manifest.get("parent", {}).get(
+                    "dynamic_selection_protocol_sha256")
+                    != receipt["dynamic_selection_protocol_sha256"]
+                or manifest.get("parent", {}).get(
+                    "dynamic_selection_prefilter_sha256")
+                    != receipt["dynamic_selection_prefilter_sha256"]
+                or manifest.get("parent", {}).get(
+                    "dynamic_selection_episodes_sha256")
+                    != receipt["dynamic_selection_episodes_sha256"]
+                or any(
+                    manifest.get("parent", {}).get(name) != receipt[name]
+                    for name in receipt_api.CANDIDATE_LINEAGE_FIELDS
+                )
+                or manifest.get("identities", {}).get("actor_sha256")
+                    != receipt["actor_sha256"]
+                or manifest.get("identities", {}).get("program_sha256")
+                    != receipt["program_sha256"]
+                or manifest.get("identities", {}).get("program_content_sha256")
+                    != receipt["program_content_sha256"]
+                or manifest.get("identities", {}).get("program_identity_sha256")
+                    != receipt["program_identity_sha256"]
+                or manifest.get("identities", {}).get("public_feature_contract_sha256")
+                    != receipt["public_feature_contract_sha256"]
+                or manifest.get("identities", {}).get("public_feature_registry_sha256")
+                    != receipt["public_feature_registry_sha256"]
+                or manifest.get("identities", {}).get("program_complexity_sha256")
+                    != receipt["program_complexity_sha256"]
+                or manifest.get("parent", {}).get("final_once_identity_sha256")
+                    != receipt["final_once_identity_sha256"]
+                or manifest.get("parent", {}).get("final_once_campaign_key")
+                    != receipt["final_once_campaign_key"]
+                or manifest.get("parent", {}).get(
+                    "final_once_permanent_anchor_sha256")
+                    != receipt["final_once_permanent_anchor_sha256"]
+                or manifest.get("parent", {}).get("final_once_attempt_started_sha256")
+                    != receipt["final_once_attempt_started_sha256"]
+                or manifest.get("parent", {}).get(
+                    "final_once_candidate_authenticated_sha256")
+                    != receipt["final_once_candidate_authenticated_sha256"]
+                or manifest.get("parent", {}).get("final_once_holdout_started_sha256")
+                    != receipt["final_once_holdout_started_sha256"]
+                or manifest.get("parent", {}).get(
+                    "final_once_historical_exclusion_started_sha256")
+                    != receipt["final_once_historical_exclusion_started_sha256"]
+                or manifest.get("parent", {}).get(
+                    "final_once_historical_exclusion_completed_sha256")
+                    != receipt["final_once_historical_exclusion_completed_sha256"]
+                or manifest.get("parent", {}).get("final_once_holdout_completed_sha256")
+                    != receipt["final_once_holdout_completed_sha256"]
+                or manifest.get("parent", {}).get("final_once_audit_started_sha256")
+                    != receipt["final_once_audit_started_sha256"]
+                or manifest.get("parent", {}).get("final_once_audit_completed_sha256")
+                    != receipt["final_once_audit_completed_sha256"]
+                or manifest.get("parent", {}).get("final_once_attempt_completed_sha256")
+                    != receipt["final_once_attempt_completed_sha256"]
+                or manifest.get("parent", {}).get("explanation_audit_inputs_sha256")
+                    != receipt["explanation_audit_inputs_sha256"]
+                or manifest.get("parent", {}).get("explanation_audit_evidence_sha256")
+                    != receipt["explanation_audit_evidence_sha256"]
+                or manifest.get("parent", {}).get("explanation_audit_sha256")
+                    != receipt["explanation_audit_sha256"]
+                or manifest.get("parent", {}).get("physical_replay_sha256")
+                    != receipt["physical_replay_sha256"]
+                or manifest.get("parent", {}).get(
+                    "fresh_final_v3_exclusion_sha256")
+                    != receipt["fresh_final_v3_exclusion_sha256"]
+                or manifest.get("parent", {}).get(
+                    "fresh_final_v3_exclusion_content_sha256")
+                    != receipt["fresh_final_v3_exclusion_content_sha256"]):
+            raise ValueError("Diagnostic package identity differs from receipt")
+        clean_load = check_clean_checkout_load(
+            ROOT, dict(manifest["sources"]["release"]),
+            base64_path=semantic_paths["base64"],
+            package_sha256=receipt["package_sha256"],
+            manifest_sha256=manifest_sha,
+        )
+        fingerprints = clean_load["play_scene_fingerprints"]
+        families = clean_load["formal_family_ids"]
+        if (clean_load.get("version") != release.VERSION
+                    or clean_load.get("release_version")
+                        != release.PUBLIC_RELEASE_VERSION
+                    or clean_load.get("formal_sample_eligible") is not False
+                    or clean_load.get("data_persistent") is not False
+                    or clean_load.get("actor_sha256") != receipt["actor_sha256"]
+                    or clean_load.get("release") != release._release_projection()
+                    or len(fingerprints) != 7 or len(set(fingerprints)) != 7
+                    or len(families) != 6 or len(set(families)) != 6
+                    or fingerprints != receipt["selected_scene_fingerprints"]):
+            raise ValueError("Loaded diagnostic context differs from receipt")
+        render = check_render_yaml(
+            render_yaml, package_sha256=receipt["package_sha256"],
+            manifest_sha256=manifest_sha,
+        )
+        immutable.verify()
+        return {
+            "version": VERSION, "status": STATUS,
+            "release_module": RELEASE_MODULE, "release_version": release.PUBLIC_RELEASE_VERSION,
+            "pilot_class": release.PILOT_CLASS, "secret_path": SECRET_PATH,
+            "receipt_sha256": expected_receipt_sha256,
+            "designation_sha256": receipt["designation_sha256"],
+            "admission_sha256": receipt["admission_sha256"],
+            "package_sha256": receipt["package_sha256"],
+            "manifest_sha256": manifest_sha,
+            "base64_sha256": receipt["base64_sha256"],
+            "actor_sha256": receipt["actor_sha256"],
+            "program_sha256": receipt["program_sha256"],
+            "program_content_sha256": receipt["program_content_sha256"],
+            "program_identity_sha256": receipt["program_identity_sha256"],
+            "public_feature_contract_sha256": receipt[
+                "public_feature_contract_sha256"],
+            "public_feature_registry_sha256": receipt[
+                "public_feature_registry_sha256"],
+            "program_complexity_sha256": receipt["program_complexity_sha256"],
+            "diagnostic_publication_authentication_sha256": receipt[
+                "diagnostic_publication_authentication_sha256"],
+            **{
+                name: receipt[name]
+                for name in receipt_api.CANDIDATE_LINEAGE_FIELDS
+            },
+            "final_once_identity_sha256": receipt["final_once_identity_sha256"],
+            "final_once_campaign_key": receipt["final_once_campaign_key"],
+            "final_once_permanent_anchor_sha256": receipt[
+                "final_once_permanent_anchor_sha256"],
+            "final_once_attempt_completed_sha256": receipt[
+                "final_once_attempt_completed_sha256"],
+            "final_once_phase_receipts": {
+                "candidate_authenticated.json": receipt[
+                    "final_once_candidate_authenticated_sha256"],
+                "holdout_started.json": receipt["final_once_holdout_started_sha256"],
+                "historical_exclusion_started.json": receipt[
+                    "final_once_historical_exclusion_started_sha256"],
+                "historical_exclusion_completed.json": receipt[
+                    "final_once_historical_exclusion_completed_sha256"],
+                "holdout_completed.json": receipt[
+                    "final_once_holdout_completed_sha256"],
+                "audit_started.json": receipt["final_once_audit_started_sha256"],
+                "audit_completed.json": receipt["final_once_audit_completed_sha256"],
+            },
+            "fresh_final_v3_exclusion_sha256": receipt[
+                "fresh_final_v3_exclusion_sha256"],
+            "fresh_final_v3_exclusion_content_sha256": receipt[
+                "fresh_final_v3_exclusion_content_sha256"],
+            "explanation_audit_evidence_sha256": receipt[
+                "explanation_audit_evidence_sha256"],
+            "scene_fingerprints": {
+                "tutorial": fingerprints[0], "X": fingerprints[1:4],
+                "Y": fingerprints[4:7],
+            },
+            "behavior_performance_gate_passed": False,
+            "behavior_performance_gate_waived": True,
+            "waiver_scope": ["behavior_performance"],
+            "formal_ready": False, "formal_sample_eligible": False,
+            "data_persistent": False, "render": render,
+            "clean_checkout_load": clean_load,
+        }
 
 
 def main(argv=None) -> int:

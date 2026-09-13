@@ -43,6 +43,7 @@ from env.warehouse_native.r41_diagnostic_conflict import (
     DIAGNOSTIC_CONTRACT_SHA256,
     DIAGNOSTIC_CONTRACT_VERSION,
 )
+from backend.training import warehouse_r41_diagnostic_input_snapshot_v8 as input_snapshot_api
 from ui import warehouse_alignment_online_release as portable
 from ui import warehouse_alignment_r41_diagnostic_tutorial as tutorial_api
 
@@ -53,6 +54,9 @@ STATUS = "r41_diagnostic_online_portable_internal_experiment"
 PUBLIC_RELEASE_VERSION = "r4.1-diagnostic"
 PILOT_CLASS = "internal_diagnostic"
 FIXED_ACTOR_SHA256 = "4ac2ba7782b5556761edaab22bfad50c831c1d8b41b174245e2d81486287ff6b"
+FIXED_DESIGNATION_SHA256 = (
+    "b42323e3bc4543c4f4e1af96be4de4d90489a38459240bfb494dcc2d6120a815"
+)
 MANIFEST_NAME = "manifest.json"
 RUNTIME_MANIFEST_VERSION = "warehouse-r41-diagnostic-portable-runtime-manifest.v1"
 DYNAMIC_SELECTION_VERSION = "warehouse-r41-diagnostic-conflict-dynamic-selection.v3"
@@ -94,28 +98,45 @@ _PARENT_FIELDS = frozenset((
     "dual_evaluation_sha256", "failure_closeout_sha256",
     "conflict_manifest_file_sha256", "conflict_manifest_content_sha256",
     "conflict_manifest_semantic_sha256", "conflict_validation_sha256",
-    "dynamic_selection_report_sha256", "selected_scenes_file_sha256",
+    "diagnostic_publication_authentication_sha256",
+    "dynamic_selection_report_sha256", "dynamic_selection_protocol_sha256",
+    "dynamic_selection_prefilter_sha256", "dynamic_selection_episodes_sha256",
+    "selected_scenes_file_sha256",
     "selected_scenes_semantic_sha256", "development_supplement_sha256",
+    "portable_runtime_manifest_sha256",
     "development_expansion_registry_sha256",
     "development_expansion_content_sha256",
-    "development_expansion_report_sha256", "prior_v7_rcpd_report_sha256",
-    "prior_v7_rcpd_rows_sha256", "development_expansion_rows_sha256",
-    "v8_fit_config_sha256", "final_rcpd_report_sha256",
-    "final_rcpd_rows_sha256", "fresh_final_holdout_sha256",
+    "development_expansion_report_sha256",
+    "retired_identity_projection_sha256",
+    "retired_identity_projection_content_sha256",
+    "retired_identity_projection_report_sha256",
+    "prior_rows_reauthentication_report_sha256",
+    "prior_v7_source_report_sha256", "prior_v7_rows_sha256",
+    "expansion_rows_reauthentication_report_sha256",
+    "expansion_source_collection_report_sha256",
+    "expansion_rows_sha256", "v8_fit_config_sha256",
+    "final_rcpd_inputs_sha256", "final_rcpd_report_sha256",
+    "final_rcpd_rows_sha256", "final_rcpd_pairs_sha256",
+    "final_rcpd_weights_audit_sha256", "final_rcpd_candidate_sha256",
+    "fresh_final_holdout_sha256",
     "fresh_final_holdout_content_sha256", "fresh_final_holdout_report_sha256",
     "fresh_final_v3_exclusion_sha256",
     "fresh_final_v3_exclusion_content_sha256",
     "final_once_identity_sha256", "final_once_campaign_key",
     "final_once_permanent_anchor_sha256", "final_once_attempt_started_sha256",
     "final_once_candidate_authenticated_sha256",
-    "final_once_holdout_started_sha256", "final_once_holdout_completed_sha256",
+    "final_once_holdout_started_sha256",
+    "final_once_historical_exclusion_started_sha256",
+    "final_once_historical_exclusion_completed_sha256",
+    "final_once_holdout_completed_sha256",
     "final_once_audit_started_sha256", "final_once_audit_completed_sha256",
     "final_once_attempt_completed_sha256", "program_content_sha256",
     "program_identity_sha256", "public_feature_contract_sha256",
     "public_feature_registry_sha256", "program_complexity_sha256",
     "explanation_audit_inputs_sha256", "explanation_audit_evidence_sha256",
     "explanation_audit_sha256", "physical_replay_sha256",
-    "question_bank_report_sha256", "tutorial_sha256",
+    "question_bank_sha256", "question_bank_report_sha256", "tutorial_sha256",
+    "release_sources_sha256", "package_contract_sha256",
 ))
 _IDENTITY_FIELDS = frozenset((
     "actor_sha256", "actor_parameters_sha256", "protocol_file_sha256",
@@ -396,6 +417,7 @@ def release_sources() -> dict[str, str]:
         ROOT / "scripts/build_warehouse_r41_diagnostic_release_receipt_v6.py",
         ROOT / "backend/training/warehouse_r41_diagnostic_admission_v6.py",
         ROOT / "backend/training/warehouse_r41_diagnostic_release_receipt_v6.py",
+        ROOT / "backend/training/warehouse_r41_diagnostic_input_snapshot_v8.py",
         ROOT / "backend/__init__.py",
         ROOT / "backend/training/__init__.py",
         ROOT / "backend/training/warehouse_native_common.py",
@@ -642,7 +664,9 @@ def _validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     parent = manifest.get("parent")
     if (not isinstance(parent, Mapping) or set(parent) != _PARENT_FIELDS
             or parent.get("version") != "warehouse-r41-diagnostic-admission.v6"
-            or parent.get("status") != "admitted_internal_diagnostic"):
+            or parent.get("status") != "admitted_internal_diagnostic"
+            or parent.get("diagnostic_designation_sha256")
+                != FIXED_DESIGNATION_SHA256):
         raise ValueError("Diagnostic portable parent binding differs")
     for name in _PARENT_FIELDS - {"version", "status"}:
         _sha(parent.get(name), "parent " + name)
@@ -684,6 +708,9 @@ def _validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
             or identities.get("uses_terminal_designated_actor") is not True
             or identities.get("action_override_count") != 0):
         raise ValueError("Diagnostic portable play/authority identity differs")
+    if (identities.get("runtime_manifest_file_sha256")
+            != parent.get("portable_runtime_manifest_sha256")):
+        raise ValueError("Diagnostic portable runtime manifest binding differs")
     expected_routes = [{
         "feature_name": "derived.critical." + group,
         "operator": ">", "threshold": 0.5,
@@ -709,10 +736,26 @@ def _validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
                 or not 0 < record["size"] <= MAX_ARTIFACT_BYTES[name]):
             raise ValueError("Diagnostic artifact record differs: " + name)
         _sha(record.get("sha256"), "artifact " + name)
+    admitted_artifact_hashes = {
+        "actor": identities["actor_sha256"],
+        "protocol": identities["protocol_file_sha256"],
+        "runtime_manifest": parent["portable_runtime_manifest_sha256"],
+        "program": identities["program_sha256"],
+        "question_bank": parent["question_bank_sha256"],
+        "tutorial": parent["tutorial_sha256"],
+    }
+    if any(records[name]["sha256"] != expected
+           for name, expected in admitted_artifact_hashes.items()):
+        raise ValueError(
+            "Diagnostic packaged artifact differs from admitted exact bytes")
     sources = manifest.get("sources")
-    if (not isinstance(sources, Mapping) or set(sources) != {"release"}
-            or portable._validate_source_map(sources["release"], "diagnostic release")
-                != release_sources()):
+    if not isinstance(sources, Mapping) or set(sources) != {"release"}:
+        raise ValueError("Diagnostic release source binding differs")
+    release_source_binding = portable._validate_source_map(
+        sources["release"], "diagnostic release")
+    if (release_source_binding != release_sources()
+            or digest(release_source_binding)
+                != parent.get("release_sources_sha256")):
         raise ValueError("Diagnostic release source binding differs")
     if canonical(manifest.get("analysis")) != canonical(portable._analysis_protocol()):
         raise ValueError("Diagnostic A/B analysis contract differs")
@@ -1117,6 +1160,79 @@ def assemble_from_admitted_components(*,
             or admission.get("data_persistent") is not False):
         raise ValueError("Exact internal diagnostic admission required")
     bindings = admission["bindings"]
+    admitted_release_sources_sha256 = _sha(
+        bindings.get("release_sources_sha256"), "admitted release sources")
+    admitted_package_contract_sha256 = _sha(
+        bindings.get("package_contract_sha256"), "admitted package contract")
+    admitted_release_sources = release_sources()
+    if digest(admitted_release_sources) != admitted_release_sources_sha256:
+        raise ValueError("Diagnostic serving sources differ from admission")
+    if digest(admission_api.package_contract()) != admitted_package_contract_sha256:
+        raise ValueError("Diagnostic package contract differs from admission")
+    packaged_component_names = (
+        "actor", "protocol", "conflict_manifest", "selected_scenes",
+        "final_rcpd_program", "question_bank", "tutorial",
+    )
+    artifact_registry = admission.get("artifacts")
+    if (not isinstance(artifact_registry, Mapping)
+            or set(artifact_registry) != set(admission_api.ARTIFACT_NAMES)):
+        raise ValueError("Exact admitted artifact registry required")
+    expected_component_sha256 = {}
+    for name in packaged_component_names:
+        record = artifact_registry.get(name)
+        if (not isinstance(record, Mapping) or set(record) != {"path", "sha256"}):
+            raise ValueError("Exact admitted artifact record required: " + name)
+        expected_component_sha256[name] = _sha(
+            record.get("sha256"), "admitted " + name)
+    if (expected_component_sha256["question_bank"]
+            != bindings.get("question_bank_sha256")
+            or expected_component_sha256["tutorial"]
+                != bindings.get("tutorial_sha256")):
+        raise ValueError("Admitted question/tutorial bytes differ from bindings")
+    snapshot_inputs = {
+        "admission": admission_path,
+        **{name: paths[name] for name in packaged_component_names},
+    }
+    snapshot_hashes = {
+        "admission": admission_sha,
+        **expected_component_sha256,
+    }
+    relative_names = {
+        "admission": "admission/admission.json",
+        **{
+            name: "components/" + str(index).zfill(2) + "-" + paths[name].name
+            for index, name in enumerate(packaged_component_names)
+        },
+    }
+    with input_snapshot_api.ImmutableInputSnapshot(
+            snapshot_inputs, expected_sha256=snapshot_hashes,
+            relative_names=relative_names,
+            prefix="warehouse-r41-diagnostic-release-assembly-") as frozen:
+        frozen_paths = dict(paths)
+        for name in packaged_component_names:
+            frozen_paths[name] = frozen.paths[name]
+        return _assemble_from_frozen_admitted_components(
+            admission=admission, admission_sha=admission_sha,
+            bindings=bindings, paths=frozen_paths,
+            output_package=output_package, output_base64=output_base64,
+            frozen=frozen, admitted_release_sources=admitted_release_sources,
+        )
+
+
+def _assemble_from_frozen_admitted_components(*,
+        admission: Mapping[str, Any], admission_sha: str,
+        bindings: Mapping[str, Any], paths: Mapping[str, Path],
+        output_package: str | Path, output_base64: str | Path | None,
+        frozen: input_snapshot_api.ImmutableInputSnapshot,
+        admitted_release_sources: Mapping[str, str]) -> dict[str, Any]:
+    def guard_release_sources() -> None:
+        if (release_sources() != dict(admitted_release_sources)
+                or digest(admitted_release_sources)
+                    != bindings["release_sources_sha256"]):
+            raise RuntimeError(
+                "Diagnostic release sources changed during package assembly")
+
+    guard_release_sources()
     full_manifest = _read_json(paths["conflict_manifest"], "diagnostic full manifest")
     selection = _read_json(paths["selected_scenes"], "diagnostic selected scenes")
     runtime_manifest = _runtime_manifest(selection, full_manifest, bindings)
@@ -1279,9 +1395,19 @@ def assemble_from_admitted_components(*,
         "conflict_manifest_content_sha256": bindings["conflict_manifest_content_sha256"],
         "conflict_manifest_semantic_sha256": bindings["conflict_manifest_semantic_sha256"],
         "conflict_validation_sha256": bindings["conflict_validation_sha256"],
+        "diagnostic_publication_authentication_sha256": bindings[
+            "diagnostic_publication_authentication_sha256"],
         "dynamic_selection_report_sha256": bindings["dynamic_selection_report_sha256"],
+        "dynamic_selection_protocol_sha256": bindings[
+            "dynamic_selection_protocol_sha256"],
+        "dynamic_selection_prefilter_sha256": bindings[
+            "dynamic_selection_prefilter_sha256"],
+        "dynamic_selection_episodes_sha256": bindings[
+            "dynamic_selection_episodes_sha256"],
         "selected_scenes_file_sha256": bindings["selected_scenes_file_sha256"],
         "selected_scenes_semantic_sha256": bindings["selected_scenes_semantic_sha256"],
+        "portable_runtime_manifest_sha256": bindings[
+            "portable_runtime_manifest_sha256"],
         "development_supplement_sha256": bindings[
             "development_supplement_sha256"],
         "development_expansion_registry_sha256": bindings[
@@ -1290,13 +1416,31 @@ def assemble_from_admitted_components(*,
             "development_expansion_content_sha256"],
         "development_expansion_report_sha256": bindings[
             "development_expansion_report_sha256"],
-        "prior_v7_rcpd_report_sha256": bindings["prior_v7_rcpd_report_sha256"],
-        "prior_v7_rcpd_rows_sha256": bindings["prior_v7_rcpd_rows_sha256"],
-        "development_expansion_rows_sha256": bindings[
-            "development_expansion_rows_sha256"],
+        "retired_identity_projection_sha256": bindings[
+            "retired_identity_projection_sha256"],
+        "retired_identity_projection_content_sha256": bindings[
+            "retired_identity_projection_content_sha256"],
+        "retired_identity_projection_report_sha256": bindings[
+            "retired_identity_projection_report_sha256"],
+        "prior_rows_reauthentication_report_sha256": bindings[
+            "prior_rows_reauthentication_report_sha256"],
+        "prior_v7_source_report_sha256": bindings[
+            "prior_v7_source_report_sha256"],
+        "prior_v7_rows_sha256": bindings["prior_v7_rows_sha256"],
+        "expansion_rows_reauthentication_report_sha256": bindings[
+            "expansion_rows_reauthentication_report_sha256"],
+        "expansion_source_collection_report_sha256": bindings[
+            "expansion_source_collection_report_sha256"],
+        "expansion_rows_sha256": bindings["expansion_rows_sha256"],
         "v8_fit_config_sha256": bindings["v8_fit_config_sha256"],
+        "final_rcpd_inputs_sha256": bindings["final_rcpd_inputs_sha256"],
         "final_rcpd_report_sha256": bindings["final_rcpd_report_sha256"],
         "final_rcpd_rows_sha256": bindings["final_rcpd_rows_sha256"],
+        "final_rcpd_pairs_sha256": bindings["final_rcpd_pairs_sha256"],
+        "final_rcpd_weights_audit_sha256": bindings[
+            "final_rcpd_weights_audit_sha256"],
+        "final_rcpd_candidate_sha256": bindings[
+            "final_rcpd_candidate_sha256"],
         "fresh_final_holdout_sha256": bindings["fresh_final_holdout_sha256"],
         "fresh_final_holdout_content_sha256": bindings[
             "fresh_final_holdout_content_sha256"],
@@ -1316,6 +1460,10 @@ def assemble_from_admitted_components(*,
             "final_once_candidate_authenticated_sha256"],
         "final_once_holdout_started_sha256": bindings[
             "final_once_holdout_started_sha256"],
+        "final_once_historical_exclusion_started_sha256": bindings[
+            "final_once_historical_exclusion_started_sha256"],
+        "final_once_historical_exclusion_completed_sha256": bindings[
+            "final_once_historical_exclusion_completed_sha256"],
         "final_once_holdout_completed_sha256": bindings[
             "final_once_holdout_completed_sha256"],
         "final_once_audit_started_sha256": bindings[
@@ -1337,8 +1485,11 @@ def assemble_from_admitted_components(*,
             "explanation_audit_evidence_sha256"],
         "explanation_audit_sha256": bindings["explanation_audit_sha256"],
         "physical_replay_sha256": bindings["physical_replay_sha256"],
+        "question_bank_sha256": bindings["question_bank_sha256"],
         "question_bank_report_sha256": bindings["question_bank_report_sha256"],
         "tutorial_sha256": bindings["tutorial_sha256"],
+        "release_sources_sha256": bindings["release_sources_sha256"],
+        "package_contract_sha256": bindings["package_contract_sha256"],
     }
     for label, value in (("protocol", _parse_json(protocol_raw, "protocol")),
                          ("runtime manifest", runtime_manifest),
@@ -1357,11 +1508,20 @@ def assemble_from_admitted_components(*,
         "parent": parent,
         "artifacts": _artifact_records(artifacts),
         "identities": identities,
-        "sources": {"release": release_sources()},
+        "sources": {"release": deepcopy(dict(admitted_release_sources))},
         "analysis": portable._analysis_protocol(),
         "release": _release_projection(),
     }
+    artifact_records = _artifact_records(artifacts)
+    if (artifact_records["question_bank"]["sha256"]
+            != bindings["question_bank_sha256"]
+            or artifact_records["tutorial"]["sha256"]
+                != bindings["tutorial_sha256"]):
+        raise ValueError("Packaged question/tutorial bytes differ from admission")
+    manifest["artifacts"] = artifact_records
     raw = _archive_bytes(manifest, artifacts)
+    frozen.verify()
+    guard_release_sources()
     package = portable._write_new(output_package, raw)
     encoded_path = None
     encoded = base64.b64encode(raw) + b"\n"
@@ -1370,6 +1530,8 @@ def assemble_from_admitted_components(*,
         raise ValueError("Diagnostic Base64 Secret File exceeds 1 MB")
     if output_base64 is not None:
         try:
+            frozen.verify()
+            guard_release_sources()
             encoded_path = portable._write_new(output_base64, encoded)
         except BaseException:
             package.unlink(missing_ok=True)
@@ -1377,6 +1539,7 @@ def assemble_from_admitted_components(*,
     manifest_sha = sha256((canonical(manifest) + "\n").encode()).hexdigest()
     package_sha = sha256(raw).hexdigest()
     try:
+        guard_release_sources()
         loaded = load_online_release(
             package_path=package, expected_package_sha256=package_sha,
             expected_manifest_sha256=manifest_sha,
@@ -1387,6 +1550,8 @@ def assemble_from_admitted_components(*,
         if encoded_path is not None:
             encoded_path.unlink(missing_ok=True)
         raise
+    frozen.verify()
+    guard_release_sources()
     return {
         "version": VERSION,
         "status": "built_from_diagnostic_admission_and_independently_reloaded",

@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from copy import deepcopy
+from hashlib import sha256
 import json
 import math
 import os
@@ -31,10 +32,19 @@ import numpy as np
 import sklearn
 from sklearn.ensemble import HistGradientBoostingClassifier
 
+from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 from backend.training import warehouse_r41_diagnostic_rcpd as legacy
 from backend.training import warehouse_r41_diagnostic_rcpd_v7 as v7
 from backend.training import warehouse_r41_diagnostic_development_expansion_v8 as expansion_api
+from backend.training import warehouse_r41_diagnostic_expansion_rows_v8 as expansion_rows_api
+from backend.training import warehouse_r41_diagnostic_prior_rows_v8 as prior_rows_api
+from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_binding
+from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_binding
+from backend.training.warehouse_r41_diagnostic_input_snapshot_v8 import (
+    ImmutableInputSnapshot,
+    read_authenticated_bytes,
+)
 from backend.training import warehouse_r41_diagnostic_pair_weights_v8 as weight_api
 from backend.warehouse_r41_diagnostic_boosted_tree import (
     R41DiagnosticBoostedTreeProgram,
@@ -56,6 +66,7 @@ from env.warehouse_native.policy import NumPyNativeActor
 
 
 VERSION = "warehouse-r41-diagnostic-rcpd.v8"
+ROOT = Path(__file__).resolve().parents[2]
 CONFIG_VERSION = "warehouse-r41-diagnostic-rcpd-v8-fit-config.v1"
 STATUS_PASSED = "passed_development_gates"
 STATUS_FAILED = "failed_development_gates"
@@ -116,6 +127,9 @@ def contract() -> dict[str, Any]:
             "validation_wins_exact_public_observation_overlap": True,
             "final_rows_accessed": False,
             "final_labels_accessed": False,
+            "historical_final_overlap_check": (
+                "deferred to irrevocable claim-bound exclusion phase"
+            ),
         },
         "prediction_inputs": {
             "base_public_features": BASE_FEATURE_COUNT,
@@ -139,7 +153,9 @@ def contract() -> dict[str, Any]:
             "base_rows": "all fit rows",
             "specialist_rows": (
                 "fit rows in the public critical group plus both endpoints of "
-                "effective pairs whose WAIT endpoint is in that group"
+                "effective pairs whose ordinary pre-action source anchor is in "
+                "that group; the endpoint union is used only when exact-overlap "
+                "removal omitted that ordinary source row"
             ),
             "validation_labels_used_for_fit": False,
             "candidate_search_inside_producer": False,
@@ -150,6 +166,10 @@ def contract() -> dict[str, Any]:
             "validation_weight": 1.0,
             "validation_labels_accessed": False,
         },
+        "effective_pair_group_assignment": (
+            "ordinary pre-action source anchor; endpoint union only when the "
+            "ordinary row was omitted by exact-overlap removal"
+        ),
         "serialization": {
             "kind": "explicit JSON axis-threshold trees",
             "pickle": False,
@@ -172,24 +192,70 @@ def contract() -> dict[str, Any]:
 
 
 def producer_sources() -> dict[str, str]:
-    root = Path(__file__).resolve().parents[2]
-    paths = (
-        Path(__file__).resolve(),
-        Path(v7.__file__).resolve(),
-        Path(expansion_api.__file__).resolve(),
-        Path(weight_api.__file__).resolve(),
-        root / "backend/warehouse_r41_diagnostic_public_features_v8.py",
-        root / "backend/warehouse_r41_diagnostic_boosted_tree.py",
-        root / "backend/warehouse_r41_diagnostic_public_tree_program_v8.py",
-        root / "backend/training/warehouse_native_common.py",
-        root / "env/warehouse_native/policy.py",
-    )
+    sources = local_source_hashes((Path(__file__).resolve(),))
+    for path, sha256 in designation_binding.designation.source_closure().items():
+        if path in sources and sources[path] != sha256:
+            raise RuntimeError("Designation/source closure hash disagreement: " + path)
+        sources[path] = sha256
+    return dict(sorted(sources.items()))
+
+
+def _fixed_input_hashes(paths: Mapping[str, Path]) -> dict[str, str]:
+    """Hash every canonical input before semantic authentication."""
     result: dict[str, str] = {}
-    for path in paths:
-        if not path.is_file() or path.is_symlink():
-            raise ValueError("Diagnostic v8 producer source is unsafe")
-        result[path.relative_to(root).as_posix()] = file_hash(path)
-    return dict(sorted(result.items()))
+    for name, path in sorted(paths.items()):
+        if (not path.is_file() or path.is_symlink() or path.resolve() != path):
+            raise RuntimeError(
+                "Diagnostic v8 fixed input changed during authentication: " + name)
+        result[name] = file_hash(path)
+    return result
+
+
+def _integrity_snapshot(paths: Mapping[str, Path]) -> dict[str, Any]:
+    return {
+        "producer_sources": producer_sources(),
+        "fixed_input_sha256": _fixed_input_hashes(paths),
+    }
+
+
+def _verify_integrity(
+    snapshot: Mapping[str, Any], paths: Mapping[str, Path], *, phase: str,
+) -> None:
+    try:
+        current_sources = producer_sources()
+        current_inputs = _fixed_input_hashes(paths)
+    except BaseException as error:
+        raise RuntimeError(
+            "Diagnostic v8 sources or fixed inputs changed during " + phase
+        ) from error
+    if (current_sources != snapshot.get("producer_sources")
+            or current_inputs != snapshot.get("fixed_input_sha256")):
+        raise RuntimeError(
+            "Diagnostic v8 sources or fixed inputs changed during " + phase)
+
+
+def _validate_designation_v2(
+    *, designation_path: Path, actor_path: Path, protocol_path: Path,
+    actor: NumPyNativeActor, protocol: Mapping[str, Any],
+    designation_original_path: Path,
+    designation_snapshot_components: Mapping[str, Path],
+    designation_original_components: Mapping[str, Path],
+) -> dict[str, Any]:
+    saved = designation_binding.read_bound_designation_snapshot(
+        designation_path,
+        original_path=designation_original_path,
+        components=designation_snapshot_components,
+        original_components=designation_original_components,
+        expected_sha256=designation_binding.EXPECTED_DESIGNATION_SHA256,
+    )
+    bindings = saved["bindings"]
+    if (bindings.get("actor_sha256") != file_hash(actor_path)
+            or bindings.get("actor_parameters_sha256")
+                != actor.metadata.get("actor_parameters_sha256")
+            or bindings.get("protocol_file_sha256") != file_hash(protocol_path)
+            or bindings.get("protocol_content_sha256") != digest(protocol)):
+        raise ValueError("RCPD v8 designation v2 input binding differs")
+    return saved
 
 
 def _sha(value: Any, label: str) -> str:
@@ -204,6 +270,17 @@ def _regular(value: str | Path, label: str, *, maximum: int | None = None) -> Pa
             or (maximum is not None and path.stat().st_size > maximum)):
         raise ValueError(label + " must be a canonical regular file")
     return path
+
+
+def _manifest_validation_path(manifest_path: Path) -> Path:
+    validation = _regular(
+        manifest_path.parent / "validation.json", "Manifest validation",
+        maximum=MAX_JSON_BYTES)
+    if (validation.parent != manifest_path.parent
+            or file_hash(validation)
+                != manifest_binding.EXPECTED_VALIDATION_SHA256):
+        raise ValueError("Exact canonical manifest validation bytes required")
+    return validation
 
 
 def _json_pairs(label: str):
@@ -252,6 +329,66 @@ def _integer(value: Any, label: str, *, lower: int, upper: int) -> int:
     if type(value) is not int or not lower <= value <= upper:
         raise ValueError(f"{label} must be an integer in [{lower}, {upper}]")
     return value
+
+
+def _designation_component_paths(designation_path: Path) -> dict[str, Path]:
+    """Resolve all five fixed designation inputs through the shared adapter."""
+    result: dict[str, Path] = {}
+    for name, path in designation_binding.resolve_bound_components(
+            designation_path).items():
+        result["designation_" + name] = _regular(
+            path, "designation " + name,
+            maximum=(MAX_NPZ_COMPRESSED_BYTES if name == "actor"
+                     else MAX_JSON_BYTES))
+    return result
+
+
+def _resolved_designation_components(designation_path: Path) -> dict[str, Path]:
+    raw = read_authenticated_bytes(
+        designation_path, label="diagnostic Actor designation",
+        expected_sha256=designation_binding.EXPECTED_DESIGNATION_SHA256,
+        maximum=MAX_JSON_BYTES,
+    )
+    return designation_binding.resolve_bound_components_from_bytes(
+        raw, original_path=designation_path,
+        expected_sha256=designation_binding.EXPECTED_DESIGNATION_SHA256,
+    )
+
+
+def _snapshot_expected_hashes(
+    *, expected_expansion_registry_sha256: str,
+    expected_expansion_report_sha256: str,
+    expected_prior_rows_report_sha256: str,
+    expected_expansion_rows_report_sha256: str,
+    expected_config_sha256: str,
+) -> dict[str, str]:
+    return {
+        "actor": designation_binding.designation.EXPECTED_ACTOR_SHA256,
+        "protocol": designation_binding.designation.EXPECTED_PROTOCOL_FILE_SHA256,
+        "manifest": manifest_binding.EXPECTED_MANIFEST_SHA256,
+        "manifest_validation": manifest_binding.EXPECTED_VALIDATION_SHA256,
+        "designation": designation_binding.EXPECTED_DESIGNATION_SHA256,
+        "expansion_registry": expected_expansion_registry_sha256,
+        "expansion_registry_report": expected_expansion_report_sha256,
+        "config": expected_config_sha256,
+        "previous_development": expansion_api.EXPECTED_PREVIOUS_DEVELOPMENT_SHA256,
+        "prior_reauth_report": expected_prior_rows_report_sha256,
+        "prior_rows": prior_rows_api.EXPECTED_SOURCE_ROWS_SHA256,
+        "prior_source_report": prior_rows_api.EXPECTED_SOURCE_REPORT_SHA256,
+        "expansion_reauth_report": expected_expansion_rows_report_sha256,
+        "expansion_collection_report": (
+            expansion_rows_api.EXPECTED_SOURCE_COLLECTION_REPORT_SHA256),
+        "expansion_rows": expansion_rows_api.EXPECTED_SOURCE_ROWS_SHA256,
+        "designation_actor": designation_binding.designation.EXPECTED_ACTOR_SHA256,
+        "designation_protocol": (
+            designation_binding.designation.EXPECTED_PROTOCOL_FILE_SHA256),
+        "designation_training_ledger": (
+            designation_binding.designation.EXPECTED_LEDGER_SHA256),
+        "designation_dual_evaluation": (
+            designation_binding.designation.EXPECTED_DUAL_EVALUATION_SHA256),
+        "designation_failure_closeout": (
+            designation_binding.designation.EXPECTED_CLOSEOUT_SHA256),
+    }
 
 
 def normalize_config(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -761,15 +898,112 @@ def _validate_combined_rows(
         raise ValueError("Combined v8 critical groups differ")
 
 
+def _pair_group_bits(
+    arrays: Mapping[str, np.ndarray], pairs: np.ndarray,
+) -> np.ndarray:
+    """Assign each intervention pair to its ordinary pre-action source group.
+
+    Intervention endpoints describe post-action states, so their critical flags
+    can legitimately differ from the state where the intervention was issued.
+    The ordinary row sharing the anchor is the authoritative public source.  An
+    exact-observation validation-wins removal can omit that fit row; only then do
+    we use the deterministic union of the two endpoint masks, matching the v8
+    pair-weight contract.
+    """
+    raw_pairs = np.asarray(pairs)
+    if (raw_pairs.ndim != 2 or raw_pairs.shape[1:] != (2,)
+            or raw_pairs.dtype.kind not in "iu"):
+        raise ValueError("Diagnostic v8 pairs must be a P-by-2 integer array")
+    pairs64 = raw_pairs.astype(np.int64, copy=False)
+    count = len(arrays["group_bits"])
+    if len(pairs64) and (np.any(pairs64 < 0) or np.any(pairs64 >= count)):
+        raise ValueError("Diagnostic v8 pair endpoint index is outside the rows")
+    split = np.asarray(arrays["split_validation"])
+    group_bits = np.asarray(arrays["group_bits"])
+    if (split.shape != (count,) or split.dtype != np.dtype(np.bool_)
+            or group_bits.shape != (count,) or group_bits.dtype.kind not in "iu"
+            or np.any(group_bits < 0)
+            or np.any(group_bits >= (1 << len(GROUPS)))):
+        raise ValueError("Diagnostic v8 pair grouping arrays differ")
+    decoded = {
+        name: _decode(np.asarray(arrays[name]), "Pair grouping " + name)
+        for name in ("kinds", "anchor_ids", "branch_actions",
+                     "scene_fingerprints", "episode_ids")
+    }
+    if any(values.shape != (count,) for values in decoded.values()):
+        raise ValueError("Diagnostic v8 pair grouping metadata is not row aligned")
+    kinds = decoded["kinds"]
+    anchors = decoded["anchor_ids"]
+    branches = decoded["branch_actions"]
+    scenes = decoded["scene_fingerprints"]
+    episodes = decoded["episode_ids"]
+
+    # Include the split in the identity so validation evidence can never borrow
+    # a same-text anchor from fit.  Duplicate ordinary identities are treated as
+    # unavailable and take the documented endpoint-union fallback.
+    ordinary_by_identity: dict[tuple[str, bool], int] = {}
+    duplicate_identities: set[tuple[str, bool]] = set()
+    for index in np.flatnonzero(kinds == "ordinary"):
+        anchor = str(anchors[index])
+        if not anchor:
+            continue
+        identity = (anchor, bool(split[index]))
+        if identity in ordinary_by_identity:
+            duplicate_identities.add(identity)
+        else:
+            ordinary_by_identity[identity] = int(index)
+    for identity in duplicate_identities:
+        ordinary_by_identity.pop(identity, None)
+
+    result = np.empty(len(pairs64), dtype=np.uint8)
+    for pair_index, (raw_wait, raw_branch) in enumerate(pairs64):
+        wait = int(raw_wait)
+        branch = int(raw_branch)
+        if (wait == branch or kinds[wait] != "intervention"
+                or kinds[branch] != "intervention"
+                or not str(anchors[wait])
+                or anchors[wait] != anchors[branch]
+                or split[wait] != split[branch]
+                or scenes[wait] != scenes[branch]
+                or episodes[wait] != episodes[branch]
+                or branches[wait] != "WAIT"
+                or branches[branch] not in ACTIONS[:-1]):
+            raise ValueError("Diagnostic v8 intervention pair identity differs")
+        identity = (str(anchors[wait]), bool(split[wait]))
+        source = ordinary_by_identity.get(identity)
+        if (source is not None
+                and (scenes[source] != scenes[wait]
+                     or episodes[source] != episodes[wait])):
+            source = None
+        result[pair_index] = np.uint8(
+            group_bits[source] if source is not None
+            else int(group_bits[wait]) | int(group_bits[branch]))
+    return result
+
+
+def _validated_pair_group_bits(
+    pairs: np.ndarray, pair_group_bits: np.ndarray,
+) -> np.ndarray:
+    raw = np.asarray(pair_group_bits)
+    if (raw.shape != (len(pairs),) or raw.dtype.kind not in "iu"
+            or np.any(raw < 0) or np.any(raw >= (1 << len(GROUPS)))):
+        raise ValueError("Diagnostic v8 pair_group_bits differs")
+    return raw.astype(np.uint8, copy=False)
+
+
 def _component_fit_masks(
     arrays: Mapping[str, np.ndarray], pairs: np.ndarray,
+    pair_group_bits: np.ndarray,
 ) -> dict[str, np.ndarray]:
     fit = ~arrays["split_validation"]
     bits = arrays["group_bits"]
+    pair_bits = _validated_pair_group_bits(pairs, pair_group_bits)
+    if len(pairs) and not np.all(fit[np.asarray(pairs).reshape(-1)]):
+        raise ValueError("Diagnostic v8 specialist pair includes validation rows")
     result = {"base": fit.copy()}
     for group_index, group in enumerate(GROUPS):
         selected = fit & ((bits & (1 << group_index)) != 0)
-        pair_selected = ((bits[pairs[:, 0]] & (1 << group_index)) != 0) \
+        pair_selected = ((pair_bits & (1 << group_index)) != 0) \
             if len(pairs) else np.empty(0, dtype=np.bool_)
         if np.any(pair_selected):
             selected[np.unique(pairs[pair_selected].reshape(-1))] = True
@@ -780,12 +1014,13 @@ def _component_fit_masks(
 def _fit_program(
     arrays: Mapping[str, np.ndarray], *, relations: R41DiagnosticPublicRelationsV8,
     weights: Mapping[str, Any], config: Mapping[str, Any], binding: str,
-    source_identity: Mapping[str, Any],
+    source_identity: Mapping[str, Any], pair_group_bits: np.ndarray,
 ) -> tuple[R41DiagnosticPublicTreeProgramV8, dict[str, Any]]:
     expanded = relations.transform_batch(arrays["observations"])
     if expanded.shape != (len(arrays["observations"]), EXPANDED_FEATURE_COUNT):
         raise RuntimeError("Diagnostic v8 expanded feature shape differs")
-    masks = _component_fit_masks(arrays, weights["pairs"])
+    masks = _component_fit_masks(
+        arrays, weights["pairs"], pair_group_bits)
     fit_labels = arrays["action_indices"]  # sliced before each estimator sees it
     programs: dict[str, R41DiagnosticBoostedTreeProgram] = {}
     diagnostics: dict[str, Any] = {}
@@ -892,9 +1127,94 @@ def _predict_in_batches(program: R41DiagnosticPublicTreeProgramV8,
         else np.empty((0, len(ACTIONS)), dtype=np.float64)
 
 
-def _metrics(probabilities: np.ndarray, arrays: Mapping[str, np.ndarray]) -> dict[str, Any]:
-    return v7._metrics_from_probabilities(
-        probabilities, arrays, arrays["split_validation"])
+def _metrics_from_probabilities(
+    probabilities: np.ndarray,
+    arrays: Mapping[str, np.ndarray],
+    mask: np.ndarray,
+    *,
+    pairs: np.ndarray,
+    pair_group_bits: np.ndarray,
+) -> dict[str, Any]:
+    """Apply the v7 metrics with source-anchored intervention groups."""
+    if (probabilities.shape != (len(arrays["observations"]), len(ACTIONS))
+            or not np.isfinite(probabilities).all()
+            or not np.allclose(
+                probabilities.sum(1), 1.0, rtol=0.0, atol=2e-12)):
+        raise ValueError("Diagnostic v8 candidate probabilities differ")
+    selected_mask = np.asarray(mask)
+    if (selected_mask.shape != (len(arrays["observations"]),)
+            or selected_mask.dtype != np.dtype(np.bool_)):
+        raise ValueError("Diagnostic v8 metric mask differs")
+    canonical_pairs = v7._effective_pairs(arrays, selected_mask)
+    if not np.array_equal(np.asarray(pairs), canonical_pairs):
+        raise ValueError("Diagnostic v8 effective-pair metric coverage differs")
+    pair_bits = _validated_pair_group_bits(canonical_pairs, pair_group_bits)
+    if not np.array_equal(pair_bits, _pair_group_bits(arrays, canonical_pairs)):
+        raise ValueError("Diagnostic v8 effective-pair group assignment differs")
+
+    predictions = np.argmax(probabilities, axis=1).astype(np.uint8)
+    labels = arrays["action_indices"]
+    correct = predictions == labels
+    scenes = _decode(arrays["scene_fingerprints"], "Metric scenes")
+    bits = arrays["group_bits"]
+
+    def stat(selected: np.ndarray) -> dict[str, Any]:
+        indices = np.flatnonzero(selected_mask & selected)
+        return {
+            "rows": int(len(indices)),
+            "scenes": len(set(map(str, scenes[indices]))),
+            "fidelity": float(correct[indices].mean()) if len(indices) else 0.0,
+        }
+
+    critical = {
+        name: stat((bits & (1 << index)) != 0)
+        for index, name in enumerate(GROUPS)
+    }
+    pair_correct = (
+        correct[canonical_pairs[:, 0]] & correct[canonical_pairs[:, 1]]
+    ) if len(canonical_pairs) else np.empty(0, dtype=np.bool_)
+    direction_by_group = {}
+    for index, name in enumerate(GROUPS):
+        selected = (pair_bits & (1 << index)) != 0
+        direction_by_group[name] = {
+            "pairs": int(np.sum(selected)),
+            "scenes": len(set(map(
+                str, scenes[canonical_pairs[selected, 0]])))
+                if np.any(selected) else 0,
+            "fidelity": float(pair_correct[selected].mean())
+                if np.any(selected) else 0.0,
+        }
+    target = arrays["probabilities"][selected_mask]
+    approximate = probabilities[selected_mask]
+    mean_kl = float(np.mean(np.sum(target * (
+        np.log(target.clip(1e-8))
+        - np.log(approximate.clip(1e-8))), axis=-1)))
+    return {
+        "overall": stat(np.ones(len(selected_mask), dtype=np.bool_)),
+        "nonwait": stat(labels != ACTIONS.index("WAIT")),
+        "critical": critical,
+        "effective_intervention_direction": {
+            "pairs": int(len(canonical_pairs)),
+            "scenes": len(set(map(
+                str, scenes[canonical_pairs[:, 0]])))
+                if len(canonical_pairs) else 0,
+            "fidelity": float(pair_correct.mean()) if len(pair_correct) else 0.0,
+            "by_group": direction_by_group,
+        },
+        "mean_kl": mean_kl,
+    }
+
+
+def _metrics(
+    probabilities: np.ndarray,
+    arrays: Mapping[str, np.ndarray],
+    *,
+    pairs: np.ndarray,
+    pair_group_bits: np.ndarray,
+) -> dict[str, Any]:
+    return _metrics_from_probabilities(
+        probabilities, arrays, arrays["split_validation"],
+        pairs=pairs, pair_group_bits=pair_group_bits)
 
 
 def _gate(metrics: Mapping[str, Any]) -> dict[str, Any]:
@@ -924,33 +1244,54 @@ def _gate(metrics: Mapping[str, Any]) -> dict[str, Any]:
 
 def _strata(probabilities: np.ndarray,
             arrays: Mapping[str, np.ndarray],
-            scene_families: Mapping[str, str]) -> dict[str, Any]:
+            scene_families: Mapping[str, str],
+            *, pairs: np.ndarray,
+            pair_group_bits: np.ndarray) -> dict[str, Any]:
     validation = arrays["split_validation"]
     predictions = np.argmax(probabilities, axis=1)
     labels = arrays["action_indices"]
     correct = predictions == labels
     scenes = _decode(arrays["scene_fingerprints"], "Metric scenes")
     episodes = _decode(arrays["episode_ids"], "Metric episodes")
-    pairs = v7._effective_pairs(arrays, validation)
+    canonical_pairs = v7._effective_pairs(arrays, validation)
+    if not np.array_equal(np.asarray(pairs), canonical_pairs):
+        raise ValueError("Diagnostic v8 stratum pair coverage differs")
+    pair_bits = _validated_pair_group_bits(canonical_pairs, pair_group_bits)
+    if not np.array_equal(pair_bits, _pair_group_bits(arrays, canonical_pairs)):
+        raise ValueError("Diagnostic v8 stratum pair groups differ")
+    pairs = canonical_pairs
     result: dict[str, Any] = {}
-    memberships = {
-        "partner": {
-            partner: np.asarray([
-                episode.rsplit(":", 1)[-1] == partner for episode in episodes
-            ]) for partner in v7.PARTNERS
-        },
-        "family": {
-            family: np.asarray([
-                scene_families.get(str(scene)) == family for scene in scenes
-            ]) for family in sorted(set(scene_families.values()))
-        },
+    memberships: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]] = {
+        "partner": {}, "family": {}, "critical": {},
     }
+    for partner in v7.PARTNERS:
+        membership = np.asarray([
+            episode.rsplit(":", 1)[-1] == partner for episode in episodes
+        ])
+        memberships["partner"][partner] = (
+            membership,
+            membership[pairs[:, 0]] if len(pairs)
+            else np.empty(0, dtype=np.bool_),
+        )
+    for family in sorted(set(scene_families.values())):
+        membership = np.asarray([
+            scene_families.get(str(scene)) == family for scene in scenes
+        ])
+        memberships["family"][family] = (
+            membership,
+            membership[pairs[:, 0]] if len(pairs)
+            else np.empty(0, dtype=np.bool_),
+        )
+    for index, group in enumerate(GROUPS):
+        memberships["critical"][group] = (
+            (arrays["group_bits"] & (1 << index)) != 0,
+            (pair_bits & (1 << index)) != 0,
+        )
     for category, values in memberships.items():
         rows = {}
-        for name, membership in values.items():
+        for name, (membership, pair_membership) in values.items():
             selected_rows = validation & membership
-            selected_pairs = membership[pairs[:, 0]] if len(pairs) \
-                else np.empty(0, dtype=np.bool_)
+            selected_pairs = pair_membership
             pair_correct = (
                 correct[pairs[selected_pairs, 0]]
                 & correct[pairs[selected_pairs, 1]]
@@ -1018,64 +1359,130 @@ def _trace_audit(program: R41DiagnosticPublicTreeProgramV8,
 def _authenticate_inputs(
     *, actor_path: Path, protocol_path: Path, manifest_path: Path,
     designation_path: Path, expansion_registry_path: Path,
-    expected_expansion_registry_sha256: str, prior_v7_output: Path,
-    expected_prior_v7_report_sha256: str, expansion_rows_path: Path,
-    expected_expansion_rows_sha256: str, config_path: Path,
+    expected_expansion_registry_sha256: str, expansion_report_path: Path,
+    expected_expansion_report_sha256: str, prior_rows_output: Path,
+    expected_prior_rows_report_sha256: str, expansion_rows_output: Path,
+    expected_expansion_rows_report_sha256: str,
+    previous_development_path: Path, config_path: Path,
     expected_config_sha256: str,
+    designation_original_path: Path,
+    designation_snapshot_components: Mapping[str, Path],
+    designation_original_components: Mapping[str, Path],
+    sources: Mapping[str, str],
 ) -> dict[str, Any]:
+    if producer_sources() != dict(sources):
+        raise RuntimeError("Diagnostic v8 sources changed during authentication")
+    for directory, label in (
+        (prior_rows_output, "prior-row reauthentication"),
+        (expansion_rows_output, "expansion-row reauthentication"),
+    ):
+        if (not directory.is_dir() or directory.is_symlink()
+                or directory.resolve() != directory):
+            raise ValueError(label + " directory is unsafe")
     for expected, actual, label in (
         (expected_expansion_registry_sha256, file_hash(expansion_registry_path),
          "development expansion registry"),
-        (expected_expansion_rows_sha256, file_hash(expansion_rows_path),
-         "development expansion rows"),
+        (expected_expansion_report_sha256, file_hash(expansion_report_path),
+         "development expansion report"),
         (expected_config_sha256, file_hash(config_path), "fit config"),
+        (expected_prior_rows_report_sha256,
+         file_hash(prior_rows_output / "report.json"),
+         "prior-row reauthentication report"),
+        (expected_expansion_rows_report_sha256,
+         file_hash(expansion_rows_output / "report.json"),
+         "expansion-row reauthentication report"),
     ):
         if _sha(expected, label) != actual:
             raise ValueError(label + " hash differs")
-    report_path = prior_v7_output / "report.json"
-    if (not prior_v7_output.is_dir() or prior_v7_output.is_symlink()
-            or prior_v7_output.resolve() != prior_v7_output
-            or _sha(expected_prior_v7_report_sha256, "prior v7 report")
-                != file_hash(report_path)):
-        raise ValueError("Prior v7 evidence or report hash differs")
     actor = NumPyNativeActor(actor_path)
     if actor.obs_dim != BASE_FEATURE_COUNT:
         raise ValueError("Frozen Actor public observation dimension differs")
     protocol = _read_json(protocol_path, "Training protocol")
-    manifest = _read_json(manifest_path, "Diagnostic manifest")
+    manifest = manifest_binding.read_saved_manifest(
+        manifest_path, actor_path=actor_path, replay_scope="development")
     designation = _read_json(designation_path, "Diagnostic Actor designation")
-    legacy._validate_manifest_actor(manifest, actor)
-    legacy._validate_designation(
+    if manifest.get("frozen_actor") != {
+        "sha256": actor.artifact_sha256,
+        "actor_parameters_sha256": actor.metadata["actor_parameters_sha256"],
+    }:
+        raise ValueError("Development manifest/Actor identity differs")
+    _validate_designation_v2(
         designation_path=designation_path,
-        expected_designation_sha256=file_hash(designation_path),
         actor_path=actor_path, protocol_path=protocol_path,
         actor=actor, protocol=protocol,
+        designation_original_path=designation_original_path,
+        designation_snapshot_components=designation_snapshot_components,
+        designation_original_components=designation_original_components,
     )
-    runtime = legacy._runtime(actor_path, protocol_path, manifest_path, manifest)
-    prior_report = _read_json(report_path, "Prior v7 report")
-    if (prior_report.get("version") != v7.VERSION
-            or prior_report.get("bindings", {}).get("actor_file_sha256")
-                != actor.artifact_sha256
-            or prior_report.get("bindings", {}).get("protocol_file_sha256")
-                != file_hash(protocol_path)
-            or prior_report.get("bindings", {}).get("manifest_file_sha256")
-                != file_hash(manifest_path)
-            or prior_report.get("bindings", {}).get("designation_sha256")
-                != file_hash(designation_path)
-            or prior_report.get("execution", {}).get("final_test_accessed") is not False):
-        raise ValueError("Prior v7 development evidence bindings differ")
-    prior_artifacts = prior_report.get("evidence_artifacts")
-    if (not isinstance(prior_artifacts, Mapping)
-            or _sha(prior_artifacts.get("rows.npz"), "prior rows")
-                != file_hash(prior_v7_output / "rows.npz")):
-        raise ValueError("Prior v7 row artifact binding differs")
+    runtime = manifest_binding.build_runtime(
+        actor_path=actor_path, protocol_path=protocol_path,
+        manifest_path=manifest_path)
+    prior_paths = {
+        "saved_report": prior_rows_output / "report.json",
+        "saved_rows": prior_rows_output / "rows.npz",
+        "embedded_source_report": prior_rows_output / "source_v7_report.json",
+        "actor": actor_path,
+        "protocol": protocol_path,
+        "manifest": manifest_path,
+        "manifest_validation": manifest_path.parent / "validation.json",
+        "designation": designation_path,
+        "supplement": previous_development_path,
+        "source_report": prior_rows_output / "source_v7_report.json",
+        "source_rows": prior_rows_output / "rows.npz",
+    }
+    prior_report = prior_rows_api._read_saved_artifacts_snapshot(
+        paths=prior_paths,
+        designation_original_path=designation_original_path,
+        designation_snapshot_components=designation_snapshot_components,
+        designation_original_components=designation_original_components,
+        sources=prior_rows_api.producer_sources(),
+    )
+    if (prior_report.get("version") != prior_rows_api.VERSION
+            or prior_report.get("status") != prior_rows_api.STATUS):
+        raise ValueError("Exact prior-row reauthentication receipt required")
     expansion = _read_json(expansion_registry_path, "Development expansion registry")
     fit_scenes, validation_scenes = _validate_expansion_registry(
         expansion, registry_path=expansion_registry_path, actor=actor,
         manifest_path=manifest_path, designation_path=designation_path,
         prior_report=prior_report,
     )
+    expansion_paths = {
+        "saved_report": expansion_rows_output / "report.json",
+        "embedded_rows": expansion_rows_output / "expansion_rows.npz",
+        "embedded_collection_report": (
+            expansion_rows_output / "source_collection_report.json"),
+        "actor": actor_path,
+        "protocol": protocol_path,
+        "manifest": manifest_path,
+        "manifest_validation": manifest_path.parent / "validation.json",
+        "designation": designation_path,
+        "expansion_registry": expansion_registry_path,
+        "expansion_report": expansion_report_path,
+        "previous": previous_development_path,
+        "source_collection_report": (
+            expansion_rows_output / "source_collection_report.json"),
+        "source_rows": expansion_rows_output / "expansion_rows.npz",
+        "prior_rows": prior_rows_output / "rows.npz",
+    }
+    expansion_rows_report = expansion_rows_api._read_saved_artifacts_snapshot(
+        paths=expansion_paths,
+        expected_expansion_registry_sha256=expected_expansion_registry_sha256,
+        expected_expansion_report_sha256=expected_expansion_report_sha256,
+        designation_original_path=designation_original_path,
+        designation_snapshot_components=designation_snapshot_components,
+        designation_original_components=designation_original_components,
+        sources=expansion_rows_api.producer_sources(),
+    )
+    if (expansion_rows_report.get("version") != expansion_rows_api.VERSION
+            or expansion_rows_report.get("status") != expansion_rows_api.STATUS):
+        raise ValueError("Exact expansion-row reauthentication receipt required")
     config = normalize_config(_read_json(config_path, "Diagnostic v8 fit config"))
+    previous_development = _read_json(
+        previous_development_path, "Previous development supplement")
+    if (file_hash(previous_development_path)
+            != prior_report["bindings"][
+                "development_supplement_file_sha256"]):
+        raise ValueError("Previous development supplement hash differs")
     relations = R41DiagnosticPublicRelationsV8(actor.metadata["feature_names"])
     if (len(relations.base_feature_names) != BASE_FEATURE_COUNT
             or len(relations.feature_names) != EXPANDED_FEATURE_COUNT):
@@ -1083,9 +1490,11 @@ def _authenticate_inputs(
     return {
         "actor": actor, "protocol": protocol, "manifest": manifest,
         "designation": designation, "prior_report": prior_report,
+        "expansion_rows_report": expansion_rows_report,
         "expansion": expansion, "fit_scenes": fit_scenes,
         "validation_scenes": validation_scenes, "config": config,
         "relations": relations,
+        "previous_development": previous_development,
         "source_full_manifest_bindings": deepcopy(
             runtime.source_full_manifest_bindings),
     }
@@ -1099,6 +1508,7 @@ def _bindings(
     relations: R41DiagnosticPublicRelationsV8 = authenticated["relations"]
     expansion = authenticated["expansion"]
     prior_report = authenticated["prior_report"]
+    expansion_rows_report = authenticated["expansion_rows_report"]
     return {
         "actor_file_sha256": file_hash(paths["actor"]),
         "actor_parameters_sha256": actor.metadata["actor_parameters_sha256"],
@@ -1110,28 +1520,53 @@ def _bindings(
         "protocol_file_sha256": file_hash(paths["protocol"]),
         "protocol_content_sha256": digest(authenticated["protocol"]),
         "manifest_file_sha256": file_hash(paths["manifest"]),
-        "manifest_content_sha256": authenticated["manifest"].get("content_sha256"),
-        "manifest_semantic_sha256": digest(authenticated["manifest"]),
+        "manifest_content_sha256": manifest_binding.EXPECTED_MANIFEST_CONTENT_SHA256,
+        "manifest_semantic_sha256": manifest_binding.EXPECTED_MANIFEST_SEMANTIC_SHA256,
         "designation_file_sha256": file_hash(paths["designation"]),
         "designation_semantic_sha256": digest(authenticated["designation"]),
-        "prior_v7_report_file_sha256": file_hash(paths["prior_report"]),
-        "prior_v7_report_semantic_sha256": digest(prior_report),
+        "prior_rows_reauthentication_receipt_file_sha256": file_hash(
+            paths["prior_reauth_report"]),
+        "prior_rows_reauthentication_receipt_semantic_sha256": digest(
+            prior_report),
+        "prior_v7_source_report_file_sha256": file_hash(
+            paths["prior_source_report"]),
+        "prior_v7_source_report_semantic_sha256": prior_report["bindings"][
+            "source_v7_report_semantic_sha256"],
         "prior_v7_rows_file_sha256": file_hash(paths["prior_rows"]),
+        "prior_v7_rows_semantic_sha256": prior_report["bindings"][
+            "source_v7_rows_semantic_sha256"],
         "expansion_registry_file_sha256": file_hash(paths["expansion_registry"]),
         "expansion_registry_content_sha256": expansion["content_sha256"],
         "expansion_registry_semantic_sha256": digest(expansion),
+        "expansion_registry_report_file_sha256": file_hash(
+            paths["expansion_registry_report"]),
+        "expansion_registry_report_semantic_sha256": (
+            expansion_rows_report["bindings"][
+                "expansion_report_semantic_sha256"]),
+        "expansion_rows_reauthentication_receipt_file_sha256": file_hash(
+            paths["expansion_reauth_report"]),
+        "expansion_rows_reauthentication_receipt_semantic_sha256": digest(
+            expansion_rows_report),
+        "expansion_source_collection_report_file_sha256": file_hash(
+            paths["expansion_collection_report"]),
+        "expansion_source_collection_report_semantic_sha256": (
+            expansion_rows_report["bindings"][
+                "source_collection_report_semantic_sha256"]),
         "expansion_rows_file_sha256": file_hash(paths["expansion_rows"]),
+        "expansion_rows_semantic_sha256": expansion_rows_report["bindings"][
+            "source_rows_semantic_sha256"],
         "previous_development_file_sha256": file_hash(
             paths["previous_development"]),
         "previous_development_semantic_sha256": digest(
-            authenticated.get("previous_development", {})),
+            authenticated["previous_development"]),
         "fit_config_file_sha256": file_hash(paths["config"]),
         "fit_config_content_sha256": digest(authenticated["config"]),
         "public_feature_contract_sha256": digest(relations.contract()),
         "public_feature_registry_sha256": digest(list(relations.feature_names)),
         "pair_weight_version": weight_api.VERSION,
         "pair_weight_contract_sha256": digest(weight_api.contract()),
-        "pair_weight_source_sha256": file_hash(Path(weight_api.__file__).resolve()),
+        "pair_weight_source_sha256": sources[
+            Path(weight_api.__file__).resolve().relative_to(ROOT).as_posix()],
         "program_version": PUBLIC_TREE_VERSION,
         "component_program_version": BOOSTED_TREE_VERSION,
         "contract_sha256": digest(contract()),
@@ -1203,6 +1638,10 @@ def _build_into(
         pair_pool_multiplier=config["pair_pool_multiplier"],
     )
     arrays["weights"] = weight_result["weights"].copy()
+    fit_pair_group_bits = _pair_group_bits(arrays, weight_result["pairs"])
+    validation_pairs = v7._effective_pairs(
+        arrays, arrays["split_validation"])
+    validation_pair_group_bits = _pair_group_bits(arrays, validation_pairs)
     binding = digest({
         "bindings": bindings,
         "combined_rows_semantic_sha256": _arrays_digest(arrays),
@@ -1212,11 +1651,16 @@ def _build_into(
         arrays, relations=relations, weights=weight_result,
         config=config, binding=binding,
         source_identity=_program_source_identity(bindings),
+        pair_group_bits=fit_pair_group_bits,
     )
     probabilities = _predict_in_batches(program, arrays["observations"])
-    metrics = _metrics(probabilities, arrays)
+    metrics = _metrics(
+        probabilities, arrays, pairs=validation_pairs,
+        pair_group_bits=validation_pair_group_bits)
     gate = _gate(metrics)
-    strata = _strata(probabilities, arrays, scene_families)
+    strata = _strata(
+        probabilities, arrays, scene_families, pairs=validation_pairs,
+        pair_group_bits=validation_pair_group_bits)
     trace_audit = _trace_audit(program, arrays, probabilities)
     program_payload = program.to_dict()
     _validate_program_identity(
@@ -1224,8 +1668,23 @@ def _build_into(
         source_identity=_program_source_identity(bindings))
 
     _copy_exclusive(paths["prior_rows"], destination / "prior_v7_rows.npz")
-    _copy_exclusive(paths["prior_report"], destination / "prior_v7_report.json")
+    _copy_exclusive(
+        paths["prior_reauth_report"],
+        destination / "prior_rows_reauthentication_report.json")
+    _copy_exclusive(
+        paths["prior_source_report"], destination / "source_v7_report.json")
     _copy_exclusive(paths["expansion_rows"], destination / "expansion_rows.npz")
+    _copy_exclusive(
+        paths["expansion_collection_report"],
+        destination / "source_expansion_collection_report.json")
+    _copy_exclusive(
+        paths["expansion_reauth_report"],
+        destination / "expansion_rows_reauthentication_report.json")
+    _copy_exclusive(
+        paths["expansion_registry"], destination / "development_expansion.json")
+    _copy_exclusive(
+        paths["expansion_registry_report"],
+        destination / "development_expansion_report.json")
     _copy_exclusive(paths["config"], destination / "fit_config.json")
     _write_npz(destination / "rows.npz", arrays)
     _write_npz(destination / "pairs.npz", {
@@ -1244,6 +1703,7 @@ def _build_into(
         "sources": sources,
         "final_rows_accessed": False,
         "final_labels_accessed": False,
+        "historical_final_overlap_check_deferred_to_claim": True,
         "formal_ready": False,
     }
     _write_json(destination / "inputs.json", inputs)
@@ -1265,12 +1725,17 @@ def _build_into(
         "runtime_action_override": False,
         "final_rows_accessed": False,
         "final_labels_accessed": False,
+        "historical_final_overlap_check_deferred_to_claim": True,
         "formal_ready": False,
     }
     _write_json(destination / "candidate.json", candidate)
     evidence_names = (
-        "inputs.json", "prior_v7_report.json", "prior_v7_rows.npz",
-        "expansion_rows.npz", "fit_config.json", "rows.npz", "pairs.npz",
+        "inputs.json", "prior_rows_reauthentication_report.json",
+        "prior_v7_rows.npz", "source_v7_report.json",
+        "expansion_rows_reauthentication_report.json", "expansion_rows.npz",
+        "source_expansion_collection_report.json",
+        "development_expansion.json", "development_expansion_report.json",
+        "fit_config.json", "rows.npz", "pairs.npz",
         "weights_audit.json", "program.json", "candidate.json",
     )
     evidence = {name: file_hash(destination / name) for name in evidence_names}
@@ -1314,7 +1779,8 @@ def _arrays_digest(arrays: Mapping[str, np.ndarray]) -> str:
         value = np.ascontiguousarray(arrays[name])
         summary[name] = {
             "dtype": value.dtype.str, "shape": list(value.shape),
-            "sha256": __import__("hashlib").sha256(value.tobytes()).hexdigest(),
+            "sha256": __import__("hashlib").sha256(
+                memoryview(value).cast("B")).hexdigest(),
         }
     return digest(summary)
 
@@ -1394,13 +1860,18 @@ def build(
     manifest_path: str | Path, designation_path: str | Path,
     expansion_registry_path: str | Path,
     expected_expansion_registry_sha256: str,
-    prior_v7_output: str | Path, expected_prior_v7_report_sha256: str,
+    expansion_report_path: str | Path,
+    expected_expansion_report_sha256: str,
+    prior_rows_output: str | Path,
+    expected_prior_rows_report_sha256: str,
     previous_development_path: str | Path,
-    expansion_rows_path: str | Path, expected_expansion_rows_sha256: str,
+    expansion_rows_output: str | Path,
+    expected_expansion_rows_report_sha256: str,
     config_path: str | Path, expected_config_sha256: str,
     output: str | Path,
 ) -> dict[str, Any]:
-    paths = {
+    sources = producer_sources()
+    originals = {
         "actor": _regular(actor_path, "Frozen Actor"),
         "protocol": _regular(protocol_path, "Training protocol", maximum=MAX_JSON_BYTES),
         "manifest": _regular(manifest_path, "Diagnostic manifest", maximum=MAX_JSON_BYTES),
@@ -1408,38 +1879,42 @@ def build(
         "expansion_registry": _regular(
             expansion_registry_path, "Development expansion registry",
             maximum=MAX_JSON_BYTES),
-        "expansion_rows": _regular(
-            expansion_rows_path, "Development expansion rows",
-            maximum=MAX_NPZ_COMPRESSED_BYTES),
+        "expansion_registry_report": _regular(
+            expansion_report_path, "Development expansion report",
+            maximum=MAX_JSON_BYTES),
         "config": _regular(config_path, "Diagnostic v8 fit config", maximum=MAX_JSON_BYTES),
         "previous_development": _regular(
             previous_development_path, "Previous development supplement",
             maximum=MAX_JSON_BYTES),
     }
-    prior_output = Path(prior_v7_output).expanduser().absolute()
-    paths["prior_report"] = _regular(
-        prior_output / "report.json", "Prior v7 report", maximum=MAX_JSON_BYTES)
-    paths["prior_rows"] = _regular(
+    originals["manifest_validation"] = _manifest_validation_path(
+        originals["manifest"])
+    components = _resolved_designation_components(originals["designation"])
+    originals.update({"designation_" + name: path
+                      for name, path in components.items()})
+    if (components["actor"] != originals["actor"]
+            or components["protocol"] != originals["protocol"]):
+        raise ValueError("Explicit Actor/protocol differ from designation registry")
+    prior_output = Path(prior_rows_output).expanduser().absolute()
+    expansion_rows_directory = Path(
+        expansion_rows_output).expanduser().absolute()
+    originals["prior_reauth_report"] = _regular(
+        prior_output / "report.json", "Prior-row reauthentication report",
+        maximum=MAX_JSON_BYTES)
+    originals["prior_rows"] = _regular(
         prior_output / "rows.npz", "Prior v7 rows", maximum=MAX_NPZ_COMPRESSED_BYTES)
-    authenticated = _authenticate_inputs(
-        actor_path=paths["actor"], protocol_path=paths["protocol"],
-        manifest_path=paths["manifest"], designation_path=paths["designation"],
-        expansion_registry_path=paths["expansion_registry"],
-        expected_expansion_registry_sha256=expected_expansion_registry_sha256,
-        prior_v7_output=prior_output,
-        expected_prior_v7_report_sha256=expected_prior_v7_report_sha256,
-        expansion_rows_path=paths["expansion_rows"],
-        expected_expansion_rows_sha256=expected_expansion_rows_sha256,
-        config_path=paths["config"], expected_config_sha256=expected_config_sha256,
-    )
-    previous = _read_json(
-        paths["previous_development"], "Previous development supplement")
-    if (file_hash(paths["previous_development"])
-            != authenticated["prior_report"]["bindings"][
-                "development_supplement_file_sha256"]):
-        raise ValueError("Previous development supplement hash differs")
-    authenticated["previous_development"] = previous
-    sources = producer_sources()
+    originals["prior_source_report"] = _regular(
+        prior_output / "source_v7_report.json", "Historical v7 source report",
+        maximum=MAX_JSON_BYTES)
+    originals["expansion_reauth_report"] = _regular(
+        expansion_rows_directory / "report.json",
+        "Expansion-row reauthentication report", maximum=MAX_JSON_BYTES)
+    originals["expansion_collection_report"] = _regular(
+        expansion_rows_directory / "source_collection_report.json",
+        "Expansion source collection report", maximum=MAX_JSON_BYTES)
+    originals["expansion_rows"] = _regular(
+        expansion_rows_directory / "expansion_rows.npz",
+        "Development expansion rows", maximum=MAX_NPZ_COMPRESSED_BYTES)
     destination = Path(output).expanduser().absolute()
     parent = destination.parent
     if (not parent.is_dir() or parent.is_symlink() or parent.resolve() != parent
@@ -1452,24 +1927,114 @@ def build(
         lock_fd = os.open(
             lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL
             | getattr(os, "O_NOFOLLOW", 0), 0o600)
-        temporary = Path(tempfile.mkdtemp(
-            prefix="." + destination.name + ".tmp-", dir=parent)).absolute()
-        os.chmod(temporary, 0o700)
-        report = _build_into(
-            temporary, paths=paths, authenticated=authenticated, sources=sources)
-        directory_fd = os.open(temporary, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-        os.rename(temporary, destination)
-        temporary = None
-        parent_fd = os.open(parent, os.O_RDONLY)
-        try:
-            os.fsync(parent_fd)
-        finally:
-            os.close(parent_fd)
-        return deepcopy(report)
+        with ImmutableInputSnapshot(
+            originals,
+            expected_sha256=_snapshot_expected_hashes(
+                expected_expansion_registry_sha256=_sha(
+                    expected_expansion_registry_sha256,
+                    "development expansion registry"),
+                expected_expansion_report_sha256=_sha(
+                    expected_expansion_report_sha256,
+                    "development expansion report"),
+                expected_prior_rows_report_sha256=_sha(
+                    expected_prior_rows_report_sha256,
+                    "prior-row reauthentication report"),
+                expected_expansion_rows_report_sha256=_sha(
+                    expected_expansion_rows_report_sha256,
+                    "expansion-row reauthentication report"),
+                expected_config_sha256=_sha(
+                    expected_config_sha256, "fit config"),
+            ),
+            relative_names={
+                "manifest": "manifest/manifest.json",
+                "manifest_validation": "manifest/validation.json",
+                "prior_reauth_report": "prior/report.json",
+                "prior_rows": "prior/rows.npz",
+                "prior_source_report": "prior/source_v7_report.json",
+                "expansion_reauth_report": "expansion/report.json",
+                "expansion_collection_report": (
+                    "expansion/source_collection_report.json"),
+                "expansion_rows": "expansion/expansion_rows.npz",
+            },
+            maximum_bytes={
+                "prior_rows": MAX_NPZ_COMPRESSED_BYTES,
+                "expansion_rows": MAX_NPZ_COMPRESSED_BYTES,
+            },
+            prefix="warehouse-r41-rcpd-v8-inputs-",
+        ) as frozen:
+            paths = frozen.paths
+            snapshot_components = {
+                name: paths["designation_" + name] for name in components
+            }
+            authenticated = _authenticate_inputs(
+                actor_path=paths["actor"], protocol_path=paths["protocol"],
+                manifest_path=paths["manifest"],
+                designation_path=paths["designation"],
+                expansion_registry_path=paths["expansion_registry"],
+                expected_expansion_registry_sha256=(
+                    expected_expansion_registry_sha256),
+                expansion_report_path=paths["expansion_registry_report"],
+                expected_expansion_report_sha256=(
+                    expected_expansion_report_sha256),
+                prior_rows_output=paths["prior_reauth_report"].parent,
+                expected_prior_rows_report_sha256=(
+                    expected_prior_rows_report_sha256),
+                expansion_rows_output=paths["expansion_reauth_report"].parent,
+                expected_expansion_rows_report_sha256=(
+                    expected_expansion_rows_report_sha256),
+                previous_development_path=paths["previous_development"],
+                config_path=paths["config"],
+                expected_config_sha256=expected_config_sha256,
+                designation_original_path=originals["designation"],
+                designation_snapshot_components=snapshot_components,
+                designation_original_components=components,
+                sources=sources,
+            )
+            frozen.verify()
+            if producer_sources() != sources:
+                raise RuntimeError(
+                    "Diagnostic v8 sources changed during authentication")
+            temporary = Path(tempfile.mkdtemp(
+                prefix="." + destination.name + ".tmp-", dir=parent)).absolute()
+            os.chmod(temporary, 0o700)
+            report = _build_into(
+                temporary, paths=paths, authenticated=authenticated,
+                sources=sources)
+            directory_fd = os.open(temporary, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+            frozen.verify()
+            if producer_sources() != sources:
+                raise RuntimeError("Diagnostic v8 sources changed during publication")
+            if destination.exists() or destination.is_symlink():
+                raise ValueError("Diagnostic v8 destination appeared during build")
+            os.rename(temporary, destination)
+            temporary = None
+            try:
+                frozen.verify()
+                if producer_sources() != sources:
+                    raise RuntimeError(
+                        "Diagnostic v8 sources changed during publication")
+                artifacts = report.get("evidence_artifacts", {})
+                if (not isinstance(artifacts, Mapping)
+                        or any(file_hash(destination / name) != expected
+                               for name, expected in artifacts.items())
+                        or file_hash(destination / "report.json")
+                            != sha256(
+                                (canonical(report) + "\n").encode("utf-8")
+                            ).hexdigest()):
+                    raise RuntimeError("Published diagnostic v8 evidence differs")
+            except BaseException:
+                shutil.rmtree(destination, ignore_errors=True)
+                raise
+            parent_fd = os.open(parent, os.O_RDONLY)
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
+            return deepcopy(report)
     finally:
         if temporary is not None:
             shutil.rmtree(temporary, ignore_errors=True)
@@ -1478,17 +2043,23 @@ def build(
             lock.unlink(missing_ok=True)
 
 
-def read_saved_report(
+def _read_saved_report_snapshot(
     output: str | Path, *, expected_report_sha256: str,
     actor_path: str | Path, protocol_path: str | Path,
     manifest_path: str | Path, designation_path: str | Path,
     expansion_registry_path: str | Path,
     expected_expansion_registry_sha256: str,
-    expected_prior_v7_report_sha256: str,
+    expansion_report_path: str | Path,
+    expected_expansion_report_sha256: str,
+    expected_prior_rows_report_sha256: str,
     previous_development_path: str | Path,
-    expected_expansion_rows_sha256: str,
+    expected_expansion_rows_report_sha256: str,
     expected_config_sha256: str, require_passed: bool = True,
     refit: bool = True,
+    designation_original_path: Path | None = None,
+    designation_snapshot_components: Mapping[str, Path] | None = None,
+    designation_original_components: Mapping[str, Path] | None = None,
+    sources: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Fail closed, and optionally refit all four models from raw evidence."""
     if type(refit) is not bool:
@@ -1501,12 +2072,55 @@ def read_saved_report(
                            maximum=MAX_JSON_BYTES)
     if _sha(expected_report_sha256, "Diagnostic v8 report") != file_hash(report_path):
         raise ValueError("Diagnostic v8 report hash differs")
-    report = _read_json(report_path, "Diagnostic v8 report")
     expected_names = {
-        "inputs.json", "prior_v7_report.json", "prior_v7_rows.npz",
-        "expansion_rows.npz", "fit_config.json", "rows.npz", "pairs.npz",
+        "inputs.json", "prior_rows_reauthentication_report.json",
+        "prior_v7_rows.npz", "source_v7_report.json",
+        "expansion_rows_reauthentication_report.json", "expansion_rows.npz",
+        "source_expansion_collection_report.json",
+        "development_expansion.json", "development_expansion_report.json",
+        "fit_config.json", "rows.npz", "pairs.npz",
         "weights_audit.json", "program.json", "candidate.json",
     }
+    integrity_paths = {"saved_report": report_path}
+    for name in sorted(expected_names):
+        integrity_paths["saved_" + name] = _regular(
+            directory / name, "Diagnostic v8 " + name,
+            maximum=(MAX_NPZ_COMPRESSED_BYTES if name.endswith(".npz")
+                     else MAX_JSON_BYTES),
+        )
+    integrity_paths.update({
+        "external_actor": _regular(actor_path, "Frozen Actor"),
+        "external_protocol": _regular(
+            protocol_path, "Training protocol", maximum=MAX_JSON_BYTES),
+        "external_manifest": _regular(
+            manifest_path, "Diagnostic manifest", maximum=MAX_JSON_BYTES),
+        "external_designation": _regular(
+            designation_path, "Actor designation", maximum=MAX_JSON_BYTES),
+        "external_expansion_registry": _regular(
+            expansion_registry_path, "Development expansion registry",
+            maximum=MAX_JSON_BYTES),
+        "external_expansion_registry_report": _regular(
+            expansion_report_path, "Development expansion report",
+            maximum=MAX_JSON_BYTES),
+        "external_previous_development": _regular(
+            previous_development_path, "Previous development supplement",
+            maximum=MAX_JSON_BYTES),
+    })
+    integrity_paths["external_manifest_validation"] = (
+        _manifest_validation_path(integrity_paths["external_manifest"]))
+    if (designation_original_path is None
+            or designation_snapshot_components is None
+            or designation_original_components is None
+            or sources is None):
+        raise ValueError("Immutable diagnostic v8 reader snapshot required")
+    if producer_sources() != dict(sources):
+        raise RuntimeError("Diagnostic v8 sources changed before saved-report read")
+    integrity_paths.update({
+        "external_designation_" + name: path
+        for name, path in designation_snapshot_components.items()
+    })
+    integrity = _integrity_snapshot(integrity_paths)
+    report = _read_json(report_path, "Diagnostic v8 report")
     artifacts = report.get("evidence_artifacts")
     if not isinstance(artifacts, Mapping) or set(artifacts) != expected_names:
         raise ValueError("Diagnostic v8 evidence artifact registry differs")
@@ -1526,8 +2140,10 @@ def read_saved_report(
     if config != inputs.get("fit_config"):
         raise ValueError("Diagnostic v8 normalized fit config differs")
     # Reauthenticate embedded raw files against caller-frozen identities.
-    if (file_hash(directory / "expansion_rows.npz")
-            != _sha(expected_expansion_rows_sha256, "expansion rows")
+    if (file_hash(directory / "source_expansion_collection_report.json")
+            != expansion_rows_api.EXPECTED_SOURCE_COLLECTION_REPORT_SHA256
+            or file_hash(directory / "expansion_rows.npz")
+                != expansion_rows_api.EXPECTED_SOURCE_ROWS_SHA256
             or file_hash(inputs_path := directory / "inputs.json")
                 != artifacts["inputs.json"]):
         raise ValueError("Diagnostic v8 embedded raw evidence differs")
@@ -1545,34 +2161,58 @@ def read_saved_report(
         "expansion_registry": _regular(
             expansion_registry_path, "Development expansion registry",
             maximum=MAX_JSON_BYTES),
+        "expansion_registry_report": _regular(
+            expansion_report_path, "Development expansion report",
+            maximum=MAX_JSON_BYTES),
         "expansion_rows": directory / "expansion_rows.npz",
         "config": None,
         "previous_development": _regular(
             previous_development_path, "Previous development supplement",
             maximum=MAX_JSON_BYTES),
-        "prior_report": directory / "prior_v7_report.json",
+        "prior_reauth_report": (
+            directory / "prior_rows_reauthentication_report.json"),
+        "prior_source_report": directory / "source_v7_report.json",
         "prior_rows": directory / "prior_v7_rows.npz",
+        "expansion_reauth_report": (
+            directory / "expansion_rows_reauthentication_report.json"),
+        "expansion_collection_report": (
+            directory / "source_expansion_collection_report.json"),
     }
     # Inputs contain the original config bytes hash, while the canonical config
     # is itself bound semantically.  The reader does not need the external file.
     actor = NumPyNativeActor(external_paths["actor"])
-    manifest = _read_json(external_paths["manifest"], "Diagnostic manifest")
+    manifest = manifest_binding.read_saved_manifest(
+        external_paths["manifest"], actor_path=external_paths["actor"],
+        replay_scope="development")
     protocol = _read_json(external_paths["protocol"], "Training protocol")
     designation = _read_json(external_paths["designation"], "Actor designation")
-    legacy._validate_manifest_actor(manifest, actor)
-    legacy._validate_designation(
+    if manifest.get("frozen_actor") != {
+        "sha256": actor.artifact_sha256,
+        "actor_parameters_sha256": actor.metadata["actor_parameters_sha256"],
+    }:
+        raise ValueError("Development manifest/Actor identity differs")
+    _validate_designation_v2(
         designation_path=external_paths["designation"],
-        expected_designation_sha256=file_hash(external_paths["designation"]),
         actor_path=external_paths["actor"], protocol_path=external_paths["protocol"],
         actor=actor, protocol=protocol,
+        designation_original_path=designation_original_path,
+        designation_snapshot_components=designation_snapshot_components,
+        designation_original_components=designation_original_components,
     )
-    runtime = legacy._runtime(
-        external_paths["actor"], external_paths["protocol"],
-        external_paths["manifest"], manifest)
+    runtime = manifest_binding.build_runtime(
+        actor_path=external_paths["actor"],
+        protocol_path=external_paths["protocol"],
+        manifest_path=external_paths["manifest"])
     expansion = _read_json(
         external_paths["expansion_registry"], "Development expansion registry")
     if (file_hash(external_paths["expansion_registry"])
             != _sha(expected_expansion_registry_sha256, "expansion registry")
+            or file_hash(directory / "development_expansion.json")
+                != expected_expansion_registry_sha256
+            or file_hash(external_paths["expansion_registry_report"])
+                != _sha(expected_expansion_report_sha256, "expansion report")
+            or file_hash(directory / "development_expansion_report.json")
+                != expected_expansion_report_sha256
             or expansion.get("content_sha256")
                 != inputs["bindings"]["expansion_registry_content_sha256"]):
         raise ValueError("Diagnostic v8 expansion registry binding differs")
@@ -1592,21 +2232,121 @@ def read_saved_report(
                 external_paths["previous_development"])
         }},
     )
-    if (inputs["bindings"]["prior_v7_report_file_sha256"]
-            != _sha(expected_prior_v7_report_sha256, "prior v7 report")
-            or file_hash(external_paths["prior_report"])
-                != expected_prior_v7_report_sha256
-            or digest(_read_json(
-                external_paths["prior_report"], "Prior v7 report"))
-                != inputs["bindings"]["prior_v7_report_semantic_sha256"]
-            or file_hash(external_paths["prior_rows"])
-                != inputs["bindings"]["prior_v7_rows_file_sha256"]):
-        raise ValueError("Diagnostic v8 prior evidence binding differs")
+    prior_report = prior_rows_api._read_saved_artifacts_snapshot(
+        paths={
+            "saved_report": external_paths["prior_reauth_report"],
+            "saved_rows": external_paths["prior_rows"],
+            "embedded_source_report": external_paths["prior_source_report"],
+            "actor": external_paths["actor"],
+            "protocol": external_paths["protocol"],
+            "manifest": external_paths["manifest"],
+            "manifest_validation": external_paths["manifest"].parent
+                / "validation.json",
+            "designation": external_paths["designation"],
+            "supplement": external_paths["previous_development"],
+            "source_report": external_paths["prior_source_report"],
+            "source_rows": external_paths["prior_rows"],
+        },
+        designation_original_path=designation_original_path,
+        designation_snapshot_components=designation_snapshot_components,
+        designation_original_components=designation_original_components,
+        sources=prior_rows_api.producer_sources(),
+    )
+    expansion_rows_report = expansion_rows_api._read_saved_artifacts_snapshot(
+        paths={
+            "saved_report": external_paths["expansion_reauth_report"],
+            "embedded_rows": external_paths["expansion_rows"],
+            "embedded_collection_report": external_paths[
+                "expansion_collection_report"],
+            "actor": external_paths["actor"],
+            "protocol": external_paths["protocol"],
+            "manifest": external_paths["manifest"],
+            "manifest_validation": external_paths["manifest"].parent
+                / "validation.json",
+            "designation": external_paths["designation"],
+            "expansion_registry": external_paths["expansion_registry"],
+            "expansion_report": external_paths["expansion_registry_report"],
+            "previous": external_paths["previous_development"],
+            "source_collection_report": external_paths[
+                "expansion_collection_report"],
+            "source_rows": external_paths["expansion_rows"],
+            "prior_rows": external_paths["prior_rows"],
+        },
+        expected_expansion_registry_sha256=expected_expansion_registry_sha256,
+        expected_expansion_report_sha256=expected_expansion_report_sha256,
+        designation_original_path=designation_original_path,
+        designation_snapshot_components=designation_snapshot_components,
+        designation_original_components=designation_original_components,
+        sources=expansion_rows_api.producer_sources(),
+    )
     relations = R41DiagnosticPublicRelationsV8(actor.metadata["feature_names"])
+    live_authenticated = {
+        "actor": actor,
+        "protocol": protocol,
+        "manifest": manifest,
+        "designation": designation,
+        "prior_report": prior_report,
+        "expansion_rows_report": expansion_rows_report,
+        "expansion": expansion,
+        "fit_scenes": fit_scenes,
+        "validation_scenes": validation_scenes,
+        "config": config,
+        "relations": relations,
+        "previous_development": previous,
+        "source_full_manifest_bindings": deepcopy(
+            runtime.source_full_manifest_bindings),
+    }
+    external_paths["config"] = directory / "fit_config.json"
+    if _bindings(
+        paths=external_paths,
+        authenticated=live_authenticated,
+        sources=sources,
+    ) != inputs.get("bindings"):
+        raise ValueError("Diagnostic v8 complete input binding differs")
+    if (inputs["bindings"].get(
+            "prior_rows_reauthentication_receipt_file_sha256")
+            != file_hash(external_paths["prior_reauth_report"])
+            or inputs["bindings"].get(
+                "prior_rows_reauthentication_receipt_semantic_sha256")
+                != digest(prior_report)
+            or inputs["bindings"].get("prior_v7_source_report_file_sha256")
+                != file_hash(external_paths["prior_source_report"])
+            or inputs["bindings"].get(
+                "prior_v7_source_report_semantic_sha256")
+                != prior_report["bindings"][
+                    "source_v7_report_semantic_sha256"]
+            or inputs["bindings"].get("prior_v7_rows_file_sha256")
+                != file_hash(external_paths["prior_rows"])
+            or inputs["bindings"].get("prior_v7_rows_semantic_sha256")
+                != prior_report["bindings"][
+                    "source_v7_rows_semantic_sha256"]
+            or inputs["bindings"].get(
+                "expansion_rows_reauthentication_receipt_file_sha256")
+                != file_hash(external_paths["expansion_reauth_report"])
+            or inputs["bindings"].get(
+                "expansion_rows_reauthentication_receipt_semantic_sha256")
+                != digest(expansion_rows_report)
+            or inputs["bindings"].get(
+                "expansion_source_collection_report_file_sha256")
+                != file_hash(external_paths["expansion_collection_report"])
+            or inputs["bindings"].get(
+                "expansion_source_collection_report_semantic_sha256")
+                != expansion_rows_report["bindings"][
+                    "source_collection_report_semantic_sha256"]
+            or inputs["bindings"].get("expansion_rows_file_sha256")
+                != file_hash(external_paths["expansion_rows"])
+            or inputs["bindings"].get("expansion_rows_semantic_sha256")
+                != expansion_rows_report["bindings"][
+                    "source_rows_semantic_sha256"]
+            or inputs["bindings"].get(
+                "expansion_registry_report_semantic_sha256")
+                != expansion_rows_report["bindings"][
+                    "expansion_report_semantic_sha256"]):
+        raise ValueError("Diagnostic v8 row reauthentication binding differs")
     if (inputs.get("contract") != contract()
-            or inputs.get("sources") != producer_sources()
+            or inputs.get("sources") != sources
             or inputs["bindings"]["producer_sources_sha256"]
-                != digest(producer_sources())
+                != digest(sources)
             or inputs["bindings"]["actor_file_sha256"]
                 != file_hash(external_paths["actor"])
             or inputs["bindings"]["protocol_file_sha256"]
@@ -1615,6 +2355,8 @@ def read_saved_report(
                 != file_hash(external_paths["manifest"])
             or inputs["bindings"]["designation_file_sha256"]
                 != file_hash(external_paths["designation"])
+            or inputs["bindings"].get("expansion_registry_report_file_sha256")
+                != file_hash(external_paths["expansion_registry_report"])
             or inputs["bindings"]["public_feature_contract_sha256"]
                 != digest(relations.contract())
             or inputs["bindings"]["public_feature_registry_sha256"]
@@ -1622,7 +2364,8 @@ def read_saved_report(
             or inputs["bindings"]["pair_weight_contract_sha256"]
                 != digest(weight_api.contract())
             or inputs["bindings"]["pair_weight_source_sha256"]
-                != file_hash(Path(weight_api.__file__).resolve())
+                != sources[
+                    Path(weight_api.__file__).resolve().relative_to(ROOT).as_posix()]
             or inputs["bindings"].get("source_full_manifest_bindings")
                 != runtime.source_full_manifest_bindings
             or inputs["bindings"].get("source_full_manifest_bindings_sha256")
@@ -1657,6 +2400,12 @@ def read_saved_report(
         pair_pool_multiplier=config["pair_pool_multiplier"],
     )
     expected_arrays["weights"] = weight_result["weights"].copy()
+    fit_pair_group_bits = _pair_group_bits(
+        expected_arrays, weight_result["pairs"])
+    validation_pairs = v7._effective_pairs(
+        expected_arrays, expected_arrays["split_validation"])
+    validation_pair_group_bits = _pair_group_bits(
+        expected_arrays, validation_pairs)
     if (_arrays_digest(arrays) != _arrays_digest(expected_arrays)
             or _read_json(directory / "weights_audit.json", "Weights audit")
                 != weight_result["audit"]):
@@ -1686,11 +2435,14 @@ def read_saved_report(
             expected_arrays, relations=relations, weights=weight_result,
             config=config, binding=binding,
             source_identity=_program_source_identity(inputs["bindings"]),
+            pair_group_bits=fit_pair_group_bits,
         )
         if program.to_dict() != saved_program.to_dict():
             raise ValueError("Diagnostic v8 program differs from authenticated refit")
     probabilities = _predict_in_batches(program, expected_arrays["observations"])
-    metrics = _metrics(probabilities, expected_arrays)
+    metrics = _metrics(
+        probabilities, expected_arrays, pairs=validation_pairs,
+        pair_group_bits=validation_pair_group_bits)
     gate = _gate(metrics)
     candidate = {
         "version": VERSION,
@@ -1702,7 +2454,10 @@ def read_saved_report(
         "fit_config": config,
         "metrics": metrics,
         "gate": gate,
-        "strata": _strata(probabilities, expected_arrays, family_map),
+        "strata": _strata(
+            probabilities, expected_arrays, family_map,
+            pairs=validation_pairs,
+            pair_group_bits=validation_pair_group_bits),
         "fit_diagnostics": fit_diagnostics,
         "complexity": program.complexity(),
         "trace_audit": _trace_audit(program, expected_arrays, probabilities),
@@ -1710,6 +2465,7 @@ def read_saved_report(
         "runtime_action_override": False,
         "final_rows_accessed": False,
         "final_labels_accessed": False,
+        "historical_final_overlap_check_deferred_to_claim": True,
         "formal_ready": False,
     }
     stored_candidate = _read_json(
@@ -1748,7 +2504,178 @@ def read_saved_report(
         raise ValueError("Diagnostic v8 report differs from recomputed evidence")
     if require_passed and report["status"] != STATUS_PASSED:
         raise ValueError("Diagnostic v8 did not meet its development gates")
+    _verify_integrity(integrity, integrity_paths, phase="saved-report return")
     return deepcopy(report)
+
+
+def read_saved_report(
+    output: str | Path, *, expected_report_sha256: str,
+    actor_path: str | Path, protocol_path: str | Path,
+    manifest_path: str | Path, designation_path: str | Path,
+    expansion_registry_path: str | Path,
+    expected_expansion_registry_sha256: str,
+    expansion_report_path: str | Path,
+    expected_expansion_report_sha256: str,
+    expected_prior_rows_report_sha256: str,
+    previous_development_path: str | Path,
+    expected_expansion_rows_report_sha256: str,
+    expected_config_sha256: str, require_passed: bool = True,
+    refit: bool = True,
+) -> dict[str, Any]:
+    """Authenticate every input from one immutable, hash-bound snapshot."""
+    sources = producer_sources()
+    if type(refit) is not bool:
+        raise ValueError("refit must be a bool")
+    directory = Path(output).expanduser().absolute()
+    if (not directory.is_dir() or directory.is_symlink()
+            or directory.resolve() != directory):
+        raise ValueError("Diagnostic v8 evidence directory is unsafe")
+    report_path = _regular(
+        directory / "report.json", "Diagnostic v8 report",
+        maximum=MAX_JSON_BYTES)
+    try:
+        report_raw = read_authenticated_bytes(
+            report_path, label="Diagnostic v8 report",
+            expected_sha256=_sha(
+                expected_report_sha256, "Diagnostic v8 report"),
+            maximum=MAX_JSON_BYTES,
+        )
+    except ValueError:
+        raise ValueError("Diagnostic v8 report hash differs") from None
+    try:
+        report_identity = json.loads(
+            report_raw.decode("utf-8"),
+            object_pairs_hook=_json_pairs("Diagnostic v8 report"),
+            parse_constant=lambda token: (_ for _ in ()).throw(
+                ValueError("Non-finite JSON value in Diagnostic v8 report: "
+                           + token)),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("Diagnostic v8 report must be strict UTF-8 JSON") from error
+    expected_names = {
+        "inputs.json", "prior_rows_reauthentication_report.json",
+        "prior_v7_rows.npz", "source_v7_report.json",
+        "expansion_rows_reauthentication_report.json", "expansion_rows.npz",
+        "source_expansion_collection_report.json",
+        "development_expansion.json", "development_expansion_report.json",
+        "fit_config.json", "rows.npz", "pairs.npz",
+        "weights_audit.json", "program.json", "candidate.json",
+    }
+    artifacts = (report_identity.get("evidence_artifacts")
+                 if isinstance(report_identity, Mapping) else None)
+    if (not isinstance(artifacts, Mapping)
+            or set(artifacts) != expected_names
+            or any(_HEX.fullmatch(str(value)) is None
+                   for value in artifacts.values())):
+        raise ValueError("Diagnostic v8 evidence artifact registry differs")
+    originals: dict[str, Path] = {
+        "saved_report": report_path,
+        "external_actor": _regular(actor_path, "Frozen Actor"),
+        "external_protocol": _regular(
+            protocol_path, "Training protocol", maximum=MAX_JSON_BYTES),
+        "external_manifest": _regular(
+            manifest_path, "Diagnostic manifest", maximum=MAX_JSON_BYTES),
+        "external_designation": _regular(
+            designation_path, "Actor designation", maximum=MAX_JSON_BYTES),
+        "external_expansion_registry": _regular(
+            expansion_registry_path, "Development expansion registry",
+            maximum=MAX_JSON_BYTES),
+        "external_expansion_registry_report": _regular(
+            expansion_report_path, "Development expansion report",
+            maximum=MAX_JSON_BYTES),
+        "external_previous_development": _regular(
+            previous_development_path, "Previous development supplement",
+            maximum=MAX_JSON_BYTES),
+    }
+    originals["external_manifest_validation"] = _manifest_validation_path(
+        originals["external_manifest"])
+    components = _resolved_designation_components(
+        originals["external_designation"])
+    if (components["actor"] != originals["external_actor"]
+            or components["protocol"] != originals["external_protocol"]):
+        raise ValueError("Explicit Actor/protocol differ from designation registry")
+    originals.update({"external_designation_" + name: path
+                      for name, path in components.items()})
+    expected: dict[str, str] = {
+        "saved_report": expected_report_sha256,
+        "external_actor": designation_binding.designation.EXPECTED_ACTOR_SHA256,
+        "external_protocol": (
+            designation_binding.designation.EXPECTED_PROTOCOL_FILE_SHA256),
+        "external_manifest": manifest_binding.EXPECTED_MANIFEST_SHA256,
+        "external_manifest_validation": manifest_binding.EXPECTED_VALIDATION_SHA256,
+        "external_designation": designation_binding.EXPECTED_DESIGNATION_SHA256,
+        "external_expansion_registry": expected_expansion_registry_sha256,
+        "external_expansion_registry_report": expected_expansion_report_sha256,
+        "external_previous_development": (
+            expansion_api.EXPECTED_PREVIOUS_DEVELOPMENT_SHA256),
+        "external_designation_actor": (
+            designation_binding.designation.EXPECTED_ACTOR_SHA256),
+        "external_designation_protocol": (
+            designation_binding.designation.EXPECTED_PROTOCOL_FILE_SHA256),
+        "external_designation_training_ledger": (
+            designation_binding.designation.EXPECTED_LEDGER_SHA256),
+        "external_designation_dual_evaluation": (
+            designation_binding.designation.EXPECTED_DUAL_EVALUATION_SHA256),
+        "external_designation_failure_closeout": (
+            designation_binding.designation.EXPECTED_CLOSEOUT_SHA256),
+    }
+    relative_names = {
+        "saved_report": "candidate/report.json",
+        "external_manifest": "external_manifest/manifest.json",
+        "external_manifest_validation": "external_manifest/validation.json",
+    }
+    maximum_bytes: dict[str, int] = {}
+    for name in sorted(expected_names):
+        key = "saved_" + name
+        originals[key] = _regular(
+            directory / name, "Diagnostic v8 " + name,
+            maximum=(MAX_NPZ_COMPRESSED_BYTES if name.endswith(".npz")
+                     else MAX_JSON_BYTES))
+        expected[key] = str(artifacts[name])
+        relative_names[key] = "candidate/" + name
+        if name.endswith(".npz"):
+            maximum_bytes[key] = MAX_NPZ_COMPRESSED_BYTES
+    with ImmutableInputSnapshot(
+        originals, expected_sha256=expected,
+        relative_names=relative_names, maximum_bytes=maximum_bytes,
+        prefix="warehouse-r41-rcpd-v8-reader-inputs-",
+    ) as frozen:
+        snapshot_components = {
+            name: frozen.paths["external_designation_" + name]
+            for name in components
+        }
+        result = _read_saved_report_snapshot(
+            frozen.root / "candidate",
+            expected_report_sha256=expected_report_sha256,
+            actor_path=frozen.paths["external_actor"],
+            protocol_path=frozen.paths["external_protocol"],
+            manifest_path=frozen.paths["external_manifest"],
+            designation_path=frozen.paths["external_designation"],
+            expansion_registry_path=frozen.paths["external_expansion_registry"],
+            expected_expansion_registry_sha256=(
+                expected_expansion_registry_sha256),
+            expansion_report_path=frozen.paths[
+                "external_expansion_registry_report"],
+            expected_expansion_report_sha256=(
+                expected_expansion_report_sha256),
+            expected_prior_rows_report_sha256=(
+                expected_prior_rows_report_sha256),
+            previous_development_path=frozen.paths[
+                "external_previous_development"],
+            expected_expansion_rows_report_sha256=(
+                expected_expansion_rows_report_sha256),
+            expected_config_sha256=expected_config_sha256,
+            require_passed=require_passed, refit=refit,
+            designation_original_path=originals["external_designation"],
+            designation_snapshot_components=snapshot_components,
+            designation_original_components=components,
+            sources=sources,
+        )
+        frozen.verify()
+        if producer_sources() != sources:
+            raise RuntimeError(
+                "Diagnostic v8 sources changed during saved-report return")
+        return result
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1759,11 +2686,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--designation", required=True)
     parser.add_argument("--expansion-registry", required=True)
     parser.add_argument("--expected-expansion-registry-sha256", required=True)
-    parser.add_argument("--prior-v7-output", required=True)
-    parser.add_argument("--expected-prior-v7-report-sha256", required=True)
+    parser.add_argument("--expansion-report", required=True)
+    parser.add_argument("--expected-expansion-report-sha256", required=True)
+    parser.add_argument("--prior-rows-output", required=True)
+    parser.add_argument("--expected-prior-rows-report-sha256", required=True)
     parser.add_argument("--previous-development", required=True)
-    parser.add_argument("--expansion-rows", required=True)
-    parser.add_argument("--expected-expansion-rows-sha256", required=True)
+    parser.add_argument("--expansion-rows-output", required=True)
+    parser.add_argument(
+        "--expected-expansion-rows-report-sha256", required=True)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expected-config-sha256", required=True)
     parser.add_argument("--output", required=True)
@@ -1773,11 +2703,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         manifest_path=args.manifest, designation_path=args.designation,
         expansion_registry_path=args.expansion_registry,
         expected_expansion_registry_sha256=args.expected_expansion_registry_sha256,
-        prior_v7_output=args.prior_v7_output,
-        expected_prior_v7_report_sha256=args.expected_prior_v7_report_sha256,
+        expansion_report_path=args.expansion_report,
+        expected_expansion_report_sha256=args.expected_expansion_report_sha256,
+        prior_rows_output=args.prior_rows_output,
+        expected_prior_rows_report_sha256=(
+            args.expected_prior_rows_report_sha256),
         previous_development_path=args.previous_development,
-        expansion_rows_path=args.expansion_rows,
-        expected_expansion_rows_sha256=args.expected_expansion_rows_sha256,
+        expansion_rows_output=args.expansion_rows_output,
+        expected_expansion_rows_report_sha256=(
+            args.expected_expansion_rows_report_sha256),
         config_path=args.config, expected_config_sha256=args.expected_config_sha256,
         output=args.output,
     )

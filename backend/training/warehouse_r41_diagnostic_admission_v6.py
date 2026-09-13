@@ -8,22 +8,30 @@ tutorial all authenticate against the designated terminal Actor.
 from __future__ import annotations
 
 from copy import deepcopy
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
 from pathlib import PureWindowsPath
 import re
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
+from backend.training import warehouse_diagnostic_source_closure as source_closure_api
 from backend.training import warehouse_r41_diagnostic_conflict_play_selection as selection_api
 from backend.training import warehouse_r41_diagnostic_conflict_scenarios as scenes_api
-from backend.training import warehouse_r41_diagnostic_designation as designation_api
+from backend.training import warehouse_r41_diagnostic_designation_v2 as designation_api
+from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_binding
+from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_api
+from backend.training import warehouse_r41_diagnostic_frozen_publication_v2 as publication_api
+from backend.training import warehouse_r41_diagnostic_input_snapshot_v8 as input_snapshot_api
 from backend.training import warehouse_r41_diagnostic_development_expansion_v8 as expansion_api
+from backend.training import warehouse_r41_diagnostic_expansion_rows_v8 as expansion_rows_api
 from backend.training import warehouse_r41_diagnostic_explanation_audit_v8 as explanation_api
 from backend.training import warehouse_r41_diagnostic_final_once_v8 as final_once_api
 from backend.training import warehouse_r41_diagnostic_fresh_final_holdout_v3 as retired_v3_api
 from backend.training import warehouse_r41_diagnostic_fresh_final_holdout_v4 as holdout_api
 from backend.training import warehouse_r41_diagnostic_pair_weights_v8 as pair_weight_api
+from backend.training import warehouse_r41_diagnostic_prior_rows_v8 as prior_rows_api
 from backend.training import warehouse_r41_diagnostic_question_bank as question_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as rcpd_api
 from backend.training.warehouse_native_common import canonical, digest, file_hash
@@ -56,37 +64,27 @@ MAX_TOTAL_ITERATIONS = 2048
 MAX_TOTAL_TREES = 10_240
 MAX_TOTAL_NODES = 2_500_000
 MAXIMUM_TREE_DEPTH = 16
-EXPECTED_RETIRED_HOLDOUTS = {
-    "warehouse-r41-diagnostic-fresh-final-holdout.v1": {
-        "file_sha256": (
-            "6c3ff25f9917451815979173d98881fe5e5e98258b514d199d50ee362d2746c2"
-        ),
-        "content_sha256": (
-            "92d3a1320a08dcfa07e8a68e2b8e43f8d3748072e3c887a965c9b7efd9cfe627"
-        ),
-    },
-    "warehouse-r41-diagnostic-fresh-final-holdout.v2": {
-        "file_sha256": (
-            "7d72424744eea7547516cffe414c15578802c7204b90bdf1b129a1e9acfbf17b"
-        ),
-        "content_sha256": (
-            "a0072c07e196ceca2680fbdde2f786d4867a1862ee8461a7fc943cbc8f765e28"
-        ),
-    },
-}
-
 ARTIFACT_NAMES = (
     "diagnostic_designation", "actor", "protocol", "training_ledger",
     "dual_evaluation", "failure_closeout", "diagnostic_contract",
     "conflict_manifest", "conflict_validation", "dynamic_selection_report",
-    "selected_scenes", "development_supplement",
+    "dynamic_selection_protocol", "dynamic_selection_prefilter",
+    "dynamic_selection_episodes", "selected_scenes", "development_supplement",
     "development_expansion_registry", "development_expansion_report",
-    "prior_v7_rcpd_report", "prior_v7_rcpd_rows",
-    "development_expansion_rows", "v8_fit_config", "final_rcpd_report",
-    "final_rcpd_rows", "final_rcpd_program",
-    "retired_fresh_final_holdout_v1", "retired_fresh_final_holdout_v2",
+    "prior_rows_reauthentication_report", "prior_v7_source_report",
+    "prior_v7_rows", "expansion_rows_reauthentication_report",
+    "expansion_source_collection_report", "expansion_rows", "v8_fit_config",
+    "final_rcpd_inputs",
+    "final_rcpd_development_expansion_registry",
+    "final_rcpd_development_expansion_report",
+    "final_rcpd_report", "final_rcpd_rows", "final_rcpd_pairs",
+    "final_rcpd_weights_audit", "final_rcpd_program",
+    "final_rcpd_candidate", "retired_identity_projection",
+    "retired_identity_projection_report",
     "final_once_attempt_started", "final_once_candidate_authenticated",
     "final_once_holdout_started", "final_once_holdout_completed",
+    "final_once_historical_exclusion_started",
+    "final_once_historical_exclusion_completed",
     "final_once_audit_started", "final_once_audit_completed",
     "final_once_attempt_completed", "fresh_final_holdout",
     "fresh_final_holdout_report", "fresh_final_v3_exclusion",
@@ -98,18 +96,50 @@ FINAL_ONCE_LEDGER_ARTIFACTS = {
     "final_once_attempt_started": "attempt_started.json",
     "final_once_candidate_authenticated": "candidate_authenticated.json",
     "final_once_holdout_started": "holdout_started.json",
+    "final_once_historical_exclusion_started": (
+        "historical_exclusion_started.json"),
+    "final_once_historical_exclusion_completed": (
+        "historical_exclusion_completed.json"),
     "final_once_holdout_completed": "holdout_completed.json",
     "final_once_audit_started": "audit_started.json",
     "final_once_audit_completed": "audit_completed.json",
     "final_once_attempt_completed": "attempt_completed.json",
+}
+RCPD_CANDIDATE_ARTIFACTS = {
+    "inputs.json": "final_rcpd_inputs",
+    "prior_rows_reauthentication_report.json": (
+        "prior_rows_reauthentication_report"),
+    "prior_v7_rows.npz": "prior_v7_rows",
+    "source_v7_report.json": "prior_v7_source_report",
+    "expansion_rows_reauthentication_report.json": (
+        "expansion_rows_reauthentication_report"),
+    "source_expansion_collection_report.json": (
+        "expansion_source_collection_report"),
+    "expansion_rows.npz": "expansion_rows",
+    "development_expansion.json": (
+        "final_rcpd_development_expansion_registry"),
+    "development_expansion_report.json": (
+        "final_rcpd_development_expansion_report"),
+    "fit_config.json": "v8_fit_config",
+    "rows.npz": "final_rcpd_rows",
+    "pairs.npz": "final_rcpd_pairs",
+    "weights_audit.json": "final_rcpd_weights_audit",
+    "program.json": "final_rcpd_program",
+    "candidate.json": "final_rcpd_candidate",
+    "report.json": "final_rcpd_report",
 }
 FINAL_ONCE_CANDIDATE_AUTH_FIELDS = frozenset((
     "version", "status", "campaign_key", "candidate_identity_sha256",
     "attempt_started_sha256", "candidate_artifacts",
     "candidate_artifacts_sha256", "rcpd_report_file_sha256",
     "program_file_sha256", "rows_file_sha256",
-    "prior_v7_report_file_sha256", "prior_v7_rows_file_sha256",
-    "expansion_rows_file_sha256", "fit_config_file_sha256",
+    "prior_rows_reauthentication_report_file_sha256",
+    "prior_v7_source_report_file_sha256", "prior_v7_rows_file_sha256",
+    "expansion_rows_reauthentication_report_file_sha256",
+    "expansion_source_collection_report_file_sha256",
+    "expansion_rows_file_sha256",
+    "development_expansion_registry_file_sha256",
+    "development_expansion_report_file_sha256", "fit_config_file_sha256",
     "actor_file_sha256", "protocol_file_sha256", "manifest_file_sha256",
     "designation_file_sha256", "selected_scenes_file_sha256",
     "development_registries", "require_passed", "refit", "formal_ready",
@@ -130,12 +160,25 @@ BINDING_FIELDS = frozenset((
     "diagnostic_contract_sha256", "conflict_graph_sha256", "conflict_families_sha256",
     "conflict_manifest_file_sha256", "conflict_manifest_content_sha256",
     "conflict_manifest_semantic_sha256", "conflict_validation_sha256",
+    "diagnostic_publication_authentication_sha256",
     "dynamic_selection_report_sha256", "selected_scenes_file_sha256",
+    "dynamic_selection_protocol_sha256", "dynamic_selection_prefilter_sha256",
+    "dynamic_selection_episodes_sha256",
     "selected_scenes_semantic_sha256", "development_supplement_sha256",
+    "portable_runtime_manifest_sha256",
     "development_expansion_registry_sha256", "development_expansion_content_sha256",
-    "development_expansion_report_sha256", "prior_v7_rcpd_report_sha256",
-    "prior_v7_rcpd_rows_sha256", "development_expansion_rows_sha256",
-    "v8_fit_config_sha256", "final_rcpd_report_sha256", "final_rcpd_rows_sha256",
+    "development_expansion_report_sha256",
+    "retired_identity_projection_sha256",
+    "retired_identity_projection_content_sha256",
+    "retired_identity_projection_report_sha256",
+    "prior_rows_reauthentication_report_sha256",
+    "prior_v7_source_report_sha256", "prior_v7_rows_sha256",
+    "expansion_rows_reauthentication_report_sha256",
+    "expansion_source_collection_report_sha256", "expansion_rows_sha256",
+    "v8_fit_config_sha256",
+    "final_rcpd_inputs_sha256", "final_rcpd_report_sha256",
+    "final_rcpd_rows_sha256", "final_rcpd_pairs_sha256",
+    "final_rcpd_weights_audit_sha256", "final_rcpd_candidate_sha256",
     "final_rcpd_binding_sha256", "fresh_final_holdout_sha256",
     "fresh_final_holdout_content_sha256", "fresh_final_holdout_report_sha256",
     "fresh_final_v3_exclusion_sha256",
@@ -143,7 +186,10 @@ BINDING_FIELDS = frozenset((
     "final_once_identity_sha256", "final_once_campaign_key",
     "final_once_permanent_anchor_sha256", "final_once_attempt_started_sha256",
     "final_once_candidate_authenticated_sha256",
-    "final_once_holdout_started_sha256", "final_once_holdout_completed_sha256",
+    "final_once_holdout_started_sha256",
+    "final_once_historical_exclusion_started_sha256",
+    "final_once_historical_exclusion_completed_sha256",
+    "final_once_holdout_completed_sha256",
     "final_once_audit_started_sha256", "final_once_audit_completed_sha256",
     "final_once_attempt_completed_sha256", "program_sha256",
     "program_content_sha256", "program_identity_sha256",
@@ -193,6 +239,28 @@ def _strict_json(path: Path, label: str, *, maximum: int = 512 * 1024 * 1024) ->
         value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=pairs,
             parse_constant=lambda token: (_ for _ in ()).throw(
                 ValueError("Non-finite JSON value in " + label + ": " + token)))
+    except UnicodeDecodeError as error:
+        raise ValueError(label + " must be UTF-8 JSON") from error
+    if not isinstance(value, dict):
+        raise ValueError(label + " must be one JSON object")
+    return value
+
+
+def _strict_json_bytes(raw: bytes, label: str) -> dict[str, Any]:
+    """Parse already-authenticated JSON bytes without reopening a pathname."""
+    def pairs(rows):
+        result = {}
+        for key, value in rows:
+            if key in result:
+                raise ValueError("Duplicate JSON field in " + label)
+            result[key] = value
+        return result
+    try:
+        value = json.loads(
+            raw.decode("utf-8"), object_pairs_hook=pairs,
+            parse_constant=lambda token: (_ for _ in ()).throw(
+                ValueError("Non-finite JSON value in " + label + ": " + token)),
+        )
     except UnicodeDecodeError as error:
         raise ValueError(label + " must be UTF-8 JSON") from error
     if not isinstance(value, dict):
@@ -469,25 +537,154 @@ def _diagnostic_runtime(actor: Path, protocol_path: Path, manifest_path: Path,
     runtime.verify_binding(); return runtime
 
 
-def _validate_publication(files: Mapping[str, Path], hashes: Mapping[str, str],
-        manifest: Mapping[str, Any]) -> None:
-    receipt = _strict_json(files["diagnostic_contract"], "diagnostic contract")
-    if (canonical(receipt) != canonical(diagnostic_contract_receipt())
-            or receipt.get("contract_sha256") != DIAGNOSTIC_CONTRACT_SHA256
-            or receipt.get("conflict_families_sha256") != CONFLICT_FAMILIES_SHA256):
-        raise ValueError("Diagnostic conflict contract receipt differs")
-    recomputed = scenes_api.validate_diagnostic_manifest(manifest, replay=True,
-        workload_actor_path=files["actor"], replay_workloads=True)
-    saved = _strict_json(files["conflict_validation"], "conflict validation")
-    expected = {**recomputed, "artifacts": {
-        "diagnostic_contract.json": hashes["diagnostic_contract"],
-        "manifest.json": hashes["conflict_manifest"]}}
-    if saved != expected or saved.get("passed") is not True:
+def _validate_publication(files: Mapping[str, Path],
+                          hashes: Mapping[str, str]) -> dict[str, Any]:
+    if hashes["conflict_manifest"] != manifest_api.EXPECTED_MANIFEST_SHA256:
+        raise ValueError("Exact frozen diagnostic manifest required")
+    successful_final = publication_api._successful_final_capability(
+        actor_path=files["actor"], manifest_path=files["conflict_manifest"],
+        program_path=files["final_rcpd_program"],
+    )
+    publication = publication_api.read_saved_publication(
+        manifest_path=files["conflict_manifest"],
+        validation_path=files["conflict_validation"],
+        contract_path=files["diagnostic_contract"],
+        actor_path=files["actor"],
+        program_path=files["final_rcpd_program"],
+    )
+    manifest = publication.get("manifest")
+    validation = publication.get("validation")
+    contract = publication.get("contract")
+    current_runtime = manifest_api.runtime_sources()
+    expected_authentication = {
+        "version": publication_api.AUTHENTICATION_VERSION,
+        "status": "authenticated_exact_publication_with_full_workload_replay",
+        "replay_scope": "all",
+        "final_test_replayed_for_authentication": True,
+        "final_test_rows_used_for_fit_or_selection": False,
+        "final_labels_used": False,
+        "final_test_scene_count": (
+            len(manifest.get("splits", {}).get("final_test", []))
+            if isinstance(manifest, Mapping) else -1
+        ),
+        "manifest_file_sha256": hashes["conflict_manifest"],
+        "manifest_content_sha256": (
+            manifest.get("content_sha256") if isinstance(manifest, Mapping) else None
+        ),
+        "manifest_semantic_sha256": (
+            digest(manifest) if isinstance(manifest, Mapping) else None
+        ),
+        "validation_file_sha256": hashes["conflict_validation"],
+        "validation_semantic_sha256": (
+            digest(validation) if isinstance(validation, Mapping) else None
+        ),
+        "contract_file_sha256": hashes["diagnostic_contract"],
+        "contract_semantic_sha256": (
+            digest(contract) if isinstance(contract, Mapping) else None
+        ),
+        "current_runtime_sources_sha256": current_runtime["sources_sha256"],
+        "successful_final_capability_sha256": digest(successful_final),
+        "final_once_version": successful_final.get("final_once_version"),
+        "final_once_campaign_key": successful_final.get("campaign_key"),
+        "final_once_campaign_identity_sha256": successful_final.get(
+            "campaign_identity_sha256"),
+        "final_once_candidate_identity_sha256": successful_final.get(
+            "candidate_identity_sha256"),
+        "final_once_attempt_started_sha256": successful_final.get(
+            "attempt_started_sha256"),
+        "final_once_attempt_completed_sha256": successful_final.get(
+            "attempt_completed_sha256"),
+        "final_once_permanent_anchor_sha256": successful_final.get(
+            "permanent_anchor_sha256"),
+        "final_once_candidate_authenticated_sha256": successful_final.get(
+            "candidate_authenticated_sha256"),
+        "final_once_candidate_artifacts_sha256": successful_final.get(
+            "candidate_artifacts_sha256"),
+        "final_once_phase_receipts_sha256": successful_final.get(
+            "phase_receipts_sha256"),
+        "actor_file_sha256": successful_final.get("actor_file_sha256"),
+        "program_file_sha256": successful_final.get("program_file_sha256"),
+    }
+    expected_phase_receipts = {
+        relative: hashes[name]
+        for name, relative in FINAL_ONCE_LEDGER_ARTIFACTS.items()
+        if name not in {
+            "final_once_attempt_started", "final_once_attempt_completed"
+        }
+    }
+    expected_candidate_artifacts = {
+        name: hashes[RCPD_CANDIDATE_ARTIFACTS[name]]
+        for name in sorted(RCPD_CANDIDATE_ARTIFACTS)
+    }
+    if (not isinstance(manifest, Mapping)
+            or not isinstance(validation, Mapping)
+            or not isinstance(contract, Mapping)
+            or manifest.get("content_sha256")
+                != manifest_api.EXPECTED_MANIFEST_CONTENT_SHA256
+            or hashes["conflict_validation"]
+                != publication_api.EXPECTED_VALIDATION_SHA256
+            or hashes["diagnostic_contract"]
+                != publication_api.EXPECTED_CONTRACT_SHA256
+            or validation.get("passed") is not True
+            or set(RCPD_CANDIDATE_ARTIFACTS)
+                != set(final_once_api.CANDIDATE_ARTIFACT_KEYS)
+            or successful_final.get("version")
+                != publication_api.SUCCESSFUL_FINAL_VERSION
+            or successful_final.get("status")
+                != "authenticated_completed_passed"
+            or successful_final.get("final_once_version")
+                != final_once_api.VERSION
+            or successful_final.get("campaign_key")
+                != final_once_api.campaign_key()
+            or successful_final.get("campaign_identity")
+                != final_once_api._campaign_identity()
+            or successful_final.get("campaign_identity_sha256")
+                != digest(final_once_api._campaign_identity())
+            or successful_final.get("candidate_identity_sha256")
+                != digest(final_once_api._campaign_identity())
+            or successful_final.get("attempt_started_sha256")
+                != hashes["final_once_attempt_started"]
+            or successful_final.get("attempt_completed_sha256")
+                != hashes["final_once_attempt_completed"]
+            or successful_final.get("candidate_authenticated_sha256")
+                != hashes["final_once_candidate_authenticated"]
+            or successful_final.get("candidate_artifacts")
+                != expected_candidate_artifacts
+            or successful_final.get("candidate_artifacts_sha256")
+                != digest(expected_candidate_artifacts)
+            or successful_final.get("phase_receipts")
+                != expected_phase_receipts
+            or successful_final.get("phase_receipts_sha256")
+                != digest(expected_phase_receipts)
+            or successful_final.get("actor_file_sha256") != hashes["actor"]
+            or successful_final.get("manifest_file_sha256")
+                != hashes["conflict_manifest"]
+            or successful_final.get("program_file_sha256")
+                != hashes["final_rcpd_program"]
+            or successful_final.get("retry_allowed") is not False
+            or successful_final.get("runtime_action_override") is not False
+            or successful_final.get("formal_ready") is not False
+            or publication.get("successful_final") != successful_final
+            or canonical(publication.get("current_runtime"))
+                != canonical(current_runtime)
+            or canonical(publication.get("authentication_receipt"))
+                != canonical(expected_authentication)
+            or publication.get("authentication_sha256")
+                != digest(expected_authentication)
+            or publication.get("publication_identity_sha256") != digest({
+                "manifest": hashes["conflict_manifest"],
+                "validation": hashes["conflict_validation"],
+                "contract": hashes["diagnostic_contract"],
+                "current_runtime_sources_sha256": current_runtime[
+                    "sources_sha256"],
+            })):
         raise ValueError("Diagnostic scene publication differs from physical replay")
+    return dict(publication)
 
 
 def _validate_expansion(files: Mapping[str, Path], hashes: Mapping[str, str],
-        actor: NumPyNativeActor, manifest: Mapping[str, Any]) -> dict[str, Any]:
+        actor: NumPyNativeActor, manifest: Mapping[str, Any], *,
+        semantic_files: Mapping[str, Path] | None = None) -> dict[str, Any]:
     expansion_dir = _same_parent(
         files,
         ("development_expansion_registry", "development_expansion_report"),
@@ -497,8 +694,13 @@ def _validate_expansion(files: Mapping[str, Path], hashes: Mapping[str, str],
             != expansion_dir / "development_expansion.json"
             or files["development_expansion_report"] != expansion_dir / "report.json"):
         raise ValueError("Development-expansion evidence layout differs")
-    registry = _strict_json(files["development_expansion_registry"], "development expansion")
-    report = _strict_json(files["development_expansion_report"], "development expansion report")
+    content_files = files if semantic_files is None else semantic_files
+    registry = _strict_json(
+        content_files["development_expansion_registry"],
+        "development expansion")
+    report = _strict_json(
+        content_files["development_expansion_report"],
+        "development expansion report")
     content = {key: value for key, value in registry.items() if key != "content_sha256"}
     report_content = {key: value for key, value in report.items() if key != "content_sha256"}
     if (registry.get("version") != expansion_api.VERSION or registry.get("status") != expansion_api.STATUS
@@ -523,32 +725,116 @@ def _validate_expansion(files: Mapping[str, Path], hashes: Mapping[str, str],
     return registry
 
 
-def _validate_retired_holdout_bindings(
+def _validate_row_reauthentication(
         files: Mapping[str, Path], hashes: Mapping[str, str],
-        expansion: Mapping[str, Any]) -> dict[str, dict[str, str]]:
-    actual: dict[str, dict[str, str]] = {}
-    for index in (1, 2):
-        name = f"retired_fresh_final_holdout_v{index}"
-        value = _strict_json(files[name], "retired fresh-final holdout")
-        version = value.get("version")
-        content = {key: child for key, child in value.items()
-                   if key != "content_sha256"}
-        claimed_content = value.get("content_sha256")
-        if (version not in EXPECTED_RETIRED_HOLDOUTS or version in actual
-                or claimed_content != digest(content)):
-            raise ValueError("Retired fresh-final holdout identity differs")
-        actual[str(version)] = {
-            "file_sha256": hashes[name],
-            "content_sha256": claimed_content,
-        }
-    expansion_bindings = expansion.get("bindings")
-    expansion_retired = (expansion_bindings.get("retired_holdouts")
-                         if isinstance(expansion_bindings, Mapping) else None)
-    if (actual != EXPECTED_RETIRED_HOLDOUTS
-            or expansion_retired != EXPECTED_RETIRED_HOLDOUTS):
-        raise ValueError(
-            "Retired v1/v2 bytes must match the fixed development expansion")
-    return deepcopy(actual)
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Re-run both development-row authenticators before admitting a fit."""
+    if (hashes["prior_v7_source_report"]
+            != prior_rows_api.EXPECTED_SOURCE_REPORT_SHA256
+            or hashes["prior_v7_rows"]
+                != prior_rows_api.EXPECTED_SOURCE_ROWS_SHA256):
+        raise ValueError("Exact prior-row reauthentication layout differs")
+    prior_receipt = prior_rows_api.read_saved_artifacts(
+        report_path=files["prior_rows_reauthentication_report"],
+        rows_path=files["prior_v7_rows"],
+        embedded_source_report_path=files["prior_v7_source_report"],
+        expected_report_sha256=hashes[
+            "prior_rows_reauthentication_report"],
+        actor_path=files["actor"], protocol_path=files["protocol"],
+        manifest_path=files["conflict_manifest"],
+        designation_path=files["diagnostic_designation"],
+        development_supplement_path=files["development_supplement"],
+        source_report_path=files["prior_v7_source_report"],
+        source_rows_path=files["prior_v7_rows"],
+    )
+    if (prior_receipt.get("version") != prior_rows_api.VERSION
+            or prior_receipt.get("status") != prior_rows_api.STATUS
+            or canonical(prior_receipt.get("contract"))
+                != canonical(prior_rows_api.contract())
+            or prior_receipt.get("content_sha256") != digest({
+                key: value for key, value in prior_receipt.items()
+                if key != "content_sha256"
+            })
+            or prior_receipt.get("runtime_action_override") is not False
+            or prior_receipt.get("formal_ready") is not False
+            or prior_receipt.get("validation", {}).get(
+                "final_scene_geometry_access") is not False
+            or prior_receipt.get("validation", {}).get(
+                "final_trajectories_access") is not False
+            or prior_receipt.get("validation", {}).get(
+                "final_actor_outputs_or_labels_access") is not False
+            or prior_receipt.get("validation", {}).get(
+                "final_used_for_fit_selection_metrics") is not False):
+        raise ValueError("Exact development-only prior-row receipt required")
+
+    if (hashes["expansion_rows"]
+                != expansion_rows_api.EXPECTED_SOURCE_ROWS_SHA256
+            or hashes["expansion_source_collection_report"]
+                != expansion_rows_api.EXPECTED_SOURCE_COLLECTION_REPORT_SHA256
+            or hashes["prior_v7_rows"]
+                != expansion_rows_api.EXPECTED_PRIOR_ROWS_SHA256):
+        raise ValueError("Exact expansion-row reauthentication layout differs")
+    expansion_receipt = expansion_rows_api.read_saved_artifacts(
+        report_path=files["expansion_rows_reauthentication_report"],
+        rows_path=files["expansion_rows"],
+        collection_report_path=files["expansion_source_collection_report"],
+        expected_report_sha256=hashes[
+            "expansion_rows_reauthentication_report"],
+        actor_path=files["actor"], protocol_path=files["protocol"],
+        manifest_path=files["conflict_manifest"],
+        designation_path=files["diagnostic_designation"],
+        expansion_registry_path=files["development_expansion_registry"],
+        expected_expansion_registry_sha256=hashes[
+            "development_expansion_registry"],
+        expansion_report_path=files["development_expansion_report"],
+        expected_expansion_report_sha256=hashes[
+            "development_expansion_report"],
+        previous_development_path=files["development_supplement"],
+        source_collection_report_path=files[
+            "expansion_source_collection_report"],
+        source_rows_path=files["expansion_rows"],
+        prior_rows_path=files["prior_v7_rows"],
+    )
+    if (expansion_receipt.get("version") != expansion_rows_api.VERSION
+            or expansion_receipt.get("status") != expansion_rows_api.STATUS
+            or canonical(expansion_receipt.get("contract"))
+                != canonical(expansion_rows_api.contract())
+            or expansion_receipt.get("content_sha256") != digest({
+                key: value for key, value in expansion_receipt.items()
+                if key != "content_sha256"
+            })
+            or any(expansion_receipt.get(name) is not False for name in (
+                "final_test_accessed", "participant_data_accessed",
+                "program_accessed", "runtime_action_override", "formal_ready",
+            ))):
+        raise ValueError("Exact development-only expansion-row receipt required")
+    return dict(prior_receipt), dict(expansion_receipt)
+
+
+def _validate_retired_identity_projection(
+        files: Mapping[str, Path], hashes: Mapping[str, str],
+        expansion: Mapping[str, Any], *,
+        semantic_files: Mapping[str, Path] | None = None) -> dict[str, Any]:
+    projection_path = files["retired_identity_projection"]
+    report_path = files["retired_identity_projection_report"]
+    if report_path != projection_path.parent / "report.json":
+        raise ValueError("Retired identity projection evidence layout differs")
+    content_files = files if semantic_files is None else semantic_files
+    identities, binding = holdout_api._retired_identity_projection(
+        content_files["retired_identity_projection"])
+    if (len(identities)
+            != holdout_api.retired_identity_api.EXPECTED_GLOBAL_EXPOSED_IDENTITIES
+            or hashes["retired_identity_projection"]
+                != holdout_api.EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256
+            or hashes["retired_identity_projection_report"]
+                != holdout_api.EXPECTED_RETIRED_IDENTITY_PROJECTION_REPORT_SHA256
+            or binding.get("file_sha256")
+                != hashes["retired_identity_projection"]
+            or binding.get("audit_file_sha256")
+                != hashes["retired_identity_projection_report"]):
+        raise ValueError("Exact retired identity-only projection required")
+    holdout_api._validate_retired_expansion_binding(binding, expansion)
+    return deepcopy(binding)
 
 
 def _validate_bilingual_question_bank(payload: Mapping[str, Any]) -> None:
@@ -606,8 +892,7 @@ def _runtime_audit(runtime: R41DiagnosticOnlineAlignmentRuntime,
 
 
 def source_closure() -> dict[str, str]:
-    from backend.training.warehouse_r4_production_admission import local_source_hashes
-    return local_source_hashes((Path(__file__),
+    sources = source_closure_api.local_source_hashes((Path(__file__),
         ROOT / "scripts/build_warehouse_r41_diagnostic_admission_v6.py",
         Path(designation_api.__file__), Path(scenes_api.__file__), Path(selection_api.__file__),
         Path(expansion_api.__file__), Path(rcpd_api.__file__), Path(pair_weight_api.__file__),
@@ -623,6 +908,146 @@ def source_closure() -> dict[str, str]:
         ROOT / "scripts/preflight_warehouse_r41_diagnostic_render_v6.py",
         ROOT / "backend/training/warehouse_r41_diagnostic_release_receipt_v6.py",
         ROOT / "scripts/build_warehouse_r41_diagnostic_release_receipt_v6.py"))
+    for name, source_sha256 in designation_api.source_closure().items():
+        if name in sources and sources[name] != source_sha256:
+            raise ValueError("Admission designation source closure differs")
+        sources[name] = source_sha256
+    return dict(sorted(sources.items()))
+
+
+def _canonical_component_paths(
+        paths: Mapping[str, str | Path]) -> dict[str, Path]:
+    """Resolve the exact component registry once for a guarded transaction."""
+    if not isinstance(paths, Mapping) or set(paths) != set(ARTIFACT_NAMES):
+        raise ValueError("Exact r4.1 diagnostic v8 admission artifact set required")
+    return {
+        name: _artifact_path(
+            paths[name], name,
+            external_name=FINAL_ONCE_LEDGER_ARTIFACTS.get(name),
+        )[0]
+        for name in ARTIFACT_NAMES
+    }
+
+
+def _component_hash_snapshot(paths: Mapping[str, Path]) -> dict[str, str]:
+    if set(paths) != set(ARTIFACT_NAMES):
+        raise ValueError("Exact r4.1 diagnostic v8 component path set required")
+    return {name: file_hash(paths[name]) for name in sorted(paths)}
+
+
+def _component_relatives(paths: Mapping[str, Path]) -> dict[str, str]:
+    """Return paths already authenticated by ``_canonical_component_paths``."""
+    result: dict[str, str] = {}
+    for name, path in paths.items():
+        external = FINAL_ONCE_LEDGER_ARTIFACTS.get(name)
+        if external is not None:
+            result[name] = "external/final_once_ledger/" + external
+        else:
+            try:
+                result[name] = path.relative_to(ROOT.resolve()).as_posix()
+            except ValueError:
+                raise ValueError(name + " must stay inside the repository") from None
+    return result
+
+
+def _component_snapshot_spec(
+    paths: Mapping[str, Path], hashes: Mapping[str, str],
+) -> tuple[dict[str, Path], dict[str, str], dict[str, str], dict[str, str]]:
+    """Deduplicate physical files while preserving every sibling layout.
+
+    Several admission names intentionally point at the same candidate file.
+    Snapshotting by physical identity avoids copying one path twice while the
+    per-parent relative layout lets strict downstream readers operate solely
+    on immutable private bytes.
+    """
+    if set(paths) != set(ARTIFACT_NAMES) or set(hashes) != set(ARTIFACT_NAMES):
+        raise ValueError("Exact r4.1 diagnostic v8 component set required")
+    unique_paths = sorted(set(paths.values()), key=lambda item: item.as_posix())
+    parent_ids = {
+        parent: index for index, parent in enumerate(sorted(
+            {path.parent for path in unique_paths}, key=lambda item: item.as_posix()))
+    }
+    key_by_path = {
+        path: f"component{index:03d}" for index, path in enumerate(unique_paths)
+    }
+    snapshot_paths = {key_by_path[path]: path for path in unique_paths}
+    expected: dict[str, str] = {}
+    for name, path in paths.items():
+        key = key_by_path[path]
+        value = hashes[name]
+        if key in expected and expected[key] != value:
+            raise ValueError("Aliased admission component hashes differ")
+        expected[key] = value
+    relative = {
+        key_by_path[path]: (
+            f"groups/{parent_ids[path.parent]:03d}/{path.name}")
+        for path in unique_paths
+    }
+    aliases = {name: key_by_path[path] for name, path in paths.items()}
+    return snapshot_paths, expected, relative, aliases
+
+
+def _validate_component_transaction(
+    files: Mapping[str, Path], *, hashes: Mapping[str, str],
+    relatives: Mapping[str, str], expected_sources: Mapping[str, str],
+    phase: str,
+) -> dict[str, Any]:
+    """Run the complete semantic admission check against one frozen byte set."""
+    snapshot_paths, expected, relative_names, aliases = (
+        _component_snapshot_spec(files, hashes))
+    with input_snapshot_api.ImmutableInputSnapshot(
+            snapshot_paths, expected_sha256=expected,
+            relative_names=relative_names,
+            prefix="warehouse-r41-admission-") as frozen:
+        semantic_files = {
+            name: frozen.paths[aliases[name]] for name in ARTIFACT_NAMES
+        }
+        checked = _validate_components_snapshot(
+            files, semantic_files, relatives, hashes)
+        if checked.get("sources") != dict(expected_sources):
+            raise RuntimeError(
+                "Diagnostic admission source changed during " + phase)
+        from ui import warehouse_alignment_r41_diagnostic_release_v8 as release
+        release_sources = release.release_sources()
+        if (any(expected_sources.get(name) != value
+                for name, value in release_sources.items())
+                or checked.get("package_contract", {}).get(
+                    "release_sources_sha256") != digest(release_sources)):
+            raise RuntimeError(
+                "Diagnostic admission release source changed during " + phase)
+        frozen.verify()
+        _guard_admission_inputs(
+            files, expected_hashes=hashes,
+            expected_sources=expected_sources, phase=phase)
+        frozen.verify()
+        return checked
+
+
+def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
+    """Strictly authenticate all components through one immutable snapshot."""
+    sources = source_closure()
+    files = _canonical_component_paths(paths)
+    relatives = _component_relatives(files)
+    hashes = _component_hash_snapshot(files)
+    _guard_admission_inputs(
+        files, expected_hashes=hashes, expected_sources=sources,
+        phase="component-reader entry")
+    return _validate_component_transaction(
+        files, hashes=hashes, relatives=relatives,
+        expected_sources=sources, phase="component-reader return")
+
+
+def _guard_admission_inputs(
+    paths: Mapping[str, Path], *, expected_hashes: Mapping[str, str],
+    expected_sources: Mapping[str, str], phase: str,
+) -> None:
+    if source_closure() != dict(expected_sources):
+        raise RuntimeError("Diagnostic admission source changed during " + phase)
+    current_hashes = _component_hash_snapshot(paths)
+    if (current_hashes != dict(expected_hashes)
+            or source_closure() != dict(expected_sources)):
+        raise RuntimeError(
+            "Diagnostic admission component or source changed during " + phase)
 
 
 def package_contract() -> dict[str, Any]:
@@ -660,57 +1085,126 @@ def _require_fixed_final_once_registry(registry: Path, campaign_key: str) -> Non
         raise ValueError("Final-once permanent registry layout differs")
 
 
-def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
-    if not isinstance(paths, Mapping) or set(paths) != set(ARTIFACT_NAMES):
+def _validate_components_snapshot(
+    files: Mapping[str, Path], semantic_files: Mapping[str, Path],
+    relatives: Mapping[str, str], hashes: Mapping[str, str],
+) -> dict[str, Any]:
+    """Validate semantics from private bytes while retaining real identities."""
+    if (set(files) != set(ARTIFACT_NAMES)
+            or set(semantic_files) != set(ARTIFACT_NAMES)
+            or set(relatives) != set(ARTIFACT_NAMES)
+            or set(hashes) != set(ARTIFACT_NAMES)):
         raise ValueError("Exact r4.1 diagnostic v8 admission artifact set required")
-    files, relatives = {}, {}
-    for name in ARTIFACT_NAMES:
-        files[name], relatives[name] = _artifact_path(
-            paths[name], name,
-            external_name=FINAL_ONCE_LEDGER_ARTIFACTS.get(name),
-        )
-    hashes = {name: file_hash(path) for name, path in files.items()}
     if hashes["actor"] != FIXED_ACTOR_SHA256:
         raise ValueError("Exact user-designated terminal Actor required")
-    designation_components = {name: files[name] for name in designation_api.ARTIFACT_NAMES}
-    designation = designation_api.read_saved_designation(files["diagnostic_designation"],
-        expected_sha256=hashes["diagnostic_designation"], components=designation_components)
+    if hashes["diagnostic_designation"] != designation_binding.EXPECTED_DESIGNATION_SHA256:
+        raise ValueError("Exact cycle-free diagnostic designation v2 required")
+    designation = designation_binding.read_bound_designation_snapshot(
+        semantic_files["diagnostic_designation"],
+        original_path=files["diagnostic_designation"],
+        components={
+            name: semantic_files[name] for name in designation_api.ARTIFACT_NAMES
+        },
+        original_components={
+            name: files[name] for name in designation_api.ARTIFACT_NAMES
+        },
+        expected_sha256=designation_binding.EXPECTED_DESIGNATION_SHA256,
+    )
+    expected_designation_artifacts = {
+        name: {"path": relatives[name], "sha256": hashes[name]}
+        for name in designation_api.ARTIFACT_NAMES
+    }
     if (designation.get("behavior_performance_gate_passed") is not False
             or designation.get("behavior_performance_gate_waived") is not True
             or designation.get("waiver_scope") != ["behavior_performance"]
             or designation.get("formal_ready") is not False
             or designation.get("formal_sample_eligible") is not False
             or designation.get("runtime_action_override") is not False
-            or designation.get("bindings", {}).get("actor_sha256") != FIXED_ACTOR_SHA256):
+            or designation.get("bindings", {}).get("actor_sha256") != FIXED_ACTOR_SHA256
+            or designation.get("artifacts") != expected_designation_artifacts):
         raise ValueError("Exact diagnostic Actor designation required")
-    protocol = _strict_json(files["protocol"], "training protocol")
-    manifest = _strict_json(files["conflict_manifest"], "conflict manifest")
-    _validate_publication(files, hashes, manifest)
-    runtime = _diagnostic_runtime(files["actor"], files["protocol"],
-        files["conflict_manifest"], protocol, manifest)
-    actor = NumPyNativeActor(files["actor"])
+    protocol = _strict_json(semantic_files["protocol"], "training protocol")
+    contract_receipt = _strict_json(
+        semantic_files["diagnostic_contract"], "diagnostic contract")
+    publication = _validate_publication(semantic_files, hashes)
+    manifest = publication["manifest"]
+    runtime = _diagnostic_runtime(
+        semantic_files["actor"], semantic_files["protocol"],
+        semantic_files["conflict_manifest"], protocol, manifest)
+    actor = NumPyNativeActor(semantic_files["actor"])
+    dynamic_dir = _same_parent(files, (
+        "dynamic_selection_report", "dynamic_selection_protocol",
+        "dynamic_selection_prefilter", "dynamic_selection_episodes",
+        "selected_scenes"), "dynamic selection")
+    semantic_dynamic_dir = _same_parent(semantic_files, (
+        "dynamic_selection_report", "dynamic_selection_protocol",
+        "dynamic_selection_prefilter", "dynamic_selection_episodes",
+        "selected_scenes"), "snapshot dynamic selection")
+    expected_dynamic_layout = {
+        "dynamic_selection_report": "report.json",
+        "dynamic_selection_protocol": "protocol.json",
+        "dynamic_selection_prefilter": "prefilter.jsonl",
+        "dynamic_selection_episodes": "episodes.jsonl",
+        "selected_scenes": "selected_scenes.json",
+    }
+    if (any(files[name] != dynamic_dir / filename
+            for name, filename in expected_dynamic_layout.items())
+            or any(semantic_files[name] != semantic_dynamic_dir / filename
+                   for name, filename in expected_dynamic_layout.items())):
+        raise ValueError("Dynamic selection evidence layout differs")
     dynamic = selection_api.read_saved_diagnostic_selection(
-        files["dynamic_selection_report"].parent,
+        semantic_dynamic_dir,
         expected_report_sha256=hashes["dynamic_selection_report"],
-        actor_path=files["actor"], manifest_path=files["conflict_manifest"],
-        selected_scenes_path=files["selected_scenes"], require_selected=True)
-    selection = _strict_json(files["selected_scenes"], "selected scenes")
-    if (dynamic.get("passed") is not True or selection.get("release_eligible") is not True
+        actor_path=semantic_files["actor"],
+        manifest_path=semantic_files["conflict_manifest"],
+        selected_scenes_path=semantic_files["selected_scenes"],
+        require_selected=True)
+    selection = _strict_json(semantic_files["selected_scenes"], "selected scenes")
+    if (dynamic.get("passed") is not True
+            or dynamic.get("selection") != selection
+            or dynamic.get("selected_scenes_sha256")
+                != hashes["selected_scenes"]
+            or selection.get("release_eligible") is not True
             or selection.get("six_distinct_conflict_families") is not True
             or selection.get("zero_action_overrides") is not True
             or selection.get("ordinary_sampler_fallback") is not False):
         raise ValueError("Exact passing six-family scene selection required")
-    expansion = _validate_expansion(files, hashes, actor, manifest)
-    _validate_retired_holdout_bindings(files, hashes, expansion)
-    rcpd_dir = _same_parent(files, ("prior_v7_rcpd_report", "prior_v7_rcpd_rows",
-        "development_expansion_rows", "v8_fit_config", "final_rcpd_report",
-        "final_rcpd_rows", "final_rcpd_program"), "v8 RCPD")
-    expected_names = {"prior_v7_rcpd_report": "prior_v7_report.json",
-        "prior_v7_rcpd_rows": "prior_v7_rows.npz",
-        "development_expansion_rows": "expansion_rows.npz", "v8_fit_config": "fit_config.json",
-        "final_rcpd_report": "report.json", "final_rcpd_rows": "rows.npz",
-        "final_rcpd_program": "program.json"}
-    if any(files[name] != rcpd_dir / filename for name, filename in expected_names.items()):
+    # Bind the exact compact manifest bytes that the portable release must use.
+    # The release loader cannot safely reconstruct this projection from the
+    # compact package alone, so the admission is the authority for its bytes.
+    from ui import warehouse_alignment_r41_diagnostic_release_v8 as release_api
+    portable_runtime_manifest = release_api._runtime_manifest(
+        selection, manifest, {
+            "actor_sha256": FIXED_ACTOR_SHA256,
+            "conflict_manifest_file_sha256": hashes["conflict_manifest"],
+            "conflict_manifest_content_sha256": manifest["content_sha256"],
+            "conflict_manifest_semantic_sha256": digest(manifest),
+            "diagnostic_contract_sha256": DIAGNOSTIC_CONTRACT_SHA256,
+            "conflict_graph_sha256": contract_receipt[
+                "conflict_graph_sha256"],
+            "conflict_families_sha256": CONFLICT_FAMILIES_SHA256,
+            "conflict_validation_sha256": hashes["conflict_validation"],
+            "dynamic_selection_report_sha256": hashes[
+                "dynamic_selection_report"],
+            "selected_scenes_file_sha256": hashes["selected_scenes"],
+            "selected_scenes_semantic_sha256": digest(selection),
+        })
+    portable_runtime_manifest_sha256 = sha256(
+        (canonical(portable_runtime_manifest) + "\n").encode("utf-8")
+    ).hexdigest()
+    expansion = _validate_expansion(
+        files, hashes, actor, manifest, semantic_files=semantic_files)
+    retired_projection = _validate_retired_identity_projection(
+        files, hashes, expansion, semantic_files=semantic_files)
+    prior_rows_receipt, expansion_rows_receipt = _validate_row_reauthentication(
+        files, hashes)
+    rcpd_layout = {
+        artifact: filename
+        for filename, artifact in RCPD_CANDIDATE_ARTIFACTS.items()
+    }
+    rcpd_dir = _same_parent(files, tuple(rcpd_layout), "v8 RCPD")
+    if any(files[name] != rcpd_dir / filename
+           for name, filename in rcpd_layout.items()):
         raise ValueError("v8 RCPD evidence layout differs")
     final = rcpd_api.read_saved_report(rcpd_dir,
         expected_report_sha256=hashes["final_rcpd_report"], actor_path=files["actor"],
@@ -718,26 +1212,34 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
         designation_path=files["diagnostic_designation"],
         expansion_registry_path=files["development_expansion_registry"],
         expected_expansion_registry_sha256=hashes["development_expansion_registry"],
-        expected_prior_v7_report_sha256=hashes["prior_v7_rcpd_report"],
+        expansion_report_path=files["development_expansion_report"],
+        expected_expansion_report_sha256=hashes[
+            "development_expansion_report"],
+        expected_prior_rows_report_sha256=hashes[
+            "prior_rows_reauthentication_report"],
         previous_development_path=files["development_supplement"],
-        expected_expansion_rows_sha256=hashes["development_expansion_rows"],
+        expected_expansion_rows_report_sha256=hashes[
+            "expansion_rows_reauthentication_report"],
         expected_config_sha256=hashes["v8_fit_config"], require_passed=True, refit=False)
-    program_identity = validate_v8_program_identity(files["final_rcpd_program"],
+    program_identity = validate_v8_program_identity(
+        semantic_files["final_rcpd_program"],
         actor_feature_names=actor.metadata["feature_names"], actor_sha256=FIXED_ACTOR_SHA256,
         actor_parameters_sha256=actor.metadata["actor_parameters_sha256"],
         source_full_manifest_bindings=runtime.source_full_manifest_bindings,
-        rcpd_report=final, fit_config=_strict_json(files["v8_fit_config"], "v8 fit config"))
+        rcpd_report=final, fit_config=_strict_json(
+            semantic_files["v8_fit_config"], "v8 fit config"))
     holdout_dir = _same_parent(files, (
         "fresh_final_holdout", "fresh_final_holdout_report",
         "fresh_final_v3_exclusion"), "fresh-final")
     if files["fresh_final_v3_exclusion"] != holdout_dir / "v3_exclusion.json":
         raise ValueError("Fresh-final v3 exclusion layout differs")
-    holdout = holdout_api.read_saved_holdout(holdout_dir,
+    semantic_holdout_dir = semantic_files["fresh_final_holdout"].parent
+    holdout = holdout_api.read_saved_holdout(semantic_holdout_dir,
         expected_holdout_sha256=hashes["fresh_final_holdout"],
         expected_report_sha256=hashes["fresh_final_holdout_report"])
     holdout_sources = holdout_api.producer_sources()
     holdout_report = _strict_json(
-        files["fresh_final_holdout_report"], "fresh-final report")
+        semantic_files["fresh_final_holdout_report"], "fresh-final report")
     _require_exact_producer_source_closure(
         holdout_report.get("producer_sources"), holdout_sources,
         label="Fresh-final")
@@ -751,21 +1253,23 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
             or holdout.get("statistics", {}).get("public_observation_overlap") != 0
             or holdout.get("bindings", {}).get("actor_sha256") != FIXED_ACTOR_SHA256):
         raise ValueError("Exact program-blind v4 fresh final holdout required")
-    retired = [files[f"retired_fresh_final_holdout_v{index}"] for index in (1, 2)]
-    singles, dev_paths, row_paths, retired_paths = final_once_api._input_paths(
+    singles, dev_paths, row_paths, projection_paths = final_once_api._input_paths(
         actor_path=files["actor"], protocol_path=files["protocol"],
         program_path=files["final_rcpd_program"], rcpd_report_path=files["final_rcpd_report"],
         manifest_path=files["conflict_manifest"], designation_path=files["diagnostic_designation"],
         selected_scenes_path=files["selected_scenes"],
         development_registry_paths=[files["development_supplement"], files["development_expansion_registry"]],
-        development_rows_paths=[files["final_rcpd_rows"]], retired_holdout_paths=retired)
-    expected_identity = final_once_api._preclaim_identity(singles, dev_paths)
+        development_rows_paths=[files["final_rcpd_rows"]],
+        retired_identity_projection_path=files["retired_identity_projection"])
+    final_implicit_paths = final_once_api._implicit_input_paths(singles)
+    expected_identity = final_once_api._preclaim_identity(
+        singles, dev_paths, projection_paths, final_implicit_paths)
     final_sources = final_once_api.producer_sources()
     final_campaign_key = final_once_api.campaign_key()
     if final_campaign_key != digest(expected_identity):
         raise ValueError("Final-once campaign identity differs")
     candidate_marker = _strict_json(
-        files["final_once_candidate_authenticated"],
+        semantic_files["final_once_candidate_authenticated"],
         "strict candidate authentication phase")
     candidate_artifacts = _validate_candidate_authentication_marker(
         candidate_marker, files=files, hashes=hashes, singles=singles,
@@ -774,7 +1278,7 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
         candidate_identity_sha256=digest(expected_identity),
     )
     v3_exclusion = _strict_json(
-        files["fresh_final_v3_exclusion"], "fresh-final v3 exclusion")
+        semantic_files["fresh_final_v3_exclusion"], "fresh-final v3 exclusion")
     v3_content = dict(v3_exclusion)
     claimed_v3_content = v3_content.pop("content_sha256", None)
     expected_claim = _final_claim_binding(
@@ -822,21 +1326,11 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
             or holdout.get("bindings", {}).get("v3_exclusion_content_sha256")
                 != claimed_v3_content):
         raise ValueError("Exact claim-bound fresh-final v3 exclusion required")
-    ledger_names = (
-        "final_once_attempt_started", "final_once_candidate_authenticated",
-        "final_once_holdout_started", "final_once_holdout_completed",
-        "final_once_audit_started", "final_once_audit_completed",
-        "final_once_attempt_completed",
-    )
+    ledger_names = tuple(FINAL_ONCE_LEDGER_ARTIFACTS)
     registry = _same_parent(files, ledger_names, "final-once registry")
     ledger_layout = {
-        "attempt_started.json": "final_once_attempt_started",
-        "candidate_authenticated.json": "final_once_candidate_authenticated",
-        "holdout_started.json": "final_once_holdout_started",
-        "holdout_completed.json": "final_once_holdout_completed",
-        "audit_started.json": "final_once_audit_started",
-        "audit_completed.json": "final_once_audit_completed",
-        "attempt_completed.json": "final_once_attempt_completed",
+        relative: name
+        for name, relative in FINAL_ONCE_LEDGER_ARTIFACTS.items()
     }
     if (files["final_once_attempt_started"] != registry / "attempt_started.json"
             or files["final_once_attempt_completed"] != registry / "attempt_completed.json"
@@ -900,10 +1394,11 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
         raise ValueError("Exact completed passing one-shot final audit required")
     audit_dir = _same_parent(files, ("explanation_audit_inputs", "explanation_audit_evidence",
         "explanation_audit_report"), "explanation audit")
-    audit_report = _strict_json(files["explanation_audit_report"], "explanation audit")
+    audit_report = _strict_json(
+        semantic_files["explanation_audit_report"], "explanation audit")
     audit_sources = explanation_api.producer_sources()
     audit_inputs = _strict_json(
-        files["explanation_audit_inputs"], "explanation audit inputs")
+        semantic_files["explanation_audit_inputs"], "explanation audit inputs")
     _require_exact_producer_source_closure(
         audit_inputs.get("producer_sources"), audit_sources,
         label="Explanation-audit")
@@ -933,9 +1428,11 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
         "producer_sources_sha256": digest(audit_sources)}
     _require_exact_audit_bindings(
         audit_report.get("bindings"), expected_audit_bindings)
-    explanation = explanation_api.read_saved_report(audit_dir,
+    semantic_audit_dir = semantic_files["explanation_audit_report"].parent
+    explanation = explanation_api.read_saved_report(semantic_audit_dir,
         expected_report_sha256=hashes["explanation_audit_report"],
-        program_path=files["final_rcpd_program"], development_rows_paths=[files["final_rcpd_rows"]],
+        program_path=semantic_files["final_rcpd_program"],
+        development_rows_paths=[semantic_files["final_rcpd_rows"]],
         expected_bindings=expected_audit_bindings, require_passed=True)
     if (explanation.get("status") != "passed" or explanation.get("statistics", {}).get("passed") is not True
             or explanation.get("zero_nn_overrides") is not True
@@ -943,7 +1440,7 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
             or explanation.get("program_never_controls_action") is not True
             or explanation.get("raw_public_observations_persisted") is not True):
         raise ValueError("Exact passing heldout v8 explanation audit required")
-    replay = _strict_json(files["physical_replay"], "physical replay")
+    replay = _strict_json(semantic_files["physical_replay"], "physical replay")
     if (set(replay) != {"version", "status", "evidence_file_sha256",
                        "arrays_sha256", "execution", "program_fits",
                        "actor_updates", "runtime_action_override", "formal_ready"}
@@ -955,12 +1452,14 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
             or replay.get("program_fits") != 0 or replay.get("actor_updates") != 0
             or replay.get("runtime_action_override") is not False or replay.get("formal_ready") is not False):
         raise ValueError("Exact independent physical replay receipt required")
-    explainer = R41DiagnosticOnlineAlignmentExplainer(files["final_rcpd_program"],
+    explainer = R41DiagnosticOnlineAlignmentExplainer(
+        semantic_files["final_rcpd_program"],
         expected_program_sha256=hashes["final_rcpd_program"], runtime=runtime)
     explainer._assert_current(runtime)
-    question = _strict_json(files["question_bank"], "question bank")
+    question = _strict_json(semantic_files["question_bank"], "question bank")
     _validate_bilingual_question_bank(question)
-    question_report = question_api.read_saved_report(files["question_bank_report"].parent,
+    question_report = question_api.read_saved_report(
+        semantic_files["question_bank_report"].parent,
         expected_report_sha256=hashes["question_bank_report"],
         expected_question_bank_sha256=hashes["question_bank"], runtime=runtime,
         manifest=manifest, manifest_file_sha256=hashes["conflict_manifest"])
@@ -971,7 +1470,7 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
             or question_report.get("formal_ready") is not False):
         raise ValueError("Frozen bilingual question-bank evidence differs")
     tutorial_scene = selection["tutorial"]
-    tutorial = _strict_json(files["tutorial"], "neutral tutorial")
+    tutorial = _strict_json(semantic_files["tutorial"], "neutral tutorial")
     expected_tutorial = tutorial_api.bindings(manifest, tutorial_scene,
         manifest_file_sha256=hashes["conflict_manifest"])
     tutorial_result = tutorial_api.validate_neutral_tutorial(tutorial,
@@ -982,10 +1481,11 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
         raise ValueError("Neutral tutorial boundary differs")
     runtime_rows = _runtime_audit(runtime, selection)
     package = package_contract(); sources = source_closure()
-    for index, value in enumerate((designation, protocol, manifest, selection, expansion,
-            final, holdout, explanation, replay, question, tutorial)):
+    for index, value in enumerate((
+            designation, protocol, manifest, selection, expansion,
+            prior_rows_receipt, expansion_rows_receipt, final, holdout,
+            explanation, replay, question, tutorial)):
         _reject_sensitive(value, "admission input " + str(index))
-    contract_receipt = _strict_json(files["diagnostic_contract"], "diagnostic contract")
     bindings = {
         "diagnostic_designation_sha256": hashes["diagnostic_designation"],
         "actor_sha256": FIXED_ACTOR_SHA256,
@@ -1002,18 +1502,47 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
         "conflict_manifest_content_sha256": manifest["content_sha256"],
         "conflict_manifest_semantic_sha256": digest(manifest),
         "conflict_validation_sha256": hashes["conflict_validation"],
+        "diagnostic_publication_authentication_sha256": publication[
+            "authentication_sha256"],
         "dynamic_selection_report_sha256": hashes["dynamic_selection_report"],
+        "dynamic_selection_protocol_sha256": hashes[
+            "dynamic_selection_protocol"],
+        "dynamic_selection_prefilter_sha256": hashes[
+            "dynamic_selection_prefilter"],
+        "dynamic_selection_episodes_sha256": hashes[
+            "dynamic_selection_episodes"],
         "selected_scenes_file_sha256": hashes["selected_scenes"],
         "selected_scenes_semantic_sha256": digest(selection),
+        "portable_runtime_manifest_sha256": (
+            portable_runtime_manifest_sha256),
         "development_supplement_sha256": hashes["development_supplement"],
         "development_expansion_registry_sha256": hashes["development_expansion_registry"],
         "development_expansion_content_sha256": expansion["content_sha256"],
-        "development_expansion_report_sha256": hashes["development_expansion_report"],
-        "prior_v7_rcpd_report_sha256": hashes["prior_v7_rcpd_report"],
-        "prior_v7_rcpd_rows_sha256": hashes["prior_v7_rcpd_rows"],
-        "development_expansion_rows_sha256": hashes["development_expansion_rows"],
-        "v8_fit_config_sha256": hashes["v8_fit_config"], "final_rcpd_report_sha256": hashes["final_rcpd_report"],
+        "development_expansion_report_sha256": hashes[
+            "development_expansion_report"],
+        "retired_identity_projection_sha256": hashes[
+            "retired_identity_projection"],
+        "retired_identity_projection_content_sha256": retired_projection[
+            "content_sha256"],
+        "retired_identity_projection_report_sha256": hashes[
+            "retired_identity_projection_report"],
+        "prior_rows_reauthentication_report_sha256": hashes[
+            "prior_rows_reauthentication_report"],
+        "prior_v7_source_report_sha256": hashes["prior_v7_source_report"],
+        "prior_v7_rows_sha256": hashes["prior_v7_rows"],
+        "expansion_rows_reauthentication_report_sha256": hashes[
+            "expansion_rows_reauthentication_report"],
+        "expansion_source_collection_report_sha256": hashes[
+            "expansion_source_collection_report"],
+        "expansion_rows_sha256": hashes["expansion_rows"],
+        "v8_fit_config_sha256": hashes["v8_fit_config"],
+        "final_rcpd_inputs_sha256": hashes["final_rcpd_inputs"],
+        "final_rcpd_report_sha256": hashes["final_rcpd_report"],
         "final_rcpd_rows_sha256": hashes["final_rcpd_rows"],
+        "final_rcpd_pairs_sha256": hashes["final_rcpd_pairs"],
+        "final_rcpd_weights_audit_sha256": hashes[
+            "final_rcpd_weights_audit"],
+        "final_rcpd_candidate_sha256": hashes["final_rcpd_candidate"],
         "final_rcpd_binding_sha256": final["diagnostic_rcpd_binding_sha256"],
         "fresh_final_holdout_sha256": hashes["fresh_final_holdout"],
         "fresh_final_holdout_content_sha256": holdout["content_sha256"],
@@ -1030,6 +1559,10 @@ def validate_components(paths: Mapping[str, str | Path]) -> dict[str, Any]:
             "final_once_candidate_authenticated"],
         "final_once_holdout_started_sha256": hashes[
             "final_once_holdout_started"],
+        "final_once_historical_exclusion_started_sha256": hashes[
+            "final_once_historical_exclusion_started"],
+        "final_once_historical_exclusion_completed_sha256": hashes[
+            "final_once_historical_exclusion_completed"],
         "final_once_holdout_completed_sha256": hashes[
             "final_once_holdout_completed"],
         "final_once_audit_started_sha256": hashes[
@@ -1078,6 +1611,34 @@ def _write_new(path: Path, value: Mapping[str, Any]) -> None:
         stream.write((canonical(value) + "\n").encode("utf-8")); stream.flush(); os.fsync(stream.fileno())
 
 
+def _publish_new_admission(
+    path: Path, value: Mapping[str, Any], *, before_publish: Callable[[], None],
+) -> None:
+    """Fsync a private sibling, recheck inputs, then publish without replace."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if (path.exists() or path.is_symlink() or path.parent.is_symlink()
+            or path.parent.resolve() != path.parent.absolute()):
+        raise ValueError("Diagnostic admission output path is unsafe")
+    staging = path.parent / ("." + path.name + ".partial")
+    if staging.exists() or staging.is_symlink():
+        raise ValueError("Diagnostic admission staging path already exists")
+    published = False
+    try:
+        _write_new(staging, value)
+        before_publish()
+        os.link(staging, path, follow_symlinks=False)
+        published = True
+        staging.unlink()
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if not published:
+            staging.unlink(missing_ok=True)
+
+
 def build_admission(paths: Mapping[str, str | Path], *, output: str | Path) -> dict[str, Any]:
     output_path = Path(output).expanduser()
     if not output_path.is_absolute(): output_path = ROOT / output_path
@@ -1085,7 +1646,19 @@ def build_admission(paths: Mapping[str, str | Path], *, output: str | Path) -> d
     try: relative = output_path.relative_to(ROOT.resolve()).as_posix()
     except ValueError: raise ValueError("Diagnostic admission output must stay inside repository") from None
     if output_path.exists() or output_path.is_symlink(): raise FileExistsError(output_path)
-    checked = validate_components(paths)
+    frozen_sources = source_closure()
+    frozen_paths = _canonical_component_paths(paths)
+    relatives = _component_relatives(frozen_paths)
+    frozen_hashes = _component_hash_snapshot(frozen_paths)
+    _guard_admission_inputs(
+        frozen_paths, expected_hashes=frozen_hashes,
+        expected_sources=frozen_sources, phase="entry snapshot")
+    checked = _validate_component_transaction(
+        frozen_paths, hashes=frozen_hashes, relatives=relatives,
+        expected_sources=frozen_sources, phase="component validation")
+    _guard_admission_inputs(
+        frozen_paths, expected_hashes=frozen_hashes,
+        expected_sources=frozen_sources, phase="component validation")
     value = {"version": VERSION, "status": STATUS, "admitted": True,
         "namespace": NAMESPACE, "pilot_class": NAMESPACE,
         "behavior_performance_gate_passed": False, "behavior_performance_gate_waived": True,
@@ -1096,18 +1669,44 @@ def build_admission(paths: Mapping[str, str | Path], *, output: str | Path) -> d
         "bindings": checked["bindings"], "artifacts": checked["artifacts"],
         "gates": checked["gates"], "sources": checked["sources"],
         "package_contract": checked["package_contract"], "self_path": relative}
-    _reject_sensitive(value, "diagnostic admission"); _write_new(output_path, value)
-    try: read_saved_admission(output_path, expected_sha256=file_hash(output_path), components=paths)
-    except BaseException: output_path.unlink(missing_ok=True); raise
+    _reject_sensitive(value, "diagnostic admission")
+    _guard_admission_inputs(
+        frozen_paths, expected_hashes=frozen_hashes,
+        expected_sources=frozen_sources, phase="admission assembly")
+    try:
+        _publish_new_admission(
+            output_path, value,
+            before_publish=lambda: _guard_admission_inputs(
+                frozen_paths, expected_hashes=frozen_hashes,
+                expected_sources=frozen_sources, phase="staged publication"),
+        )
+        _guard_admission_inputs(
+            frozen_paths, expected_hashes=frozen_hashes,
+            expected_sources=frozen_sources, phase="post-publication")
+        read_saved_admission(
+            output_path, expected_sha256=file_hash(output_path),
+            components=frozen_paths)
+    except BaseException:
+        output_path.unlink(missing_ok=True)
+        raise
     return value
 
 
 def read_saved_admission(path: str | Path, *, expected_sha256: str,
         components: Mapping[str, str | Path]) -> dict[str, Any]:
+    frozen_sources = source_closure()
+    frozen_paths = _canonical_component_paths(components)
+    relatives = _component_relatives(frozen_paths)
+    frozen_hashes = _component_hash_snapshot(frozen_paths)
+    _guard_admission_inputs(
+        frozen_paths, expected_hashes=frozen_hashes,
+        expected_sources=frozen_sources, phase="saved-reader entry snapshot")
     saved_path, relative = _artifact_path(path, "diagnostic admission")
-    if file_hash(saved_path) != _sha(expected_sha256, "diagnostic admission"):
-        raise ValueError("Diagnostic admission bytes differ")
-    value = _strict_json(saved_path, "diagnostic admission")
+    expected_admission_sha256 = _sha(expected_sha256, "diagnostic admission")
+    saved_raw = input_snapshot_api.read_authenticated_bytes(
+        saved_path, label="diagnostic admission",
+        expected_sha256=expected_admission_sha256)
+    value = _strict_json_bytes(saved_raw, "diagnostic admission")
     if (set(value) != TOP_LEVEL_FIELDS or value.get("version") != VERSION
             or value.get("status") != STATUS or value.get("admitted") is not True
             or value.get("namespace") != NAMESPACE or value.get("pilot_class") != NAMESPACE
@@ -1122,19 +1721,28 @@ def read_saved_admission(path: str | Path, *, expected_sha256: str,
             or set(value["bindings"]) != BINDING_FIELDS
             or value.get("gates") != {name: True for name in GATE_NAMES}):
         raise ValueError("Exact non-formal diagnostic v8 admission required")
-    checked = validate_components(components)
+    checked = _validate_component_transaction(
+        frozen_paths, hashes=frozen_hashes, relatives=relatives,
+        expected_sources=frozen_sources, phase="saved-reader validation")
     for key in ("bindings", "artifacts", "gates", "sources", "package_contract"):
         if canonical(value.get(key)) != canonical(checked[key]):
             raise ValueError("Diagnostic admission " + key + " differs from live evidence")
-    _reject_sensitive(value, "diagnostic admission"); return deepcopy(value)
+    _reject_sensitive(value, "diagnostic admission")
+    input_snapshot_api.read_authenticated_bytes(
+        saved_path, label="diagnostic admission",
+        expected_sha256=expected_admission_sha256)
+    _guard_admission_inputs(
+        frozen_paths, expected_hashes=frozen_hashes,
+        expected_sources=frozen_sources, phase="saved-reader return")
+    return deepcopy(value)
 
 
 __all__ = ["VERSION", "STATUS", "NAMESPACE", "FIXED_ACTOR_SHA256",
     "EXACT_ACTION_NAMES", "EXACT_CLASSES", "ARTIFACT_NAMES", "GATE_NAMES",
-    "FINAL_ONCE_LEDGER_ARTIFACTS",
+    "FINAL_ONCE_LEDGER_ARTIFACTS", "RCPD_CANDIDATE_ARTIFACTS",
     "BINDING_FIELDS", "TOP_LEVEL_FIELDS", "MAX_PROGRAM_BYTES",
     "MAX_COMPONENT_ITERATIONS", "MAX_TOTAL_ITERATIONS", "MAX_TOTAL_TREES",
-    "MAX_TOTAL_NODES", "MAXIMUM_TREE_DEPTH", "EXPECTED_RETIRED_HOLDOUTS",
+    "MAX_TOTAL_NODES", "MAXIMUM_TREE_DEPTH",
     "validate_v8_program_identity",
     "source_closure", "package_contract", "validate_components",
     "build_admission", "read_saved_admission"]

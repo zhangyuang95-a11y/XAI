@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+import inspect
 import json
 
 import numpy as np
@@ -146,6 +147,122 @@ def test_contract_has_no_final_input_and_fixes_public_protocol():
     assert value["routes"] == subject._fixed_routes()
     assert value["aggregation"] == AGGREGATION
     assert value["weights"]["contract_sha256"] == subject.digest(weights.contract())
+    assert value["effective_pair_group_assignment"].startswith(
+        "ordinary pre-action source anchor")
+
+
+def test_active_v8_chain_uses_fixed_designation_and_frozen_manifest_closure():
+    assert subject.designation_binding.EXPECTED_DESIGNATION_SHA256 == (
+        "b42323e3bc4543c4f4e1af96be4de4d90489a38459240bfb494dcc2d6120a815"
+    )
+    sources = subject.producer_sources()
+    assert "backend/training/warehouse_r41_diagnostic_designation_v2.py" in sources
+    assert "backend/training/warehouse_r41_diagnostic_designation_v2_binding.py" in sources
+    assert "backend/training/warehouse_r41_diagnostic_frozen_manifest_v2.py" in sources
+    assert "backend/training/warehouse_r41_diagnostic_prior_rows_v8.py" in sources
+    assert "backend/training/warehouse_r41_diagnostic_expansion_rows_v8.py" in sources
+    assert "backend/training/warehouse_r41_diagnostic_rows_v8.py" in sources
+    assert "scripts/build_warehouse_r41_diagnostic_designation_v2.py" in sources
+    assert "env/warehouse/transition_outcome.py" in sources
+    assert not [path for path in sources if any(token in path for token in (
+        "admission", "release", "preflight", "final_once",
+        "fresh_final_holdout", "explanation_audit",
+    ))]
+
+
+def test_source_closure_rejects_overlapping_hash_disagreement(monkeypatch):
+    monkeypatch.setattr(
+        subject, "local_source_hashes", lambda paths: {"shared.py": "a" * 64})
+    monkeypatch.setattr(
+        subject.designation_binding.designation, "source_closure",
+        lambda: {"shared.py": "b" * 64})
+    with pytest.raises(RuntimeError, match="closure hash disagreement"):
+        subject.producer_sources()
+
+
+def test_build_and_reader_accept_only_reauthenticated_row_receipts():
+    for function in (subject.build, subject.read_saved_report):
+        parameters = inspect.signature(function).parameters
+        assert "expected_prior_rows_report_sha256" in parameters
+        assert "expected_expansion_rows_report_sha256" in parameters
+        assert "expected_prior_v7_report_sha256" not in parameters
+        assert "expected_expansion_rows_sha256" not in parameters
+    parameters = inspect.signature(subject.build).parameters
+    assert "prior_rows_output" in parameters
+    assert "expansion_rows_output" in parameters
+    assert "prior_v7_output" not in parameters
+    assert "expansion_rows_path" not in parameters
+
+
+def test_complete_binding_requires_authenticated_previous_and_row_semantics(
+        tmp_path, monkeypatch):
+    artifact = tmp_path / "artifact"
+    artifact.write_bytes(b"fixed")
+    paths = {
+        name: artifact for name in (
+            "actor", "protocol", "manifest", "designation",
+            "prior_reauth_report", "prior_source_report", "prior_rows",
+            "expansion_registry", "expansion_registry_report",
+            "expansion_reauth_report", "expansion_collection_report",
+            "expansion_rows",
+            "previous_development", "config",
+        )
+    }
+
+    class Actor:
+        metadata = {
+            "actor_parameters_sha256": "p" * 64,
+            "feature_names": ["feature"],
+        }
+
+    class Relations:
+        feature_names = ("feature",)
+
+        @staticmethod
+        def contract():
+            return {"relations": True}
+
+    authenticated = {
+        "actor": Actor(),
+        "protocol": {"protocol": True},
+        "designation": {"designation": True},
+        "expansion": {"content_sha256": "e" * 64},
+        "prior_report": {"bindings": {
+            "source_v7_report_semantic_sha256": "s" * 64,
+            "source_v7_rows_semantic_sha256": "r" * 64,
+        }},
+        "expansion_rows_report": {"bindings": {
+            "expansion_report_semantic_sha256": "g" * 64,
+            "source_collection_report_semantic_sha256": "c" * 64,
+            "source_rows_semantic_sha256": "x" * 64,
+        }},
+        "previous_development": {"scenes": [{"id": "dev"}]},
+        "relations": Relations(),
+        "config": config(),
+        "source_full_manifest_bindings": {"manifest": "m" * 64},
+    }
+    monkeypatch.setattr(subject.weight_api, "contract", lambda: {"weights": True})
+    monkeypatch.setattr(subject.weight_api, "__file__", str(artifact))
+    monkeypatch.setattr(subject, "ROOT", tmp_path)
+    bindings = subject._bindings(
+        paths=paths, authenticated=authenticated,
+        sources={"artifact": subject.file_hash(artifact)})
+
+    assert bindings["previous_development_semantic_sha256"] \
+        == subject.digest(authenticated["previous_development"])
+    assert bindings["prior_v7_source_report_semantic_sha256"] == "s" * 64
+    assert bindings["prior_v7_rows_semantic_sha256"] == "r" * 64
+    assert bindings["expansion_registry_report_semantic_sha256"] == "g" * 64
+    assert (bindings["expansion_source_collection_report_semantic_sha256"]
+            == "c" * 64)
+    assert bindings["expansion_rows_semantic_sha256"] == "x" * 64
+
+    without_previous = dict(authenticated)
+    without_previous.pop("previous_development")
+    with pytest.raises(KeyError):
+        subject._bindings(
+            paths=paths, authenticated=without_previous,
+            sources={"artifact": subject.file_hash(artifact)})
 
 
 def test_disclosed_fit_config_is_strict_and_normalized():
@@ -199,6 +316,24 @@ def minimal_arrays(prefix, split):
     return result
 
 
+def intervention_pair_arrays(*, split, source_bits, wait_bits, branch_bits):
+    arrays = minimal_arrays("pair", [split, split, split])
+    arrays["scene_fingerprints"][:] = b"scene"
+    arrays["episode_ids"][:] = b"scene:skilled"
+    arrays["kinds"][:] = np.asarray(
+        [b"ordinary", b"intervention", b"intervention"], dtype="S16")
+    arrays["anchor_ids"][:] = b"scene:skilled:0"
+    arrays["branch_actions"][:] = np.asarray(
+        [b"", b"WAIT", b"RIGHT"], dtype="S8")
+    arrays["physical_hashes"][:] = np.asarray(
+        [b"", b"a" * 64, b"b" * 64], dtype="S64")
+    arrays["group_bits"][:] = np.asarray(
+        [source_bits, wait_bits, branch_bits], dtype=np.uint8)
+    arrays["action_indices"][:] = np.asarray([0, 0, 1], dtype=np.uint8)
+    pairs = np.asarray([[1, 2]], dtype=np.int64)
+    return arrays, pairs
+
+
 def test_validation_wins_exact_observation_overlap():
     prior = minimal_arrays("prior", [False, True, False])
     expansion = minimal_arrays("new", [False, True, False])
@@ -224,10 +359,78 @@ def test_component_fit_masks_never_include_validation_labels():
         "group_bits": np.asarray([1, 0, 0, 7, 7], dtype=np.uint8),
     }
     pairs = np.asarray([[0, 1]], dtype=np.int64)
-    masks = subject._component_fit_masks(arrays, pairs)
+    masks = subject._component_fit_masks(
+        arrays, pairs, np.asarray([1], dtype=np.uint8))
     assert masks["base"].tolist() == [True, True, True, False, False]
     assert masks["narrow_passage"].tolist() == [True, True, False, False, False]
     assert all(not mask[3:].any() for mask in masks.values())
+
+
+def test_pair_groups_use_ordinary_source_when_wait_endpoint_differs():
+    arrays, pairs = intervention_pair_arrays(
+        split=False, source_bits=1, wait_bits=2, branch_bits=0)
+    pair_bits = subject._pair_group_bits(arrays, pairs)
+    assert pair_bits.tolist() == [1]
+    assert pair_bits.tolist() != arrays["group_bits"][pairs[:, 0]].tolist()
+
+    masks = subject._component_fit_masks(arrays, pairs, pair_bits)
+    assert masks["narrow_passage"].tolist() == [True, True, True]
+    # The WAIT row itself is a shared-pickup state, but that post-action flag
+    # must not pull the other endpoint into the shared-pickup specialist.
+    assert masks["shared_pickup"].tolist() == [False, True, False]
+
+
+def test_pair_groups_fall_back_to_endpoint_union_without_source_row():
+    arrays, pairs = intervention_pair_arrays(
+        split=False, source_bits=1, wait_bits=2, branch_bits=4)
+    arrays["anchor_ids"][0] = b""
+    assert subject._pair_group_bits(arrays, pairs).tolist() == [6]
+
+    # A same-text ordinary anchor on the other side of the development split
+    # must not supply validation group membership.
+    arrays, pairs = intervention_pair_arrays(
+        split=True, source_bits=1, wait_bits=2, branch_bits=4)
+    arrays["split_validation"][0] = False
+    assert subject._pair_group_bits(arrays, pairs).tolist() == [6]
+
+
+def test_metrics_and_strata_share_source_pair_groups_and_reject_gaps():
+    arrays, pairs = intervention_pair_arrays(
+        split=True, source_bits=1, wait_bits=2, branch_bits=0)
+    pair_bits = subject._pair_group_bits(arrays, pairs)
+    probabilities = np.full((3, 5), 0.025, dtype=np.float64)
+    probabilities[np.arange(3), arrays["action_indices"]] = 0.9
+
+    metrics = subject._metrics(
+        probabilities, arrays, pairs=pairs, pair_group_bits=pair_bits)
+    direction = metrics["effective_intervention_direction"]["by_group"]
+    assert direction["narrow_passage"]["pairs"] == 1
+    assert direction["narrow_passage"]["fidelity"] == 1.0
+    assert direction["shared_pickup"]["pairs"] == 0
+
+    strata = subject._strata(
+        probabilities, arrays, {"scene": "family"},
+        pairs=pairs, pair_group_bits=pair_bits)
+    assert strata["critical"]["narrow_passage"]["effective_pairs"] == 1
+    assert strata["critical"]["shared_pickup"]["effective_pairs"] == 0
+    # Row strata remain current-state facts even though pair direction uses the
+    # ordinary pre-action source state.
+    assert strata["critical"]["shared_pickup"]["rows"] == 1
+
+    with pytest.raises(ValueError, match="metric coverage differs"):
+        subject._metrics(
+            probabilities, arrays,
+            pairs=np.empty((0, 2), dtype=np.int64),
+            pair_group_bits=np.empty(0, dtype=np.uint8))
+    with pytest.raises(ValueError, match="group assignment differs"):
+        subject._metrics(
+            probabilities, arrays, pairs=pairs,
+            pair_group_bits=np.asarray([2], dtype=np.uint8))
+    with pytest.raises(ValueError, match="stratum pair coverage differs"):
+        subject._strata(
+            probabilities, arrays, {"scene": "family"},
+            pairs=np.empty((0, 2), dtype=np.int64),
+            pair_group_bits=np.empty(0, dtype=np.uint8))
 
 
 def metric(value=0.9, scenes=10):
@@ -323,9 +526,11 @@ def test_reader_rejects_wrong_report_hash_before_reading_artifacts(tmp_path):
             actor_path=report, protocol_path=report, manifest_path=report,
             designation_path=report, expansion_registry_path=report,
             expected_expansion_registry_sha256=actual,
-            expected_prior_v7_report_sha256=actual,
+            expansion_report_path=report,
+            expected_expansion_report_sha256=actual,
+            expected_prior_rows_report_sha256=actual,
             previous_development_path=report,
-            expected_expansion_rows_sha256=actual,
+            expected_expansion_rows_report_sha256=actual,
             expected_config_sha256=actual,
         )
 
@@ -336,3 +541,240 @@ def test_producer_has_no_final_cli_and_never_serializes_pickle():
     assert "pickle.dump" not in source
     assert "joblib.dump" not in source
     assert subject.MAX_PROGRAM_BYTES > 0
+
+
+def _toctou_build_inputs(tmp_path):
+    paths = {}
+    for name in (
+        "actor", "protocol", "manifest", "designation",
+        "expansion_registry", "expansion_report", "config", "previous",
+    ):
+        path = tmp_path / name
+        path.write_bytes((name + "\n").encode("ascii"))
+        paths[name] = path
+    paths["manifest_validation"] = tmp_path / "validation.json"
+    paths["manifest_validation"].write_bytes(b"validation\n")
+    paths["designation_actor"] = paths["actor"]
+    paths["designation_protocol"] = paths["protocol"]
+    for name in ("training_ledger", "dual_evaluation", "failure_closeout"):
+        paths["designation_" + name] = tmp_path / ("designation_" + name)
+        paths["designation_" + name].write_bytes((name + "\n").encode("ascii"))
+    prior = tmp_path / "prior"
+    prior.mkdir()
+    for name in ("report.json", "rows.npz", "source_v7_report.json"):
+        (prior / name).write_bytes(("prior-" + name + "\n").encode("ascii"))
+    expansion = tmp_path / "expansion"
+    expansion.mkdir()
+    for name in (
+            "report.json", "source_collection_report.json",
+            "expansion_rows.npz"):
+        (expansion / name).write_bytes(
+            ("expansion-" + name + "\n").encode("ascii"))
+    paths["prior"] = prior
+    paths["expansion"] = expansion
+    return paths
+
+
+def _patch_toctou_manifest_validation(paths, monkeypatch):
+    monkeypatch.setattr(
+        subject.manifest_binding, "EXPECTED_VALIDATION_SHA256",
+        subject.file_hash(paths["manifest_validation"]))
+    components = {
+        "actor": paths["actor"], "protocol": paths["protocol"],
+        "training_ledger": paths["designation_training_ledger"],
+        "dual_evaluation": paths["designation_dual_evaluation"],
+        "failure_closeout": paths["designation_failure_closeout"],
+    }
+    monkeypatch.setattr(
+        subject, "_resolved_designation_components", lambda path: components)
+
+    def expected_hashes(**kwargs):
+        return {
+            "actor": subject.file_hash(paths["actor"]),
+            "protocol": subject.file_hash(paths["protocol"]),
+            "manifest": subject.file_hash(paths["manifest"]),
+            "manifest_validation": subject.file_hash(paths["manifest_validation"]),
+            "designation": subject.file_hash(paths["designation"]),
+            "expansion_registry": subject.file_hash(paths["expansion_registry"]),
+            "expansion_registry_report": subject.file_hash(paths["expansion_report"]),
+            "config": subject.file_hash(paths["config"]),
+            "previous_development": subject.file_hash(paths["previous"]),
+            "prior_reauth_report": subject.file_hash(paths["prior"] / "report.json"),
+            "prior_rows": subject.file_hash(paths["prior"] / "rows.npz"),
+            "prior_source_report": subject.file_hash(
+                paths["prior"] / "source_v7_report.json"),
+            "expansion_reauth_report": subject.file_hash(
+                paths["expansion"] / "report.json"),
+            "expansion_collection_report": subject.file_hash(
+                paths["expansion"] / "source_collection_report.json"),
+            "expansion_rows": subject.file_hash(
+                paths["expansion"] / "expansion_rows.npz"),
+            "designation_actor": subject.file_hash(paths["actor"]),
+            "designation_protocol": subject.file_hash(paths["protocol"]),
+            "designation_training_ledger": subject.file_hash(
+                paths["designation_training_ledger"]),
+            "designation_dual_evaluation": subject.file_hash(
+                paths["designation_dual_evaluation"]),
+            "designation_failure_closeout": subject.file_hash(
+                paths["designation_failure_closeout"]),
+        }
+
+    monkeypatch.setattr(subject, "_snapshot_expected_hashes", expected_hashes)
+
+
+def _toctou_build_kwargs(paths, output):
+    return {
+        "actor_path": paths["actor"],
+        "protocol_path": paths["protocol"],
+        "manifest_path": paths["manifest"],
+        "designation_path": paths["designation"],
+        "expansion_registry_path": paths["expansion_registry"],
+        "expected_expansion_registry_sha256": subject.file_hash(
+            paths["expansion_registry"]),
+        "expansion_report_path": paths["expansion_report"],
+        "expected_expansion_report_sha256": subject.file_hash(
+            paths["expansion_report"]),
+        "prior_rows_output": paths["prior"],
+        "expected_prior_rows_report_sha256": subject.file_hash(
+            paths["prior"] / "report.json"),
+        "previous_development_path": paths["previous"],
+        "expansion_rows_output": paths["expansion"],
+        "expected_expansion_rows_report_sha256": subject.file_hash(
+            paths["expansion"] / "report.json"),
+        "config_path": paths["config"],
+        "expected_config_sha256": subject.file_hash(paths["config"]),
+        "output": output,
+    }
+
+
+def test_build_snapshots_sources_before_authentication_and_rejects_change(
+        tmp_path, monkeypatch):
+    paths = _toctou_build_inputs(tmp_path)
+    output = tmp_path / "candidate"
+    _patch_toctou_manifest_validation(paths, monkeypatch)
+    calls = 0
+
+    def changing_sources():
+        nonlocal calls
+        calls += 1
+        return {"producer.py": ("a" if calls == 1 else "b") * 64}
+
+    monkeypatch.setattr(subject, "producer_sources", changing_sources)
+    monkeypatch.setattr(subject, "_authenticate_inputs", lambda **kwargs: {})
+    with pytest.raises(RuntimeError, match="changed during authentication"):
+        subject.build(**_toctou_build_kwargs(paths, output))
+    assert not output.exists()
+    assert not (tmp_path / ".candidate.lock").exists()
+
+
+def test_build_rechecks_sources_after_staging_and_before_publication(
+        tmp_path, monkeypatch):
+    paths = _toctou_build_inputs(tmp_path)
+    output = tmp_path / "candidate"
+    _patch_toctou_manifest_validation(paths, monkeypatch)
+    calls = 0
+
+    def changing_sources():
+        nonlocal calls
+        calls += 1
+        return {"producer.py": ("a" if calls <= 2 else "b") * 64}
+
+    def build_into(destination, **kwargs):
+        (destination / "report.json").write_text("{}\n", encoding="utf-8")
+        return {"status": "passed"}
+
+    monkeypatch.setattr(subject, "producer_sources", changing_sources)
+    monkeypatch.setattr(subject, "_authenticate_inputs", lambda **kwargs: {})
+    monkeypatch.setattr(subject, "_build_into", build_into)
+    with pytest.raises(RuntimeError, match="changed during publication"):
+        subject.build(**_toctou_build_kwargs(paths, output))
+    assert not output.exists()
+    assert not (tmp_path / ".candidate.lock").exists()
+
+
+def test_build_rejects_fixed_input_change_during_authenticate_inputs(
+        tmp_path, monkeypatch):
+    paths = _toctou_build_inputs(tmp_path)
+    output = tmp_path / "candidate"
+    _patch_toctou_manifest_validation(paths, monkeypatch)
+
+    def mutate_input(**kwargs):
+        paths["actor"].write_bytes(b"changed\n")
+        return {}
+
+    monkeypatch.setattr(subject, "producer_sources", lambda: {"p.py": "a" * 64})
+    monkeypatch.setattr(subject, "_authenticate_inputs", mutate_input)
+    with pytest.raises(RuntimeError, match="fixed inputs changed"):
+        subject.build(**_toctou_build_kwargs(paths, output))
+    assert not output.exists()
+    assert not (tmp_path / ".candidate.lock").exists()
+
+
+def test_build_rejects_manifest_validation_change_before_publication(
+        tmp_path, monkeypatch):
+    paths = _toctou_build_inputs(tmp_path)
+    output = tmp_path / "candidate"
+    _patch_toctou_manifest_validation(paths, monkeypatch)
+
+    def build_into(destination, **kwargs):
+        (destination / "report.json").write_text("{}\n", encoding="utf-8")
+        paths["manifest_validation"].write_bytes(b"changed\n")
+        return {"status": "passed"}
+
+    monkeypatch.setattr(subject, "producer_sources", lambda: {"p.py": "a" * 64})
+    monkeypatch.setattr(subject, "_authenticate_inputs", lambda **kwargs: {})
+    monkeypatch.setattr(subject, "_build_into", build_into)
+    with pytest.raises(RuntimeError, match="fixed inputs changed"):
+        subject.build(**_toctou_build_kwargs(paths, output))
+    assert not output.exists()
+    assert not (tmp_path / ".candidate.lock").exists()
+
+
+@pytest.mark.parametrize(
+    "component", ("training_ledger", "dual_evaluation", "failure_closeout"))
+def test_build_rejects_designation_component_drift_without_output(
+        component, tmp_path, monkeypatch):
+    paths = _toctou_build_inputs(tmp_path)
+    output = tmp_path / "candidate"
+    _patch_toctou_manifest_validation(paths, monkeypatch)
+
+    def build_into(destination, **kwargs):
+        (destination / "report.json").write_text("{}\n", encoding="utf-8")
+        paths["designation_" + component].write_bytes(b"changed\n")
+        return {"status": "passed"}
+
+    monkeypatch.setattr(subject, "producer_sources", lambda: {"p.py": "a" * 64})
+    monkeypatch.setattr(subject, "_authenticate_inputs", lambda **kwargs: {})
+    monkeypatch.setattr(subject, "_build_into", build_into)
+    with pytest.raises(RuntimeError, match="fixed inputs changed"):
+        subject.build(**_toctou_build_kwargs(paths, output))
+    assert not output.exists()
+    assert not (tmp_path / ".candidate.lock").exists()
+
+
+def test_designation_build_script_source_drift_aborts_without_output(
+        tmp_path, monkeypatch):
+    paths = _toctou_build_inputs(tmp_path)
+    output = tmp_path / "candidate"
+    _patch_toctou_manifest_validation(paths, monkeypatch)
+    calls = 0
+
+    monkeypatch.setattr(
+        subject, "local_source_hashes", lambda roots: {"producer.py": "p" * 64})
+
+    def changing_designation_closure():
+        nonlocal calls
+        calls += 1
+        return {
+            "scripts/build_warehouse_r41_diagnostic_designation_v2.py":
+                ("a" if calls == 1 else "b") * 64,
+        }
+
+    monkeypatch.setattr(
+        subject.designation_binding.designation, "source_closure",
+        changing_designation_closure)
+    monkeypatch.setattr(subject, "_authenticate_inputs", lambda **kwargs: {})
+    with pytest.raises(RuntimeError, match="changed during authentication"):
+        subject.build(**_toctou_build_kwargs(paths, output))
+    assert not output.exists()
+    assert not (tmp_path / ".candidate.lock").exists()

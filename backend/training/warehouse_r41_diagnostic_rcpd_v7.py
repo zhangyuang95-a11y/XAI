@@ -38,6 +38,8 @@ from backend.training.warehouse_diagnostic_source_closure import local_source_ha
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 from backend.training.warehouse_native_evaluation import critical_groups
 from backend.training import warehouse_r41_diagnostic_rcpd as legacy
+from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_binding
+from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_binding
 from backend.training import warehouse_r41_diagnostic_rcpd_v5 as source_api
 from backend.training import warehouse_r41_diagnostic_development_supplement as supplement_api
 from backend import warehouse_r41_diagnostic_model_tree as member_api
@@ -202,6 +204,25 @@ def producer_sources() -> dict[str, str]:
     ))
 
 
+def _validate_designation_v2(
+    *, designation_path: Path, expected_designation_sha256: str,
+    actor_path: Path, protocol_path: Path, actor: NumPyNativeActor,
+    protocol: Mapping[str, Any],
+) -> dict[str, Any]:
+    if expected_designation_sha256 != designation_binding.EXPECTED_DESIGNATION_SHA256:
+        raise ValueError("RCPD v7 requires the fixed cycle-free designation v2")
+    saved = designation_binding.read_bound_designation(
+        designation_path, expected_sha256=expected_designation_sha256)
+    bindings = saved["bindings"]
+    if (bindings.get("actor_sha256") != file_hash(actor_path)
+            or bindings.get("actor_parameters_sha256")
+                != actor.metadata.get("actor_parameters_sha256")
+            or bindings.get("protocol_file_sha256") != file_hash(protocol_path)
+            or bindings.get("protocol_content_sha256") != digest(protocol)):
+        raise ValueError("RCPD v7 designation v2 input binding differs")
+    return saved
+
+
 def _regular(value: str | Path, label: str) -> Path:
     path = Path(value).expanduser().absolute()
     if path.is_symlink() or not path.is_file() or path.resolve() != path:
@@ -264,12 +285,10 @@ def _decode(array: np.ndarray) -> np.ndarray:
 
 
 def _scene_splits(manifest: Mapping[str, Any],
-                  supplement: Mapping[str, Any]) -> tuple[list[dict], list[dict], list[dict]]:
-    legacy._scene_splits(manifest)
-    splits = manifest["splits"]
+                  supplement: Mapping[str, Any]) -> tuple[list[dict], list[dict], str]:
+    splits = manifest_binding.development_scene_splits(manifest)
     train = deepcopy([*splits["train"], *splits["conflict_validation"]])
     validation = deepcopy(supplement.get("scenes", []))
-    final = deepcopy(splits["final_test"])
     if (supplement.get("version") != supplement_api.VERSION
             or supplement.get("status") != "passed"
             or supplement.get("program_access") is not False
@@ -278,19 +297,22 @@ def _scene_splits(manifest: Mapping[str, Any],
                 key: value for key, value in supplement.items()
                 if key != "content_sha256"
             })
-            or len(train) != 192 or len(validation) != 64 or len(final) != 64):
+            or len(train) != 192 or len(validation) != 64):
         raise ValueError("Exact diagnostic v7 scene registry required")
     sets = [{row["fingerprint"] for row in part}
-            for part in (train, validation, final)]
-    if any(len(value) != expected for value, expected in zip(sets, (192, 64, 64))) \
-            or any(sets[left] & sets[right]
-                   for left, right in ((0, 1), (0, 2), (1, 2))):
+            for part in (train, validation)]
+    if (any(len(value) != expected for value, expected in zip(sets, (192, 64)))
+            or sets[0] & sets[1]):
         raise ValueError("Diagnostic v7 scene split overlaps")
-    return train, validation, final
+    # Historical v7 records bind the frozen final split only by its fixed
+    # public commitment.  No raw final identity is exposed to this legacy
+    # development helper; exact identities are confined to the irrevocably
+    # claimed v8 final phase.
+    return train, validation, manifest_binding.EXPECTED_FINAL_FINGERPRINTS_SHA256
 
 
 def _load_supplement(path: Path, *, actor_path: Path,
-                     manifest_path: Path) -> dict[str, Any]:
+                     manifest_path: Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
     value = _read(path, "development supplement")
     bindings = value.get("bindings", {})
     retired = bindings.get("retired_holdout_sha256")
@@ -302,7 +324,7 @@ def _load_supplement(path: Path, *, actor_path: Path,
             or not isinstance(retired, list) or len(retired) != 2
             or any(_HEX.fullmatch(str(item)) is None for item in retired)):
         raise ValueError("Development-supplement binding differs")
-    _scene_splits(_read(manifest_path, "diagnostic manifest"), value)
+    _scene_splits(manifest, value)
     return value
 
 
@@ -1045,20 +1067,24 @@ def extract(*, actor_path: str | Path, protocol_path: str | Path,
     designation_path = _regular(designation_path, "diagnostic designation")
     supplement_path = _regular(
         development_supplement_path, "development supplement")
-    manifest = _read(manifest_path, "diagnostic manifest")
+    manifest = manifest_binding.read_saved_manifest(
+        manifest_path, actor_path=actor_path, replay_scope="development")
     protocol = _read(protocol_path, "training protocol")
     actor = NumPyNativeActor(actor_path)
     legacy._validate_manifest_actor(manifest, actor)
-    legacy._validate_designation(designation_path=designation_path,
+    _validate_designation_v2(designation_path=designation_path,
         expected_designation_sha256=expected_designation_sha256,
         actor_path=actor_path, protocol_path=protocol_path,
         actor=actor, protocol=protocol)
     supplement = _load_supplement(
-        supplement_path, actor_path=actor_path, manifest_path=manifest_path)
-    train_scenes, validation_scenes, holdout = _scene_splits(manifest, supplement)
-    runtime = legacy._runtime(actor_path, protocol_path, manifest_path, manifest)
+        supplement_path, actor_path=actor_path, manifest_path=manifest_path,
+        manifest=manifest)
+    train_scenes, validation_scenes, holdout_fingerprints_sha256 = (
+        _scene_splits(manifest, supplement))
+    runtime = manifest_binding.build_runtime(
+        actor_path=actor_path, protocol_path=protocol_path,
+        manifest_path=manifest_path)
     sources = producer_sources()
-    content = deepcopy(manifest); content_sha = content.pop("content_sha256", None)
     bindings = {
         "designation_sha256": expected_designation_sha256,
         "actor_file_sha256": file_hash(actor_path),
@@ -1066,14 +1092,13 @@ def extract(*, actor_path: str | Path, protocol_path: str | Path,
         "protocol_file_sha256": file_hash(protocol_path),
         "protocol_content_sha256": digest(protocol),
         "manifest_file_sha256": file_hash(manifest_path),
-        "manifest_content_sha256": content_sha,
-        "manifest_semantic_sha256": digest(manifest),
+        "manifest_content_sha256": manifest_binding.EXPECTED_MANIFEST_CONTENT_SHA256,
+        "manifest_semantic_sha256": manifest_binding.EXPECTED_MANIFEST_SEMANTIC_SHA256,
         "development_supplement_file_sha256": file_hash(supplement_path),
         "development_supplement_content_sha256": supplement["content_sha256"],
         "contract_sha256": digest(contract()),
         "producer_sources_sha256": digest(sources),
-        "holdout_fingerprints_sha256": digest(sorted(
-            row["fingerprint"] for row in holdout)),
+        "holdout_fingerprints_sha256": holdout_fingerprints_sha256,
     }
     output = Path(output).expanduser().absolute()
     if output.exists() or output.is_symlink():
@@ -1187,20 +1212,22 @@ def read_saved_report(output: str | Path, *, expected_report_sha256: str,
     designation_path = _regular(designation_path, "diagnostic designation")
     actor = NumPyNativeActor(actor_path)
     protocol = _read(protocol_path, "training protocol")
-    manifest = _read(manifest_path, "diagnostic manifest")
+    manifest = manifest_binding.read_saved_manifest(
+        manifest_path, actor_path=actor_path, replay_scope="development")
     legacy._validate_manifest_actor(manifest, actor)
-    legacy._validate_designation(designation_path=designation_path,
+    _validate_designation_v2(designation_path=designation_path,
         expected_designation_sha256=expected_designation_sha256,
         actor_path=actor_path, protocol_path=protocol_path,
         actor=actor, protocol=protocol)
     supplement = _load_supplement(
-        supplement_path, actor_path=actor_path, manifest_path=manifest_path)
-    train_scenes, validation_scenes, holdout = _scene_splits(manifest, supplement)
-    runtime = legacy._runtime(actor_path, protocol_path, manifest_path, manifest)
+        supplement_path, actor_path=actor_path, manifest_path=manifest_path,
+        manifest=manifest)
+    train_scenes, validation_scenes, holdout_fingerprints_sha256 = (
+        _scene_splits(manifest, supplement))
+    runtime = manifest_binding.build_runtime(
+        actor_path=actor_path, protocol_path=protocol_path,
+        manifest_path=manifest_path)
     sources = producer_sources()
-    content = deepcopy(manifest); content_sha = content.pop("content_sha256", None)
-    if content_sha != digest(content):
-        raise ValueError("Diagnostic v7 manifest content digest differs")
     bindings = {
         "designation_sha256": expected_designation_sha256,
         "actor_file_sha256": file_hash(actor_path),
@@ -1208,14 +1235,13 @@ def read_saved_report(output: str | Path, *, expected_report_sha256: str,
         "protocol_file_sha256": file_hash(protocol_path),
         "protocol_content_sha256": digest(protocol),
         "manifest_file_sha256": file_hash(manifest_path),
-        "manifest_content_sha256": content_sha,
-        "manifest_semantic_sha256": digest(manifest),
+        "manifest_content_sha256": manifest_binding.EXPECTED_MANIFEST_CONTENT_SHA256,
+        "manifest_semantic_sha256": manifest_binding.EXPECTED_MANIFEST_SEMANTIC_SHA256,
         "development_supplement_file_sha256": file_hash(supplement_path),
         "development_supplement_content_sha256": supplement["content_sha256"],
         "contract_sha256": digest(contract()),
         "producer_sources_sha256": digest(sources),
-        "holdout_fingerprints_sha256": digest(sorted(
-            row["fingerprint"] for row in holdout)),
+        "holdout_fingerprints_sha256": holdout_fingerprints_sha256,
     }
     inputs = _read(output / "inputs.json", "Diagnostic v7 inputs")
     if inputs != {"version": VERSION, "bindings": bindings,

@@ -1,5 +1,7 @@
 import ast
+from copy import deepcopy
 from hashlib import sha256
+import inspect
 import json
 from pathlib import Path
 
@@ -7,9 +9,60 @@ import numpy as np
 import pytest
 
 from backend.training import warehouse_r41_diagnostic_fresh_final_holdout_v4 as subject
+from backend.training import warehouse_r41_diagnostic_workload_screen as workload_screen
+from backend.warehouse_r41_diagnostic_online_runtime import (
+    R41DiagnosticOnlineAlignmentRuntime,
+)
+from ui import warehouse_alignment_r41_tutorial as tutorial_base
 
 
 ROOT = Path(subject.__file__).resolve().parents[2]
+
+
+def _exception_module_material(error, module_names):
+    """Collect scalar material reachable through protected-module tracebacks."""
+    material = []
+    seen = set()
+
+    def visit(value):
+        identity = id(value)
+        if identity in seen:
+            return
+        if isinstance(value, (BaseException, dict, list, tuple, set, frozenset)):
+            seen.add(identity)
+        if isinstance(value, bytes):
+            material.extend((repr(value), value.hex()))
+        elif isinstance(value, (str, int)):
+            material.append(str(value))
+        elif isinstance(value, BaseException):
+            material.append(str(value))
+            visit(value.args)
+            visit(value.__dict__)
+            traceback = value.__traceback__
+            while traceback is not None:
+                frame = traceback.tb_frame
+                if frame.f_globals.get("__name__") in module_names:
+                    visit(dict(frame.f_locals))
+                traceback = traceback.tb_next
+            if value.__cause__ is not None:
+                visit(value.__cause__)
+            if value.__context__ is not None:
+                visit(value.__context__)
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                visit(key)
+                visit(item)
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            for item in value:
+                visit(item)
+
+    visit(error)
+    return "\n".join(material)
+
+
+def _assert_private_material_absent(error, fragments, *module_names):
+    rendered = _exception_module_material(error, set(module_names))
+    assert all(str(fragment) not in rendered for fragment in fragments), rendered
 
 
 def test_v4_contract_is_program_blind_and_claim_burns_v3_internally():
@@ -21,12 +74,15 @@ def test_v4_contract_is_program_blind_and_claim_burns_v3_internally():
     assert contract["program_predictions_access"] is False
     assert contract["actor_logits_access"] is False
     assert contract["final_labels_used_for_selection"] is False
-    assert contract["external_retired_final_registries"] == list(
-        subject.EXTERNAL_RETIRED_VERSIONS)
-    assert contract["external_retired_final_sha256"] == dict(
-        sorted(subject.EXPECTED_RETIRED_HOLDOUT_SHA256.items()))
+    assert contract["retired_identity_projection_version"] == (
+        subject.retired_identity_api.VERSION)
+    assert contract["retired_identity_projection_file_sha256"] == (
+        subject.EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256)
+    assert contract["retired_identity_projection_report_sha256"] == (
+        subject.EXPECTED_RETIRED_IDENTITY_PROJECTION_REPORT_SHA256)
+    assert contract["retired_identity_count"] == 139
+    assert contract["full_retired_holdout_access"] is False
     assert contract["internal_v3_exclusion_registry"] == subject.V3_TOMBSTONE_VERSION
-    assert subject.RETIRED_VERSIONS == subject.EXTERNAL_RETIRED_VERSIONS
 
 
 def test_holdout_has_no_program_import_cli_or_public_writer_export():
@@ -50,12 +106,117 @@ def test_holdout_source_closure_binds_transitive_selection_and_physics():
         "backend/training/warehouse_r41_diagnostic_workload_screen.py",
         "backend/training/warehouse_r41_diagnostic_fresh_final_holdout_v3.py",
         "backend/training/warehouse_r41_diagnostic_conflict_scenarios.py",
+        "scripts/build_warehouse_r41_diagnostic_designation_v2.py",
         "backend/training/warehouse_native_common.py",
         "env/warehouse/transition_outcome.py",
         "env/warehouse_native/environment.py",
     }.issubset(sources)
     assert "core/__init__.py" in sources
     assert not any("admission" in path or "release" in path for path in sources)
+
+
+def test_staged_publication_failure_leaves_no_public_output(tmp_path):
+    output = tmp_path / "holdout"
+    artifacts = {
+        "v3_exclusion.json": {"artifact": "v3"},
+        "holdout.json": {"artifact": "holdout"},
+        "report.json": {"artifact": "report"},
+    }
+    hashes = {
+        name: subject._json_file_sha256(value)
+        for name, value in artifacts.items()
+    }
+
+    def drift():
+        raise RuntimeError("synthetic frozen-input drift")
+
+    with pytest.raises(RuntimeError, match="frozen-input drift"):
+        subject._publish_staged_holdout(
+            output, artifacts=artifacts, expected_hashes=hashes,
+            before_publish=drift)
+    assert not output.exists()
+    assert not (tmp_path / ".holdout.partial").exists()
+
+
+def test_post_claim_input_drift_burns_without_output_or_completion(
+        tmp_path, monkeypatch):
+    claim_dir = tmp_path / "claim"
+    claim_dir.mkdir()
+    candidate = claim_dir / "candidate_authenticated.json"
+    candidate.write_text("{}\n", encoding="utf-8")
+    inputs = {}
+    for name in (
+        "actor", "protocol", "manifest", "designation", "selected",
+        "development", "rows", "legacy_rows", "expansion_rows", "retired",
+        "implicit",
+    ):
+        path = tmp_path / (name + (".npz" if "rows" in name else ".json"))
+        path.write_bytes(b"input\n")
+        inputs[name] = path
+    (tmp_path / "report.json").write_bytes(b"input\n")
+    output = tmp_path / "public-holdout"
+    monkeypatch.setattr(
+        subject, "_claim_receipt", lambda *args, **kwargs: (claim_dir, {}))
+    monkeypatch.setattr(subject, "producer_sources", lambda: {"source.py": "a" * 64})
+    monkeypatch.setattr(
+        subject, "_implicit_input_paths",
+        lambda **kwargs: {
+            "manifest_validation": inputs["implicit"],
+            **{
+                "designation_component:" + name: inputs["implicit"]
+                for name in subject.designation_api.ARTIFACT_NAMES
+            },
+        })
+    class Snapshot:
+        def __init__(self, *args, **kwargs):
+            self.paths = {}
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return None
+        def verify(self):
+            return None
+    monkeypatch.setattr(
+        subject.input_snapshot_api, "ImmutableInputSnapshot", Snapshot)
+    phases = []
+
+    def guard(*args, phase, **kwargs):
+        phases.append(phase)
+        if phase == "post-holdout phase start":
+            raise RuntimeError("synthetic transaction drift")
+
+    monkeypatch.setattr(subject, "_guard_frozen_holdout_inputs", guard)
+    monkeypatch.setattr(
+        subject, "_read_committed_salt",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("private salt read after detected drift")))
+    with pytest.raises(
+            subject._HistoricalFinalPrivatePhaseError,
+            match="^historical_final_private_phase_failed$"):
+        subject.build(
+            actor_path=inputs["actor"], protocol_path=inputs["protocol"],
+            manifest_path=inputs["manifest"],
+            designation_path=inputs["designation"],
+            selected_scenes_path=inputs["selected"],
+            development_registry_paths=[inputs["development"]],
+            development_rows_paths=[inputs["rows"]],
+            legacy_v3_rows_path=inputs["legacy_rows"],
+            expansion_rows_path=inputs["expansion_rows"],
+            retired_identity_projection_path=inputs["retired"], output=output,
+            claim_receipt_path=candidate,
+            expected_claim_sha256="1" * 64,
+            expected_campaign_key="2" * 64,
+            expected_candidate_identity_sha256="3" * 64,
+            selection_salt_path=tmp_path / "private-salt",
+        )
+    assert phases == [
+        "pre-holdout authentication", "claim-chain reauthentication",
+        "holdout phase start",
+        "post-holdout phase start",
+    ]
+    assert (claim_dir / "holdout_started.json").is_file()
+    assert not (claim_dir / "holdout_completed.json").exists()
+    assert not output.exists()
 
 
 def _rows(path, observations, fingerprints, *, corrupt=False):
@@ -91,6 +252,69 @@ def test_development_npz_hashes_are_recomputed_and_scene_coverage_is_required(tm
     with pytest.raises(ValueError, match="cover every"):
         subject._npz_development_observations(
             [path], required_fingerprints={"b" * 64})
+
+
+def test_auxiliary_observation_collectors_match_frozen_consumer_workloads(
+        monkeypatch):
+    actor = ROOT / (
+        "output/warehouse_native/r41_active_2m_20260911/boundaries/"
+        "step_2000000/actor.npz")
+    protocol = ROOT / "output/warehouse_native/r41_active_2m_20260911/protocol.json"
+    manifest_path = ROOT / (
+        "output/warehouse_native/r41_diagnostic_conflict_scenes_v3_20260912/"
+        "manifest.json")
+    if not all(path.is_file() for path in (actor, protocol, manifest_path)):
+        pytest.skip("frozen diagnostic runtime inputs are not present")
+    protocol_value = json.loads(protocol.read_text(encoding="utf-8"))
+    public_splits, _ = subject.manifest_binding.regenerate_development_splits(
+        actor, splits=("tutorial", "question_bank"))
+    runtime = R41DiagnosticOnlineAlignmentRuntime(
+        actor,
+        training_protocol_path=protocol,
+        manifest_path=manifest_path,
+        expected_actor_sha256=subject.EXPECTED_ACTOR_SHA256,
+        expected_training_protocol_file_sha256=subject.EXPECTED_PROTOCOL_SHA256,
+        expected_training_protocol_content_sha256=subject.digest(
+            protocol_value),
+        expected_manifest_file_sha256=subject.EXPECTED_MANIFEST_SHA256,
+        expected_manifest_content_sha256=(
+            subject.manifest_binding.EXPECTED_MANIFEST_CONTENT_SHA256),
+        expected_manifest_semantic_sha256=(
+            subject.manifest_binding.EXPECTED_MANIFEST_SEMANTIC_SHA256),
+    )
+
+    question_scene = public_splits["question_bank"][0]
+    actual_question = subject._question_bank_workload_observations(
+        runtime, question_scene, 0)
+    canonical_question: set[str] = set()
+    original_policy_action = workload_screen._policy_action
+
+    def capture_policy_action(actor_value, env):
+        canonical_question.add(subject._observation_hash(
+            env.observations()["robot_2"]))
+        return original_policy_action(actor_value, env)
+
+    monkeypatch.setattr(
+        workload_screen, "_policy_action", capture_policy_action)
+    workload_screen._screen_question_bank(
+        runtime.actor, question_scene, scene_index=0)
+    assert actual_question == canonical_question
+
+    tutorial_scene = public_splits["tutorial"][0]
+    actual_tutorial = subject._tutorial_workload_observations(
+        runtime, tutorial_scene, 0)
+    canonical_tutorial: set[str] = set()
+    original_public_frame = tutorial_base._public_frame
+
+    def capture_public_frame(env, *args, **kwargs):
+        canonical_tutorial.add(subject._observation_hash(
+            env.observations()["robot_2"]))
+        return original_public_frame(env, *args, **kwargs)
+
+    monkeypatch.setattr(
+        tutorial_base, "_public_frame", capture_public_frame)
+    workload_screen._screen_tutorial(tutorial_scene)
+    assert actual_tutorial == canonical_tutorial
 
 
 def test_selection_rejects_scene_seed_and_observation_overlap(monkeypatch):
@@ -176,13 +400,17 @@ def test_direct_writer_rejects_before_salt_or_final_input_access(monkeypatch):
         subject, "_read_committed_salt",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("salt was read before claim")))
-    with pytest.raises(ValueError, match="claim rejected"):
+    with pytest.raises(
+            subject._HistoricalFinalPrivatePhaseError,
+            match="^historical_final_private_phase_failed$"):
         subject.build(
             actor_path="missing-actor", protocol_path="missing-protocol",
             manifest_path="missing-manifest", designation_path="missing-designation",
             selected_scenes_path="missing-selection",
             development_registry_paths=[], development_rows_paths=[],
-            legacy_v3_rows_path="missing-v3-rows", retired_holdout_paths=[],
+            legacy_v3_rows_path="missing-v3-rows",
+            expansion_rows_path="missing-expansion-rows",
+            retired_identity_projection_path="missing-retired-projection",
             output="missing-output", claim_receipt_path="missing-claim",
             expected_claim_sha256="a" * 64, expected_campaign_key="b" * 64,
             expected_candidate_identity_sha256="c" * 64,
@@ -225,151 +453,785 @@ def test_forged_ledger_claim_without_permanent_anchor_is_rejected(
             expected_candidate_identity_sha256=subject.digest(identity))
 
 
-def test_retired_registry_bytes_are_fixed_even_if_replacement_is_self_consistent(
-        tmp_path, monkeypatch):
-    retired_paths = [
-        ROOT / "output/warehouse_native/r41_diagnostic_fresh_final_holdout_v1_20260912/holdout.json",
-        ROOT / "output/warehouse_native/r41_diagnostic_fresh_final_holdout_v2_20260912/holdout.json",
+def test_exact_identity_projection_is_the_only_retired_input():
+    projection = (
+        ROOT / "output/warehouse_native/"
+            "r41_diagnostic_retired_identity_projection_v3_sourceclosure_20260913/"
+        "retired_identity_projection.json"
+    )
+    if not projection.is_file():
+        pytest.skip("frozen retired identity projection is not present")
+    identities, binding = subject._retired_identity_projection(projection)
+    assert len(identities) == 139
+    assert set(identities[0]) == {"seed", "fingerprint"}
+    assert binding["file_sha256"] == (
+        subject.EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256)
+    assert binding["audit_file_sha256"] == (
+        subject.EXPECTED_RETIRED_IDENTITY_PROJECTION_REPORT_SHA256)
+    assert binding["identity_count"] == 139
+
+
+def test_expansion_must_bind_the_same_identity_only_projection():
+    binding = {
+        "version": subject.retired_identity_api.VERSION,
+        "file_sha256": subject.EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256,
+        "content_sha256": "1" * 64,
+        "audit_file_sha256": (
+            subject.EXPECTED_RETIRED_IDENTITY_PROJECTION_REPORT_SHA256),
+        "source_file_sha256": {"v1": "2" * 64, "v2": "3" * 64},
+        "identity_count": 139,
+    }
+    subject._validate_retired_expansion_binding(
+        binding, {"bindings": {"retired_identity_projection": binding}})
+    replacement = dict(binding)
+    replacement["file_sha256"] = "f" * 64
+    with pytest.raises(ValueError, match="identity projection differs"):
+        subject._validate_retired_expansion_binding(
+            replacement,
+            {"bindings": {"retired_identity_projection": replacement}},
+        )
+
+
+def test_retired_projection_maps_only_identity_and_never_executes_actor():
+    identities = [
+        {"fingerprint": sha256(f"retired:{index}".encode()).hexdigest(),
+         "seed": 1000 + index}
+        for index in range(139)
     ]
-    if not all(path.is_file() for path in retired_paths):
-        pytest.skip("retired local evidence is not present")
-    registries, bindings = subject._retired_registries(retired_paths)
-    assert [row["version"] for row in registries] == list(
-        subject.EXTERNAL_RETIRED_VERSIONS)
-    assert {version: value["file_sha256"] for version, value in bindings.items()} == (
-        subject.EXPECTED_RETIRED_HOLDOUT_SHA256)
-
-    replacement = json.loads(retired_paths[0].read_text(encoding="utf-8"))
-    replacement["attacker_self_consistent_note"] = "replacement"
-    replacement["content_sha256"] = subject.digest({
-        key: value for key, value in replacement.items() if key != "content_sha256"
-    })
-    replaced_path = tmp_path / "holdout-v1-replaced.json"
-    replaced_path.write_text(
-        subject.canonical(replacement) + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="identity differs"):
-        subject._retired_registries([replaced_path, retired_paths[1]])
-
-
-def test_expansion_must_bind_the_same_fixed_retired_entities():
-    bindings = {
-        version: {"file_sha256": file_sha, "content_sha256": str(index) * 64}
-        for index, (version, file_sha) in enumerate(
-            subject.EXPECTED_RETIRED_HOLDOUT_SHA256.items(), start=1)
-    }
-    subject._validate_retired_expansion_bindings(
-        bindings, {"bindings": {"retired_holdouts": bindings}})
-    replacement = {version: dict(value) for version, value in bindings.items()}
-    replacement[subject.EXTERNAL_RETIRED_VERSIONS[0]]["file_sha256"] = "f" * 64
-    with pytest.raises(ValueError, match="fixed development expansion"):
-        subject._validate_retired_expansion_bindings(
-            replacement, {"bindings": {"retired_holdouts": replacement}})
-
-
-def test_retired_trace_closure_excludes_rejected_and_accepted_rows(monkeypatch):
-    rejected = {"fingerprint": "a" * 64, "seed": 1, "family_id": "family"}
-    accepted = {"fingerprint": "b" * 64, "seed": 2, "family_id": "family"}
-    manifest = {"candidate_batches": [[rejected, accepted]]}
-    accepted_hashes = {"c" * 64}
-    failed_receipt = {"passed": False, "reason": "screen"}
-    passed_receipt = {"passed": True, "reason": None}
-    registry = {
-        "version": "retired",
-        "scenes": [accepted],
-        "selection_trace": [
-            {"fingerprint": rejected["fingerprint"], "family_id": "family",
-             "scene_index": 0, "accepted": False,
-             "workload_receipt": failed_receipt},
-            {"fingerprint": accepted["fingerprint"], "family_id": "family",
-             "scene_index": 7, "accepted": True,
-             "workload_receipt": passed_receipt,
-             "public_observation_count": 1,
-             "public_observations_sha256": subject.digest(sorted(accepted_hashes))},
-        ],
-    }
-    seen_indexes = []
-
-    def screen(scene, *, split, scene_index, actor):
-        assert split == "final_test"
-        return (failed_receipt if scene["fingerprint"] == rejected["fingerprint"]
-                else passed_receipt)
-
-    def observations(_runtime, scene, index):
-        assert scene["fingerprint"] == accepted["fingerprint"]
-        seen_indexes.append(index)
-        return set(accepted_hashes)
-
-    monkeypatch.setattr(subject, "screen_scene", screen)
-    monkeypatch.setattr(subject, "_exact_final_workload_observations", observations)
-    fingerprints, seeds, hashes, stats = subject._retired_exposure_closure(
-        runtime=object(), actor=object(), manifest=manifest,
-        registries=[registry])
-    assert fingerprints == {"a" * 64, "b" * 64}
-    assert seeds == {1, 2}
-    assert hashes == accepted_hashes
-    assert seen_indexes == [7]
-    assert stats["retired"]["touched_trace_scenes"] == 2
+    manifest = {"candidate_batches": [[
+        {**identity, "family_id": "public", "geometry": {"x": index}}
+        for index, identity in enumerate(identities)
+    ]]}
+    fingerprints, seeds, stats = subject._projected_identity_exclusions(
+        manifest=manifest, identities=identities)
+    assert fingerprints == {row["fingerprint"] for row in identities}
+    assert seeds == {row["seed"] for row in identities}
+    assert stats["projected_identity_count"] == 139
+    assert stats["retired_actor_executed"] is False
+    assert stats["retired_observations_derived"] is False
+    assert "public_observations_sha256" not in stats
 
 
 def test_v3_tombstone_is_claim_bound_and_program_blind(monkeypatch):
-    scene = {"fingerprint": "a" * 64, "seed": 7}
+    candidates = {}
+    for family_index, family in enumerate(subject.FAMILY_IDS):
+        candidates[family] = [
+            {"fingerprint": sha256(f"{family}:{index}".encode()).hexdigest(),
+             "seed": 1000 * family_index + index, "family_id": family}
+            for index in range(subject.FAMILY_QUOTAS[family])
+        ]
     monkeypatch.setattr(
-        subject.legacy_v3, "_select",
-        lambda **kwargs: ([scene], [{"fingerprint": scene["fingerprint"]}],
-                          {"accepted": 1}))
+        subject.legacy_v3, "_ordered_candidates",
+        lambda manifest, family: candidates[family])
+    monkeypatch.setattr(subject, "screen_scene",
+                        lambda *args, **kwargs: {"passed": True})
+    monkeypatch.setattr(
+        subject, "_exact_final_workload_observations",
+        lambda runtime, scene, index: {
+            sha256((scene["fingerprint"] + ":obs").encode()).hexdigest()})
     binding = {"campaign_key": "b" * 64, "attempt_started_sha256": "c" * 64}
     tombstone = subject._build_v3_tombstone(
-        runtime=object(), actor=object(), manifest={}, selected={},
-        legacy_development_hashes=set(), retired_registries=[],
+        runtime=object(), actor=object(),
+        manifest={"splits": {"train": []}, "candidate_batches": []},
+        selected={"X": [], "Y": []}, legacy_development_hashes=set(),
+        projected_retired_fingerprints=set(), projected_retired_seeds=set(),
         claim_binding=binding)
     assert tombstone["version"] == subject.V3_TOMBSTONE_VERSION
     assert tombstone["status"] == "burned_program_blind_exclusion"
     assert tombstone["claim_binding"] == binding
     assert tombstone["program_access"] is False
     assert tombstone["program_predictions_access"] is False
+    assert tombstone["statistics"]["retired_actor_executed"] is False
+    assert tombstone["statistics"]["retired_public_observation_count"] == 0
     assert tombstone["content_sha256"] == subject.digest({
         key: value for key, value in tombstone.items() if key != "content_sha256"
     })
 
 
-def test_retired_v1_v2_trace_observation_receipts_replay_with_wait_three_branch():
-    retired_paths = [
-        ROOT / "output/warehouse_native/r41_diagnostic_fresh_final_holdout_v1_20260912/holdout.json",
-        ROOT / "output/warehouse_native/r41_diagnostic_fresh_final_holdout_v2_20260912/holdout.json",
+def _historical_phase_fixture(tmp_path, monkeypatch):
+    claim_dir = tmp_path / "claim"
+    claim_dir.mkdir(parents=True)
+    expected_claim = "1" * 64
+    expected_campaign = "2" * 64
+    expected_candidate = "3" * 64
+    salt = b"s" * 32
+    monkeypatch.setattr(
+        subject, "HOLDOUT_SALT_COMMITMENT",
+        sha256(subject.HOLDOUT_SALT_DOMAIN + salt).hexdigest())
+
+    class Runtime:
+        actor_sha256 = subject.EXPECTED_ACTOR_SHA256
+        signature = "bound"
+        actor = object()
+        _actor_path = tmp_path / "actor.npz"
+
+        def verify_binding(self):
+            return self.signature
+
+    Runtime._actor_path.write_bytes(b"actor")
+    monkeypatch.setattr(subject, "R41DiagnosticOnlineAlignmentRuntime", Runtime)
+    identities = [
+        {
+            "id": f"diagnostic_final_test_{index:04d}",
+            "split": "final_test",
+            "fingerprint": sha256(
+                f"historical:{index}".encode()).hexdigest(),
+            "seed": 1000 + index,
+            "diagnostic_contract_sha256": "a" * 64,
+            "diagnostic_conflict_graph_sha256": "b" * 64,
+            "conflict_families_sha256": "c" * 64,
+            "family_id": "opposing_pickup_corridor",
+            "initial_edge_id": "edge",
+            "task_geometry_signature": "d" * 64,
+            "initial_conflict": {},
+            "initial_public_joint_work_steps": 1,
+            "initial_robot_positions": [[1, 1], [2, 2]],
+            "successor_stream_seed": 5000 + index,
+            "snapshot": {},
+            # This malformed saved result must remain completely opaque to the
+            # historical observation-only exclusion path.
+            "workload_screen": {
+                "metrics": {"poisoned_saved_metric": index},
+                "actions": ["FORBIDDEN_SAVED_ACTION"],
+            },
+        }
+        for index in range(subject.TOTAL_SCENES)
     ]
-    required = [
-        *retired_paths,
-        ROOT / "output/warehouse_native/r41_active_2m_20260911/boundaries/step_2000000/actor.npz",
-        ROOT / "output/warehouse_native/r41_active_2m_20260911/protocol.json",
-        ROOT / "output/warehouse_native/r41_diagnostic_conflict_scenes_v3_20260912/manifest.json",
-    ]
-    if not all(path.is_file() for path in required):
-        pytest.skip("retired local evidence is not present")
-    actor_path, protocol_path, manifest_path = required[2:]
-    protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    content = dict(manifest)
-    manifest_content = content.pop("content_sha256")
-    runtime = subject.R41DiagnosticOnlineAlignmentRuntime(
-        actor_path, training_protocol_path=protocol_path,
-        manifest_path=manifest_path,
-        expected_actor_sha256=subject.file_hash(actor_path),
-        expected_training_protocol_file_sha256=subject.file_hash(protocol_path),
-        expected_training_protocol_content_sha256=subject.digest(protocol),
-        expected_manifest_file_sha256=subject.file_hash(manifest_path),
-        expected_manifest_content_sha256=manifest_content,
-        expected_manifest_semantic_sha256=subject.digest(manifest),
+    payload = {"splits": {"final_test": [dict(row) for row in identities]}}
+    payload["content_sha256"] = subject.digest(payload)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(subject.canonical(payload) + "\n", encoding="utf-8")
+    monkeypatch.setattr(subject, "EXPECTED_MANIFEST_SHA256", subject.file_hash(manifest))
+    monkeypatch.setattr(
+        subject.manifest_binding, "EXPECTED_MANIFEST_CONTENT_SHA256",
+        payload["content_sha256"])
+    monkeypatch.setattr(
+        subject.manifest_binding, "EXPECTED_MANIFEST_SEMANTIC_SHA256",
+        subject.digest(payload))
+    monkeypatch.setattr(
+        subject.manifest_binding, "EXPECTED_FINAL_IDENTITY_SHA256",
+        subject.digest([
+            {"id": row["id"], "seed": row["seed"],
+             "fingerprint": row["fingerprint"]}
+            for row in identities
+        ]))
+    monkeypatch.setattr(
+        subject.manifest_binding, "EXPECTED_FINAL_FINGERPRINTS_SHA256",
+        subject.digest(sorted(row["fingerprint"] for row in identities)))
+    monkeypatch.setattr(
+        subject.manifest_binding, "EXPECTED_FINAL_SEEDS_SHA256",
+        subject.digest(sorted(row["seed"] for row in identities)))
+    monkeypatch.setattr(subject.manifest_binding, "_validate_contract", lambda value: None)
+    monkeypatch.setattr(
+        subject.manifest_binding, "_validate_source_bindings", lambda value: None)
+    replay_calls = []
+    monkeypatch.setattr(
+        subject.manifest_binding, "_validate_rows",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("saved workload comparator must not run")))
+
+    public_manifest = {
+        "version": subject.MANIFEST_VERSION,
+        "content_sha256": payload["content_sha256"],
+        "splits": {
+            "train": [], "conflict_validation": [],
+            "tutorial": [], "question_bank": [],
+        },
+        "candidate_batches": [],
+    }
+    monkeypatch.setattr(
+        subject.manifest_binding, "read_saved_manifest",
+        lambda *args, **kwargs: public_manifest)
+
+    selected = {"X": [], "Y": []}
+    for index in range(6):
+        selected["X" if index < 3 else "Y"].append({
+            "fingerprint": sha256(f"xy:{index}".encode()).hexdigest(),
+            "seed": 2000 + index,
+        })
+    selected_path = tmp_path / "selected.json"
+    selected_path.write_text(subject.canonical(selected) + "\n", encoding="utf-8")
+    monkeypatch.setattr(
+        subject, "EXPECTED_SELECTED_SCENES_SHA256",
+        subject.file_hash(selected_path))
+
+    development_paths = []
+    development_bindings = {}
+    for version in (
+            subject.DEVELOPMENT_SUPPLEMENT_VERSION,
+            subject.DEVELOPMENT_EXPANSION_VERSION):
+        path = tmp_path / (version.rsplit(".", 1)[-1] + ".json")
+        path.write_text(subject.canonical({"version": version}) + "\n",
+                        encoding="utf-8")
+        development_paths.append(path)
+        development_bindings[version] = {
+            "file_sha256": subject.file_hash(path), "content_sha256": "d" * 64}
+    monkeypatch.setattr(
+        subject, "_development_registry_evidence",
+        lambda paths: (
+            [], development_bindings,
+            {
+                version: {
+                    "version": version,
+                    "content_sha256": binding["content_sha256"],
+                }
+                for version, binding in development_bindings.items()
+            },
+        ))
+
+    projection_path = tmp_path / "projection.json"
+    projection_path.write_text("{}\n", encoding="utf-8")
+    (tmp_path / "report.json").write_text("{}\n", encoding="utf-8")
+    projected_fp = sha256(b"retired-projected").hexdigest()
+    projected_seed = 3001
+    projected_binding = {
+        "version": subject.retired_identity_api.VERSION,
+        "file_sha256": subject.file_hash(projection_path),
+        "content_sha256": "e" * 64,
+        "audit_file_sha256": subject.file_hash(tmp_path / "report.json"),
+        "source_file_sha256": {"v1": "f" * 64},
+        "identity_count": 1,
+    }
+    monkeypatch.setattr(
+        subject, "_retired_identity_projection",
+        lambda path: ([{"fingerprint": projected_fp, "seed": projected_seed}],
+                      projected_binding))
+    monkeypatch.setattr(
+        subject, "_validate_retired_expansion_binding",
+        lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        subject, "_projected_identity_exclusions",
+        lambda **kwargs: ({projected_fp}, {projected_seed}, {}))
+
+    v3_scene = {"fingerprint": sha256(b"v3-scene").hexdigest(), "seed": 4001}
+    v3_observation = sha256(b"v3-observation").hexdigest()
+    v3_tombstone = {
+        "version": subject.V3_TOMBSTONE_VERSION,
+        "scenes": [v3_scene], "selection_trace": [],
+        "content_sha256": sha256(b"v3-content").hexdigest(),
+    }
+    monkeypatch.setattr(
+        subject, "_build_v3_tombstone", lambda **kwargs: v3_tombstone)
+    monkeypatch.setattr(
+        subject, "_selection_exposure_closure",
+        lambda **kwargs: ({v3_scene["fingerprint"]}, {v3_scene["seed"]},
+                          {v3_observation}, {}))
+    final_hashes = {
+        index: sha256(f"historical-observation:{index}".encode()).hexdigest()
+        for index in range(subject.TOTAL_SCENES)
+    }
+    historical_by_fingerprint = {
+        row["fingerprint"]: final_hashes[index]
+        for index, row in enumerate(identities)
+    }
+    xy_observations = {
+        row["fingerprint"]: sha256(
+            ("xy-observation:" + row["fingerprint"]).encode()).hexdigest()
+        for rows in selected.values() for row in rows
+    }
+
+    def workload_observations(runtime, scene, index):
+        fingerprint = scene["fingerprint"]
+        if fingerprint in historical_by_fingerprint:
+            return {historical_by_fingerprint[fingerprint]}
+        if fingerprint in xy_observations:
+            return {xy_observations[fingerprint]}
+        raise AssertionError("unexpected workload scene")
+
+    monkeypatch.setattr(
+        subject, "_exact_final_workload_observations", workload_observations)
+    fresh_scene = {
+        "fingerprint": sha256(b"fresh-selected").hexdigest(),
+        "seed": 9001,
+    }
+
+    def select_fresh(**kwargs):
+        assert kwargs["selection_salt"] == salt
+        assert not (set(row["fingerprint"] for row in identities)
+                    & kwargs["excluded_fingerprints"])
+        assert not (set(row["seed"] for row in identities)
+                    & kwargs["excluded_seeds"])
+        assert not (set(final_hashes.values())
+                    & kwargs["forbidden_observation_hashes"])
+        return ([fresh_scene], [{"accepted": True}], {"accepted": 1},
+                {sha256(b"fresh-observation").hexdigest()})
+
+    monkeypatch.setattr(subject, "_select", select_fresh)
+
+    evidence = {}
+    for index, name in enumerate(
+            ("merged_rows.npz", "prior_rows.npz", "expansion_rows.npz")):
+        path = tmp_path / name
+        fingerprint = sha256(f"row-scene:{index}".encode()).hexdigest()
+        observation_hashes = _rows(
+            path, [np.arange(197, dtype=np.float32) + 10000 * (index + 1)],
+            [fingerprint])
+        evidence[name] = (path, {fingerprint}, observation_hashes)
+    candidate = claim_dir / "candidate_authenticated.json"
+    candidate.write_text(subject.canonical({
+        "development_registries": {
+            version: binding["file_sha256"]
+            for version, binding in development_bindings.items()
+        },
+        "rows_file_sha256": subject.file_hash(evidence["merged_rows.npz"][0]),
+        "prior_v7_rows_file_sha256": subject.file_hash(
+            evidence["prior_rows.npz"][0]),
+        "expansion_rows_file_sha256": subject.file_hash(
+            evidence["expansion_rows.npz"][0]),
+    }) + "\n", encoding="utf-8")
+    (claim_dir / "holdout_started.json").write_text(subject.canonical({
+        "version": subject.VERSION,
+        "status": "started_no_retry",
+        "campaign_key": expected_campaign,
+        "candidate_identity_sha256": expected_candidate,
+        "attempt_started_sha256": expected_claim,
+        "candidate_authenticated_sha256": subject.file_hash(candidate),
+        "selection_salt_commitment": subject.HOLDOUT_SALT_COMMITMENT,
+    }) + "\n", encoding="utf-8")
+    monkeypatch.setattr(
+        subject, "_claim_receipt", lambda *args, **kwargs: (claim_dir, {}))
+
+    replayed = {v3_observation, *xy_observations.values()}
+    row_observations = set().union(*(value[2] for value in evidence.values()))
+    excluded_fingerprints = {
+        projected_fp, v3_scene["fingerprint"], *xy_observations.keys()}
+    excluded_seeds = {
+        projected_seed, v3_scene["seed"],
+        *(row["seed"] for rows in selected.values() for row in rows),
+    }
+    args = {
+        "manifest_path": manifest,
+        "runtime": Runtime(),
+        "selection_manifest": public_manifest,
+        "selection_salt": salt,
+        "selected_scenes_path": selected_path,
+        "development_registry_paths": development_paths,
+        "retired_identity_projection_path": projection_path,
+        "v3_tombstone": v3_tombstone,
+        "claim_receipt_path": claim_dir / "attempt_started.json",
+        "expected_claim_sha256": expected_claim,
+        "expected_campaign_key": expected_campaign,
+        "expected_candidate_identity_sha256": expected_candidate,
+        "excluded_fingerprints": excluded_fingerprints,
+        "excluded_seeds": excluded_seeds,
+        "preexisting_observation_hashes": row_observations | replayed,
+        "replayed_excluded_observation_hashes": replayed,
+        "row_artifact_evidence": evidence,
+    }
+    return claim_dir, manifest, identities, set(final_hashes.values()), replay_calls, args
+
+
+def test_historical_final_access_is_marked_before_parse_and_returns_only_hashes(
+        tmp_path, monkeypatch):
+    claim_dir, manifest, identities, expected_hashes, replay_calls, args = (
+        _historical_phase_fixture(tmp_path, monkeypatch))
+    public_fingerprints = set(args["excluded_fingerprints"])
+    public_seeds = set(args["excluded_seeds"])
+    original_read = subject._read_exact_json
+    reads = []
+
+    def guarded_read(path, label, **kwargs):
+        if Path(path) == manifest:
+            assert (claim_dir / "historical_exclusion_started.json").is_file()
+            reads.append("manifest_after_marker")
+        return original_read(path, label, **kwargs)
+
+    monkeypatch.setattr(subject, "_read_exact_json", guarded_read)
+    scenes, trace, statistics, accepted_hashes, receipt = (
+        subject._build_claimed_historical_final_observation_exclusion(**args))
+    assert len(scenes) == 1 and trace == [{"accepted": True}]
+    assert statistics == {"accepted": 1}
+    assert accepted_hashes == {sha256(b"fresh-observation").hexdigest()}
+    assert reads == ["manifest_after_marker"]
+    assert replay_calls == []
+    assert receipt["historical_final_scenes_returned"] is False
+    assert receipt["historical_final_actor_outputs_exposed"] is False
+    assert receipt["historical_final_actor_outputs_persisted"] is False
+    assert receipt["historical_final_metrics_used_for_fit_or_program_selection"] is False
+    assert receipt[
+        "historical_final_saved_metrics_replayed_for_authentication"] is False
+    assert receipt["fresh_selection_conditioned_on_historical_final"] is False
+    assert receipt["fresh_selection_private_overlap_fallback"] is False
+    assert receipt["fresh_selection_historical_scene_fingerprint_overlap"] == 0
+    assert receipt["fresh_selection_historical_seed_overlap"] == 0
+    assert receipt["fresh_selection_historical_public_observation_overlap"] == 0
+    assert "scenes" not in receipt and "actions" not in receipt
+    assert receipt["historical_final_scene_count"] == subject.TOTAL_SCENES
+    assert args["excluded_fingerprints"] == public_fingerprints
+    assert args["excluded_seeds"] == public_seeds
+    assert receipt["combined_excluded_scene_fingerprint_count"] == (
+        subject.TOTAL_SCENES + len(public_fingerprints))
+    assert receipt["combined_excluded_seed_count"] == (
+        subject.TOTAL_SCENES + len(public_seeds))
+    assert (claim_dir / "historical_exclusion_completed.json").is_file()
+    # The durable receipt may contain aggregate counts and commitments, but it
+    # must never serialize any raw historical identity/observation value,
+    # whether as a scalar, mapping key, or member of a nested collection.
+    private_values = {
+        *(row["fingerprint"] for row in identities),
+        *(row["seed"] for row in identities),
+        *expected_hashes,
+    }
+
+    def assert_no_private_values(value, path="receipt"):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                assert key not in private_values, f"{path}.<key>"
+                assert_no_private_values(item, f"{path}.{key}")
+        elif isinstance(value, (list, tuple, set)):
+            for index, item in enumerate(value):
+                assert_no_private_values(item, f"{path}[{index}]")
+        else:
+            assert value not in private_values, path
+
+    assert_no_private_values(receipt)
+    for evidence in receipt["row_artifact_evidence"].values():
+        assert evidence["zero_historical_overlap"] is True
+        assert evidence["historical_scene_fingerprint_overlap"] == 0
+        assert evidence["historical_public_observation_overlap"] == 0
+
+
+def test_historical_final_crash_after_started_burns_phase_and_cannot_reenter(
+        tmp_path, monkeypatch):
+    claim_dir, manifest, _, _, _, args = _historical_phase_fixture(
+        tmp_path, monkeypatch)
+    original_read = subject._read_exact_json
+
+    def crash_after_marker(path, label, **kwargs):
+        if Path(path) == manifest:
+            assert (claim_dir / "historical_exclusion_started.json").is_file()
+            raise RuntimeError("synthetic full-manifest crash")
+        return original_read(path, label, **kwargs)
+
+    monkeypatch.setattr(subject, "_read_exact_json", crash_after_marker)
+    with pytest.raises(
+            subject._HistoricalFinalPrivatePhaseError,
+            match="^historical_final_private_phase_failed$") as raised:
+        subject._build_claimed_historical_final_observation_exclusion(**args)
+    assert raised.value.__cause__ is None
+    assert "full-manifest crash" not in str(raised.value)
+    assert (claim_dir / "historical_exclusion_started.json").is_file()
+    assert not (claim_dir / "historical_exclusion_completed.json").exists()
+    with pytest.raises(
+            subject._HistoricalFinalPrivatePhaseError,
+            match="^historical_final_private_phase_failed$"):
+        subject._build_claimed_historical_final_observation_exclusion(**args)
+
+
+def test_historical_final_overlap_and_forged_row_sets_fail_closed(
+        tmp_path, monkeypatch):
+    claim_dir, _, _, expected_hashes, _, args = _historical_phase_fixture(
+        tmp_path, monkeypatch)
+    forged = dict(args["row_artifact_evidence"])
+    path, fingerprints, observations = forged["merged_rows.npz"]
+    forged["merged_rows.npz"] = (path, set(fingerprints), {"e" * 64})
+    args["row_artifact_evidence"] = forged
+    with pytest.raises(
+            subject._HistoricalFinalPrivatePhaseError,
+            match="^historical_final_private_phase_failed$"):
+        subject._build_claimed_historical_final_observation_exclusion(**args)
+    assert not (claim_dir / "historical_exclusion_started.json").exists()
+
+    claim_dir, _, _, expected_hashes, _, args = _historical_phase_fixture(
+        tmp_path / "overlap", monkeypatch)
+    args["preexisting_observation_hashes"].add(next(iter(expected_hashes)))
+    with pytest.raises(
+            subject._HistoricalFinalPrivatePhaseError,
+            match="^historical_final_private_phase_failed$"):
+        subject._build_claimed_historical_final_observation_exclusion(**args)
+    assert not (claim_dir / "historical_exclusion_started.json").exists()
+    assert not (claim_dir / "historical_exclusion_completed.json").exists()
+
+
+@pytest.mark.parametrize("forgery", ["salt", "manifest", "exclusions", "rows"])
+def test_historical_helper_rejects_caller_chosen_selection_inputs_before_marker(
+        tmp_path, monkeypatch, forgery):
+    claim_dir, _, _, _, _, args = _historical_phase_fixture(
+        tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        subject, "_select",
+        lambda **kwargs: calls.append(kwargs) or (_ for _ in ()).throw(
+            AssertionError("selection ran before public inputs authenticated")))
+    if forgery == "salt":
+        args["selection_salt"] = b"x" * 32
+    elif forgery == "manifest":
+        args["selection_manifest"] = {
+            **args["selection_manifest"], "candidate_batches": [[{"forged": True}]]}
+    elif forgery == "exclusions":
+        args["excluded_fingerprints"] = set(args["excluded_fingerprints"])
+        args["excluded_fingerprints"].add("f" * 64)
+    else:
+        replacement = tmp_path / "replacement.npz"
+        fingerprint = sha256(b"replacement-row").hexdigest()
+        observations = _rows(
+            replacement, [np.arange(197, dtype=np.float32) + 90000],
+            [fingerprint])
+        args["row_artifact_evidence"] = dict(args["row_artifact_evidence"])
+        args["row_artifact_evidence"]["merged_rows.npz"] = (
+            replacement, {fingerprint}, observations)
+        row_union = set().union(*(
+            value[2] for value in args["row_artifact_evidence"].values()))
+        args["preexisting_observation_hashes"] = (
+            row_union | set(args["replayed_excluded_observation_hashes"]))
+    with pytest.raises(
+            subject._HistoricalFinalPrivatePhaseError,
+            match="^historical_final_private_phase_failed$"):
+        subject._build_claimed_historical_final_observation_exclusion(**args)
+    assert calls == []
+    assert not (claim_dir / "historical_exclusion_started.json").exists()
+    assert not (claim_dir / "historical_exclusion_completed.json").exists()
+
+
+@pytest.mark.parametrize("overlap_kind", ["fingerprint", "seed", "observation"])
+def test_fresh_selection_private_overlap_burns_without_fallback(
+        tmp_path, monkeypatch, overlap_kind):
+    claim_dir, _, identities, historical_hashes, _, args = (
+        _historical_phase_fixture(tmp_path, monkeypatch))
+    calls = []
+    fresh_scene = {
+        "fingerprint": sha256(b"otherwise-fresh-scene").hexdigest(),
+        "seed": 9917,
+    }
+    accepted = {sha256(b"otherwise-fresh-observation").hexdigest()}
+    if overlap_kind == "fingerprint":
+        fresh_scene["fingerprint"] = identities[0]["fingerprint"]
+    elif overlap_kind == "seed":
+        fresh_scene["seed"] = identities[0]["seed"]
+    else:
+        accepted = {next(iter(historical_hashes))}
+
+    def select_once(**kwargs):
+        calls.append(kwargs)
+        # Private historical membership must not be supplied to selection.
+        assert identities[0]["fingerprint"] not in kwargs["excluded_fingerprints"]
+        assert identities[0]["seed"] not in kwargs["excluded_seeds"]
+        assert not (historical_hashes & kwargs["forbidden_observation_hashes"])
+        return ([dict(fresh_scene)], [{"accepted": True}], {"accepted": 1},
+                set(accepted))
+
+    monkeypatch.setattr(subject, "_select", select_once)
+    with pytest.raises(
+            subject._HistoricalFinalPrivatePhaseError,
+            match="^historical_final_private_phase_failed$"):
+        subject._build_claimed_historical_final_observation_exclusion(**args)
+    assert len(calls) == 1
+    assert (claim_dir / "historical_exclusion_started.json").is_file()
+    assert not (claim_dir / "historical_exclusion_completed.json").exists()
+    with pytest.raises(
+            subject._HistoricalFinalPrivatePhaseError,
+            match="^historical_final_private_phase_failed$"):
+        subject._build_claimed_historical_final_observation_exclusion(**args)
+    assert len(calls) == 1
+
+
+def test_private_replay_exception_payload_is_redacted(
+        tmp_path, monkeypatch):
+    claim_dir, _, identities, historical_hashes, _, args = (
+        _historical_phase_fixture(tmp_path, monkeypatch))
+    private_fragments = (
+        identities[0]["fingerprint"], str(identities[0]["seed"]),
+        next(iter(historical_hashes)), "actor_action=RIGHT",
+        args["selection_salt"].hex(),
     )
-    candidates = subject._candidate_index(manifest)
-    for path in retired_paths:
-        retired = json.loads(path.read_text(encoding="utf-8"))
-        row = next(item for item in retired["selection_trace"]
-                   if item.get("workload_receipt", {}).get("passed") is True)
-        hashes = subject._exact_final_workload_observations(
-            runtime, candidates[row["fingerprint"]], row["scene_index"])
-        expected_count = row.get(
-            "public_observation_hash_count", row.get("public_observation_count"))
-        expected_digest = row.get(
-            "public_observation_hashes_sha256", row.get("public_observations_sha256"))
-        assert len(hashes) == expected_count
-        assert subject.digest(sorted(hashes)) == expected_digest
+    payload = " | ".join(private_fragments)
+    original_observations = subject._exact_final_workload_observations
+    historical_fingerprints = {row["fingerprint"] for row in identities}
+
+    def fail_for_historical(runtime, scene, index):
+        if scene["fingerprint"] in historical_fingerprints:
+            raise RuntimeError(payload)
+        return original_observations(runtime, scene, index)
+
+    monkeypatch.setattr(
+        subject, "_exact_final_workload_observations",
+        fail_for_historical)
+
+    with pytest.raises(
+            subject._HistoricalFinalPrivatePhaseError,
+            match="^historical_final_private_phase_failed$") as raised:
+        subject._build_claimed_historical_final_observation_exclusion(**args)
+    rendered = repr(raised.value) + " " + str(raised.value)
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert raised.value.__suppress_context__ is True
+    assert all(fragment not in rendered for fragment in private_fragments)
+    _assert_private_material_absent(
+        raised.value, private_fragments, subject.__name__)
+    assert (claim_dir / "historical_exclusion_started.json").is_file()
+    assert not (claim_dir / "historical_exclusion_completed.json").exists()
+
+
+def test_private_replay_interrupt_traceback_has_no_private_frame_locals(
+        tmp_path, monkeypatch):
+    claim_dir, _, identities, historical_hashes, _, args = (
+        _historical_phase_fixture(tmp_path, monkeypatch))
+    private_fragments = (
+        identities[0]["fingerprint"], str(identities[0]["seed"]),
+        next(iter(historical_hashes)), args["selection_salt"].hex(),
+        "private-interrupt-payload",
+    )
+    payload = " | ".join(private_fragments)
+    historical_fingerprints = {row["fingerprint"] for row in identities}
+
+    class PrivateInterrupt(BaseException):
+        pass
+
+    original_observations = subject._exact_final_workload_observations
+
+    def interrupt_historical(runtime, scene, index):
+        if scene["fingerprint"] in historical_fingerprints:
+            raise PrivateInterrupt(payload)
+        return original_observations(runtime, scene, index)
+
+    monkeypatch.setattr(
+        subject, "_exact_final_workload_observations",
+        interrupt_historical)
+    with pytest.raises(
+            subject._HistoricalFinalPrivatePhaseInterrupt,
+            match="^historical_final_private_phase_interrupted$") as raised:
+        subject._build_claimed_historical_final_observation_exclusion(**args)
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    _assert_private_material_absent(
+        raised.value, private_fragments, subject.__name__)
+    assert (claim_dir / "historical_exclusion_started.json").is_file()
+    assert not (claim_dir / "historical_exclusion_completed.json").exists()
+
+
+@pytest.mark.parametrize("interrupt", [False, True])
+def test_post_selection_failure_does_not_expose_fresh_identity_or_salt(
+        tmp_path, monkeypatch, interrupt):
+    claim_dir, _, _, _, _, args = _historical_phase_fixture(
+        tmp_path, monkeypatch)
+    private_fragments = (
+        sha256(b"fresh-selected").hexdigest(), "9001",
+        sha256(b"fresh-observation").hexdigest(),
+        args["selection_salt"].hex(),
+    )
+    payload = " | ".join(private_fragments)
+    original_marker = subject._claim_marker
+
+    class PrivateInterrupt(BaseException):
+        pass
+
+    def fail_before_historical_completion(directory, name, value, **kwargs):
+        if name == "historical_exclusion_completed.json":
+            if interrupt:
+                raise PrivateInterrupt(payload)
+            raise RuntimeError(payload)
+        return original_marker(directory, name, value, **kwargs)
+
+    monkeypatch.setattr(subject, "_claim_marker",
+                        fail_before_historical_completion)
+    expected = (
+        subject._HistoricalFinalPrivatePhaseInterrupt
+        if interrupt else subject._HistoricalFinalPrivatePhaseError)
+    with pytest.raises(expected) as raised:
+        subject._build_claimed_historical_final_observation_exclusion(**args)
+    _assert_private_material_absent(
+        raised.value, private_fragments, subject.__name__)
+    assert (claim_dir / "historical_exclusion_started.json").is_file()
+    assert not (claim_dir / "historical_exclusion_completed.json").exists()
+
+
+@pytest.mark.parametrize("interrupt", [False, True])
+def test_public_build_redacts_post_salt_exception_and_worker_is_not_callable(
+        tmp_path, monkeypatch, interrupt):
+    claim_dir = tmp_path / "claim"
+    claim_dir.mkdir()
+    candidate = claim_dir / "candidate_authenticated.json"
+    candidate.write_text("{}\n", encoding="utf-8")
+    inputs = {}
+    for name in (
+        "actor", "protocol", "manifest", "designation", "selected",
+        "development", "rows", "legacy_rows", "expansion_rows", "retired",
+        "implicit",
+    ):
+        path = tmp_path / (name + (".npz" if "rows" in name else ".json"))
+        path.write_bytes(b"input\n")
+        inputs[name] = path
+    (tmp_path / "report.json").write_bytes(b"input\n")
+    monkeypatch.setattr(
+        subject, "_claim_receipt", lambda *args, **kwargs: (claim_dir, {}))
+    monkeypatch.setattr(subject, "producer_sources", lambda: {"source.py": "a" * 64})
+    monkeypatch.setattr(
+        subject, "_implicit_input_paths",
+        lambda **kwargs: {
+            "manifest_validation": inputs["implicit"],
+            **{
+                "designation_component:" + name: inputs["implicit"]
+                for name in subject.designation_api.ARTIFACT_NAMES
+            },
+        })
+
+    class Snapshot:
+        def __init__(self, *args, **kwargs):
+            self.paths = {}
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return None
+        def verify(self):
+            return None
+
+    class PrivateInterrupt(BaseException):
+        pass
+
+    raw_salt = b"private-salt-material-0123456789"
+    private_fragments = (
+        raw_salt.hex(), "private-fresh-fingerprint",
+        "private-fresh-seed-918273", "private-observation-deadbeef",
+    )
+    payload = " | ".join(private_fragments)
+    monkeypatch.setattr(
+        subject.input_snapshot_api, "ImmutableInputSnapshot", Snapshot)
+    monkeypatch.setattr(subject, "_read_committed_salt", lambda _path: raw_salt)
+
+    def guard(*args, phase, **kwargs):
+        if phase == "private salt authentication":
+            if interrupt:
+                raise PrivateInterrupt(payload)
+            raise RuntimeError(payload)
+
+    monkeypatch.setattr(subject, "_guard_frozen_holdout_inputs", guard)
+    expected = (
+        subject._HistoricalFinalPrivatePhaseInterrupt
+        if interrupt else subject._HistoricalFinalPrivatePhaseError)
+    with pytest.raises(expected) as raised:
+        subject.build(
+            actor_path=inputs["actor"], protocol_path=inputs["protocol"],
+            manifest_path=inputs["manifest"],
+            designation_path=inputs["designation"],
+            selected_scenes_path=inputs["selected"],
+            development_registry_paths=[inputs["development"]],
+            development_rows_paths=[inputs["rows"]],
+            legacy_v3_rows_path=inputs["legacy_rows"],
+            expansion_rows_path=inputs["expansion_rows"],
+            retired_identity_projection_path=inputs["retired"],
+            output=tmp_path / "holdout", claim_receipt_path=candidate,
+            expected_claim_sha256="1" * 64,
+            expected_campaign_key="2" * 64,
+            expected_candidate_identity_sha256="3" * 64,
+            selection_salt_path=tmp_path / "private-salt",
+        )
+    _assert_private_material_absent(
+        raised.value, private_fragments, subject.__name__)
+    assert not hasattr(subject, "_build_sensitive")
+    assert not hasattr(
+        subject,
+        "_build_claimed_historical_final_observation_exclusion_sensitive")
+
+
+def test_active_holdout_source_has_no_raw_retired_reader_or_artifact_path():
+    source = Path(subject.__file__).read_text(encoding="utf-8")
+    assert "_retired_registries" not in source
+    assert "retired_holdout_paths" not in source
+    assert "r41_diagnostic_fresh_final_holdout_v1_20260912" not in source
+    assert "r41_diagnostic_fresh_final_holdout_v2_20260912" not in source
+    assert "_projected_exposure_closure" not in source
+    assert "manifest_binding._validate_rows(" not in source
+    historical_source = inspect.getsource(
+        subject._build_claimed_historical_final_observation_exclusion)
+    historical_source += inspect.getsource(subject._historical_public_scene)
+    assert 'scene["workload_screen"]' not in historical_source

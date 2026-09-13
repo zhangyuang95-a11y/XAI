@@ -10,8 +10,9 @@ label is an input to this producer.
 The validation split is selected first so later fit selection cannot influence
 which scenes are held out.  Both split streams and all six family quotas are
 fixed by this source.  Existing registered splits, formal X/Y scenes, the v1
-development supplement, and the two retired fresh-final registries are used
-only as exclusion registries.
+development supplement, and one audited identity-only projection of the two
+permanently retired fresh-final registries are used only as exclusion inputs.
+This producer never opens either full retired holdout.
 """
 from __future__ import annotations
 
@@ -24,14 +25,21 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
-from backend.training import warehouse_r41_diagnostic_designation as designation_api
+from backend.training import warehouse_r41_diagnostic_designation_v2 as designation_api
+from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_binding
+from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_binding
+from backend.training import warehouse_r41_diagnostic_retired_identity_projection_v8 as retired_identity_api
 from backend.training.warehouse_native_common import canonical, digest, file_hash
+from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
+from backend.training.warehouse_r41_diagnostic_input_snapshot_v8 import (
+    ImmutableInputSnapshot,
+    read_authenticated_bytes,
+)
 from backend.training.warehouse_r41_diagnostic_conflict_scenarios import (
     FAMILY_IDS,
     VERSION as MANIFEST_VERSION,
-    validate_diagnostic_manifest,
 )
 from backend.training.warehouse_r41_diagnostic_workload_screen import (
     CONTRACT_SHA256 as WORKLOAD_CONTRACT_SHA256,
@@ -61,10 +69,22 @@ VALIDATION_ORDER_SALT = (
 FIT_ORDER_SALT = "r41-diagnostic-v8-program-blind-fit-supplement-20260912"
 
 EXPECTED_DESIGNATION_SHA256 = (
-    "d80f2736c6d5e359764f6ae4c09ccfa277f26e98a8910c1f18d86d84cb99851f"
+    "b42323e3bc4543c4f4e1af96be4de4d90489a38459240bfb494dcc2d6120a815"
 )
 EXPECTED_MANIFEST_SHA256 = (
     "af985e9d6f041668ff1250e19da21a078ab5ccc68ecc7aca8d696f2c56845d4c"
+)
+EXPECTED_SELECTED_SCENES_SHA256 = (
+    "30accfb01d5e022fc42734622cc38481bde639ba9ed2edfb789ddbdf8a6f4fd8"
+)
+EXPECTED_PREVIOUS_DEVELOPMENT_SHA256 = (
+    "8931b74940f1c41940d9fbb73a52f940f527b8f9c67dfd6b94a4a4d1afd977fe"
+)
+EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256 = (
+    "cdd17b1a8d46b54dfeec70f74fb3acb43dc1b575c54f58cf9be982ad89d5f111"
+)
+EXPECTED_RETIRED_IDENTITY_PROJECTION_REPORT_SHA256 = (
+    "4188b293f5c0e02cc80ece7fa1c0841134369c740fffea2aecef90653e077db5"
 )
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -88,7 +108,8 @@ def contract() -> dict[str, Any]:
         },
         "selection_rule": (
             "first exact-RCPD-workload-safe scene in each family after excluding "
-            "all registered, formal X/Y, previous-development, retired-final, "
+            "all registered, formal X/Y, previous-development, retired-v1/v2 "
+            "declassified identities, "
             "and already accepted expansion scenes"
         ),
         "fit_scene_index_offset": BASE_DEVELOPMENT_FIT_SCENES,
@@ -105,36 +126,38 @@ def contract() -> dict[str, Any]:
         "participant_data_access": False,
         "final_audit_rows_access": False,
         "final_labels_used_for_selection": False,
-        "retired_final_use": "registry identity and scene exclusion only",
+        "retired_final_use": (
+            "fixed audited union of every trace-exposed retired v1/v2 "
+            "seed/fingerprint for exclusion only"
+        ),
+        "retired_identity_projection_version": retired_identity_api.VERSION,
+        "full_retired_holdout_access": False,
+        "retired_selection_trace_access": False,
+        "retired_statistics_or_metrics_access": False,
+        "retired_snapshot_or_workload_access": False,
+        "historical_final_identity_commitments_bound": True,
+        "historical_final_overlap_check": (
+            "deferred to irrevocable claim-bound exclusion phase"
+        ),
+        "final_identity_commitment_used_for_overlap_exclusion": False,
+        "final_scene_geometry_access": False,
+        "final_trajectories_access": False,
+        "final_actor_outputs_or_labels_access": False,
+        "final_used_for_fit_selection_metrics": False,
         "runtime_action_override": False,
         "formal_ready": False,
     }
 
 
 def producer_sources() -> dict[str, str]:
-    """Return the explicit source set that defines registry selection.
-
-    Keeping this closure explicit prevents unrelated deployment or explanation
-    code from becoming an input to program-blind scene selection.
-    """
-    paths = (
-        Path(__file__).resolve(),
-        ROOT / "backend/training/warehouse_native_common.py",
-        ROOT / "backend/training/warehouse_r41_diagnostic_conflict_scenarios.py",
-        ROOT / "backend/training/warehouse_r41_diagnostic_workload_screen.py",
-        Path(designation_api.__file__).resolve(),
-        ROOT / "backend/warehouse_r41_diagnostic_online_runtime.py",
-        ROOT / "env/warehouse_native/policy.py",
-        ROOT / "env/warehouse_native/r41_conflict.py",
-        ROOT / "env/warehouse_native/r41_diagnostic_conflict.py",
-    )
-    result: dict[str, str] = {}
-    for path in paths:
-        path = path.resolve()
-        if not path.is_file() or path.is_symlink():
-            raise ValueError("Development-expansion producer source is unsafe")
-        result[path.relative_to(ROOT.resolve()).as_posix()] = file_hash(path)
-    return dict(sorted(result.items()))
+    """Return the complete transitive source closure of the actual producer."""
+    sources = dict(local_source_hashes((Path(__file__).resolve(),)))
+    for path, sha256 in designation_api.source_closure().items():
+        if path in sources and sources[path] != sha256:
+            raise RuntimeError(
+                "Designation source changed while resolving producer closure")
+        sources[path] = sha256
+    return dict(sorted(sources.items()))
 
 
 def _sha(value: Any, label: str) -> str:
@@ -168,6 +191,32 @@ def _read(path: Path, label: str) -> dict[str, Any]:
         parse_constant=lambda token: (_ for _ in ()).throw(
             ValueError("Non-finite JSON value in " + label + ": " + token)
         ),
+    )
+    if not isinstance(value, dict):
+        raise ValueError(label + " must be one JSON object")
+    return value
+
+
+def _read_exact(
+    path: Path, label: str, *, expected_sha256: str,
+) -> dict[str, Any]:
+    raw = read_authenticated_bytes(
+        path, label=label, expected_sha256=expected_sha256,
+        maximum=MAX_JSON_BYTES,
+    )
+
+    def pairs(rows):
+        result = {}
+        for key, value in rows:
+            if key in result:
+                raise ValueError("Duplicate JSON field in " + label)
+            result[key] = value
+        return result
+
+    value = json.loads(
+        raw.decode("utf-8"), object_pairs_hook=pairs,
+        parse_constant=lambda token: (_ for _ in ()).throw(
+            ValueError("Non-finite JSON value in " + label + ": " + token)),
     )
     if not isinstance(value, dict):
         raise ValueError(label + " must be one JSON object")
@@ -253,24 +302,6 @@ def _validate_previous_development(
         raise ValueError("Previous development supplement identity differs")
     return _scene_identities(
         value.get("scenes"), expected_count=64, label="previous development"
-    )
-
-
-def _validate_retired_holdout(
-    value: Mapping[str, Any], *, expected_version: str,
-) -> tuple[set[str], set[int]]:
-    statistics = value.get("statistics")
-    if (value.get("version") != expected_version
-            or value.get("program_access") is not False
-            or value.get("contract", {}).get("program_predictions_access") is not False
-            or value.get("contract", {}).get("final_labels_used_for_selection") is not False
-            or not _content_valid(value) or not isinstance(statistics, Mapping)
-            or statistics.get("accepted") != 64
-            or statistics.get("public_observation_overlap") != 0):
-        raise ValueError("Retired fresh-final registry identity differs")
-    return _scene_identities(
-        value.get("scenes"), expected_count=64,
-        label="retired " + expected_version,
     )
 
 
@@ -422,7 +453,13 @@ def _write_exclusive(path: Path, value: Any) -> None:
         os.fsync(stream.fileno())
 
 
-def _atomic_output(output: Path, registry: Mapping[str, Any], report: Mapping[str, Any]) -> None:
+def _atomic_output(
+    output: Path,
+    registry: Mapping[str, Any],
+    report: Mapping[str, Any],
+    *,
+    before_publish: Callable[[], None] | None = None,
+) -> None:
     parent = output.parent
     if (not parent.is_dir() or parent.is_symlink() or parent.resolve() != parent
             or output.exists() or output.is_symlink()):
@@ -447,6 +484,8 @@ def _atomic_output(output: Path, registry: Mapping[str, Any], report: Mapping[st
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+        if before_publish is not None:
+            before_publish()
         if output.exists() or output.is_symlink():
             raise ValueError("Development-expansion destination appeared during build")
         os.rename(temporary, output)
@@ -466,46 +505,100 @@ def _atomic_output(output: Path, registry: Mapping[str, Any], report: Mapping[st
 
 def _input_identity(
     *, actor_path: Path, manifest_path: Path, designation_path: Path,
+    manifest_validation_path: Path,
     selected_path: Path, previous_development_path: Path,
-    retired_paths: Sequence[Path],
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], set[str], set[int], dict[str, Any]]:
+    retired_identity_projection_path: Path,
+    designation_original_path: Path | None = None,
+    designation_snapshot_components: Mapping[str, Path] | None = None,
+    designation_original_components: Mapping[str, Path] | None = None,
+) -> tuple[
+    dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any],
+    set[str], set[int], dict[str, Any], dict[str, Any],
+]:
+    if manifest_validation_path != manifest_path.parent / "validation.json":
+        raise ValueError(
+            "Development expansion requires the canonical manifest validation receipt")
     actor_sha256 = file_hash(actor_path)
     if actor_sha256 != designation_api.EXPECTED_ACTOR_SHA256:
         raise ValueError("Development expansion requires the frozen diagnostic Actor")
     if file_hash(manifest_path) != EXPECTED_MANIFEST_SHA256:
         raise ValueError("Development expansion requires the current frozen manifest")
+    if file_hash(manifest_validation_path) != manifest_binding.EXPECTED_VALIDATION_SHA256:
+        raise ValueError(
+            "Development expansion requires the fixed manifest validation receipt")
     if file_hash(designation_path) != EXPECTED_DESIGNATION_SHA256:
         raise ValueError("Development expansion requires the current Actor designation")
+    if (file_hash(retired_identity_projection_path)
+            != EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256):
+        raise ValueError(
+            "Development expansion requires the fixed retired identity projection")
 
-    manifest = _read(manifest_path, "diagnostic conflict manifest")
-    validate_diagnostic_manifest(manifest, replay=False)
-    if (manifest.get("version") != MANIFEST_VERSION
-            or not _content_valid(manifest)
-            or manifest.get("frozen_actor", {}).get("sha256") != actor_sha256
-            or manifest.get("frozen_actor", {}).get("actor_parameters_sha256")
-                != designation_api.EXPECTED_ACTOR_PARAMETERS_SHA256):
+    manifest_identity = manifest_binding.read_saved_manifest(
+        manifest_path, expected_sha256=EXPECTED_MANIFEST_SHA256,
+        actor_path=actor_path, replay_scope="development",
+    )
+    manifest = manifest_identity
+    candidate_batches = manifest["candidate_batches"]
+    if (manifest_identity.get("version") != MANIFEST_VERSION
+            or manifest_identity.get("content_sha256")
+                != manifest_binding.EXPECTED_MANIFEST_CONTENT_SHA256
+            or manifest_identity.get("frozen_actor", {}).get("sha256")
+                != actor_sha256
+            or manifest_identity.get("frozen_actor", {}).get(
+                "actor_parameters_sha256")
+                != designation_api.EXPECTED_ACTOR_PARAMETERS_SHA256
+            or manifest_identity.get("authentication", {}).get(
+                "validation_file_sha256")
+                != manifest_binding.EXPECTED_VALIDATION_SHA256
+            or manifest_identity.get("authentication", {}).get(
+                "candidate_scenes_disjoint_from_all_base_splits_authenticated")
+                is not True):
         raise ValueError("Diagnostic conflict manifest binding differs")
 
-    designation = _read(designation_path, "diagnostic Actor designation")
+    if (designation_original_path is None
+            or designation_snapshot_components is None
+            or designation_original_components is None):
+        raise ValueError("Complete designation snapshot binding required")
+    designation = designation_binding.read_bound_designation_snapshot(
+        designation_path,
+        original_path=designation_original_path,
+        components=designation_snapshot_components,
+        original_components=designation_original_components,
+        expected_sha256=EXPECTED_DESIGNATION_SHA256,
+    )
     _validate_designation(designation, actor_sha256=actor_sha256)
-    selected = _read(selected_path, "formal X/Y selection")
+    selected = _read_exact(
+        selected_path, "formal X/Y selection",
+        expected_sha256=EXPECTED_SELECTED_SCENES_SHA256,
+    )
     fingerprints, seeds = _validate_selected(
         selected, actor_sha256=actor_sha256,
         manifest_path=manifest_path, manifest=manifest,
     )
 
-    # Every manifest split is registered and unavailable to this expansion.
-    registered_rows = [row for rows in manifest["splits"].values() for row in rows]
+    # Development rows remain available in full.  The protected historical
+    # final split is absent from this view; its aggregate identity commitment
+    # is authenticated separately and exact overlap is deferred to the claim.
+    registered_rows = [
+        row for name in manifest_binding.DEVELOPMENT_REPLAY_SPLITS
+        for row in manifest["splits"][name]
+    ]
     registered_fp, registered_seeds = _scene_identities(
         registered_rows,
-        expected_count=sum(len(rows) for rows in manifest["splits"].values()),
+        expected_count=229,
         label="registered manifest splits",
     )
+    if any(
+        row["seed"] >= 49_300_000
+        for batch in candidate_batches for row in batch
+    ):
+        raise ValueError("Development candidate seed crossed the final namespace")
     fingerprints.update(registered_fp)
     seeds.update(registered_seeds)
 
-    previous_development = _read(
-        previous_development_path, "previous development supplement"
+    previous_development = _read_exact(
+        previous_development_path, "previous development supplement",
+        expected_sha256=EXPECTED_PREVIOUS_DEVELOPMENT_SHA256,
     )
     previous_fp, previous_seeds = _validate_previous_development(
         previous_development,
@@ -516,168 +609,296 @@ def _input_identity(
     fingerprints.update(previous_fp)
     seeds.update(previous_seeds)
 
-    retired_values: dict[str, dict[str, Any]] = {}
-    expected_versions = {
-        "warehouse-r41-diagnostic-fresh-final-holdout.v1",
-        "warehouse-r41-diagnostic-fresh-final-holdout.v2",
-    }
-    for path in retired_paths:
-        value = _read(path, "retired fresh-final registry")
-        version = value.get("version")
-        if version not in expected_versions or version in retired_values:
-            raise ValueError("Exactly one retired v1 and v2 holdout registry required")
-        retired_fp, retired_seeds = _validate_retired_holdout(
-            value, expected_version=str(version)
-        )
-        fingerprints.update(retired_fp)
-        seeds.update(retired_seeds)
-        retired_values[str(version)] = value
-    if set(retired_values) != expected_versions:
-        raise ValueError("Exactly one retired v1 and v2 holdout registry required")
+    retired_projection = retired_identity_api.read_saved_projection(
+        retired_identity_projection_path,
+        expected_projection_sha256=(
+            EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256),
+        expected_report_sha256=(
+            EXPECTED_RETIRED_IDENTITY_PROJECTION_REPORT_SHA256),
+    )
+    retired_identities = retired_projection["exposed_identities"]
+    if len(retired_identities) != 139:
+        raise ValueError(
+            "Exact retired v1/v2 exposed-identity projection required")
+    fingerprints.update(row["fingerprint"] for row in retired_identities)
+    seeds.update(row["seed"] for row in retired_identities)
 
     exclusion_summary = {
         "registered_manifest_scenes": len(registered_rows),
         "formal_xy_scenes": 6,
         "previous_development_scenes": 64,
-        "retired_fresh_final_scenes": 128,
+        "retired_fresh_final_accepted_scenes": 128,
+        "retired_fresh_final_exposed_identities": 139,
         "unique_excluded_fingerprints": len(fingerprints),
         "unique_excluded_seeds": len(seeds),
         "excluded_fingerprints_sha256": digest(sorted(fingerprints)),
         "excluded_seeds_sha256": digest(sorted(seeds)),
     }
-    return manifest, designation, selected, fingerprints, seeds, exclusion_summary
+    return (
+        manifest, designation, selected, retired_projection,
+        fingerprints, seeds, exclusion_summary, previous_development,
+    )
 
 
 def build(
     *, actor_path: str | Path, manifest_path: str | Path,
     designation_path: str | Path, selected_scenes_path: str | Path,
     previous_development_path: str | Path,
-    retired_holdout_paths: Sequence[str | Path], output: str | Path,
+    retired_identity_projection_path: str | Path, output: str | Path,
 ) -> dict[str, Any]:
+    sources = producer_sources()
     actor_path = _regular(actor_path, "frozen diagnostic Actor")
     manifest_path = _regular(manifest_path, "diagnostic conflict manifest")
+    manifest_validation_path = _regular(
+        manifest_path.parent / "validation.json",
+        "diagnostic conflict manifest validation receipt",
+    )
     designation_path = _regular(designation_path, "diagnostic Actor designation")
     selected_path = _regular(selected_scenes_path, "formal X/Y selection")
     previous_path = _regular(
         previous_development_path, "previous development supplement"
     )
-    retired_paths = [
-        _regular(path, "retired fresh-final registry")
-        for path in retired_holdout_paths
-    ]
-    if len(retired_paths) != 2:
-        raise ValueError("Exactly two retired fresh-final registries required")
-
-    (manifest, designation, selected, excluded_fingerprints, excluded_seeds,
-     exclusion_summary) = _input_identity(
-        actor_path=actor_path,
-        manifest_path=manifest_path,
-        designation_path=designation_path,
-        selected_path=selected_path,
-        previous_development_path=previous_path,
-        retired_paths=retired_paths,
+    retired_projection_path = _regular(
+        retired_identity_projection_path, "retired identity projection")
+    retired_projection_report_path = _regular(
+        retired_projection_path.parent / "report.json",
+        "retired identity projection audit",
     )
-    actor = load_frozen_actor(actor_path)
-    fit, validation, trace = _select(
-        manifest=manifest,
-        actor=actor,
-        excluded_fingerprints=set(excluded_fingerprints),
-        excluded_seeds=set(excluded_seeds),
+    designation_raw = read_authenticated_bytes(
+        designation_path, label="diagnostic Actor designation",
+        expected_sha256=EXPECTED_DESIGNATION_SHA256,
     )
-    fit_stats = _split_statistics(fit, trace["fit_supplement"])
-    validation_stats = _split_statistics(
-        validation, trace["development_validation"]
+    designation_components = (
+        designation_binding.resolve_bound_components_from_bytes(
+            designation_raw, original_path=designation_path,
+            expected_sha256=EXPECTED_DESIGNATION_SHA256,
+        ))
+    if designation_components["actor"] != actor_path:
+        raise ValueError(
+            "Development expansion Actor differs from the designation component")
+    original_inputs = {
+        "actor": actor_path,
+        "manifest": manifest_path,
+        "manifest_validation": manifest_validation_path,
+        "designation": designation_path,
+        "selected": selected_path,
+        "previous": previous_path,
+        "retired_projection": retired_projection_path,
+        "retired_projection_report": retired_projection_report_path,
+    }
+    original_inputs.update({
+        "designation_" + name: path
+        for name, path in designation_components.items()
+    })
+    expected_inputs = {
+        "actor": designation_api.EXPECTED_ACTOR_SHA256,
+        "manifest": EXPECTED_MANIFEST_SHA256,
+        "manifest_validation": manifest_binding.EXPECTED_VALIDATION_SHA256,
+        "designation": EXPECTED_DESIGNATION_SHA256,
+        "selected": EXPECTED_SELECTED_SCENES_SHA256,
+        "previous": EXPECTED_PREVIOUS_DEVELOPMENT_SHA256,
+        "retired_projection": EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256,
+        "retired_projection_report": (
+            EXPECTED_RETIRED_IDENTITY_PROJECTION_REPORT_SHA256),
+        "designation_actor": designation_api.EXPECTED_ACTOR_SHA256,
+        "designation_protocol": designation_api.EXPECTED_PROTOCOL_FILE_SHA256,
+        "designation_training_ledger": designation_api.EXPECTED_LEDGER_SHA256,
+        "designation_dual_evaluation": designation_api.EXPECTED_DUAL_EVALUATION_SHA256,
+        "designation_failure_closeout": designation_api.EXPECTED_CLOSEOUT_SHA256,
+    }
+    frozen = ImmutableInputSnapshot(
+        original_inputs,
+        expected_sha256=expected_inputs,
+        relative_names={
+            "manifest": "manifest/manifest.json",
+            "manifest_validation": "manifest/validation.json",
+            "retired_projection": (
+                "retired/retired_identity_projection.json"),
+            "retired_projection_report": "retired/report.json",
+        },
+        prefix="warehouse-r41-development-expansion-inputs-",
     )
-    if (fit_stats["families"] != FIT_FAMILY_QUOTAS
-            or validation_stats["families"] != VALIDATION_FAMILY_QUOTAS
-            or {row["fingerprint"] for row in fit}
-                & {row["fingerprint"] for row in validation}
-            or {row["seed"] for row in fit} & {row["seed"] for row in validation}):
-        raise RuntimeError("Development-expansion split invariant failed")
-
-    sources = producer_sources()
-    retired_binding = {
-        _read(path, "retired fresh-final registry")["version"]: {
-            "file_sha256": file_hash(path),
-            "content_sha256": _read(
-                path, "retired fresh-final registry"
-            )["content_sha256"],
+    with frozen:
+        if producer_sources() != sources:
+            raise RuntimeError(
+                "Development-expansion sources changed before authentication")
+        actor_path = frozen.entries["actor"].frozen
+        manifest_path = frozen.entries["manifest"].frozen
+        manifest_validation_path = frozen.entries["manifest_validation"].frozen
+        designation_snapshot_path = frozen.entries["designation"].frozen
+        selected_path = frozen.entries["selected"].frozen
+        previous_path = frozen.entries["previous"].frozen
+        retired_projection_path = frozen.entries["retired_projection"].frozen
+        retired_projection_report_path = frozen.entries[
+            "retired_projection_report"].frozen
+        designation_snapshot_components = {
+            name: frozen.entries["designation_" + name].frozen
+            for name in designation_components
         }
-        for path in retired_paths
-    }
-    bindings = {
-        "actor_sha256": file_hash(actor_path),
-        "actor_parameters_sha256": designation["bindings"]["actor_parameters_sha256"],
-        "designation_file_sha256": file_hash(designation_path),
-        "designation_semantic_sha256": digest(designation),
-        "designation_protocol_file_sha256": designation["bindings"]["protocol_file_sha256"],
-        "designation_protocol_content_sha256": designation["bindings"]["protocol_content_sha256"],
-        "source_manifest_file_sha256": file_hash(manifest_path),
-        "source_manifest_content_sha256": manifest["content_sha256"],
-        "source_manifest_semantic_sha256": digest(manifest),
-        "selected_scenes_file_sha256": file_hash(selected_path),
-        "selected_scenes_semantic_sha256": digest(selected),
-        "previous_development_file_sha256": file_hash(previous_path),
-        "previous_development_content_sha256": _read(
-            previous_path, "previous development supplement"
-        )["content_sha256"],
-        "retired_holdouts": dict(sorted(retired_binding.items())),
-        "workload_contract_sha256": WORKLOAD_CONTRACT_SHA256,
-        "contract_sha256": digest(contract()),
-        "producer_sources_sha256": digest(sources),
-    }
-    statistics = {
-        "fit_supplement": fit_stats,
-        "development_validation": validation_stats,
-        "total_accepted": len(fit) + len(validation),
-        "cross_split_fingerprint_overlap": 0,
-        "cross_split_seed_overlap": 0,
-        "exclusions": exclusion_summary,
-    }
-    registry = {
-        "version": VERSION,
-        "status": STATUS,
-        "contract": contract(),
-        "bindings": bindings,
-        "fit_supplement": fit,
-        "development_validation": validation,
-        "selection_trace": trace,
-        "statistics": statistics,
-        "program_access": False,
-        "program_predictions_access": False,
-        "participant_data_access": False,
-        "final_audit_rows_access": False,
-        "final_labels_used_for_selection": False,
-        "runtime_action_override": False,
-        "formal_ready": False,
-    }
-    registry["content_sha256"] = digest(registry)
-    report = {
-        "version": VERSION,
-        "status": STATUS,
-        "bindings": bindings,
-        "registry_content_sha256": registry["content_sha256"],
-        "statistics": statistics,
-        "producer_sources": sources,
-        "program_access": False,
-        "program_predictions_access": False,
-        "final_audit_rows_access": False,
-        "final_labels_used_for_selection": False,
-        "formal_ready": False,
-    }
 
-    output_path = Path(output).expanduser().absolute()
-    if not output_path.parent.exists():
-        raise ValueError("Development-expansion output parent must already exist")
-    # Compute the exact registry byte hash before the directory becomes visible.
-    report["registry_file_sha256"] = digest_bytes(
-        (canonical(registry) + "\n").encode("utf-8")
-    )
-    report["content_sha256"] = digest(report)
-    _atomic_output(output_path, registry, report)
-    if file_hash(output_path / "development_expansion.json") != report["registry_file_sha256"]:
-        raise RuntimeError("Atomic development-expansion bytes differ")
-    return deepcopy(report)
+        (manifest, designation, selected, retired_projection,
+         excluded_fingerprints, excluded_seeds, exclusion_summary,
+         previous_development) = _input_identity(
+            actor_path=actor_path,
+            manifest_path=manifest_path,
+            manifest_validation_path=manifest_validation_path,
+            designation_path=designation_snapshot_path,
+            selected_path=selected_path,
+            previous_development_path=previous_path,
+            retired_identity_projection_path=retired_projection_path,
+            designation_original_path=original_inputs["designation"],
+            designation_snapshot_components=designation_snapshot_components,
+            designation_original_components=designation_components,
+        )
+        actor = load_frozen_actor(actor_path)
+        fit, validation, trace = _select(
+            manifest=manifest,
+            actor=actor,
+            excluded_fingerprints=set(excluded_fingerprints),
+            excluded_seeds=set(excluded_seeds),
+        )
+        fit_stats = _split_statistics(fit, trace["fit_supplement"])
+        validation_stats = _split_statistics(
+            validation, trace["development_validation"]
+        )
+        if (fit_stats["families"] != FIT_FAMILY_QUOTAS
+                or validation_stats["families"] != VALIDATION_FAMILY_QUOTAS
+                or {row["fingerprint"] for row in fit}
+                    & {row["fingerprint"] for row in validation}
+                or {row["seed"] for row in fit} & {row["seed"] for row in validation}):
+            raise RuntimeError("Development-expansion split invariant failed")
+
+        retired_source_file_sha256 = {
+            source["version"]: source["source_file_sha256"]
+            for source in retired_projection["sources"]
+        }
+        bindings = {
+            "actor_sha256": file_hash(actor_path),
+            "actor_parameters_sha256": designation["bindings"]["actor_parameters_sha256"],
+            "designation_file_sha256": file_hash(designation_snapshot_path),
+            "designation_semantic_sha256": digest(designation),
+            "designation_protocol_file_sha256": designation["bindings"]["protocol_file_sha256"],
+            "designation_protocol_content_sha256": designation["bindings"]["protocol_content_sha256"],
+            "source_manifest_file_sha256": file_hash(manifest_path),
+            "source_manifest_content_sha256": (
+                manifest_binding.EXPECTED_MANIFEST_CONTENT_SHA256),
+            "source_manifest_semantic_sha256": (
+                manifest_binding.EXPECTED_MANIFEST_SEMANTIC_SHA256),
+            "source_manifest_validation_file_sha256": (
+                manifest_binding.EXPECTED_VALIDATION_SHA256),
+            "protected_final_identity_sha256": (
+                manifest_binding.EXPECTED_FINAL_IDENTITY_SHA256),
+            "selected_scenes_file_sha256": file_hash(selected_path),
+            "selected_scenes_semantic_sha256": digest(selected),
+            "previous_development_file_sha256": file_hash(previous_path),
+            "previous_development_content_sha256": previous_development[
+                "content_sha256"],
+            "retired_identity_projection": {
+                "version": retired_identity_api.VERSION,
+                "file_sha256": file_hash(retired_projection_path),
+                "content_sha256": retired_projection["content_sha256"],
+                "audit_file_sha256": file_hash(retired_projection_report_path),
+                "source_file_sha256": dict(sorted(
+                    retired_source_file_sha256.items())),
+                "identity_count": 139,
+            },
+            "workload_contract_sha256": WORKLOAD_CONTRACT_SHA256,
+            "current_runtime_sources_sha256": (
+                manifest_binding.runtime_sources()["sources_sha256"]),
+            "contract_sha256": digest(contract()),
+            "producer_sources_sha256": digest(sources),
+        }
+        statistics = {
+            "fit_supplement": fit_stats,
+            "development_validation": validation_stats,
+            "total_accepted": len(fit) + len(validation),
+            "cross_split_fingerprint_overlap": 0,
+            "cross_split_seed_overlap": 0,
+            "exclusions": exclusion_summary,
+        }
+        registry = {
+            "version": VERSION,
+            "status": STATUS,
+            "contract": contract(),
+            "bindings": bindings,
+            "fit_supplement": fit,
+            "development_validation": validation,
+            "selection_trace": trace,
+            "statistics": statistics,
+            "program_access": False,
+            "program_predictions_access": False,
+            "participant_data_access": False,
+            "final_audit_rows_access": False,
+            "final_labels_used_for_selection": False,
+            "full_retired_holdout_access": False,
+            "retired_selection_trace_access": False,
+            "retired_statistics_or_metrics_access": False,
+            "retired_snapshot_or_workload_access": False,
+            "final_test_replayed_for_authentication": False,
+            "historical_final_overlap_check_deferred_to_claim": True,
+            "final_identity_commitment_used_for_overlap_exclusion": False,
+            "final_state_or_label_access": False,
+            "runtime_action_override": False,
+            "formal_ready": False,
+        }
+        registry["content_sha256"] = digest(registry)
+        report = {
+            "version": VERSION,
+            "status": STATUS,
+            "bindings": bindings,
+            "registry_content_sha256": registry["content_sha256"],
+            "statistics": statistics,
+            "producer_sources": sources,
+            "program_access": False,
+            "program_predictions_access": False,
+            "final_audit_rows_access": False,
+            "final_labels_used_for_selection": False,
+            "full_retired_holdout_access": False,
+            "retired_selection_trace_access": False,
+            "retired_statistics_or_metrics_access": False,
+            "retired_snapshot_or_workload_access": False,
+            "final_test_replayed_for_authentication": False,
+            "historical_final_overlap_check_deferred_to_claim": True,
+            "final_identity_commitment_used_for_overlap_exclusion": False,
+            "final_state_or_label_access": False,
+            "formal_ready": False,
+        }
+
+        output_path = Path(output).expanduser().absolute()
+        if not output_path.parent.exists():
+            raise ValueError("Development-expansion output parent must already exist")
+
+        def verify_frozen_inputs() -> None:
+            frozen.verify()
+            if producer_sources() != sources:
+                raise RuntimeError(
+                    "Development-expansion source or fixed input changed during build")
+
+        verify_frozen_inputs()
+        # Compute the exact registry byte hash before the directory becomes visible.
+        report["registry_file_sha256"] = digest_bytes(
+            (canonical(registry) + "\n").encode("utf-8")
+        )
+        report["content_sha256"] = digest(report)
+        report_file_sha256 = digest_bytes(
+            (canonical(report) + "\n").encode("utf-8"))
+        _atomic_output(
+            output_path,
+            registry,
+            report,
+            before_publish=verify_frozen_inputs,
+        )
+        try:
+            verify_frozen_inputs()
+            if (file_hash(output_path / "development_expansion.json")
+                    != report["registry_file_sha256"]
+                    or file_hash(output_path / "report.json")
+                        != report_file_sha256):
+                raise RuntimeError("Atomic development-expansion bytes differ")
+        except BaseException:
+            shutil.rmtree(output_path, ignore_errors=True)
+            raise
+        return deepcopy(report)
 
 
 def digest_bytes(value: bytes) -> str:
@@ -692,7 +913,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--designation", required=True)
     parser.add_argument("--selected-scenes", required=True)
     parser.add_argument("--previous-development", required=True)
-    parser.add_argument("--retired-holdout", action="append", required=True)
+    parser.add_argument("--retired-identity-projection", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args(argv)
     result = build(
@@ -701,7 +922,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         designation_path=args.designation,
         selected_scenes_path=args.selected_scenes,
         previous_development_path=args.previous_development,
-        retired_holdout_paths=args.retired_holdout,
+        retired_identity_projection_path=args.retired_identity_projection,
         output=args.output,
     )
     print(canonical(result))
@@ -716,5 +937,7 @@ __all__ = [
     "VERSION", "STATUS", "BASE_DEVELOPMENT_FIT_SCENES",
     "FIT_SUPPLEMENT_SCENES", "TOTAL_DEVELOPMENT_FIT_SCENES",
     "VALIDATION_SCENES", "FIT_FAMILY_QUOTAS", "VALIDATION_FAMILY_QUOTAS",
+    "EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256",
+    "EXPECTED_RETIRED_IDENTITY_PROJECTION_REPORT_SHA256",
     "contract", "producer_sources", "build", "main",
 ]

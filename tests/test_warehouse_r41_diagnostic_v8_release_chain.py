@@ -5,6 +5,7 @@ from copy import deepcopy
 from hashlib import sha256
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
@@ -14,6 +15,8 @@ import pytest
 
 from backend.training import warehouse_r41_diagnostic_admission_v6 as admission
 from backend.training import warehouse_r41_diagnostic_explanation_audit_v8 as audit
+from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as frozen_manifest
+from backend.training import warehouse_r41_diagnostic_frozen_publication_v2 as frozen_publication
 from backend.training import warehouse_r41_diagnostic_fresh_final_holdout_v4 as holdout
 from backend.training import warehouse_r41_diagnostic_pair_weights_v8 as weights
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as rcpd
@@ -32,6 +35,693 @@ from backend.warehouse_r41_diagnostic_public_tree_program_v8 import (
 from ui import warehouse_alignment_r41_diagnostic_release_v8 as release
 from scripts import preflight_warehouse_r41_diagnostic_render_v6 as preflight
 from ui import warehouse_alignment_online_server as server
+
+
+def test_active_release_chain_requires_cycle_free_designation_v2():
+    expected = "b42323e3bc4543c4f4e1af96be4de4d90489a38459240bfb494dcc2d6120a815"
+    assert admission.designation_api.VERSION == (
+        "warehouse-r41-diagnostic-actor-designation.v2")
+    assert admission.designation_binding.EXPECTED_DESIGNATION_SHA256 == expected
+    assert receipt.designation_api.VERSION == admission.designation_api.VERSION
+    assert receipt.designation_binding.EXPECTED_DESIGNATION_SHA256 == expected
+    assert preflight.designation_api.VERSION == admission.designation_api.VERSION
+    assert preflight.designation_binding.EXPECTED_DESIGNATION_SHA256 == expected
+    assert holdout.EXPECTED_DESIGNATION_SHA256 == expected
+    assert release.FIXED_DESIGNATION_SHA256 == expected
+    assert admission.publication_api is frozen_publication
+    assert frozen_publication.manifest_reader is frozen_manifest
+    assert frozen_publication.final_once is admission.final_once_api
+    assert frozen_manifest.EXPECTED_MANIFEST_SHA256 == (
+        "af985e9d6f041668ff1250e19da21a078ab5ccc68ecc7aca8d696f2c56845d4c"
+    )
+    assert set(admission.RCPD_CANDIDATE_ARTIFACTS) == set(
+        admission.final_once_api.CANDIDATE_ARTIFACT_KEYS)
+    assert set(admission.RCPD_CANDIDATE_ARTIFACTS.values()) <= set(
+        admission.ARTIFACT_NAMES)
+    assert admission.RCPD_CANDIDATE_ARTIFACTS[
+        "development_expansion.json"] == (
+            "final_rcpd_development_expansion_registry")
+    assert admission.RCPD_CANDIDATE_ARTIFACTS[
+        "development_expansion_report.json"] == (
+            "final_rcpd_development_expansion_report")
+
+
+def test_admission_requires_full_replay_publication_authentication(
+        tmp_path, monkeypatch):
+    candidate_inputs = admission.RCPD_CANDIDATE_ARTIFACTS
+    files = {
+        name: tmp_path / name
+        for name in ({
+            "conflict_manifest", "conflict_validation",
+            "diagnostic_contract", "actor",
+            *candidate_inputs.values(),
+            *admission.FINAL_ONCE_LEDGER_ARTIFACTS,
+        })
+    }
+    hashes = {
+        "conflict_manifest": frozen_manifest.EXPECTED_MANIFEST_SHA256,
+        "conflict_validation": frozen_publication.EXPECTED_VALIDATION_SHA256,
+        "diagnostic_contract": frozen_publication.EXPECTED_CONTRACT_SHA256,
+        "actor": admission.FIXED_ACTOR_SHA256,
+    }
+    for index, name in enumerate(candidate_inputs.values(), 1):
+        hashes[name] = format(index, "x") * 64
+    for index, name in enumerate(
+            admission.FINAL_ONCE_LEDGER_ARTIFACTS, 8):
+        hashes[name] = format(index, "x") * 64
+    manifest = {
+        "content_sha256": frozen_manifest.EXPECTED_MANIFEST_CONTENT_SHA256,
+        "splits": {"final_test": [{"id": "final-1"}]},
+    }
+    validation = {"passed": True}
+    contract = {"contract_sha256": "c" * 64}
+    runtime = {
+        "version": frozen_manifest.VERSION,
+        "sources": {"runtime.py": "d" * 64},
+        "sources_sha256": "e" * 64,
+    }
+    phase_receipts = {
+        relative: hashes[name]
+        for name, relative in admission.FINAL_ONCE_LEDGER_ARTIFACTS.items()
+        if name not in {
+            "final_once_attempt_started", "final_once_attempt_completed"
+        }
+    }
+    candidate_artifacts = {
+        name: hashes[candidate_inputs[name]] for name in sorted(candidate_inputs)
+    }
+    successful_final = {
+        "version": frozen_publication.SUCCESSFUL_FINAL_VERSION,
+        "status": "authenticated_completed_passed",
+        "final_once_version": admission.final_once_api.VERSION,
+        "campaign_key": admission.final_once_api.campaign_key(),
+        "campaign_identity": admission.final_once_api._campaign_identity(),
+        "campaign_identity_sha256": digest(
+            admission.final_once_api._campaign_identity()),
+        "candidate_identity_sha256": digest(
+            admission.final_once_api._campaign_identity()),
+        "attempt_started_sha256": hashes["final_once_attempt_started"],
+        "attempt_completed_sha256": hashes["final_once_attempt_completed"],
+        "permanent_anchor_sha256": "f" * 64,
+        "candidate_authenticated_sha256": hashes[
+            "final_once_candidate_authenticated"],
+        "candidate_artifacts": candidate_artifacts,
+        "candidate_artifacts_sha256": digest(candidate_artifacts),
+        "phase_receipts": phase_receipts,
+        "phase_receipts_sha256": digest(phase_receipts),
+        "actor_file_sha256": hashes["actor"],
+        "manifest_file_sha256": hashes["conflict_manifest"],
+        "program_file_sha256": hashes["final_rcpd_program"],
+        "retry_allowed": False,
+        "runtime_action_override": False,
+        "formal_ready": False,
+    }
+    authentication = {
+        "version": frozen_publication.AUTHENTICATION_VERSION,
+        "status": "authenticated_exact_publication_with_full_workload_replay",
+        "replay_scope": "all",
+        "final_test_replayed_for_authentication": True,
+        "final_test_rows_used_for_fit_or_selection": False,
+        "final_labels_used": False,
+        "final_test_scene_count": 1,
+        "manifest_file_sha256": hashes["conflict_manifest"],
+        "manifest_content_sha256": manifest["content_sha256"],
+        "manifest_semantic_sha256": digest(manifest),
+        "validation_file_sha256": hashes["conflict_validation"],
+        "validation_semantic_sha256": digest(validation),
+        "contract_file_sha256": hashes["diagnostic_contract"],
+        "contract_semantic_sha256": digest(contract),
+        "current_runtime_sources_sha256": runtime["sources_sha256"],
+        "successful_final_capability_sha256": digest(successful_final),
+        "final_once_version": successful_final["final_once_version"],
+        "final_once_campaign_key": successful_final["campaign_key"],
+        "final_once_campaign_identity_sha256": successful_final[
+            "campaign_identity_sha256"],
+        "final_once_candidate_identity_sha256": successful_final[
+            "candidate_identity_sha256"],
+        "final_once_attempt_started_sha256": successful_final[
+            "attempt_started_sha256"],
+        "final_once_attempt_completed_sha256": successful_final[
+            "attempt_completed_sha256"],
+        "final_once_permanent_anchor_sha256": successful_final[
+            "permanent_anchor_sha256"],
+        "final_once_candidate_authenticated_sha256": successful_final[
+            "candidate_authenticated_sha256"],
+        "final_once_candidate_artifacts_sha256": successful_final[
+            "candidate_artifacts_sha256"],
+        "final_once_phase_receipts_sha256": successful_final[
+            "phase_receipts_sha256"],
+        "actor_file_sha256": successful_final["actor_file_sha256"],
+        "program_file_sha256": successful_final["program_file_sha256"],
+    }
+    publication = {
+        "manifest": manifest,
+        "validation": validation,
+        "contract": contract,
+        "current_runtime": runtime,
+        "authentication_receipt": authentication,
+        "authentication_sha256": digest(authentication),
+        "successful_final": successful_final,
+        "publication_identity_sha256": digest({
+            "manifest": hashes["conflict_manifest"],
+            "validation": hashes["conflict_validation"],
+            "contract": hashes["diagnostic_contract"],
+            "current_runtime_sources_sha256": runtime["sources_sha256"],
+        }),
+    }
+    calls = []
+
+    def successful_capability(**kwargs):
+        calls.append(("capability", kwargs))
+        return deepcopy(successful_final)
+
+    def read_saved_publication(**kwargs):
+        calls.append(("publication", kwargs))
+        return deepcopy(publication)
+
+    monkeypatch.setattr(
+        admission.publication_api, "_successful_final_capability",
+        successful_capability,
+    )
+    monkeypatch.setattr(
+        admission.publication_api, "read_saved_publication",
+        read_saved_publication,
+    )
+    monkeypatch.setattr(
+        admission.manifest_api, "runtime_sources", lambda: deepcopy(runtime),
+    )
+    checked = admission._validate_publication(files, hashes)
+    assert checked["authentication_sha256"] == digest(authentication)
+    common = {
+        "manifest_path": files["conflict_manifest"],
+        "actor_path": files["actor"],
+        "program_path": files["final_rcpd_program"],
+    }
+    assert calls == [
+        ("capability", common),
+        ("publication", {
+            **common,
+            "validation_path": files["conflict_validation"],
+            "contract_path": files["diagnostic_contract"],
+        }),
+    ]
+
+    publication["authentication_receipt"]["replay_scope"] = "development"
+    publication["authentication_sha256"] = digest(
+        publication["authentication_receipt"])
+    with pytest.raises(ValueError, match="publication differs"):
+        admission._validate_publication(files, hashes)
+
+
+def test_release_receipt_rejects_any_non_v2_designation_bytes(tmp_path):
+    admission_path = tmp_path / "admission.json"
+    designation_path = tmp_path / "designation.json"
+    admission_path.write_text("{}\n", encoding="utf-8")
+    designation_path.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="designation bytes differ"):
+        receipt._validate_inputs(
+            admission_path=admission_path,
+            designation_path=designation_path,
+            package_path=tmp_path / "package.zip",
+            base64_path=tmp_path / "package.b64",
+            rollback_path=tmp_path / "rollback.json",
+            expected_admission_sha256=file_hash(admission_path),
+            expected_designation_sha256=file_hash(designation_path),
+            expected_rollback_sha256="0" * 64,
+        )
+
+
+def _receipt_admission_registry_fixture(tmp_path, monkeypatch):
+    monkeypatch.setattr(receipt, "ROOT", tmp_path)
+    final_api = admission.final_once_api
+    campaign_key = "c" * 64
+    ledger_root = tmp_path / "account-ledger"
+    registry = ledger_root / campaign_key
+    registry.mkdir(parents=True)
+    monkeypatch.setattr(final_api, "campaign_key", lambda: campaign_key)
+    monkeypatch.setattr(final_api, "_ledger_root", lambda: ledger_root)
+    artifacts = {}
+    components = {}
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    for index, name in enumerate(admission.ARTIFACT_NAMES):
+        ledger_name = admission.FINAL_ONCE_LEDGER_ARTIFACTS.get(name)
+        if ledger_name is None:
+            path = evidence / (name + ".bin")
+            relative = path.relative_to(tmp_path).as_posix()
+        else:
+            path = registry / ledger_name
+            relative = "external/final_once_ledger/" + ledger_name
+        path.write_bytes((str(index) + ":" + name + "\n").encode("utf-8"))
+        components[name] = path
+        artifacts[name] = {"path": relative, "sha256": file_hash(path)}
+    value = {
+        "artifacts": artifacts,
+        # This intentionally forged non-runtime claim must never be trusted by
+        # receipt/package self-consistency alone.
+        "bindings": {"explanation_audit_sha256": "f" * 64},
+    }
+    path = tmp_path / "diagnostic_admission.json"
+    path.write_text(canonical(value) + "\n", encoding="utf-8")
+    return path, value, components
+
+
+def test_release_receipt_reauthenticates_every_admission_component(
+        tmp_path, monkeypatch):
+    path, value, expected_components = _receipt_admission_registry_fixture(
+        tmp_path, monkeypatch)
+    calls = []
+
+    def strict_reader(saved_path, *, expected_sha256, components):
+        calls.append((saved_path, expected_sha256, components))
+        return deepcopy(value)
+
+    monkeypatch.setattr(admission, "read_saved_admission", strict_reader)
+    result = receipt.read_strict_admission_anchor(
+        path, expected_sha256=file_hash(path))
+    assert result == value
+    assert calls == [(path, file_hash(path), expected_components)]
+
+
+def test_release_receipt_strict_anchor_rejects_forged_nonruntime_lineage(
+        tmp_path, monkeypatch):
+    path, registry, expected_components = _receipt_admission_registry_fixture(
+        tmp_path, monkeypatch)
+    monkeypatch.setattr(admission, "ROOT", tmp_path)
+    bindings = {
+        name: sha256(("binding:" + name).encode("utf-8")).hexdigest()
+        for name in admission.BINDING_FIELDS
+        if name != "tutorial_scene_id"
+    }
+    bindings["tutorial_scene_id"] = "tutorial"
+    valid = {
+        "version": admission.VERSION,
+        "status": admission.STATUS,
+        "admitted": True,
+        "namespace": admission.NAMESPACE,
+        "pilot_class": admission.NAMESPACE,
+        "behavior_performance_gate_passed": False,
+        "behavior_performance_gate_waived": True,
+        "waiver_scope": ["behavior_performance"],
+        "formal_ready": False,
+        "formal_sample_eligible": False,
+        "human_explanation_effect_validated": False,
+        "data_persistent": False,
+        "runtime_action_override": False,
+        "internal_diagnostic_only": True,
+        "test_fixture": False,
+        "bindings": bindings,
+        "artifacts": registry["artifacts"],
+        "gates": {name: True for name in admission.GATE_NAMES},
+        "sources": {},
+        "package_contract": {},
+        "self_path": path.relative_to(tmp_path).as_posix(),
+    }
+    checked = {
+        key: deepcopy(valid[key])
+        for key in ("bindings", "artifacts", "gates", "sources",
+                    "package_contract")
+    }
+    forged = deepcopy(valid)
+    forged["bindings"]["explanation_audit_sha256"] = "0" * 64
+    assert forged["bindings"] != checked["bindings"]
+    path.write_text(canonical(forged) + "\n", encoding="utf-8")
+    monkeypatch.setattr(admission, "source_closure", lambda: {})
+    monkeypatch.setattr(
+        admission, "_canonical_component_paths",
+        lambda components: dict(expected_components))
+    monkeypatch.setattr(
+        admission, "_validate_component_transaction",
+        lambda *args, **kwargs: deepcopy(checked))
+    with pytest.raises(ValueError, match="bindings differs from live evidence"):
+        receipt.read_strict_admission_anchor(
+            path, expected_sha256=file_hash(path))
+
+
+def test_release_receipt_rejects_forged_lineage_before_reading_package(
+        tmp_path, monkeypatch):
+    path, _, _ = _receipt_admission_registry_fixture(tmp_path, monkeypatch)
+    designation = tmp_path / "designation.json"
+    designation.write_text("{}\n", encoding="utf-8")
+    designation_sha256 = file_hash(designation)
+    monkeypatch.setattr(
+        receipt.designation_binding, "EXPECTED_DESIGNATION_SHA256",
+        designation_sha256)
+    monkeypatch.setattr(
+        admission, "read_saved_admission",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("strict live admission lineage differs")))
+    monkeypatch.setattr(
+        receipt.release, "_package_bytes",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("package must not be read before admission revalidation")))
+    with pytest.raises(ValueError, match="strict live admission lineage differs"):
+        receipt._validate_inputs(
+            admission_path=path, designation_path=designation,
+            package_path=tmp_path / "forged.zip",
+            base64_path=tmp_path / "forged.b64",
+            rollback_path=tmp_path / "rollback.json",
+            expected_admission_sha256=file_hash(path),
+            expected_designation_sha256=designation_sha256,
+            expected_rollback_sha256="0" * 64,
+        )
+
+
+def _receipt_build_fixture(tmp_path, monkeypatch):
+    monkeypatch.setattr(receipt, "ROOT", tmp_path)
+    inputs = {}
+    for name in ("admission", "designation", "package", "base64", "rollback"):
+        path = tmp_path / name
+        path.write_bytes((name + "\n").encode("ascii"))
+        inputs[name] = path
+    parent = {
+        name: sha256(name.encode("utf-8")).hexdigest()
+        for name in release._PARENT_FIELDS
+        if name not in {"version", "status", "tutorial_scene_id"}
+    }
+    parent.update({
+        "version": admission.VERSION,
+        "status": admission.STATUS,
+        "tutorial_scene_id": "tutorial",
+    })
+    identities = {
+        name: sha256(("identity:" + name).encode("utf-8")).hexdigest()
+        for name in (
+            "actor_sha256", "runtime_manifest_signature", "program_sha256",
+            "program_content_sha256", "program_identity_sha256",
+            "public_feature_contract_sha256",
+            "public_feature_registry_sha256", "program_complexity_sha256",
+        )
+    }
+    checked = {
+        "manifest": {"parent": parent, "identities": identities},
+        "package_sha256": "1" * 64,
+        "manifest_sha256": "2" * 64,
+        "base64_sha256": "3" * 64,
+        "scene_fingerprints": [str(index) * 64 for index in range(1, 8)],
+    }
+    monkeypatch.setattr(receipt, "source_closure", lambda: {})
+    monkeypatch.setattr(
+        receipt, "_release_input_paths",
+        lambda **kwargs: {name: path for name, path in inputs.items()},
+    )
+    return inputs, parent, checked
+
+
+def test_release_receipt_copies_every_candidate_lineage_field(
+        tmp_path, monkeypatch):
+    inputs, parent, checked = _receipt_build_fixture(tmp_path, monkeypatch)
+    semantic_paths = {}
+
+    def validate_snapshot(**kwargs):
+        argument_names = {
+            "designation": "designation_path", "package": "package_path",
+            "base64": "base64_path", "rollback": "rollback_path",
+        }
+        for name, argument in argument_names.items():
+            semantic_paths[name] = Path(kwargs[argument])
+            assert semantic_paths[name] != inputs[name]
+            assert semantic_paths[name].read_bytes() == inputs[name].read_bytes()
+        return checked
+
+    monkeypatch.setattr(receipt, "_validate_inputs", validate_snapshot)
+    monkeypatch.setattr(
+        receipt, "read_saved_receipt", lambda *args, **kwargs: {})
+    value = receipt.build_receipt(
+        admission_path=inputs["admission"],
+        expected_admission_sha256="a" * 64,
+        designation_path=inputs["designation"],
+        expected_designation_sha256="b" * 64,
+        package_path=inputs["package"], base64_path=inputs["base64"],
+        rollback_receipt_path=inputs["rollback"],
+        expected_rollback_receipt_sha256="c" * 64,
+        output=tmp_path / "receipt.json",
+    )
+    assert set(value) == receipt.FIELDS
+    assert {
+        name: value[name] for name in receipt.CANDIDATE_LINEAGE_FIELDS
+    } == {
+        name: parent[name] for name in receipt.CANDIDATE_LINEAGE_FIELDS
+    }
+    assert set(semantic_paths) == {"designation", "package", "base64", "rollback"}
+
+
+def test_release_receipt_input_drift_after_validation_publishes_nothing(
+        tmp_path, monkeypatch):
+    inputs, _, checked = _receipt_build_fixture(tmp_path, monkeypatch)
+
+    def validate_then_mutate(**kwargs):
+        inputs["package"].write_bytes(b"changed after validation\n")
+        return checked
+
+    monkeypatch.setattr(receipt, "_validate_inputs", validate_then_mutate)
+    output = tmp_path / "receipt.json"
+    with pytest.raises(RuntimeError, match="input or source changed"):
+        receipt.build_receipt(
+            admission_path=inputs["admission"],
+            expected_admission_sha256="a" * 64,
+            designation_path=inputs["designation"],
+            expected_designation_sha256="b" * 64,
+            package_path=inputs["package"], base64_path=inputs["base64"],
+            rollback_receipt_path=inputs["rollback"],
+            expected_rollback_receipt_sha256="c" * 64,
+            output=output,
+        )
+    assert not output.exists()
+    assert not list(tmp_path.glob(".receipt.json.*.partial"))
+
+
+def test_release_receipt_registry_swap_after_resolution_publishes_nothing(
+        tmp_path, monkeypatch):
+    admission_path, admission_value, _ = _receipt_admission_registry_fixture(
+        tmp_path, monkeypatch)
+    expected_admission_sha256 = file_hash(admission_path)
+    anchor = tmp_path / "permanent-anchor.json"
+    anchor.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        admission.final_once_api, "_anchor_path", lambda: anchor)
+
+    rollback_asset = tmp_path / "rollback-asset.bin"
+    rollback_asset.write_bytes(b"rollback asset\n")
+    rollback_path = tmp_path / "rollback.json"
+    rollback_path.write_text(canonical({
+        "files": {
+            rollback_asset.name: {
+                "sha256": file_hash(rollback_asset),
+                "size": rollback_asset.stat().st_size,
+            },
+        },
+    }) + "\n", encoding="utf-8")
+    expected_rollback_sha256 = file_hash(rollback_path)
+    direct = {}
+    for name in ("designation", "package", "base64"):
+        path = tmp_path / name
+        path.write_bytes((name + "\n").encode("ascii"))
+        direct[name] = path
+
+    replacement_value = deepcopy(admission_value)
+    replace_name = next(
+        name for name in admission.ARTIFACT_NAMES
+        if name not in admission.FINAL_ONCE_LEDGER_ARTIFACTS)
+    replacement_component = tmp_path / "replacement-component.bin"
+    replacement_component.write_bytes(b"different registry component\n")
+    replacement_value["artifacts"][replace_name] = {
+        "path": replacement_component.relative_to(tmp_path).as_posix(),
+        "sha256": file_hash(replacement_component),
+    }
+    replacement = tmp_path / "replacement-admission.json"
+    replacement.write_text(canonical(replacement_value) + "\n", encoding="utf-8")
+
+    original_resolver = receipt._release_input_paths
+    calls = 0
+
+    def resolve_then_swap(**kwargs):
+        nonlocal calls
+        result = original_resolver(**kwargs)
+        calls += 1
+        if calls == 1:
+            os.replace(replacement, admission_path)
+        return result
+
+    monkeypatch.setattr(receipt, "source_closure", lambda: {})
+    monkeypatch.setattr(receipt, "_release_input_paths", resolve_then_swap)
+    monkeypatch.setattr(
+        receipt, "_validate_inputs",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("semantic validation must not run after registry drift")),
+    )
+    output = tmp_path / "receipt.json"
+    with pytest.raises(RuntimeError, match="input registry changed"):
+        receipt.build_receipt(
+            admission_path=admission_path,
+            expected_admission_sha256=expected_admission_sha256,
+            designation_path=direct["designation"],
+            expected_designation_sha256="b" * 64,
+            package_path=direct["package"], base64_path=direct["base64"],
+            rollback_receipt_path=rollback_path,
+            expected_rollback_receipt_sha256=expected_rollback_sha256,
+            output=output,
+        )
+    assert calls == 1
+    assert not output.exists()
+    assert not list(tmp_path.glob(".receipt.json.*.partial"))
+
+
+def test_render_preflight_reauthenticates_full_admission_before_package(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(preflight, "ROOT", tmp_path)
+    release_root = tmp_path / "release"
+    release_root.mkdir()
+    paths = {}
+    for name, relative in preflight.FILES.items():
+        path = release_root / relative
+        path.write_bytes((name + "\n").encode("ascii"))
+        path.chmod(0o600)
+        paths[name] = path
+    expected_receipt_sha256 = file_hash(paths["receipt"])
+    mocked_receipt = {
+        "admission_sha256": file_hash(paths["admission"]),
+        "designation_sha256": file_hash(paths["designation"]),
+        "package_sha256": file_hash(paths["package"]),
+        "base64_sha256": file_hash(paths["base64"]),
+    }
+    monkeypatch.setattr(
+        preflight.receipt_api, "read_saved_receipt",
+        lambda *args, **kwargs: mocked_receipt)
+    monkeypatch.setattr(
+        preflight.receipt_api, "read_strict_admission_anchor",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("preflight strict admission lineage differs")))
+    monkeypatch.setattr(
+        preflight.release, "_package_bytes",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("package must not be read before admission revalidation")))
+    with pytest.raises(ValueError, match="preflight strict admission lineage differs"):
+        preflight.preflight(
+            release_root=release_root,
+            expected_receipt_sha256=expected_receipt_sha256,
+            render_yaml=tmp_path / "unused-render.yaml",
+        )
+
+
+def test_admission_strictly_consumes_both_row_reauthentication_reports(
+        tmp_path, monkeypatch):
+    prior_dir = tmp_path / "prior-reauth"
+    expansion_dir = tmp_path / "expansion-reauth"
+    prior_dir.mkdir(); expansion_dir.mkdir()
+    prior_rows = tmp_path / "prior_v7_rows.npz"
+    expansion_rows = tmp_path / "expansion_rows.npz"
+    prior_rows.write_bytes(b"prior rows")
+    expansion_rows.write_bytes(b"expansion rows")
+    (prior_dir / "rows.npz").write_bytes(prior_rows.read_bytes())
+    (expansion_dir / "expansion_rows.npz").write_bytes(
+        expansion_rows.read_bytes())
+
+    prior_contract = {"version": "prior-contract", "final_test": False}
+    prior_receipt = {
+        "version": admission.prior_rows_api.VERSION,
+        "status": admission.prior_rows_api.STATUS,
+        "contract": prior_contract,
+        "validation": {
+            "final_scene_geometry_access": False,
+            "final_trajectories_access": False,
+            "final_actor_outputs_or_labels_access": False,
+            "final_used_for_fit_selection_metrics": False,
+        },
+        "runtime_action_override": False,
+        "formal_ready": False,
+    }
+    prior_receipt["content_sha256"] = digest(prior_receipt)
+    (prior_dir / "report.json").write_text(
+        canonical(prior_receipt) + "\n", encoding="utf-8")
+
+    expansion_contract = {
+        "version": "expansion-contract", "final_test_accessed": False}
+    expansion_receipt = {
+        "version": admission.expansion_rows_api.VERSION,
+        "status": admission.expansion_rows_api.STATUS,
+        "contract": expansion_contract,
+        "final_test_accessed": False,
+        "participant_data_accessed": False,
+        "program_accessed": False,
+        "runtime_action_override": False,
+        "formal_ready": False,
+    }
+    expansion_receipt["content_sha256"] = digest(expansion_receipt)
+    (expansion_dir / "report.json").write_text(
+        canonical(expansion_receipt) + "\n", encoding="utf-8")
+
+    names = (
+        "actor", "protocol", "conflict_manifest", "diagnostic_designation",
+        "development_supplement", "prior_v7_source_report",
+        "development_expansion_registry", "development_expansion_report",
+        "expansion_source_collection_report",
+    )
+    files = {name: tmp_path / name for name in names}
+    for path in files.values():
+        path.write_text("x", encoding="utf-8")
+    files.update({
+        "prior_rows_reauthentication_report": prior_dir / "report.json",
+        "expansion_rows_reauthentication_report": expansion_dir / "report.json",
+        "prior_v7_rows": prior_rows,
+        "expansion_rows": expansion_rows,
+    })
+    hashes = {name: file_hash(path) for name, path in files.items()}
+    monkeypatch.setattr(
+        admission.prior_rows_api, "EXPECTED_SOURCE_REPORT_SHA256",
+        hashes["prior_v7_source_report"])
+    monkeypatch.setattr(
+        admission.prior_rows_api, "EXPECTED_SOURCE_ROWS_SHA256",
+        hashes["prior_v7_rows"])
+    monkeypatch.setattr(
+        admission.expansion_rows_api, "EXPECTED_SOURCE_ROWS_SHA256",
+        hashes["expansion_rows"])
+    monkeypatch.setattr(
+        admission.expansion_rows_api,
+        "EXPECTED_SOURCE_COLLECTION_REPORT_SHA256",
+        hashes["expansion_source_collection_report"])
+    monkeypatch.setattr(
+        admission.expansion_rows_api, "EXPECTED_PRIOR_ROWS_SHA256",
+        hashes["prior_v7_rows"])
+    monkeypatch.setattr(
+        admission.prior_rows_api, "contract", lambda: prior_contract)
+    monkeypatch.setattr(
+        admission.expansion_rows_api, "contract", lambda: expansion_contract)
+    calls = []
+
+    def read_prior(*args, **kwargs):
+        calls.append(("prior", args, kwargs))
+        return deepcopy(prior_receipt)
+
+    def read_expansion(*args, **kwargs):
+        calls.append(("expansion", args, kwargs))
+        return deepcopy(expansion_receipt)
+
+    monkeypatch.setattr(
+        admission.prior_rows_api, "read_saved_artifacts", read_prior)
+    monkeypatch.setattr(
+        admission.expansion_rows_api, "read_saved_artifacts", read_expansion)
+    prior, expansion = admission._validate_row_reauthentication(files, hashes)
+    assert prior == prior_receipt and expansion == expansion_receipt
+    assert [row[0] for row in calls] == ["prior", "expansion"]
+    assert calls[0][2]["report_path"] == files[
+        "prior_rows_reauthentication_report"]
+    assert calls[0][2]["rows_path"] == files["prior_v7_rows"]
+    assert calls[0][2]["embedded_source_report_path"] == files[
+        "prior_v7_source_report"]
+    assert calls[0][2]["source_report_path"] == files["prior_v7_source_report"]
+    assert calls[0][2]["source_rows_path"] == files["prior_v7_rows"]
+    assert calls[1][2]["source_rows_path"] == files[
+        "expansion_rows"]
+    assert calls[1][2]["collection_report_path"] == files[
+        "expansion_source_collection_report"]
+    assert calls[1][2]["prior_rows_path"] == files["prior_v7_rows"]
+    assert calls[1][2]["report_path"] == files[
+        "expansion_rows_reauthentication_report"]
+    assert calls[1][2]["rows_path"] == files["expansion_rows"]
+    assert calls[1][2]["expected_report_sha256"] == hashes[
+        "expansion_rows_reauthentication_report"]
+
 
 
 def _features():
@@ -191,6 +881,169 @@ def test_bilingual_question_contract_is_strict():
         admission._validate_bilingual_question_bank(payload)
 
 
+def test_release_assembly_freezes_exact_admitted_question_and_tutorial_bytes(
+        tmp_path, monkeypatch):
+    components = {}
+    artifact_registry = {}
+    for index, name in enumerate(admission.ARTIFACT_NAMES):
+        path = tmp_path / (str(index).zfill(2) + "-" + name + ".bin")
+        raw = ("component:" + name + "\n").encode("utf-8")
+        path.write_bytes(raw)
+        components[name] = path
+        artifact_registry[name] = {
+            "path": path.name,
+            "sha256": sha256(raw).hexdigest(),
+        }
+    admission_path = tmp_path / "admission.json"
+    admission_path.write_text("{}\n", encoding="utf-8")
+    admission_sha = file_hash(admission_path)
+    admitted_release_sources = release.release_sources()
+    admitted_package_contract = admission.package_contract()
+    admitted = {
+        "version": admission.VERSION,
+        "status": admission.STATUS,
+        "admitted": True,
+        "behavior_performance_gate_passed": False,
+        "behavior_performance_gate_waived": True,
+        "waiver_scope": ["behavior_performance"],
+        "formal_ready": False,
+        "formal_sample_eligible": False,
+        "data_persistent": False,
+        "bindings": {
+            "question_bank_sha256": artifact_registry["question_bank"]["sha256"],
+            "tutorial_sha256": artifact_registry["tutorial"]["sha256"],
+            "release_sources_sha256": release.digest(admitted_release_sources),
+            "package_contract_sha256": release.digest(admitted_package_contract),
+        },
+        "artifacts": artifact_registry,
+    }
+    monkeypatch.setattr(
+        admission, "read_saved_admission",
+        lambda *args, **kwargs: deepcopy(admitted))
+
+    original_question = components["question_bank"].read_bytes()
+
+    def inspect_frozen(*, paths, frozen, **kwargs):
+        assert paths["question_bank"] != components["question_bank"]
+        assert paths["question_bank"].read_bytes() == original_question
+        components["question_bank"].write_bytes(b"transient replacement\n")
+        frozen.verify()
+        raise AssertionError("input drift must be rejected")
+
+    monkeypatch.setattr(
+        release, "_assemble_from_frozen_admitted_components", inspect_frozen)
+    output = tmp_path / "must-not-exist.zip"
+    with pytest.raises(RuntimeError, match="fixed inputs changed"):
+        release.assemble_from_admitted_components(
+            diagnostic_admission_path=admission_path,
+            expected_diagnostic_admission_sha256=admission_sha,
+            components=components, output_package=output)
+    assert not output.exists()
+
+
+def test_portable_manifest_binds_every_packaged_artifact_to_admitted_identity():
+    parent = {
+        name: "a" * 64
+        for name in release._PARENT_FIELDS - {"version", "status"}
+    }
+    parent.update({
+        "version": admission.VERSION,
+        "status": admission.STATUS,
+        "diagnostic_designation_sha256": release.FIXED_DESIGNATION_SHA256,
+        "release_sources_sha256": release.digest(release.release_sources()),
+    })
+    scalar = {
+        "play_scene_count", "play_scene_ids", "play_scene_fingerprints",
+        "uses_terminal_designated_actor", "action_override_count",
+        "source_full_manifest_version", "source_conflict_validation_version",
+        "diagnostic_contract_version", "program_action_names",
+        "program_classes", "program_routes", "program_mix_weights",
+        "program_aggregation",
+    }
+    identities = {
+        name: "b" * 64 for name in release._IDENTITY_FIELDS - scalar
+    }
+    identities.update({
+        "actor_sha256": release.FIXED_ACTOR_SHA256,
+        "source_full_manifest_version": release.FULL_SCENE_MANIFEST_VERSION,
+        "source_conflict_validation_version": release.CONFLICT_VALIDATION_VERSION,
+        "diagnostic_contract_version": release.DIAGNOSTIC_CONTRACT_VERSION,
+        "diagnostic_conflict_graph_sha256": release.DIAGNOSTIC_CONFLICT_GRAPH_SHA256,
+        "diagnostic_contract_sha256": release.DIAGNOSTIC_CONTRACT_SHA256,
+        "conflict_families_sha256": release.CONFLICT_FAMILIES_SHA256,
+        "play_scene_count": 7,
+        "play_scene_ids": ["scene-" + str(index) for index in range(7)],
+        "play_scene_fingerprints": [format(index + 1, "x") * 64 for index in range(7)],
+        "uses_terminal_designated_actor": True,
+        "action_override_count": 0,
+        "program_action_names": ["UP", "DOWN", "LEFT", "RIGHT", "WAIT"],
+        "program_classes": [0, 1, 2, 3, 4],
+        "program_routes": [{
+            "feature_name": "derived.critical." + group,
+            "operator": ">", "threshold": 0.5,
+        } for group in release.PROGRAM_GROUPS],
+        "program_mix_weights": {group: 0.5 for group in release.PROGRAM_GROUPS},
+        "program_aggregation": release.PROGRAM_AGGREGATION,
+        "runtime_manifest_file_sha256": parent[
+            "portable_runtime_manifest_sha256"],
+    })
+    admitted = {
+        "actor": identities["actor_sha256"],
+        "protocol": identities["protocol_file_sha256"],
+        "runtime_manifest": identities["runtime_manifest_file_sha256"],
+        "program": identities["program_sha256"],
+        "question_bank": parent["question_bank_sha256"],
+        "tutorial": parent["tutorial_sha256"],
+    }
+    records = {
+        name: {"path": release.ARTIFACT_PATHS[name], "size": 1,
+               "sha256": admitted[name]}
+        for name in release.ARTIFACT_PATHS
+    }
+    manifest = {
+        "version": release.VERSION, "status": release.STATUS,
+        "test_fixture": False, "pilot_class": release.PILOT_CLASS,
+        "formal_ready": False, "formal_sample_eligible": False,
+        "data_persistent": False, "parent": parent,
+        "artifacts": records, "identities": identities,
+        "sources": {"release": release.release_sources()},
+        "analysis": release.portable._analysis_protocol(),
+        "release": release._release_projection(),
+    }
+    release._validate_manifest(manifest)
+    forged = deepcopy(manifest)
+    forged["artifacts"]["question_bank"]["sha256"] = "c" * 64
+    with pytest.raises(ValueError, match="admitted exact bytes"):
+        release._validate_manifest(forged)
+    forged = deepcopy(manifest)
+    forged["identities"]["runtime_manifest_file_sha256"] = "c" * 64
+    forged["artifacts"]["runtime_manifest"]["sha256"] = "c" * 64
+    with pytest.raises(ValueError, match="runtime manifest binding"):
+        release._validate_manifest(forged)
+    forged = deepcopy(manifest)
+    forged["artifacts"]["tutorial"]["sha256"] = "c" * 64
+    with pytest.raises(ValueError, match="admitted exact bytes"):
+        release._validate_manifest(forged)
+
+
+def test_release_assembly_source_guard_rejects_post_admission_drift(
+        tmp_path, monkeypatch):
+    admitted_sources = {"release.py": "a" * 64}
+    monkeypatch.setattr(
+        release, "release_sources", lambda: {"release.py": "b" * 64})
+    with pytest.raises(RuntimeError, match="release sources changed"):
+        release._assemble_from_frozen_admitted_components(
+            admission={}, admission_sha="a" * 64,
+            bindings={
+                "release_sources_sha256": release.digest(admitted_sources),
+            },
+            paths={}, output_package=tmp_path / "must-not-exist.zip",
+            output_base64=None,
+            frozen=object(), admitted_release_sources=admitted_sources,
+        )
+    assert not (tmp_path / "must-not-exist.zip").exists()
+
+
 def test_release_limits_and_exact_v8_source_closure(tmp_path):
     too_large_zip = tmp_path / "too-large.zip"
     too_large_zip.write_bytes(b"x" * (release.MAX_PACKAGE_BYTES + 1))
@@ -204,6 +1057,26 @@ def test_release_limits_and_exact_v8_source_closure(tmp_path):
     assert "backend/warehouse_r41_diagnostic_public_tree_program_v8.py" in sources
     assert "backend/warehouse_r41_diagnostic_boosted_tree.py" in sources
     assert "backend/training/warehouse_r41_diagnostic_admission_v6.py" in sources
+    assert "backend/training/warehouse_r41_diagnostic_input_snapshot_v8.py" in sources
+    admission_sources = admission.source_closure()
+    assert "backend/training/warehouse_r41_diagnostic_designation_v2.py" in admission_sources
+    assert "scripts/build_warehouse_r41_diagnostic_designation_v2.py" in admission_sources
+    assert (
+        "backend/training/warehouse_r41_diagnostic_designation_v2_binding.py"
+        in admission_sources
+    )
+    assert (
+        "backend/training/warehouse_r41_diagnostic_frozen_manifest_v2.py"
+        in admission_sources
+    )
+    assert (
+        "backend/training/warehouse_r41_diagnostic_frozen_publication_v2.py"
+        in admission_sources
+    )
+    assert (
+        "backend/training/warehouse_r41_diagnostic_designation.py"
+        not in admission_sources
+    )
     assert "backend/warehouse_r41_diagnostic_model_tree_ensemble_v2.py" not in sources
     contract = admission.package_contract()
     assert contract["maximum_package_bytes"] == 750_000
@@ -211,6 +1084,237 @@ def test_release_limits_and_exact_v8_source_closure(tmp_path):
     assert contract["archive_compression"] == "ZIP_BZIP2"
     assert contract["archive_compresslevel"] == 9
     assert contract["pickle_allowed"] is False
+
+
+def test_admission_designation_source_closure_disagreement_fails(monkeypatch):
+    own = Path(admission.__file__).resolve().relative_to(admission.ROOT).as_posix()
+    actual = file_hash(Path(admission.__file__).resolve())
+    replacement = "f" * 64 if actual != "f" * 64 else "e" * 64
+    monkeypatch.setattr(
+        admission.designation_api, "source_closure",
+        lambda: {own: replacement})
+    with pytest.raises(ValueError, match="designation source closure differs"):
+        admission.source_closure()
+
+
+def _temporary_admission_source_tree(tmp_path):
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    dependency = package / "dependency.py"
+    dependency.write_text("VALUE = 1\n", encoding="utf-8")
+    seed = tmp_path / "seed.py"
+    seed.write_text("from pkg import dependency\n", encoding="utf-8")
+    return seed, dependency
+
+
+def test_admission_source_closure_rejects_transient_split_read(
+        tmp_path, monkeypatch):
+    seed, _ = _temporary_admission_source_tree(tmp_path)
+    helper = admission.source_closure_api
+    original_local_source_hashes = helper.local_source_hashes
+    original_os_read = helper.os.read
+    original = seed.read_text(encoding="utf-8")
+    seed_inode = seed.stat().st_ino
+    attacked = False
+
+    monkeypatch.setattr(helper, "ROOT", tmp_path)
+
+    def transient_replacement(descriptor, count):
+        nonlocal attacked
+        if not attacked and os.fstat(descriptor).st_ino == seed_inode:
+            attacked = True
+            preserved = tmp_path / "seed-preserved.py"
+            replacement = tmp_path / "seed-replacement.py"
+            preserved.write_text(original, encoding="utf-8")
+            replacement.write_text("VALUE = 2\n", encoding="utf-8")
+            os.replace(replacement, seed)
+            raw = original_os_read(descriptor, count)
+            os.replace(preserved, seed)
+            return raw
+        return original_os_read(descriptor, count)
+
+    monkeypatch.setattr(helper.os, "read", transient_replacement)
+    monkeypatch.setattr(
+        helper, "local_source_hashes",
+        lambda _seeds: original_local_source_hashes((seed,)),
+    )
+
+    with pytest.raises(RuntimeError, match="changed while it was read"):
+        admission.source_closure()
+    assert attacked is True
+    assert seed.read_text(encoding="utf-8") == original
+
+
+def test_admission_source_closure_rejects_first_pass_hidden_import(
+        tmp_path, monkeypatch):
+    seed, dependency = _temporary_admission_source_tree(tmp_path)
+    helper = admission.source_closure_api
+    original_local_source_hashes = helper.local_source_hashes
+    original_module_files = helper._module_files
+    hidden = False
+
+    monkeypatch.setattr(helper, "ROOT", tmp_path)
+
+    def hide_once(parts, *, root):
+        nonlocal hidden
+        if list(parts) == ["pkg", "dependency"] and not hidden:
+            hidden = True
+            return []
+        return original_module_files(parts, root=root)
+
+    monkeypatch.setattr(helper, "_module_files", hide_once)
+    monkeypatch.setattr(
+        helper, "local_source_hashes",
+        lambda _seeds: original_local_source_hashes((seed,)),
+    )
+
+    with pytest.raises(RuntimeError, match="changed during discovery"):
+        admission.source_closure()
+    assert hidden is True
+    assert dependency.is_file()
+
+
+def _minimal_admission_checked(sources):
+    return {
+        "bindings": {}, "artifacts": {}, "gates": {},
+        "sources": deepcopy(sources),
+        "package_contract": {"release_sources_sha256": admission.digest({})},
+    }
+
+
+def test_admission_semantics_use_one_private_snapshot_during_transient_swap(
+        tmp_path, monkeypatch):
+    component = tmp_path / "component.bin"
+    component.write_bytes(b"authenticated")
+    files = {name: component for name in admission.ARTIFACT_NAMES}
+    hashes = {name: file_hash(component) for name in admission.ARTIFACT_NAMES}
+    relatives = {name: "evidence/" + name for name in admission.ARTIFACT_NAMES}
+    sources = {"admission.py": "a" * 64}
+    monkeypatch.setattr(admission, "source_closure", lambda: deepcopy(sources))
+    from ui import warehouse_alignment_r41_diagnostic_release_v8 as release_api
+    monkeypatch.setattr(release_api, "release_sources", lambda: {})
+
+    def validate(originals, semantic, frozen_relatives, frozen_hashes):
+        assert originals == files
+        assert frozen_relatives == relatives
+        assert frozen_hashes == hashes
+        assert len(set(semantic.values())) == 1
+        private = next(iter(semantic.values()))
+        assert private != component
+        component.write_bytes(b"transient replacement")
+        try:
+            assert private.read_bytes() == b"authenticated"
+        finally:
+            component.write_bytes(b"authenticated")
+        return _minimal_admission_checked(sources)
+
+    monkeypatch.setattr(admission, "_validate_components_snapshot", validate)
+    checked = admission._validate_component_transaction(
+        files, hashes=hashes, relatives=relatives,
+        expected_sources=sources, phase="transient swap regression")
+    assert checked == _minimal_admission_checked(sources)
+
+
+def test_admission_component_drift_during_validation_leaves_no_output(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(admission, "ROOT", tmp_path)
+    component = tmp_path / "component.bin"
+    component.write_bytes(b"before")
+    frozen_paths = {name: component for name in admission.ARTIFACT_NAMES}
+    sources = {"admission.py": "a" * 64}
+    monkeypatch.setattr(admission, "source_closure", lambda: deepcopy(sources))
+    monkeypatch.setattr(
+        admission, "_canonical_component_paths",
+        lambda paths: dict(frozen_paths))
+
+    def validate(*args, **kwargs):
+        component.write_bytes(b"after")
+        return _minimal_admission_checked(sources)
+
+    monkeypatch.setattr(admission, "_validate_component_transaction", validate)
+    output = tmp_path / "admission.json"
+    with pytest.raises(RuntimeError, match="component or source changed"):
+        admission.build_admission({}, output=output)
+    assert not output.exists()
+    assert not (tmp_path / ".admission.json.partial").exists()
+
+
+def test_admission_source_drift_during_staged_write_leaves_no_output(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(admission, "ROOT", tmp_path)
+    component = tmp_path / "component.bin"
+    component.write_bytes(b"fixed")
+    frozen_paths = {name: component for name in admission.ARTIFACT_NAMES}
+    drifted = {"value": False}
+    monkeypatch.setattr(
+        admission, "source_closure",
+        lambda: {"admission.py": ("b" if drifted["value"] else "a") * 64})
+    monkeypatch.setattr(
+        admission, "_canonical_component_paths",
+        lambda paths: dict(frozen_paths))
+    monkeypatch.setattr(
+        admission, "_validate_component_transaction",
+        lambda *args, **kwargs: _minimal_admission_checked(
+            {"admission.py": "a" * 64}))
+    original_write = admission._write_new
+
+    def drift_after_fsync(path, value):
+        original_write(path, value)
+        drifted["value"] = True
+
+    monkeypatch.setattr(admission, "_write_new", drift_after_fsync)
+    output = tmp_path / "admission.json"
+    with pytest.raises(RuntimeError, match="source changed"):
+        admission.build_admission({}, output=output)
+    assert not output.exists()
+    assert not (tmp_path / ".admission.json.partial").exists()
+
+
+def test_saved_admission_reader_detects_component_drift_before_return(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(admission, "ROOT", tmp_path)
+    component = tmp_path / "component.bin"
+    component.write_bytes(b"fixed")
+    frozen_paths = {name: component for name in admission.ARTIFACT_NAMES}
+    sources = {"admission.py": "a" * 64}
+    bindings = {name: "a" * 64 for name in admission.BINDING_FIELDS}
+    bindings["tutorial_scene_id"] = "tutorial"
+    checked = {
+        "bindings": bindings,
+        "artifacts": {},
+        "gates": {name: True for name in admission.GATE_NAMES},
+        "sources": sources,
+        "package_contract": {},
+    }
+    value = {
+        "version": admission.VERSION, "status": admission.STATUS,
+        "admitted": True, "namespace": admission.NAMESPACE,
+        "pilot_class": admission.NAMESPACE,
+        "behavior_performance_gate_passed": False,
+        "behavior_performance_gate_waived": True,
+        "waiver_scope": ["behavior_performance"], "formal_ready": False,
+        "formal_sample_eligible": False,
+        "human_explanation_effect_validated": False,
+        "data_persistent": False, "runtime_action_override": False,
+        "internal_diagnostic_only": True, "test_fixture": False,
+        **checked, "self_path": "admission.json",
+    }
+    saved = tmp_path / "admission.json"
+    saved.write_text(canonical(value) + "\n", encoding="utf-8")
+    monkeypatch.setattr(admission, "source_closure", lambda: deepcopy(sources))
+    monkeypatch.setattr(
+        admission, "_canonical_component_paths",
+        lambda paths: dict(frozen_paths))
+
+    def validate(*args, **kwargs):
+        component.write_bytes(b"changed")
+        return deepcopy(checked)
+
+    monkeypatch.setattr(admission, "_validate_component_transaction", validate)
+    with pytest.raises(RuntimeError, match="component or source changed"):
+        admission.read_saved_admission(
+            saved, expected_sha256=file_hash(saved), components={})
 
 
 def test_release_archive_uses_only_bzip2_and_rejects_deflate(monkeypatch):
@@ -391,21 +1495,75 @@ def load_online_release(*, base64_path, expected_package_sha256,
 
 
 def test_release_schema_binds_final_once_and_v8_program_identity():
+    candidate_lineage = {
+        "prior_rows_reauthentication_report_sha256",
+        "prior_v7_source_report_sha256", "prior_v7_rows_sha256",
+        "expansion_rows_reauthentication_report_sha256",
+        "expansion_source_collection_report_sha256",
+        "expansion_rows_sha256", "development_expansion_registry_sha256",
+        "development_expansion_report_sha256", "v8_fit_config_sha256",
+        "retired_identity_projection_sha256",
+        "retired_identity_projection_content_sha256",
+        "retired_identity_projection_report_sha256",
+        "final_rcpd_inputs_sha256", "final_rcpd_report_sha256",
+        "final_rcpd_rows_sha256", "final_rcpd_pairs_sha256",
+        "final_rcpd_weights_audit_sha256", "final_rcpd_candidate_sha256",
+    }
+    retired_lineage_aliases = {
+        "prior_rows_reauthentication_receipt_sha256",
+        "expansion_rows_reauthentication_receipt_sha256",
+        "prior_v7_rcpd_report_sha256", "prior_v7_rcpd_rows_sha256",
+        "development_expansion_rows_sha256",
+    }
     assert admission.FIXED_ACTOR_SHA256 == release.FIXED_ACTOR_SHA256
+    assert candidate_lineage <= admission.BINDING_FIELDS
+    assert candidate_lineage <= release._PARENT_FIELDS
+    assert candidate_lineage <= receipt.FIELDS
+    assert candidate_lineage == receipt.CANDIDATE_LINEAGE_FIELDS
+    assert not retired_lineage_aliases & admission.BINDING_FIELDS
+    assert not retired_lineage_aliases & release._PARENT_FIELDS
+    assert not retired_lineage_aliases & receipt.FIELDS
     assert {"final_once_identity_sha256", "final_once_attempt_completed_sha256",
             "final_once_campaign_key", "final_once_permanent_anchor_sha256",
             "final_once_candidate_authenticated_sha256",
             "final_once_holdout_started_sha256",
+            "final_once_historical_exclusion_started_sha256",
+            "final_once_historical_exclusion_completed_sha256",
             "final_once_holdout_completed_sha256",
             "final_once_audit_started_sha256",
             "final_once_audit_completed_sha256",
             "fresh_final_v3_exclusion_sha256",
             "fresh_final_v3_exclusion_content_sha256",
+            "diagnostic_publication_authentication_sha256",
+            "prior_rows_reauthentication_report_sha256",
+            "expansion_rows_reauthentication_report_sha256",
+            "expansion_source_collection_report_sha256",
+            "prior_v7_source_report_sha256", "prior_v7_rows_sha256",
+            "expansion_rows_sha256", "final_rcpd_inputs_sha256",
+            "final_rcpd_pairs_sha256", "final_rcpd_weights_audit_sha256",
+            "final_rcpd_candidate_sha256",
             "explanation_audit_evidence_sha256", "physical_replay_sha256",
             "program_identity_sha256", "public_feature_contract_sha256",
             "program_complexity_sha256"} <= admission.BINDING_FIELDS
     assert "retired_fresh_final_holdout_v3" not in admission.ARTIFACT_NAMES
+    assert "retired_fresh_final_holdout_v1" not in admission.ARTIFACT_NAMES
+    assert "retired_fresh_final_holdout_v2" not in admission.ARTIFACT_NAMES
+    assert {"retired_identity_projection",
+            "retired_identity_projection_report"} <= set(admission.ARTIFACT_NAMES)
     assert "fresh_final_v3_exclusion" in admission.ARTIFACT_NAMES
+    assert "diagnostic_publication_authentication_sha256" in release._PARENT_FIELDS
+    assert {"question_bank_sha256", "tutorial_sha256",
+            "portable_runtime_manifest_sha256", "release_sources_sha256",
+            "package_contract_sha256"} <= release._PARENT_FIELDS
+    assert {
+        "prior_rows_reauthentication_report_sha256",
+        "expansion_rows_reauthentication_report_sha256",
+        "expansion_source_collection_report_sha256",
+        "prior_v7_source_report_sha256", "prior_v7_rows_sha256",
+        "expansion_rows_sha256", "final_rcpd_inputs_sha256",
+        "final_rcpd_pairs_sha256", "final_rcpd_weights_audit_sha256",
+        "final_rcpd_candidate_sha256",
+    } <= release._PARENT_FIELDS
     assert {"program_action_names", "program_classes", "program_routes",
             "program_mix_weights", "program_aggregation"} <= release._IDENTITY_FIELDS
     assert release.ARCHIVE_WHITELIST == {
@@ -419,14 +1577,30 @@ def test_release_schema_binds_final_once_and_v8_program_identity():
             "final_once_campaign_key", "final_once_permanent_anchor_sha256",
             "final_once_candidate_authenticated_sha256",
             "final_once_holdout_started_sha256",
+            "final_once_historical_exclusion_started_sha256",
+            "final_once_historical_exclusion_completed_sha256",
             "final_once_holdout_completed_sha256",
             "final_once_audit_started_sha256",
             "final_once_audit_completed_sha256",
             "fresh_final_v3_exclusion_sha256",
             "fresh_final_v3_exclusion_content_sha256",
+            "diagnostic_publication_authentication_sha256",
+            "prior_rows_reauthentication_report_sha256",
+            "expansion_rows_reauthentication_report_sha256",
+            "expansion_source_collection_report_sha256",
+            "development_expansion_registry_sha256",
+            "development_expansion_report_sha256",
+            "prior_v7_source_report_sha256",
+            "prior_v7_rows_sha256",
+            "expansion_rows_sha256",
+            "v8_fit_config_sha256", "final_rcpd_report_sha256",
+            "final_rcpd_inputs_sha256", "final_rcpd_rows_sha256",
+            "final_rcpd_pairs_sha256", "final_rcpd_weights_audit_sha256",
+            "final_rcpd_candidate_sha256",
             "explanation_audit_inputs_sha256",
             "explanation_audit_evidence_sha256", "explanation_audit_sha256",
-            "physical_replay_sha256"} <= receipt.FIELDS
+            "physical_replay_sha256", "release_sources_sha256",
+            "package_contract_sha256"} <= receipt.FIELDS
 
 
 def test_final_once_ledger_artifact_paths_are_external_and_redacted(
@@ -450,10 +1624,18 @@ def test_final_once_ledger_artifact_paths_are_external_and_redacted(
         "final_once_attempt_started": "attempt_started.json",
         "final_once_candidate_authenticated": "candidate_authenticated.json",
         "final_once_holdout_started": "holdout_started.json",
+        "final_once_historical_exclusion_started": (
+            "historical_exclusion_started.json"),
+        "final_once_historical_exclusion_completed": (
+            "historical_exclusion_completed.json"),
         "final_once_holdout_completed": "holdout_completed.json",
         "final_once_audit_started": "audit_started.json",
         "final_once_audit_completed": "audit_completed.json",
         "final_once_attempt_completed": "attempt_completed.json",
+    }
+    assert set(admission.FINAL_ONCE_LEDGER_ARTIFACTS.values()) == {
+        "attempt_started.json", "attempt_completed.json",
+        *admission.final_once_api.PHASE_RECEIPT_NAMES,
     }
 
     inside = repo / "attempt_started.json"
@@ -467,14 +1649,21 @@ def test_final_once_ledger_artifact_paths_are_external_and_redacted(
 
 def test_admission_consumes_holdout_v4_four_field_v3_claim_interface(
         monkeypatch):
+    candidates = {}
+    for family_index, family in enumerate(holdout.FAMILY_IDS):
+        candidates[family] = [
+            {"fingerprint": digest({"family": family, "index": index}),
+             "seed": 1000 * family_index + index, "family_id": family}
+            for index in range(holdout.FAMILY_QUOTAS[family])
+        ]
     monkeypatch.setattr(
-        holdout.legacy_v3, "_select",
-        lambda **kwargs: (
-            [{"fingerprint": "e" * 64, "seed": 7}],
-            [{"fingerprint": "e" * 64}],
-            {"accepted": 1},
-        ),
-    )
+        holdout.legacy_v3, "_ordered_candidates",
+        lambda manifest, family: candidates[family])
+    monkeypatch.setattr(holdout, "screen_scene",
+                        lambda *args, **kwargs: {"passed": True})
+    monkeypatch.setattr(
+        holdout, "_exact_final_workload_observations",
+        lambda runtime, scene, index: {digest({"observation": index})})
     expected = admission._final_claim_binding(
         campaign_key="a" * 64,
         attempt_started_sha256="b" * 64,
@@ -482,8 +1671,10 @@ def test_admission_consumes_holdout_v4_four_field_v3_claim_interface(
         candidate_authenticated_sha256="d" * 64,
     )
     tombstone = holdout._build_v3_tombstone(
-        runtime=object(), actor=object(), manifest={}, selected={},
-        legacy_development_hashes=set(), retired_registries=[],
+        runtime=object(), actor=object(),
+        manifest={"splits": {"train": []}, "candidate_batches": []},
+        selected={"X": [], "Y": []}, legacy_development_hashes=set(),
+        projected_retired_fingerprints=set(), projected_retired_seeds=set(),
         claim_binding=expected,
     )
     admission._require_v3_claim_binding(
@@ -514,9 +1705,8 @@ def test_admission_consumes_complete_audit_v8_candidate_and_source_interface(
     full_manifest = {"manifest.py": "a" * 64}
     runtime_sources = {"runtime.py": "b" * 64}
     candidate_artifacts = {
-        filename: format(index + 3, "x") * 64
-        for index, filename in enumerate(
-            admission.final_once_api.CANDIDATE_ARTIFACT_KEYS)
+        filename: sha256(filename.encode("utf-8")).hexdigest()
+        for filename in admission.final_once_api.CANDIDATE_ARTIFACT_KEYS
     }
     monkeypatch.setattr(
         audit, "diagnostic_runtime_sources", lambda: dict(runtime_sources))
@@ -646,61 +1836,54 @@ def test_release_receipt_reauthenticates_same_fixed_external_ledger(
         receipt._validate_fixed_final_once_ledger(redirected)
 
 
-def test_admission_pins_retired_v1_v2_to_expansion_file_and_content_hashes(
+def test_admission_pins_identity_projection_and_report_to_expansion(
         tmp_path, monkeypatch):
-    files = {}
-    hashes = {}
-    expected = {}
-    for index in (1, 2):
-        name = f"retired_fresh_final_holdout_v{index}"
-        version = f"warehouse-r41-diagnostic-fresh-final-holdout.v{index}"
-        payload = {"version": version, "status": "retired", "marker": index}
-        payload["content_sha256"] = digest(payload)
-        path = tmp_path / f"v{index}.json"
-        path.write_text(canonical(payload) + "\n", encoding="utf-8")
-        files[name] = path
-        hashes[name] = file_hash(path)
-        expected[version] = {
-            "file_sha256": hashes[name],
-            "content_sha256": payload["content_sha256"],
-        }
-    monkeypatch.setattr(admission, "EXPECTED_RETIRED_HOLDOUTS", expected)
-    expansion = {"bindings": {"retired_holdouts": deepcopy(expected)}}
-    assert admission._validate_retired_holdout_bindings(
-        files, hashes, expansion) == expected
+    projection = tmp_path / "retired_identity_projection.json"
+    report = tmp_path / "report.json"
+    projection.write_text("{}\n", encoding="utf-8")
+    report.write_text("{}\n", encoding="utf-8")
+    files = {
+        "retired_identity_projection": projection,
+        "retired_identity_projection_report": report,
+    }
+    hashes = {name: file_hash(path) for name, path in files.items()}
+    binding = {
+        "file_sha256": hashes["retired_identity_projection"],
+        "audit_file_sha256": hashes["retired_identity_projection_report"],
+        "content_sha256": "a" * 64, "identity_count": 139,
+    }
+    monkeypatch.setattr(
+        admission.holdout_api, "EXPECTED_RETIRED_IDENTITY_PROJECTION_SHA256",
+        hashes["retired_identity_projection"])
+    monkeypatch.setattr(
+        admission.holdout_api,
+        "EXPECTED_RETIRED_IDENTITY_PROJECTION_REPORT_SHA256",
+        hashes["retired_identity_projection_report"])
+    monkeypatch.setattr(
+        admission.holdout_api, "_retired_identity_projection",
+        lambda path: ([{"seed": index, "fingerprint": digest(index)}
+                       for index in range(139)], binding))
+    monkeypatch.setattr(
+        admission.holdout_api, "_validate_retired_expansion_binding",
+        lambda actual, expansion: None if actual == binding and expansion[
+            "bindings"]["retired_identity_projection"] == binding else
+        (_ for _ in ()).throw(ValueError("projection differs")))
+    expansion = {"bindings": {"retired_identity_projection": binding}}
+    assert admission._validate_retired_identity_projection(
+        files, hashes, expansion) == binding
 
-    # A replacement registry remains rejected even if an attacker also makes
-    # the supplied expansion binding internally self-consistent.
-    replacement = {
-        "version": "warehouse-r41-diagnostic-fresh-final-holdout.v1",
-        "status": "retired", "marker": "replacement",
-    }
-    replacement["content_sha256"] = digest(replacement)
-    files["retired_fresh_final_holdout_v1"].write_text(
-        canonical(replacement) + "\n", encoding="utf-8")
     replacement_hashes = dict(hashes)
-    replacement_hashes["retired_fresh_final_holdout_v1"] = file_hash(
-        files["retired_fresh_final_holdout_v1"])
-    replacement_bindings = deepcopy(expected)
-    replacement_bindings[replacement["version"]] = {
-        "file_sha256": replacement_hashes["retired_fresh_final_holdout_v1"],
-        "content_sha256": replacement["content_sha256"],
-    }
-    with pytest.raises(ValueError, match="fixed development expansion"):
-        admission._validate_retired_holdout_bindings(
-            files, replacement_hashes,
-            {"bindings": {"retired_holdouts": replacement_bindings}},
-        )
+    replacement_hashes["retired_identity_projection"] = "f" * 64
+    with pytest.raises(ValueError, match="identity-only projection"):
+        admission._validate_retired_identity_projection(
+            files, replacement_hashes, expansion)
 
 
 def test_admission_binds_final_candidate_to_strict_refit_marker_bytes(tmp_path):
     candidate = tmp_path / "candidate"
     candidate.mkdir()
     by_filename = {}
-    for filename in (
-            "program.json", "report.json", "rows.npz",
-            "prior_v7_report.json", "prior_v7_rows.npz",
-            "expansion_rows.npz", "fit_config.json"):
+    for filename in admission.final_once_api.CANDIDATE_ARTIFACT_KEYS:
         path = candidate / filename
         path.write_bytes((filename + "\n").encode("ascii"))
         by_filename[filename] = path
@@ -710,15 +1893,10 @@ def test_admission_binds_final_candidate_to_strict_refit_marker_bytes(tmp_path):
         path = tmp_path / name
         path.write_bytes((name + "\n").encode("ascii"))
         simple[name] = path
-    singles = {
-        **simple,
-        "program": by_filename["program.json"],
-        "rcpd_report": by_filename["report.json"],
-        "candidate_prior_v7_report_json": by_filename["prior_v7_report.json"],
-        "candidate_prior_v7_rows_npz": by_filename["prior_v7_rows.npz"],
-        "candidate_expansion_rows_npz": by_filename["expansion_rows.npz"],
-        "candidate_fit_config_json": by_filename["fit_config.json"],
-    }
+    singles = dict(simple)
+    for filename, key in admission.final_once_api.CANDIDATE_ARTIFACT_KEYS.items():
+        if key != "development_rows":
+            singles[key] = by_filename[filename]
     row_paths = [by_filename["rows.npz"]]
     development_paths = []
     for index, version in enumerate((
@@ -744,9 +1922,20 @@ def test_admission_binds_final_candidate_to_strict_refit_marker_bytes(tmp_path):
         "rcpd_report_file_sha256": artifacts["report.json"],
         "program_file_sha256": artifacts["program.json"],
         "rows_file_sha256": artifacts["rows.npz"],
-        "prior_v7_report_file_sha256": artifacts["prior_v7_report.json"],
+        "prior_rows_reauthentication_report_file_sha256": artifacts[
+            "prior_rows_reauthentication_report.json"],
+        "prior_v7_source_report_file_sha256": artifacts[
+            "source_v7_report.json"],
         "prior_v7_rows_file_sha256": artifacts["prior_v7_rows.npz"],
+        "expansion_rows_reauthentication_report_file_sha256": artifacts[
+            "expansion_rows_reauthentication_report.json"],
+        "expansion_source_collection_report_file_sha256": artifacts[
+            "source_expansion_collection_report.json"],
         "expansion_rows_file_sha256": artifacts["expansion_rows.npz"],
+        "development_expansion_registry_file_sha256": artifacts[
+            "development_expansion.json"],
+        "development_expansion_report_file_sha256": artifacts[
+            "development_expansion_report.json"],
         "fit_config_file_sha256": artifacts["fit_config.json"],
         "actor_file_sha256": file_hash(simple["actor"]),
         "protocol_file_sha256": file_hash(simple["protocol"]),

@@ -579,7 +579,14 @@ def evaluate_candidate(
                     or not np.allclose(predicted.sum(1), 1.0, rtol=0.0, atol=2e-12)):
                 raise ValueError("V9 fold prediction probabilities differ")
             oof[validation] = predicted
-            complete = np.asarray(arrays["probabilities"], dtype=np.float64).copy()
+            # Metrics validate every row in the supplied probability matrix,
+            # while the fold mask scores only held-out rows.  Give unscored
+            # rows a fixed, exact distribution instead of copying historical
+            # float32 Actor probabilities (whose harmless rounding error can
+            # exceed the strict float64 normalisation tolerance).  This also
+            # keeps non-fold probability targets outside candidate selection.
+            complete = np.zeros_like(oof)
+            complete[:, 0] = 1.0
             complete[validation] = predicted
             fold_metrics, fold_gate, _, _ = _probability_metrics(
                 complete, arrays, validation)

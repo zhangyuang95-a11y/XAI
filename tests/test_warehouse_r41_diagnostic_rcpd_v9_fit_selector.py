@@ -247,6 +247,9 @@ def test_candidate_calls_fit_primitive_six_times_with_fold_local_split(
 ):
     count = 18
     arrays = _arrays(count)
+    # Non-scored fold rows must not need historical Actor probabilities to be
+    # normalised (or even finite) for a held-out metric call.
+    arrays["probabilities"][:] = np.nan
     scenes = [value.decode() for value in arrays["scene_fingerprints"]]
     scene_families = {
         scene: f"family-{index % 6}" for index, scene in enumerate(scenes)
@@ -267,12 +270,15 @@ def test_candidate_calls_fit_primitive_six_times_with_fold_local_split(
         actions = observations[:, 0].astype(int)
         return np.eye(5, dtype=np.float64)[actions]
 
-    monkeypatch.setattr(
-        subject, "_probability_metrics",
-        lambda probabilities, arrays, mask: ({"scope": int(np.sum(mask))},
-                                              {"passed": True},
-                                              np.empty((0, 2), dtype=np.int64),
-                                              np.empty(0, dtype=np.uint8)))
+    def metrics(probabilities, arrays, mask):
+        assert np.isfinite(probabilities).all()
+        np.testing.assert_allclose(
+            probabilities.sum(1), 1.0, rtol=0.0, atol=2e-12)
+        return ({"scope": int(np.sum(mask))}, {"passed": True},
+                np.empty((0, 2), dtype=np.int64),
+                np.empty(0, dtype=np.uint8))
+
+    monkeypatch.setattr(subject, "_probability_metrics", metrics)
     result = subject.evaluate_candidate(
         arrays, scene_families=scene_families, relations=object(),
         config=_config(), fit_program=fit_program,

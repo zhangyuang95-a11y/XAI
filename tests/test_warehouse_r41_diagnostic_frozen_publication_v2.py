@@ -199,9 +199,27 @@ def _write_successful_ledger(tmp_path, monkeypatch):
         subject.final_once.holdout_api, "DEFAULT_PERMANENT_ANCHOR",
         permanent_anchor)
     identity = subject.final_once._campaign_identity()
+    output = tmp_path / "final-output"
     key, registry, _ = subject.final_once._claim(
-        identity, output=tmp_path / "final-output")
+        identity, output=output)
     started_sha = file_hash(registry / "attempt_started.json")
+    (output / "fresh_holdout").mkdir(parents=True)
+    (output / "explanation_audit").mkdir()
+    (output / "attempt_started.json").write_bytes(
+        (registry / "attempt_started.json").read_bytes())
+    (output / "fresh_holdout/v3_exclusion.json").write_text(
+        "{}\n", encoding="utf-8")
+    (output / "fresh_holdout/holdout.json").write_text(
+        "{}\n", encoding="utf-8")
+    (output / "fresh_holdout/report.json").write_text(
+        '{"status":"passed_program_blind_registry"}\n', encoding="utf-8")
+    (output / "explanation_audit/inputs.json").write_text(
+        "{}\n", encoding="utf-8")
+    (output / "explanation_audit/evidence.npz").write_bytes(b"evidence")
+    (output / "explanation_audit/report.json").write_text(
+        '{"status":"passed"}\n', encoding="utf-8")
+    (output / "physical_replay.json").write_text(
+        '{"status":"passed"}\n', encoding="utf-8")
     candidate_artifacts = {
         name: (file_hash(PROGRAM) if name == "program.json" else "a" * 64)
         for name in subject.final_once.CANDIDATE_ARTIFACT_KEYS
@@ -225,6 +243,8 @@ def _write_successful_ledger(tmp_path, monkeypatch):
         "expansion_rows_reauthentication_report_file_sha256": (
             candidate_artifacts[
                 "expansion_rows_reauthentication_report.json"]),
+        "expansion_source_collection_report_file_sha256": (
+            candidate_artifacts["source_expansion_collection_report.json"]),
         "expansion_rows_file_sha256": candidate_artifacts["expansion_rows.npz"],
         "development_expansion_registry_file_sha256": candidate_artifacts[
             "development_expansion.json"],
@@ -257,7 +277,13 @@ def _write_successful_ledger(tmp_path, monkeypatch):
         "candidate_authenticated_sha256": candidate_sha,
     }
     (registry / "holdout_started.json").write_text(
-        subject.canonical({**common, "status": "started_no_retry"}) + "\n",
+        subject.canonical({
+            **common,
+            "version": subject.final_once.holdout_api.VERSION,
+            "status": "started_no_retry",
+            "selection_salt_commitment": (
+                subject.final_once.holdout_api.HOLDOUT_SALT_COMMITMENT),
+        }) + "\n",
         encoding="utf-8")
     historical_common = {
         **common,
@@ -279,18 +305,43 @@ def _write_successful_ledger(tmp_path, monkeypatch):
         }
         for name, value in row_hashes.items()
     }
+    public_exclusion_commitment = {
+        "scene_fingerprint_count": 1,
+        "scene_fingerprints_sha256": "1" * 64,
+        "seed_count": 1,
+        "seeds_sha256": "2" * 64,
+        "replayed_observation_count": 1,
+        "replayed_observations_sha256": "3" * 64,
+        "forbidden_observation_count": 1,
+        "forbidden_observations_sha256": "4" * 64,
+        "retired_identity_projection_file_sha256": "5" * 64,
+        "retired_identity_projection_report_sha256": "6" * 64,
+        "retired_identity_count": 139,
+        "retired_actor_executed": False,
+        "retired_observations_derived": False,
+        "v3_exclusion_content_sha256": "7" * 64,
+    }
     (registry / "historical_exclusion_started.json").write_text(
         subject.canonical({
             **historical_common,
+            "version": (
+                subject.final_once.holdout_api.VERSION
+                + ".historical-exclusion.v1"),
             "status": "started_irrevocable_no_retry",
             "manifest_file_sha256": subject.final_once.EXPECTED_MANIFEST_SHA256,
             "historical_final_access_refunds_attempt": False,
             "formal_ready": False,
             "row_artifact_evidence": row_artifact_evidence,
             "row_artifact_evidence_sha256": digest(row_artifact_evidence),
+            "public_exclusion_commitment": public_exclusion_commitment,
+            "public_exclusion_commitment_sha256": digest(
+                public_exclusion_commitment),
         }) + "\n", encoding="utf-8")
     historical_completed = {
         **historical_common,
+        "version": (
+            subject.final_once.holdout_api.VERSION
+            + ".historical-exclusion.v1"),
         "status": "completed_observation_hash_exclusion",
         "historical_exclusion_started_sha256": file_hash(
             registry / "historical_exclusion_started.json"),
@@ -350,9 +401,16 @@ def _write_successful_ledger(tmp_path, monkeypatch):
     (registry / "holdout_completed.json").write_text(
         subject.canonical({
             **common,
+            "version": subject.final_once.holdout_api.VERSION,
             "status": "completed_program_blind",
             "historical_exclusion_completed_sha256": file_hash(
                 registry / "historical_exclusion_completed.json"),
+            "holdout_file_sha256": file_hash(
+                output / "fresh_holdout/holdout.json"),
+            "report_file_sha256": file_hash(
+                output / "fresh_holdout/report.json"),
+            "v3_exclusion_file_sha256": file_hash(
+                output / "fresh_holdout/v3_exclusion.json"),
         }) + "\n", encoding="utf-8")
     audit_common = {
         **common,
@@ -361,14 +419,30 @@ def _write_successful_ledger(tmp_path, monkeypatch):
         "candidate_artifacts_sha256": digest(candidate_artifacts),
     }
     (registry / "audit_started.json").write_text(
-        subject.canonical({**audit_common, "status": "started_no_retry"})
+        subject.canonical({
+            **audit_common,
+            "version": subject.final_once.audit_api.VERSION,
+            "status": "started_no_retry",
+        })
         + "\n", encoding="utf-8")
     (registry / "audit_completed.json").write_text(
-        subject.canonical({**audit_common, "status": "passed"}) + "\n",
+        subject.canonical({
+            **audit_common,
+            "version": subject.final_once.audit_api.VERSION,
+            "status": "passed",
+            "report_file_sha256": file_hash(
+                output / "explanation_audit/report.json"),
+            "evidence_file_sha256": file_hash(
+                output / "explanation_audit/evidence.npz"),
+        }) + "\n",
         encoding="utf-8")
     phase_receipts = {
         name: file_hash(registry / name)
         for name in subject.final_once.PHASE_RECEIPT_NAMES
+    }
+    artifacts = {
+        name: file_hash(output / name)
+        for name in subject.final_once._SUCCESS_OUTPUT_ARTIFACT_NAMES
     }
     completion = {
         "version": subject.final_once.VERSION,
@@ -380,10 +454,13 @@ def _write_successful_ledger(tmp_path, monkeypatch):
         "attempt_started_sha256": started_sha,
         "permanent_anchor_sha256": file_hash(permanent_anchor),
         "phase_receipts": phase_receipts,
+        "uncommitted_phase_residues": {},
+        "completed_at": "2026-09-13T00:00:00+00:00",
         "candidate_authenticated_sha256": candidate_sha,
         "candidate_artifacts": candidate_artifacts,
         "candidate_artifacts_sha256": digest(candidate_artifacts),
         "output_created": True,
+        "output_identity": str(output),
         "reason": None,
         "automatic_retry": False,
         "retry_allowed": False,
@@ -397,9 +474,13 @@ def _write_successful_ledger(tmp_path, monkeypatch):
         "runtime_action_override": False,
         "formal_ready": False,
         "producer_sources": subject.final_once.producer_sources(),
+        "artifacts": artifacts,
     }
+    completion_raw = subject.canonical(completion) + "\n"
     (registry / "attempt_completed.json").write_text(
-        subject.canonical(completion) + "\n", encoding="utf-8")
+        completion_raw, encoding="utf-8")
+    (output / "attempt_completed.json").write_text(
+        completion_raw, encoding="utf-8")
     return completion, registry, permanent_anchor
 
 

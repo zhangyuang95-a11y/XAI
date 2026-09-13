@@ -456,7 +456,7 @@ def test_forged_ledger_claim_without_permanent_anchor_is_rejected(
 def test_exact_identity_projection_is_the_only_retired_input():
     projection = (
         ROOT / "output/warehouse_native/"
-            "r41_diagnostic_retired_identity_projection_v3_sourceclosure_20260913/"
+            "r41_diagnostic_retired_identity_projection_v6_sourceclosure4_20260913/"
         "retired_identity_projection.json"
     )
     if not projection.is_file():

@@ -81,6 +81,8 @@ def test_contract_is_irrevocable_fixed_campaign_and_program_independent():
     assert contract["retry_after_output_removal"] is False
     assert contract["program_fits"] == 0
     assert contract["actor_updates"] == 0
+    assert contract["fresh_outer_public_evidence_authenticated_before_claim"] is True
+    assert contract["all_direct_postclaim_api_calls_signature_bound_before_claim"] is True
     assert "development_expansion_registry_sha256" in contract["campaign_key_inputs"]
     assert "development_expansion_report_sha256" in contract["campaign_key_inputs"]
     assert "retired_identity_projection_file_sha256" in (
@@ -96,7 +98,7 @@ def test_contract_is_irrevocable_fixed_campaign_and_program_independent():
         subject.EXPECTED_EXPANSION_REGISTRY_SHA256)
     assert subject.EXPECTED_EXPANSION_REGISTRY_SHA256 == (
         subject.EXPECTED_FRESH_OUTER_REGISTRY_SHA256
-    ) == "bf5346f9dd70ff02773b3335efd36018eae1b9abf4da1c035108a89ec5bcb923"
+    ) == "a598f78b0b8054bfe9e3cb0befa9c1007f0bcf6e0e599ac2565523d1f0e62332"
     assert identity["development_expansion_report_sha256"] == (
         subject.EXPECTED_FRESH_OUTER_REPORT_SHA256)
     assert identity["retired_identity_projection_file_sha256"] == (
@@ -398,6 +400,73 @@ def test_fresh_outer_report_is_a_fixed_sibling_input(tmp_path, monkeypatch):
         subject._fresh_outer_report_input([supplement, registry])
 
 
+def test_preclaim_fresh_outer_uses_complete_public_reader_and_validators(
+        tmp_path, monkeypatch):
+    supplement = tmp_path / "supplement.json"
+    supplement.write_text('{"kind":"supplement"}\n', encoding="utf-8")
+    outer = tmp_path / "outer"; outer.mkdir()
+    registry_path = outer / "development_expansion.json"
+    registry_path.write_text("{}\n", encoding="utf-8")
+    report_path = outer / "report.json"
+    report_path.write_text("{}\n", encoding="utf-8")
+    live_sources = {"outer.py": "a" * 64}
+    registry = {
+        "kind": "complete-public-registry",
+        "producer_sources": live_sources,
+        "producer_sources_sha256": subject.digest(live_sources),
+    }
+    report = {"kind": "complete-public-report"}
+    registry_sha256 = subject.file_hash(registry_path)
+    report_sha256 = subject.file_hash(report_path)
+    monkeypatch.setattr(
+        subject, "EXPECTED_FRESH_OUTER_REGISTRY_SHA256", registry_sha256)
+    monkeypatch.setattr(
+        subject, "EXPECTED_FRESH_OUTER_REPORT_SHA256", report_sha256)
+    calls = []
+
+    def read_development(paths):
+        calls.append(("reader", tuple(paths)))
+        return [], {
+            subject.holdout_api.DEVELOPMENT_EXPANSION_VERSION: {
+                "file_sha256": registry_sha256,
+                "report_file_sha256": report_sha256,
+            },
+        }, {
+            subject.holdout_api.DEVELOPMENT_EXPANSION_VERSION: registry,
+        }
+
+    monkeypatch.setattr(
+        subject.holdout_api, "_development_registry_evidence",
+        read_development)
+    monkeypatch.setattr(
+        subject.holdout_api.outer_split_api, "producer_sources",
+        lambda: live_sources)
+    monkeypatch.setattr(
+        subject.holdout_api, "_validate_fresh_outer_registry",
+        lambda value: calls.append(("registry", value)))
+    monkeypatch.setattr(
+        subject.holdout_api, "_read_exact_json",
+        lambda path, label, expected_sha256=None: (
+            report, report_sha256))
+    monkeypatch.setattr(
+        subject.holdout_api, "_validate_fresh_outer_report",
+        lambda value, bound: calls.append(("report", value, bound)))
+
+    assert subject._preclaim_fresh_outer_evidence(
+        [supplement, registry_path]) == report_path
+    assert calls == [
+        ("reader", (supplement, registry_path)),
+        ("registry", registry),
+        ("report", report, registry),
+    ]
+
+    monkeypatch.setattr(
+        subject.holdout_api.outer_split_api, "producer_sources",
+        lambda: {"outer.py": "b" * 64})
+    with pytest.raises(ValueError, match="not authentic"):
+        subject._preclaim_fresh_outer_evidence([supplement, registry_path])
+
+
 def test_candidate_selector_artifacts_are_individually_frozen(tmp_path):
     candidate = tmp_path / "candidate"; candidate.mkdir()
     files = {}
@@ -437,6 +506,10 @@ def test_candidate_selector_artifacts_are_individually_frozen(tmp_path):
             "fit_selector_scope.json"],
         "fit_selector_selected_config_file_sha256": artifacts[
             "fit_selector_selected_config.json"],
+        "fit_selector_source_v8_report_file_sha256": artifacts[
+            "fit_selector_source_v8_report.json"],
+        "fit_selector_source_v8_rows_file_sha256": artifacts[
+            "fit_selector_source_v8_rows.npz"],
     }
     assert subject._validate_candidate_artifact_binding(
         marker, singles=singles, row_paths=rows) == artifacts
@@ -444,6 +517,8 @@ def test_candidate_selector_artifacts_are_individually_frozen(tmp_path):
         "fit_selector_report_file_sha256",
         "fit_selector_scope_file_sha256",
         "fit_selector_selected_config_file_sha256",
+        "fit_selector_source_v8_report_file_sha256",
+        "fit_selector_source_v8_rows_file_sha256",
     ):
         changed = dict(marker)
         changed[field] = "f" * 64
@@ -537,6 +612,11 @@ def test_candidate_authentication_uses_same_directory_strict_refit(tmp_path, mon
             files["fit_selector_scope.json"]),
         "fit_selector_selected_config_file_sha256": subject.file_hash(
             files["fit_selector_selected_config.json"]),
+        "fit_selector_source_v8_report_file_sha256": subject.file_hash(
+            files["fit_selector_source_v8_report.json"]),
+        "fit_selector_source_v8_rows_file_sha256": subject.file_hash(
+            files["fit_selector_source_v8_rows.npz"]),
+        "fit_selector_source_v8_rows_semantic_sha256": "7" * 64,
     }
     report = {
         "version": subject.audit_api.RCPD_VERSION,
@@ -627,6 +707,8 @@ def _fake_run_setup(tmp_path, monkeypatch, audit_error):
         subject.file_hash(outer_report))
     monkeypatch.setattr(
         subject, "_fresh_outer_report_input", lambda paths: outer_report)
+    monkeypatch.setattr(
+        subject, "_preclaim_fresh_outer_evidence", lambda paths: outer_report)
     rows = tmp_path / "rows.npz"; rows.write_bytes(b"rows")
     implicit_paths = {}
     implicit_constants = {
@@ -928,6 +1010,12 @@ def test_candidate_interface_mismatch_is_rejected_before_permanent_claim(
         tmp_path, monkeypatch, stale_schema):
     setup = _fake_run_setup(tmp_path, monkeypatch, None)
     files, development, rows, retired, _, calls = setup
+    monkeypatch.setattr(
+        subject.holdout_api, "CANDIDATE_ARTIFACT_NAMES",
+        frozenset(subject.CANDIDATE_ARTIFACT_KEYS))
+    monkeypatch.setattr(
+        subject.audit_api, "CANDIDATE_ARTIFACT_NAMES",
+        frozenset(subject.CANDIDATE_ARTIFACT_KEYS))
     if stale_schema:
         monkeypatch.setattr(
             subject.rcpd_api, "_CANDIDATE_SELECTOR_ARTIFACTS",
@@ -948,6 +1036,175 @@ def test_candidate_interface_mismatch_is_rejected_before_permanent_claim(
     with pytest.raises(RuntimeError, match="incompatible"):
         subject.run_final_once(**_run_args(
             files, development, rows, retired, tmp_path / "never-claimed"))
+    assert calls == []
+    assert not (tmp_path / "permanent" / "campaign.anchor").exists()
+    assert not (tmp_path / "external" / "ledger").exists()
+
+
+@pytest.mark.parametrize("failure", [
+    "missing_sibling", "wrong_registry_hash", "wrong_report_hash",
+    "malformed_registry", "malformed_report", "wrong_schema",
+    "source_closure_drift",
+])
+def test_fresh_outer_public_failure_is_rejected_before_permanent_claim(
+        tmp_path, monkeypatch, failure):
+    real_preclaim = subject._preclaim_fresh_outer_evidence
+    setup = _fake_run_setup(tmp_path, monkeypatch, None)
+    files, development, rows, retired, _, calls = setup
+    monkeypatch.setattr(
+        subject.holdout_api, "CANDIDATE_ARTIFACT_NAMES",
+        frozenset(subject.CANDIDATE_ARTIFACT_KEYS))
+    monkeypatch.setattr(
+        subject.audit_api, "CANDIDATE_ARTIFACT_NAMES",
+        frozenset(subject.CANDIDATE_ARTIFACT_KEYS))
+    monkeypatch.setattr(
+        subject, "_claim",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("permanent claim must not be called")))
+    monkeypatch.setattr(subject, "_preclaim_fresh_outer_evidence", real_preclaim)
+    registry_path = development[1]
+    report_path = registry_path.parent / "report.json"
+    report_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        subject, "EXPECTED_FRESH_OUTER_REGISTRY_SHA256",
+        subject.file_hash(registry_path))
+    monkeypatch.setattr(
+        subject, "EXPECTED_FRESH_OUTER_REPORT_SHA256",
+        subject.file_hash(report_path))
+
+    if failure == "missing_sibling":
+        report_path.unlink()
+    elif failure == "wrong_registry_hash":
+        monkeypatch.setattr(
+            subject, "EXPECTED_FRESH_OUTER_REGISTRY_SHA256", "f" * 64)
+    elif failure == "wrong_report_hash":
+        monkeypatch.setattr(
+            subject, "EXPECTED_FRESH_OUTER_REPORT_SHA256", "f" * 64)
+    elif failure == "source_closure_drift":
+        version = subject.holdout_api.DEVELOPMENT_EXPANSION_VERSION
+        stale_sources = {"outer.py": "1" * 64}
+        stale_registry = {
+            "producer_sources": stale_sources,
+            "producer_sources_sha256": subject.digest(stale_sources),
+        }
+        monkeypatch.setattr(
+            subject.holdout_api, "_development_registry_evidence",
+            lambda paths: ([], {version: {
+                "file_sha256": subject.file_hash(registry_path),
+                "report_file_sha256": subject.file_hash(report_path),
+            }}, {version: stale_registry}))
+        monkeypatch.setattr(
+            subject.holdout_api.outer_split_api, "producer_sources",
+            lambda: {"outer.py": "2" * 64})
+    elif failure == "malformed_registry":
+        registry_path.write_bytes(b"{not-json")
+        monkeypatch.setattr(
+            subject, "EXPECTED_FRESH_OUTER_REGISTRY_SHA256",
+            subject.file_hash(registry_path))
+
+        def read_malformed_registry(paths):
+            subject.holdout_api._read_exact_json(
+                registry_path, "development registry",
+                expected_sha256=subject.file_hash(registry_path))
+            raise AssertionError("malformed registry unexpectedly parsed")
+
+        monkeypatch.setattr(
+            subject.holdout_api, "_development_registry_evidence",
+            read_malformed_registry)
+    elif failure == "malformed_report":
+        report_path.write_bytes(b"{not-json")
+        monkeypatch.setattr(
+            subject, "EXPECTED_FRESH_OUTER_REPORT_SHA256",
+            subject.file_hash(report_path))
+        version = subject.holdout_api.DEVELOPMENT_EXPANSION_VERSION
+        live_sources = {"outer.py": "3" * 64}
+        registry = {
+            "producer_sources": live_sources,
+            "producer_sources_sha256": subject.digest(live_sources),
+        }
+        monkeypatch.setattr(
+            subject.holdout_api, "_development_registry_evidence",
+            lambda paths: ([], {version: {
+                "file_sha256": subject.file_hash(registry_path),
+                "report_file_sha256": subject.file_hash(report_path),
+            }}, {version: registry}))
+        monkeypatch.setattr(
+            subject.holdout_api.outer_split_api, "producer_sources",
+            lambda: live_sources)
+        monkeypatch.setattr(
+            subject.holdout_api, "_validate_fresh_outer_registry",
+            lambda value: None)
+    elif failure == "wrong_schema":
+        version = subject.holdout_api.DEVELOPMENT_EXPANSION_VERSION
+        live_sources = {"outer.py": "4" * 64}
+        registry = {
+            "producer_sources": live_sources,
+            "producer_sources_sha256": subject.digest(live_sources),
+        }
+        monkeypatch.setattr(
+            subject.holdout_api, "_development_registry_evidence",
+            lambda paths: ([], {version: {
+                "file_sha256": subject.file_hash(registry_path),
+                "report_file_sha256": subject.file_hash(report_path),
+            }}, {version: registry}))
+        monkeypatch.setattr(
+            subject.holdout_api.outer_split_api, "producer_sources",
+            lambda: live_sources)
+    else:
+        raise AssertionError("unhandled adversarial case: " + failure)
+
+    with pytest.raises(ValueError):
+        subject.run_final_once(**_run_args(
+            files, development, rows, retired, tmp_path / failure))
+    assert calls == []
+    assert not (tmp_path / "permanent" / "campaign.anchor").exists()
+    assert not (tmp_path / "external" / "ledger").exists()
+
+
+@pytest.mark.parametrize(("module_name", "function_name"), [
+    ("selector_api", "authenticate_selected_config_snapshot"),
+    ("outer_split_api", "producer_sources"),
+    ("holdout_api", "_development_registry_evidence"),
+    ("holdout_api", "_validate_fresh_outer_registry"),
+    ("holdout_api", "_read_exact_json"),
+    ("holdout_api", "_validate_fresh_outer_report"),
+    ("holdout_api", "_retired_identity_projection"),
+    ("holdout_api", "_validate_retired_expansion_binding"),
+    ("designation_binding", "resolve_bound_components"),
+    ("rcpd_api", "read_saved_report"),
+    ("holdout_api", "build"),
+    ("holdout_api", "read_saved_holdout"),
+    ("audit_api", "audit"),
+    ("audit_api", "read_saved_report"),
+    ("audit_api", "replay_saved_audit"),
+    ("input_snapshot_api", "ImmutableInputSnapshot"),
+])
+def test_every_downstream_api_drift_is_rejected_before_permanent_claim(
+        tmp_path, monkeypatch, module_name, function_name):
+    setup = _fake_run_setup(tmp_path, monkeypatch, None)
+    files, development, rows, retired, _, calls = setup
+    monkeypatch.setattr(
+        subject.holdout_api, "CANDIDATE_ARTIFACT_NAMES",
+        frozenset(subject.CANDIDATE_ARTIFACT_KEYS))
+    monkeypatch.setattr(
+        subject.audit_api, "CANDIDATE_ARTIFACT_NAMES",
+        frozenset(subject.CANDIDATE_ARTIFACT_KEYS))
+    monkeypatch.setattr(
+        subject, "_claim",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("permanent claim must not be called")))
+    module = (subject.holdout_api.outer_split_api
+              if module_name == "outer_split_api"
+              else getattr(subject, module_name))
+
+    def incompatible_api(*, removed_required_argument):
+        raise AssertionError("incompatible API must never execute")
+
+    monkeypatch.setattr(module, function_name, incompatible_api)
+    with pytest.raises(RuntimeError, match="API is incompatible"):
+        subject.run_final_once(**_run_args(
+            files, development, rows, retired,
+            tmp_path / (module_name + "-" + function_name)))
     assert calls == []
     assert not (tmp_path / "permanent" / "campaign.anchor").exists()
     assert not (tmp_path / "external" / "ledger").exists()

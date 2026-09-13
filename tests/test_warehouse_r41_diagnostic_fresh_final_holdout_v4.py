@@ -157,6 +157,16 @@ def test_v4_contract_is_program_blind_and_claim_burns_v3_internally():
     assert subject.VERSION == "warehouse-r41-diagnostic-fresh-final-holdout.v4"
     assert sum(contract["family_quotas"].values()) == subject.TOTAL_SCENES == 64
     assert contract["selection_salt_commitment"] == subject.HOLDOUT_SALT_COMMITMENT
+    assert subject.EXPECTED_EXPANSION_REGISTRY_SHA256 == (
+        "a598f78b0b8054bfe9e3cb0befa9c1007f0bcf6e0e599ac2565523d1f0e62332")
+    assert subject.EXPECTED_EXPANSION_REPORT_SHA256 == (
+        "bf21daa21e3799c701c641a34b72130d95bdb64294a908d78d901938623e3115")
+    assert {
+        "fit_selector_source_v8_report.json",
+        "fit_selector_source_v8_rows.npz",
+        "fit_selector_fit_only_rows.npz",
+        "fit_selector_inner_fit_program.json",
+    }.issubset(subject.CANDIDATE_ARTIFACT_NAMES)
     assert contract["program_access"] is False
     assert contract["program_predictions_access"] is False
     assert contract["actor_logits_access"] is False

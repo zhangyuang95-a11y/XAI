@@ -30,6 +30,7 @@ from backend.training.warehouse_diagnostic_source_closure import local_source_ha
 from backend.training import warehouse_r41_diagnostic_fresh_final_holdout_v4 as holdout_api
 from backend.training import warehouse_r41_diagnostic_explanation_audit_v8 as audit_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as rcpd_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v8_fit_selector as selector_api
 from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_binding
 from backend.training import warehouse_r41_diagnostic_designation_v2 as designation_api
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_binding
@@ -93,6 +94,8 @@ _PHASE_FIELDS = {
         "development_expansion_report_file_sha256", "fit_config_file_sha256",
         "fit_selector_report_file_sha256", "fit_selector_scope_file_sha256",
         "fit_selector_selected_config_file_sha256",
+        "fit_selector_source_v8_report_file_sha256",
+        "fit_selector_source_v8_rows_file_sha256",
         "actor_file_sha256", "protocol_file_sha256", "manifest_file_sha256",
         "designation_file_sha256", "selected_scenes_file_sha256",
         "development_registries", "require_passed", "refit", "formal_ready",
@@ -186,9 +189,23 @@ CANDIDATE_ARTIFACT_KEYS = {
         "candidate_development_expansion_report_json"),
     "fit_config.json": "candidate_fit_config_json",
     "fit_selector_report.json": "candidate_fit_selector_report_json",
+    "fit_selector_fit_only_rows.npz": (
+        "candidate_fit_selector_fit_only_rows_npz"),
     "fit_selector_scope.json": "candidate_fit_selector_scope_json",
+    "fit_selector_config_registry.json": (
+        "candidate_fit_selector_config_registry_json"),
+    "fit_selector_inner_split_audit.json": (
+        "candidate_fit_selector_inner_split_audit_json"),
+    "fit_selector_inner_selection.json": (
+        "candidate_fit_selector_inner_selection_json"),
     "fit_selector_selected_config.json": (
         "candidate_fit_selector_selected_config_json"),
+    "fit_selector_inner_fit_program.json": (
+        "candidate_fit_selector_inner_fit_program_json"),
+    "fit_selector_source_v8_report.json": (
+        "candidate_fit_selector_source_v8_report_json"),
+    "fit_selector_source_v8_rows.npz": (
+        "candidate_fit_selector_source_v8_rows_npz"),
     "rows.npz": "development_rows",
     "pairs.npz": "candidate_pairs_npz",
     "weights_audit.json": "candidate_weights_audit_json",
@@ -216,11 +233,13 @@ EXPECTED_SELECTED_SCENES_SHA256 = (
     "30accfb01d5e022fc42734622cc38481bde639ba9ed2edfb789ddbdf8a6f4fd8"
 )
 EXPECTED_FRESH_OUTER_REGISTRY_SHA256 = (
-    "bf5346f9dd70ff02773b3335efd36018eae1b9abf4da1c035108a89ec5bcb923"
+    "a598f78b0b8054bfe9e3cb0befa9c1007f0bcf6e0e599ac2565523d1f0e62332"
 )
 # Compatibility alias retained for the existing final-once receipt schema.
 EXPECTED_EXPANSION_REGISTRY_SHA256 = EXPECTED_FRESH_OUTER_REGISTRY_SHA256
-EXPECTED_FRESH_OUTER_REPORT_SHA256 = holdout_api.EXPECTED_EXPANSION_REPORT_SHA256
+EXPECTED_FRESH_OUTER_REPORT_SHA256 = (
+    "bf21daa21e3799c701c641a34b72130d95bdb64294a908d78d901938623e3115"
+)
 EXPECTED_DEVELOPMENT_SUPPLEMENT_SHA256 = (
     "8931b74940f1c41940d9fbb73a52f940f527b8f9c67dfd6b94a4a4d1afd977fe"
 )
@@ -261,6 +280,8 @@ def contract() -> dict[str, Any]:
         "completion_written_on_failure_where_possible": True,
         "strict_saved_evidence_reader": True,
         "strict_development_candidate_refit_after_claim": True,
+        "fresh_outer_public_evidence_authenticated_before_claim": True,
+        "all_direct_postclaim_api_calls_signature_bound_before_claim": True,
         "preclaim_source_closure_snapshot": True,
         "fixed_input_hash_snapshot_after_irrevocable_claim": True,
         "private_selection_salt_access": "post_claim_holdout_only",
@@ -469,54 +490,107 @@ def _input_paths(
 def _preclaim_candidate_interface(
     singles: Mapping[str, Path], row_paths: Sequence[Path],
 ) -> None:
-    """Reject a stale candidate schema or reader API before burning the claim."""
+    """Reject stale candidate schemas and direct APIs before burning the claim.
+
+    ``Signature.bind`` exercises Python's actual call binding without invoking
+    any producer or reader.  This keeps protected inputs unopened while proving
+    that every direct post-claim call site can accept exactly the arguments the
+    irreversible controller will supply.
+    """
     selector_artifacts = {
-        "fit_selector_report.json": "candidate_fit_selector_report_json",
-        "fit_selector_scope.json": "candidate_fit_selector_scope_json",
-        "fit_selector_selected_config.json": (
-            "candidate_fit_selector_selected_config_json"),
+        name: key for name, key in CANDIDATE_ARTIFACT_KEYS.items()
+        if name.startswith("fit_selector_")
     }
     if (set(CANDIDATE_ARTIFACT_KEYS) != set(holdout_api.CANDIDATE_ARTIFACT_NAMES)
-            or {name: CANDIDATE_ARTIFACT_KEYS.get(name)
-                for name in selector_artifacts} != selector_artifacts
-            or set(getattr(rcpd_api, "_CANDIDATE_SELECTOR_ARTIFACTS", ()))
-                != set(selector_artifacts)
+            or set(selector_artifacts)
+                != set(getattr(rcpd_api, "_CANDIDATE_SELECTOR_ARTIFACTS", ()))
             or set(getattr(audit_api, "CANDIDATE_ARTIFACT_NAMES", ()))
                 != set(CANDIDATE_ARTIFACT_KEYS)
             or len(row_paths) != 1):
         raise RuntimeError("Final-once candidate artifact schema is incompatible")
 
-    supplied = {
-        "output", "expected_report_sha256", "actor_path", "protocol_path",
-        "manifest_path", "designation_path", "expansion_registry_path",
-        "expected_expansion_registry_sha256", "expansion_report_path",
-        "expected_expansion_report_sha256",
-        "expected_prior_rows_report_sha256", "previous_development_path",
-        "expected_expansion_rows_report_sha256",
-        "expected_selector_report_sha256", "require_passed", "refit",
-    }
-    try:
-        parameters = inspect.signature(rcpd_api.read_saved_report).parameters
-    except (TypeError, ValueError) as error:
-        raise RuntimeError("Final-once RCPD reader API is incompatible") from error
-    accepts_keywords = any(
-        parameter.kind is inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters.values())
-    rejected = {
-        name for name in supplied
-        if name not in parameters and not accepts_keywords
-    }
-    missing = {
-        name for name, parameter in parameters.items()
-        if parameter.default is inspect.Parameter.empty
-        and parameter.kind in {
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        }
-        and name not in supplied
-    }
-    if rejected or missing:
-        raise RuntimeError("Final-once RCPD reader API is incompatible")
+    calls: tuple[tuple[str, Callable[..., Any], int, frozenset[str]], ...] = (
+        ("development registry public reader",
+         holdout_api._development_registry_evidence, 1, frozenset()),
+        ("fresh outer registry validator",
+         holdout_api._validate_fresh_outer_registry, 1, frozenset()),
+        ("fresh outer report reader", holdout_api._read_exact_json, 2,
+         frozenset({"expected_sha256"})),
+        ("fresh outer report validator",
+         holdout_api._validate_fresh_outer_report, 2, frozenset()),
+        ("retired identity reader",
+         holdout_api._retired_identity_projection, 1, frozenset()),
+        ("retired/fresh binding validator",
+         holdout_api._validate_retired_expansion_binding, 2, frozenset()),
+        ("fresh outer source-closure reader",
+         holdout_api.outer_split_api.producer_sources, 0, frozenset()),
+        ("fit-selector strict reader",
+         selector_api.authenticate_selected_config_snapshot, 0, frozenset({
+             "evidence_directory", "evidence_artifact_paths",
+             "expected_report_sha256", "actor_path",
+             "source_full_manifest_bindings", "fresh_outer_registry_path",
+             "expected_fresh_outer_registry_sha256", "fresh_outer_report_path",
+             "expected_fresh_outer_report_sha256",
+         })),
+        ("designation component reader",
+         designation_binding.resolve_bound_components, 1,
+         frozenset({"expected_sha256"})),
+        ("RCPD reader", rcpd_api.read_saved_report, 1, frozenset({
+            "expected_report_sha256", "actor_path", "protocol_path",
+            "manifest_path", "designation_path", "expansion_registry_path",
+            "expected_expansion_registry_sha256", "expansion_report_path",
+            "expected_expansion_report_sha256",
+            "expected_prior_rows_report_sha256", "previous_development_path",
+            "expected_expansion_rows_report_sha256",
+            "expected_selector_report_sha256", "require_passed", "refit",
+        })),
+        ("fresh-final builder", holdout_api.build, 0, frozenset({
+            "actor_path", "protocol_path", "manifest_path", "designation_path",
+            "selected_scenes_path", "development_registry_paths",
+            "development_rows_paths", "legacy_v3_rows_path",
+            "expansion_rows_path", "retired_identity_projection_path",
+            "output", "claim_receipt_path", "expected_claim_sha256",
+            "expected_campaign_key", "expected_candidate_identity_sha256",
+            "selection_salt_path",
+        })),
+        ("fresh-final saved reader", holdout_api.read_saved_holdout, 1,
+         frozenset({"expected_holdout_sha256", "expected_report_sha256"})),
+        ("explanation audit", audit_api.audit, 0, frozenset({
+            "actor_path", "protocol_path", "program_path", "rcpd_report_path",
+            "manifest_path", "designation_path", "development_expansion_path",
+            "fresh_holdout_path", "fresh_holdout_report_path",
+            "development_rows_paths", "output", "claim_receipt_path",
+            "expected_claim_sha256", "expected_campaign_key",
+            "expected_candidate_identity_sha256",
+            "expected_holdout_completion_sha256",
+        })),
+        ("explanation audit saved reader", audit_api.read_saved_report, 1,
+         frozenset({
+             "expected_report_sha256", "program_path",
+             "development_rows_paths", "expected_bindings", "require_passed",
+         })),
+        ("explanation audit physical replay", audit_api.replay_saved_audit, 1,
+         frozenset({
+             "actor_path", "protocol_path", "program_path", "manifest_path",
+             "fresh_holdout_path", "expected_evidence_sha256",
+             "expected_bindings",
+         })),
+        ("immutable input snapshot", input_snapshot_api.ImmutableInputSnapshot,
+         1, frozenset({
+             "expected_sha256", "relative_names", "maximum_bytes", "prefix",
+         })),
+    )
+    sentinel = object()
+    for label, function, positional_count, keywords in calls:
+        try:
+            signature = inspect.signature(function)
+            signature.bind(
+                *(sentinel for _ in range(positional_count)),
+                **{name: sentinel for name in keywords},
+            )
+        except (TypeError, ValueError) as error:
+            raise RuntimeError(
+                "Final-once " + label + " API is incompatible") from error
 
 
 def _direct_input_hash_snapshot(
@@ -599,7 +673,7 @@ def _guard_frozen_execution_inputs(
 
 
 def _fresh_outer_report_input(development_paths: Sequence[Path]) -> Path:
-    """Resolve the fixed sibling report after the irreversible campaign claim."""
+    """Resolve the fixed public-only sibling report without final access."""
     matching = [
         path for path in development_paths
         if file_hash(path) == EXPECTED_FRESH_OUTER_REGISTRY_SHA256
@@ -611,6 +685,48 @@ def _fresh_outer_report_input(development_paths: Sequence[Path]) -> Path:
     if file_hash(report) != EXPECTED_FRESH_OUTER_REPORT_SHA256:
         raise ValueError("Exact fixed fresh outer registry report required")
     return report
+
+
+def _preclaim_fresh_outer_evidence(
+    development_paths: Sequence[Path],
+) -> Path:
+    """Fully authenticate the public-only fresh outer pair before the claim.
+
+    The holdout reader validates the complete registry/report schema, content
+    digests, source bindings, family quotas, and negative information boundary.
+    Neither artifact contains final rows, labels, Actor outputs, or a program.
+    """
+    report_path = _fresh_outer_report_input(development_paths)
+    try:
+        _, bindings, values = holdout_api._development_registry_evidence(
+            development_paths)
+        version = holdout_api.DEVELOPMENT_EXPANSION_VERSION
+        binding = bindings.get(version)
+        registry = values.get(version)
+        live_outer_sources = holdout_api.outer_split_api.producer_sources()
+        if (not isinstance(binding, Mapping)
+                or not isinstance(registry, Mapping)
+                or binding.get("file_sha256")
+                    != EXPECTED_FRESH_OUTER_REGISTRY_SHA256
+                or binding.get("report_file_sha256")
+                    != EXPECTED_FRESH_OUTER_REPORT_SHA256
+                or registry.get("producer_sources") != live_outer_sources
+                or registry.get("producer_sources_sha256")
+                    != digest(live_outer_sources)):
+            raise ValueError("Fresh outer public evidence binding differs")
+        # Keep the complete validators explicit at this boundary even though
+        # the public reader already applies them internally.  A future reader
+        # that weakens its schema therefore fails this preclaim contract.
+        holdout_api._validate_fresh_outer_registry(registry)
+        report, report_sha256 = holdout_api._read_exact_json(
+            report_path, "fresh outer registry report",
+            expected_sha256=EXPECTED_FRESH_OUTER_REPORT_SHA256)
+        holdout_api._validate_fresh_outer_report(report, registry)
+        if report_sha256 != EXPECTED_FRESH_OUTER_REPORT_SHA256:
+            raise ValueError("Fresh outer public evidence binding differs")
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("Fresh outer public evidence is not authentic") from error
+    return report_path
 
 
 def _preclaim_identity(
@@ -742,7 +858,11 @@ def _validate_candidate_artifact_binding(
             or marker.get("fit_selector_scope_file_sha256")
                 != expected["fit_selector_scope.json"]
             or marker.get("fit_selector_selected_config_file_sha256")
-                != expected["fit_selector_selected_config.json"]):
+                != expected["fit_selector_selected_config.json"]
+            or marker.get("fit_selector_source_v8_report_file_sha256")
+                != expected["fit_selector_source_v8_report.json"]
+            or marker.get("fit_selector_source_v8_rows_file_sha256")
+                != expected["fit_selector_source_v8_rows.npz"]):
         raise ValueError("Claim-authenticated RCPD candidate artifacts changed")
     return expected
 
@@ -823,6 +943,9 @@ def _authenticate_candidate_after_claim(
         "previous_development_file_sha256",
         "fit_selector_report_file_sha256", "fit_selector_scope_file_sha256",
         "fit_selector_selected_config_file_sha256",
+        "fit_selector_source_v8_report_file_sha256",
+        "fit_selector_source_v8_rows_file_sha256",
+        "fit_selector_source_v8_rows_semantic_sha256",
     )
     if any(_HEX.fullmatch(str(bindings.get(name))) is None
            for name in required_binding_names):
@@ -832,7 +955,11 @@ def _authenticate_candidate_after_claim(
             or bindings.get("fit_selector_scope_file_sha256")
                 != candidate_artifacts["fit_selector_scope.json"]
             or bindings.get("fit_selector_selected_config_file_sha256")
-                != candidate_artifacts["fit_selector_selected_config.json"]):
+                != candidate_artifacts["fit_selector_selected_config.json"]
+            or bindings.get("fit_selector_source_v8_report_file_sha256")
+                != candidate_artifacts["fit_selector_source_v8_report.json"]
+            or bindings.get("fit_selector_source_v8_rows_file_sha256")
+                != candidate_artifacts["fit_selector_source_v8_rows.npz"]):
         raise ValueError("V8 RCPD fit-selector artifact binding differs")
     candidate_dir = singles["program"].parent
     authenticated = rcpd_api.read_saved_report(
@@ -1088,24 +1215,7 @@ def _phase_receipt_values(
 
 
 def _candidate_artifacts_from_marker(value: Mapping[str, Any]) -> dict[str, str]:
-    expected_fields = {
-        "version", "status", "campaign_key", "candidate_identity_sha256",
-        "attempt_started_sha256", "candidate_artifacts",
-        "candidate_artifacts_sha256", "rcpd_report_file_sha256",
-        "program_file_sha256", "rows_file_sha256",
-        "prior_rows_reauthentication_report_file_sha256",
-        "prior_v7_source_report_file_sha256", "prior_v7_rows_file_sha256",
-        "expansion_rows_reauthentication_report_file_sha256",
-        "expansion_source_collection_report_file_sha256",
-        "expansion_rows_file_sha256",
-        "development_expansion_registry_file_sha256",
-        "development_expansion_report_file_sha256", "fit_config_file_sha256",
-        "fit_selector_report_file_sha256", "fit_selector_scope_file_sha256",
-        "fit_selector_selected_config_file_sha256",
-        "actor_file_sha256", "protocol_file_sha256", "manifest_file_sha256",
-        "designation_file_sha256", "selected_scenes_file_sha256",
-        "development_registries", "require_passed", "refit", "formal_ready",
-    }
+    expected_fields = _PHASE_FIELDS["candidate_authenticated.json"]
     artifacts = value.get("candidate_artifacts")
     development = value.get("development_registries")
     if (set(value) != expected_fields
@@ -1143,6 +1253,10 @@ def _candidate_artifacts_from_marker(value: Mapping[str, Any]) -> dict[str, str]
                 != artifacts.get("fit_selector_scope.json")
             or value.get("fit_selector_selected_config_file_sha256")
                 != artifacts.get("fit_selector_selected_config.json")
+            or value.get("fit_selector_source_v8_report_file_sha256")
+                != artifacts.get("fit_selector_source_v8_report.json")
+            or value.get("fit_selector_source_v8_rows_file_sha256")
+                != artifacts.get("fit_selector_source_v8_rows.npz")
             or value.get("require_passed") is not True
             or value.get("refit") is not True
             or value.get("formal_ready") is not False):
@@ -1481,13 +1595,20 @@ def run_final_once(
         retired_identity_projection_path=retired_identity_projection_path,
     )
     _preclaim_candidate_interface(singles, row_paths)
+    # The fresh outer pair is explicitly public-only.  Authenticate its fixed
+    # sibling, full schema, and negative information boundary before the
+    # permanent claim so malformed development packaging cannot burn the sole
+    # final attempt.
+    singles["fresh_outer_registry_report"] = _preclaim_fresh_outer_evidence(
+        development_paths)
     salt_path = _salt_path(selection_salt_path)
     protected = [*singles.values(), *development_paths, *row_paths, *projection_paths,
                  salt_path]
     output_path = _safe_output(output, protected)
     # The full manifest contains the protected historical-final split.  Claim
-    # the fixed campaign identity before hashing, copying, or parsing any input
-    # bytes so an I/O traceback cannot expose those bytes on a retryable path.
+    # the fixed campaign identity before hashing, copying, or parsing any
+    # protected input bytes so an I/O traceback cannot expose them on a
+    # retryable path.  The public-only fresh outer pair was authenticated above.
     sources = producer_sources()
     identity = _campaign_identity()
     key, registry, started = _claim(identity, output=output_path)
@@ -1510,8 +1631,6 @@ def run_final_once(
         # Every direct and transitive input is now authenticated under the
         # irreversible, sanitized phase.  None of these reads can refund the
         # attempt or surface its originating traceback.
-        singles["fresh_outer_registry_report"] = _fresh_outer_report_input(
-            development_paths)
         implicit_paths = _implicit_input_paths(singles)
         direct_input_snapshot = _direct_input_hash_snapshot(
             singles, development_paths, row_paths, projection_paths,
@@ -1587,6 +1706,10 @@ def run_final_once(
                 singles["candidate_fit_selector_scope_json"]),
             "fit_selector_selected_config_file_sha256": file_hash(
                 singles["candidate_fit_selector_selected_config_json"]),
+            "fit_selector_source_v8_report_file_sha256": file_hash(
+                singles["candidate_fit_selector_source_v8_report_json"]),
+            "fit_selector_source_v8_rows_file_sha256": file_hash(
+                singles["candidate_fit_selector_source_v8_rows_npz"]),
             "actor_file_sha256": file_hash(singles["actor"]),
             "protocol_file_sha256": file_hash(singles["protocol"]),
             "manifest_file_sha256": file_hash(singles["manifest"]),

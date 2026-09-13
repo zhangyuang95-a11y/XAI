@@ -97,10 +97,10 @@ EXPECTED_DESIGNATION_SHA256 = (
     "b42323e3bc4543c4f4e1af96be4de4d90489a38459240bfb494dcc2d6120a815"
 )
 EXPECTED_EXPANSION_REGISTRY_SHA256 = (
-    "bf5346f9dd70ff02773b3335efd36018eae1b9abf4da1c035108a89ec5bcb923"
+    "a598f78b0b8054bfe9e3cb0befa9c1007f0bcf6e0e599ac2565523d1f0e62332"
 )
 EXPECTED_EXPANSION_REPORT_SHA256 = (
-    "742c45a3c970e7e0cce1c35b9e43934b9e9efcc77a52dc43b5089307db112fc5"
+    "bf21daa21e3799c701c641a34b72130d95bdb64294a908d78d901938623e3115"
 )
 EXPECTED_SELECTED_SCENES_SHA256 = (
     "30accfb01d5e022fc42734622cc38481bde639ba9ed2edfb789ddbdf8a6f4fd8"
@@ -128,8 +128,12 @@ CANDIDATE_ARTIFACT_NAMES = frozenset({
     "expansion_rows_reauthentication_report.json",
     "source_expansion_collection_report.json", "expansion_rows.npz",
     "development_expansion.json", "development_expansion_report.json",
-    "fit_config.json", "fit_selector_report.json", "fit_selector_scope.json",
-    "fit_selector_selected_config.json", "rows.npz", "pairs.npz",
+    "fit_config.json", "fit_selector_report.json",
+    "fit_selector_source_v8_report.json", "fit_selector_source_v8_rows.npz",
+    "fit_selector_fit_only_rows.npz", "fit_selector_scope.json",
+    "fit_selector_config_registry.json", "fit_selector_inner_split_audit.json",
+    "fit_selector_inner_selection.json", "fit_selector_selected_config.json",
+    "fit_selector_inner_fit_program.json", "rows.npz", "pairs.npz",
     "weights_audit.json",
     "program.json", "candidate.json", "report.json",
 })
@@ -365,6 +369,11 @@ def _claim_receipt(
                 != candidate_artifacts.get("fit_selector_scope.json")
             or candidate_marker.get("fit_selector_selected_config_file_sha256")
                 != candidate_artifacts.get("fit_selector_selected_config.json")
+            or candidate_marker.get(
+                "fit_selector_source_v8_report_file_sha256")
+                != candidate_artifacts.get("fit_selector_source_v8_report.json")
+            or candidate_marker.get("fit_selector_source_v8_rows_file_sha256")
+                != candidate_artifacts.get("fit_selector_source_v8_rows.npz")
             or candidate_marker.get("actor_file_sha256") != EXPECTED_ACTOR_SHA256
             or candidate_marker.get("protocol_file_sha256")
                 != EXPECTED_PROTOCOL_SHA256

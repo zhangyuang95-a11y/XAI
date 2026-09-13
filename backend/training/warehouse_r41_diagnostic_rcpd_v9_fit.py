@@ -160,7 +160,12 @@ def build_fit_weights(
     weights = np.asarray(established["weights"], dtype=np.float64)
     weights[~selected] = 0.0
     pairs = np.asarray(established["pairs"], dtype=np.int64)
-    pair_bits = v8._pair_group_bits(fold_arrays, pairs)
+    occurrences = established["audit"]["pair_occurrences"]
+    # The established builder copied group_bits only for fit pair occurrences.
+    # Reuse that audit projection instead of invoking a helper which validates
+    # the complete row-aligned critical-bit array, including held-fold rows.
+    pair_bits = np.asarray(
+        [item["group_bits"] for item in occurrences], dtype=np.uint8)
 
     # Preserve the established family -> scene -> partner -> critical-bit pair
     # allocation exactly.  The only v9 change is a preregistered redistribution
@@ -169,7 +174,6 @@ def build_fit_weights(
     old_pair = np.asarray(established["pair_contribution"], dtype=np.float64)
     old_pair[~selected] = 0.0
     old_pair_mass = float(math.fsum(map(float, old_pair[selected])))
-    occurrences = established["audit"]["pair_occurrences"]
     occurrence_mass = float(math.fsum(
         float(item["weighted_occurrence_mass"]) for item in occurrences))
     replacement = np.zeros(count, dtype=np.float64)

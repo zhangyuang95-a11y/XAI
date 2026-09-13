@@ -127,6 +127,8 @@ def test_held_fold_label_values_are_never_read_or_validated():
     poisoned = dict(arrays)
     poisoned["action_indices"] = arrays["action_indices"].copy()
     poisoned["action_indices"][~mask] = np.uint8(255)
+    poisoned["group_bits"] = arrays["group_bits"].copy()
+    poisoned["group_bits"][~mask] = np.uint8(255)
     actual = subject.build_fit_weights(poisoned, mask, **kwargs)
     np.testing.assert_array_equal(actual[0], expected[0])
     np.testing.assert_array_equal(actual[1], expected[1])

@@ -6,11 +6,11 @@ development rows plus the program-blind v8 development expansion.  The 64
 expansion validation scenes win on exact float32 public-observation overlap;
 every matching fit row is removed before weights or models are constructed.
 
-There is deliberately no final/holdout input.  A disclosed, immutable config
-selects model capacity, random seeds, pair weighting, and specialist mixture
-weights before this command is run.  Fitted sklearn objects are never saved:
-the only executable artifact is the explicit JSON tree program used by the
-NumPy runtime.
+There is deliberately no final/holdout input.  The fit config is extracted
+only from a hash-authenticated, fit-only selector report and its bound scope;
+there is no direct config input.  Fitted sklearn objects are never saved: the
+only executable artifact is the explicit JSON tree program used by the NumPy
+runtime.
 """
 from __future__ import annotations
 
@@ -96,6 +96,13 @@ _MODEL_FIELDS = frozenset((
     "learning_rate", "max_iter", "max_leaf_nodes", "min_samples_leaf",
     "l2_regularization", "max_depth", "max_bins", "random_state",
 ))
+_SELECTOR_REQUIRED_ARTIFACTS = frozenset((
+    "fit_scope.json", "selected_config.json",
+))
+_CANDIDATE_SELECTOR_ARTIFACTS = frozenset((
+    "fit_selector_report.json", "fit_selector_scope.json",
+    "fit_selector_selected_config.json",
+))
 
 
 if tuple(ENV_ACTIONS) != ACTIONS:
@@ -165,6 +172,12 @@ def contract() -> dict[str, Any]:
             "contract_sha256": digest(weight_api.contract()),
             "validation_weight": 1.0,
             "validation_labels_accessed": False,
+        },
+        "config_selection": {
+            "source": "authenticated fit-only selector evidence",
+            "direct_config_input": False,
+            "selector_report_scope_and_selected_config_copied": True,
+            "fresh_outer_registry_bound_without_outer_labels": True,
         },
         "effective_pair_group_assignment": (
             "ordinary pre-action source anchor; endpoint union only when the "
@@ -311,6 +324,71 @@ def _read_json(value: str | Path, label: str) -> dict[str, Any]:
     return parsed
 
 
+def _read_json_bytes(raw: bytes, label: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(
+            raw.decode("utf-8"), object_pairs_hook=_json_pairs(label),
+            parse_constant=lambda token: (_ for _ in ()).throw(
+                ValueError("Non-finite JSON value in " + label + ": " + token)
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(label + " must be strict UTF-8 JSON") from error
+    if not isinstance(parsed, dict):
+        raise ValueError(label + " must be one JSON object")
+    return parsed
+
+
+def _selector_snapshot_inputs(
+    evidence: str | Path, *, expected_report_sha256: str,
+) -> tuple[dict[str, Path], dict[str, str]]:
+    """Resolve only the selector artifacts needed by the candidate fit.
+
+    The report is read with ``O_NOFOLLOW`` under its caller-supplied exact
+    hash.  Its artifact registry supplies the hashes used by the subsequent
+    immutable snapshot; semantic authentication happens only inside that
+    snapshot.
+    """
+    directory = Path(evidence).expanduser().absolute()
+    if (not directory.is_dir() or directory.is_symlink()
+            or directory.resolve() != directory):
+        raise ValueError("Fit-only selector evidence directory is unsafe")
+    report_path = _regular(
+        directory / "report.json", "Fit-only selector report",
+        maximum=MAX_JSON_BYTES)
+    report_sha256 = _sha(expected_report_sha256, "fit-only selector report")
+    raw = read_authenticated_bytes(
+        report_path, label="fit-only selector report",
+        expected_sha256=report_sha256, maximum=MAX_JSON_BYTES)
+    report = _read_json_bytes(raw, "Fit-only selector report")
+    artifacts = report.get("evidence_artifacts")
+    if (not isinstance(artifacts, Mapping)
+            or not _SELECTOR_REQUIRED_ARTIFACTS.issubset(artifacts)
+            or any(type(artifacts[name]) is not str
+                   or _HEX.fullmatch(artifacts[name]) is None
+                   for name in _SELECTOR_REQUIRED_ARTIFACTS)):
+        raise ValueError("Fit-only selector artifact registry differs")
+    originals = {
+        "selector_report": report_path,
+        "selector_scope": _regular(
+            directory / "fit_scope.json", "Fit-only selector scope",
+            maximum=MAX_JSON_BYTES),
+        "selector_selected_config": _regular(
+            directory / "selected_config.json", "Fit-only selected config",
+            maximum=MAX_JSON_BYTES),
+    }
+    expected = {
+        "selector_report": report_sha256,
+        "selector_scope": artifacts["fit_scope.json"],
+        "selector_selected_config": artifacts["selected_config.json"],
+    }
+    return originals, expected
+
+
+def _canonical_json_file_sha256(value: Any) -> str:
+    return sha256((canonical(value) + "\n").encode("utf-8")).hexdigest()
+
+
 def _number(value: Any, label: str, *, lower: float, upper: float,
             lower_inclusive: bool = True) -> float:
     if isinstance(value, (bool, np.bool_)) or type(value) not in (int, float):
@@ -360,7 +438,9 @@ def _snapshot_expected_hashes(
     expected_expansion_report_sha256: str,
     expected_prior_rows_report_sha256: str,
     expected_expansion_rows_report_sha256: str,
-    expected_config_sha256: str,
+    expected_selector_report_sha256: str,
+    expected_selector_scope_sha256: str,
+    expected_selector_selected_config_sha256: str,
 ) -> dict[str, str]:
     return {
         "actor": designation_binding.designation.EXPECTED_ACTOR_SHA256,
@@ -370,7 +450,9 @@ def _snapshot_expected_hashes(
         "designation": designation_binding.EXPECTED_DESIGNATION_SHA256,
         "expansion_registry": expected_expansion_registry_sha256,
         "expansion_registry_report": expected_expansion_report_sha256,
-        "config": expected_config_sha256,
+        "selector_report": expected_selector_report_sha256,
+        "selector_scope": expected_selector_scope_sha256,
+        "selector_selected_config": expected_selector_selected_config_sha256,
         "previous_development": expansion_api.EXPECTED_PREVIOUS_DEVELOPMENT_SHA256,
         "prior_reauth_report": expected_prior_rows_report_sha256,
         "prior_rows": prior_rows_api.EXPECTED_SOURCE_ROWS_SHA256,
@@ -1363,8 +1445,9 @@ def _authenticate_inputs(
     expected_expansion_report_sha256: str, prior_rows_output: Path,
     expected_prior_rows_report_sha256: str, expansion_rows_output: Path,
     expected_expansion_rows_report_sha256: str,
-    previous_development_path: Path, config_path: Path,
-    expected_config_sha256: str,
+    previous_development_path: Path, selector_report_path: Path,
+    expected_selector_report_sha256: str, selector_scope_path: Path,
+    selector_selected_config_path: Path,
     designation_original_path: Path,
     designation_snapshot_components: Mapping[str, Path],
     designation_original_components: Mapping[str, Path],
@@ -1384,7 +1467,8 @@ def _authenticate_inputs(
          "development expansion registry"),
         (expected_expansion_report_sha256, file_hash(expansion_report_path),
          "development expansion report"),
-        (expected_config_sha256, file_hash(config_path), "fit config"),
+        (expected_selector_report_sha256, file_hash(selector_report_path),
+         "fit-only selector report"),
         (expected_prior_rows_report_sha256,
          file_hash(prior_rows_output / "report.json"),
          "prior-row reauthentication report"),
@@ -1476,7 +1560,25 @@ def _authenticate_inputs(
     if (expansion_rows_report.get("version") != expansion_rows_api.VERSION
             or expansion_rows_report.get("status") != expansion_rows_api.STATUS):
         raise ValueError("Exact expansion-row reauthentication receipt required")
-    config = normalize_config(_read_json(config_path, "Diagnostic v8 fit config"))
+    # Local import makes the selector source part of this producer's source
+    # closure while avoiding a module-initialization cycle (the selector uses
+    # this module's fit/config primitives).
+    from backend.training import (  # noqa: PLC0415
+        warehouse_r41_diagnostic_rcpd_v8_fit_selector as selector_api,
+    )
+    selector = selector_api.authenticate_selected_config_snapshot(
+        report_path=selector_report_path,
+        expected_report_sha256=expected_selector_report_sha256,
+        scope_path=selector_scope_path,
+        selected_config_path=selector_selected_config_path,
+        actor_file_sha256=file_hash(actor_path),
+        fresh_outer_registry_path=expansion_registry_path,
+        expected_fresh_outer_registry_sha256=(
+            expected_expansion_registry_sha256),
+        fresh_outer_report_path=expansion_report_path,
+        expected_fresh_outer_report_sha256=expected_expansion_report_sha256,
+    )
+    config = normalize_config(selector["config"])
     previous_development = _read_json(
         previous_development_path, "Previous development supplement")
     if (file_hash(previous_development_path)
@@ -1493,6 +1595,7 @@ def _authenticate_inputs(
         "expansion_rows_report": expansion_rows_report,
         "expansion": expansion, "fit_scenes": fit_scenes,
         "validation_scenes": validation_scenes, "config": config,
+        "selector": selector,
         "relations": relations,
         "previous_development": previous_development,
         "source_full_manifest_bindings": deepcopy(
@@ -1509,6 +1612,7 @@ def _bindings(
     expansion = authenticated["expansion"]
     prior_report = authenticated["prior_report"]
     expansion_rows_report = authenticated["expansion_rows_report"]
+    selector = authenticated["selector"]
     return {
         "actor_file_sha256": file_hash(paths["actor"]),
         "actor_parameters_sha256": actor.metadata["actor_parameters_sha256"],
@@ -1559,7 +1663,25 @@ def _bindings(
             paths["previous_development"]),
         "previous_development_semantic_sha256": digest(
             authenticated["previous_development"]),
-        "fit_config_file_sha256": file_hash(paths["config"]),
+        "fit_selector_report_file_sha256": file_hash(
+            paths["selector_report"]),
+        "fit_selector_report_semantic_sha256": digest(selector["report"]),
+        "fit_selector_scope_file_sha256": file_hash(
+            paths["selector_scope"]),
+        "fit_selector_scope_content_sha256": selector["scope"][
+            "content_sha256"],
+        "fit_selector_selected_config_file_sha256": file_hash(
+            paths["selector_selected_config"]),
+        "fit_selector_selected_config_semantic_sha256": digest(
+            selector["selected_config_record"]),
+        "fit_selector_selected_config_sha256": digest(
+            authenticated["config"]),
+        "fit_selector_fresh_outer_registry_file_sha256": selector["report"][
+            "bindings"]["fresh_outer_registry_file_sha256"],
+        "fit_selector_fresh_outer_report_file_sha256": selector["report"][
+            "bindings"]["fresh_outer_report_file_sha256"],
+        "fit_config_file_sha256": _canonical_json_file_sha256(
+            authenticated["config"]),
         "fit_config_content_sha256": digest(authenticated["config"]),
         "public_feature_contract_sha256": digest(relations.contract()),
         "public_feature_registry_sha256": digest(list(relations.feature_names)),
@@ -1685,7 +1807,14 @@ def _build_into(
     _copy_exclusive(
         paths["expansion_registry_report"],
         destination / "development_expansion_report.json")
-    _copy_exclusive(paths["config"], destination / "fit_config.json")
+    _copy_exclusive(
+        paths["selector_report"], destination / "fit_selector_report.json")
+    _copy_exclusive(
+        paths["selector_scope"], destination / "fit_selector_scope.json")
+    _copy_exclusive(
+        paths["selector_selected_config"],
+        destination / "fit_selector_selected_config.json")
+    _write_json(destination / "fit_config.json", config)
     _write_npz(destination / "rows.npz", arrays)
     _write_npz(destination / "pairs.npz", {
         "pairs": weight_result["pairs"],
@@ -1735,6 +1864,7 @@ def _build_into(
         "expansion_rows_reauthentication_report.json", "expansion_rows.npz",
         "source_expansion_collection_report.json",
         "development_expansion.json", "development_expansion_report.json",
+        *sorted(_CANDIDATE_SELECTOR_ARTIFACTS),
         "fit_config.json", "rows.npz", "pairs.npz",
         "weights_audit.json", "program.json", "candidate.json",
     )
@@ -1867,10 +1997,14 @@ def build(
     previous_development_path: str | Path,
     expansion_rows_output: str | Path,
     expected_expansion_rows_report_sha256: str,
-    config_path: str | Path, expected_config_sha256: str,
+    selector_evidence: str | Path,
+    expected_selector_report_sha256: str,
     output: str | Path,
 ) -> dict[str, Any]:
     sources = producer_sources()
+    selector_originals, selector_expected = _selector_snapshot_inputs(
+        selector_evidence,
+        expected_report_sha256=expected_selector_report_sha256)
     originals = {
         "actor": _regular(actor_path, "Frozen Actor"),
         "protocol": _regular(protocol_path, "Training protocol", maximum=MAX_JSON_BYTES),
@@ -1882,11 +2016,11 @@ def build(
         "expansion_registry_report": _regular(
             expansion_report_path, "Development expansion report",
             maximum=MAX_JSON_BYTES),
-        "config": _regular(config_path, "Diagnostic v8 fit config", maximum=MAX_JSON_BYTES),
         "previous_development": _regular(
             previous_development_path, "Previous development supplement",
             maximum=MAX_JSON_BYTES),
     }
+    originals.update(selector_originals)
     originals["manifest_validation"] = _manifest_validation_path(
         originals["manifest"])
     components = _resolved_designation_components(originals["designation"])
@@ -1942,8 +2076,12 @@ def build(
                 expected_expansion_rows_report_sha256=_sha(
                     expected_expansion_rows_report_sha256,
                     "expansion-row reauthentication report"),
-                expected_config_sha256=_sha(
-                    expected_config_sha256, "fit config"),
+                expected_selector_report_sha256=selector_expected[
+                    "selector_report"],
+                expected_selector_scope_sha256=selector_expected[
+                    "selector_scope"],
+                expected_selector_selected_config_sha256=selector_expected[
+                    "selector_selected_config"],
             ),
             relative_names={
                 "manifest": "manifest/manifest.json",
@@ -1955,6 +2093,9 @@ def build(
                 "expansion_collection_report": (
                     "expansion/source_collection_report.json"),
                 "expansion_rows": "expansion/expansion_rows.npz",
+                "selector_report": "selector/report.json",
+                "selector_scope": "selector/fit_scope.json",
+                "selector_selected_config": "selector/selected_config.json",
             },
             maximum_bytes={
                 "prior_rows": MAX_NPZ_COMPRESSED_BYTES,
@@ -1983,8 +2124,12 @@ def build(
                 expected_expansion_rows_report_sha256=(
                     expected_expansion_rows_report_sha256),
                 previous_development_path=paths["previous_development"],
-                config_path=paths["config"],
-                expected_config_sha256=expected_config_sha256,
+                selector_report_path=paths["selector_report"],
+                expected_selector_report_sha256=(
+                    expected_selector_report_sha256),
+                selector_scope_path=paths["selector_scope"],
+                selector_selected_config_path=paths[
+                    "selector_selected_config"],
                 designation_original_path=originals["designation"],
                 designation_snapshot_components=snapshot_components,
                 designation_original_components=components,
@@ -2054,7 +2199,7 @@ def _read_saved_report_snapshot(
     expected_prior_rows_report_sha256: str,
     previous_development_path: str | Path,
     expected_expansion_rows_report_sha256: str,
-    expected_config_sha256: str, require_passed: bool = True,
+    expected_selector_report_sha256: str, require_passed: bool = True,
     refit: bool = True,
     designation_original_path: Path | None = None,
     designation_snapshot_components: Mapping[str, Path] | None = None,
@@ -2080,7 +2225,7 @@ def _read_saved_report_snapshot(
         "development_expansion.json", "development_expansion_report.json",
         "fit_config.json", "rows.npz", "pairs.npz",
         "weights_audit.json", "program.json", "candidate.json",
-    }
+    } | _CANDIDATE_SELECTOR_ARTIFACTS
     integrity_paths = {"saved_report": report_path}
     for name in sorted(expected_names):
         integrity_paths["saved_" + name] = _regular(
@@ -2148,7 +2293,7 @@ def _read_saved_report_snapshot(
                 != artifacts["inputs.json"]):
         raise ValueError("Diagnostic v8 embedded raw evidence differs")
     config_file_hash = inputs.get("bindings", {}).get("fit_config_file_sha256")
-    if (config_file_hash != _sha(expected_config_sha256, "fit config")
+    if (config_file_hash != _canonical_json_file_sha256(config)
             or file_hash(directory / "fit_config.json") != config_file_hash
             or inputs["bindings"].get("fit_config_content_sha256")
                 != digest(config)):
@@ -2165,7 +2310,10 @@ def _read_saved_report_snapshot(
             expansion_report_path, "Development expansion report",
             maximum=MAX_JSON_BYTES),
         "expansion_rows": directory / "expansion_rows.npz",
-        "config": None,
+        "selector_report": directory / "fit_selector_report.json",
+        "selector_scope": directory / "fit_selector_scope.json",
+        "selector_selected_config": (
+            directory / "fit_selector_selected_config.json"),
         "previous_development": _regular(
             previous_development_path, "Previous development supplement",
             maximum=MAX_JSON_BYTES),
@@ -2279,6 +2427,23 @@ def _read_saved_report_snapshot(
         designation_original_components=designation_original_components,
         sources=expansion_rows_api.producer_sources(),
     )
+    from backend.training import (  # noqa: PLC0415
+        warehouse_r41_diagnostic_rcpd_v8_fit_selector as selector_api,
+    )
+    selector = selector_api.authenticate_selected_config_snapshot(
+        report_path=external_paths["selector_report"],
+        expected_report_sha256=expected_selector_report_sha256,
+        scope_path=external_paths["selector_scope"],
+        selected_config_path=external_paths["selector_selected_config"],
+        actor_file_sha256=file_hash(external_paths["actor"]),
+        fresh_outer_registry_path=external_paths["expansion_registry"],
+        expected_fresh_outer_registry_sha256=(
+            expected_expansion_registry_sha256),
+        fresh_outer_report_path=external_paths["expansion_registry_report"],
+        expected_fresh_outer_report_sha256=expected_expansion_report_sha256,
+    )
+    if normalize_config(selector["config"]) != config:
+        raise ValueError("Diagnostic v8 selector/config binding differs")
     relations = R41DiagnosticPublicRelationsV8(actor.metadata["feature_names"])
     live_authenticated = {
         "actor": actor,
@@ -2291,12 +2456,12 @@ def _read_saved_report_snapshot(
         "fit_scenes": fit_scenes,
         "validation_scenes": validation_scenes,
         "config": config,
+        "selector": selector,
         "relations": relations,
         "previous_development": previous,
         "source_full_manifest_bindings": deepcopy(
             runtime.source_full_manifest_bindings),
     }
-    external_paths["config"] = directory / "fit_config.json"
     if _bindings(
         paths=external_paths,
         authenticated=live_authenticated,
@@ -2519,7 +2684,7 @@ def read_saved_report(
     expected_prior_rows_report_sha256: str,
     previous_development_path: str | Path,
     expected_expansion_rows_report_sha256: str,
-    expected_config_sha256: str, require_passed: bool = True,
+    expected_selector_report_sha256: str, require_passed: bool = True,
     refit: bool = True,
 ) -> dict[str, Any]:
     """Authenticate every input from one immutable, hash-bound snapshot."""
@@ -2560,7 +2725,7 @@ def read_saved_report(
         "development_expansion.json", "development_expansion_report.json",
         "fit_config.json", "rows.npz", "pairs.npz",
         "weights_audit.json", "program.json", "candidate.json",
-    }
+    } | _CANDIDATE_SELECTOR_ARTIFACTS
     artifacts = (report_identity.get("evidence_artifacts")
                  if isinstance(report_identity, Mapping) else None)
     if (not isinstance(artifacts, Mapping)
@@ -2664,7 +2829,7 @@ def read_saved_report(
                 "external_previous_development"],
             expected_expansion_rows_report_sha256=(
                 expected_expansion_rows_report_sha256),
-            expected_config_sha256=expected_config_sha256,
+            expected_selector_report_sha256=expected_selector_report_sha256,
             require_passed=require_passed, refit=refit,
             designation_original_path=originals["external_designation"],
             designation_snapshot_components=snapshot_components,
@@ -2694,8 +2859,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--expansion-rows-output", required=True)
     parser.add_argument(
         "--expected-expansion-rows-report-sha256", required=True)
-    parser.add_argument("--config", required=True)
-    parser.add_argument("--expected-config-sha256", required=True)
+    parser.add_argument("--selector-evidence", required=True)
+    parser.add_argument("--expected-selector-report-sha256", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args(argv)
     result = build(
@@ -2712,7 +2877,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         expansion_rows_output=args.expansion_rows_output,
         expected_expansion_rows_report_sha256=(
             args.expected_expansion_rows_report_sha256),
-        config_path=args.config, expected_config_sha256=args.expected_config_sha256,
+        selector_evidence=args.selector_evidence,
+        expected_selector_report_sha256=(
+            args.expected_selector_report_sha256),
         output=args.output,
     )
     print(canonical({

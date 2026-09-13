@@ -207,6 +207,114 @@ def _fresh_outer_pair(source_rows_sha256: str) -> tuple[dict, dict, str, str]:
     return registry, report, registry_file_sha256, "8" * 64
 
 
+def _write_json(path, value):
+    path.write_text(subject.canonical(value) + "\n", encoding="utf-8")
+
+
+def _selector_evidence(tmp_path, monkeypatch):
+    sources = {"selector.py": "1" * 64}
+    monkeypatch.setattr(subject, "producer_sources", lambda: sources)
+    registry, outer_report, _, _ = _fresh_outer_pair("b" * 64)
+    registry_path = tmp_path / "development_expansion.json"
+    _write_json(registry_path, registry)
+    registry_sha = file_hash(registry_path)
+    outer_report["registry_file_sha256"] = registry_sha
+    outer_report["content_sha256"] = subject.digest({
+        key: value for key, value in outer_report.items()
+        if key != "content_sha256"
+    })
+    outer_report_path = tmp_path / "development_expansion_report.json"
+    _write_json(outer_report_path, outer_report)
+    outer_report_sha = file_hash(outer_report_path)
+
+    eligible = [_fingerprint(index) for index in range(1, 7)]
+    families = {scene: FAMILIES[index] for index, scene in enumerate(eligible)}
+    scope = _scope(eligible=eligible, exposed=[], families=families)
+    scope.update({
+        "fresh_outer_scene_fingerprints": sorted(
+            row["fingerprint"] for row in registry["selected_outer_identities"]),
+        "fresh_outer_registry_file_sha256": registry_sha,
+        "fresh_outer_registry_content_sha256": registry["content_sha256"],
+        "fresh_outer_report_file_sha256": outer_report_sha,
+        "fresh_outer_report_content_sha256": outer_report["content_sha256"],
+    })
+    scope["content_sha256"] = subject.digest({
+        key: value for key, value in scope.items() if key != "content_sha256"
+    })
+    evidence = tmp_path / "selector"
+    evidence.mkdir()
+    scope_path = evidence / "fit_scope.json"
+    _write_json(scope_path, scope)
+    config = subject.candidate_configs(_config())[1]
+    selected = {
+        "version": subject.VERSION,
+        "status": subject.STATUS_SELECTED,
+        "selected_mix_weight": 0.25,
+        "selected_config": config,
+        "selected_config_sha256": subject.digest(config),
+        "outer_evaluation_performed": False,
+        "final_rows_accessed": False,
+        "final_labels_accessed": False,
+    }
+    selected_path = evidence / "selected_config.json"
+    _write_json(selected_path, selected)
+    artifacts = {}
+    for name in subject.EVIDENCE_ARTIFACT_NAMES:
+        path = evidence / name
+        if name == "fit_scope.json":
+            pass
+        elif name == "selected_config.json":
+            pass
+        else:
+            path.write_bytes((name + "\n").encode("ascii"))
+        artifacts[name] = file_hash(path)
+    report = {
+        "version": subject.VERSION,
+        "status": subject.STATUS_SELECTED,
+        "contract": subject.contract(),
+        "bindings": {
+            "source_v8_report_sha256": "a" * 64,
+            "source_v8_rows_sha256": "b" * 64,
+            "source_v8_config_sha256": "2" * 64,
+            "source_v8_program_sha256": "3" * 64,
+            "source_v8_weights_audit_sha256": "4" * 64,
+            "actor_file_sha256": "5" * 64,
+            "fit_scope_file_sha256": artifacts["fit_scope.json"],
+            "fit_scope_content_sha256": scope["content_sha256"],
+            "fresh_outer_registry_file_sha256": registry_sha,
+            "fresh_outer_registry_content_sha256": registry["content_sha256"],
+            "fresh_outer_report_file_sha256": outer_report_sha,
+            "fresh_outer_report_content_sha256": outer_report["content_sha256"],
+            "selector_binding_sha256": "6" * 64,
+            "producer_sources_sha256": subject.digest(sources),
+        },
+        "projection": {},
+        "selection": {
+            "status": subject.STATUS_SELECTED,
+            "selected_mix_weight": 0.25,
+            "outer_evaluation_performed": False,
+        },
+        "selected_config_sha256": subject.digest(config),
+        "outer_evaluation_performed": False,
+        "outer_labels_used_for_projection_fit_or_selection": False,
+        "outer_probabilities_used_for_projection_fit_or_selection": False,
+        "final_rows_accessed": False,
+        "final_labels_accessed": False,
+        "runtime_action_override": False,
+        "actor_changed": False,
+        "formal_ready": False,
+        "sources": sources,
+        "evidence_artifacts": artifacts,
+    }
+    report_path = evidence / "report.json"
+    _write_json(report_path, report)
+    return {
+        "evidence": evidence, "report": report_path, "scope": scope_path,
+        "selected": selected_path, "registry": registry_path,
+        "outer_report": outer_report_path, "config": config,
+    }
+
+
 def test_contract_freezes_fit_only_search_and_has_no_outer_or_final_metric_input():
     value = subject.contract()
     assert value["source"][
@@ -424,6 +532,43 @@ def test_fresh_outer_scope_requires_one_exact_authenticated_registry_report_pair
     })
     with pytest.raises(ValueError, match="scope schema differs"):
         subject.normalize_scope(changed_scope)
+
+
+def test_authenticated_selected_config_extracts_wrapper_and_binds_fresh_outer(
+        tmp_path, monkeypatch):
+    paths = _selector_evidence(tmp_path, monkeypatch)
+    result = subject.authenticate_selected_config_snapshot(
+        report_path=paths["report"],
+        expected_report_sha256=file_hash(paths["report"]),
+        scope_path=paths["scope"], selected_config_path=paths["selected"],
+        actor_file_sha256="5" * 64,
+        fresh_outer_registry_path=paths["registry"],
+        expected_fresh_outer_registry_sha256=file_hash(paths["registry"]),
+        fresh_outer_report_path=paths["outer_report"],
+        expected_fresh_outer_report_sha256=file_hash(paths["outer_report"]),
+    )
+    assert result["config"] == paths["config"]
+    assert result["selected_config_record"]["selected_config"] == paths["config"]
+    assert result["report_file_sha256"] == file_hash(paths["report"])
+
+
+def test_authenticated_selected_config_rejects_wrapper_or_scope_substitution(
+        tmp_path, monkeypatch):
+    paths = _selector_evidence(tmp_path, monkeypatch)
+    selected = json.loads(paths["selected"].read_text(encoding="utf-8"))
+    selected["selected_mix_weight"] = 1.0
+    _write_json(paths["selected"], selected)
+    with pytest.raises(ValueError, match="artifact hash differs"):
+        subject.authenticate_selected_config_snapshot(
+            report_path=paths["report"],
+            expected_report_sha256=file_hash(paths["report"]),
+            scope_path=paths["scope"], selected_config_path=paths["selected"],
+            actor_file_sha256="5" * 64,
+            fresh_outer_registry_path=paths["registry"],
+            expected_fresh_outer_registry_sha256=file_hash(paths["registry"]),
+            fresh_outer_report_path=paths["outer_report"],
+            expected_fresh_outer_report_sha256=file_hash(paths["outer_report"]),
+        )
 
 
 def test_selection_uses_all_gates_gain_guardrail_and_smallest_mix():

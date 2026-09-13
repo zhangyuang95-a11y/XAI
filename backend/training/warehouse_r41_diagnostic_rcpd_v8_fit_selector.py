@@ -79,6 +79,16 @@ CHARGER_MODEL = {
 MAX_JSON_BYTES = 512 * 1024 * 1024
 MAX_NPZ_BYTES = 512 * 1024 * 1024
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
+EVIDENCE_ARTIFACT_NAMES = frozenset((
+    "fit_only_rows.npz", "fit_scope.json", "config_registry.json",
+    "inner_split_audit.json", "inner_selection.json", "selected_config.json",
+    "inner_fit_program.json",
+))
+SELECTED_CONFIG_FIELDS = frozenset((
+    "version", "status", "selected_mix_weight", "selected_config",
+    "selected_config_sha256", "outer_evaluation_performed",
+    "final_rows_accessed", "final_labels_accessed",
+))
 
 
 def contract() -> dict[str, Any]:
@@ -898,6 +908,149 @@ def _validate_scope_family_registry(
     return actual
 
 
+def authenticate_selected_config_snapshot(
+    *, report_path: str | Path, expected_report_sha256: str,
+    scope_path: str | Path, selected_config_path: str | Path,
+    actor_file_sha256: str,
+    fresh_outer_registry_path: str | Path,
+    expected_fresh_outer_registry_sha256: str,
+    fresh_outer_report_path: str | Path,
+    expected_fresh_outer_report_sha256: str,
+) -> dict[str, Any]:
+    """Authenticate the three selector artifacts needed by a candidate fit.
+
+    Callers must pass immutable private copies.  The RCPD v8 producer includes
+    these files in its own :class:`ImmutableInputSnapshot`; this function then
+    checks the selector protocol, source closure, chosen config, scope, and
+    fresh-outer pair without refitting or reading an outer label.
+    """
+    report_file = _regular(
+        report_path, "Fit-only selector report", maximum=MAX_JSON_BYTES)
+    report_sha256 = _sha(expected_report_sha256, "fit-only selector report")
+    if file_hash(report_file) != report_sha256:
+        raise ValueError("Fit-only selector report hash differs")
+    report = _read_json(report_file, "Fit-only selector report")
+    artifacts = report.get("evidence_artifacts")
+    bindings = report.get("bindings")
+    sources = producer_sources()
+    if (report.get("version") != VERSION
+            or report.get("status") != STATUS_SELECTED
+            or report.get("contract") != contract()
+            or report.get("sources") != sources
+            or not isinstance(bindings, Mapping)
+            or bindings.get("producer_sources_sha256")
+                != digest(sources)
+            or report.get("outer_evaluation_performed") is not False
+            or report.get("outer_labels_used_for_projection_fit_or_selection")
+                is not False
+            or report.get(
+                "outer_probabilities_used_for_projection_fit_or_selection")
+                is not False
+            or report.get("final_rows_accessed") is not False
+            or report.get("final_labels_accessed") is not False
+            or report.get("runtime_action_override") is not False
+            or report.get("actor_changed") is not False
+            or report.get("formal_ready") is not False
+            or not isinstance(artifacts, Mapping)
+            or set(artifacts) != EVIDENCE_ARTIFACT_NAMES
+            or any(type(value) is not str or _HEX.fullmatch(value) is None
+                   for value in artifacts.values())):
+        raise ValueError("Fit-only selector report assurance differs")
+
+    scope_file = _regular(
+        scope_path, "Fit-only selector scope", maximum=MAX_JSON_BYTES)
+    selected_file = _regular(
+        selected_config_path, "Fit-only selected config", maximum=MAX_JSON_BYTES)
+    if (file_hash(scope_file) != artifacts["fit_scope.json"]
+            or file_hash(selected_file) != artifacts["selected_config.json"]):
+        raise ValueError("Fit-only selector artifact hash differs")
+    scope = normalize_scope(_read_json(scope_file, "Fit-only selector scope"))
+    selected = _read_json(selected_file, "Fit-only selected config")
+    if set(selected) != SELECTED_CONFIG_FIELDS:
+        raise ValueError("Fit-only selected-config schema differs")
+    if (bindings.get("fit_scope_file_sha256") != artifacts["fit_scope.json"]
+            or bindings.get("fit_scope_content_sha256")
+                != scope["content_sha256"]
+            or bindings.get("actor_file_sha256")
+                != _sha(actor_file_sha256, "candidate Actor")
+            or scope["source_report_sha256"]
+                != bindings.get("source_v8_report_sha256")
+            or scope["source_rows_sha256"]
+                != bindings.get("source_v8_rows_sha256")):
+        raise ValueError("Fit-only selector scope/source binding differs")
+
+    registry_file = _regular(
+        fresh_outer_registry_path, "Fresh outer registry",
+        maximum=MAX_JSON_BYTES)
+    outer_report_file = _regular(
+        fresh_outer_report_path, "Fresh outer report", maximum=MAX_JSON_BYTES)
+    registry_sha256 = _sha(
+        expected_fresh_outer_registry_sha256, "fresh outer registry")
+    outer_report_sha256 = _sha(
+        expected_fresh_outer_report_sha256, "fresh outer report")
+    if (file_hash(registry_file) != registry_sha256
+            or file_hash(outer_report_file) != outer_report_sha256
+            or bindings.get("fresh_outer_registry_file_sha256")
+                != registry_sha256
+            or bindings.get("fresh_outer_report_file_sha256")
+                != outer_report_sha256
+            or scope["fresh_outer_registry_file_sha256"] != registry_sha256
+            or scope["fresh_outer_report_file_sha256"]
+                != outer_report_sha256):
+        raise ValueError("Fit-only selector fresh-outer file binding differs")
+    registry = _read_json(registry_file, "Fresh outer registry")
+    outer_report = _read_json(outer_report_file, "Fresh outer report")
+    fresh = _validate_fresh_outer_binding(
+        registry, outer_report,
+        registry_file_sha256=registry_sha256,
+        report_file_sha256=outer_report_sha256,
+        source_rows_sha256=scope["source_rows_sha256"],
+    )
+    if (fresh != set(scope["fresh_outer_scene_fingerprints"])
+            or bindings.get("fresh_outer_registry_content_sha256")
+                != registry["content_sha256"]
+            or bindings.get("fresh_outer_report_content_sha256")
+                != outer_report["content_sha256"]
+            or scope["fresh_outer_registry_content_sha256"]
+                != registry["content_sha256"]
+            or scope["fresh_outer_report_content_sha256"]
+                != outer_report["content_sha256"]):
+        raise ValueError("Fit-only selector fresh-outer identity binding differs")
+
+    config = v8.normalize_config(selected.get("selected_config"))
+    mix = selected.get("selected_mix_weight")
+    selection = report.get("selection")
+    if (type(mix) not in (int, float) or isinstance(mix, bool)
+            or float(mix) not in MIX_CANDIDATES
+            or selected.get("version") != VERSION
+            or selected.get("status") != STATUS_SELECTED
+            or selected.get("selected_config_sha256") != digest(config)
+            or report.get("selected_config_sha256") != digest(config)
+            or not isinstance(selection, Mapping)
+            or selection.get("status") != STATUS_SELECTED
+            or selection.get("selected_mix_weight") != float(mix)
+            or selection.get("outer_evaluation_performed") is not False
+            or selected.get("outer_evaluation_performed") is not False
+            or selected.get("final_rows_accessed") is not False
+            or selected.get("final_labels_accessed") is not False
+            or config["mix_weights"]["shared_charger"] != float(mix)
+            or config["mix_weights"]["narrow_passage"] != 0.0
+            or config["mix_weights"]["shared_pickup"] != 0.0
+            or config["models"]["shared_charger"] != CHARGER_MODEL
+            or config["pair_pool_multiplier"] != 16.0
+            or config["use_action_factor"] is not True):
+        raise ValueError("Fit-only selector chosen config binding differs")
+    return {
+        "config": config,
+        "report": deepcopy(report),
+        "scope": scope,
+        "selected_config_record": deepcopy(selected),
+        "report_file_sha256": report_sha256,
+        "scope_file_sha256": artifacts["fit_scope.json"],
+        "selected_config_file_sha256": artifacts["selected_config.json"],
+    }
+
+
 def prepare_scope(
     *, source_evidence: str | Path, expected_source_report_sha256: str,
     fresh_outer_registry_path: str | Path,
@@ -1304,6 +1457,7 @@ __all__ = [
     "INNER_HOLDOUT_FAMILY_QUOTAS", "INNER_ORDER_SALT", "CHARGER_MODEL",
     "MIN_CHARGER_DIRECTION_IMPROVEMENT", "MAX_OTHER_METRIC_DEGRADATION",
     "contract", "producer_sources", "normalize_scope", "candidate_configs",
-    "choose_candidate", "prepare_scope", "build", "main", "_inner_holdout",
+    "choose_candidate", "prepare_scope", "authenticate_selected_config_snapshot",
+    "build", "main", "_inner_holdout",
     "_project_fit_only", "_arrays_digest",
 ]

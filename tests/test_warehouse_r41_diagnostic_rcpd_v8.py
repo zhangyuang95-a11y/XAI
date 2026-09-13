@@ -147,6 +147,9 @@ def test_contract_has_no_final_input_and_fixes_public_protocol():
     assert value["routes"] == subject._fixed_routes()
     assert value["aggregation"] == AGGREGATION
     assert value["weights"]["contract_sha256"] == subject.digest(weights.contract())
+    assert value["config_selection"]["direct_config_input"] is False
+    assert value["config_selection"][
+        "selector_report_scope_and_selected_config_copied"] is True
     assert value["effective_pair_group_assignment"].startswith(
         "ordinary pre-action source anchor")
 
@@ -163,6 +166,7 @@ def test_active_v8_chain_uses_fixed_designation_and_frozen_manifest_closure():
     assert "backend/training/warehouse_r41_diagnostic_expansion_rows_v8.py" in sources
     assert "backend/training/warehouse_r41_diagnostic_rows_v8.py" in sources
     assert "backend/training/warehouse_r41_diagnostic_rcpd_v8_outer_split.py" in sources
+    assert "backend/training/warehouse_r41_diagnostic_rcpd_v8_fit_selector.py" in sources
     assert "scripts/build_warehouse_r41_diagnostic_designation_v2.py" in sources
     assert "env/warehouse/transition_outcome.py" in sources
     assert not [path for path in sources if any(token in path for token in (
@@ -191,6 +195,10 @@ def test_build_and_reader_accept_only_reauthenticated_row_receipts():
     parameters = inspect.signature(subject.build).parameters
     assert "prior_rows_output" in parameters
     assert "expansion_rows_output" in parameters
+    assert "selector_evidence" in parameters
+    assert "expected_selector_report_sha256" in parameters
+    assert "config_path" not in parameters
+    assert "expected_config_sha256" not in parameters
     assert "prior_v7_output" not in parameters
     assert "expansion_rows_path" not in parameters
 
@@ -206,7 +214,8 @@ def test_complete_binding_requires_authenticated_previous_and_row_semantics(
             "expansion_registry", "expansion_registry_report",
             "expansion_reauth_report", "expansion_collection_report",
             "expansion_rows",
-            "previous_development", "config",
+            "previous_development", "selector_report", "selector_scope",
+            "selector_selected_config",
         )
     }
 
@@ -240,6 +249,14 @@ def test_complete_binding_requires_authenticated_previous_and_row_semantics(
         "previous_development": {"scenes": [{"id": "dev"}]},
         "relations": Relations(),
         "config": config(),
+        "selector": {
+            "report": {"bindings": {
+                "fresh_outer_registry_file_sha256": "u" * 64,
+                "fresh_outer_report_file_sha256": "v" * 64,
+            }},
+            "scope": {"content_sha256": "w" * 64},
+            "selected_config_record": {"selected": True},
+        },
         "source_full_manifest_bindings": {"manifest": "m" * 64},
     }
     monkeypatch.setattr(subject.weight_api, "contract", lambda: {"weights": True})
@@ -257,6 +274,12 @@ def test_complete_binding_requires_authenticated_previous_and_row_semantics(
     assert (bindings["expansion_source_collection_report_semantic_sha256"]
             == "c" * 64)
     assert bindings["expansion_rows_semantic_sha256"] == "x" * 64
+    assert bindings["fit_selector_fresh_outer_registry_file_sha256"] == "u" * 64
+    assert bindings["fit_selector_fresh_outer_report_file_sha256"] == "v" * 64
+    assert bindings["fit_selector_selected_config_sha256"] == subject.digest(
+        authenticated["config"])
+    assert bindings["fit_config_file_sha256"] == subject._canonical_json_file_sha256(
+        authenticated["config"])
 
     without_previous = dict(authenticated)
     without_previous.pop("previous_development")
@@ -532,13 +555,15 @@ def test_reader_rejects_wrong_report_hash_before_reading_artifacts(tmp_path):
             expected_prior_rows_report_sha256=actual,
             previous_development_path=report,
             expected_expansion_rows_report_sha256=actual,
-            expected_config_sha256=actual,
+            expected_selector_report_sha256=actual,
         )
 
 
 def test_producer_has_no_final_cli_and_never_serializes_pickle():
     source = open(subject.__file__, encoding="utf-8").read()
     assert 'parser.add_argument("--final' not in source
+    assert 'parser.add_argument("--config"' not in source
+    assert 'parser.add_argument("--selector-evidence"' in source
     assert "pickle.dump" not in source
     assert "joblib.dump" not in source
     assert subject.MAX_PROGRAM_BYTES > 0
@@ -548,11 +573,28 @@ def _toctou_build_inputs(tmp_path):
     paths = {}
     for name in (
         "actor", "protocol", "manifest", "designation",
-        "expansion_registry", "expansion_report", "config", "previous",
+        "expansion_registry", "expansion_report", "previous",
     ):
         path = tmp_path / name
         path.write_bytes((name + "\n").encode("ascii"))
         paths[name] = path
+    selector = tmp_path / "selector"
+    selector.mkdir()
+    selector_scope = selector / "fit_scope.json"
+    selector_scope.write_text("{}\n", encoding="utf-8")
+    selector_config = selector / "selected_config.json"
+    selector_config.write_text("{}\n", encoding="utf-8")
+    selector_report = selector / "report.json"
+    selector_report.write_text(json.dumps({
+        "evidence_artifacts": {
+            "fit_scope.json": subject.file_hash(selector_scope),
+            "selected_config.json": subject.file_hash(selector_config),
+        },
+    }, sort_keys=True) + "\n", encoding="utf-8")
+    paths["selector"] = selector
+    paths["selector_report"] = selector_report
+    paths["selector_scope"] = selector_scope
+    paths["selector_selected_config"] = selector_config
     paths["manifest_validation"] = tmp_path / "validation.json"
     paths["manifest_validation"].write_bytes(b"validation\n")
     paths["designation_actor"] = paths["actor"]
@@ -598,7 +640,10 @@ def _patch_toctou_manifest_validation(paths, monkeypatch):
             "designation": subject.file_hash(paths["designation"]),
             "expansion_registry": subject.file_hash(paths["expansion_registry"]),
             "expansion_registry_report": subject.file_hash(paths["expansion_report"]),
-            "config": subject.file_hash(paths["config"]),
+            "selector_report": subject.file_hash(paths["selector_report"]),
+            "selector_scope": subject.file_hash(paths["selector_scope"]),
+            "selector_selected_config": subject.file_hash(
+                paths["selector_selected_config"]),
             "previous_development": subject.file_hash(paths["previous"]),
             "prior_reauth_report": subject.file_hash(paths["prior"] / "report.json"),
             "prior_rows": subject.file_hash(paths["prior"] / "rows.npz"),
@@ -642,10 +687,38 @@ def _toctou_build_kwargs(paths, output):
         "expansion_rows_output": paths["expansion"],
         "expected_expansion_rows_report_sha256": subject.file_hash(
             paths["expansion"] / "report.json"),
-        "config_path": paths["config"],
-        "expected_config_sha256": subject.file_hash(paths["config"]),
+        "selector_evidence": paths["selector"],
+        "expected_selector_report_sha256": subject.file_hash(
+            paths["selector_report"]),
         "output": output,
     }
+
+
+def test_selector_bootstrap_pins_report_scope_and_selected_config(tmp_path):
+    paths = _toctou_build_inputs(tmp_path)
+    originals, expected = subject._selector_snapshot_inputs(
+        paths["selector"],
+        expected_report_sha256=subject.file_hash(paths["selector_report"]))
+    assert originals == {
+        "selector_report": paths["selector_report"],
+        "selector_scope": paths["selector_scope"],
+        "selector_selected_config": paths["selector_selected_config"],
+    }
+    assert expected == {
+        name: subject.file_hash(path) for name, path in originals.items()
+    }
+
+
+def test_selector_bootstrap_rejects_unbound_selected_config(tmp_path):
+    paths = _toctou_build_inputs(tmp_path)
+    report = json.loads(paths["selector_report"].read_text(encoding="utf-8"))
+    del report["evidence_artifacts"]["selected_config.json"]
+    paths["selector_report"].write_text(
+        json.dumps(report, sort_keys=True) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="artifact registry differs"):
+        subject._selector_snapshot_inputs(
+            paths["selector"], expected_report_sha256=subject.file_hash(
+                paths["selector_report"]))
 
 
 def test_build_snapshots_sources_before_authentication_and_rejects_change(

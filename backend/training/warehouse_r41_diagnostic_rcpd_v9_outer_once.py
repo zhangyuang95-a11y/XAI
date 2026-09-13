@@ -389,7 +389,8 @@ def _registry_bundle(
         registry_report_path.read_bytes(), "fresh v9 outer registry report")
     scenes = value.get("development_outer")
     identities = value.get("selected_outer_identities")
-    sources = registry_api.producer_sources()
+    registry_sources = value.get("producer_sources")
+    registry_sources_sha256 = value.get("producer_sources_sha256")
     if (set(value) != _REGISTRY_FIELDS
             or value.get("version") != registry_api.VERSION
             or value.get("status") != registry_api.STATUS
@@ -404,8 +405,8 @@ def _registry_bundle(
             or value.get("probabilities_access") is not False
             or value.get("final_audit_rows_access") is not False
             or value.get("formal_ready") is not False
-            or value.get("producer_sources") != sources
-            or value.get("producer_sources_sha256") != digest(sources)):
+            or not projection_api._frozen_sources_valid(
+                registry_sources, registry_sources_sha256)):
         raise ValueError("Fresh v9 outer registry semantics differ")
     public_identities = []
     seen: set[tuple[int, str]] = set()
@@ -444,8 +445,9 @@ def _registry_bundle(
             or report.get("statistics") != value.get("statistics")
             or report.get("information_boundary")
                 != value.get("information_boundary")
-            or report.get("producer_sources") != sources
-            or report.get("producer_sources_sha256") != digest(sources)
+            or report.get("producer_sources") != registry_sources
+            or report.get("producer_sources_sha256")
+                != registry_sources_sha256
             or not isinstance(selection, Mapping)
             or set(selection) != _REGISTRY_REPORT_SELECTION_FIELDS
             or selection.get("salt") != registry_api.SELECTION_SALT

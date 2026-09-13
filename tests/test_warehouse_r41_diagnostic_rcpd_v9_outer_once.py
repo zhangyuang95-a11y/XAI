@@ -480,6 +480,26 @@ def test_registry_report_identity_failure_rejects_before_claim_or_private_read(
     assert list(permanent.iterdir()) == []
 
 
+def test_registry_bundle_accepts_authenticated_historical_source_closure(
+        tmp_path, monkeypatch):
+    args, _, _, _ = _fixture(tmp_path, monkeypatch)
+    registry_path = Path(args["fresh_outer_registry_path"])
+    report_path = Path(args["fresh_outer_registry_report_path"])
+    bindings = {
+        "fresh_outer_registry_sha256": file_hash(registry_path),
+        "fresh_outer_registry_report_sha256": file_hash(report_path),
+    }
+    monkeypatch.setattr(
+        subject.registry_api, "producer_sources",
+        lambda: {"later/source.py": _fp("later-source")})
+    registry, report, selected = subject._registry_bundle(
+        registry_path, report_path, bindings=bindings)
+    assert registry["producer_sources"] == report["producer_sources"]
+    assert registry["producer_sources_sha256"] == digest(
+        registry["producer_sources"])
+    assert selected == report["selection"]["selected_identity_sha256"]
+
+
 def test_claim_precedes_private_rows_and_program_execution_and_second_call_fails(
         tmp_path, monkeypatch):
     args, arrays, _, permanent = _fixture(tmp_path, monkeypatch)

@@ -10,6 +10,7 @@ accepted by this transformer.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from collections import deque
 from typing import Any
 
 import numpy as np
@@ -17,6 +18,7 @@ import numpy as np
 from backend.warehouse_r41_diagnostic_public_features_v8 import (
     R41DiagnosticPublicRelationsV8,
 )
+from backend.training.warehouse_native_common import digest
 
 
 VERSION = "warehouse-r41-diagnostic-public-relations.v9"
@@ -33,6 +35,7 @@ class R41DiagnosticPublicRelationsV9:
         self.v8 = R41DiagnosticPublicRelationsV8(base_feature_names)
         self.base_feature_names = self.v8.base_feature_names
         self._index = {name: index for index, name in enumerate(self.base_feature_names)}
+        self._topology_cache: dict[tuple[bytes, int, int, int, int], tuple[float, ...]] = {}
         required = self._required_names()
         missing = sorted(required - set(self.base_feature_names))
         if missing:
@@ -247,6 +250,36 @@ class R41DiagnosticPublicRelationsV9:
             chosen = improvements[row_index, nearest]
             add(chosen, f"derived.v9.{who}.nearest_goal.improvement")
 
+        topology = np.empty((len(values), 8), dtype=np.float32)
+        task_coordinates = []
+        for task in range(2):
+            task_coordinates.append((
+                self._coordinate(self._column(values, f"task.{task}.pickup_row"), ROWS),
+                self._coordinate(self._column(values, f"task.{task}.pickup_column"), COLS),
+                self._coordinate(self._column(values, f"task.{task}.delivery_row"), ROWS),
+                self._coordinate(self._column(values, f"task.{task}.delivery_column"), COLS),
+            ))
+        packed_maps = np.packbits(grid.reshape(len(values), -1), axis=1, bitorder="little")
+        for index in range(len(values)):
+            p0 = int(task_coordinates[0][0][index]) * COLS + int(task_coordinates[0][1][index])
+            d0 = int(task_coordinates[0][2][index]) * COLS + int(task_coordinates[0][3][index])
+            p1 = int(task_coordinates[1][0][index]) * COLS + int(task_coordinates[1][1][index])
+            d1 = int(task_coordinates[1][2][index]) * COLS + int(task_coordinates[1][3][index])
+            key = (packed_maps[index].tobytes(), p0, d0, p1, d1)
+            cached = self._topology_cache.get(key)
+            if cached is None:
+                cached = self._task_pair_topology(grid[index], p0, d0, p1, d1)
+                self._topology_cache[key] = cached
+            topology[index] = cached
+        topology_names = (
+            "shared_edge_ratio_min", "shared_edge_ratio_max",
+            "shared_bridge_fraction", "shared_crossing_fraction",
+            "same_direction_fraction", "opposing_direction_fraction",
+            "task_0_route_fraction", "task_1_route_fraction",
+        )
+        for index, name in enumerate(topology_names):
+            add(topology[:, index], "derived.v9.task_pair." + name)
+
         # Collision recovery and action-history interactions are public.  They
         # are especially useful for the ordinary WAIT endpoint of an isolated
         # counterfactual pair, which v8's shallow specialists underfit.
@@ -271,6 +304,124 @@ class R41DiagnosticPublicRelationsV9:
         if not np.isfinite(result).all():
             raise ValueError("Derived public features are non-finite")
         return result, names
+
+    @staticmethod
+    def _task_pair_topology(
+        grid: np.ndarray, pickup0: int, delivery0: int,
+        pickup1: int, delivery1: int,
+    ) -> tuple[float, ...]:
+        """Return public graph relations for the two visible task routes."""
+        cells = tuple((row, column) for row in range(ROWS) for column in range(COLS)
+                      if bool(grid[row, column]))
+        passable = set(cells)
+
+        def point(value: int) -> tuple[int, int]:
+            return divmod(value, COLS)
+
+        def neighbors(node: tuple[int, int]) -> tuple[tuple[int, int], ...]:
+            row, column = node
+            return tuple(sorted(candidate for candidate in (
+                (row - 1, column), (row + 1, column),
+                (row, column - 1), (row, column + 1),
+            ) if candidate in passable))
+
+        def paths(start: tuple[int, int], goal: tuple[int, int]) -> tuple[tuple[tuple[int, int], ...], ...]:
+            if start not in passable or goal not in passable:
+                return ()
+            queue = deque((start,))
+            distances = {start: 0}
+            while queue:
+                current = queue.popleft()
+                for target in neighbors(current):
+                    if target not in distances:
+                        distances[target] = distances[current] + 1
+                        queue.append(target)
+            if goal not in distances:
+                return ()
+            result: list[tuple[tuple[int, int], ...]] = []
+
+            def visit(current: tuple[int, int], route: tuple[tuple[int, int], ...]) -> None:
+                if current == goal:
+                    result.append(route)
+                    return
+                for target in neighbors(current):
+                    if distances.get(target) == distances[current] + 1 \
+                            and distances[target] <= distances[goal]:
+                        visit(target, route + (target,))
+            visit(start, (start,))
+            return tuple(result)
+
+        def undirected(route: Sequence[tuple[int, int]]) -> frozenset[frozenset[tuple[int, int]]]:
+            return frozenset(frozenset(edge) for edge in zip(route, route[1:]))
+
+        def directed(route: Sequence[tuple[int, int]]) -> frozenset[tuple[tuple[int, int], tuple[int, int]]]:
+            return frozenset(zip(route, route[1:]))
+
+        def bridges() -> frozenset[frozenset[tuple[int, int]]]:
+            timer = 0
+            seen: set[tuple[int, int]] = set()
+            tin: dict[tuple[int, int], int] = {}
+            low: dict[tuple[int, int], int] = {}
+            result: set[frozenset[tuple[int, int]]] = set()
+
+            def search(node: tuple[int, int], parent: tuple[int, int] | None) -> None:
+                nonlocal timer
+                seen.add(node)
+                tin[node] = low[node] = timer
+                timer += 1
+                for target in neighbors(node):
+                    if target == parent:
+                        continue
+                    if target in seen:
+                        low[node] = min(low[node], tin[target])
+                    else:
+                        search(target, node)
+                        low[node] = min(low[node], low[target])
+                        if low[target] > tin[node]:
+                            result.add(frozenset((node, target)))
+            for node in cells:
+                if node not in seen:
+                    search(node, None)
+            return frozenset(result)
+
+        endpoints = ((point(pickup0), point(delivery0)),
+                     (point(pickup1), point(delivery1)))
+        routes = tuple(paths(*pair) for pair in endpoints)
+        if any(not item for item in routes):
+            return (0.0,) * 8
+        edge_sets = tuple(tuple(undirected(route) for route in item) for item in routes)
+        ratios: list[float] = []
+        shared_edges: set[frozenset[tuple[int, int]]] = set()
+        shared_nodes: set[tuple[int, int]] = set()
+        for left_index, left in enumerate(routes[0]):
+            for right_index, right in enumerate(routes[1]):
+                shared = edge_sets[0][left_index] & edge_sets[1][right_index]
+                ratios.append(len(shared) / max(1, min(
+                    len(edge_sets[0][left_index]), len(edge_sets[1][right_index]))))
+                shared_edges.update(shared)
+                shared_nodes.update(set(left) & set(right))
+        graph_bridges = bridges()
+        crossings = {node for node in shared_nodes if len(neighbors(node)) >= 3}
+
+        # Current public task routes, independent of robot assignment, expose
+        # same/opposing aisle demand directly.
+        same = opposing = 0
+        for left in routes[0]:
+            left_edges = directed(left)
+            for right in routes[1]:
+                right_edges = directed(right)
+                same = max(same, len(left_edges & right_edges))
+                opposing = max(opposing, len(
+                    left_edges & frozenset((after, before) for before, after in right_edges)))
+        scale = float(max(1, ROWS * COLS - 1))
+        return (
+            float(min(ratios)), float(max(ratios)),
+            len(shared_edges & graph_bridges) / scale,
+            len(crossings) / scale,
+            same / scale, opposing / scale,
+            (len(routes[0][0]) - 1) / scale,
+            (len(routes[1][0]) - 1) / scale,
+        )
 
     def transform_batch(self, observations: np.ndarray) -> np.ndarray:
         values = np.asarray(observations, dtype=np.float32)
@@ -305,10 +456,7 @@ class R41DiagnosticPublicRelationsV9:
             "version": VERSION,
             "base_feature_names": list(self.base_feature_names),
             "derived_feature_names": list(self.derived_feature_names),
-            "v8_contract_sha256": __import__(
-                "backend.training.warehouse_native_common",
-                fromlist=["digest"],
-            ).digest(self.v8.contract()),
+            "v8_contract_sha256": digest(self.v8.contract()),
             "map_shape": [ROWS, COLS],
             "prediction_inputs": ["public_observation"],
             "scene_identifier_input": False,

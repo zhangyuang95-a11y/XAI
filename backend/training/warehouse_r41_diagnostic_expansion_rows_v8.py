@@ -40,7 +40,7 @@ VERSION = "warehouse-r41-diagnostic-expansion-rows.v8-fresh-collection"
 STATUS = "passed_fresh_expansion_rows_reauthentication"
 ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_SOURCE_COLLECTION_REPORT_SHA256 = (
-    "4272f3b1a0c6b975787aad933270559456d2a802c34f91c5580456fbb80a7994"
+    "830c17d120da271ddf4c042b96c470cd71fb4b7596077a0e2131e20478548ee6"
 )
 EXPECTED_SOURCE_ROWS_SHA256 = (
     "7c80beb23c840dcdc71ccf340cbdad87aaced4388c5fe174179202524d2b6bba"

@@ -12,6 +12,9 @@ from backend.training import warehouse_r41_diagnostic_rcpd_v9_outer_once as subj
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 
 
+_FEATURE_NAMES = tuple(f"public.feature.{index}" for index in range(197))
+
+
 def _fp(label: str) -> str:
     return sha256(label.encode("utf-8")).hexdigest()
 
@@ -120,14 +123,37 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
     projection_receipt = tmp_path / "projection_receipt.json"
     _write_json(projection_receipt, _content({"receipt": "projection"}))
 
-    program = {"version": "warehouse-r41-diagnostic-public-tree-program.v9"}
+    program = {
+        "version": "warehouse-r41-diagnostic-public-tree-program.v9",
+        "relations": {"base_feature_names": list(_FEATURE_NAMES)},
+    }
     program_path = tmp_path / "program.json"
     _write_json(program_path, program)
     files = {}
     for name in ("actor", "protocol", "runtime_manifest", "designation",
                  "failed_outer_closeout", "selector_report"):
         path = tmp_path / (name + (".npz" if name == "actor" else ".json"))
-        path.write_bytes((name + "\n").encode("ascii"))
+        if name == "actor":
+            metadata = {
+                "obs_dim": 197,
+                "actions": list(subject.metrics_api.ACTIONS),
+                "feature_names": list(_FEATURE_NAMES),
+                "action_masks": False,
+                "runtime_action_override": False,
+            }
+            np.savez(
+                path, metadata_json=np.asarray(canonical(metadata)),
+                **{
+                    "0.weight": np.zeros((1,), dtype=np.float32),
+                    "0.bias": np.zeros((1,), dtype=np.float32),
+                    "2.weight": np.zeros((1,), dtype=np.float32),
+                    "2.bias": np.zeros((1,), dtype=np.float32),
+                    "4.weight": np.zeros((1,), dtype=np.float32),
+                    "4.bias": np.zeros((1,), dtype=np.float32),
+                },
+            )
+        else:
+            path.write_bytes((name + "\n").encode("ascii"))
         files[name] = path
     closure = subject.runtime_program_sources()
     selector = {"sources": closure}
@@ -135,6 +161,8 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
 
     bindings = {
         "actor_sha256": file_hash(files["actor"]),
+        "actor_feature_names_sha256": digest(list(_FEATURE_NAMES)),
+        "public_feature_contract_sha256": digest(program["relations"]),
         "protocol_sha256": file_hash(files["protocol"]),
         "runtime_manifest_sha256": file_hash(files["runtime_manifest"]),
         "designation_sha256": file_hash(files["designation"]),
@@ -248,6 +276,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
 
 class _FakeProgram:
     action_names = tuple(subject.metrics_api.ACTIONS)
+    base_feature_names = _FEATURE_NAMES
 
     @classmethod
     def from_dict(cls, unused):
@@ -262,6 +291,7 @@ class _FakeProgram:
 class _FakeActor:
     def __init__(self, unused):
         self.obs_dim = 197
+        self.metadata = {"feature_names": list(_FEATURE_NAMES)}
 
 
 def test_source_closure_has_no_protected_final_or_holdout_module():
@@ -306,6 +336,34 @@ def test_runtime_source_drift_fails_before_claim_or_private_outer_read(
             AssertionError("private outer rows opened before source rejection")),
     )
     with pytest.raises(ValueError, match="runtime source closure differs"):
+        subject.build(**args)
+    assert list(permanent.iterdir()) == []
+
+
+def test_program_actor_feature_registry_mismatch_fails_before_claim_or_private_read(
+        tmp_path, monkeypatch):
+    args, _, _, permanent = _fixture(tmp_path, monkeypatch)
+    program_path = Path(args["program_path"])
+    program = json.loads(program_path.read_text("utf-8"))
+    program["relations"]["base_feature_names"][-1] = "scene_fingerprint"
+    _write_json(program_path, program)
+    lock_path = Path(args["candidate_lock_path"])
+    lock = json.loads(lock_path.read_text("utf-8"))
+    lock["bindings"]["program_sha256"] = file_hash(program_path)
+    lock["bindings"]["public_feature_contract_sha256"] = digest(
+        program["relations"])
+    lock["content_sha256"] = digest({
+        key: value for key, value in lock.items() if key != "content_sha256"
+    })
+    _write_json(lock_path, lock)
+    args["expected_candidate_lock_sha256"] = file_hash(lock_path)
+
+    monkeypatch.setattr(
+        subject.collection_api, "load_authenticated_rows",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("private outer rows opened before registry rejection")),
+    )
+    with pytest.raises(ValueError, match="program and Actor feature registries differ"):
         subject.build(**args)
     assert list(permanent.iterdir()) == []
 

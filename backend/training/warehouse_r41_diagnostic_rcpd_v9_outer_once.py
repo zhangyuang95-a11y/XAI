@@ -60,6 +60,7 @@ PREDICTION_BATCH_SIZE = 16_384
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _LOCK_BINDINGS = frozenset((
     "actor_sha256", "protocol_sha256", "runtime_manifest_sha256",
+    "actor_feature_names_sha256", "public_feature_contract_sha256",
     "designation_sha256", "failed_outer_closeout_sha256",
     "fresh_outer_registry_sha256", "outer_hash_projection_sha256",
     "development_rows_sha256", "program_sha256",
@@ -75,6 +76,11 @@ _PRIVATE_ROW_FIELDS = frozenset((
     "observations", "probabilities", "action_indices", "weights",
     "submitted_equal",
 ))
+_ACTOR_MEMBERS = frozenset((
+    "metadata_json.npy", "0.weight.npy", "0.bias.npy", "2.weight.npy",
+    "2.bias.npy", "4.weight.npy", "4.bias.npy",
+))
+MAX_ACTOR_METADATA_BYTES = 4 * 1024 * 1024
 
 
 def contract() -> dict[str, Any]:
@@ -88,6 +94,7 @@ def contract() -> dict[str, Any]:
         "candidate_refit": False,
         "program_mutation": False,
         "candidate_runtime_source_closure_authenticated_before_attempt_anchor": True,
+        "actor_program_feature_registry_authenticated_before_attempt_anchor": True,
         "runtime_action_override": False,
         "protected_final_access": False,
         "formal_ready": False,
@@ -271,6 +278,74 @@ def _validate_candidate_source_closure(
         raise ValueError(
             "V9 candidate runtime source closure differs: " + "; ".join(details))
     return closure, runtime
+
+
+def _actor_feature_registry(
+    path: Path, *, expected_sha256: str,
+) -> tuple[tuple[str, ...], str]:
+    """Read only the bounded metadata member of the already-bound Actor."""
+    expected = _sha(expected_sha256, "Actor SHA-256")
+    if file_hash(path) != expected:
+        raise ValueError("Exact Actor bytes required for feature registry")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            infos = archive.infolist()
+            names = [item.filename for item in infos]
+            if len(names) != len(set(names)) or set(names) != _ACTOR_MEMBERS:
+                raise ValueError("Actor archive schema differs")
+            info = archive.getinfo("metadata_json.npy")
+            if (info.is_dir() or info.file_size <= 0
+                    or info.file_size > MAX_ACTOR_METADATA_BYTES):
+                raise ValueError("Actor metadata member is unsafe")
+            encoded = np.load(BytesIO(archive.read(info)), allow_pickle=False)
+    except (OSError, ValueError, zipfile.BadZipFile, KeyError) as error:
+        raise ValueError("Actor metadata cannot be safely authenticated") from error
+    if file_hash(path) != expected:
+        raise RuntimeError("Actor changed during feature-registry authentication")
+    if encoded.shape != () or encoded.dtype.kind not in "US":
+        raise ValueError("Actor metadata encoding differs")
+    scalar = encoded.item()
+    if isinstance(scalar, bytes):
+        raw = scalar
+    elif type(scalar) is str:
+        raw = scalar.encode("utf-8")
+    else:
+        raise ValueError("Actor metadata encoding differs")
+    metadata = _strict_json_bytes(raw, "Actor metadata")
+    feature_names = metadata.get("feature_names")
+    if (metadata.get("obs_dim") != 197
+            or metadata.get("actions") != list(metrics_api.ACTIONS)
+            or metadata.get("action_masks") is not False
+            or metadata.get("runtime_action_override") is not False
+            or not isinstance(feature_names, list)
+            or len(feature_names) != 197
+            or len(set(feature_names)) != 197
+            or any(type(name) is not str or not name for name in feature_names)):
+        raise ValueError("Actor public feature registry differs")
+    normalized = tuple(feature_names)
+    return normalized, digest(list(normalized))
+
+
+def _authenticate_program_actor_features(
+    *, program_payload: Mapping[str, Any], actor_path: Path,
+    bindings: Mapping[str, str],
+) -> tuple[tuple[str, ...], str]:
+    relations = program_payload.get("relations")
+    program_names = relations.get("base_feature_names") \
+        if isinstance(relations, Mapping) else None
+    if (not isinstance(relations, Mapping)
+            or bindings.get("public_feature_contract_sha256")
+                != digest(dict(relations))
+            or not isinstance(program_names, list) or len(program_names) != 197
+            or len(set(program_names)) != 197
+            or any(type(name) is not str or not name for name in program_names)):
+        raise ValueError("Locked v9 program public feature contract differs")
+    actor_names, feature_sha256 = _actor_feature_registry(
+        actor_path, expected_sha256=bindings["actor_sha256"])
+    if (tuple(program_names) != actor_names
+            or bindings.get("actor_feature_names_sha256") != feature_sha256):
+        raise ValueError("Locked v9 program and Actor feature registries differ")
+    return actor_names, feature_sha256
 
 
 def _registry(path: Path) -> dict[str, Any]:
@@ -591,6 +666,10 @@ def build(
         lock, paths["selector_report"], bindings)
     registry = _registry(paths["fresh_outer_registry"])
     program_payload = _program_payload(paths["program"])
+    actor_feature_names, actor_feature_names_sha256 = (
+        _authenticate_program_actor_features(
+            program_payload=program_payload, actor_path=paths["actor"],
+            bindings=bindings))
     projection, projection_receipt = projection_api.read_saved_projection(
         projection_path=paths["outer_hash_projection"],
         receipt_path=outer_hash_projection_receipt_path,
@@ -653,6 +732,7 @@ def build(
                 Path(outer_hash_projection_receipt_path).expanduser().absolute()),
             "candidate_source_closure_sha256": digest(candidate_sources),
             "runtime_program_source_closure_sha256": digest(runtime_sources),
+            "actor_feature_names_sha256": actor_feature_names_sha256,
             "source_closure_sha256": digest(sources),
         },
         "preflight": preflight,
@@ -683,6 +763,11 @@ def build(
         if tuple(program.action_names) != tuple(metrics_api.ACTIONS):
             raise ValueError("Locked v9 program action registry differs")
         actor = NumPyNativeActor(paths["actor"])
+        if (tuple(actor.metadata.get("feature_names", ())) != actor_feature_names
+                or digest(list(actor_feature_names))
+                    != bindings["actor_feature_names_sha256"]
+                or tuple(program.base_feature_names) != actor_feature_names):
+            raise ValueError("Executing v9 program and Actor feature registries differ")
         rows_api._validate_arrays(
             arrays, actor=actor, train_scenes=[],
             validation_scenes=registry["development_outer"])
@@ -708,6 +793,7 @@ def build(
             "candidate_lock_sha256": file_hash(lock_path),
             "program_sha256": file_hash(paths["program"]),
             "program_content_sha256": digest(program_payload),
+            "actor_feature_names_sha256": actor_feature_names_sha256,
             "outer_rows_sha256": file_hash(rows_path),
             "outer_collection_report_sha256": file_hash(report_path),
             "metrics": metrics,

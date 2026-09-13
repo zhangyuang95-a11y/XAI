@@ -71,7 +71,7 @@ _EARLY_DEVELOPMENT_MEMBERS = (
 )
 _LOCK_BINDINGS = frozenset((
     "actor_sha256", "actor_feature_names_sha256", "protocol_sha256",
-    "runtime_manifest_sha256",
+    "runtime_manifest_sha256", "public_feature_contract_sha256",
     "designation_sha256", "failed_outer_closeout_sha256",
     "fresh_outer_registry_sha256", "outer_hash_projection_sha256",
     "development_rows_sha256", "program_sha256", "selector_report_sha256",

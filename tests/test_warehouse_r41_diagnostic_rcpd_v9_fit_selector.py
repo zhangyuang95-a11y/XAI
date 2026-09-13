@@ -274,7 +274,7 @@ def test_selection_uses_robust_cell_then_explicit_capacity():
     assert selected["selected_config_sha256"] == _fp("c")
 
 
-def test_candidate_lock_is_canonical_and_accepted_by_downstream_schema():
+def test_candidate_lock_is_canonical_and_accepted_by_downstream_schema(tmp_path: Path):
     from backend.training import warehouse_r41_diagnostic_outer_collection_v9 as collection
     from backend.training import warehouse_r41_diagnostic_rcpd_v9_outer_once as outer_once
 
@@ -291,9 +291,14 @@ def test_candidate_lock_is_canonical_and_accepted_by_downstream_schema():
     assert collection._validate_candidate_lock_shape(lock) == {
         name: lock["bindings"][name] for name in collection._REQUIRED_LOCK_BINDINGS
     }
-    # The one-shot scorer's shape validator is file based; its exact schema
-    # constants must still agree before a real outer can ever be opened.
     assert outer_once.LOCK_SCHEMA == subject.LOCK_SCHEMA
+    assert outer_once._LOCK_BINDINGS.issubset(lock["bindings"])
+    path = tmp_path / "candidate_lock.json"
+    _json(path, lock)
+    _, checked, checked_bindings = outer_once._candidate_lock(
+        path, expected_sha256=file_hash(path))
+    assert checked == lock
+    assert checked_bindings == lock["bindings"]
 
 
 def test_source_closure_and_build_have_no_outer_or_final_private_reader():

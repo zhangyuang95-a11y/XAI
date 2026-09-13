@@ -1,6 +1,6 @@
-"""Reauthenticate the fresh expansion-only diagnostic v8 row collection.
+"""Reauthenticate retained fit rows and the fresh diagnostic v8 outer rows.
 
-The source collection is rebuilt from the current program-blind development
+The source collection is rebuilt from the current identity-frozen development
 registry. This producer authenticates that collector receipt, replays its
 fixed collection schedule, checks disjointness from the exact prior rows, and
 freezes the exact pair for the RCPD fitter. It never reads final-test data.
@@ -19,7 +19,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from backend.training import warehouse_r41_diagnostic_development_expansion_v8 as expansion_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v8_outer_split as expansion_api
 from backend.training import warehouse_r41_diagnostic_expansion_collection_v8 as collection_api
 from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_binding
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_binding

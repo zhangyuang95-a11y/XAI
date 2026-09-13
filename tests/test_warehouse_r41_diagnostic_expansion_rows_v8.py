@@ -38,6 +38,7 @@ def test_contract_pins_exact_historical_rows_and_has_no_final_input():
 def test_source_closure_has_no_release_or_final_producer():
     sources = subject.producer_sources()
     assert sources
+    assert "backend/training/warehouse_r41_diagnostic_rcpd_v8_outer_split.py" in sources
     assert "scripts/build_warehouse_r41_diagnostic_designation_v2.py" in sources
     forbidden = ("admission", "release", "preflight", "final_once",
                  "fresh_final_holdout", "explanation_audit")

@@ -36,7 +36,7 @@ from backend.training.warehouse_diagnostic_source_closure import local_source_ha
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 from backend.training import warehouse_r41_diagnostic_rcpd as legacy
 from backend.training import warehouse_r41_diagnostic_rcpd_v7 as v7
-from backend.training import warehouse_r41_diagnostic_development_expansion_v8 as expansion_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v8_outer_split as expansion_api
 from backend.training import warehouse_r41_diagnostic_expansion_rows_v8 as expansion_rows_api
 from backend.training import warehouse_r41_diagnostic_prior_rows_v8 as prior_rows_api
 from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_binding

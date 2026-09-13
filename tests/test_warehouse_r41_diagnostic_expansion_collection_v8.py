@@ -1,13 +1,33 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import inspect
+import json
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from backend.training import warehouse_r41_diagnostic_expansion_collection_v8 as subject
-from backend.training.warehouse_native_common import digest
+from backend.training.warehouse_native_common import digest, file_hash
+
+
+ROOT = Path(__file__).resolve().parents[1]
+FRESH_OUTER = ROOT / (
+    "output/warehouse_native/"
+    "r41_diagnostic_rcpd_v8_fresh_outer_registry_v1_20260913"
+)
+FRESH_REGISTRY = FRESH_OUTER / "development_expansion.json"
+FRESH_REPORT = FRESH_OUTER / "report.json"
+MANIFEST = ROOT / (
+    "output/warehouse_native/r41_diagnostic_conflict_scenes_v3_20260912/"
+    "manifest.json"
+)
+DESIGNATION = ROOT / (
+    "output/warehouse_native/"
+    "r41_diagnostic_designation_v2_sourceclosure2_20260913/"
+    "diagnostic_actor_designation.json"
+)
 
 
 def test_collection_contract_and_api_fix_the_only_allowed_population():
@@ -25,6 +45,46 @@ def test_collection_contract_and_api_fix_the_only_allowed_population():
     assert value["prior_rows_access"] is False
     assert value["retired_holdout_access"] is False
     assert value["historical_final_access"] is False
+    assert value["fresh_outer_identity_frozen_before_actor_collection"] is True
+    assert value["previously_exposed_outer_reused"] is False
+
+
+def test_collector_pins_and_validates_the_fresh_outer_registry():
+    assert subject.expansion_api.VERSION == (
+        "warehouse-r41-diagnostic-rcpd-v8-fresh-outer-registry.v1")
+    assert file_hash(FRESH_REGISTRY) == subject.EXPECTED_EXPANSION_REGISTRY_SHA256
+    assert file_hash(FRESH_REPORT) == subject.EXPECTED_EXPANSION_REPORT_SHA256
+    registry = json.loads(FRESH_REGISTRY.read_text(encoding="utf-8"))
+    report = json.loads(FRESH_REPORT.read_text(encoding="utf-8"))
+    assert report["version"] == registry["version"] == subject.expansion_api.VERSION
+    assert report["status"] == registry["status"] == subject.expansion_api.STATUS
+    assert report["registry_file_sha256"] == file_hash(FRESH_REGISTRY)
+    assert report["registry_content_sha256"] == registry["content_sha256"]
+
+    class Actor:
+        artifact_sha256 = registry["bindings"]["actor_sha256"]
+        metadata = {"actor_parameters_sha256": registry["bindings"][
+            "actor_parameters_sha256"]}
+
+    prior_report = {"bindings": {"development_supplement_file_sha256":
+        subject.expansion_api.EXPECTED_PREVIOUS_DEVELOPMENT_SHA256}}
+    fit, outer = subject.rows_api._validate_expansion_registry(
+        registry, registry_path=FRESH_REGISTRY, actor=Actor(),
+        manifest_path=MANIFEST, designation_path=DESIGNATION,
+        prior_report=prior_report)
+    assert len(fit) == 128
+    assert len(outer) == 64
+
+    tampered = deepcopy(registry)
+    tampered["information_boundary"]["outer_actor_rows_collected"] = True
+    tampered["content_sha256"] = digest({
+        key: value for key, value in tampered.items()
+        if key != "content_sha256"})
+    with pytest.raises(ValueError, match="Fresh outer registry boundary"):
+        subject.rows_api._validate_expansion_registry(
+            tampered, registry_path=FRESH_REGISTRY, actor=Actor(),
+            manifest_path=MANIFEST, designation_path=DESIGNATION,
+            prior_report=prior_report)
 
 
 def test_collection_rejects_old_row_or_schedule_arguments_before_execution():
@@ -39,6 +99,7 @@ def test_collection_rejects_old_row_or_schedule_arguments_before_execution():
 def test_source_closure_contains_collector_and_no_final_producer():
     sources = subject.producer_sources()
     assert "backend/training/warehouse_r41_diagnostic_expansion_collection_v8.py" in sources
+    assert "backend/training/warehouse_r41_diagnostic_rcpd_v8_outer_split.py" in sources
     assert "backend/training/warehouse_r41_diagnostic_rcpd_v7.py" in sources
     forbidden = (
         "fresh_final_holdout", "explanation_audit", "final_once",

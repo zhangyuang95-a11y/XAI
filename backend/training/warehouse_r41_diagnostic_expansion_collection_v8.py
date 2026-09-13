@@ -1,9 +1,9 @@
-"""Collect the fixed program-blind development expansion for diagnostic v8.
+"""Collect retained fit rows plus the identity-frozen fresh outer for v8.
 
 This producer is deliberately separate from the RCPD fitter and from every
 final-test component.  It consumes only the frozen Actor/protocol/designation,
 the development replay projection of the fixed manifest, and the exact
-program-blind expansion registry.  Its collection schedule is fixed here and
+fresh-outer registry.  Its collection schedule is fixed here and
 cannot be selected by a caller.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from backend.training import warehouse_r41_diagnostic_development_expansion_v8 as expansion_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v8_outer_split as expansion_api
 from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_binding
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_binding
 from backend.training import warehouse_r41_diagnostic_rcpd_v7 as v7
@@ -46,10 +46,10 @@ FIT_SCENE_COUNT = 128
 VALIDATION_SCENE_OFFSET = 320
 VALIDATION_SCENE_COUNT = 64
 EXPECTED_EXPANSION_REGISTRY_SHA256 = (
-    "a687fd3fd4b145ed432af77f3ce26726d4e328df4875e4d69fc3ed351ad98748"
+    "bf5346f9dd70ff02773b3335efd36018eae1b9abf4da1c035108a89ec5bcb923"
 )
 EXPECTED_EXPANSION_REPORT_SHA256 = (
-    "be0c009847ea227710ad7ff26afbfc8c414b0e74f78505bbd2805ef0a6311d2a"
+    "742c45a3c970e7e0cce1c35b9e43934b9e9efcc77a52dc43b5089307db112fc5"
 )
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _REPORT_FIELDS = {
@@ -94,8 +94,11 @@ _ACCOUNTING_FIELDS = {
 def contract() -> dict[str, Any]:
     return {
         "version": VERSION,
-        "purpose": "fresh program-blind expansion-only public-observation rows",
-        "input_population": "fixed development expansion registry only",
+        "purpose": (
+            "retained fit-supplement plus fresh identity-frozen outer "
+            "public-observation rows"
+        ),
+        "input_population": "fixed fresh-outer development registry only",
         "fit_collection": {
             "scene_offset": FIT_SCENE_OFFSET,
             "scene_count": FIT_SCENE_COUNT,
@@ -110,6 +113,8 @@ def contract() -> dict[str, Any]:
         "partners": list(v7.PARTNERS),
         "source_layout": "expansion_only",
         "validation_wins_observation_deduplication": True,
+        "fresh_outer_identity_frozen_before_actor_collection": True,
+        "previously_exposed_outer_reused": False,
         "actor_probabilities_and_actions_recomputed": True,
         "runtime_action_override": False,
         "program_access": False,

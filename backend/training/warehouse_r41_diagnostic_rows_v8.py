@@ -15,7 +15,7 @@ import zipfile
 
 import numpy as np
 
-from backend.training import warehouse_r41_diagnostic_development_expansion_v8 as expansion_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v8_outer_split as expansion_api
 from backend.training import warehouse_r41_diagnostic_rcpd as legacy
 from backend.training import warehouse_r41_diagnostic_rcpd_v7 as v7
 from backend.training.warehouse_native_common import digest, file_hash
@@ -177,7 +177,13 @@ def _validate_expansion_registry(
             or bindings.get("designation_file_sha256") != file_hash(designation_path)
             or bindings.get("previous_development_file_sha256")
                 != prior_report["bindings"]["development_supplement_file_sha256"]
-            or bindings.get("contract_sha256") != digest(expansion_api.contract())):
+            or bindings.get("contract_sha256") != digest(expansion_api.contract())
+            or bindings.get("source_rows_file_sha256")
+                != expansion_api.EXPECTED_SOURCE_ROWS_SHA256
+            or bindings.get("source_expansion_file_sha256")
+                != expansion_api.EXPECTED_SOURCE_EXPANSION_SHA256
+            or bindings.get("manifest_validation_file_sha256")
+                != expansion_api.EXPECTED_MANIFEST_VALIDATION_SHA256):
         raise ValueError("Development expansion bindings differ")
     fit = value.get("fit_supplement")
     validation = value.get("development_validation")
@@ -195,11 +201,74 @@ def _validate_expansion_registry(
                     or _HEX.fullmatch(str(row.get("fingerprint"))) is None
                     or type(row.get("id")) is not str
                     or type(row.get("family_id")) is not str
+                    or (split_name == "development_validation" and (
+                        type(row.get("seed")) is not int
+                        or type(row.get("batch_index")) is not int
+                        or row.get("family_id") not in expansion_api.FAMILY_IDS))
                     or row["fingerprint"] in seen):
                 raise ValueError("Development expansion scene registry differs")
             seen.add(str(row["fingerprint"]))
     if len(seen) != len(fit) + len(validation):
         raise ValueError("Development expansion scene identities overlap")
+    selected = value.get("selected_outer_identities")
+    exposed = value.get("previously_exposed_validation_scene_fingerprints")
+    statistics = value.get("statistics")
+    boundary = value.get("information_boundary")
+    expected_selected = [
+        {
+            "batch_index": row.get("batch_index"),
+            "family_id": row.get("family_id"),
+            "seed": row.get("seed"),
+            "fingerprint": row.get("fingerprint"),
+        }
+        for row in validation
+    ]
+    actual_family_counts = dict(sorted(Counter(
+        str(row["family_id"]) for row in validation).items()))
+    if (selected != expected_selected
+            or not isinstance(exposed, list)
+            or len(exposed) != expansion_api.OLD_OUTER_SCENE_COUNT
+            or any(type(row) is not str or _HEX.fullmatch(row) is None
+                   for row in exposed)
+            or len(set(exposed)) != len(exposed)
+            or set(exposed) & {str(row["fingerprint"]) for row in validation}
+            or not isinstance(statistics, Mapping)
+            or statistics.get("fresh_outer_scenes")
+                != expansion_api.VALIDATION_SCENES
+            or statistics.get("fresh_outer_family_counts")
+                != actual_family_counts
+            or actual_family_counts != expansion_api.FAMILY_QUOTAS
+            or any(statistics.get(name) != 0 for name in (
+                "fresh_outer_source_rows_scene_overlap",
+                "fresh_outer_old_outer_scene_overlap",
+                "fresh_outer_prior_expansion_trace_overlap",
+                "fresh_outer_excluded_seed_overlap",
+                "fresh_outer_manifest_registered_scene_overlap",
+            ))
+            or not isinstance(boundary, Mapping)
+            or boundary.get(
+                "candidate_identity_selection_frozen_before_materialisation")
+                is not True
+            or boundary.get(
+                "candidate_population_disjoint_from_all_manifest_base_splits_authenticated")
+                is not True
+            or boundary.get("source_rows_fields_read") != ["scene_fingerprints"]
+            or any(boundary.get(name) is not False for name in (
+                "source_rows_observations_read",
+                "source_rows_action_labels_read",
+                "source_rows_probabilities_read",
+                "source_fit_payload_used_for_selection",
+                "actor_loaded_or_inferred",
+                "observations_generated",
+                "workload_screen_or_replay_run",
+                "candidate_program_or_metrics_read",
+                "full_manifest_json_parsed",
+                "protected_final_access",
+                "outer_actor_rows_collected",
+                "outer_candidate_scored",
+            ))
+            or boundary.get("old_outer_previously_exposed") is not True):
+        raise ValueError("Fresh outer registry boundary differs")
     return deepcopy(fit), deepcopy(validation)
 
 

@@ -162,6 +162,7 @@ def test_active_v8_chain_uses_fixed_designation_and_frozen_manifest_closure():
     assert "backend/training/warehouse_r41_diagnostic_prior_rows_v8.py" in sources
     assert "backend/training/warehouse_r41_diagnostic_expansion_rows_v8.py" in sources
     assert "backend/training/warehouse_r41_diagnostic_rows_v8.py" in sources
+    assert "backend/training/warehouse_r41_diagnostic_rcpd_v8_outer_split.py" in sources
     assert "scripts/build_warehouse_r41_diagnostic_designation_v2.py" in sources
     assert "env/warehouse/transition_outcome.py" in sources
     assert not [path for path in sources if any(token in path for token in (

@@ -661,6 +661,10 @@ def test_contract_freezes_fit_only_search_and_has_no_outer_or_final_metric_input
         "fit_population": v8.NARROW_PAIR_ENDPOINT_FIT,
         "mix_weight": 1.0,
     }
+    assert value["frozen_model_change"]["base"] == {
+        "model": subject.BASE_MODEL,
+        "depth_bounded_from_frozen_source": True,
+    }
     assert value["selection"]["primary"] == (
         "maximum minimum margin across all nine v8 gates")
     assert value["development_diagnosis_sha256"] == subject.digest(
@@ -675,7 +679,7 @@ def test_candidate_registry_freezes_pair_narrow_capacity_and_component_mixes():
     assert [row["mix_weights"]["shared_charger"] for row in candidates] == [
         0.0, 0.25, 0.5, 1.0]
     for row in candidates:
-        assert row["models"]["base"] == source["models"]["base"]
+        assert row["models"]["base"] == subject.BASE_MODEL
         assert row["models"]["narrow_passage"] == subject.NARROW_MODEL
         assert row["models"]["shared_pickup"] == source["models"]["shared_pickup"]
         assert row["models"]["shared_charger"] == subject.CHARGER_MODEL

@@ -46,7 +46,7 @@ from backend.warehouse_r41_diagnostic_public_tree_program_v8 import (
 from env.warehouse_native.policy import NumPyNativeActor
 
 
-VERSION = "warehouse-r41-diagnostic-rcpd-v8-fit-selector.v2"
+VERSION = "warehouse-r41-diagnostic-rcpd-v8-fit-selector.v3"
 SCOPE_VERSION = "warehouse-r41-diagnostic-rcpd-v8-fit-scope.v1"
 STATUS_SELECTED = "passed_fit_only_inner_selection"
 STATUS_FAILED = "failed_fit_only_inner_selection"
@@ -76,13 +76,23 @@ GATE_THRESHOLDS = {
     "direction_shared_pickup": v8.MIN_DIRECTION,
     "direction_shared_charger": v8.MIN_DIRECTION,
 }
-NARROW_MODEL = {
+BASE_MODEL = {
     "learning_rate": 0.1,
+    "max_iter": 70,
+    "max_leaf_nodes": 63,
+    "min_samples_leaf": 10,
+    "l2_regularization": 0.1,
+    "max_depth": 12,
+    "max_bins": 255,
+    "random_state": 941,
+}
+NARROW_MODEL = {
+    "learning_rate": 0.15,
     "max_iter": 100,
-    "max_leaf_nodes": 127,
+    "max_leaf_nodes": 63,
     "min_samples_leaf": 5,
     "l2_regularization": 0.1,
-    "max_depth": None,
+    "max_depth": 16,
     "max_bins": 255,
     "random_state": 947,
 }
@@ -92,7 +102,7 @@ CHARGER_MODEL = {
     "max_leaf_nodes": 63,
     "min_samples_leaf": 10,
     "l2_regularization": 0.1,
-    "max_depth": None,
+    "max_depth": 12,
     "max_bins": 255,
     "random_state": 967,
 }
@@ -102,7 +112,7 @@ CHARGER_MODEL = {
 # additional selector input.  In particular, no fresh outer or final Actor row
 # was collected or scored while making this choice.
 DEVELOPMENT_DIAGNOSIS = {
-    "version": "warehouse-r41-diagnostic-rcpd-v8-fit-diagnosis.v1",
+    "version": "warehouse-r41-diagnostic-rcpd-v8-fit-diagnosis.v2",
     "failed_selector_report_sha256": (
         "3baff28bd2befdf9d55a3200d5706c05d6c8fa4b176057ae85a7827c55ccf4af"
     ),
@@ -173,10 +183,39 @@ DEVELOPMENT_DIAGNOSIS = {
             },
             "passed": True,
         },
+        {
+            "name": "all_components_depth_bounded_100_63_lr015",
+            "models": {
+                "base": deepcopy(BASE_MODEL),
+                "narrow_passage": deepcopy(NARROW_MODEL),
+                "shared_charger": deepcopy(CHARGER_MODEL),
+            },
+            "mix_weights": {
+                "narrow_passage": 1.0,
+                "shared_pickup": 1.0,
+                "shared_charger": 0.5,
+            },
+            "maximum_tree_depth": 16,
+            "nine_gate_minimum_margin": 0.007550482879719045,
+            "metrics": {
+                "overall": 0.9178786803831146,
+                "nonwait": 0.9119813610870839,
+                "critical_narrow_passage": 0.8989248330412543,
+                "critical_shared_pickup": 0.9144213613958693,
+                "critical_shared_charger": 0.9294392016487688,
+                "direction_overall": 0.8641679378223287,
+                "direction_narrow_passage": 0.857550482879719,
+                "direction_shared_pickup": 0.8650944592367187,
+                "direction_shared_charger": 0.8703583904774227,
+            },
+            "passed": True,
+        },
     ],
     "decision": {
         "narrow_fit_population": deepcopy(v8.NARROW_PAIR_ENDPOINT_FIT),
+        "base_model": deepcopy(BASE_MODEL),
         "narrow_model": deepcopy(NARROW_MODEL),
+        "charger_model": deepcopy(CHARGER_MODEL),
         "fixed_narrow_mix_weight": 1.0,
         "fixed_pickup_mix_weight": 1.0,
         "charger_mix_candidates": list(MIX_CANDIDATES),
@@ -344,6 +383,10 @@ def contract() -> dict[str, Any]:
             "episode_or_intervention_pair_crosses_split": False,
         },
         "frozen_model_change": {
+            "base": {
+                "model": deepcopy(BASE_MODEL),
+                "depth_bounded_from_frozen_source": True,
+            },
             "narrow_passage": {
                 "model": deepcopy(NARROW_MODEL),
                 "fit_population": deepcopy(v8.NARROW_PAIR_ENDPOINT_FIT),
@@ -357,7 +400,6 @@ def contract() -> dict[str, Any]:
                 "model": deepcopy(CHARGER_MODEL),
                 "mix_candidates": list(MIX_CANDIDATES),
             },
-            "base_model_unchanged": True,
             "pair_pool_multiplier_unchanged": True,
             "action_factor_unchanged": True,
         },
@@ -613,6 +655,7 @@ def candidate_configs(source_config: Mapping[str, Any]) -> list[dict[str, Any]]:
     configs = []
     for weight in MIX_CANDIDATES:
         item = deepcopy(source)
+        item["models"]["base"] = deepcopy(BASE_MODEL)
         item["models"]["narrow_passage"] = deepcopy(NARROW_MODEL)
         item["models"]["shared_charger"] = deepcopy(CHARGER_MODEL)
         item["mix_weights"] = {
@@ -638,7 +681,7 @@ def _config_registry(configs: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             for mix, config in zip(MIX_CANDIDATES, normalized)
         ],
         "selection_fields": [
-            "models.narrow_passage", "models.shared_charger",
+            "models.base", "models.narrow_passage", "models.shared_charger",
             "mix_weights.narrow_passage", "mix_weights.shared_pickup",
             "mix_weights.shared_charger",
         ],
@@ -1642,6 +1685,7 @@ def authenticate_embedded_selected_config_snapshot(
             or config["mix_weights"]["shared_charger"] != float(mix)
             or config["mix_weights"]["narrow_passage"] != 1.0
             or config["mix_weights"]["shared_pickup"] != 1.0
+            or config["models"]["base"] != BASE_MODEL
             or config["models"]["narrow_passage"] != NARROW_MODEL
             or config["models"]["shared_charger"] != CHARGER_MODEL
             or config["pair_pool_multiplier"] != 16.0
@@ -2335,7 +2379,7 @@ __all__ = [
     "VERSION", "SCOPE_VERSION", "STATUS_SELECTED", "STATUS_FAILED",
     "MIX_CANDIDATES", "INNER_HOLDOUT_SCENES",
     "INNER_HOLDOUT_FAMILY_QUOTAS", "INNER_ORDER_SALT", "GATE_THRESHOLDS",
-    "NARROW_MODEL", "CHARGER_MODEL", "DEVELOPMENT_DIAGNOSIS",
+    "BASE_MODEL", "NARROW_MODEL", "CHARGER_MODEL", "DEVELOPMENT_DIAGNOSIS",
     "FROZEN_SOURCE_V8_REPORT_SHA256", "FROZEN_FIT_SCOPE_SHA256",
     "FROZEN_SOURCE_CONFIG",
     "contract", "producer_sources", "normalize_scope", "candidate_configs",

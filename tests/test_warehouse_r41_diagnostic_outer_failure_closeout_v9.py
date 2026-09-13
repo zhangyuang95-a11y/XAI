@@ -256,3 +256,51 @@ def test_anchor_tamper_is_rejected(tmp_path, monkeypatch):
         subject.read_saved_closeout(
             published, expected_closeout_sha256=file_hash(published),
             permanent_registry=permanent)
+
+
+def test_saved_closeout_survives_later_source_evolution(tmp_path, monkeypatch):
+    """A frozen receipt authenticates history, not the current checkout."""
+    _, _, args = _fixture(tmp_path, monkeypatch)
+    permanent = tmp_path / "permanent"
+    permanent.mkdir()
+    output = tmp_path / "closeout"
+    receipt = subject.build(
+        **args, permanent_registry=permanent, output=output)
+    published = output / subject.ANCHOR_FILENAME
+
+    monkeypatch.setattr(
+        subject, "producer_sources",
+        lambda: {"later-source.py": _fp("later source bytes")})
+
+    saved = subject.read_saved_closeout(
+        published, expected_closeout_sha256=file_hash(published),
+        permanent_registry=permanent)
+    assert saved == receipt
+
+
+def test_saved_closeout_rejects_invalid_frozen_source_receipt(
+        tmp_path, monkeypatch):
+    _, _, args = _fixture(tmp_path, monkeypatch)
+    permanent = tmp_path / "permanent"
+    permanent.mkdir()
+    output = tmp_path / "closeout"
+    receipt = subject.build(
+        **args, permanent_registry=permanent, output=output)
+    published = output / subject.ANCHOR_FILENAME
+    anchor = permanent / receipt["campaign_key"] / subject.ANCHOR_FILENAME
+
+    changed = json.loads(published.read_text(encoding="utf-8"))
+    changed["producer_sources"] = {"subject.py": "not-a-sha256"}
+    changed["producer_sources_sha256"] = digest(changed["producer_sources"])
+    changed["content_sha256"] = digest({
+        key: value for key, value in changed.items()
+        if key != "content_sha256"
+    })
+    raw = (canonical(changed) + "\n").encode("utf-8")
+    published.write_bytes(raw)
+    anchor.write_bytes(raw)
+
+    with pytest.raises(ValueError, match="semantics differ"):
+        subject.read_saved_closeout(
+            published, expected_closeout_sha256=file_hash(published),
+            permanent_registry=permanent)

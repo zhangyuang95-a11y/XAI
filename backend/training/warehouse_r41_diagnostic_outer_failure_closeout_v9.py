@@ -698,10 +698,16 @@ def build(*, permanent_registry: str | Path, output: str | Path,
 
 
 def _validate_saved_receipt(value: Mapping[str, Any]) -> None:
+    frozen_sources = value.get("producer_sources")
     if (value.get("version") != VERSION or value.get("status") != STATUS
             or not _content_valid(value) or value.get("formal_ready") is not False
+            or not isinstance(frozen_sources, Mapping) or not frozen_sources
+            or any(type(path) is not str or not path
+                   or type(source_sha256) is not str
+                   or _HEX.fullmatch(source_sha256) is None
+                   for path, source_sha256 in frozen_sources.items())
             or value.get("producer_sources_sha256")
-                != digest(value.get("producer_sources"))):
+                != digest(dict(frozen_sources))):
         raise ValueError("Saved failed-outer closeout semantics differ")
     source = value.get("source")
     disposition = value.get("disposition")
@@ -830,15 +836,12 @@ def read_saved_closeout(
     path: str | Path, *, expected_closeout_sha256: str,
     permanent_registry: str | Path,
 ) -> dict[str, Any]:
-    sources = producer_sources()
     closeout_path, raw, receipt = _strict_json(
         path, "failed outer closeout",
         expected_sha256=expected_closeout_sha256)
     if closeout_path.name != ANCHOR_FILENAME:
         raise ValueError("Canonical failure_closeout.json filename required")
     _validate_saved_receipt(receipt)
-    if receipt.get("producer_sources") != sources:
-        raise ValueError("Failed-outer closeout source closure differs")
     permanent = _canonical_directory(permanent_registry, "Permanent closeout registry")
     campaign_key = _sha(receipt.get("campaign_key"), "failed outer campaign key")
     campaign_directory = _canonical_directory(
@@ -850,8 +853,7 @@ def read_saved_closeout(
             or file_hash(entries[0]) != _sha(
                 expected_closeout_sha256, "failed outer closeout SHA-256")):
         raise ValueError("Permanent failed-outer closeout anchor differs")
-    if (producer_sources() != sources
-            or closeout_path.read_bytes() != raw):
+    if closeout_path.read_bytes() != raw:
         raise RuntimeError("Failed-outer closeout changed during read")
     return deepcopy(receipt)
 

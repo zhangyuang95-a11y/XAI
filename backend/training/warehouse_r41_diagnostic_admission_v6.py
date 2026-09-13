@@ -1144,7 +1144,24 @@ def package_contract() -> dict[str, Any]:
         "requires_external_admission_sha256": True,
         "uses_compact_seven_scene_runtime_manifest": True,
         "source_full_manifest_remains_hash_bound": True,
-        "program_serialization": "explicit_json_axis_threshold_trees",
+        "program_serialization": (
+            "xz_preorder_exact_threshold_affine_int16_leaf_v1"),
+        "audited_full_program_remains_admission_evidence": True,
+        "compact_program_is_deterministically_derived": True,
+        "compact_program_exact_topology": True,
+        "compact_program_exact_float64_thresholds": True,
+        "compact_program_leaf_encoding": (
+            "per_component_affine_int16_with_exact_audited_leaf_patches"),
+        "compact_program_parity_sources": [
+            "final_rcpd_rows.observations",
+            "explanation_audit_evidence.ordinary_observations",
+            "explanation_audit_evidence.pair_wait_observations",
+            "explanation_audit_evidence.pair_changed_observations",
+        ],
+        "compact_program_exact_action_parity_required": True,
+        "compact_program_probability_error_recorded": True,
+        "compact_program_trace_preserved": True,
+        "compact_program_controls_runtime": False,
         "pickle_allowed": False, "behavior_performance_waiver_scope": ["behavior_performance"],
         "runtime_action_override": False, "data_persistent": False,
         "formal_ready": False, "formal_sample_eligible": False}

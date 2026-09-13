@@ -11,6 +11,7 @@ import subprocess
 from types import SimpleNamespace
 import zipfile
 
+import numpy as np
 import pytest
 
 from backend.training import warehouse_r41_diagnostic_admission_v6 as admission
@@ -911,6 +912,30 @@ def test_bilingual_question_contract_is_strict():
         admission._validate_bilingual_question_bank(payload)
 
 
+def test_release_compaction_reads_only_required_public_observations(tmp_path):
+    rows = tmp_path / "rows.npz"
+    evidence = tmp_path / "evidence.npz"
+    np.savez(rows, observations=np.zeros((2, 197), dtype=np.float32),
+             private_logits=np.ones((2, 5), dtype=np.float32))
+    np.savez(
+        evidence,
+        ordinary_observations=np.ones((3, 197), dtype=np.float32),
+        pair_wait_observations=np.full((1, 197), 2, dtype=np.float32),
+        pair_changed_observations=np.full((1, 197), 3, dtype=np.float32),
+        hidden_state=np.ones((1, 7), dtype=np.float32),
+    )
+    result = release._compact_audit_observations(rows, evidence)
+    assert set(result) == {
+        "final_rcpd_rows", "final_audit_ordinary",
+        "final_audit_pair_wait", "final_audit_pair_changed",
+    }
+    assert sum(len(value) for value in result.values()) == 7
+    assert all(value.dtype == np.dtype("float32") for value in result.values())
+    np.savez(rows, observations=np.zeros((2, 198), dtype=np.float32))
+    with pytest.raises(ValueError, match="unreadable"):
+        release._compact_audit_observations(rows, evidence)
+
+
 def test_release_assembly_freezes_exact_admitted_question_and_tutorial_bytes(
         tmp_path, monkeypatch):
     components = {}
@@ -988,7 +1013,10 @@ def test_portable_manifest_binds_every_packaged_artifact_to_admitted_identity():
         "source_full_manifest_version", "source_conflict_validation_version",
         "diagnostic_contract_version", "program_action_names",
         "program_classes", "program_routes", "program_mix_weights",
-        "program_aggregation",
+        "program_aggregation", "compact_program_audit_row_count",
+        "compact_program_maximum_absolute_probability_error",
+        "compact_program_mean_absolute_probability_error",
+        "compact_program_patch_count",
     }
     identities = {
         name: "b" * 64 for name in release._IDENTITY_FIELDS - scalar
@@ -1006,6 +1034,10 @@ def test_portable_manifest_binds_every_packaged_artifact_to_admitted_identity():
         "play_scene_fingerprints": [format(index + 1, "x") * 64 for index in range(7)],
         "uses_terminal_designated_actor": True,
         "action_override_count": 0,
+        "compact_program_audit_row_count": 4,
+        "compact_program_maximum_absolute_probability_error": 0.001,
+        "compact_program_mean_absolute_probability_error": 0.0001,
+        "compact_program_patch_count": 0,
         "program_action_names": ["UP", "DOWN", "LEFT", "RIGHT", "WAIT"],
         "program_classes": [0, 1, 2, 3, 4],
         "program_routes": [{
@@ -1021,7 +1053,7 @@ def test_portable_manifest_binds_every_packaged_artifact_to_admitted_identity():
         "actor": identities["actor_sha256"],
         "protocol": identities["protocol_file_sha256"],
         "runtime_manifest": identities["runtime_manifest_file_sha256"],
-        "program": identities["program_sha256"],
+        "program": identities["compact_program_sha256"],
         "question_bank": parent["question_bank_sha256"],
         "tutorial": parent["tutorial_sha256"],
     }
@@ -1085,6 +1117,7 @@ def test_release_limits_and_exact_v8_source_closure(tmp_path):
         release._package_bytes(base64_path=too_large_b64)
     sources = release.release_sources()
     assert "backend/warehouse_r41_diagnostic_public_tree_program_v8.py" in sources
+    assert "backend/warehouse_r41_diagnostic_compact_public_tree_v8.py" in sources
     assert "backend/warehouse_r41_diagnostic_boosted_tree.py" in sources
     assert "backend/training/warehouse_r41_diagnostic_admission_v6.py" in sources
     assert "backend/training/warehouse_r41_diagnostic_input_snapshot_v8.py" in sources
@@ -1113,6 +1146,8 @@ def test_release_limits_and_exact_v8_source_closure(tmp_path):
     assert contract["maximum_base64_bytes"] == 1_000_000
     assert contract["archive_compression"] == "ZIP_BZIP2"
     assert contract["archive_compresslevel"] == 9
+    assert contract["compact_program_exact_action_parity_required"] is True
+    assert contract["compact_program_trace_preserved"] is True
     assert contract["pickle_allowed"] is False
 
 
@@ -1608,7 +1643,7 @@ def test_release_schema_binds_final_once_and_v8_program_identity():
             "program_mix_weights", "program_aggregation"} <= release._IDENTITY_FIELDS
     assert release.ARCHIVE_WHITELIST == {
         "manifest.json", "artifacts/actor.npz", "artifacts/training_protocol.json",
-        "artifacts/runtime_manifest.json", "artifacts/program.json",
+        "artifacts/runtime_manifest.json", "artifacts/program.ctree.xz",
         "artifacts/question_bank.json", "artifacts/tutorial.json"}
     assert {"public_feature_contract_sha256", "public_feature_registry_sha256",
             "program_complexity_sha256", "final_once_identity_sha256",

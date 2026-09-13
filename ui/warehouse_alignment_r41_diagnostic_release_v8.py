@@ -21,6 +21,8 @@ import tempfile
 from typing import Any, Mapping
 import zipfile
 
+import numpy as np
+
 from backend.warehouse_r41_diagnostic_online_runtime import (
     CONFLICT_VALIDATION_VERSION,
     FULL_SCENE_MANIFEST_VERSION,
@@ -37,6 +39,7 @@ from backend.warehouse_r41_diagnostic_public_tree_program_v8 import (
     GROUPS as PROGRAM_GROUPS,
     R41DiagnosticPublicTreeProgramV8,
 )
+from backend import warehouse_r41_diagnostic_compact_public_tree_v8 as compact_tree_api
 from env.warehouse_native.r41_diagnostic_conflict import (
     CONFLICT_FAMILIES_SHA256,
     DIAGNOSTIC_CONFLICT_GRAPH_SHA256,
@@ -64,7 +67,7 @@ ARTIFACT_PATHS = {
     "actor": "artifacts/actor.npz",
     "protocol": "artifacts/training_protocol.json",
     "runtime_manifest": "artifacts/runtime_manifest.json",
-    "program": "artifacts/program.json",
+    "program": "artifacts/program.ctree.xz",
     "question_bank": "artifacts/question_bank.json",
     "tutorial": "artifacts/tutorial.json",
 }
@@ -78,9 +81,7 @@ MAX_ARTIFACT_BYTES = {
     "actor": 2_000_000,
     "protocol": 2_000_000,
     "runtime_manifest": 8_000_000,
-    # The explicit-tree source can be larger before ZIP compression.  The
-    # externally enforced 750 KB ZIP / 1 MB Base64 limits remain decisive.
-    "program": 64 * 1024 * 1024,
+    "program": compact_tree_api.MAX_COMPRESSED_BYTES,
     "question_bank": 16_000_000,
     "tutorial": 2_000_000,
 }
@@ -156,6 +157,12 @@ _IDENTITY_FIELDS = frozenset((
     "program_action_names", "program_classes", "program_routes",
     "program_mix_weights", "program_aggregation", "parent_runtime_signature",
     "runtime_manifest_signature", "parent_explainer_signature",
+    "compact_program_sha256", "runtime_program_sha256",
+    "runtime_program_content_sha256", "runtime_explainer_signature",
+    "compact_program_audit_sha256", "compact_program_audit_row_count",
+    "compact_program_maximum_absolute_probability_error",
+    "compact_program_mean_absolute_probability_error",
+    "compact_program_patch_count",
     "parent_question_bank_signature", "question_bank_private_items_sha256",
     "question_bank_public_items_sha256", "runtime_manifest_file_sha256",
     "runtime_manifest_content_sha256", "runtime_manifest_semantic_sha256",
@@ -448,6 +455,7 @@ def release_sources() -> dict[str, str]:
         ROOT / "backend/warehouse_r41_diagnostic_boosted_tree.py",
         ROOT / "backend/warehouse_r41_diagnostic_public_features_v8.py",
         ROOT / "backend/warehouse_r41_diagnostic_public_tree_program_v8.py",
+        ROOT / "backend/warehouse_r41_diagnostic_compact_public_tree_v8.py",
         ROOT / "backend/warehouse_alignment_online_explanation.py",
         ROOT / "core/policy_contracts.py",
         ROOT / "core/program.py",
@@ -689,7 +697,10 @@ def _validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
         "source_full_manifest_version", "source_conflict_validation_version",
         "diagnostic_contract_version", "program_action_names",
         "program_classes", "program_routes", "program_mix_weights",
-        "program_aggregation",
+        "program_aggregation", "compact_program_audit_row_count",
+        "compact_program_maximum_absolute_probability_error",
+        "compact_program_mean_absolute_probability_error",
+        "compact_program_patch_count",
     }
     for name in _IDENTITY_FIELDS - scalar_exceptions:
         _sha(identities.get(name), "identity " + name)
@@ -716,7 +727,21 @@ def _validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
             or any(_HEX.fullmatch(value) is None
                    for value in identities["play_scene_fingerprints"])
             or identities.get("uses_terminal_designated_actor") is not True
-            or identities.get("action_override_count") != 0):
+            or identities.get("action_override_count") != 0
+            or type(identities.get("compact_program_audit_row_count")) is not int
+            or identities["compact_program_audit_row_count"] <= 0
+            or type(identities.get("compact_program_patch_count")) is not int
+            or identities["compact_program_patch_count"] < 0
+            or type(identities.get(
+                "compact_program_maximum_absolute_probability_error"))
+                not in (int, float)
+            or not 0.0 <= float(identities[
+                "compact_program_maximum_absolute_probability_error"]) <= 1.0
+            or type(identities.get(
+                "compact_program_mean_absolute_probability_error"))
+                not in (int, float)
+            or not 0.0 <= float(identities[
+                "compact_program_mean_absolute_probability_error"]) <= 1.0):
         raise ValueError("Diagnostic portable play/authority identity differs")
     if (identities.get("runtime_manifest_file_sha256")
             != parent.get("portable_runtime_manifest_sha256")):
@@ -750,7 +775,7 @@ def _validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
         "actor": identities["actor_sha256"],
         "protocol": identities["protocol_file_sha256"],
         "runtime_manifest": parent["portable_runtime_manifest_sha256"],
-        "program": identities["program_sha256"],
+        "program": identities["compact_program_sha256"],
         "question_bank": parent["question_bank_sha256"],
         "tutorial": parent["tutorial_sha256"],
     }
@@ -904,6 +929,49 @@ def _write_material(root: Path, artifacts: Mapping[str, bytes]) -> dict[str, Pat
     return paths
 
 
+def _write_runtime_program(root: Path, raw: bytes) -> Path:
+    """Write decoded runtime JSON outside the packaged artifact registry."""
+
+    target = root / "runtime-program.json"
+    descriptor = os.open(
+        target, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0), 0o600,
+    )
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+    return target
+
+
+def _compact_audit_observations(
+        final_rows_path: Path, evidence_path: Path) -> dict[str, np.ndarray]:
+    """Read only the admitted public observations used for runtime parity."""
+
+    result: dict[str, np.ndarray] = {}
+    specifications = (
+        (final_rows_path, {"final_rcpd_rows": "observations"}),
+        (evidence_path, {
+            "final_audit_ordinary": "ordinary_observations",
+            "final_audit_pair_wait": "pair_wait_observations",
+            "final_audit_pair_changed": "pair_changed_observations",
+        }),
+    )
+    for path, fields in specifications:
+        try:
+            with np.load(path, allow_pickle=False) as archive:
+                if any(name not in archive.files for name in fields.values()):
+                    raise ValueError("Compact parity evidence fields differ")
+                for public_name, field in fields.items():
+                    value = archive[field]
+                    if (value.dtype != np.dtype("float32")
+                            or value.ndim != 2 or value.shape[1] != 197
+                            or not len(value) or not np.isfinite(value).all()):
+                        raise ValueError("Compact parity observations differ")
+                    result[public_name] = np.ascontiguousarray(value)
+        except (OSError, ValueError, zipfile.BadZipFile) as error:
+            raise ValueError("Compact parity evidence is unreadable") from error
+    return result
+
+
 def _runtime(paths: Mapping[str, Path],
              identities: Mapping[str, Any]) -> R41DiagnosticOnlineAlignmentRuntime:
     runtime_manifest = _parse_json(
@@ -961,7 +1029,7 @@ def load_online_release(*, expected_package_sha256: str,
         raw, expected_package_sha256=expected_package_sha256,
         expected_manifest_sha256=expected_manifest_sha256,
     )
-    for name in ("protocol", "runtime_manifest", "program", "question_bank", "tutorial"):
+    for name in ("protocol", "runtime_manifest", "question_bank", "tutorial"):
         _reject_sensitive(
             _parse_json(artifacts[name], "diagnostic archived " + name),
             "diagnostic archived " + name,
@@ -971,6 +1039,33 @@ def load_online_release(*, expected_package_sha256: str,
     try:
         paths = _write_material(root, artifacts)
         identities, parent = manifest["identities"], manifest["parent"]
+        compact_program, compact_header = compact_tree_api.decode_program(
+            artifacts["program"],
+            expected_compact_sha256=identities["compact_program_sha256"],
+            expected_source_program_sha256=identities["program_sha256"],
+        )
+        runtime_program_raw = compact_tree_api.program_json_bytes(compact_program)
+        if (sha256(runtime_program_raw).hexdigest()
+                != identities["runtime_program_sha256"]
+                or digest(compact_program.to_dict())
+                    != identities["runtime_program_content_sha256"]
+                or digest(compact_header["audit"])
+                    != identities["compact_program_audit_sha256"]
+                or compact_header["audit"]["row_count"]
+                    != identities["compact_program_audit_row_count"]
+                or compact_header["audit"]["patch_count"]
+                    != identities["compact_program_patch_count"]
+                or compact_header["audit"][
+                    "maximum_absolute_probability_error"]
+                    != identities[
+                        "compact_program_maximum_absolute_probability_error"]
+                or compact_header["audit"]["mean_absolute_probability_error"]
+                    != identities[
+                        "compact_program_mean_absolute_probability_error"]):
+            raise ValueError("Diagnostic compact public-tree identity differs")
+        _reject_sensitive(
+            compact_program.to_dict(), "diagnostic decoded runtime program")
+        runtime_program_path = _write_runtime_program(root, runtime_program_raw)
         runtime_manifest = _parse_json(
             artifacts["runtime_manifest"], "diagnostic runtime manifest")
         play, tutorial_scene = _validate_runtime_manifest(runtime_manifest, parent)
@@ -1004,11 +1099,11 @@ def load_online_release(*, expected_package_sha256: str,
             if environment.state.frame != 0:
                 raise ValueError("Diagnostic play scene does not start at frame zero")
         explainer = R41DiagnosticOnlineAlignmentExplainer(
-            paths["program"],
-            expected_program_sha256=identities["program_sha256"],
+            runtime_program_path,
+            expected_program_sha256=identities["runtime_program_sha256"],
             runtime=runtime,
         )
-        if explainer.signature != identities["parent_explainer_signature"]:
+        if explainer.signature != identities["runtime_explainer_signature"]:
             raise ValueError("Diagnostic explainer identity differs")
         explainer._assert_current(runtime)
         program = explainer.program
@@ -1024,7 +1119,8 @@ def load_online_release(*, expected_package_sha256: str,
             "metadata": program.metadata,
             "complexity": program.complexity(),
         }
-        if (explainer.program_content_sha256 != identities["program_content_sha256"]
+        if (explainer.program_content_sha256
+                    != identities["runtime_program_content_sha256"]
                 or program.action_names != tuple(identities["program_action_names"])
                 or program.base_program.classes != tuple(identities["program_classes"])
                 or list(program.routes) != identities["program_routes"]
@@ -1091,7 +1187,9 @@ def load_online_release(*, expected_package_sha256: str,
             "runtime_manifest_signature": runtime.runtime_manifest_signature,
             "protocol_sha256": runtime.protocol_sha256,
             "scenario_manifest_sha256": digest(runtime_manifest),
-            "program_sha256": explainer.program_sha256,
+            "program_sha256": identities["program_sha256"],
+            "runtime_program_sha256": explainer.program_sha256,
+            "compact_program_sha256": identities["compact_program_sha256"],
             "explainer_signature": explainer.signature,
             "question_bank_signature": bank.signature,
             "tutorial_signature": identities["tutorial_signature"],
@@ -1122,7 +1220,8 @@ def load_online_release(*, expected_package_sha256: str,
             "package_sha256": expected_package_sha256,
             "runtime_signature": runtime.signature,
             "runtime_manifest_signature": runtime.runtime_manifest_signature,
-            "program_sha256": explainer.program_sha256,
+            "program_sha256": identities["program_sha256"],
+            "runtime_program_sha256": explainer.program_sha256,
             "question_bank_signature": bank.signature,
             "tutorial_signature": identities["tutorial_signature"],
             "sources": source_binding,
@@ -1181,7 +1280,8 @@ def assemble_from_admitted_components(*,
         raise ValueError("Diagnostic package contract differs from admission")
     packaged_component_names = (
         "actor", "protocol", "conflict_manifest", "selected_scenes",
-        "final_rcpd_program", "question_bank", "tutorial",
+        "final_rcpd_program", "final_rcpd_rows", "explanation_audit_evidence",
+        "question_bank", "tutorial",
     )
     artifact_registry = admission.get("artifacts")
     if (not isinstance(artifact_registry, Mapping)
@@ -1250,17 +1350,36 @@ def _assemble_from_frozen_admitted_components(*,
     protocol_raw = paths["protocol"].read_bytes()
     question_raw = paths["question_bank"].read_bytes()
     tutorial_raw = paths["tutorial"].read_bytes()
-    program_raw = paths["final_rcpd_program"].read_bytes()
+    source_program_raw = paths["final_rcpd_program"].read_bytes()
+    compact_observations = _compact_audit_observations(
+        paths["final_rcpd_rows"], paths["explanation_audit_evidence"])
+    compact_program_raw, compact_report = compact_tree_api.encode_program(
+        source_program_raw, compact_observations)
+    compact_program, compact_header = compact_tree_api.decode_program(
+        compact_program_raw,
+        expected_compact_sha256=compact_report["compact_file_sha256"],
+        expected_source_program_sha256=bindings["program_sha256"],
+    )
+    runtime_program_raw = compact_tree_api.program_json_bytes(compact_program)
     artifacts = {
         "actor": paths["actor"].read_bytes(),
         "protocol": protocol_raw,
         "runtime_manifest": runtime_manifest_raw,
-        "program": program_raw,
+        "program": compact_program_raw,
         "question_bank": question_raw,
         "tutorial": tutorial_raw,
     }
     with tempfile.TemporaryDirectory(prefix="warehouse-r41-diagnostic-assemble-") as tmp:
         material = _write_material(Path(tmp), artifacts)
+        source_program_path = _write_runtime_program(
+            Path(tmp), source_program_raw)
+        runtime_program_path = Path(tmp) / "runtime-compact-program.json"
+        descriptor = os.open(
+            runtime_program_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            | getattr(os, "O_NOFOLLOW", 0), 0o600,
+        )
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(runtime_program_raw); stream.flush(); os.fsync(stream.fileno())
         # Runtime construction precedes final identities because its distinct
         # serving-manifest signature is itself part of the package identity.
         content = deepcopy(runtime_manifest); content_sha = content.pop("content_sha256")
@@ -1278,8 +1397,14 @@ def _assemble_from_frozen_admitted_components(*,
         runtime.verify_binding()
         if runtime.signature != bindings["runtime_signature"]:
             raise ValueError("Diagnostic full and portable runtime identities differ")
+        source_explainer = R41DiagnosticOnlineAlignmentExplainer(
+            source_program_path, expected_program_sha256=bindings["program_sha256"],
+            runtime=runtime,
+        )
+        source_explainer._assert_current(runtime)
         explainer = R41DiagnosticOnlineAlignmentExplainer(
-            material["program"], expected_program_sha256=bindings["program_sha256"],
+            runtime_program_path,
+            expected_program_sha256=sha256(runtime_program_raw).hexdigest(),
             runtime=runtime,
         )
         explainer._assert_current(runtime)
@@ -1301,6 +1426,16 @@ def _assemble_from_frozen_admitted_components(*,
             "protocol_content_sha256": bindings["protocol_content_sha256"],
             "program_sha256": bindings["program_sha256"],
             "program_content_sha256": bindings["program_content_sha256"],
+            "compact_program_sha256": compact_report["compact_file_sha256"],
+            "runtime_program_sha256": sha256(runtime_program_raw).hexdigest(),
+            "runtime_program_content_sha256": digest(compact_program.to_dict()),
+            "compact_program_audit_sha256": digest(compact_header["audit"]),
+            "compact_program_audit_row_count": compact_header["audit"]["row_count"],
+            "compact_program_maximum_absolute_probability_error":
+                compact_header["audit"]["maximum_absolute_probability_error"],
+            "compact_program_mean_absolute_probability_error":
+                compact_header["audit"]["mean_absolute_probability_error"],
+            "compact_program_patch_count": compact_header["audit"]["patch_count"],
             "program_identity_sha256": bindings["program_identity_sha256"],
             "public_feature_contract_sha256": bindings[
                 "public_feature_contract_sha256"],
@@ -1314,7 +1449,8 @@ def _assemble_from_frozen_admitted_components(*,
             "program_aggregation": explainer.program.to_dict()["aggregation"],
             "parent_runtime_signature": runtime.signature,
             "runtime_manifest_signature": runtime.runtime_manifest_signature,
-            "parent_explainer_signature": explainer.signature,
+            "parent_explainer_signature": source_explainer.signature,
+            "runtime_explainer_signature": explainer.signature,
             "parent_question_bank_signature": question["source_bank_signature"],
             "question_bank_private_items_sha256": question[
                 "private_items_sha256"],
@@ -1364,10 +1500,21 @@ def _assemble_from_frozen_admitted_components(*,
         }
         if (identities["parent_explainer_signature"]
                 != bindings["explainer_signature"]
+                or identities["runtime_explainer_signature"] != explainer.signature
                 or identities["parent_question_bank_signature"]
                     != bindings["question_bank_signature"]
                 or identities["tutorial_signature"] != bindings["tutorial_signature"]
+                or source_explainer.program_content_sha256
+                    != identities["program_content_sha256"]
                 or explainer.program_content_sha256
+                    != identities["runtime_program_content_sha256"]
+                or sha256(runtime_program_raw).hexdigest()
+                    != identities["runtime_program_sha256"]
+                or sha256(compact_program_raw).hexdigest()
+                    != identities["compact_program_sha256"]
+                or compact_header["source"]["file_sha256"]
+                    != identities["program_sha256"]
+                or compact_header["source"]["content_sha256"]
                     != identities["program_content_sha256"]
                 or digest(explainer.program.relations.contract())
                     != identities["public_feature_contract_sha256"]
@@ -1523,7 +1670,7 @@ def _assemble_from_frozen_admitted_components(*,
     }
     for label, value in (("protocol", _parse_json(protocol_raw, "protocol")),
                          ("runtime manifest", runtime_manifest),
-                         ("program", _parse_json(program_raw, "program")),
+                         ("program", _parse_json(source_program_raw, "program")),
                          ("question bank", question), ("tutorial", tutorial),
                          ("admission", admission)):
         _reject_sensitive(value, "diagnostic " + label)

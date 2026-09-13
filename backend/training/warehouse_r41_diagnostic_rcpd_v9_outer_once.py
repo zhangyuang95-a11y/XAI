@@ -62,9 +62,31 @@ _LOCK_BINDINGS = frozenset((
     "actor_sha256", "protocol_sha256", "runtime_manifest_sha256",
     "actor_feature_names_sha256", "public_feature_contract_sha256",
     "designation_sha256", "failed_outer_closeout_sha256",
-    "fresh_outer_registry_sha256", "outer_hash_projection_sha256",
-    "development_rows_sha256", "program_sha256",
+    "fresh_outer_registry_sha256", "fresh_outer_registry_report_sha256",
+    "outer_hash_projection_sha256", "outer_hash_projection_receipt_sha256",
+    "development_rows_sha256", "candidate_grid_sha256", "program_sha256",
     "selector_report_sha256", "source_closure_sha256",
+))
+_REGISTRY_FIELDS = frozenset((
+    "version", "status", "contract", "bindings", "development_outer",
+    "selected_outer_identities", "exclusion_counts", "exclusion_digests",
+    "statistics", "information_boundary", "program_access",
+    "program_predictions_access", "action_labels_access",
+    "probabilities_access", "final_audit_rows_access", "formal_ready",
+    "producer_sources", "producer_sources_sha256", "content_sha256",
+))
+_REGISTRY_REPORT_FIELDS = frozenset((
+    "version", "status", "registry_file_sha256", "registry_content_sha256",
+    "bindings", "selection", "statistics", "information_boundary",
+    "producer_sources", "producer_sources_sha256", "formal_ready",
+    "content_sha256",
+))
+_REGISTRY_REPORT_SELECTION_FIELDS = frozenset((
+    "salt", "family_quotas", "selected_identity_sha256",
+    "fixed_remaining_identity_sha256", "exclusion_digests",
+))
+_PUBLIC_IDENTITY_FIELDS = frozenset((
+    "batch_index", "family_id", "seed", "fingerprint",
 ))
 _SAFE_ROW_FIELDS = frozenset((
     "observation_hashes", "scene_fingerprints", "episode_ids", "frames",
@@ -215,6 +237,12 @@ def _candidate_lock(
                    or _HEX.fullmatch(child) is None
                    for name, child in bindings.items())):
         raise ValueError("V9 candidate lock semantics differ")
+    try:
+        strict_bindings = collection_api._validate_candidate_lock_shape(value)
+    except ValueError as error:
+        raise ValueError("V9 candidate lock semantics differ") from error
+    if strict_bindings != dict(bindings):
+        raise ValueError("V9 candidate lock semantics differ")
     return lock_path, value, dict(bindings)
 
 
@@ -225,7 +253,9 @@ def _verify_lock_files(bindings: Mapping[str, str], **paths: str | Path) -> dict
         "designation": "designation_sha256",
         "failed_outer_closeout": "failed_outer_closeout_sha256",
         "fresh_outer_registry": "fresh_outer_registry_sha256",
+        "fresh_outer_registry_report": "fresh_outer_registry_report_sha256",
         "outer_hash_projection": "outer_hash_projection_sha256",
+        "outer_hash_projection_receipt": "outer_hash_projection_receipt_sha256",
         "development_rows": "development_rows_sha256",
         "program": "program_sha256", "selector_report": "selector_report_sha256",
     }
@@ -348,28 +378,90 @@ def _authenticate_program_actor_features(
     return actor_names, feature_sha256
 
 
-def _registry(path: Path) -> dict[str, Any]:
-    value = _strict_json_bytes(path.read_bytes(), "fresh v9 outer registry")
+def _registry_bundle(
+    registry_path: Path, registry_report_path: Path,
+    *, bindings: Mapping[str, str],
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Authenticate the fresh-outer identity bundle without Actor inference."""
+    value = _strict_json_bytes(
+        registry_path.read_bytes(), "fresh v9 outer registry")
+    report = _strict_json_bytes(
+        registry_report_path.read_bytes(), "fresh v9 outer registry report")
     scenes = value.get("development_outer")
-    if (value.get("version") != registry_api.VERSION
+    identities = value.get("selected_outer_identities")
+    sources = registry_api.producer_sources()
+    if (set(value) != _REGISTRY_FIELDS
+            or value.get("version") != registry_api.VERSION
             or value.get("status") != registry_api.STATUS
             or not _content_valid(value)
             or not isinstance(scenes, list)
             or len(scenes) != projection_api.SCENE_COUNT
+            or not isinstance(identities, list)
+            or len(identities) != projection_api.SCENE_COUNT
             or value.get("program_access") is not False
             or value.get("program_predictions_access") is not False
             or value.get("action_labels_access") is not False
             or value.get("probabilities_access") is not False
             or value.get("final_audit_rows_access") is not False
-            or value.get("formal_ready") is not False):
+            or value.get("formal_ready") is not False
+            or value.get("producer_sources") != sources
+            or value.get("producer_sources_sha256") != digest(sources)):
         raise ValueError("Fresh v9 outer registry semantics differ")
-    fingerprints = [row.get("fingerprint") if isinstance(row, Mapping) else None
-                    for row in scenes]
-    if (len(set(fingerprints)) != projection_api.SCENE_COUNT
-            or any(type(item) is not str or _HEX.fullmatch(item) is None
-                   for item in fingerprints)):
-        raise ValueError("Fresh v9 outer registry identities differ")
-    return value
+    public_identities = []
+    seen: set[tuple[int, str]] = set()
+    for index, (scene, identity) in enumerate(zip(scenes, identities)):
+        if (not isinstance(scene, Mapping) or not isinstance(identity, Mapping)
+                or set(identity) != _PUBLIC_IDENTITY_FIELDS):
+            raise ValueError("Fresh v9 outer registry identities differ")
+        public = {name: identity[name] for name in (
+            "batch_index", "family_id", "seed", "fingerprint")}
+        if (type(public["batch_index"]) is not int
+                or public["batch_index"] < 0
+                or type(public["seed"]) is not int
+                or type(public["family_id"]) is not str
+                or public["family_id"] not in registry_api.FAMILY_IDS
+                or type(public["fingerprint"]) is not str
+                or _HEX.fullmatch(public["fingerprint"]) is None
+                or scene.get("id") != f"diagnostic_v9_fresh_outer_{index:04d}"
+                or scene.get("seed") != public["seed"]
+                or scene.get("family_id") != public["family_id"]
+                or scene.get("fingerprint") != public["fingerprint"]
+                or (public["seed"], public["fingerprint"]) in seen):
+            raise ValueError("Fresh v9 outer registry identities differ")
+        seen.add((public["seed"], public["fingerprint"]))
+        public_identities.append(public)
+    selected_identity_sha256 = digest(public_identities)
+    selection = report.get("selection")
+    if (set(report) != _REGISTRY_REPORT_FIELDS
+            or report.get("version") != registry_api.VERSION
+            or report.get("status") != registry_api.STATUS
+            or report.get("formal_ready") is not False
+            or not _content_valid(report)
+            or report.get("registry_file_sha256")
+                != bindings["fresh_outer_registry_sha256"]
+            or report.get("registry_content_sha256") != value["content_sha256"]
+            or report.get("bindings") != value.get("bindings")
+            or report.get("statistics") != value.get("statistics")
+            or report.get("information_boundary")
+                != value.get("information_boundary")
+            or report.get("producer_sources") != sources
+            or report.get("producer_sources_sha256") != digest(sources)
+            or not isinstance(selection, Mapping)
+            or set(selection) != _REGISTRY_REPORT_SELECTION_FIELDS
+            or selection.get("salt") != registry_api.SELECTION_SALT
+            or selection.get("family_quotas") != registry_api.FAMILY_QUOTAS
+            or selection.get("exclusion_digests")
+                != value.get("exclusion_digests")
+            or selection.get("selected_identity_sha256")
+                != selected_identity_sha256
+            or type(selection.get("fixed_remaining_identity_sha256")) is not str
+            or _HEX.fullmatch(selection["fixed_remaining_identity_sha256"]) is None):
+        raise ValueError("Fresh v9 outer registry/report identity differs")
+    if (file_hash(registry_path) != bindings["fresh_outer_registry_sha256"]
+            or file_hash(registry_report_path)
+                != bindings["fresh_outer_registry_report_sha256"]):
+        raise RuntimeError("Fresh v9 outer registry bundle changed during read")
+    return value, report, selected_identity_sha256
 
 
 def _program_payload(path: Path) -> dict[str, Any]:
@@ -519,6 +611,8 @@ def _collection_report(
         "failed_outer_closeout_sha256": bindings[
             "failed_outer_closeout_sha256"],
         "fresh_outer_registry_sha256": bindings["fresh_outer_registry_sha256"],
+        "fresh_outer_registry_report_sha256": bindings[
+            "fresh_outer_registry_report_sha256"],
         "outer_hash_projection_sha256": bindings["outer_hash_projection_sha256"],
         "outer_hash_projection_receipt_sha256": projection_receipt_sha256,
         "development_rows_sha256": bindings["development_rows_sha256"],
@@ -544,6 +638,9 @@ def _collection_report(
             or collection.get("all_actor_probabilities_and_actions_exact") is not True
             or not isinstance(boundary, Mapping)
             or boundary.get("candidate_lock_authenticated_before_outer_replay") is not True
+            or boundary.get(
+                "selector_report_and_passed_gates_authenticated_before_outer_replay")
+                is not True
             or boundary.get("labels_and_probabilities_collected_only_after_candidate_lock")
                 is not True
             or boundary.get("outer_metrics_or_candidate_score_computed") is not False
@@ -594,12 +691,18 @@ def _load_private_rows(path: Path, *, expected_sha256: str) -> dict[str, np.ndar
 
 def _attempt_identity(
     *, bindings: Mapping[str, str], projection: Mapping[str, Any],
-    registry: Mapping[str, Any],
+    registry: Mapping[str, Any], registry_report: Mapping[str, Any],
+    selected_identity_sha256: str,
 ) -> tuple[str, dict[str, str]]:
     values = {
         "scheme": VERSION + ".outer-identity.v1",
         "fresh_outer_registry_sha256": bindings["fresh_outer_registry_sha256"],
         "fresh_outer_registry_content_sha256": registry["content_sha256"],
+        "fresh_outer_registry_report_sha256": bindings[
+            "fresh_outer_registry_report_sha256"],
+        "fresh_outer_registry_report_content_sha256": registry_report[
+            "content_sha256"],
+        "selected_identity_sha256": selected_identity_sha256,
         "outer_hash_projection_sha256": bindings["outer_hash_projection_sha256"],
         "outer_hash_projection_content_sha256": projection["content_sha256"],
         "ordered_replay_sha256": projection["projection"]["ordered_replay_sha256"],
@@ -636,6 +739,7 @@ def build(
     runtime_manifest_path: str | Path, designation_path: str | Path,
     failed_outer_closeout_path: str | Path,
     fresh_outer_registry_path: str | Path,
+    fresh_outer_registry_report_path: str | Path,
     outer_hash_projection_path: str | Path,
     outer_hash_projection_receipt_path: str | Path,
     expected_outer_hash_projection_receipt_sha256: str,
@@ -654,17 +758,31 @@ def build(
         raise RuntimeError("Protected final/holdout source entered outer scorer closure")
     lock_path, lock, bindings = _candidate_lock(
         candidate_lock_path, expected_sha256=expected_candidate_lock_sha256)
+    if (_sha(expected_outer_hash_projection_receipt_sha256,
+             "outer hash projection receipt")
+            != bindings["outer_hash_projection_receipt_sha256"]):
+        raise ValueError(
+            "Expected outer projection receipt differs from candidate lock")
     paths = _verify_lock_files(
         bindings, actor=actor_path, protocol=protocol_path,
         runtime_manifest=runtime_manifest_path, designation=designation_path,
         failed_outer_closeout=failed_outer_closeout_path,
         fresh_outer_registry=fresh_outer_registry_path,
+        fresh_outer_registry_report=fresh_outer_registry_report_path,
         outer_hash_projection=outer_hash_projection_path,
+        outer_hash_projection_receipt=outer_hash_projection_receipt_path,
         development_rows=development_rows_path, program=program_path,
         selector_report=selector_report_path)
+    collection_api.authenticate_locked_candidate_selector(
+        lock=lock, selector_report_path=paths["selector_report"],
+        expected_selector_report_sha256=bindings["selector_report_sha256"],
+        expected_program_sha256=bindings["program_sha256"],
+    )
     candidate_sources, runtime_sources = _validate_candidate_source_closure(
         lock, paths["selector_report"], bindings)
-    registry = _registry(paths["fresh_outer_registry"])
+    registry, registry_report, selected_identity_sha256 = _registry_bundle(
+        paths["fresh_outer_registry"], paths["fresh_outer_registry_report"],
+        bindings=bindings)
     program_payload = _program_payload(paths["program"])
     actor_feature_names, actor_feature_names_sha256 = (
         _authenticate_program_actor_features(
@@ -672,15 +790,20 @@ def build(
             bindings=bindings))
     projection, projection_receipt = projection_api.read_saved_projection(
         projection_path=paths["outer_hash_projection"],
-        receipt_path=outer_hash_projection_receipt_path,
+        receipt_path=paths["outer_hash_projection_receipt"],
         expected_projection_sha256=bindings["outer_hash_projection_sha256"],
-        expected_receipt_sha256=expected_outer_hash_projection_receipt_sha256)
+        expected_receipt_sha256=bindings["outer_hash_projection_receipt_sha256"])
     if (projection["identity"]["registry_file_sha256"]
             != bindings["fresh_outer_registry_sha256"]
             or projection["identity"]["registry_content_sha256"]
                 != registry["content_sha256"]
+            or projection["identity"]["selected_identity_sha256"]
+                != selected_identity_sha256
             or projection_receipt["bindings"]["actor_sha256"]
-                != bindings["actor_sha256"]):
+                != bindings["actor_sha256"]
+            or projection_receipt["bindings"].get(
+                "fresh_outer_registry_report_sha256")
+                != bindings["fresh_outer_registry_report_sha256"]):
         raise ValueError("Candidate lock, registry, and projection identity differ")
     projection_copy_path = _authenticate_file(
         outer_hash_projection_copy_path, "copied outer hash projection",
@@ -701,14 +824,16 @@ def build(
         expected_projection_copy_sha256=(
             expected_outer_hash_projection_copy_sha256),
         projection_receipt_sha256=file_hash(
-            Path(outer_hash_projection_receipt_path).expanduser().absolute()))
+            paths["outer_hash_projection_receipt"]))
     preflight = _preflight_outer_rows(
         rows_path=rows_path, rows_sha256=file_hash(rows_path),
         projection=projection, development_rows_path=paths["development_rows"],
         development_rows_sha256=bindings["development_rows_sha256"],
         registry=registry)
     attempt_key, attempt_inputs = _attempt_identity(
-        bindings=bindings, projection=projection, registry=registry)
+        bindings=bindings, projection=projection, registry=registry,
+        registry_report=registry_report,
+        selected_identity_sha256=selected_identity_sha256)
     permanent = _directory(permanent_registry, "permanent outer-attempt registry")
     destination = Path(output).expanduser().absolute()
     parent = _directory(destination.parent, "outer result output parent")
@@ -728,8 +853,13 @@ def build(
             "outer_collection_report_content_sha256": collection_report[
                 "content_sha256"],
             "outer_rows_sha256": file_hash(rows_path),
+            "fresh_outer_registry_report_sha256": file_hash(
+                paths["fresh_outer_registry_report"]),
+            "fresh_outer_registry_report_content_sha256": registry_report[
+                "content_sha256"],
+            "selected_identity_sha256": selected_identity_sha256,
             "outer_hash_projection_receipt_sha256": file_hash(
-                Path(outer_hash_projection_receipt_path).expanduser().absolute()),
+                paths["outer_hash_projection_receipt"]),
             "candidate_source_closure_sha256": digest(candidate_sources),
             "runtime_program_source_closure_sha256": digest(runtime_sources),
             "actor_feature_names_sha256": actor_feature_names_sha256,
@@ -824,6 +954,10 @@ def build(
         if (producer_sources() != sources
                 or file_hash(lock_path) != expected_candidate_lock_sha256
                 or file_hash(paths["program"]) != bindings["program_sha256"]
+                or file_hash(paths["fresh_outer_registry_report"])
+                    != bindings["fresh_outer_registry_report_sha256"]
+                or file_hash(paths["outer_hash_projection_receipt"])
+                    != bindings["outer_hash_projection_receipt_sha256"]
                 or file_hash(rows_path) != expected_outer_rows_sha256
                 or file_hash(report_path)
                     != expected_outer_collection_report_sha256):
@@ -908,6 +1042,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--designation", required=True)
     parser.add_argument("--failed-outer-closeout", required=True)
     parser.add_argument("--fresh-outer-registry", required=True)
+    parser.add_argument("--fresh-outer-registry-report", required=True)
     parser.add_argument("--outer-hash-projection", required=True)
     parser.add_argument("--outer-hash-projection-receipt", required=True)
     parser.add_argument("--expected-outer-hash-projection-receipt-sha256", required=True)
@@ -931,6 +1066,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         designation_path=args.designation,
         failed_outer_closeout_path=args.failed_outer_closeout,
         fresh_outer_registry_path=args.fresh_outer_registry,
+        fresh_outer_registry_report_path=args.fresh_outer_registry_report,
         outer_hash_projection_path=args.outer_hash_projection,
         outer_hash_projection_receipt_path=args.outer_hash_projection_receipt,
         expected_outer_hash_projection_receipt_sha256=(

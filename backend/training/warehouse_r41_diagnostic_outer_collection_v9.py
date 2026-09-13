@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -25,6 +26,7 @@ from backend.training import warehouse_r41_diagnostic_designation_v2_binding as 
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_binding
 from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v9 as projection_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v7 as rows_v7
+from backend.training import warehouse_r41_diagnostic_rcpd_v8 as metrics_api
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 from backend.training.warehouse_r41_diagnostic_input_snapshot_v8 import ImmutableInputSnapshot
@@ -34,6 +36,14 @@ VERSION = "warehouse-r41-diagnostic-outer-collection.v9"
 SCHEMA_VERSION = "warehouse_r41_diagnostic_rcpd_v9_outer_collection_v1"
 STATUS = "collected_unscored"
 CANDIDATE_LOCK_VERSION = "warehouse_r41_diagnostic_rcpd_v9_candidate_lock_v1"
+SELECTOR_VERSION = "warehouse-r41-diagnostic-rcpd-v9-fit-selector.v1"
+SELECTOR_STATUS = "locked_development_candidate_pending_fresh_outer"
+SELECTOR_GRID_VERSION = "warehouse-r41-diagnostic-rcpd-v9-candidate-grid.v1"
+CV_SALTS = (
+    "warehouse-r41-v9-blocked-cv-a-20260913",
+    "warehouse-r41-v9-blocked-cv-b-20260913",
+)
+CV_FOLDS = 3
 REPORT_NAME = "collection_report.json"
 ROWS_NAME = "rows.npz"
 PROJECTION_COPY_NAME = projection_api.PROJECTION_NAME
@@ -42,11 +52,87 @@ MAX_NPZ_BYTES = 512 * 1024 * 1024
 MAX_NPZ_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _REQUIRED_LOCK_BINDINGS = frozenset((
-    "actor_sha256", "protocol_sha256", "runtime_manifest_sha256",
+    "actor_sha256", "actor_feature_names_sha256", "protocol_sha256",
+    "runtime_manifest_sha256", "public_feature_contract_sha256",
     "designation_sha256", "failed_outer_closeout_sha256",
-    "fresh_outer_registry_sha256", "outer_hash_projection_sha256",
-    "development_rows_sha256", "program_sha256", "selector_report_sha256",
+    "fresh_outer_registry_sha256", "fresh_outer_registry_report_sha256",
+    "outer_hash_projection_sha256", "outer_hash_projection_receipt_sha256",
+    "development_rows_sha256", "candidate_grid_sha256", "program_sha256",
+    "selector_report_sha256", "source_closure_sha256",
+))
+_LOCK_FIELDS = frozenset((
+    "schema_version", "status", "formal_ready", "bindings",
+    "source_closure", "selection", "information_boundary", "content_sha256",
+))
+_LOCK_SELECTION_FIELDS = frozenset((
+    "selected_config_sha256", "two_salt_three_fold_development_cv_passed",
+    "fresh_outer_scored",
+))
+_LOCK_BOUNDARY_FIELDS = frozenset((
+    "candidate_locked_before_full_fresh_outer_collection",
+    "fresh_outer_hashes_used_only_for_validation_wins",
+    "fresh_outer_actions_or_probabilities_read", "protected_final_access",
+    "runtime_action_override", "formal_ready",
+))
+_SELECTOR_FIELDS = frozenset((
+    "version", "status", "contract", "bindings", "development",
+    "candidate_grid", "selection", "final_fit", "sources",
+    "information_boundary", "formal_ready", "content_sha256",
+))
+_SELECTOR_BINDINGS = frozenset((
+    "actor_sha256", "actor_feature_names_sha256", "protocol_sha256",
+    "runtime_manifest_sha256", "public_feature_contract_sha256",
+    "designation_sha256", "failed_outer_closeout_sha256",
+    "fresh_outer_registry_sha256", "fresh_outer_registry_report_sha256",
+    "outer_hash_projection_sha256", "outer_hash_projection_receipt_sha256",
+    "development_rows_sha256", "candidate_grid_sha256", "program_sha256",
     "source_closure_sha256",
+))
+_CANDIDATE_REPORT_FIELDS = frozenset((
+    "config", "config_sha256", "salts",
+    "both_salts_pass_all_aggregate_gates",
+    "robust_minimum_family_exact_bit_direction_fidelity", "observed_capacity",
+))
+_SALT_REPORT_FIELDS = frozenset((
+    "salt", "fold_assignment_sha256", "folds", "aggregate_metrics",
+    "aggregate_gate", "family_exact_bit_direction",
+))
+_FOLD_REPORT_FIELDS = frozenset((
+    "fold", "fit_rows", "validation_rows", "fit_scenes", "validation_scenes",
+    "fit_scene_fingerprints_sha256", "validation_scene_fingerprints_sha256",
+    "fit_diagnostics", "complexity", "metrics", "informational_gate",
+))
+_FINAL_FIT_FIELDS = frozenset((
+    "binding_sha256", "diagnostics", "complexity", "development_metrics",
+    "development_gate", "program_file_sha256",
+    "runtime_roundtrip_actions_equal", "runtime_roundtrip_max_probability_error",
+    "runtime_roundtrip_rows",
+))
+_SELECTION_FIELDS = frozenset((
+    "selected_config", "selected_config_sha256", "selection_key",
+    "eligible_config_sha256s", "eligible_count",
+))
+_DEVELOPMENT_FIELDS = frozenset((
+    "failed_v8_outer_permanently_closed",
+    "failed_v8_outer_reclassified_as_development", "validation_wins",
+    "scene_families", "retained_scene_count", "retained_row_count",
+))
+_VALIDATION_WINS_FIELDS = frozenset((
+    "source_rows", "retained_rows", "removed_rows",
+    "source_unique_observations", "retained_unique_observations",
+    "fresh_outer_unique_observations",
+    "retained_fresh_outer_observation_overlap", "keep_mask_sha256",
+    "retained_observation_hashes_sha256",
+    "private_development_members_read_before_mask_frozen",
+    "retained_rows_semantic_sha256", "all_retained_rows_marked_development",
+    "private_members_read_only_after_mask_frozen",
+    "source_archive_reauthenticated_after_private_read", "content_sha256",
+))
+_SELECTOR_BOUNDARY_FIELDS = frozenset((
+    "fresh_outer_projection_authenticated_before_development_targets",
+    "validation_wins_keep_mask_frozen_before_action_or_probability_read",
+    "fresh_outer_actions_or_probabilities_read", "fresh_outer_full_collection_access",
+    "protected_final_access", "runtime_action_override", "formal_ready",
 ))
 
 
@@ -58,6 +144,7 @@ def contract() -> dict[str, Any]:
         "scene_offset": projection_api.SCENE_OFFSET,
         "partners": list(rows_v7.PARTNERS),
         "candidate_lock_required_before_actor_output_collection": True,
+        "selector_cv_and_full_development_refit_authenticated_before_collection": True,
         "ordered_projection_required_row_for_row": True,
         "row_schema": sorted(rows_v7._FIELDS),
         "score_computed": False,
@@ -237,16 +324,399 @@ def load_authenticated_rows(
 
 def _validate_candidate_lock_shape(value: Mapping[str, Any]) -> dict[str, str]:
     bindings = value.get("bindings")
-    if (value.get("schema_version") != CANDIDATE_LOCK_VERSION
+    selection = value.get("selection")
+    boundary = value.get("information_boundary")
+    closure = value.get("source_closure")
+    if (set(value) != _LOCK_FIELDS
+            or value.get("schema_version") != CANDIDATE_LOCK_VERSION
             or value.get("status") != "locked"
             or value.get("formal_ready") is not False
             or not _content_valid(value)
             or not isinstance(bindings, Mapping)
             or not _REQUIRED_LOCK_BINDINGS.issubset(bindings)
-            or any(_HEX.fullmatch(str(bindings.get(name, ""))) is None
-                   for name in _REQUIRED_LOCK_BINDINGS)):
+            or any(type(name) is not str or type(child) is not str
+                   or _HEX.fullmatch(child) is None
+                   for name, child in bindings.items())
+            or not isinstance(closure, Mapping) or not closure
+            or any(type(name) is not str or not name or type(child) is not str
+                   or _HEX.fullmatch(child) is None
+                   for name, child in closure.items())
+            or digest(dict(closure)) != bindings.get("source_closure_sha256")
+            or not isinstance(selection, Mapping)
+            or set(selection) != _LOCK_SELECTION_FIELDS
+            or type(selection.get("selected_config_sha256")) is not str
+            or _HEX.fullmatch(selection["selected_config_sha256"]) is None
+            or selection.get("two_salt_three_fold_development_cv_passed") is not True
+            or selection.get("fresh_outer_scored") is not False
+            or not isinstance(boundary, Mapping)
+            or set(boundary) != _LOCK_BOUNDARY_FIELDS
+            or boundary.get("candidate_locked_before_full_fresh_outer_collection")
+                is not True
+            or boundary.get("fresh_outer_hashes_used_only_for_validation_wins") is not True
+            or boundary.get("fresh_outer_actions_or_probabilities_read") is not False
+            or boundary.get("protected_final_access") is not False
+            or boundary.get("runtime_action_override") is not False
+            or boundary.get("formal_ready") is not False):
         raise ValueError("Exact locked v9 candidate contract required")
-    return {name: str(bindings[name]) for name in _REQUIRED_LOCK_BINDINGS}
+    return dict(bindings)
+
+
+def _gate_matches(metrics: Any, gate: Any, *, label: str,
+                  require_passed: bool) -> bool:
+    if not isinstance(metrics, Mapping) or not isinstance(gate, Mapping):
+        raise ValueError(label + " metrics or gate differs")
+    try:
+        recomputed = metrics_api._gate(metrics)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(label + " metrics cannot be gated") from error
+    if dict(gate) != recomputed or (require_passed and recomputed.get("passed") is not True):
+        raise ValueError(label + " gate differs")
+    return recomputed.get("passed") is True
+
+
+def _finite_unit(value: Any, label: str) -> float:
+    if isinstance(value, (bool, np.bool_)) or type(value) not in (int, float):
+        raise ValueError(label + " differs")
+    result = float(value)
+    if not np.isfinite(result) or not 0.0 <= result <= 1.0:
+        raise ValueError(label + " differs")
+    return result
+
+
+def _validate_family_cells(value: Any, *, label: str) -> float:
+    if not isinstance(value, Mapping) or set(value) != {
+            "cells", "cell_count", "minimum_fidelity"}:
+        raise ValueError(label + " cells differ")
+    cells = value.get("cells")
+    if not isinstance(cells, Mapping) or not cells:
+        raise ValueError(label + " cells differ")
+    fidelities = []
+    for name, row in cells.items():
+        if (type(name) is not str or not isinstance(row, Mapping)
+                or set(row) != {"family_id", "exact_group_bits", "pairs",
+                                "scenes", "fidelity"}
+                or type(row.get("family_id")) is not str
+                or type(row.get("exact_group_bits")) is not int
+                or not 0 <= row["exact_group_bits"] < 8
+                or type(row.get("pairs")) is not int or row["pairs"] <= 0
+                or type(row.get("scenes")) is not int or row["scenes"] <= 0
+                or row["scenes"] > row["pairs"]
+                or name != row["family_id"] + "|exact_bits=" + format(
+                    row["exact_group_bits"], f"0{len(metrics_api.GROUPS)}b")):
+            raise ValueError(label + " cell row differs")
+        fidelities.append(_finite_unit(row.get("fidelity"), label + " cell fidelity"))
+    minimum = _finite_unit(value.get("minimum_fidelity"), label + " minimum")
+    if value.get("cell_count") != len(cells) or minimum != min(fidelities):
+        raise ValueError(label + " cell summary differs")
+    return minimum
+
+
+def _validate_validation_wins(
+    value: Mapping[str, Any], *, retained_row_count: int,
+) -> str:
+    if (set(value) != _VALIDATION_WINS_FIELDS or not _content_valid(value)
+            or type(value.get("source_rows")) is not int
+            or type(value.get("retained_rows")) is not int
+            or type(value.get("removed_rows")) is not int
+            or value["source_rows"] <= 0 or value["retained_rows"] <= 0
+            or value["removed_rows"] < 0
+            or value["source_rows"]
+                != value["retained_rows"] + value["removed_rows"]
+            or value["retained_rows"] != retained_row_count
+            or any(type(value.get(name)) is not int or value[name] <= 0
+                   for name in (
+                       "source_unique_observations",
+                       "retained_unique_observations",
+                       "fresh_outer_unique_observations"))
+            or value["retained_unique_observations"]
+                > value["source_unique_observations"]
+            or value.get("retained_fresh_outer_observation_overlap") != 0
+            or any(type(value.get(name)) is not str
+                   or _HEX.fullmatch(value[name]) is None
+                   for name in (
+                       "keep_mask_sha256", "retained_observation_hashes_sha256",
+                       "retained_rows_semantic_sha256"))
+            or value.get(
+                "private_development_members_read_before_mask_frozen") is not False
+            or value.get("all_retained_rows_marked_development") is not True
+            or value.get("private_members_read_only_after_mask_frozen") is not True
+            or value.get(
+                "source_archive_reauthenticated_after_private_read") is not True):
+        raise ValueError("Locked v9 selector validation-wins trace differs")
+    return value["retained_rows_semantic_sha256"]
+
+
+def _validate_selector_report(
+    lock: Mapping[str, Any], report: Mapping[str, Any], *,
+    expected_report_sha256: str, expected_program_sha256: str,
+) -> None:
+    """Authenticate the official selector result before fresh labels are read."""
+    bindings = _validate_candidate_lock_shape(lock)
+    report_bindings = report.get("bindings")
+    sources = report.get("sources")
+    if (set(report) != _SELECTOR_FIELDS
+            or report.get("version") != SELECTOR_VERSION
+            or report.get("status") != SELECTOR_STATUS
+            or report.get("formal_ready") is not False
+            or not _content_valid(report)
+            or bindings.get("selector_report_sha256") != expected_report_sha256
+            or bindings.get("program_sha256") != expected_program_sha256
+            or not isinstance(report_bindings, Mapping)
+            or set(report_bindings) != _SELECTOR_BINDINGS
+            or any(bindings.get(name) != child
+                   for name, child in report_bindings.items())
+            or report_bindings.get("program_sha256") != expected_program_sha256
+            or not isinstance(sources, Mapping)
+            or dict(sources) != dict(lock["source_closure"])
+            or digest(dict(sources)) != bindings["source_closure_sha256"]):
+        raise ValueError("Locked v9 selector report identity or bindings differ")
+
+    contract_value = report.get("contract")
+    development = report.get("development")
+    validation_wins = development.get("validation_wins") \
+        if isinstance(development, Mapping) else None
+    boundary = report.get("information_boundary")
+    if (not isinstance(contract_value, Mapping)
+            or contract_value.get("version") != SELECTOR_VERSION
+            or contract_value.get("fresh_outer_labels_or_probabilities_read") is not False
+            or contract_value.get("protected_final_access") is not False
+            or contract_value.get("runtime_action_override") is not False
+            or contract_value.get("formal_ready") is not False
+            or not isinstance(development, Mapping)
+            or set(development) != _DEVELOPMENT_FIELDS
+            or development.get("failed_v8_outer_permanently_closed") is not True
+            or development.get("failed_v8_outer_reclassified_as_development") is not True
+            or not isinstance(validation_wins, Mapping)
+            or validation_wins.get("retained_fresh_outer_observation_overlap") != 0
+            or validation_wins.get("private_development_members_read_before_mask_frozen")
+                is not False
+            or validation_wins.get("private_members_read_only_after_mask_frozen") is not True
+            or validation_wins.get("all_retained_rows_marked_development") is not True
+            or not isinstance(boundary, Mapping)
+            or set(boundary) != _SELECTOR_BOUNDARY_FIELDS
+            or boundary.get("fresh_outer_projection_authenticated_before_development_targets")
+                is not True
+            or boundary.get("validation_wins_keep_mask_frozen_before_action_or_probability_read")
+                is not True
+            or boundary.get("fresh_outer_actions_or_probabilities_read") is not False
+            or boundary.get("fresh_outer_full_collection_access") is not False
+            or boundary.get("protected_final_access") is not False
+            or boundary.get("runtime_action_override") is not False
+            or boundary.get("formal_ready") is not False):
+        raise ValueError("Locked v9 selector information boundary differs")
+    if (type(development.get("retained_row_count")) is not int
+            or development["retained_row_count"] <= 0):
+        raise ValueError("Locked v9 selector development row count differs")
+    retained_rows_semantic_sha256 = _validate_validation_wins(
+        validation_wins, retained_row_count=development["retained_row_count"])
+
+    grid = report.get("candidate_grid")
+    selection = report.get("selection")
+    if (not isinstance(grid, Mapping)
+            or set(grid) != {"config_count", "config_sha256s", "candidate_reports"}
+            or not isinstance(selection, Mapping)
+            or set(selection) != _SELECTION_FIELDS):
+        raise ValueError("Locked v9 selector selection differs")
+    candidate_reports = grid.get("candidate_reports")
+    config_hashes = grid.get("config_sha256s")
+    if (not isinstance(candidate_reports, list) or not candidate_reports
+            or not isinstance(config_hashes, list)
+            or grid.get("config_count") != len(candidate_reports)
+            or len(config_hashes) != len(candidate_reports)
+            or len(set(config_hashes)) != len(config_hashes)):
+        raise ValueError("Locked v9 selector candidate registry differs")
+
+    normalized_candidates = []
+    for candidate, expected_config_sha in zip(candidate_reports, config_hashes):
+        if (not isinstance(candidate, Mapping)
+                or set(candidate) != _CANDIDATE_REPORT_FIELDS):
+            raise ValueError("Locked v9 selector candidate report differs")
+        config = candidate.get("config")
+        config_sha = candidate.get("config_sha256")
+        salts = candidate.get("salts")
+        capacity = candidate.get("observed_capacity")
+        if (not isinstance(config, Mapping) or type(config_sha) is not str
+                or _HEX.fullmatch(config_sha) is None
+                or config_sha != digest(dict(config))
+                or expected_config_sha != config_sha
+                or not isinstance(salts, list) or len(salts) != len(CV_SALTS)
+                or not isinstance(capacity, Mapping)):
+            raise ValueError("Locked v9 selector candidate report differs")
+        salt_passes = []
+        salt_minima = []
+        complexities = []
+        assignment_hashes = []
+        for salt_report, expected_salt in zip(salts, CV_SALTS):
+            folds = salt_report.get("folds") if isinstance(salt_report, Mapping) else None
+            if (not isinstance(salt_report, Mapping)
+                    or set(salt_report) != _SALT_REPORT_FIELDS
+                    or salt_report.get("salt") != expected_salt
+                    or type(salt_report.get("fold_assignment_sha256")) is not str
+                    or _HEX.fullmatch(salt_report["fold_assignment_sha256"]) is None
+                    or not isinstance(folds, list) or len(folds) != CV_FOLDS
+                    or [row.get("fold") if isinstance(row, Mapping) else None
+                        for row in folds] != list(range(CV_FOLDS))):
+                raise ValueError("Locked v9 selector two-salt CV trace differs")
+            assignment_hashes.append(salt_report["fold_assignment_sha256"])
+            validation_row_total = 0
+            validation_scene_total = 0
+            for fold in folds:
+                complexity = fold.get("complexity")
+                if (set(fold) != _FOLD_REPORT_FIELDS
+                        or not isinstance(complexity, Mapping)
+                        or type(complexity.get("total_nodes")) is not int
+                        or complexity["total_nodes"] <= 0
+                        or type(complexity.get("maximum_tree_depth")) is not int
+                        or complexity["maximum_tree_depth"] < 0
+                        or type(fold.get("fit_rows")) is not int
+                        or fold["fit_rows"] <= 0
+                        or type(fold.get("validation_rows")) is not int
+                        or fold["validation_rows"] <= 0
+                        or type(fold.get("fit_scenes")) is not int
+                        or fold["fit_scenes"] <= 0
+                        or type(fold.get("validation_scenes")) is not int
+                        or fold["validation_scenes"] <= 0
+                        or type(fold.get("fit_scene_fingerprints_sha256")) is not str
+                        or _HEX.fullmatch(fold["fit_scene_fingerprints_sha256"]) is None
+                        or type(fold.get("validation_scene_fingerprints_sha256"))
+                            is not str
+                        or _HEX.fullmatch(
+                            fold["validation_scene_fingerprints_sha256"]) is None):
+                    raise ValueError("Locked v9 selector fold trace differs")
+                if (fold["fit_rows"] + fold["validation_rows"]
+                        != development.get("retained_row_count")
+                        or fold["fit_scenes"] + fold["validation_scenes"]
+                        != development.get("retained_scene_count")
+                        or fold["fit_scene_fingerprints_sha256"]
+                            == fold["validation_scene_fingerprints_sha256"]
+                        or not isinstance(fold.get("fit_diagnostics"), Mapping)):
+                    raise ValueError("Locked v9 selector fold partition differs")
+                validation_row_total += fold["validation_rows"]
+                validation_scene_total += fold["validation_scenes"]
+                _gate_matches(
+                    fold.get("metrics"), fold.get("informational_gate"),
+                    label="Locked v9 selector informational fold",
+                    require_passed=False,
+                )
+                complexities.append((complexity["total_nodes"],
+                                     complexity["maximum_tree_depth"]))
+            if (validation_row_total != development.get("retained_row_count")
+                    or validation_scene_total
+                        != development.get("retained_scene_count")):
+                raise ValueError("Locked v9 selector fold coverage differs")
+            salt_passes.append(_gate_matches(
+                salt_report.get("aggregate_metrics"),
+                salt_report.get("aggregate_gate"),
+                label="Locked v9 selector aggregate", require_passed=False))
+            salt_minima.append(_validate_family_cells(
+                salt_report.get("family_exact_bit_direction"),
+                label="Locked v9 selector robust"))
+        if len(set(assignment_hashes)) != len(CV_SALTS):
+            raise ValueError("Locked v9 selector salted assignments differ")
+        both_pass = all(salt_passes)
+        robust = _finite_unit(
+            candidate.get("robust_minimum_family_exact_bit_direction_fidelity"),
+            "Locked v9 selector robust minimum")
+        expected_capacity = {
+            "maximum_total_nodes": max(row[0] for row in complexities),
+            "maximum_tree_depth": max(row[1] for row in complexities),
+            "fold_program_count": len(complexities),
+        }
+        if (candidate.get("both_salts_pass_all_aggregate_gates") is not both_pass
+                or robust != min(salt_minima)
+                or dict(capacity) != expected_capacity):
+            raise ValueError("Locked v9 selector candidate summary differs")
+        normalized_candidates.append(candidate)
+
+    candidate_grid_payload: dict[str, Any] = {
+        "version": SELECTOR_GRID_VERSION,
+        "configs": [deepcopy(dict(row["config"])) for row in normalized_candidates],
+    }
+    candidate_grid_payload["content_sha256"] = digest(candidate_grid_payload)
+    candidate_grid_file_sha256 = sha256(
+        _json_bytes(candidate_grid_payload)).hexdigest()
+    if candidate_grid_file_sha256 != bindings["candidate_grid_sha256"]:
+        raise ValueError("Locked v9 selector candidate-grid binding differs")
+
+    eligible = [candidate for candidate in normalized_candidates
+                if candidate["both_salts_pass_all_aggregate_gates"] is True]
+    eligible.sort(key=lambda candidate: (
+        -float(candidate["robust_minimum_family_exact_bit_direction_fidelity"]),
+        int(candidate["observed_capacity"]["maximum_total_nodes"]),
+        int(candidate["observed_capacity"]["maximum_tree_depth"]),
+        str(candidate["config_sha256"]),
+    ))
+    if not eligible:
+        raise ValueError("Locked v9 selector has no eligible candidate")
+    chosen = eligible[0]
+    expected_selection = {
+        "selected_config": chosen["config"],
+        "selected_config_sha256": chosen["config_sha256"],
+        "selection_key": {
+            "robust_minimum_family_exact_bit_direction_fidelity": chosen[
+                "robust_minimum_family_exact_bit_direction_fidelity"],
+            "maximum_total_nodes": chosen["observed_capacity"]["maximum_total_nodes"],
+            "maximum_tree_depth": chosen["observed_capacity"]["maximum_tree_depth"],
+        },
+        "eligible_config_sha256s": [row["config_sha256"] for row in eligible],
+        "eligible_count": len(eligible),
+    }
+    if (dict(selection) != expected_selection
+            or lock["selection"]["selected_config_sha256"]
+                != chosen["config_sha256"]):
+        raise ValueError("Locked v9 selector chosen candidate differs")
+
+    final_fit = report.get("final_fit")
+    if (not isinstance(final_fit, Mapping)
+            or set(final_fit) != _FINAL_FIT_FIELDS):
+        raise ValueError("Locked v9 selector full-development refit differs")
+    _gate_matches(final_fit.get("development_metrics"),
+                  final_fit.get("development_gate"),
+                  label="Locked v9 selector full-development", require_passed=True)
+    final_complexity = final_fit.get("complexity")
+    expected_final_binding_sha256 = digest({
+        "selector": SELECTOR_VERSION,
+        "development_rows_sha256": bindings["development_rows_sha256"],
+        "retained_rows_semantic_sha256": retained_rows_semantic_sha256,
+        "selected_config_sha256": selection["selected_config_sha256"],
+        "fresh_outer_projection_sha256": bindings[
+            "outer_hash_projection_sha256"],
+    })
+    if (final_fit.get("binding_sha256") != expected_final_binding_sha256
+            or not isinstance(final_fit.get("diagnostics"), Mapping)
+            or not isinstance(final_complexity, Mapping)
+            or type(final_complexity.get("total_nodes")) is not int
+            or final_complexity["total_nodes"] <= 0
+            or type(final_complexity.get("maximum_tree_depth")) is not int
+            or final_complexity["maximum_tree_depth"] < 0
+            or final_fit.get("program_file_sha256") != expected_program_sha256
+            or final_fit.get("runtime_roundtrip_actions_equal") is not True
+            or final_fit.get("runtime_roundtrip_max_probability_error") != 0.0
+            or type(final_fit.get("runtime_roundtrip_rows")) is not int
+            or final_fit["runtime_roundtrip_rows"] <= 0
+            or type(development.get("retained_row_count")) is not int
+            or development["retained_row_count"] != final_fit["runtime_roundtrip_rows"]
+            or type(development.get("retained_scene_count")) is not int
+            or development["retained_scene_count"] <= 0):
+        raise ValueError("Locked v9 selector full-development refit differs")
+
+
+def authenticate_locked_candidate_selector(
+    *, lock: Mapping[str, Any], selector_report_path: str | Path,
+    expected_selector_report_sha256: str, expected_program_sha256: str,
+) -> dict[str, Any]:
+    path = _regular(selector_report_path, "locked v9 selector report")
+    expected = _sha(expected_selector_report_sha256, "locked selector report")
+    raw = path.read_bytes()
+    if sha256(raw).hexdigest() != expected:
+        raise ValueError("Exact locked v9 selector report bytes required")
+    report = _strict_json_bytes(raw, "locked v9 selector report")
+    if file_hash(path) != expected:
+        raise RuntimeError("Locked v9 selector report changed during authentication")
+    _validate_selector_report(
+        lock, report, expected_report_sha256=expected,
+        expected_program_sha256=_sha(expected_program_sha256, "locked program"))
+    return deepcopy(report)
 
 
 def _selector_source_closure(
@@ -272,14 +742,21 @@ def _validate_candidate_bindings(
         "designation_sha256": file_hash(paths["designation"]),
         "failed_outer_closeout_sha256": file_hash(paths["failure_closeout"]),
         "fresh_outer_registry_sha256": file_hash(paths["registry"]),
+        "fresh_outer_registry_report_sha256": file_hash(paths["registry_report"]),
         "outer_hash_projection_sha256": file_hash(paths["projection"]),
+        "outer_hash_projection_receipt_sha256": file_hash(
+            paths["projection_receipt"]),
         "development_rows_sha256": file_hash(paths["development_rows"]),
         "program_sha256": file_hash(paths["program"]),
         "selector_report_sha256": file_hash(paths["selector_report"]),
     }
     if any(bindings[name] != value for name, value in actual.items()):
         raise ValueError("V9 candidate lock artifact binding differs")
-    selector_report = _strict_json(paths["selector_report"], "v9 selector report")
+    selector_report = authenticate_locked_candidate_selector(
+        lock=lock, selector_report_path=paths["selector_report"],
+        expected_selector_report_sha256=bindings["selector_report_sha256"],
+        expected_program_sha256=bindings["program_sha256"],
+    )
     closure = _selector_source_closure(lock, selector_report)
     if closure is not None:
         normalized = dict(closure)
@@ -471,6 +948,7 @@ def _report(
         "sources": deepcopy(dict(sources)),
         "information_boundary": {
             "candidate_lock_authenticated_before_outer_replay": True,
+            "selector_report_and_passed_gates_authenticated_before_outer_replay": True,
             "labels_and_probabilities_collected_only_after_candidate_lock": True,
             "projection_verified_before_rows_publication": True,
             "outer_metrics_or_candidate_score_computed": False,
@@ -676,6 +1154,9 @@ def authenticate_saved_collection(
             or report.get("sources") != sources
             or not isinstance(boundary, Mapping)
             or boundary.get("candidate_lock_authenticated_before_outer_replay") is not True
+            or boundary.get(
+                "selector_report_and_passed_gates_authenticated_before_outer_replay")
+                is not True
             or boundary.get("labels_and_probabilities_collected_only_after_candidate_lock")
                 is not True
             or boundary.get("projection_verified_before_rows_publication") is not True
@@ -740,5 +1221,6 @@ if __name__ == "__main__":
 __all__ = [
     "VERSION", "SCHEMA_VERSION", "STATUS", "CANDIDATE_LOCK_VERSION", "REPORT_NAME",
     "ROWS_NAME", "PROJECTION_COPY_NAME", "contract", "producer_sources",
-    "load_authenticated_rows", "build", "authenticate_saved_collection", "main",
+    "load_authenticated_rows", "authenticate_locked_candidate_selector",
+    "build", "authenticate_saved_collection", "main",
 ]

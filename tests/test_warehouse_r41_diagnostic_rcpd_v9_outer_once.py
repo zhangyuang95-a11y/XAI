@@ -87,23 +87,62 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
         "fingerprint": _fp(f"scene-{index}"),
         "family_id": f"conflict_family_{index % 6 + 1:02d}",
     } for index in range(subject.projection_api.SCENE_COUNT)]
+    selected_identities = [{
+        "batch_index": index, "family_id": row["family_id"],
+        "seed": row["seed"], "fingerprint": row["fingerprint"],
+    } for index, row in enumerate(scenes)]
+    selected_identity_sha256 = digest(selected_identities)
+    registry_sources = subject.registry_api.producer_sources()
+    registry_bindings = {"actor_sha256": _fp("registry-actor")}
+    registry_statistics = {"selected_outer_scene_count": len(scenes)}
+    registry_boundary = {
+        "identity_selection_frozen_before_materialisation": True,
+        "protected_final_access": False,
+    }
+    exclusion_digests = {"excluded": _fp("excluded")}
     registry = _content({
         "version": subject.registry_api.VERSION,
         "status": subject.registry_api.STATUS,
+        "contract": {"version": subject.registry_api.VERSION},
+        "bindings": registry_bindings,
         "development_outer": scenes,
-        "selected_outer_identities": [{
-            "batch_index": 0, "family_id": row["family_id"],
-            "seed": row["seed"], "fingerprint": row["fingerprint"],
-        } for row in scenes],
+        "selected_outer_identities": selected_identities,
+        "exclusion_counts": {"excluded": 1},
+        "exclusion_digests": exclusion_digests,
+        "statistics": registry_statistics,
+        "information_boundary": registry_boundary,
         "program_access": False,
         "program_predictions_access": False,
         "action_labels_access": False,
         "probabilities_access": False,
         "final_audit_rows_access": False,
         "formal_ready": False,
+        "producer_sources": registry_sources,
+        "producer_sources_sha256": digest(registry_sources),
     })
     registry_path = tmp_path / "development_outer.json"
     _write_json(registry_path, registry)
+    registry_report = _content({
+        "version": subject.registry_api.VERSION,
+        "status": subject.registry_api.STATUS,
+        "registry_file_sha256": file_hash(registry_path),
+        "registry_content_sha256": registry["content_sha256"],
+        "bindings": registry_bindings,
+        "selection": {
+            "salt": subject.registry_api.SELECTION_SALT,
+            "family_quotas": subject.registry_api.FAMILY_QUOTAS,
+            "selected_identity_sha256": selected_identity_sha256,
+            "fixed_remaining_identity_sha256": _fp("remaining-identities"),
+            "exclusion_digests": exclusion_digests,
+        },
+        "statistics": registry_statistics,
+        "information_boundary": registry_boundary,
+        "producer_sources": registry_sources,
+        "producer_sources_sha256": digest(registry_sources),
+        "formal_ready": False,
+    })
+    registry_report_path = tmp_path / "registry_report.json"
+    _write_json(registry_report_path, registry_report)
 
     outer_arrays = _arrays([row["fingerprint"] for row in scenes], prefix="outer")
     outer_rows = tmp_path / "rows.npz"
@@ -115,7 +154,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
     projection = subject.projection_api.projection_from_arrays(
         outer_arrays, registry_file_sha256=file_hash(registry_path),
         registry_content_sha256=registry["content_sha256"],
-        selected_identity_sha256=_fp("selected-identities"), environment_steps=64)
+        selected_identity_sha256=selected_identity_sha256, environment_steps=64)
     projection_path = tmp_path / "ordered_projection.json"
     _write_json(projection_path, projection)
     projection_copy = tmp_path / "projection_copy.json"
@@ -168,8 +207,11 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
         "designation_sha256": file_hash(files["designation"]),
         "failed_outer_closeout_sha256": file_hash(files["failed_outer_closeout"]),
         "fresh_outer_registry_sha256": file_hash(registry_path),
+        "fresh_outer_registry_report_sha256": file_hash(registry_report_path),
         "outer_hash_projection_sha256": file_hash(projection_path),
+        "outer_hash_projection_receipt_sha256": file_hash(projection_receipt),
         "development_rows_sha256": file_hash(development_rows),
+        "candidate_grid_sha256": _fp("candidate-grid"),
         "program_sha256": file_hash(program_path),
         "selector_report_sha256": file_hash(files["selector_report"]),
         "source_closure_sha256": digest(closure),
@@ -178,6 +220,19 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
         "schema_version": subject.LOCK_SCHEMA,
         "status": "locked", "bindings": bindings,
         "source_closure": closure, "formal_ready": False,
+        "selection": {
+            "selected_config_sha256": _fp("selected-config"),
+            "two_salt_three_fold_development_cv_passed": True,
+            "fresh_outer_scored": False,
+        },
+        "information_boundary": {
+            "candidate_locked_before_full_fresh_outer_collection": True,
+            "fresh_outer_hashes_used_only_for_validation_wins": True,
+            "fresh_outer_actions_or_probabilities_read": False,
+            "protected_final_access": False,
+            "runtime_action_override": False,
+            "formal_ready": False,
+        },
     })
     lock_path = tmp_path / "candidate_lock.json"
     _write_json(lock_path, lock)
@@ -194,6 +249,8 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
             "designation_sha256": bindings["designation_sha256"],
             "failed_outer_closeout_sha256": bindings["failed_outer_closeout_sha256"],
             "fresh_outer_registry_sha256": bindings["fresh_outer_registry_sha256"],
+            "fresh_outer_registry_report_sha256": bindings[
+                "fresh_outer_registry_report_sha256"],
             "outer_hash_projection_sha256": bindings["outer_hash_projection_sha256"],
             "outer_hash_projection_receipt_sha256": file_hash(projection_receipt),
             "development_rows_sha256": bindings["development_rows_sha256"],
@@ -212,6 +269,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
         },
         "information_boundary": {
             "candidate_lock_authenticated_before_outer_replay": True,
+            "selector_report_and_passed_gates_authenticated_before_outer_replay": True,
             "labels_and_probabilities_collected_only_after_candidate_lock": True,
             "outer_metrics_or_candidate_score_computed": False,
             "program_loaded_or_executed": False,
@@ -226,12 +284,19 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
     monkeypatch.setattr(
         subject.projection_api, "read_saved_projection",
         lambda **unused: (deepcopy(projection), {
-            "bindings": {"actor_sha256": bindings["actor_sha256"]},
+            "bindings": {
+                "actor_sha256": bindings["actor_sha256"],
+                "fresh_outer_registry_report_sha256": bindings[
+                    "fresh_outer_registry_report_sha256"],
+            },
             "content_sha256": _fp("projection-receipt-content"),
         }))
     monkeypatch.setattr(
         subject.collection_api, "authenticate_saved_collection",
         lambda **unused: deepcopy(collection_report))
+    monkeypatch.setattr(
+        subject.collection_api, "authenticate_locked_candidate_selector",
+        lambda **unused: {"status": subject.collection_api.SELECTOR_STATUS})
     monkeypatch.setattr(
         subject.collection_api, "load_authenticated_rows",
         lambda *unused_args, **unused_kwargs: {
@@ -256,6 +321,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, fidelity: float = 0.95):
         "designation_path": files["designation"],
         "failed_outer_closeout_path": files["failed_outer_closeout"],
         "fresh_outer_registry_path": registry_path,
+        "fresh_outer_registry_report_path": registry_report_path,
         "outer_hash_projection_path": projection_path,
         "outer_hash_projection_receipt_path": projection_receipt,
         "expected_outer_hash_projection_receipt_sha256": file_hash(projection_receipt),
@@ -368,6 +434,52 @@ def test_program_actor_feature_registry_mismatch_fails_before_claim_or_private_r
     assert list(permanent.iterdir()) == []
 
 
+def test_selector_semantic_failure_rejects_before_claim_or_private_outer_read(
+        tmp_path, monkeypatch):
+    args, _, _, permanent = _fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        subject.collection_api, "authenticate_locked_candidate_selector",
+        lambda **unused: (_ for _ in ()).throw(
+            ValueError("Locked v9 selector aggregate gate differs")),
+    )
+    monkeypatch.setattr(
+        subject.collection_api, "load_authenticated_rows",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("private outer rows opened before selector rejection")),
+    )
+    with pytest.raises(ValueError, match="aggregate gate"):
+        subject.build(**args)
+    assert list(permanent.iterdir()) == []
+
+
+def test_registry_report_identity_failure_rejects_before_claim_or_private_read(
+        tmp_path, monkeypatch):
+    args, _, _, permanent = _fixture(tmp_path, monkeypatch)
+    report_path = Path(args["fresh_outer_registry_report_path"])
+    report = json.loads(report_path.read_text("utf-8"))
+    report["selection"]["selected_identity_sha256"] = _fp("forged-identities")
+    report["content_sha256"] = digest({
+        key: child for key, child in report.items() if key != "content_sha256"
+    })
+    _write_json(report_path, report)
+    lock_path = Path(args["candidate_lock_path"])
+    lock = json.loads(lock_path.read_text("utf-8"))
+    lock["bindings"]["fresh_outer_registry_report_sha256"] = file_hash(report_path)
+    lock["content_sha256"] = digest({
+        key: child for key, child in lock.items() if key != "content_sha256"
+    })
+    _write_json(lock_path, lock)
+    args["expected_candidate_lock_sha256"] = file_hash(lock_path)
+    monkeypatch.setattr(
+        subject.collection_api, "load_authenticated_rows",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("private outer rows opened before identity rejection")),
+    )
+    with pytest.raises(ValueError, match="registry/report identity differs"):
+        subject.build(**args)
+    assert list(permanent.iterdir()) == []
+
+
 def test_claim_precedes_private_rows_and_program_execution_and_second_call_fails(
         tmp_path, monkeypatch):
     args, arrays, _, permanent = _fixture(tmp_path, monkeypatch)
@@ -445,7 +557,11 @@ def test_ordered_projection_mismatch_fails_before_claim(tmp_path, monkeypatch):
     monkeypatch.setattr(
         subject.projection_api, "read_saved_projection",
         lambda **unused: (bad, {
-            "bindings": {"actor_sha256": file_hash(args["actor_path"])},
+            "bindings": {
+                "actor_sha256": file_hash(args["actor_path"]),
+                "fresh_outer_registry_report_sha256": file_hash(
+                    args["fresh_outer_registry_report_path"]),
+            },
         }))
     with pytest.raises(ValueError, match="ordered hash projection differs"):
         subject.build(**args)

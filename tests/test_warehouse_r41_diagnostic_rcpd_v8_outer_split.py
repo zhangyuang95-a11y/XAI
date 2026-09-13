@@ -14,6 +14,13 @@ from backend.training import warehouse_r41_diagnostic_rcpd_v8_outer_split as sub
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 
 
+def test_producer_sources_include_the_public_build_entrypoint():
+    sources = subject.producer_sources()
+    wrapper = "scripts/build_warehouse_r41_diagnostic_rcpd_v8_outer_split.py"
+    assert wrapper in sources
+    assert sources[wrapper] == file_hash(subject.ROOT / wrapper)
+
+
 def _fp(label: str) -> str:
     return sha256(label.encode("ascii")).hexdigest()
 

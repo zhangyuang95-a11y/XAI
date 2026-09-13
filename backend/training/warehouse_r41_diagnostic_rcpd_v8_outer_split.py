@@ -46,6 +46,7 @@ from env.warehouse_native.r41_diagnostic_conflict import (
 VERSION = "warehouse-r41-diagnostic-rcpd-v8-fresh-outer-registry.v1"
 REPORT_VERSION = VERSION
 STATUS = "frozen_identity_only_pending_outer_collection"
+ROOT = Path(__file__).resolve().parents[2]
 SELECTION_SALT = "warehouse-r41-v8-fresh-development-outer-20260913-v1"
 FAMILY_IDS = tuple(scenes_api.FAMILY_IDS)
 FAMILY_QUOTAS = dict(zip(FAMILY_IDS, (11, 11, 11, 11, 10, 10)))
@@ -77,7 +78,10 @@ _HEX = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def producer_sources() -> dict[str, str]:
-    return dict(sorted(local_source_hashes((Path(__file__).resolve(),)).items()))
+    return dict(sorted(local_source_hashes((
+        Path(__file__).resolve(),
+        ROOT / "scripts/build_warehouse_r41_diagnostic_rcpd_v8_outer_split.py",
+    )).items()))
 
 
 def _sha(value: Any, label: str) -> str:

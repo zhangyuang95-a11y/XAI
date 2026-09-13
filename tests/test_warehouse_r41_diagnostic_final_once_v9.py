@@ -232,6 +232,35 @@ def test_source_order_has_no_final_or_salt_preclaim_parameter():
         "material = dict(_run_materializer(")
 
 
+def test_preclaim_reproduces_locked_v10_validation_wins_projection():
+    development = [_fp("same-a"), _fp("outer"), _fp("same-a"), _fp("same-c")]
+    outer = [_fp("outer")]
+    keep = ~np.isin(
+        np.asarray(development, dtype="U64"), np.asarray(outer, dtype="U64"))
+    retained = [value for value, selected in zip(development, keep)
+                if bool(selected)]
+    packed = np.ascontiguousarray(keep.astype(np.uint8))
+    validation_wins = {
+        "source_rows": 4,
+        "retained_rows": 3,
+        "removed_rows": 1,
+        "source_unique_observations": 3,
+        "retained_unique_observations": 2,
+        "fresh_outer_unique_observations": 1,
+        "retained_fresh_outer_observation_overlap": 0,
+        "keep_mask_sha256": sha256(memoryview(packed).cast("B")).hexdigest(),
+        "retained_observation_hashes_sha256": digest(retained),
+    }
+    assert subject._retained_development_hashes(
+        development_ordered=development, outer_unique_hashes=outer,
+        validation_wins=validation_wins) == {_fp("same-a"), _fp("same-c")}
+    changed = dict(validation_wins, removed_rows=0)
+    with pytest.raises(ValueError, match="validation-wins projection differs"):
+        subject._retained_development_hashes(
+            development_ordered=development, outer_unique_hashes=outer,
+            validation_wins=changed)
+
+
 def test_material_contract_rejects_program_access(tmp_path, monkeypatch):
     common, _context, permanent, materializer_sources = _setup(tmp_path, monkeypatch)
 

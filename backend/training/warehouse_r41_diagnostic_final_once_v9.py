@@ -12,6 +12,7 @@ bound component that may read its secret only after this controller calls it.
 from __future__ import annotations
 
 from copy import deepcopy
+from hashlib import sha256
 import os
 from pathlib import Path
 import re
@@ -267,7 +268,7 @@ def _authenticate_preclaim(
         outer_hash_projection_receipt=outer_hash_projection_receipt_path,
         development_rows=development_rows_path, program=program_path,
         selector_report=selector_report_path)
-    collection_api.authenticate_locked_candidate_selector(
+    selector_report = collection_api.authenticate_locked_candidate_selector(
         lock=lock, selector_report_path=paths["selector_report"],
         expected_selector_report_sha256=bindings["selector_report_sha256"],
         expected_program_sha256=bindings["program_sha256"])
@@ -317,8 +318,12 @@ def _authenticate_preclaim(
         expected_sha256=bindings["development_rows_sha256"],
         fields=frozenset(("observation_hashes", "scene_fingerprints")),
         label="locked v9 development rows")
-    development_hashes = set(outer_api._decode(
-        development["observation_hashes"], "development observation hashes"))
+    development_ordered = outer_api._decode(
+        development["observation_hashes"], "development observation hashes")
+    development_hashes = _retained_development_hashes(
+        development_ordered=development_ordered,
+        outer_unique_hashes=projection["projection"]["unique_observation_hashes"],
+        validation_wins=selector_report["development"]["validation_wins"])
     development_scenes = set(outer_api._decode(
         development["scene_fingerprints"], "development scene fingerprints"))
     outer_hashes = set(projection["projection"]["ordered_observation_hashes"])
@@ -339,6 +344,38 @@ def _authenticate_preclaim(
         "development_scenes": development_scenes,
         "outer_hashes": outer_hashes, "outer_scenes": outer_scenes,
     }
+
+
+def _retained_development_hashes(
+    *, development_ordered: Sequence[str], outer_unique_hashes: Sequence[str],
+    validation_wins: Mapping[str, Any],
+) -> set[str]:
+    """Reproduce the locked v10 validation-wins projection before final use."""
+    keep = ~np.isin(
+        np.asarray(development_ordered, dtype="U64"),
+        np.asarray(outer_unique_hashes, dtype="U64"))
+    retained = [value for value, selected in zip(development_ordered, keep)
+                if bool(selected)]
+    packed = np.ascontiguousarray(keep.astype(np.uint8))
+    recomputed = {
+        "source_rows": len(development_ordered),
+        "retained_rows": len(retained),
+        "removed_rows": int(np.sum(~keep)),
+        "source_unique_observations": len(set(development_ordered)),
+        "retained_unique_observations": len(set(retained)),
+        "fresh_outer_unique_observations": len(outer_unique_hashes),
+        "retained_fresh_outer_observation_overlap": 0,
+        "keep_mask_sha256": sha256(memoryview(packed).cast("B")).hexdigest(),
+        "retained_observation_hashes_sha256": digest(retained),
+    }
+    if (not isinstance(validation_wins, Mapping)
+            or any(validation_wins.get(name) != value
+                   for name, value in recomputed.items())):
+        raise ValueError("Locked v10 validation-wins projection differs")
+    result = set(retained)
+    if result & set(outer_unique_hashes):
+        raise ValueError("Locked development and passed outer splits overlap")
+    return result
 
 
 def _validate_material(

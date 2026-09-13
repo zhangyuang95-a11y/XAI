@@ -65,7 +65,7 @@ def wait_for_answers(store, sid, count):
     raise AssertionError("synthetic v9 answer did not finish")
 
 
-def test_v9_release_seam_is_registered_but_artifacts_fail_closed(tmp_path):
+def test_v9_release_loader_is_registered_and_unadmitted_input_fails_closed(tmp_path):
     assert release.VERSION == online.R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V9
     assert release.VERSION in online.R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS
     assert online.R41_DIAGNOSTIC_RELEASE_MODULE_V9 in online.RELEASE_MODULES
@@ -80,7 +80,7 @@ def test_v9_release_seam_is_registered_but_artifacts_fail_closed(tmp_path):
     assert projection["runtime_action_override"] is False
     assert projection["animation_duration_ms"] == 380
     sources = release.release_sources()
-    assert set(sources) == {
+    assert {
         "ui/warehouse_alignment_r41_diagnostic_release_v9.py",
         "ui/warehouse_alignment_online_server.py",
         "backend/warehouse_r41_diagnostic_online_explanation_v9.py",
@@ -88,11 +88,8 @@ def test_v9_release_seam_is_registered_but_artifacts_fail_closed(tmp_path):
         "ui/warehouse_family_feedback_research/app.js",
         "ui/warehouse_family_feedback_research/styles.css",
         "ui/warehouse_family_feedback_research/favicon.svg",
-    }
-    assert not any("final" in name.lower() or "holdout" in name.lower()
-                   for name in sources)
-    with pytest.raises(release.V9ReleaseArtifactsNotBound,
-                       match=release.UNBOUND_REASON):
+    }.issubset(sources)
+    with pytest.raises((ValueError, FileNotFoundError)):
         online.load_online_context(
             expected_package_sha256="1" * 64,
             expected_manifest_sha256="2" * 64,

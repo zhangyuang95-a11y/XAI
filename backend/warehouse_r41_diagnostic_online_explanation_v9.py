@@ -41,7 +41,7 @@ from backend.warehouse_r41_diagnostic_public_tree_program_v9 import (
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "warehouse-r41-diagnostic-online-readable-answers.v9"
-RCPD_VERSION = "warehouse-r41-diagnostic-rcpd-v9-fit.v1"
+RCPD_VERSION = "warehouse-r41-diagnostic-rcpd-v12-fit.v1"
 EXACT_ACTIONS = ("UP", "DOWN", "LEFT", "RIGHT", "WAIT")
 ARTIFACT_BINDING_VERSION = "warehouse-r41-diagnostic-explanation-artifact-binding.v9"
 ACCESS_VERSION = "warehouse-r41-diagnostic-explanation-access.v9"

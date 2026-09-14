@@ -23,7 +23,7 @@ import zipfile
 
 from backend import warehouse_r41_diagnostic_compact_public_tree_v9 as compact_api
 from backend import warehouse_r41_diagnostic_online_explanation_v9 as explanation_api
-from backend.warehouse_r41_diagnostic_online_runtime import (
+from backend.warehouse_r41_diagnostic_online_runtime_portable_v1 import (
     PORTABLE_RUNTIME_MANIFEST_VERSION,
     R41DiagnosticOnlineAlignmentRuntime,
     diagnostic_runtime_sources,
@@ -620,7 +620,7 @@ def _assemble_admitted(*, admission: Mapping[str, Any],
              for name, value in components.items()}
     packaged = {
         "actor": paths["actor"].read_bytes(),
-        "protocol": paths["protocol"].read_bytes(),
+        "protocol": paths.get("runtime_protocol", paths["protocol"]).read_bytes(),
         "runtime_manifest": paths["runtime_manifest"].read_bytes(),
         "program": paths["compact_program"].read_bytes(),
         "question_bank": paths["question_bank"].read_bytes(),

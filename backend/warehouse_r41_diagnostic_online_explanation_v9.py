@@ -513,12 +513,15 @@ class R41DiagnosticOnlineAlignmentExplainerV9:
                  runtime: Any, artifact_binding: Mapping[str, Any] | None = None,
                  allow_test_fixture: bool = False):
         from backend.warehouse_r41_diagnostic_online_runtime import (
-            R41DiagnosticOnlineAlignmentRuntime,
+            R41DiagnosticOnlineAlignmentRuntime as SourceRuntime,
+        )
+        from backend.warehouse_r41_diagnostic_online_runtime_portable_v1 import (
+            R41DiagnosticOnlineAlignmentRuntime as PortableRuntime,
         )
 
         if tuple(_RUNTIME_ACTIONS) != EXACT_ACTIONS:
             raise ValueError("Runtime action registry differs from the exact five-action contract")
-        if (type(runtime) is not R41DiagnosticOnlineAlignmentRuntime
+        if (type(runtime) not in (SourceRuntime, PortableRuntime)
                 or type(allow_test_fixture) is not bool
                 or runtime.test_fixture is not allow_test_fixture):
             raise ValueError("Explicit matching r4.1 diagnostic runtime scope is required")
@@ -614,10 +617,13 @@ class R41DiagnosticOnlineAlignmentExplainerV9:
 
     def _assert_current(self, runtime: Any) -> None:
         from backend.warehouse_r41_diagnostic_online_runtime import (
-            R41DiagnosticOnlineAlignmentRuntime,
+            R41DiagnosticOnlineAlignmentRuntime as SourceRuntime,
+        )
+        from backend.warehouse_r41_diagnostic_online_runtime_portable_v1 import (
+            R41DiagnosticOnlineAlignmentRuntime as PortableRuntime,
         )
 
-        if (type(runtime) is not R41DiagnosticOnlineAlignmentRuntime
+        if (type(runtime) not in (SourceRuntime, PortableRuntime)
                 or runtime.verify_binding() != self.runtime_signature
                 or runtime.actor_sha256 != self.actor_sha256
                 or runtime.test_fixture is not self.test_fixture

@@ -30,6 +30,9 @@ from backend.training.warehouse_native_common import canonical, digest, file_has
 from backend import warehouse_r41_diagnostic_compact_public_tree_v9 as compact_api
 from backend.warehouse_r41_diagnostic_online_runtime import (
     PORTABLE_RUNTIME_MANIFEST_VERSION,
+    R41DiagnosticOnlineAlignmentRuntime as SourceDiagnosticRuntime,
+)
+from backend.warehouse_r41_diagnostic_online_runtime_portable_v1 import (
     R41DiagnosticOnlineAlignmentRuntime,
 )
 from backend.warehouse_r41_diagnostic_public_tree_program_v9 import (
@@ -46,7 +49,7 @@ ROOT = Path(__file__).resolve().parents[2]
 VERSION = "warehouse-r41-diagnostic-admission.v11"
 STATUS = "admitted_internal_diagnostic_v11"
 ARTIFACT_NAMES = (
-    "designation", "actor", "protocol", "source_manifest",
+    "designation", "actor", "protocol", "runtime_protocol", "source_manifest",
     "source_manifest_validation",
     "runtime_manifest",
     "candidate_lock", "development_rows", "promotion_closeout",
@@ -269,6 +272,28 @@ def _designation(value: Mapping[str, Any], files: Mapping[str, Path],
     return dict(bindings)
 
 
+def _portable_protocol(source: Mapping[str, Any], portable: Mapping[str, Any],
+                       files: Mapping[str, Path]) -> dict[str, Any]:
+    runtime_protocol = {
+        "version": source.get("version"),
+        "feedback": deepcopy(source.get("feedback")),
+        "scenario_sampling": deepcopy(source.get("scenario_sampling")),
+        "runtime_action_override": source.get("runtime_action_override"),
+    }
+    content = deepcopy(dict(portable))
+    claimed = content.pop("content_sha256", None)
+    expected = {
+        "version": "warehouse-r41-diagnostic-portable-protocol.v1",
+        "source_protocol_file_sha256": file_hash(files["protocol"]),
+        "source_protocol_content_sha256": digest(source),
+        "runtime_protocol": runtime_protocol,
+    }
+    if content != expected or claimed != digest(content):
+        raise ValueError("Exact public projection of the Actor protocol required")
+    _reject_sensitive(portable, "runtime protocol")
+    return runtime_protocol
+
+
 def _compact(files: Mapping[str, Path], *, program_payload: Mapping[str, Any],
              lock_bindings: Mapping[str, str]) -> dict[str, Any]:
     raw_program = files["program"].read_bytes()
@@ -413,7 +438,8 @@ def _validate_components_snapshot(
         }
     }
     for name, value in json_values.items():
-        _reject_sensitive(value, "v9 " + name.replace("_", " "))
+        if name != "protocol":
+            _reject_sensitive(value, "v9 " + name.replace("_", " "))
 
     lock_path, lock, lock_bindings = outer_api._candidate_lock(
         files["candidate_lock"],
@@ -436,6 +462,8 @@ def _validate_components_snapshot(
 
     designation = _designation(
         json_values["designation"], files, lock_bindings)
+    _portable_protocol(
+        json_values["protocol"], json_values["runtime_protocol"], files)
     source_manifest_authentication = manifest_api.read_saved_manifest(
         files["source_manifest"],
         expected_sha256=initial_hashes["source_manifest"],
@@ -450,7 +478,7 @@ def _validate_components_snapshot(
     source_manifest = json_values["source_manifest"]
     source_manifest_content = deepcopy(source_manifest)
     source_manifest_claimed = source_manifest_content.pop("content_sha256", None)
-    source_runtime = R41DiagnosticOnlineAlignmentRuntime(
+    source_runtime = SourceDiagnosticRuntime(
         files["actor"], training_protocol_path=files["protocol"],
         manifest_path=files["source_manifest"],
         expected_actor_sha256=initial_hashes["actor"],
@@ -467,10 +495,10 @@ def _validate_components_snapshot(
     manifest_content = deepcopy(manifest)
     manifest_claimed = manifest_content.pop("content_sha256", None)
     runtime = R41DiagnosticOnlineAlignmentRuntime(
-        files["actor"], training_protocol_path=files["protocol"],
+        files["actor"], training_protocol_path=files["runtime_protocol"],
         manifest_path=files["runtime_manifest"],
         expected_actor_sha256=initial_hashes["actor"],
-        expected_training_protocol_file_sha256=initial_hashes["protocol"],
+        expected_training_protocol_file_sha256=initial_hashes["runtime_protocol"],
         expected_training_protocol_content_sha256=designation[
             "protocol_content_sha256"],
         expected_manifest_file_sha256=initial_hashes["runtime_manifest"],
@@ -634,7 +662,7 @@ def _validate_components_snapshot(
         raise ValueError("Protected-final audit does not bind the locked candidate")
 
     question = json_values["question_bank"]
-    question_api.validate_payload(runtime, question)
+    question_api.validate_payload(source_runtime, question)
     if (question.get("actor_sha256") != initial_hashes["actor"]
             or question.get("protocol_sha256") != runtime.protocol_sha256
             or len(question.get("items", ())) != 8
@@ -675,7 +703,7 @@ def _validate_components_snapshot(
         "producer_sources_sha256": digest(tutorial_api.producer_sources()),
     }
     tutorial_replay = tutorial_api.validate_neutral_tutorial(
-        tutorial, tutorial_scene=play[0], runtime=runtime,
+        tutorial, tutorial_scene=play[0], runtime=source_runtime,
         expected_bindings=expected_tutorial_bindings)
 
     current_hashes = {name: file_hash(path) for name, path in files.items()}
@@ -693,7 +721,8 @@ def _validate_components_snapshot(
             "actor_sha256": initial_hashes["actor"],
             "actor_feature_names_sha256": lock_bindings[
                 "actor_feature_names_sha256"],
-            "protocol_file_sha256": initial_hashes["protocol"],
+            "protocol_file_sha256": initial_hashes["runtime_protocol"],
+            "source_protocol_file_sha256": initial_hashes["protocol"],
             "protocol_content_sha256": runtime.protocol_sha256,
             "runtime_manifest_file_sha256": initial_hashes["runtime_manifest"],
             "runtime_manifest_content_sha256": manifest_claimed,

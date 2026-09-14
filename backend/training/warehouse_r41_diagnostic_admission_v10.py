@@ -54,7 +54,8 @@ ARTIFACT_NAMES = (
     "promotion_observation_projection", "combined_promoted_projection",
     "promoted_burned_final_rows", "combined_promoted_rows",
     "program", "compact_program", "compact_program_report",
-    "outer_result", "outer_rows", "final_anchor", "final_completion", "final_material",
+    "outer_result", "outer_collection_report", "outer_rows",
+    "final_anchor", "final_completion", "final_material",
     "final_rows", "final_projection_parity", "final_audit", "question_bank",
     "question_bank_report", "selected_scenes", "tutorial",
 )
@@ -516,6 +517,8 @@ def _validate_components_snapshot(
                 != initial_hashes["candidate_lock"]
             or outer.get("program_sha256") != initial_hashes["program"]
             or outer.get("outer_rows_sha256") != initial_hashes["outer_rows"]
+            or outer.get("outer_collection_report_sha256")
+                != initial_hashes["outer_collection_report"]
             or outer.get("gate", {}).get("passed") is not True
             or outer.get("gate") != recomputed_outer_gate
             or outer.get("row_accounting", {}).get(
@@ -707,6 +710,8 @@ def _validate_components_snapshot(
             **compact,
             "outer_result_sha256": initial_hashes["outer_result"],
             "outer_result_content_sha256": outer["content_sha256"],
+            "outer_collection_report_sha256": initial_hashes[
+                "outer_collection_report"],
             "outer_rows_sha256": initial_hashes["outer_rows"],
             "final_completion_sha256": initial_hashes["final_completion"],
             "final_completion_content_sha256": completion["content_sha256"],

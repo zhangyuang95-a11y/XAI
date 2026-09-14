@@ -41,7 +41,8 @@ def test_v10_admission_binds_v13_closeout_and_projection_parity():
         "promotion_closeout", "promotion_identity_registry",
         "promotion_observation_projection", "combined_promoted_projection",
         "promoted_burned_final_rows", "combined_promoted_rows",
-        "development_rows", "outer_rows", "final_projection_parity",
+        "development_rows", "outer_collection_report", "outer_rows",
+        "final_projection_parity",
     }
     assert required <= set(admission.ARTIFACT_NAMES)
     assert {"projection_parity_file_sha256",

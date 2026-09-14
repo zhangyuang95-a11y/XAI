@@ -63,7 +63,7 @@ OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH = (
 # claim; any later producer change requires a new protocol version rather than
 # silently changing a consumed final evaluator.
 OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256 = (
-    "fa2c1fcc84b12830b83accfa9462b54a6387ff9670c6bffb775c0840eeb1bdd5"
+    "4bd200f524c18a41b8edb5e37e83dc69c8427b188681659c5e9efcc18eeea650"
 )
 PRIVATE_SALT_DOMAIN = b"warehouse-r41-v13-final-holdout-salt\0"
 PRIVATE_SALT_COMMITMENT = (

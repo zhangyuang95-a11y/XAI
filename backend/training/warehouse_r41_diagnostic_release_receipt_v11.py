@@ -123,7 +123,7 @@ def validate_inputs(*, admission_path: str | Path,
         permanent_promotion_closeout_registry=permanent_promotion_closeout_registry)
     encoded_raw = encoded_file.read_bytes()
     if len(encoded_raw) > release.MAX_BASE64_BYTES:
-        raise ValueError("V11 Base64 Secret File exceeds 960,000 bytes")
+        raise ValueError("V11 Base64 Secret File exceeds 1,000,000 bytes")
     try:
         decoded = base64.b64decode(b"".join(encoded_raw.split()), validate=True)
     except (ValueError, base64.binascii.Error) as error:

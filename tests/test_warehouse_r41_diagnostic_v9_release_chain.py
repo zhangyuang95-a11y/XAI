@@ -161,7 +161,7 @@ def test_admission_separates_full_and_portable_manifests_and_all_hard_gates():
         "protected_final_audit", "compact_program_parity", "question_bank",
         "neutral_tutorial", "participant_ui_source_closure")
     contract = admission.package_contract()
-    assert contract["maximum_base64_bytes"] == 960_000
+    assert contract["maximum_base64_bytes"] == 1_000_000
     assert contract["protected_outer_or_final_artifacts_packaged"] is False
     assert set(contract["archive_whitelist"]) == set(release.ARCHIVE_WHITELIST)
 

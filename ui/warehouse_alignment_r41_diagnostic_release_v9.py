@@ -50,8 +50,8 @@ ARTIFACT_PATHS = {
     "tutorial": "artifacts/tutorial.json",
 }
 ARCHIVE_WHITELIST = frozenset((MANIFEST_NAME, *ARTIFACT_PATHS.values()))
-MAX_BASE64_BYTES = 960_000
-MAX_PACKAGE_BYTES = 719_997
+MAX_BASE64_BYTES = 1_000_000
+MAX_PACKAGE_BYTES = 749_997
 ARCHIVE_COMPRESSION = zipfile.ZIP_BZIP2
 ARCHIVE_COMPRESSLEVEL = 9
 MAX_MANIFEST_BYTES = 512_000
@@ -287,7 +287,7 @@ def _archive_bytes(manifest: Mapping[str, Any], artifacts: Mapping[str, bytes]) 
                              compresslevel=ARCHIVE_COMPRESSLEVEL)
     raw = stream.getvalue()
     if not raw or len(raw) > MAX_PACKAGE_BYTES:
-        raise ValueError("V9 ZIP exceeds the 960 KB Secret File boundary")
+        raise ValueError("V9 ZIP exceeds the 1 MB Secret File boundary")
     return raw
 
 
@@ -663,7 +663,7 @@ def _assemble_admitted(*, admission: Mapping[str, Any],
     raw = _archive_bytes(manifest, packaged)
     encoded = base64.b64encode(raw) + b"\n"
     if len(encoded) > MAX_BASE64_BYTES:
-        raise ValueError("V9 Base64 Secret File exceeds 960,000 bytes")
+        raise ValueError("V9 Base64 Secret File exceeds 1,000,000 bytes")
     package = portable._write_new(output_package, raw)
     encoded_path = None
     try:

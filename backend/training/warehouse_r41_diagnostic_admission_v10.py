@@ -14,6 +14,8 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 from typing import Any, Mapping
 
+import numpy as np
+
 from backend.training import warehouse_r41_diagnostic_designation_v2 as designation_api
 from backend.training import warehouse_r41_diagnostic_explanation_audit_v9 as audit_api
 from backend.training import warehouse_r41_diagnostic_final_once_v13 as final_api
@@ -47,11 +49,12 @@ ARTIFACT_NAMES = (
     "designation", "actor", "protocol", "source_manifest",
     "source_manifest_validation",
     "runtime_manifest",
-    "candidate_lock", "promotion_closeout", "promotion_identity_registry",
+    "candidate_lock", "development_rows", "promotion_closeout",
+    "promotion_identity_registry",
     "promotion_observation_projection", "combined_promoted_projection",
     "promoted_burned_final_rows", "combined_promoted_rows",
     "program", "compact_program", "compact_program_report",
-    "outer_result", "final_anchor", "final_completion", "final_material",
+    "outer_result", "outer_rows", "final_anchor", "final_completion", "final_material",
     "final_rows", "final_projection_parity", "final_audit", "question_bank",
     "question_bank_report", "selected_scenes", "tutorial",
 )
@@ -201,8 +204,8 @@ def _paths(values: Mapping[str, str | Path]) -> dict[str, Path]:
     if not isinstance(values, Mapping) or set(values) != set(ARTIFACT_NAMES):
         raise ValueError("Exact v10 admission artifact set required")
     json_names = set(ARTIFACT_NAMES) - {
-        "actor", "compact_program", "final_rows", "combined_promoted_rows",
-        "promoted_burned_final_rows"}
+        "actor", "compact_program", "development_rows", "outer_rows",
+        "final_rows", "combined_promoted_rows", "promoted_burned_final_rows"}
     return {
         name: _regular(values[name], "v9 " + name.replace("_", " "),
                        maximum=(MAX_JSON_BYTES if name in json_names
@@ -282,6 +285,28 @@ def _compact(files: Mapping[str, Path], *, program_payload: Mapping[str, Any],
     transport = report.get("transport")
     audit = report.get("audit")
     audit_sets = audit.get("sets") if isinstance(audit, Mapping) else None
+    row_observations = {
+        name: outer_api._safe_row_projection(
+            files[path_name], expected_sha256=file_hash(files[path_name]),
+            fields=frozenset(("observations",)), label=name + " rows",
+        )["observations"]
+        for name, path_name in (
+            ("base development", "development_rows"),
+            ("promoted development", "combined_promoted_rows"),
+            ("fresh outer", "outer_rows"),
+            ("protected final", "final_rows"),
+        )
+    }
+    audited_observations = {
+        "development": np.concatenate((
+            row_observations["base development"],
+            row_observations["promoted development"],
+        ), axis=0),
+        "fresh_outer": row_observations["fresh outer"],
+        "protected_final": row_observations["protected final"],
+    }
+    _, expected_audit_sets = compact_api._observation_sets(
+        audited_observations, expected_features=len(program.base_feature_names))
     if (report.get("version") != compact_api.VERSION
             or report.get("status")
                 != "encoded_with_exact_audited_action_parity"
@@ -296,8 +321,7 @@ def _compact(files: Mapping[str, Path], *, program_payload: Mapping[str, Any],
             or audit.get("exact_action_parity") is not True
             or type(audit.get("row_count")) is not int or audit["row_count"] <= 0
             or not isinstance(audit_sets, list)
-            or [row.get("name") for row in audit_sets]
-                != ["development", "fresh_outer", "protected_final"]
+            or audit_sets != expected_audit_sets
             or any(type(row.get("rows")) is not int or row["rows"] <= 0
                    or _HEX.fullmatch(str(row.get("observation_sha256", "")))
                         is None for row in audit_sets)
@@ -379,7 +403,8 @@ def _validate_components_snapshot(
         name: _strict_json(path, "v9 " + name.replace("_", " "))
         for name, path in files.items()
         if name not in {
-            "actor", "compact_program", "final_rows",
+            "actor", "compact_program", "development_rows", "outer_rows",
+            "final_rows",
             "combined_promoted_rows", "promoted_burned_final_rows",
         }
     }
@@ -396,6 +421,9 @@ def _validate_components_snapshot(
                 != initial_hashes["source_manifest"]
             or lock_bindings.get("program_sha256") != initial_hashes["program"]):
         raise ValueError("V9 candidate lock does not bind serving artifacts")
+    if (lock_bindings.get("development_rows_sha256")
+            != initial_hashes["development_rows"]):
+        raise ValueError("V13 candidate lock does not bind development rows")
 
     promotion_closeout, combined_promoted_rows_semantic_sha256 = (
         _authenticate_promotion(
@@ -487,6 +515,7 @@ def _validate_components_snapshot(
             or outer.get("candidate_lock_sha256")
                 != initial_hashes["candidate_lock"]
             or outer.get("program_sha256") != initial_hashes["program"]
+            or outer.get("outer_rows_sha256") != initial_hashes["outer_rows"]
             or outer.get("gate", {}).get("passed") is not True
             or outer.get("gate") != recomputed_outer_gate
             or outer.get("row_accounting", {}).get(
@@ -654,6 +683,7 @@ def _validate_components_snapshot(
                 "manifest_semantic_sha256"],
             "designation_sha256": initial_hashes["designation"],
             "candidate_lock_sha256": initial_hashes["candidate_lock"],
+            "development_rows_sha256": initial_hashes["development_rows"],
             "combined_promoted_rows_sha256": initial_hashes[
                 "combined_promoted_rows"],
             "combined_promoted_rows_semantic_sha256": (
@@ -677,6 +707,7 @@ def _validate_components_snapshot(
             **compact,
             "outer_result_sha256": initial_hashes["outer_result"],
             "outer_result_content_sha256": outer["content_sha256"],
+            "outer_rows_sha256": initial_hashes["outer_rows"],
             "final_completion_sha256": initial_hashes["final_completion"],
             "final_completion_content_sha256": completion["content_sha256"],
             "final_audit_sha256": initial_hashes["final_audit"],

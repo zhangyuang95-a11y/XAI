@@ -9,6 +9,7 @@ from backend.training import warehouse_r41_diagnostic_release_receipt_v10 as rec
 from backend.training import warehouse_r41_diagnostic_study_materials_v10 as study
 from backend.training.warehouse_native_common import file_hash
 from scripts import build_warehouse_r41_diagnostic_admission_v10 as admission_cli
+from scripts import build_warehouse_r41_diagnostic_compact_program_v10 as compact_cli
 from scripts import build_warehouse_r41_diagnostic_study_materials_v10 as study_cli
 from scripts import preflight_warehouse_r41_diagnostic_render_v10 as preflight
 from ui import warehouse_alignment_online_server as server
@@ -40,7 +41,7 @@ def test_v10_admission_binds_v13_closeout_and_projection_parity():
         "promotion_closeout", "promotion_identity_registry",
         "promotion_observation_projection", "combined_promoted_projection",
         "promoted_burned_final_rows", "combined_promoted_rows",
-        "final_projection_parity",
+        "development_rows", "outer_rows", "final_projection_parity",
     }
     assert required <= set(admission.ARTIFACT_NAMES)
     assert {"projection_parity_file_sha256",
@@ -111,6 +112,14 @@ def test_v10_cli_and_preflight_use_v13_promotion_boundary():
     assert "--promotion-closeout" in study_options
     assert "--expected-promotion-closeout-sha256" in study_options
     assert "--permanent-promotion-closeout-registry" in study_options
+    compact_options = {
+        option for action in compact_cli.parser()._actions
+        for option in action.option_strings
+    }
+    for name in ("program", "development-rows", "combined-promoted-rows",
+                 "outer-rows", "final-rows"):
+        assert "--" + name in compact_options
+        assert "--expected-" + name + "-sha256" in compact_options
     assert preflight.RELEASE_MODULE.endswith("_v9")
     assert "--release-module " + preflight.RELEASE_MODULE in preflight.START_COMMAND
 

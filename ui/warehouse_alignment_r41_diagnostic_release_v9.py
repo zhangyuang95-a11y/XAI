@@ -196,8 +196,12 @@ def _validate_manifest(value: Mapping[str, Any]) -> dict[str, Any]:
             or set(parent) != {"version", "status", "admission_sha256",
                               "admission_content_sha256", "bindings_sha256",
                               "gates_sha256"}
-            or parent.get("version") != "warehouse-r41-diagnostic-admission.v9"
-            or parent.get("status") != "admitted_internal_diagnostic_v9"):
+            or (parent.get("version"), parent.get("status")) not in {
+                ("warehouse-r41-diagnostic-admission.v9",
+                 "admitted_internal_diagnostic_v9"),
+                ("warehouse-r41-diagnostic-admission.v10",
+                 "admitted_internal_diagnostic_v10"),
+            }):
         raise ValueError("V9 diagnostic admission parent differs")
     for name in set(parent) - {"version", "status"}:
         _sha(parent[name], "v9 parent " + name)
@@ -598,30 +602,18 @@ def validate_bound_context(context: Any, *, expected_package_sha256: str,
     return context
 
 
-def assemble_from_admitted_components(*,
-        diagnostic_admission_path: str | Path,
+def _assemble_admitted(*, admission: Mapping[str, Any],
+        admission_gate_names: tuple[str, ...],
+        admission_label: str,
         expected_diagnostic_admission_sha256: str,
         components: Mapping[str, str | Path],
-        outer_permanent_registry: str | Path,
-        final_permanent_registry: str | Path,
-        promoted_v11_permanent_registry: str | Path,
         output_package: str | Path,
         output_base64: str | Path | None = None) -> dict[str, Any]:
-    """Build only after the complete immutable v9 admission rereads cleanly."""
-
-    from backend.training import warehouse_r41_diagnostic_admission_v9 as admission_api
-    admission = admission_api.read_saved_admission(
-        diagnostic_admission_path,
-        expected_sha256=_sha(expected_diagnostic_admission_sha256,
-                             "v9 admission"),
-        components=components,
-        outer_permanent_registry=outer_permanent_registry,
-        final_permanent_registry=final_permanent_registry,
-        promoted_v11_permanent_registry=promoted_v11_permanent_registry)
+    """Package one already re-authenticated diagnostic admission."""
     if (admission.get("admitted") is not True
             or admission.get("gates")
-                != {name: True for name in admission_api.GATE_NAMES}):
-        raise ValueError("Passing v9 diagnostic admission required")
+                != {name: True for name in admission_gate_names}):
+        raise ValueError("Passing " + admission_label + " admission required")
     paths = {name: Path(value).expanduser().absolute()
              for name, value in components.items()}
     packaged = {
@@ -688,7 +680,8 @@ def assemble_from_admitted_components(*,
         raise
     return {
         "version": VERSION,
-        "status": "built_from_v9_admission_and_independently_reloaded",
+        "status": ("built_from_" + admission_label
+                   + "_admission_and_independently_reloaded"),
         "release_version": PUBLIC_RELEASE_VERSION,
         "pilot_class": PILOT_CLASS,
         "package": str(package), "package_size": len(raw),
@@ -703,6 +696,65 @@ def assemble_from_admitted_components(*,
     }
 
 
+def assemble_from_admitted_components(*,
+        diagnostic_admission_path: str | Path,
+        expected_diagnostic_admission_sha256: str,
+        components: Mapping[str, str | Path],
+        outer_permanent_registry: str | Path,
+        final_permanent_registry: str | Path,
+        promoted_v11_permanent_registry: str | Path,
+        output_package: str | Path,
+        output_base64: str | Path | None = None) -> dict[str, Any]:
+    """Build only after the complete immutable v9 admission rereads cleanly."""
+
+    from backend.training import warehouse_r41_diagnostic_admission_v9 as admission_api
+    admission = admission_api.read_saved_admission(
+        diagnostic_admission_path,
+        expected_sha256=_sha(expected_diagnostic_admission_sha256,
+                             "v9 admission"),
+        components=components,
+        outer_permanent_registry=outer_permanent_registry,
+        final_permanent_registry=final_permanent_registry,
+        promoted_v11_permanent_registry=promoted_v11_permanent_registry)
+    return _assemble_admitted(
+        admission=admission, admission_gate_names=admission_api.GATE_NAMES,
+        admission_label="v9",
+        expected_diagnostic_admission_sha256=(
+            expected_diagnostic_admission_sha256),
+        components=components, output_package=output_package,
+        output_base64=output_base64)
+
+
+def assemble_from_v10_admitted_components(*,
+        diagnostic_admission_path: str | Path,
+        expected_diagnostic_admission_sha256: str,
+        components: Mapping[str, str | Path],
+        outer_permanent_registry: str | Path,
+        final_permanent_registry: str | Path,
+        permanent_promotion_closeout_registry: str | Path,
+        output_package: str | Path,
+        output_base64: str | Path | None = None) -> dict[str, Any]:
+    """Build the v9 runtime package from a passed v13-evidence admission."""
+
+    from backend.training import warehouse_r41_diagnostic_admission_v10 as admission_api
+    admission = admission_api.read_saved_admission(
+        diagnostic_admission_path,
+        expected_sha256=_sha(expected_diagnostic_admission_sha256,
+                             "v10 admission"),
+        components=components,
+        outer_permanent_registry=outer_permanent_registry,
+        final_permanent_registry=final_permanent_registry,
+        permanent_promotion_closeout_registry=(
+            permanent_promotion_closeout_registry))
+    return _assemble_admitted(
+        admission=admission, admission_gate_names=admission_api.GATE_NAMES,
+        admission_label="v10",
+        expected_diagnostic_admission_sha256=(
+            expected_diagnostic_admission_sha256),
+        components=components, output_package=output_package,
+        output_base64=output_base64)
+
+
 __all__ = [
     "VERSION", "STATUS", "PUBLIC_RELEASE_VERSION", "PILOT_CLASS",
     "ANIMATION_DURATION_MS", "MANIFEST_NAME", "ARTIFACT_PATHS",
@@ -711,5 +763,5 @@ __all__ = [
     "R41DiagnosticOnlineReleaseContext", "release_sources",
     "release_projection", "validate_bound_context", "_archive_bytes",
     "_read_archive", "inspect_online_release", "load_online_release",
-    "assemble_from_admitted_components",
+    "assemble_from_admitted_components", "assemble_from_v10_admitted_components",
 ]

@@ -17,6 +17,8 @@ def parser() -> argparse.ArgumentParser:
         value.add_argument("--" + name.replace("_", "-"), type=Path, required=True)
     value.add_argument("--outer-permanent-registry", type=Path, required=True)
     value.add_argument("--final-permanent-registry", type=Path, required=True)
+    value.add_argument(
+        "--promoted-v11-permanent-registry", type=Path, required=True)
     value.add_argument("--output", type=Path, required=True)
     return value
 
@@ -26,6 +28,7 @@ def main(argv=None) -> int:
     result = admission.build_admission(
         components, outer_permanent_registry=args.outer_permanent_registry,
         final_permanent_registry=args.final_permanent_registry,
+        promoted_v11_permanent_registry=args.promoted_v11_permanent_registry,
         output=args.output)
     print(json.dumps({"version": admission.VERSION, "status": result["status"],
                       "output": str(args.output),

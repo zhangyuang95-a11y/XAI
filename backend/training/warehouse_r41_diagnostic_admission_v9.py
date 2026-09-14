@@ -19,8 +19,9 @@ from backend.training import warehouse_r41_diagnostic_explanation_audit_v9 as au
 from backend.training import warehouse_r41_diagnostic_final_once_v9 as final_api
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_api
 from backend.training import warehouse_r41_diagnostic_input_snapshot_v8 as snapshot_api
+from backend.training import warehouse_r41_diagnostic_outer_attempt_closeout_v12 as promoted_closeout_api
 from backend.training import warehouse_r41_diagnostic_question_bank as question_api
-from backend.training import warehouse_r41_diagnostic_rcpd_v11_outer_once as outer_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v12_outer_once as outer_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as metrics_api
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training.warehouse_native_common import canonical, digest, file_hash
@@ -46,14 +47,16 @@ ARTIFACT_NAMES = (
     "designation", "actor", "protocol", "source_manifest",
     "source_manifest_validation",
     "runtime_manifest",
-    "candidate_lock", "program", "compact_program", "compact_program_report",
+    "candidate_lock", "promoted_v11_rows", "promoted_v11_closeout",
+    "program", "compact_program", "compact_program_report",
     "outer_result", "final_anchor", "final_completion", "final_material",
     "final_rows", "final_audit", "question_bank",
     "question_bank_report", "selected_scenes", "tutorial",
 )
 GATE_NAMES = (
     "actor_designation", "runtime_action_authority", "portable_manifest",
-    "six_high_conflict_scenes", "locked_program", "fresh_outer",
+    "six_high_conflict_scenes", "locked_program",
+    "promoted_v11_development_binding", "fresh_outer",
     "protected_final_audit", "compact_program_parity", "question_bank",
     "neutral_tutorial", "participant_ui_source_closure",
 )
@@ -196,7 +199,7 @@ def _paths(values: Mapping[str, str | Path]) -> dict[str, Path]:
     if not isinstance(values, Mapping) or set(values) != set(ARTIFACT_NAMES):
         raise ValueError("Exact v9 admission artifact set required")
     json_names = set(ARTIFACT_NAMES) - {
-        "actor", "compact_program", "final_rows"}
+        "actor", "compact_program", "final_rows", "promoted_v11_rows"}
     return {
         name: _regular(values[name], "v9 " + name.replace("_", " "),
                        maximum=(MAX_JSON_BYTES if name in json_names
@@ -317,9 +320,37 @@ def _compact(files: Mapping[str, Path], *, program_payload: Mapping[str, Any],
     }
 
 
+def _authenticate_promoted_v11(
+    files: Mapping[str, Path], hashes: Mapping[str, str],
+    lock_bindings: Mapping[str, str], *, permanent_registry: str | Path,
+) -> tuple[dict[str, Any], str]:
+    """Authenticate the permanently closed v11 rows promoted to development."""
+
+    if (lock_bindings.get("promoted_v11_rows_sha256")
+            != hashes.get("promoted_v11_rows")
+            or lock_bindings.get("promoted_v11_closeout_sha256")
+                != hashes.get("promoted_v11_closeout")):
+        raise ValueError("V12 candidate lock does not bind promoted v11 inputs")
+    closeout = promoted_closeout_api.read_saved_closeout(
+        files["promoted_v11_closeout"],
+        expected_closeout_sha256=hashes["promoted_v11_closeout"],
+        permanent_attempt_registry=permanent_registry,
+    )
+    consumed = closeout.get("consumed_outer")
+    semantic = (consumed.get("rows_semantic_sha256")
+                if isinstance(consumed, Mapping) else None)
+    if (not isinstance(consumed, Mapping)
+            or consumed.get("rows_sha256") != hashes["promoted_v11_rows"]
+            or type(semantic) is not str or _HEX.fullmatch(semantic) is None):
+        raise ValueError(
+            "Promoted v11 closeout does not bind its development rows")
+    return closeout, semantic
+
+
 def _validate_components_snapshot(
     values: Mapping[str, str | Path], *, outer_permanent_registry: str | Path,
     final_permanent_registry: str | Path,
+    promoted_v11_permanent_registry: str | Path,
 ) -> dict[str, Any]:
     """Authenticate all release evidence without exposing protected rows."""
 
@@ -345,6 +376,11 @@ def _validate_components_snapshot(
                 != initial_hashes["source_manifest"]
             or lock_bindings.get("program_sha256") != initial_hashes["program"]):
         raise ValueError("V9 candidate lock does not bind serving artifacts")
+
+    promoted_closeout, promoted_rows_semantic_sha256 = (
+        _authenticate_promoted_v11(
+            files, initial_hashes, lock_bindings,
+            permanent_registry=promoted_v11_permanent_registry))
 
     designation = _designation(
         json_values["designation"], files, lock_bindings)
@@ -584,6 +620,14 @@ def _validate_components_snapshot(
                 "manifest_semantic_sha256"],
             "designation_sha256": initial_hashes["designation"],
             "candidate_lock_sha256": initial_hashes["candidate_lock"],
+            "promoted_v11_rows_sha256": initial_hashes[
+                "promoted_v11_rows"],
+            "promoted_v11_rows_semantic_sha256": (
+                promoted_rows_semantic_sha256),
+            "promoted_v11_closeout_sha256": initial_hashes[
+                "promoted_v11_closeout"],
+            "promoted_v11_closeout_content_sha256": promoted_closeout[
+                "content_sha256"],
             "program_sha256": initial_hashes["program"],
             "program_content_sha256": digest(program_payload),
             "public_feature_contract_sha256": lock_bindings[
@@ -645,6 +689,7 @@ def _snapshot_spec(files: Mapping[str, Path], hashes: Mapping[str, str]):
 def validate_components(
     values: Mapping[str, str | Path], *, outer_permanent_registry: str | Path,
     final_permanent_registry: str | Path,
+    promoted_v11_permanent_registry: str | Path,
 ) -> dict[str, Any]:
     """Authenticate one stable byte snapshot and then recheck originals."""
 
@@ -661,7 +706,8 @@ def validate_components(
                          for name in ARTIFACT_NAMES}
         checked = _validate_components_snapshot(
             frozen_values, outer_permanent_registry=outer_permanent_registry,
-            final_permanent_registry=final_permanent_registry)
+            final_permanent_registry=final_permanent_registry,
+            promoted_v11_permanent_registry=promoted_v11_permanent_registry)
         frozen.verify()
         if ({name: file_hash(path) for name, path in files.items()} != hashes
                 or source_closure() != sources
@@ -687,11 +733,13 @@ def _write_new(path: Path, value: Mapping[str, Any]) -> None:
 
 def build_admission(
     paths: Mapping[str, str | Path], *, outer_permanent_registry: str | Path,
-    final_permanent_registry: str | Path, output: str | Path,
+    final_permanent_registry: str | Path,
+    promoted_v11_permanent_registry: str | Path, output: str | Path,
 ) -> dict[str, Any]:
     checked = validate_components(
         paths, outer_permanent_registry=outer_permanent_registry,
-        final_permanent_registry=final_permanent_registry)
+        final_permanent_registry=final_permanent_registry,
+        promoted_v11_permanent_registry=promoted_v11_permanent_registry)
     value = {
         "version": VERSION, "status": STATUS,
         "release_version": release_api.PUBLIC_RELEASE_VERSION,
@@ -717,7 +765,8 @@ def build_admission(
         read_saved_admission(
             target, expected_sha256=expected, components=paths,
             outer_permanent_registry=outer_permanent_registry,
-            final_permanent_registry=final_permanent_registry)
+            final_permanent_registry=final_permanent_registry,
+            promoted_v11_permanent_registry=promoted_v11_permanent_registry)
     except BaseException:
         target.unlink(missing_ok=True)
         raise
@@ -729,6 +778,7 @@ def read_saved_admission(
     components: Mapping[str, str | Path],
     outer_permanent_registry: str | Path,
     final_permanent_registry: str | Path,
+    promoted_v11_permanent_registry: str | Path,
 ) -> dict[str, Any]:
     saved_path = _regular(path, "v9 diagnostic admission", maximum=MAX_JSON_BYTES)
     if file_hash(saved_path) != _sha(expected_sha256, "v9 admission"):
@@ -758,7 +808,8 @@ def read_saved_admission(
         raise ValueError("Exact v9 internal diagnostic admission required")
     checked = validate_components(
         components, outer_permanent_registry=outer_permanent_registry,
-        final_permanent_registry=final_permanent_registry)
+        final_permanent_registry=final_permanent_registry,
+        promoted_v11_permanent_registry=promoted_v11_permanent_registry)
     for name in ("artifacts", "bindings", "play_scenes", "sources"):
         if value.get(name) != checked[name]:
             raise ValueError("V9 admission " + name + " differs from evidence")

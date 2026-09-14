@@ -19,6 +19,8 @@ def main(argv=None) -> int:
         parser.add_argument("--" + name.replace("_", "-"), type=Path, required=True)
     parser.add_argument("--outer-permanent-registry", type=Path, required=True)
     parser.add_argument("--final-permanent-registry", type=Path, required=True)
+    parser.add_argument(
+        "--promoted-v11-permanent-registry", type=Path, required=True)
     parser.add_argument("--output-package", type=Path, required=True)
     parser.add_argument("--output-base64", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -29,6 +31,7 @@ def main(argv=None) -> int:
         components=components,
         outer_permanent_registry=args.outer_permanent_registry,
         final_permanent_registry=args.final_permanent_registry,
+        promoted_v11_permanent_registry=args.promoted_v11_permanent_registry,
         output_package=args.output_package, output_base64=args.output_base64)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True,
                      separators=(",", ":")))

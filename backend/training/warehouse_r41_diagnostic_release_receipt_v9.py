@@ -88,6 +88,7 @@ def validate_inputs(*, admission_path: str | Path,
                     components: Mapping[str, str | Path],
                     outer_permanent_registry: str | Path,
                     final_permanent_registry: str | Path,
+                    promoted_v11_permanent_registry: str | Path,
                     package_path: str | Path,
                     base64_path: str | Path) -> dict[str, Any]:
     from backend.training import warehouse_r41_diagnostic_admission_v9 as admission_api
@@ -100,7 +101,8 @@ def validate_inputs(*, admission_path: str | Path,
     admission = admission_api.read_saved_admission(
         admission_file, expected_sha256=admission_sha, components=components,
         outer_permanent_registry=outer_permanent_registry,
-        final_permanent_registry=final_permanent_registry)
+        final_permanent_registry=final_permanent_registry,
+        promoted_v11_permanent_registry=promoted_v11_permanent_registry)
     encoded_raw = encoded_file.read_bytes()
     if len(encoded_raw) > release.MAX_BASE64_BYTES:
         raise ValueError("V9 Base64 Secret File exceeds 960,000 bytes")

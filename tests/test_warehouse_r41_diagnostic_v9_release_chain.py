@@ -13,15 +13,60 @@ import pytest
 
 from backend.training import warehouse_r41_diagnostic_admission_v9 as admission
 from backend.training import warehouse_r41_diagnostic_release_receipt_v9 as receipt
-from backend.training.warehouse_native_common import canonical, digest
+from backend.training.warehouse_native_common import canonical, digest, file_hash
 from scripts import preflight_warehouse_r41_diagnostic_render_v9 as preflight
 from ui import warehouse_alignment_online_release as portable
 from ui import warehouse_alignment_r41_diagnostic_release_v9 as release
 
 
-def test_admission_authenticates_v11_outer_result():
+def test_admission_authenticates_v12_outer_result():
     assert admission.outer_api.VERSION.startswith(
-        "warehouse-r41-diagnostic-rcpd-v11-")
+        "warehouse-r41-diagnostic-rcpd-v12-")
+
+
+def test_admission_authenticates_promoted_v11_closeout_and_rows(
+        tmp_path, monkeypatch):
+    rows = tmp_path / "promoted-v11-rows.npz"
+    closeout_path = tmp_path / "promoted-v11-closeout.json"
+    rows.write_bytes(b"promoted rows")
+    closeout_path.write_bytes(b"promoted closeout")
+    hashes = {
+        "promoted_v11_rows": file_hash(rows),
+        "promoted_v11_closeout": file_hash(closeout_path),
+    }
+    lock_bindings = {
+        "promoted_v11_rows_sha256": hashes["promoted_v11_rows"],
+        "promoted_v11_closeout_sha256": hashes["promoted_v11_closeout"],
+    }
+    closeout = {
+        "content_sha256": "1" * 64,
+        "consumed_outer": {
+            "rows_sha256": hashes["promoted_v11_rows"],
+            "rows_semantic_sha256": "2" * 64,
+        },
+    }
+    calls = []
+    monkeypatch.setattr(
+        admission.promoted_closeout_api, "read_saved_closeout",
+        lambda path, **kwargs: calls.append((Path(path), kwargs)) or closeout)
+    authenticated, semantic = admission._authenticate_promoted_v11(
+        {"promoted_v11_rows": rows,
+         "promoted_v11_closeout": closeout_path},
+        hashes, lock_bindings, permanent_registry=tmp_path)
+    assert authenticated is closeout
+    assert semantic == "2" * 64
+    assert calls == [(closeout_path, {
+        "expected_closeout_sha256": hashes["promoted_v11_closeout"],
+        "permanent_attempt_registry": tmp_path,
+    })]
+
+    changed = dict(lock_bindings)
+    changed["promoted_v11_rows_sha256"] = "3" * 64
+    with pytest.raises(ValueError, match="candidate lock"):
+        admission._authenticate_promoted_v11(
+            {"promoted_v11_rows": rows,
+             "promoted_v11_closeout": closeout_path},
+            hashes, changed, permanent_registry=tmp_path)
 
 
 def _artifacts():
@@ -105,11 +150,14 @@ def test_admission_separates_full_and_portable_manifests_and_all_hard_gates():
     assert "runtime_manifest" in admission.ARTIFACT_NAMES
     assert "selected_scenes" in admission.ARTIFACT_NAMES
     assert "question_bank_report" in admission.ARTIFACT_NAMES
+    assert {"promoted_v11_rows", "promoted_v11_closeout"}.issubset(
+        admission.ARTIFACT_NAMES)
     assert {"final_anchor", "final_material", "final_rows", "final_audit"}.issubset(
         admission.ARTIFACT_NAMES)
     assert admission.GATE_NAMES == (
         "actor_designation", "runtime_action_authority", "portable_manifest",
-        "six_high_conflict_scenes", "locked_program", "fresh_outer",
+        "six_high_conflict_scenes", "locked_program",
+        "promoted_v11_development_binding", "fresh_outer",
         "protected_final_audit", "compact_program_parity", "question_bank",
         "neutral_tutorial", "participant_ui_source_closure")
     contract = admission.package_contract()
@@ -224,7 +272,9 @@ def test_base64_reader_enforces_960000_byte_ceiling(tmp_path):
 
 def test_assembler_and_receipt_stop_before_writing_when_admission_fails(
         tmp_path, monkeypatch):
+    calls = []
     def fail(*args, **kwargs):
+        calls.append(kwargs)
         raise ValueError("outer gate failed")
     monkeypatch.setattr(admission, "read_saved_admission", fail)
     package = tmp_path / "release.zip"
@@ -234,6 +284,7 @@ def test_assembler_and_receipt_stop_before_writing_when_admission_fails(
             expected_diagnostic_admission_sha256="a" * 64,
             components={}, outer_permanent_registry=tmp_path,
             final_permanent_registry=tmp_path,
+            promoted_v11_permanent_registry=tmp_path,
             output_package=package)
     assert not package.exists()
     admission_path = tmp_path / "admission.json"
@@ -248,9 +299,44 @@ def test_assembler_and_receipt_stop_before_writing_when_admission_fails(
             admission_path=admission_path,
             expected_admission_sha256=sha256(admission_path.read_bytes()).hexdigest(),
             components={}, outer_permanent_registry=tmp_path,
-            final_permanent_registry=tmp_path, package_path=package_path,
+            final_permanent_registry=tmp_path,
+            promoted_v11_permanent_registry=tmp_path,
+            package_path=package_path,
             base64_path=base64_path, output=receipt_path)
     assert not receipt_path.exists()
+    assert len(calls) == 2
+    assert all(call["promoted_v11_permanent_registry"] == tmp_path
+               for call in calls)
+
+
+def test_preflight_propagates_promoted_v11_permanent_registry(
+        tmp_path, monkeypatch):
+    package = tmp_path / "candidate.zip"
+    encoded = tmp_path / "candidate.b64"
+    receipt_path = tmp_path / "receipt.json"
+    for path, raw in ((package, b"zip"), (encoded, b"emlw\n"),
+                      (receipt_path, b"receipt")):
+        path.write_bytes(raw)
+        path.chmod(0o600)
+    seen = []
+
+    def stop(path, **kwargs):
+        seen.append((Path(path), kwargs))
+        raise ValueError("stop after receipt authentication boundary")
+
+    monkeypatch.setattr(preflight.receipt_api, "read_saved_receipt", stop)
+    with pytest.raises(ValueError, match="receipt authentication boundary"):
+        preflight.preflight(
+            admission_path=tmp_path / "admission.json",
+            expected_admission_sha256="a" * 64, components={},
+            outer_permanent_registry=tmp_path,
+            final_permanent_registry=tmp_path,
+            promoted_v11_permanent_registry=tmp_path,
+            package_path=package, base64_path=encoded,
+            receipt_path=receipt_path,
+            expected_receipt_sha256=file_hash(receipt_path),
+            render_yaml=tmp_path / "render.yaml", check_clean_checkout=False)
+    assert seen[0][1]["promoted_v11_permanent_registry"] == tmp_path
 
 
 def _render_yaml(package="a" * 64, manifest="b" * 64):

@@ -13,9 +13,9 @@ from backend import warehouse_r41_diagnostic_online_explanation_v9 as explanatio
 from scripts import build_warehouse_r41_diagnostic_study_materials_v9 as cli
 
 
-def test_study_materials_authenticate_v11_candidate_lock():
+def test_study_materials_authenticate_v12_candidate_lock():
     assert subject.outer_api.VERSION.startswith(
-        "warehouse-r41-diagnostic-rcpd-v11-")
+        "warehouse-r41-diagnostic-rcpd-v12-")
 
 
 def _write(path: Path, value) -> Path:
@@ -58,6 +58,10 @@ def _synthetic_inputs(tmp_path: Path):
             "content_sha256": "0" * 64,
         }),
         "candidate_lock": _write(tmp_path / "lock.json", {"synthetic": True}),
+        "promoted_v11_rows": _write(
+            tmp_path / "promoted-v11-rows.npz", b"synthetic promoted rows"),
+        "promoted_v11_closeout": _write(
+            tmp_path / "promoted-v11-closeout.json", {"synthetic": True}),
         "program": _write(tmp_path / "program.json", {"synthetic": True}),
         "final_audit": _write(tmp_path / "audit.json", {"synthetic": True}),
     }
@@ -75,6 +79,8 @@ def test_authentication_binds_actor_program_and_passed_final_audit(
         "protocol_sha256": hashes["protocol"],
         "runtime_manifest_sha256": hashes["source_manifest"],
         "program_sha256": hashes["program"],
+        "promoted_v11_rows_sha256": hashes["promoted_v11_rows"],
+        "promoted_v11_closeout_sha256": hashes["promoted_v11_closeout"],
         "public_feature_contract_sha256": public_contract,
     }
     final_bindings = {
@@ -119,6 +125,18 @@ def test_authentication_binds_actor_program_and_passed_final_audit(
     monkeypatch.setattr(subject.outer_api, "_candidate_lock", lambda path, expected_sha256: (
         Path(path), lock, lock_bindings,
     ))
+    closeout = {
+        "content_sha256": "6" * 64,
+        "consumed_outer": {
+            "rows_sha256": hashes["promoted_v11_rows"],
+            "rows_semantic_sha256": "5" * 64,
+        },
+    }
+    closeout_calls = []
+    monkeypatch.setattr(
+        subject.promoted_closeout_api, "read_saved_closeout",
+        lambda path, **kwargs: (
+            closeout_calls.append((Path(path), kwargs)) or closeout))
     monkeypatch.setattr(subject, "R41DiagnosticPublicTreeProgramV9", Program)
     monkeypatch.setattr(subject, "_runtime", lambda *args: runtime)
     checked = []
@@ -128,10 +146,15 @@ def test_authentication_binds_actor_program_and_passed_final_audit(
     result = subject.authenticate_release_inputs(**{
         **paths,
         **{"expected_" + name + "_sha256": hashes[name] for name in paths},
+        "promoted_v11_permanent_registry": tmp_path,
     })
     assert result["runtime"] is runtime
     assert checked == [(audit, {
         "expected_bindings": final_bindings, "require_passed": True,
+    })]
+    assert closeout_calls == [(paths["promoted_v11_closeout"], {
+        "expected_closeout_sha256": hashes["promoted_v11_closeout"],
+        "permanent_attempt_registry": tmp_path,
     })]
 
     changed = deepcopy(audit)
@@ -142,6 +165,7 @@ def test_authentication_binds_actor_program_and_passed_final_audit(
             **paths,
             **{"expected_" + name + "_sha256": file_hash(paths[name])
                for name in paths},
+            "promoted_v11_permanent_registry": tmp_path,
         })
 
 
@@ -164,6 +188,10 @@ def test_atomic_build_reuses_replayed_bilingual_bank_and_neutral_tutorial(
         "lock_bindings": {"public_feature_contract_sha256": "b" * 64},
         "program_payload": {"program": "synthetic"},
         "final_audit": {"content_sha256": "c" * 64},
+        "promoted_v11_closeout": {
+            "content_sha256": "e" * 64,
+            "consumed_outer": {"rows_semantic_sha256": "f" * 64},
+        },
     }
     monkeypatch.setattr(subject, "authenticate_release_inputs",
                         lambda **kwargs: authenticated)
@@ -191,6 +219,7 @@ def test_atomic_build_reuses_replayed_bilingual_bank_and_neutral_tutorial(
         **paths,
         **{"expected_" + name + "_sha256": file_hash(path)
            for name, path in paths.items()},
+        "promoted_v11_permanent_registry": tmp_path,
     })
     assert receipt["status"] == subject.STATUS
     assert receipt["question_bank"] == {
@@ -204,6 +233,9 @@ def test_atomic_build_reuses_replayed_bilingual_bank_and_neutral_tutorial(
     }
     assert receipt["tutorial"]["uses_final_actor"] is False
     assert receipt["information_boundary"]["final_rows_read"] is False
+    assert receipt["information_boundary"]["promoted_v11_rows_read"] is False
+    assert receipt["information_boundary"][
+        "promoted_v11_closeout_permanently_authenticated"] is True
     assert json.loads((output / subject.RECEIPT_FILE).read_text()) == receipt
     assert (output / subject.QUESTION_DIRECTORY / subject.QUESTION_FILE).is_file()
     assert (output / subject.TUTORIAL_FILE).is_file()
@@ -237,7 +269,8 @@ def test_cli_requires_hash_for_every_prerequisite():
     }
     for name in (
         "actor", "protocol", "source-manifest", "candidate-lock", "program",
-        "final-audit",
+        "final-audit", "promoted-v11-rows", "promoted-v11-closeout",
     ):
         assert "--" + name in option_strings
         assert "--expected-" + name + "-sha256" in option_strings
+    assert "--promoted-v11-permanent-registry" in option_strings

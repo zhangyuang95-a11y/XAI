@@ -604,6 +604,7 @@ def assemble_from_admitted_components(*,
         components: Mapping[str, str | Path],
         outer_permanent_registry: str | Path,
         final_permanent_registry: str | Path,
+        promoted_v11_permanent_registry: str | Path,
         output_package: str | Path,
         output_base64: str | Path | None = None) -> dict[str, Any]:
     """Build only after the complete immutable v9 admission rereads cleanly."""
@@ -615,7 +616,8 @@ def assemble_from_admitted_components(*,
                              "v9 admission"),
         components=components,
         outer_permanent_registry=outer_permanent_registry,
-        final_permanent_registry=final_permanent_registry)
+        final_permanent_registry=final_permanent_registry,
+        promoted_v11_permanent_registry=promoted_v11_permanent_registry)
     if (admission.get("admitted") is not True
             or admission.get("gates")
                 != {name: True for name in admission_api.GATE_NAMES}):

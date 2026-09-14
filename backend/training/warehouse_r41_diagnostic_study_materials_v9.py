@@ -19,8 +19,9 @@ import tempfile
 from typing import Any, Mapping
 
 from backend.training import warehouse_r41_diagnostic_explanation_audit_v9 as audit_api
+from backend.training import warehouse_r41_diagnostic_outer_attempt_closeout_v12 as promoted_closeout_api
 from backend.training import warehouse_r41_diagnostic_question_bank as question_api
-from backend.training import warehouse_r41_diagnostic_rcpd_v11_outer_once as outer_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v12_outer_once as outer_api
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 from backend.warehouse_r41_diagnostic_online_runtime import (
@@ -115,6 +116,10 @@ def authenticate_release_inputs(
     protocol: str | Path, expected_protocol_sha256: str,
     source_manifest: str | Path, expected_source_manifest_sha256: str,
     candidate_lock: str | Path, expected_candidate_lock_sha256: str,
+    promoted_v11_rows: str | Path, expected_promoted_v11_rows_sha256: str,
+    promoted_v11_closeout: str | Path,
+    expected_promoted_v11_closeout_sha256: str,
+    promoted_v11_permanent_registry: str | Path,
     program: str | Path, expected_program_sha256: str,
     final_audit: str | Path, expected_final_audit_sha256: str,
 ) -> dict[str, Any]:
@@ -132,6 +137,20 @@ def authenticate_release_inputs(
     lock_path = _regular(candidate_lock, "v9 candidate lock")
     lock_path, lock, lock_bindings = outer_api._candidate_lock(
         lock_path, expected_sha256=expected_candidate_lock_sha256)
+    promoted_rows_path = _regular(
+        promoted_v11_rows, "promoted closed-v11 outer rows")
+    if file_hash(promoted_rows_path) != _sha(
+            expected_promoted_v11_rows_sha256, "promoted v11 rows"):
+        raise ValueError("Exact promoted closed-v11 outer rows required")
+    promoted_closeout_path = _regular(
+        promoted_v11_closeout, "promoted v11 outer closeout")
+    promoted_closeout_value = promoted_closeout_api.read_saved_closeout(
+        promoted_closeout_path,
+        expected_closeout_sha256=_sha(
+            expected_promoted_v11_closeout_sha256,
+            "promoted v11 closeout"),
+        permanent_attempt_registry=promoted_v11_permanent_registry,
+    )
     program_path, program_payload = _read_json(
         program, "locked v9 program", expected_sha256=expected_program_sha256)
     audit_path, audit = _read_json(
@@ -143,10 +162,18 @@ def authenticate_release_inputs(
         "protocol_sha256": file_hash(protocol_path),
         "runtime_manifest_sha256": file_hash(manifest_path),
         "program_sha256": file_hash(program_path),
+        "promoted_v11_rows_sha256": file_hash(promoted_rows_path),
+        "promoted_v11_closeout_sha256": file_hash(promoted_closeout_path),
     }
     if any(lock_bindings.get(name) != value
            for name, value in expected_lock.items()):
         raise ValueError("Candidate lock does not bind the study-material inputs")
+    promoted_outer = promoted_closeout_value.get("consumed_outer")
+    if (not isinstance(promoted_outer, Mapping)
+            or promoted_outer.get("rows_sha256") != file_hash(promoted_rows_path)
+            or _HEX.fullmatch(str(promoted_outer.get(
+                "rows_semantic_sha256", ""))) is None):
+        raise ValueError("Promoted v11 closeout does not bind its development rows")
     parsed_program = R41DiagnosticPublicTreeProgramV9.from_dict(program_payload)
     runtime = _runtime(actor_path, protocol_path, manifest_path, manifest)
     runtime.verify_binding()
@@ -177,11 +204,15 @@ def authenticate_release_inputs(
         "candidate_lock_sha256": file_hash(lock_path),
         "program_sha256": file_hash(program_path),
         "final_audit_sha256": file_hash(audit_path),
+        "promoted_v11_rows_sha256": file_hash(promoted_rows_path),
+        "promoted_v11_closeout_sha256": file_hash(promoted_closeout_path),
     }
     return {
         "paths": {
             "actor": actor_path, "protocol": protocol_path,
             "source_manifest": manifest_path, "candidate_lock": lock_path,
+            "promoted_v11_rows": promoted_rows_path,
+            "promoted_v11_closeout": promoted_closeout_path,
             "program": program_path, "final_audit": audit_path,
         },
         "hashes": initial_hashes,
@@ -192,6 +223,7 @@ def authenticate_release_inputs(
         "program": parsed_program,
         "program_payload": program_payload,
         "final_audit": audit,
+        "promoted_v11_closeout": promoted_closeout_value,
     }
 
 
@@ -322,6 +354,11 @@ def build(*, output: str | Path, **inputs: Any) -> dict[str, Any]:
                 "public_feature_contract_sha256": authenticated[
                     "lock_bindings"]["public_feature_contract_sha256"],
                 "final_audit_content_sha256": final_audit["content_sha256"],
+                "promoted_v11_closeout_content_sha256": authenticated[
+                    "promoted_v11_closeout"]["content_sha256"],
+                "promoted_v11_rows_semantic_sha256": authenticated[
+                    "promoted_v11_closeout"]["consumed_outer"][
+                        "rows_semantic_sha256"],
                 "question_bank_sha256": file_hash(question_path),
                 "question_bank_report_sha256": file_hash(question_report_path),
                 "tutorial_sha256": file_hash(tutorial_path),
@@ -342,6 +379,8 @@ def build(*, output: str | Path, **inputs: Any) -> dict[str, Any]:
             },
             "information_boundary": {
                 "outer_rows_read": False,
+                "promoted_v11_rows_read": False,
+                "promoted_v11_closeout_permanently_authenticated": True,
                 "final_rows_read": False,
                 "holdout_salt_read": False,
                 "program_controls_runtime_actions": False,

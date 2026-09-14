@@ -20,11 +20,13 @@ def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(description=__doc__)
     for name in (
         "actor", "protocol", "source_manifest", "candidate_lock", "program",
-        "final_audit",
+        "final_audit", "promoted_v11_rows", "promoted_v11_closeout",
     ):
         value.add_argument("--" + name.replace("_", "-"), type=Path, required=True)
         value.add_argument(
             "--expected-" + name.replace("_", "-") + "-sha256", required=True)
+    value.add_argument(
+        "--promoted-v11-permanent-registry", type=Path, required=True)
     value.add_argument("--output", type=Path, required=True)
     return value
 
@@ -35,7 +37,8 @@ def main(argv=None) -> int:
         name: getattr(args, name)
         for name in (
             "actor", "protocol", "source_manifest", "candidate_lock",
-            "program", "final_audit",
+            "program", "final_audit", "promoted_v11_rows",
+            "promoted_v11_closeout",
         )
     }
     values.update({
@@ -43,9 +46,12 @@ def main(argv=None) -> int:
             args, "expected_" + name + "_sha256")
         for name in (
             "actor", "protocol", "source_manifest", "candidate_lock",
-            "program", "final_audit",
+            "program", "final_audit", "promoted_v11_rows",
+            "promoted_v11_closeout",
         )
     })
+    values["promoted_v11_permanent_registry"] = (
+        args.promoted_v11_permanent_registry)
     receipt = producer.build(output=args.output, **values)
     receipt_path = args.output.expanduser().absolute() / producer.RECEIPT_FILE
     print(json.dumps({

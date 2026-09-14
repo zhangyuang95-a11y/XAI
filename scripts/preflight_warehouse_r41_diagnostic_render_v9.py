@@ -100,6 +100,7 @@ def preflight(*, admission_path: str | Path,
               expected_admission_sha256: str,
               components, outer_permanent_registry: str | Path,
               final_permanent_registry: str | Path,
+              promoted_v11_permanent_registry: str | Path,
               package_path: str | Path, base64_path: str | Path,
               receipt_path: str | Path, expected_receipt_sha256: str,
               render_yaml: str | Path, check_clean_checkout: bool = True):
@@ -117,6 +118,7 @@ def preflight(*, admission_path: str | Path,
         components=components,
         outer_permanent_registry=outer_permanent_registry,
         final_permanent_registry=final_permanent_registry,
+        promoted_v11_permanent_registry=promoted_v11_permanent_registry,
         package_path=package, base64_path=encoded)
     receipt = receipt_api.read_saved_receipt(
         receipt_file, expected_sha256=expected_receipt_sha256, **inputs)
@@ -181,6 +183,8 @@ def main(argv=None) -> int:
         parser.add_argument("--" + name.replace("_", "-"), type=Path, required=True)
     parser.add_argument("--outer-permanent-registry", type=Path, required=True)
     parser.add_argument("--final-permanent-registry", type=Path, required=True)
+    parser.add_argument(
+        "--promoted-v11-permanent-registry", type=Path, required=True)
     parser.add_argument("--package", type=Path, required=True)
     parser.add_argument("--base64", type=Path, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
@@ -195,6 +199,7 @@ def main(argv=None) -> int:
         components=components,
         outer_permanent_registry=args.outer_permanent_registry,
         final_permanent_registry=args.final_permanent_registry,
+        promoted_v11_permanent_registry=args.promoted_v11_permanent_registry,
         package_path=args.package, base64_path=args.base64,
         receipt_path=args.receipt,
         expected_receipt_sha256=args.expected_receipt_sha256,

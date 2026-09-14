@@ -20,6 +20,8 @@ def main(argv=None) -> int:
         parser.add_argument("--" + name.replace("_", "-"), type=Path, required=True)
     parser.add_argument("--outer-permanent-registry", type=Path, required=True)
     parser.add_argument("--final-permanent-registry", type=Path, required=True)
+    parser.add_argument(
+        "--promoted-v11-permanent-registry", type=Path, required=True)
     parser.add_argument("--package", type=Path, required=True)
     parser.add_argument("--base64", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -31,6 +33,7 @@ def main(argv=None) -> int:
         components=components,
         outer_permanent_registry=args.outer_permanent_registry,
         final_permanent_registry=args.final_permanent_registry,
+        promoted_v11_permanent_registry=args.promoted_v11_permanent_registry,
         package_path=args.package, base64_path=args.base64, output=args.output)
     print(json.dumps({"version": receipt.VERSION, "status": value["status"],
                       "receipt": str(args.output),

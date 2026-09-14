@@ -137,6 +137,7 @@ def test_private_salt_is_exact_32_byte_mode_0600_and_domain_bound(
     path = tmp_path / "salt.bin"
     path.write_bytes(raw)
     path.chmod(0o600)
+    monkeypatch.setattr(subject, "PRIVATE_SALT_PATH", path)
     monkeypatch.setattr(subject, "PRIVATE_SALT_COMMITMENT",
                         sha256(subject.PRIVATE_SALT_DOMAIN + raw).hexdigest())
     assert subject._read_committed_salt(path) == raw

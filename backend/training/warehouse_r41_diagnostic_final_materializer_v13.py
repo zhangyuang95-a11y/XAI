@@ -60,6 +60,9 @@ PRIVATE_SALT_DOMAIN = b"warehouse-r41-v13-final-holdout-salt\0"
 PRIVATE_SALT_COMMITMENT = (
     "2df27d590f169a927812e6b46816f522a75677be2bb4ea521a576536e9c758b6"
 )
+PRIVATE_SALT_PATH = Path(
+    "/Users/zhangyuang/.config/policylens/"
+    "warehouse_r41_diagnostic_v13_holdout_salt.bin")
 MAX_JSON_BYTES = 512 * 1024 * 1024
 MAX_NPZ_BYTES = 512 * 1024 * 1024
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
@@ -879,6 +882,8 @@ def _select_and_replay(
 
 def _read_committed_salt(path: Path) -> bytes:
     """Open and authenticate the independent v13 salt after the claim."""
+    if Path(path).expanduser().absolute() != PRIVATE_SALT_PATH:
+        raise ValueError("Only the frozen private v13 salt path is allowed")
     candidate, raw, _actual = _read_once(
         path, "private v13 holdout salt", maximum=32)
     info = candidate.stat(follow_symlinks=False)
@@ -893,6 +898,11 @@ def _prepare_selection(
     *, paths: Mapping[str, Path], authenticated: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Reconstruct all public exclusions before the private salt is opened."""
+    if (paths["burned_v12_final_closeout"]
+            != paths["promotion_closeout"]
+            or paths["permanent_v12_final_closeout_registry"]
+                != paths["permanent_promotion_closeout_registry"]):
+        raise ValueError("V12 promotion closeout paths must be identical")
     registry = authenticated["registry"]
     (identities, excluded_seeds, excluded_fingerprints, source_row_scenes,
      exposure_closure) = _exposure_closure(paths=paths, registry=registry)
@@ -1054,6 +1064,6 @@ if __name__ == "__main__":
 __all__ = [
     "VERSION", "MATERIAL_VERSION", "MATERIAL_STATUS", "CONFIG_VERSION",
     "CONFIG_ENV", "FINAL_SCENE_COUNT", "FINAL_SCENE_OFFSET", "FAMILY_IDS", "FAMILY_QUOTAS",
-    "PRIVATE_SALT_DOMAIN", "PRIVATE_SALT_COMMITMENT",
+    "PRIVATE_SALT_DOMAIN", "PRIVATE_SALT_COMMITMENT", "PRIVATE_SALT_PATH",
     "contract", "producer_sources", "materialize", "main",
 ]

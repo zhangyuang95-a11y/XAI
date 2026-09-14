@@ -437,9 +437,10 @@ def _validate_components_snapshot(
             "combined_promoted_rows", "promoted_burned_final_rows",
         }
     }
-    for name, value in json_values.items():
-        if name != "protocol":
-            _reject_sensitive(value, "v9 " + name.replace("_", " "))
+    for name in ("runtime_protocol", "runtime_manifest", "question_bank",
+                 "tutorial"):
+        _reject_sensitive(
+            json_values[name], "v11 packaged " + name.replace("_", " "))
 
     lock_path, lock, lock_bindings = outer_api._candidate_lock(
         files["candidate_lock"],

@@ -11,8 +11,15 @@ import numpy as np
 import pytest
 
 from backend.training import warehouse_r41_diagnostic_outer_collection_v12 as subject
+from backend.training import warehouse_r41_diagnostic_rcpd_v12_fit_selector as selector_api
 from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v12 as projection_api
 from backend.training.warehouse_native_common import canonical, digest, file_hash
+
+
+def test_collection_uses_the_frozen_v12_selector_grid_version():
+    assert subject.SELECTOR_GRID_VERSION == selector_api.GRID_VERSION
+    assert subject.SELECTOR_GRID_VERSION == (
+        "warehouse-r41-diagnostic-rcpd-v12-candidate-grid.v1")
 
 
 def _arrays(count: int = 3) -> dict[str, np.ndarray]:

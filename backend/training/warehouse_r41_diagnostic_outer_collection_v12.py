@@ -26,6 +26,7 @@ from backend.training import warehouse_r41_diagnostic_designation_v2_binding as 
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_binding
 from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v12 as projection_api
 from backend.training import warehouse_r41_diagnostic_outer_attempt_closeout_v12 as promoted_closeout_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v12_fit_selector as selector_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v7 as rows_v7
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as metrics_api
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
@@ -39,7 +40,7 @@ STATUS = "collected_unscored"
 CANDIDATE_LOCK_VERSION = "warehouse_r41_diagnostic_rcpd_v12_candidate_lock_v1"
 SELECTOR_VERSION = "warehouse-r41-diagnostic-rcpd-v12-fit-selector.v1"
 SELECTOR_STATUS = "locked_development_candidate_pending_fresh_outer"
-SELECTOR_GRID_VERSION = "warehouse-r41-diagnostic-rcpd-v9-candidate-grid.v1"
+SELECTOR_GRID_VERSION = selector_api.GRID_VERSION
 CV_SALTS = (
     "warehouse-r41-v9-blocked-cv-a-20260913",
     "warehouse-r41-v9-blocked-cv-b-20260913",

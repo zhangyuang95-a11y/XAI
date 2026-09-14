@@ -27,12 +27,13 @@ import numpy as np
 from backend.training import warehouse_r41_diagnostic_designation_v2_binding as designation_api
 from backend.training import warehouse_r41_diagnostic_explanation_audit_v9 as audit_api
 from backend.training import warehouse_r41_diagnostic_frozen_manifest_v2 as manifest_api
-from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v11 as projection_api
-from backend.training import warehouse_r41_diagnostic_outer_collection_v11 as collection_api
-from backend.training import warehouse_r41_diagnostic_rcpd_v11_fit_selector as selector_api
+from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v12 as projection_api
+from backend.training import warehouse_r41_diagnostic_outer_attempt_closeout_v12 as promoted_closeout_api
+from backend.training import warehouse_r41_diagnostic_outer_collection_v12 as collection_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v12_fit_selector as selector_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v7 as rows_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v8 as metrics_api
-from backend.training import warehouse_r41_diagnostic_rcpd_v11_outer_once as outer_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v12_outer_once as outer_api
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training.warehouse_native_common import canonical, digest, file_hash
 
@@ -59,7 +60,7 @@ OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH = (
 # claim; any later producer change requires a new protocol version rather than
 # silently changing a consumed final evaluator.
 OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256 = (
-    "395bc3f1a8d5d3b20a3aae8e45b3f0c66d73b87bb197ae8271f47578263e7cec"
+    "efe39860affc1100a25ff8aa4899efe614c8a84cdc0abc1d98985dad06a917ee"
 )
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _MATERIAL_FIELDS = frozenset((
@@ -227,7 +228,7 @@ def _strict_outer_pass(value: Mapping[str, Any], *, bindings: Mapping[str, str],
     try:
         recomputed = metrics_api._gate(metrics)
     except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("V11 outer result metrics cannot be gated") from error
+        raise ValueError("V12 outer result metrics cannot be gated") from error
     if (value.get("status") != outer_api.STATUS_PASSED
             or value.get("candidate_lock_sha256") != candidate_lock_sha256
             or value.get("program_sha256") != bindings["program_sha256"]
@@ -240,7 +241,7 @@ def _strict_outer_pass(value: Mapping[str, Any], *, bindings: Mapping[str, str],
             or value.get("row_accounting", {}).get("runtime_action_overrides") != 0
             or value.get("execution", {}).get("candidate_refit") is not False
             or value.get("execution", {}).get("program_mutated") is not False):
-        raise ValueError("A passed immutable v11 fresh outer is required")
+        raise ValueError("A passed immutable v12 fresh outer is required")
 
 
 def _authenticate_preclaim(
@@ -248,29 +249,51 @@ def _authenticate_preclaim(
     actor_path: str | Path, protocol_path: str | Path,
     runtime_manifest_path: str | Path, designation_path: str | Path,
     failed_outer_closeout_path: str | Path,
+    promoted_v11_closeout_path: str | Path,
+    expected_promoted_v11_closeout_sha256: str,
+    permanent_v11_outer_registry: str | Path,
     fresh_outer_registry_path: str | Path,
     fresh_outer_registry_report_path: str | Path,
     prior_outer_hash_projection_path: str | Path,
     outer_hash_projection_path: str | Path,
     outer_hash_projection_receipt_path: str | Path,
-    development_rows_path: str | Path, program_path: str | Path,
+    development_rows_path: str | Path, promoted_v11_rows_path: str | Path,
+    program_path: str | Path,
     selector_report_path: str | Path, outer_result_path: str | Path,
     expected_outer_result_sha256: str, outer_permanent_registry: str | Path,
 ) -> dict[str, Any]:
     """Authenticate only public/development evidence; never accepts final input."""
     lock_path, lock, bindings = outer_api._candidate_lock(
         candidate_lock_path, expected_sha256=expected_candidate_lock_sha256)
+    if (_sha(expected_promoted_v11_closeout_sha256,
+             "promoted-v11 outer closeout")
+            != bindings["promoted_v11_closeout_sha256"]):
+        raise ValueError("Expected promoted-v11 closeout differs from candidate lock")
     paths = outer_api._verify_lock_files(
         bindings, actor=actor_path, protocol=protocol_path,
         runtime_manifest=runtime_manifest_path, designation=designation_path,
         failed_outer_closeout=failed_outer_closeout_path,
+        promoted_v11_closeout=promoted_v11_closeout_path,
         fresh_outer_registry=fresh_outer_registry_path,
         fresh_outer_registry_report=fresh_outer_registry_report_path,
         prior_outer_hash_projection=prior_outer_hash_projection_path,
         outer_hash_projection=outer_hash_projection_path,
         outer_hash_projection_receipt=outer_hash_projection_receipt_path,
-        development_rows=development_rows_path, program=program_path,
+        development_rows=development_rows_path,
+        promoted_v11_rows=promoted_v11_rows_path, program=program_path,
         selector_report=selector_report_path)
+    promoted_closeout = promoted_closeout_api.read_saved_closeout(
+        paths["promoted_v11_closeout"],
+        expected_closeout_sha256=expected_promoted_v11_closeout_sha256,
+        permanent_attempt_registry=permanent_v11_outer_registry)
+    promoted_outer = promoted_closeout.get("consumed_outer")
+    promoted_projection = promoted_outer.get("observation_hash_projection") \
+        if isinstance(promoted_outer, Mapping) else None
+    if (not isinstance(promoted_outer, Mapping)
+            or not isinstance(promoted_projection, Mapping)
+            or promoted_outer.get("rows_sha256")
+                != bindings["promoted_v11_rows_sha256"]):
+        raise ValueError("Promoted-v11 rows differ from authenticated closeout")
     selector_report = collection_api.authenticate_locked_candidate_selector(
         lock=lock, selector_report_path=paths["selector_report"],
         expected_selector_report_sha256=bindings["selector_report_sha256"],
@@ -288,7 +311,25 @@ def _authenticate_preclaim(
             or registry_bindings.get(
                 "outer_observation_hash_projection_content_sha256")
                 != bindings["prior_outer_hash_projection_content_sha256"]):
-        raise ValueError("V11 prior outer hash projection binding differs")
+        raise ValueError("V12 prior outer hash projection binding differs")
+    if (registry_bindings.get(
+            "consumed_v11_outer_closeout_file_sha256")
+            != bindings["promoted_v11_closeout_sha256"]
+            or registry_bindings.get(
+                "consumed_v11_outer_closeout_content_sha256")
+                != promoted_closeout.get("content_sha256")
+            or registry_bindings.get("consumed_v11_outer_rows_sha256")
+                != bindings["promoted_v11_rows_sha256"]
+            or registry_bindings.get(
+                "consumed_v11_outer_rows_semantic_sha256")
+                != promoted_outer.get("rows_semantic_sha256")
+            or registry_bindings.get(
+                "consumed_v11_selected_identity_sha256")
+                != promoted_outer.get("identities_sha256")
+            or registry_bindings.get(
+                "consumed_v11_outer_observation_hashes_sha256")
+                != promoted_projection.get("outer_observation_hashes_sha256")):
+        raise ValueError("Promoted v11 closeout and v12 registry differ")
     prior_projection = selector_api.read_prior_outer_hash_projection(
         paths["prior_outer_hash_projection"],
         expected_sha256=bindings["prior_outer_hash_projection_sha256"],
@@ -312,7 +353,7 @@ def _authenticate_preclaim(
                 != selected_identity_sha256
             or receipt_bindings.get("actor_sha256")
                 != bindings["actor_sha256"]):
-        raise ValueError("V11 outer identity/projection binding differs")
+        raise ValueError("V12 outer identity/projection binding differs")
     expected_receipt_bindings = {
         "fresh_outer_registry_sha256": bindings[
             "fresh_outer_registry_sha256"],
@@ -329,7 +370,7 @@ def _authenticate_preclaim(
     if (not isinstance(receipt_bindings, Mapping)
             or any(receipt_bindings.get(name) != expected
                    for name, expected in expected_receipt_bindings.items())):
-        raise ValueError("V11 outer registry/report projection receipt differs")
+        raise ValueError("V12 outer registry/report projection receipt differs")
 
     # These strict readers authenticate the frozen runtime and designation but
     # deliberately use no full/final manifest replay.
@@ -354,19 +395,36 @@ def _authenticate_preclaim(
         paths["development_rows"],
         expected_sha256=bindings["development_rows_sha256"],
         fields=frozenset(("observation_hashes", "scene_fingerprints")),
-        label="locked v11 development rows")
+        label="locked base development rows")
     development_ordered = outer_api._decode(
         development["observation_hashes"], "development observation hashes")
-    validation_hashes = selector_api.validation_hash_union(
+    development_scene_ordered = outer_api._decode(
+        development["scene_fingerprints"], "development scene fingerprints")
+    promoted = outer_api._safe_row_projection(
+        paths["promoted_v11_rows"],
+        expected_sha256=bindings["promoted_v11_rows_sha256"],
+        fields=frozenset(("observation_hashes", "scene_fingerprints")),
+        label="locked promoted v11 development rows")
+    promoted_ordered = outer_api._decode(
+        promoted["observation_hashes"], "promoted v11 observation hashes")
+    promoted_scene_ordered = outer_api._decode(
+        promoted["scene_fingerprints"], "promoted v11 scene fingerprints")
+    development_hashes, development_scenes = (
+        _retained_combined_development_hashes(
+            base_ordered=development_ordered,
+            base_scene_ordered=development_scene_ordered,
+            promoted_ordered=promoted_ordered,
+            promoted_scene_ordered=promoted_scene_ordered,
+            prior_unique_hashes=prior_projection["outer_observation_hashes"],
+            promoted_unique_hashes=promoted_projection[
+                "outer_observation_hashes"],
+            fresh_unique_hashes=projection["projection"][
+                "unique_observation_hashes"],
+            validation_wins=selector_report["development"][
+                "validation_wins"]))
+    outer_hashes = set(selector_api.validation_hash_union(
         prior_projection["outer_observation_hashes"],
-        projection["projection"]["unique_observation_hashes"])
-    development_hashes = _retained_development_hashes(
-        development_ordered=development_ordered,
-        outer_unique_hashes=validation_hashes,
-        validation_wins=selector_report["development"]["validation_wins"])
-    development_scenes = set(outer_api._decode(
-        development["scene_fingerprints"], "development scene fingerprints"))
-    outer_hashes = set(validation_hashes)
+        projection["projection"]["unique_observation_hashes"]))
     outer_scenes = {str(scene["fingerprint"])
                     for scene in registry["development_outer"]}
     if development_hashes & outer_hashes or development_scenes & outer_scenes:
@@ -383,6 +441,7 @@ def _authenticate_preclaim(
         "development_hashes": development_hashes,
         "development_scenes": development_scenes,
         "outer_hashes": outer_hashes, "outer_scenes": outer_scenes,
+        "promoted_v11_closeout": promoted_closeout,
     }
 
 
@@ -416,6 +475,122 @@ def _retained_development_hashes(
     if result & set(outer_unique_hashes):
         raise ValueError("Locked development and passed outer splits overlap")
     return result
+
+
+def _mask_projection_audit(
+    *, ordered_hashes: Sequence[str], exclusions: Sequence[str],
+    saved: Mapping[str, Any], label: str,
+) -> tuple[list[str], np.ndarray]:
+    """Replay one v12 label-blind keep mask from its public hashes."""
+    hashes = list(ordered_hashes)
+    outer = list(exclusions)
+    if (not hashes or any(type(value) is not str or _HEX.fullmatch(value) is None
+                          for value in hashes)
+            or outer != sorted(set(outer))
+            or any(type(value) is not str or _HEX.fullmatch(value) is None
+                   for value in outer)):
+        raise ValueError(label + " observation hash projection differs")
+    keep = ~np.isin(
+        np.asarray(hashes, dtype="U64"), np.asarray(outer, dtype="U64"))
+    retained = [value for value, selected in zip(hashes, keep)
+                if bool(selected)]
+    packed = np.ascontiguousarray(keep.astype(np.uint8))
+    expected = {
+        "source_rows": len(hashes),
+        "retained_rows": len(retained),
+        "removed_rows": int(np.sum(~keep)),
+        "source_unique_observations": len(set(hashes)),
+        "retained_unique_observations": len(set(retained)),
+        "fresh_outer_unique_observations": len(outer),
+        "retained_fresh_outer_observation_overlap": 0,
+        "keep_mask_sha256": sha256(memoryview(packed).cast("B")).hexdigest(),
+        "retained_observation_hashes_sha256": digest(retained),
+    }
+    if (not isinstance(saved, Mapping) or not _content_valid(saved)
+            or any(saved.get(name) != value for name, value in expected.items())
+            or saved.get("private_development_members_read_before_mask_frozen")
+                is not False
+            or saved.get("private_members_read_only_after_mask_frozen") is not True
+            or saved.get("source_archive_reauthenticated_after_private_read")
+                is not True
+            or saved.get("all_retained_rows_marked_development") is not True
+            or type(saved.get("retained_rows_semantic_sha256")) is not str
+            or _HEX.fullmatch(saved["retained_rows_semantic_sha256"]) is None):
+        raise ValueError("Locked " + label + " validation-wins projection differs")
+    return retained, keep.astype(np.bool_)
+
+
+def _retained_combined_development_hashes(
+    *, base_ordered: Sequence[str], base_scene_ordered: Sequence[str],
+    promoted_ordered: Sequence[str], promoted_scene_ordered: Sequence[str],
+    prior_unique_hashes: Sequence[str], promoted_unique_hashes: Sequence[str],
+    fresh_unique_hashes: Sequence[str], validation_wins: Mapping[str, Any],
+) -> tuple[set[str], set[str]]:
+    """Authenticate v12 precedence and both masks without opening targets."""
+    prior = selector_api.validation_hash_union(prior_unique_hashes, ())
+    promoted = selector_api.validation_hash_union(promoted_unique_hashes, ())
+    fresh = selector_api.validation_hash_union(fresh_unique_hashes, ())
+    prior_set, promoted_set = set(prior), set(promoted)
+    if (not promoted_set or not promoted_set <= prior_set
+            or set(promoted_ordered) != promoted_set):
+        raise ValueError("Promoted v11 rows and prior projection differ")
+    if (len(base_ordered) != len(base_scene_ordered)
+            or len(promoted_ordered) != len(promoted_scene_ordered)):
+        raise ValueError("Development row and scene projections differ")
+    historical = sorted(prior_set - promoted_set)
+    base_exclusions = selector_api.validation_hash_union(prior, fresh)
+    promoted_exclusions = selector_api.validation_hash_union(historical, fresh)
+    base_saved = validation_wins.get("base") \
+        if isinstance(validation_wins, Mapping) else None
+    promoted_saved = validation_wins.get("promoted_v11") \
+        if isinstance(validation_wins, Mapping) else None
+    base_retained, base_keep = _mask_projection_audit(
+        ordered_hashes=base_ordered, exclusions=base_exclusions,
+        saved=base_saved, label="base development")
+    promoted_retained, promoted_keep = _mask_projection_audit(
+        ordered_hashes=promoted_ordered, exclusions=promoted_exclusions,
+        saved=promoted_saved, label="promoted v11 development")
+    base_set, promoted_retained_set = set(base_retained), set(promoted_retained)
+    retained = base_set | promoted_retained_set
+    retained_scenes = {
+        str(scene) for scene, selected in zip(base_scene_ordered, base_keep)
+        if bool(selected)
+    } | {
+        str(scene) for scene, selected in zip(
+            promoted_scene_ordered, promoted_keep) if bool(selected)
+    }
+    expected = {
+        "precedence": "fresh-v12-validation > promoted-v11 > older-development",
+        "prior_unique_observations": len(prior),
+        "historical_unique_observations": len(historical),
+        "promoted_v11_unique_observations": len(promoted),
+        "fresh_v12_unique_observations": len(fresh),
+        "promoted_v11_projection_sha256": digest(promoted),
+        "combined_source_rows": len(base_ordered) + len(promoted_ordered),
+        "combined_retained_rows": len(base_retained) + len(promoted_retained),
+        "combined_retained_scene_count": len(retained_scenes),
+        "cross_component_observation_overlap": 0,
+        "retained_fresh_outer_observation_overlap": 0,
+        "all_retained_rows_marked_development": True,
+        "private_members_read_only_after_both_masks_frozen": True,
+        "both_source_archives_reauthenticated_after_private_read": True,
+    }
+    if (not isinstance(validation_wins, Mapping)
+            or not _content_valid(validation_wins)
+            or any(validation_wins.get(name) != value
+                   for name, value in expected.items())
+            or type(validation_wins.get("retained_rows_semantic_sha256"))
+                is not str
+            or _HEX.fullmatch(
+                validation_wins["retained_rows_semantic_sha256"]) is None
+            or base_set & promoted_retained_set
+            or retained & set(fresh)):
+        raise ValueError("Locked combined v12 validation-wins projection differs")
+    # Whole-scene final isolation covers every source scene, including rows
+    # removed by observation-level precedence.
+    exposed_scenes = set(map(str, base_scene_ordered)) | set(map(
+        str, promoted_scene_ordered))
+    return retained, exposed_scenes
 
 
 def _validate_material(
@@ -500,12 +675,16 @@ def run_final_once(
     actor_path: str | Path, protocol_path: str | Path,
     runtime_manifest_path: str | Path, designation_path: str | Path,
     failed_outer_closeout_path: str | Path,
+    promoted_v11_closeout_path: str | Path,
+    expected_promoted_v11_closeout_sha256: str,
+    permanent_v11_outer_registry: str | Path,
     fresh_outer_registry_path: str | Path,
     fresh_outer_registry_report_path: str | Path,
     prior_outer_hash_projection_path: str | Path,
     outer_hash_projection_path: str | Path,
     outer_hash_projection_receipt_path: str | Path,
-    development_rows_path: str | Path, program_path: str | Path,
+    development_rows_path: str | Path, promoted_v11_rows_path: str | Path,
+    program_path: str | Path,
     selector_report_path: str | Path, outer_result_path: str | Path,
     expected_outer_result_sha256: str, outer_permanent_registry: str | Path,
     permanent_final_registry: str | Path, output: str | Path,
@@ -520,12 +699,18 @@ def run_final_once(
         runtime_manifest_path=runtime_manifest_path,
         designation_path=designation_path,
         failed_outer_closeout_path=failed_outer_closeout_path,
+        promoted_v11_closeout_path=promoted_v11_closeout_path,
+        expected_promoted_v11_closeout_sha256=(
+            expected_promoted_v11_closeout_sha256),
+        permanent_v11_outer_registry=permanent_v11_outer_registry,
         fresh_outer_registry_path=fresh_outer_registry_path,
         fresh_outer_registry_report_path=fresh_outer_registry_report_path,
         prior_outer_hash_projection_path=prior_outer_hash_projection_path,
         outer_hash_projection_path=outer_hash_projection_path,
         outer_hash_projection_receipt_path=outer_hash_projection_receipt_path,
-        development_rows_path=development_rows_path, program_path=program_path,
+        development_rows_path=development_rows_path,
+        promoted_v11_rows_path=promoted_v11_rows_path,
+        program_path=program_path,
         selector_report_path=selector_report_path,
         outer_result_path=outer_result_path,
         expected_outer_result_sha256=expected_outer_result_sha256,

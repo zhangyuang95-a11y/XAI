@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from backend.training import warehouse_r41_diagnostic_final_once_v9 as subject
+from backend.training import warehouse_r41_diagnostic_final_materializer_v9 as materializer_api
 from backend.training.warehouse_native_common import digest, file_hash
 
 
@@ -103,12 +104,17 @@ def _setup(tmp_path: Path, monkeypatch):
         "runtime_manifest_path": paths["manifest"],
         "designation_path": paths["designation"],
         "failed_outer_closeout_path": paths["designation"],
+        "promoted_v11_closeout_path": paths["designation"],
+        "expected_promoted_v11_closeout_sha256": file_hash(
+            paths["designation"]),
+        "permanent_v11_outer_registry": permanent,
         "fresh_outer_registry_path": paths["designation"],
         "fresh_outer_registry_report_path": paths["designation"],
         "prior_outer_hash_projection_path": paths["designation"],
         "outer_hash_projection_path": paths["designation"],
         "outer_hash_projection_receipt_path": paths["designation"],
         "development_rows_path": paths["actor"],
+        "promoted_v11_rows_path": paths["actor"],
         "program_path": paths["program"],
         "selector_report_path": paths["designation"],
         "outer_result_path": paths["designation"],
@@ -158,6 +164,24 @@ def test_claim_precedes_materialization_and_success_is_readable(tmp_path, monkey
         completion_path, expected_completion_sha256=file_hash(completion_path),
         permanent_final_registry=permanent) == result
     assert (Path(common["output"]) / subject.ROWS_NAME).is_file()
+
+
+def test_v12_preclaim_keeps_frozen_materializer_anchor_schema(tmp_path, monkeypatch):
+    common, _context, permanent, materializer_sources = _setup(
+        tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        materializer_api, "producer_sources", lambda: materializer_sources)
+
+    def materializer(_source_path, anchor, campaign):
+        _path, authenticated = materializer_api._authenticate_claim(
+            campaign / subject.ANCHOR_NAME)
+        assert authenticated == anchor
+        return _material(materializer_sources, anchor)
+
+    monkeypatch.setattr(subject, "_run_materializer", materializer)
+    result = subject.run_final_once(**common)
+    assert result["status"] == subject.STATUS_PASSED
+    assert len(list(permanent.iterdir())) == 1
 
 
 def test_preclaim_failure_cannot_invoke_final_materializer(tmp_path, monkeypatch):
@@ -260,6 +284,87 @@ def test_preclaim_reproduces_locked_v11_validation_wins_projection():
         subject._retained_development_hashes(
             development_ordered=development, outer_unique_hashes=outer,
             validation_wins=changed)
+
+
+def test_preclaim_reproduces_v12_two_source_validation_wins():
+    old = _fp("old-outer")
+    promoted_hashes = sorted({_fp("promoted-a"), _fp("promoted-b")})
+    fresh = [_fp("fresh-outer")]
+    prior = sorted({old, *promoted_hashes})
+    base = [promoted_hashes[0], _fp("base-a"), old, _fp("base-b"), fresh[0]]
+    base_scenes = [_fp("base-scene-a"), _fp("base-scene-a"),
+                   _fp("base-scene-old"), _fp("base-scene-b"),
+                   _fp("base-scene-fresh")]
+    promoted = [promoted_hashes[0], promoted_hashes[1], promoted_hashes[0]]
+    promoted_scenes = [_fp("promoted-scene-a"), _fp("promoted-scene-b"),
+                       _fp("promoted-scene-a")]
+
+    def child(values, exclusions, semantic):
+        keep = ~np.isin(
+            np.asarray(values, dtype="U64"), np.asarray(exclusions, dtype="U64"))
+        retained = [value for value, selected in zip(values, keep)
+                    if bool(selected)]
+        packed = np.ascontiguousarray(keep.astype(np.uint8))
+        return _content({
+            "source_rows": len(values),
+            "retained_rows": len(retained),
+            "removed_rows": int(np.sum(~keep)),
+            "source_unique_observations": len(set(values)),
+            "retained_unique_observations": len(set(retained)),
+            "fresh_outer_unique_observations": len(exclusions),
+            "retained_fresh_outer_observation_overlap": 0,
+            "keep_mask_sha256": sha256(
+                memoryview(packed).cast("B")).hexdigest(),
+            "retained_observation_hashes_sha256": digest(retained),
+            "private_development_members_read_before_mask_frozen": False,
+            "retained_rows_semantic_sha256": semantic,
+            "all_retained_rows_marked_development": True,
+            "private_members_read_only_after_mask_frozen": True,
+            "source_archive_reauthenticated_after_private_read": True,
+        }), keep
+
+    base_audit, base_keep = child(base, sorted({*prior, *fresh}), _fp("base"))
+    promoted_audit, promoted_keep = child(
+        promoted, sorted({old, *fresh}), _fp("promoted"))
+    retained_scenes = {
+        scene for scene, selected in zip(base_scenes, base_keep) if bool(selected)
+    } | {
+        scene for scene, selected in zip(promoted_scenes, promoted_keep)
+        if bool(selected)
+    }
+    audit = _content({
+        "precedence": "fresh-v12-validation > promoted-v11 > older-development",
+        "base": base_audit,
+        "promoted_v11": promoted_audit,
+        "prior_unique_observations": len(prior),
+        "historical_unique_observations": 1,
+        "promoted_v11_unique_observations": len(promoted_hashes),
+        "fresh_v12_unique_observations": len(fresh),
+        "promoted_v11_projection_sha256": digest(promoted_hashes),
+        "combined_source_rows": len(base) + len(promoted),
+        "combined_retained_rows": int(np.sum(base_keep) + np.sum(promoted_keep)),
+        "combined_retained_scene_count": len(retained_scenes),
+        "cross_component_observation_overlap": 0,
+        "retained_fresh_outer_observation_overlap": 0,
+        "retained_rows_semantic_sha256": _fp("combined"),
+        "all_retained_rows_marked_development": True,
+        "private_members_read_only_after_both_masks_frozen": True,
+        "both_source_archives_reauthenticated_after_private_read": True,
+    })
+    retained, exposed_scenes = subject._retained_combined_development_hashes(
+        base_ordered=base, base_scene_ordered=base_scenes,
+        promoted_ordered=promoted, promoted_scene_ordered=promoted_scenes,
+        prior_unique_hashes=prior, promoted_unique_hashes=promoted_hashes,
+        fresh_unique_hashes=fresh, validation_wins=audit)
+    assert retained == {_fp("base-a"), _fp("base-b"), *promoted_hashes}
+    assert exposed_scenes == set(base_scenes) | set(promoted_scenes)
+    with pytest.raises(ValueError, match="combined v12 validation-wins"):
+        subject._retained_combined_development_hashes(
+            base_ordered=base, base_scene_ordered=base_scenes,
+            promoted_ordered=promoted, promoted_scene_ordered=promoted_scenes,
+            prior_unique_hashes=prior, promoted_unique_hashes=promoted_hashes,
+            fresh_unique_hashes=fresh,
+            validation_wins=_content(dict(audit, combined_retained_rows=0)))
 
 
 def test_material_contract_rejects_program_access(tmp_path, monkeypatch):
@@ -366,10 +471,10 @@ def test_official_materializer_binding_matches_frozen_transitive_digest():
         subject.OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256)
 
 
-def test_final_controller_uses_only_v11_outer_chain():
+def test_final_controller_uses_only_v12_outer_chain():
     assert subject.outer_api.VERSION.startswith(
-        "warehouse-r41-diagnostic-rcpd-v11-")
+        "warehouse-r41-diagnostic-rcpd-v12-")
     assert subject.collection_api.VERSION == (
-        "warehouse-r41-diagnostic-outer-collection.v11")
+        "warehouse-r41-diagnostic-outer-collection.v12")
     assert subject.projection_api.VERSION == (
-        "warehouse-r41-diagnostic-outer-hash-projection.v11")
+        "warehouse-r41-diagnostic-outer-hash-projection.v12")

@@ -28,12 +28,18 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--runtime-manifest", type=Path, required=True)
     value.add_argument("--designation", type=Path, required=True)
     value.add_argument("--failed-outer-closeout", type=Path, required=True)
+    value.add_argument("--promoted-v11-closeout", type=Path, required=True)
+    value.add_argument(
+        "--expected-promoted-v11-closeout-sha256", required=True)
+    value.add_argument(
+        "--promoted-v11-permanent-registry", type=Path, required=True)
     value.add_argument("--fresh-outer-registry", type=Path, required=True)
     value.add_argument("--fresh-outer-registry-report", type=Path, required=True)
     value.add_argument("--prior-outer-hash-projection", type=Path, required=True)
     value.add_argument("--outer-hash-projection", type=Path, required=True)
     value.add_argument("--outer-hash-projection-receipt", type=Path, required=True)
     value.add_argument("--development-rows", type=Path, required=True)
+    value.add_argument("--promoted-v11-rows", type=Path, required=True)
     value.add_argument("--program", type=Path, required=True)
     value.add_argument("--selector-report", type=Path, required=True)
     value.add_argument("--outer-result", type=Path, required=True)
@@ -65,6 +71,11 @@ def main(argv: list[str] | None = None) -> int:
             runtime_manifest_path=args.runtime_manifest,
             designation_path=args.designation,
             failed_outer_closeout_path=args.failed_outer_closeout,
+            promoted_v11_closeout_path=args.promoted_v11_closeout,
+            expected_promoted_v11_closeout_sha256=(
+                args.expected_promoted_v11_closeout_sha256),
+            permanent_v11_outer_registry=(
+                args.promoted_v11_permanent_registry),
             fresh_outer_registry_path=args.fresh_outer_registry,
             fresh_outer_registry_report_path=args.fresh_outer_registry_report,
             prior_outer_hash_projection_path=(
@@ -73,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
             outer_hash_projection_receipt_path=(
                 args.outer_hash_projection_receipt),
             development_rows_path=args.development_rows,
+            promoted_v11_rows_path=args.promoted_v11_rows,
             program_path=args.program,
             selector_report_path=args.selector_report,
             outer_result_path=args.outer_result,

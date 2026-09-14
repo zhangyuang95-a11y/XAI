@@ -209,7 +209,7 @@ def test_saved_registry_binds_closeout_and_combined_promotion(
     }
     expected_closeout_sha = "4" * 64
     monkeypatch.setattr(
-        subject.burned_v12_api, "read_saved_closeout",
+        subject.burned_v12_api, "read_saved_closeout_public",
         lambda *_args, **_kwargs: deepcopy(closeout))
     identities = [
         {"batch_index": index, "family_id": subject.FAMILY_IDS[
@@ -300,3 +300,13 @@ def test_saved_registry_binds_closeout_and_combined_promotion(
         permanent_v12_final_closeout_registry=tmp_path)
     assert checked_registry == registry
     assert checked_report == report
+
+
+def test_registry_uses_public_only_closeout_reader():
+    source = inspect.getsource(subject)
+    assert source.count("burned_v12_api.read_saved_closeout_public(") == 2
+    assert "burned_v12_api.read_saved_closeout(" not in source
+    public_reader_source = inspect.getsource(subject.burned_v12_api)
+    assert "load_authenticated_rows" not in public_reader_source
+    assert "import numpy" not in public_reader_source.lower()
+    assert "import zipfile" not in public_reader_source.lower()

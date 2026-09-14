@@ -20,7 +20,7 @@ import shutil
 import tempfile
 from typing import Any, Mapping, Sequence
 
-from backend.training import warehouse_r41_diagnostic_final_attempt_closeout_v13 as burned_v12_api
+from backend.training import warehouse_r41_diagnostic_final_attempt_closeout_public_v13 as burned_v12_api
 from backend.training import warehouse_r41_diagnostic_rcpd_v12_outer_split as v12
 from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
 from backend.training.warehouse_native_common import canonical, digest, file_hash
@@ -274,7 +274,7 @@ def replay_exclusion_closure(
     closeout_path = v12.v11.v9._regular(
         burned_v12_final_closeout_path, "burned v12 final closeout",
         maximum=MAX_JSON_BYTES)
-    closeout = burned_v12_api.read_saved_closeout(
+    closeout = burned_v12_api.read_saved_closeout_public(
         closeout_path,
         expected_closeout_sha256=expected_burned_v12_final_closeout_sha256,
         permanent_closeout_registry=permanent_v12_final_closeout_registry)
@@ -818,7 +818,7 @@ def read_saved_registry(
     report_file, report = v12.v11.v9._strict_json(
         report_path, "saved v13 outer registry report",
         expected_sha256=expected_report_sha256)
-    closeout = burned_v12_api.read_saved_closeout(
+    closeout = burned_v12_api.read_saved_closeout_public(
         burned_v12_final_closeout_path,
         expected_closeout_sha256=expected_burned_v12_final_closeout_sha256,
         permanent_closeout_registry=permanent_v12_final_closeout_registry)

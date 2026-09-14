@@ -509,6 +509,8 @@ def create_registry(**kwargs: Any) -> tuple[
             closure["v9_consumed_identities"]),
         "consumed_v10_outer_identities_sha256": digest(
             closure["v10_consumed_identities"]),
+        "consumed_v10_outer_observation_hashes_sha256": v10_projection[
+            "outer_observation_hashes_sha256"],
         "consumed_v11_outer_identities_sha256": digest(
             closure["v11_consumed_identities"]),
         "consumed_v11_outer_observation_hashes_sha256": v11_projection[

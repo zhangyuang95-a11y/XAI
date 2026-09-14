@@ -314,6 +314,92 @@ def test_public_authentication_reproduces_locked_v11_validation_wins():
             validation_wins=dict(validation_wins, retained_rows=4))
 
 
+def test_v12_two_source_validation_wins_preserves_promoted_v11_rows():
+    old = _fp("historical")
+    promoted_hashes = sorted({_fp("promoted-a"), _fp("promoted-b")})
+    fresh = [_fp("fresh-v12")]
+    prior = sorted({old, *promoted_hashes})
+    base = [promoted_hashes[0], _fp("base-a"), old, _fp("base-b"),
+            _fp("base-a")]
+    base_scenes = [_fp("scene-0"), _fp("scene-1"), _fp("scene-2"),
+                   _fp("scene-3"), _fp("scene-1")]
+    promoted = [promoted_hashes[0], promoted_hashes[1], promoted_hashes[0]]
+    promoted_scenes = [_fp("scene-p0"), _fp("scene-p1"), _fp("scene-p0")]
+
+    def child(ordered, exclusions, semantic):
+        keep = ~np.isin(np.asarray(ordered, dtype="U64"),
+                        np.asarray(exclusions, dtype="U64"))
+        retained = [value for value, selected in zip(ordered, keep)
+                    if bool(selected)]
+        packed = np.ascontiguousarray(keep.astype(np.uint8))
+        value = {
+            "source_rows": len(ordered),
+            "retained_rows": len(retained),
+            "removed_rows": int(np.sum(~keep)),
+            "source_unique_observations": len(set(ordered)),
+            "retained_unique_observations": len(set(retained)),
+            "fresh_outer_unique_observations": len(exclusions),
+            "retained_fresh_outer_observation_overlap": 0,
+            "keep_mask_sha256": sha256(memoryview(packed).cast("B")).hexdigest(),
+            "retained_observation_hashes_sha256": digest(retained),
+            "private_development_members_read_before_mask_frozen": False,
+            "retained_rows_semantic_sha256": _fp(semantic),
+            "all_retained_rows_marked_development": True,
+            "private_members_read_only_after_mask_frozen": True,
+            "source_archive_reauthenticated_after_private_read": True,
+        }
+        value["content_sha256"] = digest(value)
+        return value, keep
+
+    base_exclusions = sorted(set(prior) | set(fresh))
+    promoted_exclusions = sorted((set(prior) - set(promoted_hashes))
+                                 | set(fresh))
+    base_audit, base_keep = child(base, base_exclusions, "base-semantic")
+    promoted_audit, promoted_keep = child(
+        promoted, promoted_exclusions, "promoted-semantic")
+    retained_scenes = {
+        scene for scene, selected in zip(base_scenes, base_keep) if selected
+    } | {
+        scene for scene, selected in zip(promoted_scenes, promoted_keep)
+        if selected
+    }
+    audit = {
+        "precedence": "fresh-v12-validation > promoted-v11 > older-development",
+        "base": base_audit,
+        "promoted_v11": promoted_audit,
+        "prior_unique_observations": len(prior),
+        "historical_unique_observations": 1,
+        "promoted_v11_unique_observations": len(promoted_hashes),
+        "fresh_v12_unique_observations": len(fresh),
+        "promoted_v11_projection_sha256": digest(promoted_hashes),
+        "combined_source_rows": len(base) + len(promoted),
+        "combined_retained_rows": int(np.sum(base_keep) + np.sum(promoted_keep)),
+        "combined_retained_scene_count": len(retained_scenes),
+        "cross_component_observation_overlap": 0,
+        "retained_fresh_outer_observation_overlap": 0,
+        "retained_rows_semantic_sha256": _fp("combined-semantic"),
+        "all_retained_rows_marked_development": True,
+        "private_members_read_only_after_both_masks_frozen": True,
+        "both_source_archives_reauthenticated_after_private_read": True,
+    }
+    audit["content_sha256"] = digest(audit)
+    retained, exposed_scenes = subject._retained_combined_development_hashes(
+        base_ordered=base, base_scene_ordered=base_scenes,
+        promoted_ordered=promoted, promoted_scene_ordered=promoted_scenes,
+        prior_unique_hashes=prior,
+        promoted_unique_hashes=promoted_hashes,
+        fresh_unique_hashes=fresh, validation_wins=audit)
+    assert retained == {_fp("base-a"), _fp("base-b"), *promoted_hashes}
+    assert exposed_scenes == set(base_scenes) | set(promoted_scenes)
+    with pytest.raises(ValueError, match="Promoted v11 rows"):
+        subject._retained_combined_development_hashes(
+            base_ordered=base, base_scene_ordered=base_scenes,
+            promoted_ordered=promoted, promoted_scene_ordered=promoted_scenes,
+            prior_unique_hashes=prior,
+            promoted_unique_hashes=promoted_hashes[:1],
+            fresh_unique_hashes=fresh, validation_wins=audit)
+
+
 def test_source_orders_claim_config_public_preparation_then_salt():
     source = inspect.getsource(subject.materialize)
     positions = [source.index(token) for token in (
@@ -328,6 +414,9 @@ def test_config_is_strict_and_does_not_embed_secret(tmp_path, monkeypatch):
     assert "burned_v10_final_closeout" in subject._CONFIG_PATH_FIELDS
     assert "permanent_v10_final_closeout_registry" in (
         subject._CONFIG_PATH_FIELDS)
+    assert "promoted_v11_rows" in subject._CONFIG_PATH_FIELDS
+    assert "promoted_v11_closeout" in subject._CONFIG_PATH_FIELDS
+    assert "permanent_v11_outer_registry" in subject._CONFIG_PATH_FIELDS
     paths = {name: str((tmp_path / name).absolute())
              for name in subject._CONFIG_PATH_FIELDS}
     value = {"version": subject.CONFIG_VERSION, "paths": paths}
@@ -343,7 +432,7 @@ def test_config_is_strict_and_does_not_embed_secret(tmp_path, monkeypatch):
 
 def _prior_projection() -> dict:
     values = sorted({_fp("v8-observation"), _fp("v9-observation"),
-                     _fp("v10-observation")})
+                     _fp("v10-observation"), _fp("v11-observation")})
     value = {
         "version": subject.registry_api.VERSION
             + ".validation-wins-exclusion.v1",
@@ -353,15 +442,19 @@ def _prior_projection() -> dict:
         "source_v9_projection_content_sha256": _fp("v9-projection"),
         "source_v10_final_closeout_content_sha256": _fp("v10-closeout"),
         "source_v10_projection_content_sha256": _fp("v10-projection"),
+        "source_v11_closeout_content_sha256": _fp("v11-closeout"),
+        "source_v11_projection_content_sha256": _fp("v11-projection"),
         "outer_observation_hashes": values,
         "unique_outer_observation_hash_count": len(values),
         "outer_observation_hashes_sha256": digest(values),
         "component_unique_counts": {
-            "consumed_v8": 1, "consumed_v9": 1, "consumed_v10": 1},
+            "consumed_v8": 1, "consumed_v9": 1, "consumed_v10": 1,
+            "consumed_v11": 1},
         "component_hashes_sha256": {
             "consumed_v8": digest([_fp("v8-observation")]),
             "consumed_v9": digest([_fp("v9-observation")]),
             "consumed_v10": digest([_fp("v10-observation")]),
+            "consumed_v11": digest([_fp("v11-observation")]),
         },
         "selector_rule": "validation-wins test projection",
         "raw_observations_included": False,
@@ -375,7 +468,7 @@ def _prior_projection() -> dict:
     return value
 
 
-def test_prior_outer_projection_requires_exact_v11_three_campaign_union(tmp_path):
+def test_prior_outer_projection_requires_exact_v12_four_campaign_union(tmp_path):
     expected = _prior_projection()
     path = tmp_path / "outer_observation_hashes.json"
     path.write_text(canonical(expected) + "\n", encoding="utf-8")
@@ -396,7 +489,7 @@ def test_prior_outer_projection_requires_exact_v11_three_campaign_union(tmp_path
             expected_projection=expected)
 
 
-def test_exposure_closure_accepts_v11_hash_screened_selection(
+def test_exposure_closure_accepts_v12_hash_screened_selection(
         tmp_path, monkeypatch):
     selected = []
     index = 0
@@ -406,7 +499,7 @@ def test_exposure_closure_accepts_v11_hash_screened_selection(
                 "batch_index": index % 3,
                 "family_id": family,
                 "seed": 900_000 + index,
-                "fingerprint": _fp(f"v11-selected-{index}"),
+                "fingerprint": _fp(f"v12-selected-{index}"),
             })
             index += 1
     remaining = selected + [{
@@ -414,17 +507,22 @@ def test_exposure_closure_accepts_v11_hash_screened_selection(
         "seed": 999_999, "fingerprint": _fp("identity-only-first"),
     }]
     consumed_v10_hash = _fp("consumed-v10-observations")
+    consumed_v11_hash = _fp("consumed-v11-observations")
     closure = {
         "candidates": remaining,
         "excluded_seeds": set(), "excluded_fingerprints": set(),
         "row_fingerprints": set(), "row_candidate_fingerprints": set(),
         "trace_fingerprints": set(), "current_identities": [],
         "v9_consumed_identities": [], "v10_consumed_identities": [],
+        "v11_consumed_identities": [],
         "formal_fingerprints": set(), "previous_fingerprints": set(),
         "retired_fingerprints": set(),
         "burned_final_closeout": {"consumed_outer": {
             "observation_hash_projection": {
                 "outer_observation_hashes_sha256": consumed_v10_hash}}},
+        "consumed_v11_closeout": {"consumed_outer": {
+            "observation_hash_projection": {
+                "outer_observation_hashes_sha256": consumed_v11_hash}}},
     }
     monkeypatch.setattr(
         subject.registry_api, "replay_exclusion_closure",
@@ -433,8 +531,8 @@ def test_exposure_closure_accepts_v11_hash_screened_selection(
         family: subject.FAMILY_QUOTAS[family]
             + (1 if family == subject.FAMILY_IDS[0] else 0)
         for family in subject.FAMILY_IDS}.items()))
-    # The identity-only prefix intentionally differs from the saved set.  V11
-    # may skip ranked identities whose replay hashes overlap consumed v10.
+    # The identity-only prefix intentionally differs from the saved set.  V12
+    # may skip ranked identities whose replay hashes overlap consumed v11.
     monkeypatch.setattr(
         subject.registry_api, "_remaining_and_selected",
         lambda *_args, **_kwargs: (
@@ -443,8 +541,8 @@ def test_exposure_closure_accepts_v11_hash_screened_selection(
         "selected": [{key: row[key] for key in (
             "seed", "fingerprint", "family_id")} for row in selected],
         "selected_scene_count": len(selected),
-        "selected_v10_observation_overlap": 0,
-        "consumed_v10_observation_hashes_sha256": consumed_v10_hash,
+        "selected_v11_observation_overlap": 0,
+        "consumed_v11_observation_hashes_sha256": consumed_v11_hash,
     }
     hash_screen["content_sha256"] = digest(hash_screen)
     exclusion_counts = {
@@ -454,6 +552,7 @@ def test_exposure_closure_accepts_v11_hash_screened_selection(
         "consumed_outer_identities": 0,
         "consumed_v9_outer_identities": 0,
         "consumed_v10_outer_identities": 0,
+        "consumed_v11_outer_identities": 0,
         "formal_xy_identities": 0,
         "previous_development_identities": 0,
         "retired_exposed_identities": 0,
@@ -464,6 +563,7 @@ def test_exposure_closure_accepts_v11_hash_screened_selection(
             "failure_closeout_file_sha256": _fp("failed"),
             "consumed_v9_attempt_closeout_file_sha256": _fp("v9"),
             "burned_v10_final_closeout_file_sha256": _fp("v10"),
+            "consumed_v11_outer_closeout_file_sha256": _fp("v11"),
         },
         "selected_outer_identities": selected,
         "statistics": {
@@ -483,6 +583,8 @@ def test_exposure_closure_accepts_v11_hash_screened_selection(
             "consumed_v9_outer_identities_sha256": digest([]),
             "consumed_v10_outer_identities_sha256": digest([]),
             "consumed_v10_outer_observation_hashes_sha256": consumed_v10_hash,
+            "consumed_v11_outer_identities_sha256": digest([]),
+            "consumed_v11_outer_observation_hashes_sha256": consumed_v11_hash,
             "retired_exposed_fingerprints_sha256": digest([]),
         },
     }
@@ -500,10 +602,10 @@ def test_real_source_closure_is_nonempty_and_self_bound():
     assert sources[relative] == sha256(
         Path(subject.__file__).read_bytes()).hexdigest()
     for required in (
-        "backend/training/warehouse_r41_diagnostic_outer_collection_v11.py",
-        "backend/training/warehouse_r41_diagnostic_outer_hash_projection_v11.py",
-        "backend/training/warehouse_r41_diagnostic_rcpd_v11_outer_once.py",
-        "backend/training/warehouse_r41_diagnostic_rcpd_v11_outer_split.py",
-        "backend/training/warehouse_r41_diagnostic_final_attempt_closeout_v11.py",
+        "backend/training/warehouse_r41_diagnostic_outer_collection_v12.py",
+        "backend/training/warehouse_r41_diagnostic_outer_hash_projection_v12.py",
+        "backend/training/warehouse_r41_diagnostic_rcpd_v12_outer_once.py",
+        "backend/training/warehouse_r41_diagnostic_rcpd_v12_outer_split.py",
+        "backend/training/warehouse_r41_diagnostic_outer_attempt_closeout_v12.py",
     ):
         assert required in sources

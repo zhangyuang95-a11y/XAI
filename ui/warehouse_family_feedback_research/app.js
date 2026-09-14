@@ -37,7 +37,7 @@
   function explanationsAllowed(view){return !view?.study_version_mismatch && allowed(view,"question") && view?.explain_allowed===true && (view?.release?.explanation_ready===true || verificationFlow(view)) && ["freeplay","task1","task1_complete"].includes(phase(view));}
   function visibleAnswers(view){
     if(!explanationsAllowed(view))return [];
-    return (Array.isArray(view.answers)?view.answers:[]).filter(a=>!a.run_id || a.run_id===view.run_id).map(a=>({
+    return (Array.isArray(view.answers)?view.answers:[]).filter(a=>!a.run_id || a.run_id===view.run_id).slice(0,1).map(a=>({
       id:a.id || a.answer_id || a.question_id,status:a.status || (a.text?"ready":"pending"),
       question:String(a.question || ""),text:typeof a.text==="string"?a.text:typeof a.answer==="string"?a.answer:"",
       frame:a.frame ?? a.selected_frame ?? null,
@@ -70,18 +70,24 @@
         || !Number.isInteger(before.version) || after.version!==before.version+1
         || !Number.isInteger(before.state?.frame) || after.state?.frame!==before.state.frame+1)return null;
     const previous=new Map((before.state?.agents || []).map(agent=>[agent.id,agent]));
-    const agents={};let moved=false;
+    const agents={},feedback=framePublicHistory(after),deltas={UP:[-1,0],DOWN:[1,0],LEFT:[0,-1],RIGHT:[0,1]};let moved=false,bumped=false;
     for(const agent of after.state?.agents || []){
       const old=previous.get(agent.id),from=old?.position,to=agent.position;
       if(!Array.isArray(from) || !Array.isArray(to) || from.length!==2 || to.length!==2
           || !from.every(Number.isFinite) || !to.every(Number.isFinite))continue;
       agents[agent.id]={from:[...from],to:[...to]};
       if(from[0]!==to[0] || from[1]!==to[1])moved=true;
+      else if(feedback?.valid===true && feedback.move_canceled?.[agent.id]===true){
+        const delta=deltas[feedback.submitted_actions?.[agent.id]];
+        if(delta){const other=[...previous.values()].find(value=>value.id!==agent.id)?.position,aligned=other && (from[0]===other[0] || from[1]===other[1]);const distance={same_target:aligned?.66:.32,swap:.16,occupied_stationary:.32}[feedback.collision_kind] ?? .16;agents[agent.id].bump=[delta[0]*distance,delta[1]*distance];bumped=true;}
+      }
     }
-    return moved || tutorial?{agents,duration:MOTION_DURATION_MS,tutorial}:null;
+    return moved || bumped || tutorial?{agents,duration:MOTION_DURATION_MS,tutorial,feedback,bumped}:null;
   }
   function easeMotion(progress){const t=Math.max(0,Math.min(1,Number(progress) || 0));return t*t*(3-2*t);}
-  function interpolateMotion(motion,progress){const t=easeMotion(progress),positions={};for(const [id,path] of Object.entries(motion?.agents || {}))positions[id]=[path.from[0]+(path.to[0]-path.from[0])*t,path.from[1]+(path.to[1]-path.from[1])*t];return positions;}
+  function bumpProgress(progress){const t=Math.max(0,Math.min(1,Number(progress)||0));return t<.4?easeMotion(t/.4):t<=.55?1:1-easeMotion((t-.55)/.45);}
+  function interpolateMotion(motion,progress){const t=easeMotion(progress),b=bumpProgress(progress),positions={};for(const [id,path] of Object.entries(motion?.agents || {}))positions[id]=[path.from[0]+(path.to[0]-path.from[0])*t+(path.bump?.[0]||0)*b,path.from[1]+(path.to[1]-path.from[1])*t+(path.bump?.[1]||0)*b];return positions;}
+  function collisionNotice(history,language){if(history?.valid!==true)return "";const zh=language!=="en";if(["same_target","swap","occupied_stationary"].includes(history.collision_kind))return zh?"发生碰撞：本步冲突移动已取消。":"Collision: conflicting movement was canceled this turn.";return "";}
   function readStorage(storage, key) { try { return storage.getItem(key); } catch { return null; } }
   function makeTransport({fetchImpl,storage,onPending=()=>{}}) {
     let pending = null, sending = false;
@@ -131,7 +137,7 @@
     const a=id=>actions[history.submitted_actions?.[id]] || "—";
     return zh?[`提交动作：你 ${a("robot_1")} · AI 2 ${a("robot_2")}`,`移动取消：你 ${canceled("robot_1")} · AI 2 ${canceled("robot_2")}`,`机器人冲突：${kinds[history.collision_kind] || "—"} · 连续 ${count(history.consecutive_collision)} 步`]:[`Submitted: You ${a("robot_1")} · AI 2 ${a("robot_2")}`,`Move canceled: You ${canceled("robot_1")} · AI 2 ${canceled("robot_2")}`,`Robot conflict: ${kinds[history.collision_kind] || "—"} · ${count(history.consecutive_collision)} consecutive turns`];
   }
-  if(typeof module!=="undefined" && module.exports)module.exports={FRONTEND_VERSION,MOTION_DURATION_MS,verificationFlow,playable,framePublicHistory,publicHistoryLines,PENDING_KEY,local,accessibilityLabels,releaseMessageKey,releaseBadgeKey,normalizeView,phase,displayStage,study,ended,canEnter,allowed,explanationsAllowed,visibleAnswers,keyboardAction,canAct,canSubmit,readLocked,frameMetrics,confirmedMotion,easeMotion,interpolateMotion,makeTransport};
+  if(typeof module!=="undefined" && module.exports)module.exports={FRONTEND_VERSION,MOTION_DURATION_MS,verificationFlow,playable,framePublicHistory,publicHistoryLines,PENDING_KEY,local,accessibilityLabels,releaseMessageKey,releaseBadgeKey,normalizeView,phase,displayStage,study,ended,canEnter,allowed,explanationsAllowed,visibleAnswers,keyboardAction,canAct,canSubmit,readLocked,frameMetrics,confirmedMotion,easeMotion,bumpProgress,interpolateMotion,collisionNotice,makeTransport};
   if(typeof document==="undefined")return;
   const $=id=>document.getElementById(id);
   const WORDS={
@@ -196,6 +202,7 @@
     for(const [id,role] of [["humanStatus","robot_1"],["aiStatus","robot_2"]]){const a=f?.state?.agents?.find(a=>a.id===role);$(id).textContent=a?`${tr("battery")} ${Math.round(a.battery)}% · ${a.carrying_label?tr("carrying")+" "+a.carrying_label:tr("empty")}`:"—";}
     const agents=Number(f?.state?.frame)>0?f.state.agents || []:[];$("lastActions").textContent=`${tr("last")}: 1 ${actionLabel(agents.find(a=>a.id==="robot_1")?.last_executed_action)} · 2 ${actionLabel(agents.find(a=>a.id==="robot_2")?.last_executed_action)}`;
     publicHistoryLines(framePublicHistory(f),ui.language).forEach((line,i)=>$( ["submittedHistory","canceledHistory","collisionHistory"][i]).textContent=line);
+    paintCollisionNotice(ui.motion?.feedback || framePublicHistory(f));
     $("historySlider").max=String(count()-1);$("historySlider").value=String(ui.replay===null?count()-1:ui.replay);disable($("historySlider"),readLocked(v,ui.busy || ui.historyLoading!==null,pending) || !v?.run_id || count()<2);disable($("previousFrame"),readLocked(v,ui.busy || ui.historyLoading!==null,pending) || !v?.run_id || Number($("historySlider").value)<=0);disable($("liveButton"),readLocked(v,ui.busy || ui.historyLoading!==null,pending) || ui.replay===null);$("historyLabel").textContent=v?.run_id?`${f?.state?.frame ?? 0} / ${s?.frame ?? 0}`:"—";
     $("frameNote").textContent=ui.historyLoading!==null?tr("historyLoading"):tutorialActive?`${tr("tutorialFrame")} ${(tutorial.frame_index ?? 0)+1} / ${tutorial.total_frames ?? 1} · ${tr("tutorialUnscored")}`:p==="questionnaire" && f?.state?`${tr("questionMap")} ${f.state.frame}`:ui.replay!==null?`${tr("replay")} ${f?.state?.frame ?? ui.replay} · ${tr("confirmed")} ${s?.frame ?? 0} · ${tr("paused")}`:v?.run_id?`${ended(v)?tr("ended"):tr("liveFrame")} ${s?.frame ?? 0}`:"";
     $("statusText").textContent=v?.study_version_mismatch?tr("studyVersionChanged"):ui.historyLoading!==null?tr("historyLoading"):ui.busy?tr("busy"):pending?tr("pending"):ui.error?tr(ui.error):v?.version_mismatch?tr("runtimeChanged"):v?tr("synced"):tr("connecting");$("statusText").parentElement.classList.toggle("error",!!pending || !!ui.error || !!v?.study_version_mismatch);$("retryButton").classList.toggle("hidden",!pending || !!v?.study_version_mismatch);disable($("retryButton"),ui.busy || ui.historyLoading!==null || !canSubmit(v,pending?.body?.kind,true));
@@ -239,8 +246,16 @@
   }
   function animateConfirmedAction(before,after,kind){
     const motion=confirmedMotion(before,after,kind,ui.replay);if(!motion)return Promise.resolve();
-    const token=++ui.motionToken;ui.motion={token,progress:0,positions:interpolateMotion(motion,0)};drawWarehouse(shown(),ui.motion.positions);drawQuestionMarkers(shown());
-    return new Promise(resolve=>{let started=null;const tick=now=>{if(token!==ui.motionToken){resolve();return;}if(started===null)started=now;const progress=Math.min(1,(now-started)/motion.duration);ui.motion={token,progress,positions:interpolateMotion(motion,progress)};drawWarehouse(shown(),ui.motion.positions);drawQuestionMarkers(shown());if(progress<1){requestAnimationFrame(tick);return;}ui.motion=null;resolve();};requestAnimationFrame(tick);});
+    const token=++ui.motionToken;ui.motion={token,progress:0,feedback:motion.feedback,positions:interpolateMotion(motion,0)};paintCollisionNotice(motion.feedback);drawWarehouse(shown(),ui.motion.positions);drawQuestionMarkers(shown());
+    return new Promise(resolve=>{let started=null;const tick=now=>{if(token!==ui.motionToken){resolve();return;}if(started===null)started=now;const progress=Math.min(1,(now-started)/motion.duration);ui.motion={token,progress,feedback:motion.feedback,positions:interpolateMotion(motion,progress)};drawWarehouse(shown(),ui.motion.positions);drawQuestionMarkers(shown());drawCollisionImpact(shown(),ui.motion);if(progress<1){requestAnimationFrame(tick);return;}ui.motion=null;resolve();};requestAnimationFrame(tick);});
+  }
+  function paintCollisionNotice(feedback){const notice=$("collisionNotice");if(!notice)return;notice.textContent=collisionNotice(feedback,ui.language);notice.hidden=!notice.textContent;}
+  function drawCollisionImpact(view,motion){
+    if(!view?.map || !collisionNotice(motion?.feedback,ui.language) || motion.progress<.32 || motion.progress>.72)return;
+    const canvas=$("warehouseCanvas"),ctx=canvas.getContext("2d"),map=view.map,size=Math.min((canvas.clientWidth-34)/map.cols,(canvas.clientHeight-34)/map.rows),ox=(canvas.clientWidth-map.cols*size)/2,oy=(canvas.clientHeight-map.rows*size)/2;
+    ctx.save();ctx.strokeStyle="#d9485f";ctx.lineWidth=Math.max(2,size*.045);ctx.globalAlpha=Math.min(1,(motion.progress-.32)/.08,(.72-motion.progress)/.17);
+    for(const position of Object.values(motion.positions)){const [r,c]=position,x=ox+(c+.5)*size,y=oy+(r+.5)*size;ctx.beginPath();ctx.arc(x,y,size*.45,0,Math.PI*2);ctx.stroke();}
+    ctx.restore();
   }
   async function refresh(){if(ui.busy || ui.refreshing)return;ui.refreshing=true;try{adopt(await transport.request("/api/view"));}catch{if(!transport.pending())ui.error="requestFailed";render();}finally{ui.refreshing=false;}}
   async function execute(payload,retry=false){

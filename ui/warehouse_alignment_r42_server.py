@@ -504,6 +504,13 @@ def _assets(*, diagnostic=False, r42=False):
     )
     if r42:
         html = data["index.html"].decode("utf-8")
+        group_field = '''          <label class="field"><span data-i18n="previewGroup">内部体验分组</span><select id="groupChoice"><option value="auto" data-i18n="groupAuto">自动分组</option><option value="A" data-i18n="groupA">Group A · Task 1 有解释</option><option value="B" data-i18n="groupB">Group B · 无解释</option></select></label>
+          <p class="small" data-i18n="previewGroupNote">手动选组仅用于内部体验，单独标记；开始后不能切换。自动分组仍采用平衡随机分配。</p>
+'''
+        group_anchor = '          <p class="small" id="consentText"'
+        if group_anchor not in html:
+            raise ValueError("r4.2 enrollment HTML anchor changed")
+        html = html.replace(group_anchor, group_field + group_anchor, 1)
         preview = '''      <section id="roundPreviewPanel" class="round-preview hidden">
         <span class="eyebrow" data-i18n="roundPreview">本局预览</span>
         <h3 id="roundPreviewTitle">—</h3>
@@ -517,6 +524,22 @@ def _assets(*, diagnostic=False, r42=False):
             raise ValueError("r4.2 round preview HTML anchor changed")
         html = html.replace(anchor, preview + anchor, 1)
         data["index.html"] = html.encode("utf-8")
+        js = js.replace(
+            'participant_id:id,consent:true});',
+            'participant_id:id,consent:true,group_choice:$("groupChoice").value});', 1)
+        js = js.replace(
+            '    $("participantInput").value=v?.flow?.participant_id || $("participantInput").value;',
+            '    $("participantInput").value=v?.flow?.participant_id || $("participantInput").value;\n'
+            '    if(v?.flow?.preview_condition)$("groupChoice").value=v.flow.preview_condition;disable($("groupChoice"),locked || !registrationStage);', 1)
+        js = js.replace(
+            '    const stages=["consent","instructions","task1","task2","questionnaire","completed"]',
+            '    if(v?.flow?.assignment_source==="manual_preview")$("roundLabel").textContent+=`\\n${tr("manualPreview")} · Group ${v.flow.preview_condition}`;\n'
+            '    const stages=["consent","instructions","task1","task2","questionnaire","completed"]', 1)
+        js = js.replace(
+            '  const ui={view:null,',
+            '  Object.assign(WORDS.zh,{previewGroup:"内部体验分组",groupAuto:"自动分组",groupA:"Group A · Task 1 有解释",groupB:"Group B · 无解释",previewGroupNote:"手动选组仅用于内部体验，单独标记；开始后不能切换。自动分组仍采用平衡随机分配。",manualPreview:"内部手动体验"});\n'
+            '  Object.assign(WORDS.en,{previewGroup:"Internal preview group",groupAuto:"Automatic allocation",groupA:"Group A · Explanations in Task 1",groupB:"Group B · No explanations",previewGroupNote:"Manual choices are recorded separately for internal preview. The group is fixed after starting. Automatic allocation remains balanced and random.",manualPreview:"Manual internal preview"});\n'
+            '  const ui={view:null,', 1)
         js = js.replace(
             "function ask(question,focus){",
             "function ask(question,focus,intentId=null){",
@@ -569,7 +592,8 @@ def _assets(*, diagnostic=False, r42=False):
                 "local(r.message,ui.language)")
     if r42:
         required += ("QUICK_INTENTS", "intent_id:intentId", "roundPreviewPanel",
-                     'kind:"begin_round"')
+                     'kind:"begin_round"', 'group_choice:$("groupChoice").value',
+                     'assignment_source==="manual_preview"')
     if any(value not in js for value in required):
         raise ValueError("online frontend transformation anchor changed")
     data["app.js"] = js.encode("utf-8")
@@ -590,6 +614,7 @@ _SCHEMA = """PRAGMA journal_mode=WAL;
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,version INTEGER NOT NULL DEFAULT 0,active_run TEXT,
  participant_id TEXT,participant_key TEXT UNIQUE,position INTEGER UNIQUE,condition TEXT,task_order TEXT,
+ assignment_source TEXT NOT NULL DEFAULT 'random_block',
  mode TEXT NOT NULL DEFAULT 'enrollment',stage TEXT NOT NULL DEFAULT 'registration',round_index INTEGER NOT NULL DEFAULT 0,
  questionnaire TEXT NOT NULL DEFAULT '{}',questionnaire_scores TEXT,namespace TEXT NOT NULL,study_signature TEXT,
  questionnaire_bank_signature TEXT,consented TEXT,tutorial_index INTEGER NOT NULL DEFAULT 0,
@@ -644,7 +669,8 @@ class OnlineAlignmentStudyStore:
                 or release.get("pilot_class") != "internal_pilot"
                 or release.get("formal_sample_eligible") is not False
                 or release.get("human_explanation_effect_validated") is not False
-                or release.get("behavior_performance_gate_waived") is not True
+                or release.get("behavior_performance_gate_passed") is not True
+                or release.get("behavior_performance_gate_waived") is not False
                 or release.get("data_persistent") is not False):
             raise ValueError("r4.2 internal-pilot classification is incomplete")
         if self.is_diagnostic and (
@@ -815,6 +841,8 @@ class OnlineAlignmentStudyStore:
             if "question_sequence" not in question_columns:
                 db.execute("ALTER TABLE questions ADD COLUMN question_sequence INTEGER")
             session_columns = {row[1] for row in db.execute("PRAGMA table_info(sessions)")}
+            if "assignment_source" not in session_columns:
+                db.execute("ALTER TABLE sessions ADD COLUMN assignment_source TEXT NOT NULL DEFAULT 'random_block'")
             for name in ("tutorial_index", "tutorial_max_index", "tutorial_complete"):
                 if name not in session_columns:
                     db.execute(f"ALTER TABLE sessions ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0")
@@ -953,7 +981,7 @@ class OnlineAlignmentStudyStore:
         signature = getattr(context, "tutorial_signature", None)
         expected_fields = {"version", "source", "uses_final_actor", "scene_id",
             "duration_ms", "map_sha256", "bindings", "coverage", "frames"}
-        tutorial_version = ("warehouse-alignment-r42-neutral-tutorial.v1"
+        tutorial_version = ("warehouse-alignment-r42-neutral-tutorial.v2"
                             if self.is_r42 else
                             "warehouse-alignment-diagnostic-neutral-tutorial.v3"
                             if self.is_diagnostic else
@@ -1078,6 +1106,9 @@ class OnlineAlignmentStudyStore:
             "initial_snapshot_sha256": _digest(snapshot),
             "tutorial_signature": self.tutorial_signature,
             "tutorial_is_separate_run": True}
+        if self.is_r42:
+            provenance["assignment_source"] = session["assignment_source"]
+            provenance["condition"] = session["condition"]
         db.execute("INSERT INTO runs(id,session_id,scenario_id,signature,stage,round_index,snapshot,metrics,started,created,provenance) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (rid, sid, scene["id"], self.signature, session["stage"], session["round_index"],
              _canonical(snapshot), _canonical(metrics), 0 if self.is_r42 else 1,
@@ -1155,6 +1186,11 @@ class OnlineAlignmentStudyStore:
             "state": None, "metrics": {}, "ended": False,
             "tutorial": None,
             "questionnaire": self._questionnaire(session)}
+        if self.is_r42:
+            result["enrollment"]["manual_preview_available"] = True
+            result["flow"]["assignment_source"] = session["assignment_source"]
+            if session["assignment_source"] == "manual_preview":
+                result["flow"]["preview_condition"] = session["condition"]
         if session["stage"] == "instructions":
             last = len(self.tutorial_frames) - 1
             index = max(0, min(int(session["tutorial_index"]), last))
@@ -1226,6 +1262,9 @@ class OnlineAlignmentStudyStore:
         version = self._session(db, sid)["version"]
         db.execute("INSERT INTO operations VALUES(?,?,?,?,?)", (sid, op, request_hash, version, kind))
         current = self._session(db, sid)
+        if kind == "start" and self.is_r42:
+            payload = {**payload, "assignment_source": current["assignment_source"],
+                       "assigned_condition": current["condition"]}
         db.execute("INSERT INTO events(session_id,run_id,kind,payload,created) VALUES(?,?,?,?,?)",
             (sid, current["active_run"], kind, _canonical(payload), _utcnow()))
 
@@ -1243,22 +1282,31 @@ class OnlineAlignmentStudyStore:
         participant = participant.strip()
         if db.execute("SELECT 1 FROM sessions WHERE participant_key=?", (participant.lower(),)).fetchone():
             raise CommandError("participant_id_taken", 409)
-        position = db.execute("SELECT count(*) FROM sessions WHERE position IS NOT NULL").fetchone()[0]
-        block_size = 2 if self.is_r42 else 4
-        block_id = position // block_size
-        block = db.execute("SELECT allocation FROM blocks WHERE id=?", (block_id,)).fetchone()
-        if block is None:
-            cells = ([['A','XY'],['B','XY']] if self.is_r42 else
-                     [["A","XY"],["A","YX"],["B","XY"],["B","YX"]])
-            random.SystemRandom().shuffle(cells)
-            db.execute("INSERT INTO blocks VALUES(?,?)", (block_id, _canonical(cells)))
+        group_choice = payload.get("group_choice", "auto")
+        if not isinstance(group_choice, str) or group_choice not in {"auto", "A", "B"}:
+            raise CommandError("invalid_group_choice")
+        if group_choice != "auto" and not self.is_r42:
+            raise CommandError("manual_preview_unavailable", 403)
+        assignment_source = "manual_preview" if group_choice != "auto" else "random_block"
+        if assignment_source == "manual_preview":
+            position, condition, task_order = None, group_choice, "XY"
         else:
-            cells = json.loads(block[0])
-        condition, task_order = cells[position % block_size]
+            position = db.execute("SELECT count(*) FROM sessions WHERE position IS NOT NULL").fetchone()[0]
+            block_size = 2 if self.is_r42 else 4
+            block_id = position // block_size
+            block = db.execute("SELECT allocation FROM blocks WHERE id=?", (block_id,)).fetchone()
+            if block is None:
+                cells = ([['A','XY'],['B','XY']] if self.is_r42 else
+                         [["A","XY"],["A","YX"],["B","XY"],["B","YX"]])
+                random.SystemRandom().shuffle(cells)
+                db.execute("INSERT INTO blocks VALUES(?,?)", (block_id, _canonical(cells)))
+            else:
+                cells = json.loads(block[0])
+            condition, task_order = cells[position % block_size]
         consented = _utcnow()
         initial_complete = int(len(self.tutorial_frames) == 1)
-        db.execute("UPDATE sessions SET mode='study',stage='instructions',participant_id=?,participant_key=?,position=?,condition=?,task_order=?,round_index=0,active_run=NULL,questionnaire_bank_signature=?,study_signature=?,consented=?,tutorial_index=0,tutorial_max_index=0,tutorial_complete=? WHERE id=?",
-            (participant, participant.lower(), position, condition, task_order,
+        db.execute("UPDATE sessions SET mode='study',stage='instructions',participant_id=?,participant_key=?,position=?,condition=?,task_order=?,assignment_source=?,round_index=0,active_run=NULL,questionnaire_bank_signature=?,study_signature=?,consented=?,tutorial_index=0,tutorial_max_index=0,tutorial_complete=? WHERE id=?",
+            (participant, participant.lower(), position, condition, task_order, assignment_source,
              str(self.question_bank.signature), self.signature, consented, initial_complete, sid))
 
     def command(self, sid, payload):

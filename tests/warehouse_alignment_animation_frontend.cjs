@@ -40,7 +40,7 @@ test('stationary robot remains fixed while its teammate moves', () => {
   assert.deepEqual(app.interpolateMotion(motion, 0.37).robot_2, [7, 6]);
 });
 
-test('wait, blocked moves, replay, refresh and stale responses never animate', () => {
+test('wait, unconfirmed blocked moves, replay, refresh and stale responses never animate', () => {
   const before = view(), unchanged = view({version:5, frame:9});
   assert.equal(app.confirmedMotion(before, unchanged, 'action', null), null);
   assert.equal(app.confirmedMotion(before,
@@ -51,6 +51,49 @@ test('wait, blocked moves, replay, refresh and stale responses never animate', (
     view({version:6, frame:10, positions:[[4, 4], [7, 6]]}), 'action', null), null);
   assert.equal(app.confirmedMotion(before,
     view({version:5, frame:9, run:'run-2',positions:[[4, 4], [7, 6]]}), 'action', null), null);
+});
+
+for (const kind of ['same_target','swap','occupied_stationary','none']) {
+  test(`confirmed ${kind} rejection approaches and rebounds without changing final state`, () => {
+    const before=view({positions:[[3,2],[3,4]]});
+    const after=view({version:5,frame:9,positions:[[3,2],[3,4]]});
+    after.state.public_feedback={valid:true,collision_kind:kind,
+      submitted_actions:{robot_1:'RIGHT',robot_2:kind==='occupied_stationary'?'WAIT':'LEFT'},
+      move_canceled:{robot_1:true,robot_2:kind!=='occupied_stationary'}};
+    const saved=JSON.stringify({before,after});
+    const motion=app.confirmedMotion(before,after,'action',null);
+    assert.equal(motion.duration,380);
+    assert.deepEqual(app.interpolateMotion(motion,0),{robot_1:[3,2],robot_2:[3,4]});
+    const contact=app.interpolateMotion(motion,.45);
+    assert.ok(contact.robot_1[1]>2 && contact.robot_1[1]<3);
+    if(kind==='occupied_stationary')assert.deepEqual(contact.robot_2,[3,4]);
+    else assert.ok(contact.robot_2[1]<4 && contact.robot_2[1]>3);
+    assert.deepEqual(app.interpolateMotion(motion,1),{robot_1:[3,2],robot_2:[3,4]});
+    assert.equal(JSON.stringify({before,after}),saved);
+    assert.equal(!!app.collisionNotice(after.state.public_feedback,'en'),kind!=='none');
+    assert.equal(app.confirmedMotion(before,after,'question',null),null);
+    assert.equal(app.confirmedMotion(before,after,'action',0),null);
+  });
+}
+
+test('WAIT does not become a movement even if the collision flag is present',()=>{
+  const before=view(),after=view({version:5,frame:9});
+  after.state.public_feedback={valid:true,collision_kind:'occupied_stationary',
+    submitted_actions:{robot_1:'WAIT',robot_2:'WAIT'},move_canceled:{robot_1:true,robot_2:true}};
+  assert.equal(app.confirmedMotion(before,after,'action',null),null);
+});
+
+test('only the latest answer is presented',()=>{
+  const current=view();
+  current.explain_allowed=true;
+  current.allowed_kinds=['question'];
+  current.release={model_ready:true,explanation_ready:true};
+  current.flow={mode:'study',stage:'task1'};
+  current.answers=[
+    {id:'new',run_id:current.run_id,question:'new',answer:'new answer',frame:8},
+    {id:'old',run_id:current.run_id,question:'old',answer:'old answer',frame:3},
+  ];
+  assert.deepEqual(app.visibleAnswers(current).map(answer=>answer.id),['new']);
 });
 
 test('each confirmed AI-AI tutorial step reserves the full 380ms even when stationary', () => {

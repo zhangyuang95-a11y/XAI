@@ -19,9 +19,7 @@ from ui.warehouse_alignment_r42_release import load_online_release
 from ui.warehouse_alignment_r42_server import CommandError, OnlineAlignmentStudyStore
 
 
-DEFAULT_RELEASE = ROOT / "output/warehouse_native/r42_internal_pilot_20260914"
-DEFAULT_SELECTION = (ROOT / "output/warehouse_native/"
-                     "r41_diagnostic_dynamic_selection_v3r1_20260912/report.json")
+DEFAULT_RELEASE = ROOT / "output/warehouse_native/r42_delivery_release_20260915"
 
 
 def _command(store, sid, kind, **values):
@@ -139,12 +137,11 @@ def _run_condition(store, sid, condition, view=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--release-dir", type=Path, default=DEFAULT_RELEASE)
-    parser.add_argument("--selection-report", type=Path, default=DEFAULT_SELECTION)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
-    receipt = json.loads((args.release_dir / "build_receipt.json").read_text())
-    package = args.release_dir / "warehouse_r42_internal_pilot.zip"
-    encoded = args.release_dir / "warehouse_r42_internal_pilot.b64"
+    receipt = json.loads((args.release_dir / "release_receipt.json").read_text())
+    package = args.release_dir / "warehouse_r42_delivery_release.zip"
+    encoded = args.release_dir / "warehouse_r42_delivery_release.b64"
     assert sha256(package.read_bytes()).hexdigest() == receipt["package_sha256"]
     assert sha256(encoded.read_bytes()).hexdigest() == receipt["base64_sha256"]
     assert encoded.stat().st_size < 1_000_000
@@ -160,8 +157,12 @@ def main(argv=None):
     try:
         identity = store.deployment_identity()
         assert identity["release_version"] == "r4.2-internal-pilot"
-        assert identity["actor_sha256"] == (
-            "4ac2ba7782b5556761edaab22bfad50c831c1d8b41b174245e2d81486287ff6b")
+        assert identity["actor_sha256"] == receipt["actor_sha256"]
+        behavior = context.evidence["behavior"]
+        assert behavior["passed"] is True
+        assert behavior["actor_sha256"] == receipt["actor_sha256"]
+        assert behavior["gates"]["skilled_each_robot_2_deliveries_at_least_2"] is True
+        assert behavior["gates"]["no_action_override"] is True
         tutorial = context.evidence["tutorial"]
         assert tutorial["passed"] is True and tutorial["frame_count"] == 121
         assert min(tutorial["individual_deliveries"]) >= 1
@@ -185,14 +186,6 @@ def main(argv=None):
         traces = [_run_condition(store, sid, condition, view)
                   for sid, condition, view in enrolled]
 
-        selection = json.loads(args.selection_report.read_text())
-        assert selection["status"] == "accepted_diagnostic_dynamic_selection"
-        assert selection["release_eligible"] is True
-        assert selection["actor_action_override_frames"] == 0
-        assert selection["successor_sampling_failures"] == 0
-        assert selection["replacement_tasks"] > 0
-        assert selection["selection"]["balance"]["conflict_relative_difference"] <= .05
-        assert selection["selection"]["balance"]["workload_relative_difference"] <= .05
         report = {
             "status": "passed",
             "release_version": "r4.2-internal-pilot",
@@ -200,14 +193,7 @@ def main(argv=None):
             "deployment_identity": identity,
             "tutorial": tutorial,
             "ab_traces": traces,
-            "dynamic_scene_evidence": {
-                "report_sha256": sha256(args.selection_report.read_bytes()).hexdigest(),
-                "replacement_tasks": selection["replacement_tasks"],
-                "actor_submission_frames": selection["actor_submission_frames"],
-                "actor_action_override_frames": selection["actor_action_override_frames"],
-                "successor_sampling_failures": selection["successor_sampling_failures"],
-                "balance": selection["selection"]["balance"],
-            },
+            "behavior": behavior,
         }
     finally:
         store.close()

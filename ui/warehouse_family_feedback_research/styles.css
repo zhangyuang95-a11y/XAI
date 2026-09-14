@@ -103,6 +103,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .public-history { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 16px; align-items: start; min-height: 74px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: var(--panel-2); font-size: 11px; line-height: 1.55; }
 .public-history > strong { color: var(--text); font-size: 12px; white-space: nowrap; }
 .public-history p { margin: 0 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.collision-notice { position: absolute; z-index: 2; left: 12px; right: 12px; bottom: 8px; margin: 0; padding: 8px 12px; border: 1px solid #d9485f; border-radius: 8px; background: #fff1f2; color: #9f1239; text-align: center; font-size: 12px; font-weight: 700; pointer-events: none; }
+.collision-notice[hidden] { display: none; }
 
 .detail-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; margin-top: 12px; }
 .robot-card { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: 0 4px 14px rgba(52,68,94,.05); }

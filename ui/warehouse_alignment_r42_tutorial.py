@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from hashlib import sha256
+from collections import deque
+from functools import lru_cache
+from itertools import permutations, product
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -16,7 +18,7 @@ from ui import warehouse_alignment_r41_tutorial as base
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "warehouse-alignment-r42-neutral-tutorial.v1"
+VERSION = "warehouse-alignment-r42-neutral-tutorial.v2"
 SOURCE = "independent_neutral_ai_ai"
 DURATION_MS = 380
 FRAME_COUNT = 121
@@ -47,96 +49,106 @@ def _append(env, frames, coverage, metrics, actions, *, final=False):
     return metrics, info
 
 
-def _deliver(env, frames, coverage, metrics, worker_id, other_id):
-    worker, other = env.state.by_id(worker_id), env.state.by_id(other_id)
-    candidates = []
-    for task in env.state.tasks:
-        if task.status != "available":
-            continue
-        try:
-            first = base._path_actions(
-                env, worker.position, task.pickup_position,
-                blocked=(other.position,),
-            )
-            second = base._path_actions(
-                env, task.pickup_position, task.delivery_position,
-                blocked=(other.position,),
-            )
-        except ValueError:
-            continue
-        candidates.append((len(first) + len(second), task.task_id, first))
-    if not candidates:
-        raise ValueError("r4.2 neutral worker has no delivery route")
-    _, task_id, first = min(candidates)
-    for action in first:
-        metrics, _ = _append(
-            env, frames, coverage, metrics,
-            {worker_id: action, other_id: "WAIT"},
-        )
-    if env.state.by_id(worker_id).carrying_task_id != task_id:
-        raise ValueError("r4.2 neutral worker failed to collect")
-    task = next(item for item in env.state.tasks if item.task_id == task_id)
-    second = base._path_actions(
-        env, env.state.by_id(worker_id).position, task.delivery_position,
-        blocked=(env.state.by_id(other_id).position,),
-    )
-    delivered = False
-    for action in second:
-        metrics, info = _append(
-            env, frames, coverage, metrics,
-            {worker_id: action, other_id: "WAIT"},
-        )
-        delivered |= any(event.get("event") == "delivery"
-                         and event.get("task_id") == task_id
-                         for event in info["events"])
-    if not delivered:
-        raise ValueError("r4.2 neutral worker failed to deliver")
-    return metrics
+_DELTAS = {"UP": (-1, 0), "LEFT": (0, -1), "RIGHT": (0, 1),
+           "DOWN": (1, 0), "WAIT": (0, 0)}
 
 
-def _move_to(env, frames, coverage, metrics, worker_id, other_id, target):
-    """Move one teaching robot to a public waypoint while the other waits."""
-    worker = env.state.by_id(worker_id)
-    other = env.state.by_id(other_id)
-    for action in base._path_actions(
-            env, worker.position, target, blocked=(other.position,)):
-        metrics, _ = _append(
-            env, frames, coverage, metrics,
-            {worker_id: action, other_id: "WAIT"},
-        )
-    if env.state.by_id(worker_id).position != target:
-        raise ValueError("r4.2 neutral worker failed to reach waypoint")
-    return metrics
+@lru_cache(maxsize=4096)
+def _distance(env, start, goal):
+    return len(base._path_actions(env, start, goal))
 
 
-def _active_tail(env, frames, coverage, metrics):
-    """Keep both robots visibly active and energy-safe through step 119.
+def _teaching_goals(env, charging):
+    """Assign current public jobs; the independent teaching controller only.
 
-    The eight-step choreography uses only the three-cell exit beside the
-    charger.  Each robot moves on six of every eight steps and receives two
-    charging turns, so the full tutorial remains physically valid without
-    exposing any preference of the deployed Actor.
+    A job's owner remains its real carrier. Empty robots split the remaining
+    pickups by public route length. Charging is a persistent, energy-triggered
+    task, rather than a filler motion or a fixed turn-taking schedule.
     """
-    metrics = _move_to(
-        env, frames, coverage, metrics, "robot_2", "robot_1", (5, 4))
-    metrics = _move_to(
-        env, frames, coverage, metrics, "robot_1", "robot_2", (5, 2))
-    cycle = (
-        {"robot_1": "RIGHT", "robot_2": "UP"},
-        {"robot_1": "WAIT", "robot_2": "DOWN"},
-        {"robot_1": "WAIT", "robot_2": "UP"},
-        {"robot_1": "LEFT", "robot_2": "DOWN"},
-        {"robot_1": "UP", "robot_2": "LEFT"},
-        {"robot_1": "DOWN", "robot_2": "WAIT"},
-        {"robot_1": "UP", "robot_2": "WAIT"},
-        {"robot_1": "DOWN", "robot_2": "RIGHT"},
-    )
-    offset = 0
-    while env.state.frame < 119:
-        actions = cycle[offset % len(cycle)]
-        metrics, _ = _append(env, frames, coverage, metrics, actions)
-        offset += 1
-    return metrics
+    agents = env.state.agents
+    available = sorted((t for t in env.state.tasks if t.status == "available"),
+                       key=lambda task: task.task_id)
+    empty = [a for a in agents if not a.carrying_task_id]
+    allocations = []
+    for ordering in permutations(available, len(empty)):
+        cost = sum(_distance(env, a.position, t.pickup_position)
+                   + _distance(env, t.pickup_position, t.delivery_position)
+                   for a, t in zip(empty, ordering))
+        allocations.append((cost, tuple(t.task_id for t in ordering), ordering))
+    tasks = {a.agent_id: env.state.task_by_id(a.carrying_task_id)
+             for a in agents if a.carrying_task_id}
+    if allocations:
+        for agent, task in zip(empty, min(allocations, key=lambda x: x[:2])[2]):
+            tasks[agent.agent_id] = task
+    charger = tuple(env.layout.charger_position)
+    goals = {}
+    for agent in agents:
+        task = tasks[agent.agent_id]
+        target = task.delivery_position if agent.carrying_task_id else task.pickup_position
+        route = _distance(env, agent.position, target)
+        if not agent.carrying_task_id:
+            route += _distance(env, task.pickup_position, task.delivery_position)
+        route += _distance(env, task.delivery_position, charger)
+        if agent.battery < env.config.move_battery_cost * (route + 3):
+            charging.add(agent.agent_id)
+        if agent.battery >= 90:
+            charging.discard(agent.agent_id)
+        goals[agent.agent_id] = tuple(target)
+    if charging:
+        # Only one robot may occupy the shared charger. The robot already
+        # there, otherwise the one with least return reserve, gets service.
+        owner = min((a for a in agents if a.agent_id in charging), key=lambda a: (
+            a.position != charger,
+            a.battery - env.config.move_battery_cost * _distance(env, a.position, charger),
+            a.agent_id))
+        goals[owner.agent_id] = charger
+        for agent in agents:
+            if agent.agent_id in charging and agent.agent_id != owner.agent_id:
+                holding = ((5, 2), (5, 4), (4, 4))
+                goals[agent.agent_id] = min(holding, key=lambda position: (
+                    _distance(env, agent.position, position), position))
+    return goals
+
+
+def _joint_teaching_action(env, goals):
+    """Shortest joint route respecting same-cell/swap collision physics.
+
+    Both commands are planned from the same public state. Replanning after
+    every authoritative joint step responds to pickup, delivery and new jobs.
+    This planner is never installed as the experimental robot's controller.
+    """
+    agents = env.state.agents
+    start = tuple(tuple(a.position) for a in agents)
+    goal = tuple(goals[a.agent_id] for a in agents)
+    if start == goal:
+        return {a.agent_id: "WAIT" for a in agents}
+    queue, seen = deque([(start, None)]), {start}
+    while queue:
+        positions, first = queue.popleft()
+        choices = []
+        for index, position in enumerate(positions):
+            # A robot that reached its goal can still step aside if needed;
+            # distance ordering avoids gratuitous detours among shortest paths.
+            rows = []
+            for action, delta in _DELTAS.items():
+                target = position[0] + delta[0], position[1] + delta[1]
+                if env.layout.is_passable(target):
+                    rows.append((_distance(env, target, goal[index]),
+                                 action == "WAIT", action, target))
+            choices.append(sorted(rows))
+        for left, right in product(*choices):
+            destinations = left[3], right[3]
+            if (destinations[0] == destinations[1]
+                    or destinations == positions[::-1]):
+                continue
+            if destinations in seen:
+                continue
+            actions = first or (left[2], right[2])
+            if destinations == goal:
+                return {a.agent_id: action for a, action in zip(agents, actions)}
+            seen.add(destinations)
+            queue.append((destinations, actions))
+    raise ValueError("Teaching delivery targets have no joint route")
 
 
 def build_tutorial(scenarios: Mapping[str, Any]) -> dict[str, Any]:
@@ -161,13 +173,11 @@ def build_tutorial(scenarios: Mapping[str, Any]) -> dict[str, Any]:
     )
     for actions in prelude:
         metrics, _ = _append(env, frames, coverage, metrics, actions)
-    metrics = _deliver(env, frames, coverage, metrics, "robot_1", "robot_2")
-    metrics = _deliver(env, frames, coverage, metrics, "robot_2", "robot_1")
-    metrics = _active_tail(env, frames, coverage, metrics)
-    metrics, _ = _append(
-        env, frames, coverage, metrics,
-        {"robot_1": "WAIT", "robot_2": "WAIT"}, final=True,
-    )
+    charging = set()
+    while env.state.frame < 120:
+        actions = _joint_teaching_action(env, _teaching_goals(env, charging))
+        metrics, _ = _append(env, frames, coverage, metrics, actions,
+                             final=env.state.frame == 119)
     payload = {
         "version": VERSION,
         "source": SOURCE,
@@ -226,8 +236,26 @@ def validate_tutorial(payload: Mapping[str, Any], scene: Mapping[str, Any]):
             not recovered[name] for name in _COVERAGE_FIELDS):
         raise ValueError("r4.2 tutorial physical coverage differs")
     deliveries = [agent.deliveries_completed for agent in env.state.agents]
-    if min(deliveries) < 1:
-        raise ValueError("both r4.2 tutorial robots must contribute a delivery")
+    if min(deliveries) < 3:
+        raise ValueError("both r4.2 tutorial robots must sustain deliveries")
+    delivery_windows = {
+        f"{start + 1}-{start + 40}": (
+            payload["frames"][start + 40]["metrics"]["deliveries"]
+            - payload["frames"][start]["metrics"]["deliveries"])
+        for start in (0, 40, 80)
+    }
+    if min(delivery_windows.values()) < 2:
+        raise ValueError("tutorial must sustain deliveries in every 40-step window")
+    if len(recovered["simultaneous_movement_frames"]) < 60:
+        raise ValueError("tutorial must demonstrate ongoing joint movement")
+    progress_frames = sorted(set(recovered["pickup_frames"]
+                                 + recovered["delivery_frames"]))
+    longest_no_progress = max(right - left - 1 for left, right in zip(
+        [0, *progress_frames], [*progress_frames, 121]))
+    if longest_no_progress > 20:
+        raise ValueError("tutorial contains a prolonged no-task-progress segment")
+    if env.state.shutdown_count:
+        raise ValueError("tutorial must complete without a battery shutdown")
     for agent_id in ("robot_1", "robot_2"):
         actions = [frame["actions"].get(agent_id)
                    for frame in payload["frames"][1:]]
@@ -235,14 +263,16 @@ def validate_tutorial(payload: Mapping[str, Any], scene: Mapping[str, Any]):
         for action in actions:
             current = current + 1 if action == "WAIT" else 0
             longest_wait = max(longest_wait, current)
-        # A robot may wait while its partner demonstrates one complete
-        # pickup-to-delivery route, but the long inactive tail from r4.1 is
-        # forbidden.
+        # Charging and a short shared-charger queue can require waiting; a
+        # sustained inactive teaching robot is still rejected.
         if longest_wait > 16:
             raise ValueError("r4.2 tutorial robot remains stationary too long")
     return {"passed": True, "frame_count": FRAME_COUNT,
             "tutorial_signature": digest(dict(payload)),
             "individual_deliveries": deliveries,
+            "delivery_windows": delivery_windows,
+            "simultaneous_movement_count": len(recovered["simultaneous_movement_frames"]),
+            "longest_no_task_progress": longest_no_progress,
             "maximum_consecutive_waits": {
                 agent_id: max(
                     len(run) for run in "".join(

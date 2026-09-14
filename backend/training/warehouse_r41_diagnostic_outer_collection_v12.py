@@ -45,6 +45,8 @@ CV_SALTS = (
     "warehouse-r41-v9-blocked-cv-a-20260913",
     "warehouse-r41-v9-blocked-cv-b-20260913",
 )
+OFFICIAL_FOLD_ASSIGNMENT_SHA256S = (
+    selector_api.OFFICIAL_FOLD_ASSIGNMENT_SHA256S)
 CV_FOLDS = 3
 FOLD_ASSIGNMENT_VERSION = (
     "warehouse-r41-diagnostic-rcpd-v12-family-fold-support-repair.v1")
@@ -687,7 +689,7 @@ def _validate_fold_assignment_revision(development: Mapping[str, Any]) -> None:
             or not isinstance(legacy, Mapping)
             or set(legacy) != _LEGACY_SUPPORT_FAILURE_FIELDS
             or legacy.get("assignment_version") != LEGACY_FOLD_ASSIGNMENT_VERSION
-            or legacy.get("salt") != CV_SALTS[0]
+            or legacy.get("salt") != CV_SALTS[1]
             or legacy.get("fold") != 0
             or type(legacy.get("fold_assignment_sha256")) is not str
             or _HEX.fullmatch(legacy["fold_assignment_sha256"]) is None
@@ -737,7 +739,7 @@ def _validate_fold_assignment_revision(development: Mapping[str, Any]) -> None:
                for fold in range(CV_FOLDS)
                for name in audit["minimum_support"]):
             raise ValueError("Locked v12 repaired fold remains unsupported")
-        expected_repairs = 1 if salt == CV_SALTS[0] else 0
+        expected_repairs = 1 if salt == CV_SALTS[1] else 0
         if len(audit["repairs"]) != expected_repairs:
             raise ValueError("Locked v12 minimal fold repair count differs")
         for repair in audit["repairs"]:
@@ -764,6 +766,12 @@ def _validate_fold_assignment_revision(development: Mapping[str, Any]) -> None:
                     and audit["legacy_assignment_sha256"]
                         == audit["repaired_assignment_sha256"])):
             raise ValueError("Locked v12 fold repair assignment digest differs")
+        if (audit["repaired_assignment_sha256"]
+                != OFFICIAL_FOLD_ASSIGNMENT_SHA256S[salt]):
+            raise ValueError("Locked v12 official fold assignment differs")
+    if (legacy["fold_assignment_sha256"]
+            != repairs_by_salt[legacy["salt"]]["legacy_assignment_sha256"]):
+        raise ValueError("Locked v12 retired fold assignment differs")
 
 
 def _validate_selector_report(
@@ -1055,6 +1063,9 @@ def _validate_selector_report(
                 label="Locked v12 selector robust"))
         if len(set(assignment_hashes)) != len(CV_SALTS):
             raise ValueError("Locked v12 selector salted assignments differ")
+        if any(assignment_sha != OFFICIAL_FOLD_ASSIGNMENT_SHA256S[salt]
+               for salt, assignment_sha in zip(CV_SALTS, assignment_hashes)):
+            raise ValueError("Locked v12 selector official fold assignments differ")
         both_pass = all(salt_passes)
         robust = _finite_unit(
             candidate.get("robust_minimum_family_exact_bit_direction_fidelity"),

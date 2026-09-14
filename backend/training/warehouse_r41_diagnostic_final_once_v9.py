@@ -60,7 +60,7 @@ OFFICIAL_FINAL_MATERIALIZER_RELATIVE_PATH = (
 # claim; any later producer change requires a new protocol version rather than
 # silently changing a consumed final evaluator.
 OFFICIAL_FINAL_MATERIALIZER_SOURCE_CLOSURE_SHA256 = (
-    "efe39860affc1100a25ff8aa4899efe614c8a84cdc0abc1d98985dad06a917ee"
+    "2e44d13b24bf26c8169891c1be7de4667bbea1df1c3964406936ac830375c582"
 )
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _MATERIAL_FIELDS = frozenset((

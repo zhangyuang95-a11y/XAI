@@ -22,6 +22,20 @@ def test_collection_uses_the_frozen_v12_selector_grid_version():
         "warehouse-r41-diagnostic-rcpd-v12-candidate-grid.v1")
 
 
+def test_collection_freezes_the_observed_b_only_fold_repair_revision():
+    report = _selector_report(_candidate_lock())
+    development = report["development"]
+    repairs = development["fold_assignment_repairs"]
+    assert development["legacy_family_only_split_failure"]["salt"] == (
+        subject.CV_SALTS[1])
+    assert [len(repairs[salt]["repairs"]) for salt in subject.CV_SALTS] == [0, 1]
+    assert {
+        salt: repairs[salt]["repaired_assignment_sha256"]
+        for salt in subject.CV_SALTS
+    } == subject.OFFICIAL_FOLD_ASSIGNMENT_SHA256S
+    subject._validate_fold_assignment_revision(development)
+
+
 def _arrays(count: int = 3) -> dict[str, np.ndarray]:
     observations = np.arange(count * 197, dtype=np.float32).reshape(count, 197)
     hashes = [subject.rows_v7.legacy._obs_hash(row) for row in observations]
@@ -130,7 +144,9 @@ def _selector_report(lock: dict) -> dict:
         "pairs": 10, "scenes": 10, "fidelity": 0.95,
     }
     salts = [{
-        "salt": salt, "fold_assignment_sha256": digest({"salt": salt}),
+        "salt": salt,
+        "fold_assignment_sha256": (
+            subject.OFFICIAL_FOLD_ASSIGNMENT_SHA256S[salt]),
         "folds": deepcopy(folds), "aggregate_metrics": deepcopy(metrics),
         "aggregate_gate": deepcopy(gate),
         "family_exact_bit_direction": {
@@ -260,8 +276,8 @@ def _selector_report(lock: dict) -> dict:
     }
     legacy_failure = {
         "assignment_version": subject.LEGACY_FOLD_ASSIGNMENT_VERSION,
-        "salt": subject.CV_SALTS[0], "fold": 0,
-        "fold_assignment_sha256": digest({"legacy": "assignment"}),
+        "salt": subject.CV_SALTS[1], "fold": 0,
+        "fold_assignment_sha256": digest({"legacy": subject.CV_SALTS[1]}),
         "support": legacy_support,
         "reason": "frozen_replacement_support_prerequisite_not_met",
         "action_labels_or_probabilities_used": False,
@@ -276,7 +292,7 @@ def _selector_report(lock: dict) -> dict:
     }
 
     def assignment_audit(salt: str) -> dict:
-        repairs = [repair] if salt == subject.CV_SALTS[0] else []
+        repairs = [repair] if salt == subject.CV_SALTS[1] else []
         before = {
             "0": {"rows": 1, "scenes": 1, "episodes": 1},
             "1": {"rows": 10, "scenes": 7, "episodes": 7},
@@ -290,12 +306,13 @@ def _selector_report(lock: dict) -> dict:
         if repairs:
             after["0"] = {"rows": 2, "scenes": 2, "episodes": 2}
             after["1"] = {"rows": 9, "scenes": 6, "episodes": 6}
-        legacy_sha = digest({"legacy": salt})
+        legacy_sha = (digest({"legacy": salt}) if repairs
+                      else subject.OFFICIAL_FOLD_ASSIGNMENT_SHA256S[salt])
         value = {
             "version": subject.FOLD_ASSIGNMENT_VERSION,
             "legacy_assignment_sha256": legacy_sha,
             "repaired_assignment_sha256": (
-                digest({"repaired": salt}) if repairs else legacy_sha),
+                subject.OFFICIAL_FOLD_ASSIGNMENT_SHA256S[salt]),
             "minimum_support": minimum_support,
             "support_before": before, "support_after": after,
             "repairs": repairs, "repairs_sha256": digest(repairs),

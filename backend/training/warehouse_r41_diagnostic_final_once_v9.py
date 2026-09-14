@@ -422,9 +422,16 @@ def _authenticate_preclaim(
                 "unique_observation_hashes"],
             validation_wins=selector_report["development"][
                 "validation_wins"]))
-    outer_hashes = set(selector_api.validation_hash_union(
-        prior_projection["outer_observation_hashes"],
-        projection["projection"]["unique_observation_hashes"]))
+    # The closed v11 outer is intentionally promoted to development.  The
+    # disjoint outer audit set is therefore older v8-v10 outer evidence plus
+    # the fresh v12 outer; together with development it still excludes every
+    # prior observation from the protected final.
+    outer_hashes = _v12_outer_audit_hashes(
+        prior_unique_hashes=prior_projection["outer_observation_hashes"],
+        promoted_unique_hashes=promoted_projection[
+            "outer_observation_hashes"],
+        fresh_unique_hashes=projection["projection"][
+            "unique_observation_hashes"])
     outer_scenes = {str(scene["fingerprint"])
                     for scene in registry["development_outer"]}
     if development_hashes & outer_hashes or development_scenes & outer_scenes:
@@ -591,6 +598,21 @@ def _retained_combined_development_hashes(
     exposed_scenes = set(map(str, base_scene_ordered)) | set(map(
         str, promoted_scene_ordered))
     return retained, exposed_scenes
+
+
+def _v12_outer_audit_hashes(
+    *, prior_unique_hashes: Sequence[str],
+    promoted_unique_hashes: Sequence[str],
+    fresh_unique_hashes: Sequence[str],
+) -> set[str]:
+    """Partition historical and fresh outer evidence from promoted v11."""
+    prior = set(selector_api.validation_hash_union(prior_unique_hashes, ()))
+    promoted = set(selector_api.validation_hash_union(
+        promoted_unique_hashes, ()))
+    fresh = set(selector_api.validation_hash_union(fresh_unique_hashes, ()))
+    if not promoted or not promoted <= prior:
+        raise ValueError("Promoted v11 and prior outer projections differ")
+    return (prior - promoted) | fresh
 
 
 def _validate_material(

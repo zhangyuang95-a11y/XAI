@@ -357,6 +357,17 @@ def test_preclaim_reproduces_v12_two_source_validation_wins():
         prior_unique_hashes=prior, promoted_unique_hashes=promoted_hashes,
         fresh_unique_hashes=fresh, validation_wins=audit)
     assert retained == {_fp("base-a"), _fp("base-b"), *promoted_hashes}
+    # The permanently closed v11 outer is now development evidence.  It may
+    # overlap the historical union, while the fresh v12 outer remains isolated.
+    assert retained & set(prior) == set(promoted_hashes)
+    assert not retained & set(fresh)
+    outer_audit = subject._v12_outer_audit_hashes(
+        prior_unique_hashes=prior,
+        promoted_unique_hashes=promoted_hashes,
+        fresh_unique_hashes=fresh)
+    assert outer_audit == {old, *fresh}
+    assert not retained & outer_audit
+    assert retained | outer_audit >= set(prior) | set(fresh)
     assert exposed_scenes == set(base_scenes) | set(promoted_scenes)
     with pytest.raises(ValueError, match="combined v12 validation-wins"):
         subject._retained_combined_development_hashes(

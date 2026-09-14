@@ -221,6 +221,8 @@ def _validate_manifest(value: Mapping[str, Any]) -> dict[str, Any]:
         "tutorial_sha256", "tutorial_signature", "release_sources_sha256",
         "designation_sha256", "outer_result_sha256", "final_audit_sha256",
     }
+    if parent.get("version") == "warehouse-r41-diagnostic-admission.v11":
+        required_identities.add("question_bank_runtime_signature")
     if (not isinstance(identities, Mapping)
             or set(identities) != required_identities):
         raise ValueError("Exact v9 portable identities required")
@@ -480,7 +482,11 @@ def load_online_release(*, expected_package_sha256: str,
             runtime=runtime, artifact_binding=artifact_binding)
         question = _parse_json(artifacts["question_bank"], "v9 question bank")
         bank_identities = {
-            "parent_runtime_signature": identities["runtime_signature"],
+            "actor_sha256": identities["actor_sha256"],
+            "protocol_sha256": identities["protocol_content_sha256"],
+            "parent_runtime_signature": identities.get(
+                "question_bank_runtime_signature",
+                identities["runtime_signature"]),
             "question_bank_private_items_sha256": identities[
                 "question_bank_private_items_sha256"],
             "question_bank_public_items_sha256": identities[
@@ -640,6 +646,8 @@ def _assemble_admitted(*, admission: Mapping[str, Any],
         "tutorial_sha256", "tutorial_signature", "release_sources_sha256",
         "designation_sha256", "outer_result_sha256", "final_audit_sha256",
     }
+    if admission.get("version") == "warehouse-r41-diagnostic-admission.v11":
+        identity_names.add("question_bank_runtime_signature")
     identities = {name: bindings[name] for name in identity_names}
     parent = {
         "version": admission["version"], "status": admission["status"],

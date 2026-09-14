@@ -799,6 +799,7 @@ def _validate_components_snapshot(
             "question_bank_public_items_sha256": question[
                 "public_items_sha256"],
             "question_bank_signature": question["source_bank_signature"],
+            "question_bank_runtime_signature": question["runtime_signature"],
             "tutorial_sha256": initial_hashes["tutorial"],
             "selected_scenes_sha256": initial_hashes["selected_scenes"],
             "tutorial_signature": digest(tutorial),

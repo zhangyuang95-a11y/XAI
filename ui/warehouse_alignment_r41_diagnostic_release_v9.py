@@ -525,8 +525,12 @@ def load_online_release(*, expected_package_sha256: str,
                 "conflict_families_sha256"],
             "producer_sources_sha256": digest(tutorial_api.producer_sources()),
         }
+        # Replay the neutral tutorial against its authoritative environment.
+        # The deployed actor runtime is the separately validated portable
+        # implementation, while the tutorial validator deliberately accepts
+        # only the original diagnostic runtime when one is supplied.
         tutorial_replay = tutorial_api.validate_neutral_tutorial(
-            tutorial, tutorial_scene=tutorial_scene, runtime=runtime,
+            tutorial, tutorial_scene=tutorial_scene,
             expected_bindings=expected_tutorial)
         if (digest(tutorial) != identities["tutorial_signature"]
                 or tutorial_replay["tutorial_signature"]

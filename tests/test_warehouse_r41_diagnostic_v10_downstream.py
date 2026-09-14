@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import inspect
 
 import pytest
 
 from backend.training import warehouse_r41_diagnostic_admission_v10 as admission
+from backend.training import warehouse_r41_diagnostic_final_once_v13 as final_v13
 from backend.training import warehouse_r41_diagnostic_release_receipt_v10 as receipt
 from backend.training import warehouse_r41_diagnostic_study_materials_v10 as study
 from backend.training.warehouse_native_common import file_hash
@@ -34,6 +36,19 @@ def test_v10_is_append_only_adapter_for_v13_evidence_and_v9_runtime():
     assert receipt.release is release
     assert preflight.RELEASE_MODULE == server.R41_DIAGNOSTIC_RELEASE_MODULE_V9
     assert release.assemble_from_v10_admitted_components is not None
+
+
+def test_legacy_v9_assembler_stays_callable_and_outside_frozen_final_closure():
+    legacy = inspect.signature(release.assemble_from_admitted_components).parameters
+    adapter = inspect.signature(
+        release.assemble_from_v10_admitted_components).parameters
+    assert "promoted_v11_permanent_registry" in legacy
+    assert "permanent_promotion_closeout_registry" not in legacy
+    assert "permanent_promotion_closeout_registry" in adapter
+    assert "promoted_v11_permanent_registry" not in adapter
+    _path, materializer_sources = final_v13._official_materializer_binding()
+    assert "ui/warehouse_alignment_r41_diagnostic_release_v9.py" not in (
+        materializer_sources)
 
 
 def test_v10_admission_binds_v13_closeout_and_projection_parity():

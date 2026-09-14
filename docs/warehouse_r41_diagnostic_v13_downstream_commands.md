@@ -2,8 +2,8 @@
 
 Run this sequence only after the v13 one-shot outer and protected final both
 complete with passed status. The commands do not read the holdout salt and do
-not call Render. Replace the six angle-bracket placeholders with the new v13
-artifact directories. All remaining inputs are frozen repository artifacts.
+not call Render. Replace the two angle-bracket placeholders with the successful
+v13 final directories. All remaining inputs are frozen repository artifacts.
 
 ```bash
 cd /Users/zhangyuang/Desktop/ICLR/XAI
@@ -24,10 +24,10 @@ SELECTED_SCENES=output/warehouse_native/r41_diagnostic_dynamic_selection_v3r1_20
 
 PROMOTION_DIR=output/warehouse_native/r41_diagnostic_final_attempt_closeout_v13_20260914
 PROMOTION_REGISTRY=output/warehouse_native/r41_diagnostic_final_attempt_closeout_v13_permanent_registry_20260914
-SELECTOR_DIR='<v13-selector-output-directory>'
-OUTER_COLLECTION_DIR='<v13-outer-collection-output-directory>'
-OUTER_RESULT_DIR='<v13-outer-result-output-directory>'
-OUTER_REGISTRY='<v13-permanent-outer-registry-directory>'
+SELECTOR_DIR=output/warehouse_native/r41_diagnostic_rcpd_v13_selector_20260914
+OUTER_COLLECTION_DIR=output/warehouse_native/r41_diagnostic_rcpd_v13_fresh_outer_collection_20260914
+OUTER_RESULT_DIR=output/warehouse_native/r41_diagnostic_rcpd_v13_outer_once_20260914
+OUTER_REGISTRY=output/warehouse_native/r41_diagnostic_rcpd_v13_outer_attempt_registry_20260914
 FINAL_DIR='<v13-passed-final-output-directory>'
 FINAL_REGISTRY='<v13-permanent-final-registry-directory>'
 

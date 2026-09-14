@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import inspect
+import re
 
 import pytest
 
@@ -146,3 +147,62 @@ def test_release_source_closure_contains_v10_boundary():
     assert "ui/warehouse_alignment_online_server.py" in sources
     assert "backend/warehouse_r41_diagnostic_online_explanation_v9.py" in sources
     assert not any("holdout_salt.bin" in name for name in sources)
+
+
+def test_v10_receipt_requires_exact_v10_admission_parent():
+    admission_value = {
+        "content_sha256": "b" * 64,
+        "bindings": {"actor_sha256": "c" * 64},
+        "gates": {"final_passed": True},
+    }
+    admission_sha = "a" * 64
+    exact = {
+        "version": admission.VERSION,
+        "status": admission.STATUS,
+        "admission_sha256": admission_sha,
+        "admission_content_sha256": admission_value["content_sha256"],
+        "bindings_sha256": receipt.digest(admission_value["bindings"]),
+        "gates_sha256": receipt.digest(admission_value["gates"]),
+    }
+    receipt._require_exact_admission_parent(
+        {"parent": exact}, admission_value, admission_sha)
+
+    for field, replacement in (
+        ("version", "warehouse-r41-diagnostic-admission.v9"),
+        ("status", "admitted_internal_diagnostic_v9"),
+        ("gates_sha256", "d" * 64),
+    ):
+        forged = {**exact, field: replacement}
+        with pytest.raises(ValueError, match="exact v10 admission"):
+            receipt._require_exact_admission_parent(
+                {"parent": forged}, admission_value, admission_sha)
+
+
+def test_v10_preflight_rejects_render_start_without_explicit_release_module(
+        tmp_path: Path):
+    package_sha, manifest_sha = "a" * 64, "b" * 64
+    text = (Path(__file__).resolve().parents[1] / "render.yaml").read_text(
+        encoding="utf-8")
+    text = re.sub(
+        r"(?m)^    startCommand:.*$",
+        "    startCommand: " + preflight.START_COMMAND,
+        text,
+    )
+    text = re.sub(
+        r"(?m)(^      - key: WAREHOUSE_RELEASE_PACKAGE_SHA256\n"
+        r"        value: )[0-9a-f]{64}$", r"\g<1>" + package_sha, text)
+    text = re.sub(
+        r"(?m)(^      - key: WAREHOUSE_RELEASE_MANIFEST_SHA256\n"
+        r"        value: )[0-9a-f]{64}$", r"\g<1>" + manifest_sha, text)
+    candidate = tmp_path / "render.v10.yaml"
+    candidate.write_text(text, encoding="utf-8")
+    assert preflight.check_render_yaml(
+        candidate, package_sha256=package_sha,
+        manifest_sha256=manifest_sha)["release_module"] == preflight.RELEASE_MODULE
+
+    candidate.write_text(text.replace(
+        " --release-module " + preflight.RELEASE_MODULE, ""), encoding="utf-8")
+    with pytest.raises(ValueError, match="single free service"):
+        preflight.check_render_yaml(
+            candidate, package_sha256=package_sha,
+            manifest_sha256=manifest_sha)

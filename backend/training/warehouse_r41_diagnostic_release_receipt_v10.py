@@ -83,6 +83,24 @@ def _manifest_sha(package: Path) -> str:
     return sha256(raw).hexdigest()
 
 
+def _require_exact_admission_parent(
+        manifest: Mapping[str, Any], admission: Mapping[str, Any],
+        admission_sha256: str) -> None:
+    """Reject packages whose parent is anything but this exact v10 admission."""
+
+    from backend.training import warehouse_r41_diagnostic_admission_v10 as admission_api
+    expected = {
+        "version": admission_api.VERSION,
+        "status": admission_api.STATUS,
+        "admission_sha256": admission_sha256,
+        "admission_content_sha256": admission["content_sha256"],
+        "bindings_sha256": digest(admission["bindings"]),
+        "gates_sha256": digest(admission["gates"]),
+    }
+    if manifest.get("parent") != expected:
+        raise ValueError("V10 package parent is not the exact v10 admission")
+
+
 def validate_inputs(*, admission_path: str | Path,
                     expected_admission_sha256: str,
                     components: Mapping[str, str | Path],
@@ -118,12 +136,8 @@ def validate_inputs(*, admission_path: str | Path,
     manifest = release.inspect_online_release(
         package_path=package, expected_package_sha256=package_sha,
         expected_manifest_sha256=manifest_sha)
-    if (manifest.get("parent", {}).get("admission_sha256") != admission_sha
-            or manifest.get("parent", {}).get("admission_content_sha256")
-                != admission["content_sha256"]
-            or manifest.get("parent", {}).get("bindings_sha256")
-                != digest(admission["bindings"])
-            or manifest.get("play_scenes") != admission["play_scenes"]
+    _require_exact_admission_parent(manifest, admission, admission_sha)
+    if (manifest.get("play_scenes") != admission["play_scenes"]
             or manifest.get("sources", {}).get("release")
                 != release.release_sources()):
         raise ValueError("V10 package does not derive from the admission")

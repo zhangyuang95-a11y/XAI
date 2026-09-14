@@ -193,6 +193,12 @@ def _setup(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(subject.audit_api, "audit_rows", lambda **kwargs: _content({
         "status": subject.audit_api.STATUS_PASSED,
         "bindings": dict(kwargs["bindings"]), "passed": True,
+        "action_authority": {
+            "all_submitted_actions_equal_policy_actions": True,
+            "all_actor_probabilities_and_actions_exact": True,
+            "runtime_action_overrides": 0,
+            "program_controls_runtime_actions": False,
+        },
     }))
     monkeypatch.setattr(subject.audit_api, "validate_report",
                         lambda report, **_: report)
@@ -241,6 +247,8 @@ def _setup(tmp_path: Path, monkeypatch):
 def test_claim_precedes_materializer_and_parity_artifact_is_saved(
         tmp_path, monkeypatch):
     common, _context, permanent, sources = _setup(tmp_path, monkeypatch)
+    rename = subject.os.rename
+    publication_order = []
 
     def materializer(_path, anchor, _campaign, *, timeout_seconds):
         assert timeout_seconds == 1980
@@ -248,10 +256,18 @@ def test_claim_precedes_materializer_and_parity_artifact_is_saved(
         return _material(sources, anchor)
 
     monkeypatch.setattr(subject, "_run_materializer", materializer)
+    def checked_rename(source, destination):
+        campaign = next(permanent.iterdir())
+        assert (campaign / subject.COMPLETION_NAME).is_file()
+        publication_order.append("permanent-before-public")
+        return rename(source, destination)
+
+    monkeypatch.setattr(subject.os, "rename", checked_rename)
     result = subject.run_final_once(**common)
     assert result["status"] == subject.STATUS_PASSED
     assert result["materializer_collector_projection_parity_passed"] is True
     assert (Path(common["output"]) / subject.PARITY_NAME).is_file()
+    assert publication_order == ["permanent-before-public"]
     completion = Path(common["output"]) / subject.COMPLETION_NAME
     assert subject.read_completion(
         completion, expected_completion_sha256=file_hash(completion),
@@ -287,6 +303,54 @@ def test_projection_mismatch_burns_attempt_and_cannot_retry(tmp_path, monkeypatc
     with pytest.raises(FileExistsError, match="already consumed"):
         subject.run_final_once(**common)
     assert len(calls) == 1
+
+
+def test_publication_failure_preserves_permanent_success_and_staging(
+        tmp_path, monkeypatch):
+    common, _context, permanent, sources = _setup(tmp_path, monkeypatch)
+
+    def materializer(_path, anchor, _campaign, *, timeout_seconds):
+        assert timeout_seconds == 1980
+        return _material(sources, anchor)
+
+    monkeypatch.setattr(subject, "_run_materializer", materializer)
+    monkeypatch.setattr(subject.os, "rename", lambda *_: (_ for _ in ()).throw(
+        OSError("synthetic publication failure")))
+    with pytest.raises(
+            RuntimeError,
+            match="public_final_publication_failed_after_permanent_success"):
+        subject.run_final_once(**common)
+    campaign = next(permanent.iterdir())
+    assert (campaign / subject.COMPLETION_NAME).is_file()
+    assert not Path(common["output"]).exists()
+    staging = list(Path(common["output"]).parent.glob(
+        "." + Path(common["output"]).name + ".tmp-*"))
+    assert len(staging) == 1
+    assert (staging[0] / subject.COMPLETION_NAME).is_file()
+
+
+def test_v14_controller_directly_gates_exact_actor_authority(
+        tmp_path, monkeypatch):
+    common, _context, permanent, sources = _setup(tmp_path, monkeypatch)
+
+    def materializer(_path, anchor, _campaign, *, timeout_seconds):
+        return _material(sources, anchor)
+
+    monkeypatch.setattr(subject, "_run_materializer", materializer)
+    monkeypatch.setattr(subject.audit_api, "audit_rows", lambda **kwargs: _content({
+        "status": subject.audit_api.STATUS_PASSED,
+        "bindings": dict(kwargs["bindings"]), "passed": True,
+        "action_authority": {
+            "all_submitted_actions_equal_policy_actions": False,
+            "all_actor_probabilities_and_actions_exact": True,
+            "runtime_action_overrides": 0,
+            "program_controls_runtime_actions": False,
+        },
+    }))
+    with pytest.raises(RuntimeError, match="protected_final_phase_failed"):
+        subject.run_final_once(**common)
+    campaign = next(permanent.iterdir())
+    assert (campaign / subject.COMPLETION_NAME).is_file()
 
 
 def test_material_projection_parity_normalizes_per_scene_local_index():
@@ -370,6 +434,41 @@ def test_controller_anchor_is_accepted_by_v14_materializer(
     monkeypatch.setattr(subject, "_run_materializer", materializer)
     assert subject.run_final_once(**common)["status"] == subject.STATUS_PASSED
     assert len(list(permanent.iterdir())) == 1
+
+
+@pytest.mark.parametrize("mutation", [
+    "extra_anchor_field", "attempt_key_mismatch", "binding_input_mismatch",
+])
+def test_completion_reader_rejects_mutated_permanent_anchor(
+        tmp_path, monkeypatch, mutation):
+    common, _context, permanent, sources = _setup(tmp_path, monkeypatch)
+
+    def materializer(_path, anchor, _campaign, *, timeout_seconds):
+        return _material(sources, anchor)
+
+    monkeypatch.setattr(subject, "_run_materializer", materializer)
+    subject.run_final_once(**common)
+    completion_path = Path(common["output"]) / subject.COMPLETION_NAME
+    completion_sha = file_hash(completion_path)
+    campaign = next(permanent.iterdir())
+    anchor_path = campaign / subject.ANCHOR_NAME
+    anchor = subject.outer_api._strict_json_bytes(
+        anchor_path.read_bytes(), "test anchor")
+    if mutation == "extra_anchor_field":
+        anchor["unexpected"] = False
+    elif mutation == "attempt_key_mismatch":
+        anchor["attempt_key_inputs"]["candidate_universe_sha256"] = _fp(
+            "mutated universe")
+    else:
+        anchor["bindings"]["candidate_universe_content_sha256"] = _fp(
+            "mutated binding")
+    anchor["content_sha256"] = digest({
+        key: value for key, value in anchor.items() if key != "content_sha256"})
+    anchor_path.write_text(subject.canonical(anchor) + "\n")
+    with pytest.raises(ValueError, match="anchor differs"):
+        subject.read_completion(
+            completion_path, expected_completion_sha256=completion_sha,
+            permanent_final_registry=permanent)
 
 
 def test_material_validation_rejects_nonexact_screening(tmp_path, monkeypatch):

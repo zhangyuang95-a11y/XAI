@@ -106,6 +106,36 @@ _FAILURE_COMPLETION_FIELDS = frozenset((
     "actor_updates", "runtime_action_override", "producer_sources_sha256",
     "formal_ready", "content_sha256",
 ))
+_ANCHOR_FIELDS = frozenset((
+    "version", "status", "attempt_key", "attempt_key_inputs", "bindings",
+    "candidate_and_outer_authenticated_before_claim",
+    "final_identity_or_rows_accessed_before_claim", "retry_allowed",
+    "formal_ready", "content_sha256",
+))
+_ATTEMPT_INPUT_FIELDS = frozenset((
+    "scheme", "candidate_lock_sha256", "candidate_lock_content_sha256",
+    "actor_sha256", "protocol_sha256", "runtime_manifest_sha256",
+    "designation_sha256", "program_sha256",
+    "public_feature_contract_sha256", "candidate_source_closure_sha256",
+    "outer_result_sha256", "outer_attempt_key",
+    "final_projection_source_closure_sha256",
+    "final_projection_contract_sha256", "private_salt_commitment",
+    "private_salt_domain_sha256", "timeout_closeout_sha256",
+    "timeout_closeout_content_sha256", "candidate_universe_sha256",
+    "candidate_universe_content_sha256", "candidate_universe_identity_sha256",
+    "timing_calibration_sha256", "timing_calibration_content_sha256",
+))
+_ANCHOR_BINDING_FIELDS = frozenset((
+    "outer_result_content_sha256",
+    "candidate_runtime_source_closure_sha256",
+    "final_controller_source_closure_sha256",
+    "final_materializer_source_closure_sha256",
+    "actor_feature_names_sha256", "final_projection_source_closure_sha256",
+    "final_projection_contract_sha256", "private_salt_commitment",
+    "private_salt_domain_sha256", "timeout_closeout_content_sha256",
+    "candidate_universe_content_sha256", "candidate_universe_identity_sha256",
+    "timing_calibration_content_sha256",
+))
 
 def contract() -> dict[str, Any]:
     return {
@@ -193,6 +223,14 @@ def _write_npz_exclusive(path: Path, arrays: Mapping[str, np.ndarray]) -> None:
         np.savez_compressed(stream, **arrays)
         stream.flush()
         os.fsync(stream.fileno())
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _directory(value: str | Path, label: str) -> Path:
@@ -1070,6 +1108,7 @@ def run_final_once(
 
     completion: dict[str, Any]
     temporary: Path | None = None
+    permanent_success_committed = False
     try:
         material = dict(_run_materializer(
             materializer_source, anchor, campaign,
@@ -1136,6 +1175,15 @@ def run_final_once(
             replay_environment_steps=replay_environment_steps)
         audit_api.validate_report(
             audit, expected_bindings=audit_bindings, require_passed=True)
+        authority = audit.get("action_authority")
+        if (not isinstance(authority, Mapping)
+                or authority.get(
+                    "all_submitted_actions_equal_policy_actions") is not True
+                or authority.get(
+                    "all_actor_probabilities_and_actions_exact") is not True
+                or authority.get("runtime_action_overrides") != 0
+                or authority.get("program_controls_runtime_actions") is not False):
+            raise ValueError("Final audit does not preserve exact Actor authority")
         _write_exclusive(temporary / AUDIT_NAME, _json_bytes(audit))
         if (producer_sources() != sources
                 or _official_materializer_binding()
@@ -1170,10 +1218,24 @@ def run_final_once(
         }
         completion["content_sha256"] = digest(completion)
         _write_exclusive(temporary / COMPLETION_NAME, _json_bytes(completion))
+        # Commit and sync the immutable success receipt first.  Only then may
+        # the public directory become visible, so a publication error can
+        # never leave a public success without its permanent authority record.
+        _write_exclusive(campaign / COMPLETION_NAME, _json_bytes(completion))
+        permanent_success_committed = True
+        _fsync_directory(campaign)
+        _fsync_directory(permanent)
         os.rename(temporary, destination)
         temporary = None
-        _write_exclusive(campaign / COMPLETION_NAME, _json_bytes(completion))
+        _fsync_directory(parent)
     except BaseException:
+        if permanent_success_committed:
+            # Preserve the complete staging directory for deterministic
+            # operator recovery. The final attempt is already permanently
+            # successful and must never be rewritten as a failed retry.
+            raise RuntimeError(
+                "public_final_publication_failed_after_permanent_success"
+            ) from None
         if temporary is not None:
             shutil.rmtree(temporary, ignore_errors=True)
         completion = _failure_completion(anchor, sources)
@@ -1244,29 +1306,61 @@ def read_completion(
         anchor_path.read_bytes(), "permanent v14 final anchor")
     _materializer_source, official_materializer_sources = (
         _official_materializer_binding())
-    if (not isinstance(anchor, Mapping) or not _content_valid(anchor)
+    inputs = anchor.get("attempt_key_inputs") \
+        if isinstance(anchor, Mapping) else None
+    bindings = anchor.get("bindings") if isinstance(anchor, Mapping) else None
+    if (not isinstance(anchor, Mapping) or set(anchor) != _ANCHOR_FIELDS
+            or not _content_valid(anchor)
             or anchor.get("version") != VERSION + ".attempt-anchor.v1"
             or anchor.get("status") != "final_attempt_irrevocably_claimed"
             or anchor.get("attempt_key") != value["attempt_key"]
+            or campaign.name != value["attempt_key"]
+            or not isinstance(inputs, Mapping)
+            or set(inputs) != _ATTEMPT_INPUT_FIELDS
+            or inputs.get("scheme") != VERSION + ".candidate-and-outer.v1"
+            or any(type(child) is not str or _HEX.fullmatch(child) is None
+                   for name, child in inputs.items() if name != "scheme")
+            or anchor.get("attempt_key") != digest(dict(inputs))
+            or not isinstance(bindings, Mapping)
+            or set(bindings) != _ANCHOR_BINDING_FIELDS
+            or any(type(child) is not str or _HEX.fullmatch(child) is None
+                   for child in bindings.values())
             or anchor.get("retry_allowed") is not False
+            or anchor.get("formal_ready") is not False
             or anchor.get("candidate_and_outer_authenticated_before_claim") is not True
             or anchor.get("final_identity_or_rows_accessed_before_claim") is not False
-            or anchor.get("bindings", {}).get(
+            or bindings.get(
                 "final_controller_source_closure_sha256")
                 != digest(producer_sources())
-            or anchor.get("bindings", {}).get(
+            or bindings.get(
                 "final_materializer_source_closure_sha256")
                 != digest(official_materializer_sources)
-            or anchor.get("bindings", {}).get(
+            or bindings.get(
                 "final_projection_source_closure_sha256")
                 != digest(final_projection_api.producer_sources())
-            or anchor.get("bindings", {}).get(
+            or bindings.get(
                 "final_projection_contract_sha256")
                 != digest(final_projection_api.contract())
-            or anchor.get("bindings", {}).get("private_salt_commitment")
+            or bindings.get("private_salt_commitment")
                 != PRIVATE_SALT_COMMITMENT
-            or anchor.get("bindings", {}).get("private_salt_domain_sha256")
+            or bindings.get("private_salt_domain_sha256")
                 != sha256(PRIVATE_SALT_DOMAIN).hexdigest()
+            or inputs.get("private_salt_commitment")
+                != bindings.get("private_salt_commitment")
+            or inputs.get("private_salt_domain_sha256")
+                != bindings.get("private_salt_domain_sha256")
+            or inputs.get("final_projection_source_closure_sha256")
+                != bindings.get("final_projection_source_closure_sha256")
+            or inputs.get("final_projection_contract_sha256")
+                != bindings.get("final_projection_contract_sha256")
+            or inputs.get("timeout_closeout_content_sha256")
+                != bindings.get("timeout_closeout_content_sha256")
+            or inputs.get("candidate_universe_content_sha256")
+                != bindings.get("candidate_universe_content_sha256")
+            or inputs.get("candidate_universe_identity_sha256")
+                != bindings.get("candidate_universe_identity_sha256")
+            or inputs.get("timing_calibration_content_sha256")
+                != bindings.get("timing_calibration_content_sha256")
             or value.get("attempt_anchor_content_sha256")
                 != anchor.get("content_sha256")):
         raise ValueError("Permanent v14 final anchor differs")

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 from copy import deepcopy
+import gc
 from dataclasses import dataclass, field
 from hashlib import sha256
 import io
@@ -471,6 +472,11 @@ def load_online_release(*, expected_package_sha256: str,
                              0o600)
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(program_raw); stream.flush(); os.fsync(stream.fileno())
+        # The explainer authenticates and loads the same expanded program from
+        # the private file below.  Release the decoder's copy first so a free
+        # Render instance never holds both large Python tree graphs at once.
+        del program, program_raw
+        gc.collect()
         artifact_binding = explanation_api.make_artifact_binding(
             actor_sha256=runtime.actor_sha256,
             program_sha256=identities["runtime_program_sha256"],

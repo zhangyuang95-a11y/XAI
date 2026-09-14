@@ -29,6 +29,6 @@ def test_render_blueprint_is_pinned_to_r42_package():
     blueprint = (ROOT / "render.yaml").read_text()
     assert "ui.warehouse_alignment_r42_server" in blueprint
     assert "ui.warehouse_alignment_r42_release" in blueprint
-    assert "a647e1765c6b85a1d4227dd31500f2727e03d290bca3a611f3ad2a3f0b4830a9" in blueprint
-    assert "75e1d327784417e6350b6496508a850e969e0f34dbc4ac6a572249a1cac1562a" in blueprint
+    assert "1c372b2294a3739aadee2d346a043c2cbdbe8d7c35c69d78a66ae8acd24837dd" in blueprint
+    assert "56790275e22a017c015a4c47cc86109864e712d822ee521c05814960c6c715b5" in blueprint
     assert "warehouse_alignment_r41_diagnostic_release_v9" not in blueprint

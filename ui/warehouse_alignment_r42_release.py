@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
@@ -15,7 +16,6 @@ import tempfile
 from typing import Any, Mapping
 import zipfile
 
-from env.warehouse.navigation import shortest_path_distance
 from ui import warehouse_alignment_r41_diagnostic_release_v9 as parent_release
 from ui import warehouse_alignment_r42_tutorial as tutorial_api
 
@@ -29,6 +29,36 @@ PARENT_NAME = "artifacts/r41_parent_release.zip"
 MAX_PACKAGE_BYTES = 750_000
 MAX_BASE64_BYTES = 1_000_000
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
+
+
+def _shortest_path_distance(env: Any, start: tuple[int, int],
+                            goal: tuple[int, int]) -> int:
+    """Runtime-only BFS that avoids importing the offline RCPD package.
+
+    Importing ``env.warehouse.navigation`` executes ``env.warehouse``'s package
+    initializer, which eventually imports the scikit-learn based offline RCPD
+    fitter.  The participant service intentionally ships only NumPy.  The
+    restored environment already exposes the authoritative layout, so compute
+    the same four-neighbour distance directly from it.
+    """
+
+    if start == goal:
+        return 0
+    moves = ((-1, 0), (1, 0), (0, -1), (0, 1))
+    queue = deque(((start, 0),))
+    visited = {start}
+    while queue:
+        position, distance = queue.popleft()
+        for row_delta, column_delta in moves:
+            candidate = (position[0] + row_delta,
+                         position[1] + column_delta)
+            if candidate in visited or not env.layout.is_passable(candidate):
+                continue
+            if candidate == goal:
+                return distance + 1
+            visited.add(candidate)
+            queue.append((candidate, distance + 1))
+    return int(env.layout.rows * env.layout.cols)
 
 
 def _canonical(value: Any) -> bytes:
@@ -101,34 +131,29 @@ class R42ReadableExplainer:
         env = runtime.from_snapshot(deepcopy(snapshot))
         agent = env.state.by_id("robot_2")
         charger = env.layout.charger_position
-        direct = shortest_path_distance(agent.position, charger,
-                                        env.config.map_layout_id)
+        direct = _shortest_path_distance(env, agent.position, charger)
         route = None
         carrying = agent.carrying_task_id
         if carrying:
             task = next((item for item in env.state.tasks
                          if item.task_id == carrying), None)
             if task is not None:
-                route = (shortest_path_distance(agent.position,
-                                                task.delivery_position,
-                                                env.config.map_layout_id)
-                         + shortest_path_distance(task.delivery_position,
-                                                  charger,
-                                                  env.config.map_layout_id))
+                route = (_shortest_path_distance(
+                    env, agent.position, task.delivery_position)
+                         + _shortest_path_distance(
+                             env, task.delivery_position, charger))
         else:
             candidates = []
             for task in env.state.tasks:
                 if task.status != "available":
                     continue
                 candidates.append(
-                    shortest_path_distance(agent.position,
-                                           task.pickup_position,
-                                           env.config.map_layout_id)
-                    + shortest_path_distance(task.pickup_position,
-                                             task.delivery_position,
-                                             env.config.map_layout_id)
-                    + shortest_path_distance(task.delivery_position, charger,
-                                             env.config.map_layout_id))
+                    _shortest_path_distance(
+                        env, agent.position, task.pickup_position)
+                    + _shortest_path_distance(
+                        env, task.pickup_position, task.delivery_position)
+                    + _shortest_path_distance(
+                        env, task.delivery_position, charger))
             route = min(candidates) if candidates else None
         planned_moves = route if route is not None else direct
         move_cost = float(getattr(env.config, "move_battery_cost", 2.0))

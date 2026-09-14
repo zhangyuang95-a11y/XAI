@@ -6,9 +6,9 @@
 - Server: `warehouse-alignment-online-study-server.r4.2`
 - Actor SHA-256: `4ac2ba7782b5556761edaab22bfad50c831c1d8b41b174245e2d81486287ff6b`
 - Program SHA-256: `79da2cd273d2a5e3a9a1af0ec1c4c8a42f4c887c8971be9a72642e292b42aff1`
-- Release package SHA-256: `a647e1765c6b85a1d4227dd31500f2727e03d290bca3a611f3ad2a3f0b4830a9`
-- Manifest SHA-256: `75e1d327784417e6350b6496508a850e969e0f34dbc4ac6a572249a1cac1562a`
-- Render Secret File SHA-256: `d175e2b16829f6d0da9cbef93959a46dfa2dccf7d694cdc78dd73107c246256d`
+- Release package SHA-256: `1c372b2294a3739aadee2d346a043c2cbdbe8d7c35c69d78a66ae8acd24837dd`
+- Manifest SHA-256: `56790275e22a017c015a4c47cc86109864e712d822ee521c05814960c6c715b5`
+- Render Secret File SHA-256: `1e43dda1a0446464d0271b65308845a46b19db575dfe4f7798404c3e9c515d2c`
 
 This release is an internal pilot. It uses ephemeral Render storage, is not a formal-ready release, and its records are not eligible as formal samples.
 

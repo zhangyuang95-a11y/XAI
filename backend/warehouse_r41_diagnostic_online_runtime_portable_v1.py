@@ -51,10 +51,13 @@ CONFLICT_VALIDATION_VERSION = "warehouse-r41-diagnostic-conflict-scene-validatio
 
 
 def _regular(path: str | Path, label: str) -> Path:
-    value = Path(path).expanduser().absolute()
-    if value.is_symlink() or not value.is_file() or value.resolve() != value:
+    supplied = Path(path).expanduser().absolute()
+    if supplied.is_symlink() or not supplied.is_file():
         raise ValueError(label + " must be a canonical regular file")
-    return value
+    # macOS exposes its canonical temporary directory through /var -> /private;
+    # archive members are created as regular files, so normalize that directory
+    # alias while continuing to reject a symlink at the supplied file itself.
+    return supplied.resolve()
 
 
 def _read_object(path: Path, label: str) -> dict[str, Any]:

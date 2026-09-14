@@ -92,6 +92,25 @@ def test_v13_selector_uses_replacement_registry_without_prior_targets():
         "file_sha256", "content_sha256"]
 
 
+def test_promoted_closeout_snapshot_preserves_exact_public_artifact_set():
+    relative = subject._PROMOTED_BUNDLE_SNAPSHOT_RELATIVE_NAMES
+    assert set(relative) == {
+        "promoted_bundle_closeout", "promoted_bundle_identity",
+        "promoted_bundle_projection", "promoted_bundle_combined_projection",
+        "promoted_bundle_promoted_rows", "combined_promoted_rows",
+    }
+    paths = [Path(value) for value in relative.values()]
+    assert {path.parent.as_posix() for path in paths} == {"promoted_bundle"}
+    assert {path.name for path in paths} == {
+        subject.promotion_closeout_api.RECEIPT_NAME,
+        subject.promotion_closeout_api.IDENTITY_NAME,
+        subject.promotion_closeout_api.PROMOTED_PROJECTION_NAME,
+        subject.promotion_closeout_api.COMBINED_PROJECTION_NAME,
+        subject.promotion_closeout_api.PROMOTED_ROWS_NAME,
+        subject.promotion_closeout_api.COMBINED_ROWS_NAME,
+    }
+
+
 def test_v13_candidate_lock_binds_prior_validation_projection():
     sources = {"producer.py": "b" * 64}
     bindings = {name: "a" * 64 for name in subject._LOCK_BINDINGS}

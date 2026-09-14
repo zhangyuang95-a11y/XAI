@@ -82,6 +82,20 @@ MAX_JSON_BYTES = 512 * 1024 * 1024
 MAX_NPZ_BYTES = 512 * 1024 * 1024
 MAX_NPZ_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_NPZ_MEMBER_BYTES = 512 * 1024 * 1024
+_PROMOTED_BUNDLE_SNAPSHOT_RELATIVE_NAMES = {
+    "promoted_bundle_closeout": (
+        "promoted_bundle/" + promotion_closeout_api.RECEIPT_NAME),
+    "promoted_bundle_identity": (
+        "promoted_bundle/" + promotion_closeout_api.IDENTITY_NAME),
+    "promoted_bundle_projection": (
+        "promoted_bundle/" + promotion_closeout_api.PROMOTED_PROJECTION_NAME),
+    "promoted_bundle_combined_projection": (
+        "promoted_bundle/" + promotion_closeout_api.COMBINED_PROJECTION_NAME),
+    "promoted_bundle_promoted_rows": (
+        "promoted_bundle/" + promotion_closeout_api.PROMOTED_ROWS_NAME),
+    "combined_promoted_rows": (
+        "promoted_bundle/" + promotion_closeout_api.COMBINED_ROWS_NAME),
+}
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _EARLY_DEVELOPMENT_MEMBERS = (
     "observation_hashes", "scene_fingerprints", "observations",
@@ -1399,6 +1413,9 @@ def _resolve_snapshot(
         expected_closeout_sha256=expected_promoted_bundle_closeout_sha256,
         permanent_closeout_registry=promoted_permanent)
     promoted_component = promoted_closeout.get("combined_promoted_development", {})
+    promoted_bindings = promoted_closeout.get("bindings", {})
+    if not isinstance(promoted_bindings, Mapping):
+        raise ValueError("Combined promoted outer closeout bindings differ")
     promoted_rows_sha = _sha(
         promoted_component.get("rows_sha256"), "combined promoted rows")
     expected_promoted_path = (
@@ -1412,6 +1429,22 @@ def _resolve_snapshot(
         "designation": _regular(designation_path, "Actor designation"),
         "failure_closeout": closeout_original,
         "promoted_bundle_closeout": promoted_closeout_original,
+        "promoted_bundle_identity": _regular(
+            promoted_closeout_original.parent
+            / promotion_closeout_api.IDENTITY_NAME,
+            "promoted burned identity registry"),
+        "promoted_bundle_projection": _regular(
+            promoted_closeout_original.parent
+            / promotion_closeout_api.PROMOTED_PROJECTION_NAME,
+            "promoted burned-final observation projection"),
+        "promoted_bundle_combined_projection": _regular(
+            promoted_closeout_original.parent
+            / promotion_closeout_api.COMBINED_PROJECTION_NAME,
+            "combined promoted observation projection"),
+        "promoted_bundle_promoted_rows": _regular(
+            promoted_closeout_original.parent
+            / promotion_closeout_api.PROMOTED_ROWS_NAME,
+            "promoted burned-final rows", maximum=MAX_NPZ_BYTES),
         "registry": _regular(registry_path, "fresh outer registry"),
         "registry_report": _regular(registry_report_path, "fresh outer registry report"),
         "prior_projection": _regular(
@@ -1442,6 +1475,18 @@ def _resolve_snapshot(
         "promoted_bundle_closeout": _sha(
             expected_promoted_bundle_closeout_sha256,
             "combined promoted outer closeout"),
+        "promoted_bundle_identity": _sha(
+            promoted_bindings.get("burned_identity_registry_sha256"),
+            "promoted burned identity registry"),
+        "promoted_bundle_projection": _sha(
+            promoted_bindings.get("burned_projection_sha256"),
+            "promoted burned-final observation projection"),
+        "promoted_bundle_combined_projection": _sha(
+            promoted_bindings.get("combined_projection_sha256"),
+            "combined promoted observation projection"),
+        "promoted_bundle_promoted_rows": _sha(
+            promoted_bindings.get("promoted_rows_sha256"),
+            "promoted burned-final rows"),
         "registry": _sha(expected_registry_sha256, "fresh outer registry"),
         "registry_report": _sha(
             expected_registry_report_sha256, "fresh outer registry report"),
@@ -1467,10 +1512,14 @@ def _resolve_snapshot(
         }[name]
     snapshot = ImmutableInputSnapshot(
         originals, expected_sha256=expected,
-        relative_names={"manifest": "manifest/manifest.json",
-                        "manifest_validation": "manifest/validation.json"},
+        relative_names={
+            "manifest": "manifest/manifest.json",
+            "manifest_validation": "manifest/validation.json",
+            **_PROMOTED_BUNDLE_SNAPSHOT_RELATIVE_NAMES,
+        },
         maximum_bytes={"actor": MAX_NPZ_BYTES, "designation_actor": MAX_NPZ_BYTES,
                        "development_rows": MAX_NPZ_BYTES,
+                       "promoted_bundle_promoted_rows": MAX_NPZ_BYTES,
                        "combined_promoted_rows": MAX_NPZ_BYTES},
         prefix="warehouse-r41-v13-fit-selector-inputs-",
     )

@@ -91,6 +91,8 @@ def test_projection_exactly_matches_collector_observation_rows(monkeypatch) -> N
 def test_projection_contract_returns_no_targets_or_raw_observations() -> None:
     source = inspect.getsource(subject.project_observation_hashes)
     assert ".decision(" not in source
+    assert "submitted_actions" not in source
+    assert "policy_actions" not in source
     assert '["probabilities"]' not in source
     assert "program.predict" not in source
     contract = subject.contract()

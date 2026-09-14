@@ -92,12 +92,12 @@ def project_observation_hashes(
                 if anchor_enabled:
                     for player_action in rows_api.ACTIONS:
                         branch = runtime.from_snapshot(source)
-                        transition = runtime.step(branch, player_action)
+                        # ``runtime.step`` must advance the frozen Actor, but
+                        # selection is deliberately blind to every returned
+                        # action field.  Authority is checked later by the
+                        # protected audit, outside identity selection.
+                        runtime.step(branch, player_action)
                         environment_steps += 1
-                        if (transition["submitted_actions"]["robot_2"]
-                                != transition["policy_actions"]["robot_2"]):
-                            raise RuntimeError(
-                                "Observation projection detected an Actor override")
                         if not branch.done:
                             ordered.append(_observation_hash(
                                 branch.observations()["robot_2"]))
@@ -106,12 +106,8 @@ def project_observation_hashes(
                 if digest(env.snapshot()) != source_sha:
                     raise RuntimeError(
                         "Observation projection changed the source state")
-                transition = runtime.step(env, player_action)
+                runtime.step(env, player_action)
                 environment_steps += 1
-                if (transition["submitted_actions"]["robot_2"]
-                        != transition["policy_actions"]["robot_2"]):
-                    raise RuntimeError(
-                        "Observation projection detected an Actor override")
         scene_hashes = ordered[start:]
         scene_summaries.append({
             "local_scene_index": local_index,

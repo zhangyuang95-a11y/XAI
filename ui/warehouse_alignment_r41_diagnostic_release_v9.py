@@ -201,6 +201,8 @@ def _validate_manifest(value: Mapping[str, Any]) -> dict[str, Any]:
                  "admitted_internal_diagnostic_v9"),
                 ("warehouse-r41-diagnostic-admission.v10",
                  "admitted_internal_diagnostic_v10"),
+                ("warehouse-r41-diagnostic-admission.v11",
+                 "admitted_internal_diagnostic_v11"),
             }):
         raise ValueError("V9 diagnostic admission parent differs")
     for name in set(parent) - {"version", "status"}:
@@ -755,6 +757,36 @@ def assemble_from_v10_admitted_components(*,
         output_base64=output_base64)
 
 
+def assemble_from_v11_admitted_components(*,
+        diagnostic_admission_path: str | Path,
+        expected_diagnostic_admission_sha256: str,
+        components: Mapping[str, str | Path],
+        outer_permanent_registry: str | Path,
+        final_permanent_registry: str | Path,
+        permanent_promotion_closeout_registry: str | Path,
+        output_package: str | Path,
+        output_base64: str | Path | None = None) -> dict[str, Any]:
+    """Build the v9 runtime package from a passed v14-evidence admission."""
+
+    from backend.training import warehouse_r41_diagnostic_admission_v11 as admission_api
+    admission = admission_api.read_saved_admission(
+        diagnostic_admission_path,
+        expected_sha256=_sha(expected_diagnostic_admission_sha256,
+                             "v11 admission"),
+        components=components,
+        outer_permanent_registry=outer_permanent_registry,
+        final_permanent_registry=final_permanent_registry,
+        permanent_promotion_closeout_registry=(
+            permanent_promotion_closeout_registry))
+    return _assemble_admitted(
+        admission=admission, admission_gate_names=admission_api.GATE_NAMES,
+        admission_label="v11",
+        expected_diagnostic_admission_sha256=(
+            expected_diagnostic_admission_sha256),
+        components=components, output_package=output_package,
+        output_base64=output_base64)
+
+
 __all__ = [
     "VERSION", "STATUS", "PUBLIC_RELEASE_VERSION", "PILOT_CLASS",
     "ANIMATION_DURATION_MS", "MANIFEST_NAME", "ARTIFACT_PATHS",
@@ -764,4 +796,5 @@ __all__ = [
     "release_projection", "validate_bound_context", "_archive_bytes",
     "_read_archive", "inspect_online_release", "load_online_release",
     "assemble_from_admitted_components", "assemble_from_v10_admitted_components",
+    "assemble_from_v11_admitted_components",
 ]

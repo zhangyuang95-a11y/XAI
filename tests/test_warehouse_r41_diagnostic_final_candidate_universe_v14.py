@@ -127,3 +127,30 @@ def test_candidate_identity_requires_frozen_five_fields():
         pass
     else:
         raise AssertionError("expanded candidate identity accepted")
+
+
+def test_saved_universe_accepts_lossless_json_coordinate_normalization(
+    tmp_path, monkeypatch,
+):
+    saved = {
+        "version": subject.VERSION,
+        "status": subject.STATUS,
+        "contract": subject.contract(),
+        "candidate_scenes": [{"route": [[1, 2], [2, 2]]}],
+        "formal_ready": False,
+    }
+    saved["content_sha256"] = digest(saved)
+    path = tmp_path / "candidate_universe.json"
+    path.write_text(canonical(saved) + "\n", encoding="utf-8")
+    recreated = deepcopy(saved)
+    recreated["candidate_scenes"][0]["route"] = [(1, 2), (2, 2)]
+    monkeypatch.setattr(subject, "create_universe", lambda **_kwargs: recreated)
+
+    result = subject.read_saved_universe(
+        path,
+        expected_universe_sha256=file_hash(path),
+        timeout_closeout_path=tmp_path / "unused.json",
+        expected_timeout_closeout_sha256="0" * 64,
+        permanent_timeout_closeout_registry=tmp_path,
+    )
+    assert result == saved

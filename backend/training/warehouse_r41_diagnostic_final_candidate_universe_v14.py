@@ -448,7 +448,13 @@ def read_saved_universe(
         timeout_closeout_path=timeout_closeout_path,
         expected_timeout_closeout_sha256=expected_timeout_closeout_sha256,
         permanent_timeout_closeout_registry=permanent_timeout_closeout_registry)
-    if saved != recreated or file_hash(universe_path) != expected_universe_sha256:
+    # The public scene generator uses tuples for coordinates in memory, while
+    # canonical JSON necessarily restores those coordinates as lists.  Compare
+    # the canonical representation so a byte-authentic saved universe can be
+    # replayed without treating this lossless JSON type normalization as a
+    # semantic difference.
+    if (canonical(saved) != canonical(recreated)
+            or file_hash(universe_path) != expected_universe_sha256):
         raise ValueError("Saved v14 candidate universe differs from replay")
     return deepcopy(saved)
 

@@ -925,7 +925,7 @@ def read_saved_projection(
             or receipt.get("program_accessed") is not False
             or receipt.get("protected_final_access") is not False
             or receipt.get("formal_ready") is not False):
-        raise ValueError("V11 outer projection receipt differs")
+        raise ValueError("V12 outer projection receipt differs")
     return projection, deepcopy(receipt)
 
 

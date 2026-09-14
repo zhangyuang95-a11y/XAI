@@ -223,15 +223,12 @@ def replay_exclusion_closure(
             or any(candidate_public.get((row["seed"], row["fingerprint"])) != row
                    for row in identities)):
         raise ValueError("Consumed v11 identities are not exact fixed candidates")
-    prior_keys = {(int(seed), str(fingerprint)) for seed, fingerprint in zip(
-        base["excluded_seeds"], base["excluded_fingerprints"])}
     # Seed and fingerprint membership are independently excluded by design;
     # the exact pair check below guards against an earlier identity reuse.
     if any(row["seed"] in base["excluded_seeds"]
            or row["fingerprint"] in base["excluded_fingerprints"]
            for row in identities):
         raise ValueError("Consumed v11 identity overlaps an older exclusion")
-    del prior_keys
     return {
         **base,
         "excluded_seeds": set(base["excluded_seeds"]) | {
@@ -421,8 +418,8 @@ def create_registry(**kwargs: Any) -> tuple[
     if (any(row["seed"] in closure["excluded_seeds"]
             or row["fingerprint"] in closure["excluded_fingerprints"]
             for row in selected_public)
-            or len({row["seed"] for row in selected_public}) != SCENE_COUNT
-            or len({row["fingerprint"] for row in selected_public}) != SCENE_COUNT):
+            or len({row["seed"] for row in selected_public}) != FRESH_OUTER_SCENE_COUNT
+            or len({row["fingerprint"] for row in selected_public}) != FRESH_OUTER_SCENE_COUNT):
         raise RuntimeError("V12 outer overlaps an exposed identity")
     if [(row["seed"], row["fingerprint"]) for row in scenes] != [
             (row["seed"], row["fingerprint"]) for row in selected]:
@@ -656,8 +653,8 @@ def read_saved_registry(
                 "program_access", "program_predictions_access",
                 "action_labels_access", "probabilities_access",
                 "final_audit_rows_access"))
-            or not isinstance(scenes, list) or len(scenes) != SCENE_COUNT
-            or not isinstance(identities, list) or len(identities) != SCENE_COUNT
+            or not isinstance(scenes, list) or len(scenes) != FRESH_OUTER_SCENE_COUNT
+            or not isinstance(identities, list) or len(identities) != FRESH_OUTER_SCENE_COUNT
             or registry.get("producer_sources_sha256")
                 != digest(dict(sorted(registry.get("producer_sources", {}).items())))):
         raise ValueError("Saved v12 outer registry semantics differ")
@@ -694,9 +691,9 @@ def read_saved_registry(
                 != EXPECTED_REMAINING_SCENE_COUNT
             or stats.get("remaining_family_counts")
                 != EXPECTED_REMAINING_FAMILY_COUNTS
-            or stats.get("consumed_v11_outer_identities") != SCENE_COUNT
+            or stats.get("consumed_v11_outer_identities") != FRESH_OUTER_SCENE_COUNT
             or stats.get("union_candidate_identities_excluded") != 657
-            or stats.get("selected_outer_scene_count") != SCENE_COUNT
+            or stats.get("selected_outer_scene_count") != FRESH_OUTER_SCENE_COUNT
             or stats.get("selected_outer_family_counts") != FAMILY_QUOTAS
             or stats.get("selected_exposed_seed_overlap") != 0
             or stats.get("selected_exposed_fingerprint_overlap") != 0

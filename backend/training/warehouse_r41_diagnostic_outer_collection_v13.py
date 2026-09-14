@@ -58,6 +58,20 @@ PROJECTION_COPY_NAME = projection_api.PROJECTION_NAME
 MAX_JSON_BYTES = 512 * 1024 * 1024
 MAX_NPZ_BYTES = 512 * 1024 * 1024
 MAX_NPZ_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
+_PROMOTION_BUNDLE_SNAPSHOT_RELATIVE_NAMES = {
+    "promotion_closeout": (
+        "promotion_bundle/" + promoted_closeout_api.RECEIPT_NAME),
+    "promotion_identity": (
+        "promotion_bundle/" + promoted_closeout_api.IDENTITY_NAME),
+    "promotion_projection": (
+        "promotion_bundle/" + promoted_closeout_api.PROMOTED_PROJECTION_NAME),
+    "promotion_combined_projection": (
+        "promotion_bundle/" + promoted_closeout_api.COMBINED_PROJECTION_NAME),
+    "promotion_promoted_rows": (
+        "promotion_bundle/" + promoted_closeout_api.PROMOTED_ROWS_NAME),
+    "combined_promoted_rows": (
+        "promotion_bundle/" + promoted_closeout_api.COMBINED_ROWS_NAME),
+}
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _REQUIRED_LOCK_BINDINGS = frozenset((
     "actor_sha256", "actor_feature_names_sha256", "protocol_sha256",
@@ -1312,6 +1326,9 @@ def _resolve_snapshot(
         expected_closeout_sha256=expected_promotion_closeout_sha256,
         permanent_closeout_registry=permanent_promotion_closeout_registry)
     promoted = promoted_closeout["combined_promoted_development"]
+    promoted_bindings = promoted_closeout.get("bindings", {})
+    if not isinstance(promoted_bindings, Mapping):
+        raise ValueError("V13 promotion closeout bindings differ")
     promoted_rows_sha = promoted["rows_sha256"]
     expected_promoted_path = (
         promoted_closeout_original.parent / promoted_closeout_api.COMBINED_ROWS_NAME)
@@ -1333,6 +1350,21 @@ def _resolve_snapshot(
         "failure_closeout": _regular(
             failure_closeout_path, "failed outer closeout"),
         "promotion_closeout": promoted_closeout_original,
+        "promotion_identity": _regular(
+            promoted_closeout_original.parent / promoted_closeout_api.IDENTITY_NAME,
+            "promoted burned identity registry"),
+        "promotion_projection": _regular(
+            promoted_closeout_original.parent
+            / promoted_closeout_api.PROMOTED_PROJECTION_NAME,
+            "promoted burned-final observation projection"),
+        "promotion_combined_projection": _regular(
+            promoted_closeout_original.parent
+            / promoted_closeout_api.COMBINED_PROJECTION_NAME,
+            "combined promoted observation projection"),
+        "promotion_promoted_rows": _regular(
+            promoted_closeout_original.parent
+            / promoted_closeout_api.PROMOTED_ROWS_NAME,
+            "promoted burned-final rows", maximum=MAX_NPZ_BYTES),
         "development_rows": _regular(
             development_rows_path, "locked development rows", maximum=MAX_NPZ_BYTES),
         "combined_promoted_rows": _regular(
@@ -1365,6 +1397,18 @@ def _resolve_snapshot(
         "candidate_lock": _sha(expected_candidate_lock_sha256, "candidate lock"),
         "failure_closeout": bindings["failed_outer_closeout_sha256"],
         "promotion_closeout": bindings["promotion_closeout_sha256"],
+        "promotion_identity": _sha(
+            promoted_bindings.get("burned_identity_registry_sha256"),
+            "promoted burned identity registry"),
+        "promotion_projection": _sha(
+            promoted_bindings.get("burned_projection_sha256"),
+            "promoted burned-final observation projection"),
+        "promotion_combined_projection": _sha(
+            promoted_bindings.get("combined_projection_sha256"),
+            "combined promoted observation projection"),
+        "promotion_promoted_rows": _sha(
+            promoted_bindings.get("promoted_rows_sha256"),
+            "promoted burned-final rows"),
         "development_rows": bindings["development_rows_sha256"],
         "combined_promoted_rows": bindings["combined_promoted_rows_sha256"],
         "program": bindings["program_sha256"],
@@ -1382,10 +1426,14 @@ def _resolve_snapshot(
         }[name]
     snapshot = ImmutableInputSnapshot(
         originals, expected_sha256=expected,
-        relative_names={"manifest": "manifest/manifest.json",
-                        "manifest_validation": "manifest/validation.json"},
+        relative_names={
+            "manifest": "manifest/manifest.json",
+            "manifest_validation": "manifest/validation.json",
+            **_PROMOTION_BUNDLE_SNAPSHOT_RELATIVE_NAMES,
+        },
         maximum_bytes={"actor": MAX_NPZ_BYTES, "designation_actor": MAX_NPZ_BYTES,
                        "development_rows": MAX_NPZ_BYTES,
+                       "promotion_promoted_rows": MAX_NPZ_BYTES,
                        "combined_promoted_rows": MAX_NPZ_BYTES},
         prefix="warehouse-r41-v13-outer-collection-inputs-",
     )

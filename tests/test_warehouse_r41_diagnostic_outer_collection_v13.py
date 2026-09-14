@@ -22,6 +22,25 @@ def test_collection_uses_the_frozen_v12_selector_grid_version():
         "warehouse-r41-diagnostic-rcpd-v12-candidate-grid.v1")
 
 
+def test_collection_snapshot_preserves_exact_public_promotion_artifact_set():
+    relative = subject._PROMOTION_BUNDLE_SNAPSHOT_RELATIVE_NAMES
+    assert set(relative) == {
+        "promotion_closeout", "promotion_identity", "promotion_projection",
+        "promotion_combined_projection", "promotion_promoted_rows",
+        "combined_promoted_rows",
+    }
+    paths = [Path(value) for value in relative.values()]
+    assert {path.parent.as_posix() for path in paths} == {"promotion_bundle"}
+    assert {path.name for path in paths} == {
+        subject.promoted_closeout_api.RECEIPT_NAME,
+        subject.promoted_closeout_api.IDENTITY_NAME,
+        subject.promoted_closeout_api.PROMOTED_PROJECTION_NAME,
+        subject.promoted_closeout_api.COMBINED_PROJECTION_NAME,
+        subject.promoted_closeout_api.PROMOTED_ROWS_NAME,
+        subject.promoted_closeout_api.COMBINED_ROWS_NAME,
+    }
+
+
 def test_collection_freezes_the_v13_public_fold_assignments_without_repairs():
     report = _selector_report(_candidate_lock())
     development = report["development"]

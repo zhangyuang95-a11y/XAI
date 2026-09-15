@@ -35,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "ui/warehouse_family_feedback_research"
 VERSION = "warehouse-alignment-online-study-server.r4.2"
 R43_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.3"
+R44_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.4"
 DIAGNOSTIC_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.1-diagnostic"
 SERVICE_FAMILY = "warehouse_alignment_online_r2"
 R41_RELEASE_CONTEXT_VERSION = "warehouse-r41-online-release.v1"
@@ -48,6 +49,7 @@ R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V8 = "warehouse-r41-diagnostic-online-rel
 R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V9 = "warehouse-r41-diagnostic-online-release.v9"
 R42_RELEASE_CONTEXT_VERSION = "warehouse-r42-internal-pilot-release.v1"
 R43_RELEASE_CONTEXT_VERSION = "warehouse-r43-internal-pilot-release.v1"
+R44_RELEASE_CONTEXT_VERSION = "warehouse-r44-internal-pilot-release.v1"
 R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS = (
     R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION,
     R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V4,
@@ -60,6 +62,7 @@ R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS = (
 R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION = "r4.1-diagnostic"
 R42_PUBLIC_RELEASE_VERSION = "r4.2-internal-pilot"
 R43_PUBLIC_RELEASE_VERSION = "r4.3-internal-pilot"
+R44_PUBLIC_RELEASE_VERSION = "r4.4-internal-pilot"
 NAMESPACE = "online_demo"
 COOKIE = "warehouse_alignment_online_session_v1"
 DIAGNOSTIC_NAMESPACE = "online_diagnostic"
@@ -68,6 +71,8 @@ R42_NAMESPACE = "online_r42_internal_pilot"
 R42_COOKIE = "warehouse_alignment_online_session_r42"
 R43_NAMESPACE = "online_r43_internal_pilot"
 R43_COOKIE = "warehouse_alignment_online_session_r43"
+R44_NAMESPACE = "online_r44_internal_pilot"
+R44_COOKIE = "warehouse_alignment_online_session_r44"
 DEFAULT_PORT = 8000
 DEFAULT_ORIGIN = "https://policylens-warehouse-study.onrender.com"
 DEFAULT_DATABASE = Path(os.environ.get("WAREHOUSE_ONLINE_DATABASE", "/tmp/warehouse_alignment_online.sqlite3"))
@@ -728,11 +733,15 @@ class OnlineAlignmentStudyStore:
                 or release.get("formal_ready") is not False):
             raise ValueError("a genuine technically verified local-pilot release is required")
         context_version = str(getattr(context, "provenance", {}).get("version", ""))
-        self.is_r43 = context_version == R43_RELEASE_CONTEXT_VERSION
+        self.is_r44 = context_version == R44_RELEASE_CONTEXT_VERSION
+        self.is_r43 = context_version in {
+            R43_RELEASE_CONTEXT_VERSION, R44_RELEASE_CONTEXT_VERSION}
         self.is_r42 = context_version in {
-            R42_RELEASE_CONTEXT_VERSION, R43_RELEASE_CONTEXT_VERSION}
+            R42_RELEASE_CONTEXT_VERSION, R43_RELEASE_CONTEXT_VERSION,
+            R44_RELEASE_CONTEXT_VERSION}
         self.is_diagnostic = context_version in R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS
-        expected_current_release = (R43_PUBLIC_RELEASE_VERSION if self.is_r43
+        expected_current_release = (R44_PUBLIC_RELEASE_VERSION if self.is_r44
+                                    else R43_PUBLIC_RELEASE_VERSION if self.is_r43
                                     else R42_PUBLIC_RELEASE_VERSION)
         if self.is_r42 and (
                 release.get("release_version") != expected_current_release
@@ -765,7 +774,8 @@ class OnlineAlignmentStudyStore:
         self.pilot_class = ("internal_pilot" if self.is_r42 else
                             "internal_diagnostic" if self.is_diagnostic
                             else "internal_pilot")
-        self.service_version = (R43_SERVER_VERSION if self.is_r43 else
+        self.service_version = (R44_SERVER_VERSION if self.is_r44 else
+                                R43_SERVER_VERSION if self.is_r43 else
                                 VERSION if self.is_r42 else
                                 DIAGNOSTIC_SERVER_VERSION if self.is_diagnostic
                                 else VERSION)
@@ -805,15 +815,47 @@ class OnlineAlignmentStudyStore:
             raise ValueError("diagnostic release requires explicitly ephemeral storage")
         self.data_persistent = mode == "persistent"
         self.database = requested
-        self.namespace = (R43_NAMESPACE if self.is_r43 else
+        self.namespace = (R44_NAMESPACE if self.is_r44 else
+                          R43_NAMESPACE if self.is_r43 else
                           R42_NAMESPACE if self.is_r42 else
                           DIAGNOSTIC_NAMESPACE if self.is_diagnostic else NAMESPACE)
-        self.cookie_name = (R43_COOKIE if self.is_r43 else
+        self.cookie_name = (R44_COOKIE if self.is_r44 else
+                            R43_COOKIE if self.is_r43 else
                             R42_COOKIE if self.is_r42 else
                             DIAGNOSTIC_COOKIE if self.is_diagnostic else COOKIE)
         self.web_assets = _assets(diagnostic=self.is_diagnostic,
                                   r42=self.is_r42 and not self.is_r43,
                                   r43=self.is_r43)
+        if self.is_r44:
+            assets = {
+                key: value.replace(b"r4.3", b"r4.4").replace(b"r4_3", b"r4_4")
+                for key, value in self.web_assets.items()
+            }
+            # r4.4 returns to the study protocol's balanced automatic
+            # allocation.  The r4.2/r4.3 manual selector remains available in
+            # their frozen internal-preview assets, but is not exposed here.
+            html = assets["index.html"].decode("utf-8")
+            html = re.sub(
+                r'\s*<label class="field"><span data-i18n="previewGroup">.*?'
+                r'</label>\s*<p class="small" data-i18n="previewGroupNote">.*?'
+                r'</p>\s*',
+                "\n",
+                html,
+                count=1,
+                flags=re.DOTALL,
+            )
+            js = assets["app.js"].decode("utf-8")
+            js = js.replace(
+                'participant_id:id,consent:true,group_choice:$("groupChoice").value});',
+                'participant_id:id,consent:true,group_choice:"auto"});',
+            )
+            js = js.replace(
+                '    if(v?.flow?.preview_condition)$("groupChoice").value=v.flow.preview_condition;disable($("groupChoice"),locked || !registrationStage);',
+                '',
+            )
+            assets["index.html"] = html.encode("utf-8")
+            assets["app.js"] = js.encode("utf-8")
+            self.web_assets = assets
         self.asset_sha256 = {k: sha256(v).hexdigest() for k, v in self.web_assets.items()}
         template = self.runtime.environment(play[0])
         self._map = _public_map(template)
@@ -858,7 +900,8 @@ class OnlineAlignmentStudyStore:
         returned by participant HTTP endpoints: task fingerprints and artifact
         hashes reveal experiment allocation and implementation metadata.
         """
-        result = {"event": ("warehouse_r43_deployment_identity" if self.is_r43 else
+        result = {"event": ("warehouse_r44_deployment_identity" if self.is_r44 else
+                            "warehouse_r43_deployment_identity" if self.is_r43 else
                             "warehouse_r42_deployment_identity" if self.is_r42 else
                             "warehouse_r41_diagnostic_deployment_identity"
                             if self.is_diagnostic
@@ -868,7 +911,8 @@ class OnlineAlignmentStudyStore:
         if self.public_release_version not in (
                 R41_PUBLIC_RELEASE_VERSION,
                 R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION,
-                R42_PUBLIC_RELEASE_VERSION):
+                R42_PUBLIC_RELEASE_VERSION, R43_PUBLIC_RELEASE_VERSION,
+                R44_PUBLIC_RELEASE_VERSION):
             return result
         play = self.scenarios.get("splits", {}).get("play", [])
         fingerprints = [row.get("fingerprint") for row in play[1:7]]
@@ -1062,7 +1106,9 @@ class OnlineAlignmentStudyStore:
         signature = getattr(context, "tutorial_signature", None)
         expected_fields = {"version", "source", "uses_final_actor", "scene_id",
             "duration_ms", "map_sha256", "bindings", "coverage", "frames"}
-        tutorial_version = ("warehouse-alignment-r43-neutral-tutorial.v3"
+        tutorial_version = ("warehouse-alignment-r44-neutral-tutorial.v4"
+                            if self.is_r44 else
+                            "warehouse-alignment-r43-neutral-tutorial.v3"
                             if self.is_r43 else
                             "warehouse-alignment-r42-neutral-tutorial.v2"
                             if self.is_r42 else
@@ -1271,7 +1317,7 @@ class OnlineAlignmentStudyStore:
             "tutorial": None,
             "questionnaire": self._questionnaire(session)}
         if self.is_r42:
-            result["enrollment"]["manual_preview_available"] = True
+            result["enrollment"]["manual_preview_available"] = not self.is_r44
             result["flow"]["assignment_source"] = session["assignment_source"]
             if session["assignment_source"] == "manual_preview":
                 result["flow"]["preview_condition"] = session["condition"]
@@ -1369,7 +1415,7 @@ class OnlineAlignmentStudyStore:
         group_choice = payload.get("group_choice", "auto")
         if not isinstance(group_choice, str) or group_choice not in {"auto", "A", "B"}:
             raise CommandError("invalid_group_choice")
-        if group_choice != "auto" and not self.is_r42:
+        if group_choice != "auto" and (not self.is_r42 or self.is_r44):
             raise CommandError("manual_preview_unavailable", 403)
         assignment_source = "manual_preview" if group_choice != "auto" else "random_block"
         if assignment_source == "manual_preview":
@@ -1596,8 +1642,15 @@ class OnlineAlignmentStudyStore:
         intent_id = payload.get("intent_id")
         if intent_id is not None and intent_id not in _QUICK_INTENTS:
             raise CommandError("invalid_question_intent")
-        if intent_id is None:
+        parser = getattr(self.explainer, "parse_question", None)
+        if callable(parser):
+            parsed = parser({"question": question, "intent_id": intent_id,
+                             "language": language})
+            intent_id = parsed.get("intent_id")
+        elif intent_id is None:
             intent_id = _infer_quick_intent(question)
+        if intent_id not in _QUICK_INTENTS:
+            raise CommandError("invalid_question_intent")
         # The server binds semantics to the selected frame.  Legacy clients
         # may still submit ``focus``, but cannot redirect the evidence frame.
         focus = "next" if intent_id == "counterfactual" else "executed"
@@ -1669,11 +1722,17 @@ class OnlineAlignmentStudyStore:
                     db.execute("UPDATE questions SET status='expired',answer=NULL,evidence_detail=NULL WHERE id=?", (qid,))
                     db.commit(); return
                 row = db.execute("SELECT internal FROM frames WHERE run_id=? AND frame=?", (q["run_id"], q["frame"])).fetchone()
+                history_rows = list(db.execute(
+                    "SELECT internal FROM frames WHERE run_id=? AND frame<=? ORDER BY frame DESC LIMIT 8",
+                    (q["run_id"], q["frame"]),
+                ))
                 access_context = self._explanation_access_context(
                     db, session, q, request_kind="new_question")
                 db.execute("UPDATE questions SET status='running' WHERE id=?", (qid,))
                 db.commit()
             record = json.loads(row[0])
+            record["_history"] = [json.loads(item[0])
+                                  for item in reversed(history_rows)]
             answer_study = getattr(self.explainer, "answer_study", None)
             if callable(answer_study):
                 answer_result = answer_study(

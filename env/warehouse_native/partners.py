@@ -62,22 +62,24 @@ def _goals(env,kind):
     assignments=_assignments(env,kind)
     distance=lambda a,b:shortest_path_distance(a,b,env.config.map_layout_id)
     goals={}
+    move_cost=float(env.config.move_battery_cost)
+    reserve_steps=float(env.config.charge_release_hysteresis_steps)
     for a in state.agents:
         task=assignments[a.agent_id]
         if task is None:
             goal=env.layout.robot_start_positions[int(a.agent_id[-1])-1]
-            required=2*distance(a.position,env.layout.charger_position)+4
+            required=move_cost*(distance(a.position,env.layout.charger_position)+reserve_steps)
         else:
             goal=task.delivery_position if a.carrying_task_id else task.pickup_position
             work=distance(a.position,goal)+(0 if a.carrying_task_id else distance(task.pickup_position,task.delivery_position))
-            required=2*(work+distance(task.delivery_position,env.layout.charger_position))+4
+            required=move_cost*(work+distance(task.delivery_position,env.layout.charger_position)+reserve_steps)
         if a.battery < min(100.,required):
             goal=env.layout.charger_position
         goals[a.agent_id]=goal
     charger=env.layout.charger_position
     if all(goals[a.agent_id]==charger for a in state.agents):
         occupied=next((a for a in state.agents if a.position==charger),None)
-        priority=occupied or min(state.agents,key=lambda a:(a.battery-2*distance(a.position,charger),a.agent_id))
+        priority=occupied or min(state.agents,key=lambda a:(a.battery-move_cost*distance(a.position,charger),a.agent_id))
         other=next(a for a in state.agents if a.agent_id!=priority.agent_id)
         # Public waiting bay, not a charge reservation enforced on the learner.
         bays=[p for p in env.layout.robot_start_positions if p!=priority.position and p!=charger]

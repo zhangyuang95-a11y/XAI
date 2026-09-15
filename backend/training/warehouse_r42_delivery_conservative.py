@@ -63,7 +63,7 @@ def _dev_behavior(actor_path, scenes, maximum_scenes=16):
 
 
 def _conservative_train(model, corrections, anchors, parent_logits, *, device,
-                        epochs, seed, callback):
+                        epochs, seed, callback, retention_loss_weight=24.0):
     rng = np.random.default_rng(seed)
     correction_x, correction_y = _arrays(corrections)
     anchor_x = np.stack([row[0] for row in anchors]).astype(np.float32)
@@ -86,7 +86,7 @@ def _conservative_train(model, corrections, anchors, parent_logits, *, device,
             retention_loss = nn.functional.mse_loss(
                 model.actor_logits(ax), target_logits
             )
-            loss = correction_loss + 24.0 * retention_loss
+            loss = correction_loss + retention_loss_weight * retention_loss
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.actor.parameters(), .35)
@@ -107,6 +107,10 @@ def main(argv=None):
     parser.add_argument("--parent", default=str(base.DEFAULT_PARENT))
     parser.add_argument("--scenes", default=str(base.DEFAULT_SCENES))
     parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--retention-loss-weight", type=float, default=24.0)
+    parser.add_argument("--ppo-steps", type=int, default=1_024)
+    parser.add_argument("--ppo-actor-learning-rate", type=float, default=1e-7)
+    parser.add_argument("--ppo-behavior-coefficient", type=float, default=2.0)
     parser.add_argument("--seed", type=int, default=260_915_942)
     args = parser.parse_args(argv)
     started = time.monotonic()
@@ -158,6 +162,7 @@ def main(argv=None):
     history = _conservative_train(
         model, corrections, anchors, parent_logits, device=device,
         epochs=args.epochs, seed=args.seed, callback=save_epoch,
+        retention_loss_weight=args.retention_loss_weight,
     )
     eligible = [row for row in candidates if row["carried"]["rate"] >= .90]
     if not eligible:
@@ -175,11 +180,12 @@ def main(argv=None):
     # learning rate preserves the accepted carried policy while satisfying the
     # requirement that the final neural weights include fresh RL training.
     updates = base.ppo_finetune(
-        model, scenes, contract, device=device, joint_steps=1_024,
+        model, scenes, contract, device=device, joint_steps=args.ppo_steps,
         seed=args.seed + 100, checkpoint_callback=lambda *_: None,
         reference_observations=correction_x,
         reference_labels=correction_y,
-        actor_learning_rate=1e-7, behavior_coefficient=2.0,
+        actor_learning_rate=args.ppo_actor_learning_rate,
+        behavior_coefficient=args.ppo_behavior_coefficient,
     )
     final = output / "actor.npz"
     base.export_actor(model, contract, final, metadata={
@@ -187,7 +193,7 @@ def main(argv=None):
         "parent_actor_sha256": contract.sha256,
         "scene_manifest_sha256": base.file_hash(scene_path),
         "dagger_correction_rows": len(corrections),
-        "fresh_ppo_joint_steps": 1_024,
+        "fresh_ppo_joint_steps": args.ppo_steps,
         "ppo_actor_specific_reward": True,
         "runtime_action_override": False,
     })
@@ -206,10 +212,11 @@ def main(argv=None):
                      "training_scenes": len(training_entries),
                      "checkpoint_selection_scenes": 16,
                      "retention_rows": len(anchors),
-                     "retention_loss_weight": 24.0,
+                     "retention_loss_weight": args.retention_loss_weight,
                      "history": history,
-                     "fresh_ppo_joint_steps": 1_024,
-                     "ppo_actor_learning_rate": 1e-7,
+                     "fresh_ppo_joint_steps": args.ppo_steps,
+                     "ppo_actor_learning_rate": args.ppo_actor_learning_rate,
+                     "ppo_behavior_coefficient": args.ppo_behavior_coefficient,
                      "ppo_updates": updates,
                      "runtime_action_override": False},
         "candidate_summaries": [{key: value for key, value in row.items()

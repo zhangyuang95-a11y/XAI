@@ -330,7 +330,7 @@ def ppo_finetune(model, scenes, actor_contract, *, device, joint_steps, seed,
                 participant = ("WAIT" if partner_profiles[index] == "wait" else
                     partner_action(env, "robot_1", partner_profiles[index],
                                    partner_rngs[index]))
-                _, _, terminated, truncated, info = env.step({
+                _, environment_rewards, terminated, truncated, info = env.step({
                     "robot_1": participant, "robot_2": action,
                 }, decision_metadata={
                     "policy_action": action, "submitted_action": action,
@@ -349,6 +349,13 @@ def ppo_finetune(model, scenes, actor_contract, *, device, joint_steps, seed,
                     reward -= .10
                 reward -= .08 * int(info["robot_collision"])
                 reward -= 6.0 * int(not after.active)
+                # Preserve the authoritative environment's shared-resource
+                # consequence in the actor-specific PPO objective.  Other
+                # task terms remain explicitly shaped above, so include only
+                # the non-duplicated charger component here.
+                reward += float(info.get("reward_components", {}).get(
+                    "charger_occupancy_penalty", 0.0
+                ))
                 rewards[index] = reward
                 if terminated or truncated:
                     dones[index] = 1.0

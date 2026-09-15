@@ -36,6 +36,7 @@ WEB = ROOT / "ui/warehouse_family_feedback_research"
 VERSION = "warehouse-alignment-online-study-server.r4.2"
 R43_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.3"
 R44_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.4"
+R45_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.5"
 DIAGNOSTIC_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.1-diagnostic"
 SERVICE_FAMILY = "warehouse_alignment_online_r2"
 R41_RELEASE_CONTEXT_VERSION = "warehouse-r41-online-release.v1"
@@ -50,6 +51,7 @@ R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V9 = "warehouse-r41-diagnostic-online-rel
 R42_RELEASE_CONTEXT_VERSION = "warehouse-r42-internal-pilot-release.v1"
 R43_RELEASE_CONTEXT_VERSION = "warehouse-r43-internal-pilot-release.v1"
 R44_RELEASE_CONTEXT_VERSION = "warehouse-r44-internal-pilot-release.v1"
+R45_RELEASE_CONTEXT_VERSION = "warehouse-r45-internal-pilot-release.v1"
 R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS = (
     R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION,
     R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V4,
@@ -63,6 +65,7 @@ R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION = "r4.1-diagnostic"
 R42_PUBLIC_RELEASE_VERSION = "r4.2-internal-pilot"
 R43_PUBLIC_RELEASE_VERSION = "r4.3-internal-pilot"
 R44_PUBLIC_RELEASE_VERSION = "r4.4-internal-pilot"
+R45_PUBLIC_RELEASE_VERSION = "r4.5-internal-pilot"
 NAMESPACE = "online_demo"
 COOKIE = "warehouse_alignment_online_session_v1"
 DIAGNOSTIC_NAMESPACE = "online_diagnostic"
@@ -73,6 +76,8 @@ R43_NAMESPACE = "online_r43_internal_pilot"
 R43_COOKIE = "warehouse_alignment_online_session_r43"
 R44_NAMESPACE = "online_r44_internal_pilot"
 R44_COOKIE = "warehouse_alignment_online_session_r44"
+R45_NAMESPACE = "online_r45_internal_pilot"
+R45_COOKIE = "warehouse_alignment_online_session_r45"
 DEFAULT_PORT = 8000
 DEFAULT_ORIGIN = "https://policylens-warehouse-study.onrender.com"
 DEFAULT_DATABASE = Path(os.environ.get("WAREHOUSE_ONLINE_DATABASE", "/tmp/warehouse_alignment_online.sqlite3"))
@@ -733,14 +738,18 @@ class OnlineAlignmentStudyStore:
                 or release.get("formal_ready") is not False):
             raise ValueError("a genuine technically verified local-pilot release is required")
         context_version = str(getattr(context, "provenance", {}).get("version", ""))
-        self.is_r44 = context_version == R44_RELEASE_CONTEXT_VERSION
+        self.is_r45 = context_version == R45_RELEASE_CONTEXT_VERSION
+        self.is_r44 = context_version in {
+            R44_RELEASE_CONTEXT_VERSION, R45_RELEASE_CONTEXT_VERSION}
         self.is_r43 = context_version in {
-            R43_RELEASE_CONTEXT_VERSION, R44_RELEASE_CONTEXT_VERSION}
+            R43_RELEASE_CONTEXT_VERSION, R44_RELEASE_CONTEXT_VERSION,
+            R45_RELEASE_CONTEXT_VERSION}
         self.is_r42 = context_version in {
             R42_RELEASE_CONTEXT_VERSION, R43_RELEASE_CONTEXT_VERSION,
-            R44_RELEASE_CONTEXT_VERSION}
+            R44_RELEASE_CONTEXT_VERSION, R45_RELEASE_CONTEXT_VERSION}
         self.is_diagnostic = context_version in R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS
-        expected_current_release = (R44_PUBLIC_RELEASE_VERSION if self.is_r44
+        expected_current_release = (R45_PUBLIC_RELEASE_VERSION if self.is_r45
+                                    else R44_PUBLIC_RELEASE_VERSION if self.is_r44
                                     else R43_PUBLIC_RELEASE_VERSION if self.is_r43
                                     else R42_PUBLIC_RELEASE_VERSION)
         if self.is_r42 and (
@@ -774,7 +783,8 @@ class OnlineAlignmentStudyStore:
         self.pilot_class = ("internal_pilot" if self.is_r42 else
                             "internal_diagnostic" if self.is_diagnostic
                             else "internal_pilot")
-        self.service_version = (R44_SERVER_VERSION if self.is_r44 else
+        self.service_version = (R45_SERVER_VERSION if self.is_r45 else
+                                R44_SERVER_VERSION if self.is_r44 else
                                 R43_SERVER_VERSION if self.is_r43 else
                                 VERSION if self.is_r42 else
                                 DIAGNOSTIC_SERVER_VERSION if self.is_diagnostic
@@ -815,11 +825,13 @@ class OnlineAlignmentStudyStore:
             raise ValueError("diagnostic release requires explicitly ephemeral storage")
         self.data_persistent = mode == "persistent"
         self.database = requested
-        self.namespace = (R44_NAMESPACE if self.is_r44 else
+        self.namespace = (R45_NAMESPACE if self.is_r45 else
+                          R44_NAMESPACE if self.is_r44 else
                           R43_NAMESPACE if self.is_r43 else
                           R42_NAMESPACE if self.is_r42 else
                           DIAGNOSTIC_NAMESPACE if self.is_diagnostic else NAMESPACE)
-        self.cookie_name = (R44_COOKIE if self.is_r44 else
+        self.cookie_name = (R45_COOKIE if self.is_r45 else
+                            R44_COOKIE if self.is_r44 else
                             R43_COOKIE if self.is_r43 else
                             R42_COOKIE if self.is_r42 else
                             DIAGNOSTIC_COOKIE if self.is_diagnostic else COOKIE)
@@ -827,8 +839,10 @@ class OnlineAlignmentStudyStore:
                                   r42=self.is_r42 and not self.is_r43,
                                   r43=self.is_r43)
         if self.is_r44:
+            target_release = b"r4.5" if self.is_r45 else b"r4.4"
+            target_code = b"r4_5" if self.is_r45 else b"r4_4"
             assets = {
-                key: value.replace(b"r4.3", b"r4.4").replace(b"r4_3", b"r4_4")
+                key: value.replace(b"r4.3", target_release).replace(b"r4_3", target_code)
                 for key, value in self.web_assets.items()
             }
             # r4.4 returns to the study protocol's balanced automatic
@@ -900,7 +914,8 @@ class OnlineAlignmentStudyStore:
         returned by participant HTTP endpoints: task fingerprints and artifact
         hashes reveal experiment allocation and implementation metadata.
         """
-        result = {"event": ("warehouse_r44_deployment_identity" if self.is_r44 else
+        result = {"event": ("warehouse_r45_deployment_identity" if self.is_r45 else
+                            "warehouse_r44_deployment_identity" if self.is_r44 else
                             "warehouse_r43_deployment_identity" if self.is_r43 else
                             "warehouse_r42_deployment_identity" if self.is_r42 else
                             "warehouse_r41_diagnostic_deployment_identity"
@@ -912,7 +927,7 @@ class OnlineAlignmentStudyStore:
                 R41_PUBLIC_RELEASE_VERSION,
                 R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION,
                 R42_PUBLIC_RELEASE_VERSION, R43_PUBLIC_RELEASE_VERSION,
-                R44_PUBLIC_RELEASE_VERSION):
+                R44_PUBLIC_RELEASE_VERSION, R45_PUBLIC_RELEASE_VERSION):
             return result
         play = self.scenarios.get("splits", {}).get("play", [])
         fingerprints = [row.get("fingerprint") for row in play[1:7]]
@@ -1723,7 +1738,7 @@ class OnlineAlignmentStudyStore:
                     db.commit(); return
                 row = db.execute("SELECT internal FROM frames WHERE run_id=? AND frame=?", (q["run_id"], q["frame"])).fetchone()
                 history_rows = list(db.execute(
-                    "SELECT internal FROM frames WHERE run_id=? AND frame<=? ORDER BY frame DESC LIMIT 8",
+                    "SELECT internal FROM frames WHERE run_id=? AND frame<=? ORDER BY frame DESC LIMIT 24",
                     (q["run_id"], q["frame"]),
                 ))
                 access_context = self._explanation_access_context(

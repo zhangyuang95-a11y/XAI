@@ -17,16 +17,17 @@ from typing import Any, Mapping
 import zipfile
 
 from backend.warehouse_r42_program import R42DecisionProgram
-from backend.warehouse_r44_runtime import R44WarehouseRuntime
+from backend.warehouse_r45_runtime import R45WarehouseRuntime
+from env.warehouse_native.r45_energy import selected_energy_budget
 from ui import warehouse_alignment_r41_diagnostic_release_v9 as parent_release
 from ui import warehouse_alignment_r42_tutorial as tutorial_api
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "warehouse-r44-internal-pilot-envelope.v1"
-STANDALONE_VERSION = "warehouse-r44-shared-charger-package.v1"
-CONTEXT_VERSION = "warehouse-r44-internal-pilot-release.v1"
-PUBLIC_RELEASE_VERSION = "r4.4-internal-pilot"
+VERSION = "warehouse-r45-internal-pilot-envelope.v1"
+STANDALONE_VERSION = "warehouse-r45-energy-cycle-package.v1"
+CONTEXT_VERSION = "warehouse-r45-internal-pilot-release.v1"
+PUBLIC_RELEASE_VERSION = "r4.5-internal-pilot"
 MANIFEST_NAME = "manifest.json"
 PARENT_NAME = "artifacts/r41_parent_release.zip"
 STANDALONE_ARTIFACTS = {
@@ -91,7 +92,10 @@ def source_hashes() -> dict[str, str]:
     paths = (Path(__file__), ROOT / "ui/warehouse_alignment_r42_server.py",
              ROOT / "ui/warehouse_alignment_r42_tutorial.py",
              ROOT / "backend/warehouse_r42_program.py",
+             ROOT / "backend/warehouse_r45_runtime.py",
              ROOT / "backend/warehouse_r44_runtime.py",
+             ROOT / "env/warehouse_native/r45_cycle.py",
+             ROOT / "env/warehouse_native/r45_energy.py",
              ROOT / "env/warehouse_native/r44_charger.py",
              ROOT / "env/warehouse_native/partners.py",
              ROOT / "ui/warehouse_family_feedback_research/index.html",
@@ -465,28 +469,24 @@ class R43UnifiedExplainer(R42DirectExplainer):
         agent = env.state.by_id(agent_id)
         charger = env.layout.charger_position
         direct = _shortest_path_distance(env, agent.position, charger)
-        if agent.carrying_task_id:
-            task = env.state.task_by_id(agent.carrying_task_id)
-            route = (_shortest_path_distance(env, agent.position,
-                                             task.delivery_position)
-                     + _shortest_path_distance(env, task.delivery_position,
-                                               charger))
-        else:
-            routes = [
-                _shortest_path_distance(env, agent.position, task.pickup_position)
-                + _shortest_path_distance(env, task.pickup_position,
-                                          task.delivery_position)
-                + _shortest_path_distance(env, task.delivery_position, charger)
-                for task in env.state.tasks if task.status == "available"
-            ]
-            route = min(routes) if routes else direct
-        reserve = float(env.config.charge_release_hysteresis_steps)
-        required = float(env.config.move_battery_cost) * (route + reserve)
+        budget = selected_energy_budget(env, agent_id)
+        route = budget["route_steps"] if budget else direct
+        reserve = (budget["reserve_steps"] if budget else
+                   float(env.config.charge_release_hysteresis_steps))
+        required = (budget["required_battery"] if budget else
+                    float(env.config.move_battery_cost) * (route + reserve))
         return {
-            "needs": bool(not agent.active or agent.battery <= max(20.0, required)),
+            "needs": bool(not agent.active or agent.battery < required),
             "battery": float(agent.battery), "direct": int(direct),
             "route": int(route), "required": float(required),
             "on_charger": tuple(agent.position) == tuple(charger),
+            "task_id": budget["task_id"] if budget else None,
+            "reserve": float(reserve),
+            "deficit": max(0.0, float(required) - float(agent.battery)),
+            "charge_steps": int(max(0.0, float(required) - float(agent.battery))
+                                // float(env.config.charge_per_wait)) + int(
+                max(0.0, float(required) - float(agent.battery))
+                % float(env.config.charge_per_wait) > 0),
         }
 
     @staticmethod
@@ -500,6 +500,12 @@ class R43UnifiedExplainer(R42DirectExplainer):
                 "deduct", "lost 50", "lose 50", "lost points", "lose points",
                 "score fell", "score drop")):
             return "penalty_reason"
+        energy_budget = any(token in text for token in (
+            "需要多少电", "多少电量", "预计耗电", "任务耗电",
+            "how much battery", "battery does", "energy does", "energy need",
+        ))
+        if energy_budget:
+            return "energy_budget"
         if any(token in text for token in ("如果", "假如", "接下来", "what if", "if i", "next")):
             return "counterfactual"
         if any(token in text for token in ("规则", "阈值", "占桩", "rule", "threshold", "occupancy")):
@@ -548,17 +554,11 @@ class R43UnifiedExplainer(R42DirectExplainer):
         charger = env.layout.charger_position
         before_charge = _shortest_path_distance(env, agent.position, charger)
         after_charge = _shortest_path_distance(env, candidate, charger)
-        if (action != "WAIT" and after_charge < before_charge
-                and agent.battery <= max(
-                    20.0,
-                    float(env.config.move_battery_cost) * (
-                        before_charge
-                        + float(env.config.charge_release_hysteresis_steps)
-                    ),
-                )
-                and agreement):
-            return ("是在接近充电桩" if language == "zh"
-                    else "was moving toward the charger"), {
+        energy = selected_energy_budget(env, "robot_2")
+        if (action != "WAIT" and after_charge < before_charge and agreement
+                and energy is not None and energy["battery_margin"] < 0):
+            return ("使它更接近充电桩" if language == "zh"
+                    else "moved it closer to the charger"), {
                         "kind": "charger", "before": before_charge,
                         "after": after_charge,
                     }
@@ -599,22 +599,37 @@ class R43UnifiedExplainer(R42DirectExplainer):
             for key in agent_ids:
                 name = "你" if key == "robot_1" else "机器人2"
                 row = facts[key]
-                verdict = "需要充电" if row["needs"] else "暂时不需要充电"
-                parts.append(f"{name}{verdict}，当前电量为 {row['battery']:.0f}%")
+                task = str(row["task_id"] or "").replace("task_", "")
+                basis = (f"候选任务{task}" if task else "当前可执行工作")
+                if row["needs"]:
+                    verdict = (f"还差约{row['deficit']:.0f}%（约需再充"
+                               f"{row['charge_steps']}步）")
+                else:
+                    verdict = "当前电量已经覆盖该预算"
+                parts.append(
+                    f"{name}当前为{row['battery']:.0f}%；按{basis}的工作、返程和余量估计约需"
+                    f"{row['required']:.0f}%，{verdict}"
+                )
             answer = "；".join(parts) + "。"
             detail = "；".join(
-                f"{key}：任务及返程估计 {row['route']} 步，按每步 3% 并保留两步余量，约需 {row['required']:.0f}%"
+                f"{key}：任务及返程估计 {row['route']} 步，按每步 3% 并保留{row['reserve']:.0f}步余量，约需 {row['required']:.0f}%"
                 for key, row in facts.items()) + "。"
         else:
             parts = []
             for key in agent_ids:
                 name = "You" if key == "robot_1" else "Robot 2"
                 row = facts[key]
-                verdict = "needs to charge" if row["needs"] else "does not need to charge yet"
-                parts.append(f"{name} {verdict} at {row['battery']:.0f}% battery")
+                task = str(row["task_id"] or "").replace("task_", "")
+                basis = f"candidate task {task}" if task else "available work"
+                verdict = (f"is about {row['deficit']:.0f}% short ({row['charge_steps']} more charge step(s))"
+                           if row["needs"] else "already covers that budget")
+                parts.append(
+                    f"{name} is at {row['battery']:.0f}%; {basis} needs about "
+                    f"{row['required']:.0f}% for work, return, and reserve, so it {verdict}"
+                )
             answer = "; ".join(parts) + "."
             detail = "; ".join(
-                f"{key}: {row['route']} task-and-return moves, about {row['required']:.0f}% at 3% per move with a two-move reserve"
+                f"{key}: {row['route']} task-and-return moves, about {row['required']:.0f}% at 3% per move with a {row['reserve']:.0f}-move reserve"
                 for key, row in facts.items()) + "."
         return answer, detail
 
@@ -677,7 +692,7 @@ class R43UnifiedExplainer(R42DirectExplainer):
             else:
                 answer = ("所选这一步没有发生充电桩占用处罚。" if language == "zh"
                           else "No shared-charger penalty occurred on this step.")
-        elif intent in ("charging_need", "both_charging_need"):
+        elif intent in ("charging_need", "both_charging_need", "energy_budget"):
             ids = (("robot_1", "robot_2") if intent == "both_charging_need"
                    else ("robot_2",))
             answer, extra = self._charging_need_answer(after_env, language, ids)
@@ -833,7 +848,7 @@ class R44UnifiedExplainer(R43UnifiedExplainer):
     def __init__(self, program):
         super().__init__(program)
         self.signature = _digest({
-            "version": "warehouse-r44-unified-explainer.v1",
+            "version": "warehouse-r45-unified-explainer.v1",
             "program": program.signature,
             "actor": program.actor_sha256,
         })
@@ -896,18 +911,31 @@ class R44UnifiedExplainer(R43UnifiedExplainer):
     @staticmethod
     def _recent_return(record, charger):
         history = record.get("_history", []) if isinstance(record, Mapping) else []
-        positions = []
+        rows = []
         for row in history:
             after = row.get("after", {}).get("state", {})
             agents = after.get("agents", []) if isinstance(after, Mapping) else []
             agent = next((x for x in agents if x.get("agent_id") == "robot_2"), None)
             if agent:
-                positions.append(tuple(agent.get("position", ())))
-        if len(positions) < 3:
+                rows.append((tuple(agent.get("position", ())), row))
+        positions = [item[0] for item in rows]
+        if len(positions) < 3 or positions[-1] != tuple(charger):
             return False
-        was_on = positions[0] == tuple(charger)
-        left = any(position != tuple(charger) for position in positions[1:-1])
-        return was_on and left and positions[-1] == tuple(charger)
+        last_outside = next((index for index in range(len(positions) - 2, -1, -1)
+                             if positions[index] != tuple(charger)), None)
+        if last_outside is None:
+            return False
+        prior_on = next((index for index in range(last_outside - 1, -1, -1)
+                         if positions[index] == tuple(charger)), None)
+        if prior_on is None:
+            return False
+        return not any(
+            event.get("event") in ("pickup", "delivery")
+            and event.get("agent_id") == "robot_2"
+            for _position, row in rows[prior_on + 1:]
+            for event in row.get("events", ())
+            if isinstance(event, Mapping)
+        )
 
     def _yield_evidence(self, before_env, after_env, player_action, runtime):
         actor = before_env.state.by_id("robot_2")
@@ -1071,9 +1099,13 @@ class R44UnifiedExplainer(R43UnifiedExplainer):
             left = (before_agent.position == charger and after_agent.position != charger)
             returned = entered and self._recent_return(record, charger)
             if charge:
-                answer = ((f"机器人2留在充电桩，电量由{before_agent.battery:.0f}%恢复到{after_agent.battery:.0f}%。")
+                budget_answer, extra = self._charging_need_answer(
+                    after_env, language, ("robot_2",)
+                )
+                answer = ((f"机器人2留在充电桩，电量由{before_agent.battery:.0f}%恢复到{after_agent.battery:.0f}%；{budget_answer}")
                           if language == "zh" else
-                          (f"Robot 2 stayed on the charger and rose from {before_agent.battery:.0f}% to {after_agent.battery:.0f}% battery."))
+                          (f"Robot 2 stayed on the charger and rose from {before_agent.battery:.0f}% to {after_agent.battery:.0f}% battery. {budget_answer}"))
+                detail += " " + extra
             elif entered:
                 suffix = "；它近期曾离桩又返回，属于充电往返。" if returned and language == "zh" else ". It recently left and returned, which is a charger round trip." if returned else "。" if language == "zh" else "."
                 answer = ((f"机器人2以{after_agent.battery:.0f}%电量进入充电桩，本步尚未补电" if language == "zh" else
@@ -1103,9 +1135,15 @@ class R44UnifiedExplainer(R43UnifiedExplainer):
                           (f"Robot 2 next chooses {self._LABELS['en'][next_action]}; that action does not directly shorten its current pickup or delivery distance."))
         elif action == "WAIT" and intent in ("wait_reason", "action_reason"):
             if charge:
-                answer = ((f"机器人2在充电桩等待，电量由{before_agent.battery:.0f}%恢复到{after_agent.battery:.0f}%。")
+                budget_answer, extra = self._charging_need_answer(
+                    after_env, language, ("robot_2",)
+                )
+                answer = ((f"机器人2在充电桩等待，电量由{before_agent.battery:.0f}%恢复到{after_agent.battery:.0f}%；"
+                           f"{budget_answer}")
                           if language == "zh" else
-                          (f"Robot 2 waited on the charger and rose from {before_agent.battery:.0f}% to {after_agent.battery:.0f}% battery."))
+                          (f"Robot 2 waited on the charger and rose from {before_agent.battery:.0f}% to {after_agent.battery:.0f}% battery. "
+                           f"{budget_answer}"))
+                detail += " " + extra
             else:
                 yielding = self._yield_evidence(
                     before_env, after_env, player_action, runtime
@@ -1131,7 +1169,17 @@ class R44UnifiedExplainer(R43UnifiedExplainer):
                 forwarded = dict(question); forwarded["intent_id"] = "collision_reason"
                 return self.answer_study(
                     forwarded, record, runtime, access_context=access_context)
-            if delivery:
+            charger = before_env.layout.charger_position
+            returned = (before_agent.position != charger
+                        and after_agent.position == charger
+                        and self._recent_return(record, charger))
+            if returned:
+                answer = (("机器人2离开充电桩后又返回，期间没有确认的取货或配送，并额外消耗了电量；"
+                           "这是当前策略的一段无效往返。")
+                          if language == "zh" else
+                          ("Robot 2 returned after leaving the charger without a confirmed pickup or delivery and spent extra battery; "
+                           "this was an unproductive policy cycle."))
+            elif delivery:
                 number = str(delivery["task_id"]).replace("task_", "")
                 answer = ((f"机器人2刚才{label}到达B{number}并完成了配送。")
                           if language == "zh" else
@@ -1148,12 +1196,25 @@ class R44UnifiedExplainer(R43UnifiedExplainer):
                           (f"Robot 2 moved {label} and {role}; the distance changed from {change.get('before')} to {change.get('after')}."))
             else:
                 moved = before_agent.position != after_agent.position
+                before_charge = _shortest_path_distance(
+                    before_env, before_agent.position,
+                    before_env.layout.charger_position,
+                )
+                after_charge = _shortest_path_distance(
+                    before_env, after_agent.position,
+                    before_env.layout.charger_position,
+                )
                 if language == "zh":
-                    answer = (f"机器人2刚才选择{label}，{'实际移动了一格' if moved else '但位置没有变化'}；"
-                              "这一步没有直接缩短到当前取货点或交付点的距离。")
+                    effect = (f"但距充电桩由{before_charge}格缩短到{after_charge}格"
+                              if after_charge < before_charge else
+                              "且没有缩短到当前取货点、交付点或充电桩的距离")
+                    answer = (f"机器人2刚才选择{label}，{'实际移动了一格' if moved else '但位置没有变化'}，"
+                              f"{effect}。")
                 else:
-                    answer = (f"Robot 2 chose {label} and {'moved one cell' if moved else 'did not change position'}; "
-                              "the action did not directly shorten its current pickup or delivery distance.")
+                    effect = (f"it reduced its charger distance from {before_charge} to {after_charge}"
+                              if after_charge < before_charge else
+                              "it did not shorten the current pickup, delivery, or charger distance")
+                    answer = (f"Robot 2 chose {label} and {'moved one cell' if moved else 'did not change position'}; {effect}.")
         else:
             forwarded = dict(question); forwarded["intent_id"] = intent
             result = super().answer_study(
@@ -1464,7 +1525,7 @@ def _load_standalone(manifest, artifacts, *, expected_package_sha256,
         scenarios = json.loads(paths["runtime_manifest"].read_text(encoding="utf-8"))
         scenario_content = deepcopy(scenarios)
         scenario_claimed = scenario_content.pop("content_sha256", None)
-        runtime = R44WarehouseRuntime(
+        runtime = R45WarehouseRuntime(
             paths["actor"],
             training_protocol_path=paths["protocol"],
             manifest_path=paths["runtime_manifest"],
@@ -1493,7 +1554,7 @@ def _load_standalone(manifest, artifacts, *, expected_package_sha256,
                 or behavior.get("passed") is not True
                 or behavior.get("actor_sha256") != runtime.actor_sha256
                 or training.get("action_authority", {}).get("runtime_overrides") != 0):
-            raise ValueError("r4.4 standalone runtime evidence differs")
+            raise ValueError("r4.5 standalone runtime evidence differs")
         release = {
             "release_version": PUBLIC_RELEASE_VERSION,
             "pilot_class": "internal_pilot",

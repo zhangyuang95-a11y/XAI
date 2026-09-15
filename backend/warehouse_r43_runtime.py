@@ -43,9 +43,12 @@ class R43WarehouseRuntime(R41DiagnosticOnlineAlignmentRuntime):
     """Keep the Actor action authoritative while changing only public physics."""
 
     def __init__(self, *args: Any, **kwargs: Any):
+        later_features = tuple(
+            kwargs.get("additional_observation_feature_names", ())
+        )
         kwargs["environment_config_overrides"] = {"move_battery_cost": 3.0}
         kwargs["additional_observation_feature_names"] = (
-            R43_OBSERVATION_FEATURE_NAMES
+            tuple(R43_OBSERVATION_FEATURE_NAMES) + later_features
         )
         super().__init__(*args, **kwargs)
         self._r43_sources = runtime_sources()

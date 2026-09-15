@@ -14,6 +14,7 @@ import random
 from env.warehouse.layouts import get_map_layout
 from env.warehouse.navigation import ACTIONS, MOVE_DELTAS, shortest_path_distance
 from .observations import task_order
+from .r45_energy import task_energy_budget
 
 PARTNER_KINDS = ("skilled","assertive","noisy","fixed_yield","fixed_region","fixed_task","follow")
 
@@ -63,17 +64,15 @@ def _goals(env,kind):
     distance=lambda a,b:shortest_path_distance(a,b,env.config.map_layout_id)
     goals={}
     move_cost=float(env.config.move_battery_cost)
-    reserve_steps=float(env.config.charge_release_hysteresis_steps)
     for a in state.agents:
         task=assignments[a.agent_id]
         if task is None:
             goal=env.layout.robot_start_positions[int(a.agent_id[-1])-1]
-            required=move_cost*(distance(a.position,env.layout.charger_position)+reserve_steps)
+            required=move_cost*(distance(a.position,env.layout.charger_position)+float(env.config.charge_release_hysteresis_steps))
         else:
             goal=task.delivery_position if a.carrying_task_id else task.pickup_position
-            work=distance(a.position,goal)+(0 if a.carrying_task_id else distance(task.pickup_position,task.delivery_position))
-            required=move_cost*(work+distance(task.delivery_position,env.layout.charger_position)+reserve_steps)
-        if a.battery < min(100.,required):
+            required=task_energy_budget(env,a.agent_id,task)["required_battery"]
+        if a.battery < required:
             goal=env.layout.charger_position
         goals[a.agent_id]=goal
     charger=env.layout.charger_position

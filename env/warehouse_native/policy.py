@@ -95,8 +95,41 @@ class NumPyNativeActor:
         self.sha256 = self.artifact_sha256
         with np.load(self.path, allow_pickle=False) as archive:
             self.metadata = json.loads(str(archive["metadata_json"].item()))
-            self.weights = {name: archive[name].astype(np.float32, copy=True)
-                            for name in archive.files if name != "metadata_json"}
+            stored = {name: np.array(archive[name], copy=True)
+                      for name in archive.files if name != "metadata_json"}
+        storage = self.metadata.get("weight_storage", "float32")
+        if storage in {"int8_per_output_channel_v1", "int12_per_output_channel_v1"}:
+            scales = self.metadata.get("weight_scales")
+            if not isinstance(scales, dict):
+                raise ValueError("Quantized Actor is missing weight scales")
+            self.weights = {}
+            for name, value in stored.items():
+                if name.endswith(".weight"):
+                    scale = np.asarray(scales.get(name), dtype=np.float32)
+                    if storage == "int12_per_output_channel_v1":
+                        shape = tuple(self.metadata.get("weight_shapes", {}).get(name, ()))
+                        count = int(np.prod(shape)) if shape else 0
+                        if value.dtype != np.uint8 or value.ndim != 1 or value.size != ((count + 1) // 2) * 3:
+                            raise ValueError("Invalid packed Actor tensor: " + name)
+                        triples = value.reshape(-1, 3).astype(np.uint16)
+                        first = triples[:, 0] | ((triples[:, 1] & 15) << 8)
+                        second = (triples[:, 1] >> 4) | (triples[:, 2] << 4)
+                        quantized = np.empty(triples.shape[0] * 2, dtype=np.int16)
+                        quantized[0::2] = first.astype(np.int16)
+                        quantized[1::2] = second.astype(np.int16)
+                        quantized[quantized >= 2048] -= 4096
+                        value = quantized[:count].reshape(shape)
+                    if value.dtype not in (np.int8, np.int16) or scale.shape != (value.shape[0],):
+                        raise ValueError("Invalid quantized Actor tensor: " + name)
+                    self.weights[name] = (value.astype(np.float32)
+                                          * scale[:, None])
+                else:
+                    self.weights[name] = value.astype(np.float32, copy=True)
+        elif storage == "float32":
+            self.weights = {name: value.astype(np.float32, copy=True)
+                            for name, value in stored.items()}
+        else:
+            raise ValueError("Unsupported native Actor weight storage")
         expected = {
             "format": NATIVE_ACTOR_FORMAT, "policy_version": NATIVE_POLICY_VERSION,
             "actions": list(ACTIONS), "architecture": "two_hidden_layer_tanh",

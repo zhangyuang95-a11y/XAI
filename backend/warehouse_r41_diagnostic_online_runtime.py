@@ -130,6 +130,7 @@ class R41DiagnosticOnlineAlignmentRuntime(R41OnlineAlignmentRuntime):
         allow_test_fixture: bool = False,
         environment_config_overrides: Mapping[str, Any] | None = None,
         additional_observation_feature_names: tuple[str, ...] = (),
+        expected_hidden: int = 128,
     ) -> None:
         self._actor_path = _regular(actor_path, "Diagnostic Actor")
         self._training_protocol_path = _regular(
@@ -226,7 +227,7 @@ class R41DiagnosticOnlineAlignmentRuntime(R41OnlineAlignmentRuntime):
         metadata_contract = {
             "obs_dim": 197 + len(additional),
             "state_dim": 354,
-            "hidden": 128,
+            "hidden": int(expected_hidden),
             "feature_names": list(observation_names(self.config))
             + list(HISTORY_FEATURE_NAMES) + list(additional),
             "public_feedback_mode": "observed",

@@ -80,6 +80,10 @@ def run_episode(actor, scene, profile: str, seed: int, *, capture_trace=False) -
     trace = []
     while not env.done:
         before = env.snapshot()
+        selected_budget = None
+        if capture_trace:
+            from env.warehouse_native.r45_energy import selected_energy_budget
+            selected_budget = selected_energy_budget(env, "robot_2")
         before_distance = _goal_distance(env)
         actions, probabilities = actor.act(env.observations(), deterministic=True)
         learner_action = actions["robot_2"]
@@ -140,6 +144,13 @@ def run_episode(actor, scene, profile: str, seed: int, *, capture_trace=False) -
                 "player_action": player_action,
                 "collision": bool(info["robot_collision"]),
                 "events": info["events"],
+                "selected_task_before": (
+                    selected_budget["task_id"] if selected_budget else None
+                ),
+                "selected_required_before": (
+                    selected_budget["required_battery"]
+                    if selected_budget else None
+                ),
             })
         if terminated or truncated:
             break

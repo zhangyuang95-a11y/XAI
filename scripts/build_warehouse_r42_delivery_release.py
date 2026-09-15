@@ -1,4 +1,4 @@
-"""Build the compact r4.4 internal-pilot Render release."""
+"""Build the compact r4.5 internal-pilot Render release."""
 from __future__ import annotations
 
 import argparse
@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.training import warehouse_r4_question_bank as question_api
-from backend.warehouse_r44_runtime import R44WarehouseEnv, R44WarehouseRuntime
+from backend.warehouse_r45_runtime import R45WarehouseEnv, R45WarehouseRuntime
 from env.warehouse.domain import collaborative_study_config
 from env.warehouse_native.r41_diagnostic_conflict import diagnostic_scene_fingerprint
 from env.warehouse_native.r44_charger import SNAPSHOT_KEY, VERSION as CHARGER_VERSION
@@ -26,7 +26,7 @@ from ui import warehouse_alignment_r42_release as release_api
 from ui import warehouse_alignment_r42_tutorial as tutorial_api
 
 
-VERSION = "warehouse-r44-internal-pilot-release-builder.v1"
+VERSION = "warehouse-r45-internal-pilot-release-builder.v1"
 
 
 def canonical(value):
@@ -56,7 +56,7 @@ def _runtime(actor_path, protocol_path, manifest_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     content = deepcopy(manifest)
     claimed = content.pop("content_sha256", None)
-    return R44WarehouseRuntime(
+    return R45WarehouseRuntime(
         actor_path,
         training_protocol_path=protocol_path,
         manifest_path=manifest_path,
@@ -89,7 +89,7 @@ def migrate_manifest(payload):
                 "penalized": {"robot_1": False, "robot_2": False},
                 "last_event": None,
             }
-            env = R44WarehouseEnv(
+            env = R45WarehouseEnv(
                 collaborative_study_config(move_battery_cost=3.0))
             env.restore(snapshot)
             scene["snapshot"] = env.snapshot()
@@ -213,7 +213,7 @@ def build(args):
         write_json(tutorial_path, tutorial, compact=True)
         shutil.copyfile(protocol, protocol_path)
         shutil.copyfile(runtime_manifest, runtime_manifest_path)
-        package = output / "warehouse_r44_internal_pilot_release.zip"
+        package = output / "warehouse_r45_internal_pilot_release.zip"
         receipt = release_api.build_standalone_package(
             output_path=package,
             actor=actor, protocol=protocol_path,
@@ -221,7 +221,7 @@ def build(args):
             program=program, question_bank=bank_path, tutorial=tutorial_path,
             training_report=training_report, behavior_report=behavior_report,
         )
-        encoded = output / "warehouse_r44_internal_pilot_release.b64"
+        encoded = output / "warehouse_r45_internal_pilot_release.b64"
         receipt["base64_sha256"] = release_api.write_base64(package, encoded)
         receipt.update({
             "version": VERSION,

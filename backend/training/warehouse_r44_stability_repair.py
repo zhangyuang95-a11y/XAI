@@ -20,6 +20,7 @@ from backend.training.warehouse_r44_adaptation import actor_environment
 from env.warehouse.navigation import ACTIONS, MOVE_DELTAS, shortest_path_distance
 from env.warehouse_native.partners import partner_action
 from env.warehouse_native.policy import NumPyNativeActor
+from env.warehouse_native.r45_energy import selected_energy_budget
 
 
 VERSION = "warehouse-r44-neural-stability-repair.v1"
@@ -62,51 +63,11 @@ def _active_reference_action(env):
     learner = env.state.by_id("robot_2")
     teammate = env.state.by_id("robot_1")
     charger = env.layout.charger_position
-    move_cost = float(env.config.move_battery_cost)
-    reserve_steps = float(env.config.charge_release_hysteresis_steps) + 2.0
-
-    if learner.carrying_task_id:
-        task = env.state.task_by_id(learner.carrying_task_id)
-        goal = task.delivery_position
-        route_steps = (
-            shortest_path_distance(
-                learner.position, task.delivery_position,
-                env.config.map_layout_id,
-            )
-            + shortest_path_distance(
-                task.delivery_position, charger,
-                env.config.map_layout_id,
-            )
-        )
-    else:
-        available = [task for task in env.state.tasks
-                     if task.status == "available"]
-        task = min(available, key=lambda item: (
-            shortest_path_distance(
-                learner.position, item.pickup_position,
-                env.config.map_layout_id,
-            )
-            + shortest_path_distance(
-                item.pickup_position, item.delivery_position,
-                env.config.map_layout_id,
-            ),
-            item.task_id,
-        )) if available else None
-        goal = task.pickup_position if task is not None else learner.position
-        route_steps = (0 if task is None else
-            shortest_path_distance(
-                learner.position, task.pickup_position,
-                env.config.map_layout_id,
-            )
-            + shortest_path_distance(
-                task.pickup_position, task.delivery_position,
-                env.config.map_layout_id,
-            )
-            + shortest_path_distance(
-                task.delivery_position, charger,
-                env.config.map_layout_id,
-            ))
-    required = move_cost * (route_steps + reserve_steps)
+    budget = selected_energy_budget(env, "robot_2")
+    task = (env.state.task_by_id(budget["task_id"]) if budget else None)
+    goal = (task.delivery_position if learner.carrying_task_id else
+            task.pickup_position if task is not None else learner.position)
+    required = budget["required_battery"] if budget else 0.0
     urgent_handoff = bool(
         learner.position == charger
         and learner.battery + env.config.charge_per_wait > 60.0
@@ -120,9 +81,9 @@ def _active_reference_action(env):
     # runtime never forces the Actor to remain on or leave the charger.
     if (learner.position == charger and not urgent_handoff
             and task is not None
-            and learner.battery < min(100.0, required)):
+            and learner.battery < required):
         return "WAIT"
-    if learner.position != charger and learner.battery < min(100.0, required):
+    if learner.position != charger and learner.battery < required:
         goal = charger
     if learner.position == goal and not urgent_handoff:
         return "WAIT"
@@ -149,7 +110,7 @@ def _active_reference_action(env):
         if collision or executed["robot_2"] != action:
             continue
         distance = shortest_path_distance(target, goal, env.config.map_layout_id)
-        if goal == charger and distance >= current_distance:
+        if distance >= current_distance:
             continue
         candidates.append((
             distance,

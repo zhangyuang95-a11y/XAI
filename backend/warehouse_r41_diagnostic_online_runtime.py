@@ -128,6 +128,8 @@ class R41DiagnosticOnlineAlignmentRuntime(R41OnlineAlignmentRuntime):
         expected_manifest_content_sha256: str,
         expected_manifest_semantic_sha256: str,
         allow_test_fixture: bool = False,
+        environment_config_overrides: Mapping[str, Any] | None = None,
+        additional_observation_feature_names: tuple[str, ...] = (),
     ) -> None:
         self._actor_path = _regular(actor_path, "Diagnostic Actor")
         self._training_protocol_path = _regular(
@@ -212,14 +214,21 @@ class R41DiagnosticOnlineAlignmentRuntime(R41OnlineAlignmentRuntime):
             raise ValueError("Source full diagnostic manifest binding differs")
 
         self.actor = OnlineNumPyActor(self._actor_path)
-        self.config = collaborative_study_config()
+        self.config = collaborative_study_config(
+            **dict(environment_config_overrides or {})
+        )
+        additional = tuple(additional_observation_feature_names)
+        if (any(type(name) is not str or not name for name in additional)
+                or len(set(additional)) != len(additional)):
+            raise ValueError("Additional observation feature names differ")
+        self._additional_observation_feature_names = additional
         metadata = self.actor.metadata
         metadata_contract = {
-            "obs_dim": 197,
+            "obs_dim": 197 + len(additional),
             "state_dim": 354,
             "hidden": 128,
             "feature_names": list(observation_names(self.config))
-            + list(HISTORY_FEATURE_NAMES),
+            + list(HISTORY_FEATURE_NAMES) + list(additional),
             "public_feedback_mode": "observed",
             "action_masks": False,
             "runtime_action_override": False,

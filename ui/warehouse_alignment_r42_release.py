@@ -17,18 +17,16 @@ from typing import Any, Mapping
 import zipfile
 
 from backend.warehouse_r42_program import R42DecisionProgram
-from backend.warehouse_r41_diagnostic_online_runtime import (
-    R41DiagnosticOnlineAlignmentRuntime,
-)
+from backend.warehouse_r43_runtime import R43WarehouseRuntime
 from ui import warehouse_alignment_r41_diagnostic_release_v9 as parent_release
 from ui import warehouse_alignment_r42_tutorial as tutorial_api
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "warehouse-r42-internal-pilot-envelope.v1"
-STANDALONE_VERSION = "warehouse-r42-delivery-first-package.v1"
-CONTEXT_VERSION = "warehouse-r42-internal-pilot-release.v1"
-PUBLIC_RELEASE_VERSION = "r4.2-internal-pilot"
+VERSION = "warehouse-r43-internal-pilot-envelope.v1"
+STANDALONE_VERSION = "warehouse-r43-shared-charger-package.v1"
+CONTEXT_VERSION = "warehouse-r43-internal-pilot-release.v1"
+PUBLIC_RELEASE_VERSION = "r4.3-internal-pilot"
 MANIFEST_NAME = "manifest.json"
 PARENT_NAME = "artifacts/r41_parent_release.zip"
 STANDALONE_ARTIFACTS = {
@@ -93,6 +91,8 @@ def source_hashes() -> dict[str, str]:
     paths = (Path(__file__), ROOT / "ui/warehouse_alignment_r42_server.py",
              ROOT / "ui/warehouse_alignment_r42_tutorial.py",
              ROOT / "backend/warehouse_r42_program.py",
+             ROOT / "backend/warehouse_r43_runtime.py",
+             ROOT / "env/warehouse_native/r43_charger.py",
              ROOT / "ui/warehouse_family_feedback_research/index.html",
              ROOT / "ui/warehouse_family_feedback_research/app.js",
              ROOT / "ui/warehouse_family_feedback_research/styles.css")
@@ -425,6 +425,398 @@ class R42DirectExplainer:
         return {"answer": answer, "evidence_detail": detail}
 
 
+class R43UnifiedExplainer(R42DirectExplainer):
+    """One evidence classifier for quick questions and free system questions."""
+
+    _COLLISION_ZH = {
+        "swap": "两台机器人试图交换位置",
+        "same_target": "两台机器人同时进入同一格",
+        "occupied_stationary": "一台机器人进入了另一台停留的位置",
+    }
+    _COLLISION_EN = {
+        "swap": "the robots tried to exchange positions",
+        "same_target": "both robots tried to enter the same cell",
+        "occupied_stationary": "one robot tried to enter the other robot's occupied cell",
+    }
+
+    def __init__(self, program):
+        super().__init__(program)
+        self.signature = _digest({
+            "version": "warehouse-r43-unified-explainer.v1",
+            "program": program.signature,
+            "actor": program.actor_sha256,
+        })
+
+    @staticmethod
+    def _agent(env, agent_id):
+        return env.state.by_id(agent_id)
+
+    @staticmethod
+    def _event(record, name, agent_id=None):
+        for event in record.get("events", ()) if isinstance(record, Mapping) else ():
+            if (isinstance(event, Mapping) and event.get("event") == name
+                    and (agent_id is None or event.get("agent_id") == agent_id)):
+                return dict(event)
+        return None
+
+    @staticmethod
+    def _route_need(env, agent_id):
+        agent = env.state.by_id(agent_id)
+        charger = env.layout.charger_position
+        direct = _shortest_path_distance(env, agent.position, charger)
+        if agent.carrying_task_id:
+            task = env.state.task_by_id(agent.carrying_task_id)
+            route = (_shortest_path_distance(env, agent.position,
+                                             task.delivery_position)
+                     + _shortest_path_distance(env, task.delivery_position,
+                                               charger))
+        else:
+            routes = [
+                _shortest_path_distance(env, agent.position, task.pickup_position)
+                + _shortest_path_distance(env, task.pickup_position,
+                                          task.delivery_position)
+                + _shortest_path_distance(env, task.delivery_position, charger)
+                for task in env.state.tasks if task.status == "available"
+            ]
+            route = min(routes) if routes else direct
+        required = float(env.config.move_battery_cost) * (route + 2)
+        return {
+            "needs": bool(not agent.active or agent.battery <= max(20.0, required)),
+            "battery": float(agent.battery), "direct": int(direct),
+            "route": int(route), "required": float(required),
+            "on_charger": tuple(agent.position) == tuple(charger),
+        }
+
+    @staticmethod
+    def _infer_intent(question):
+        explicit = question.get("intent_id")
+        if explicit:
+            return explicit
+        text = str(question.get("question", "")).casefold()
+        if any(token in text for token in (
+                "扣分", "分数少", "分数降", "罚", "-50", "penalty",
+                "deduct", "lost 50", "lose 50", "lost points", "lose points",
+                "score fell", "score drop")):
+            return "penalty_reason"
+        if any(token in text for token in ("如果", "假如", "接下来", "what if", "if i", "next")):
+            return "counterfactual"
+        if any(token in text for token in ("规则", "阈值", "占桩", "rule", "threshold", "occupancy")):
+            return "rule_question"
+        if any(token in text for token in ("碰撞", "撞", "冲突", "collid", "collision", "crash")):
+            return "collision_reason"
+        charge = any(token in text for token in ("充电", "电量", "充电桩", "charge", "battery", "charger"))
+        if charge and any(token in text for token in ("我们", "分别", "两台", "both", "each")):
+            return "both_charging_need"
+        if charge and any(token in text for token in ("为什么", "为何", "怎么", "why", "didn't", "not charge")):
+            return "charging_reason"
+        if charge:
+            return "charging_need"
+        if (("我" in text or "my " in text or " i " in f" {text} ")
+                and any(token in text for token in ("为什么", "为何", "why"))):
+            return "player_reason"
+        if any(token in text for token in ("影响", "affect", "influence")):
+            return "human_influence"
+        if any(token in text for token in ("任务", "目标", "方向", "task", "target")):
+            return "task_direction"
+        if any(token in text for token in ("等待", "没动", "不动", "wait", "stationary")):
+            return "wait_reason"
+        return "action_reason"
+
+    @staticmethod
+    def _counterfactual_action(text):
+        value = str(text).casefold()
+        choices = (
+            (("向上", "上移", " up"), "UP"),
+            (("向下", "下移", " down"), "DOWN"),
+            (("向左", "左移", " left"), "LEFT"),
+            (("向右", "右移", " right"), "RIGHT"),
+            (("等待", "不动", " wait"), "WAIT"),
+        )
+        for tokens, action in choices:
+            if any(token in value for token in tokens):
+                return action
+        return None
+
+    def _action_role(self, env, action, *, language, agreement=True):
+        agent = env.state.by_id("robot_2")
+        delta = self._DELTAS.get(action, (0, 0))
+        candidate = (agent.position[0] + delta[0], agent.position[1] + delta[1])
+        if not env.layout.is_passable(candidate):
+            candidate = agent.position
+        charger = env.layout.charger_position
+        before_charge = _shortest_path_distance(env, agent.position, charger)
+        after_charge = _shortest_path_distance(env, candidate, charger)
+        if (action != "WAIT" and after_charge < before_charge
+                and agent.battery <= max(20.0, 3.0 * (before_charge + 2))
+                and agreement):
+            return ("是在接近充电桩" if language == "zh"
+                    else "was moving toward the charger"), {
+                        "kind": "charger", "before": before_charge,
+                        "after": after_charge,
+                    }
+        if agent.carrying_task_id:
+            task = env.state.task_by_id(agent.carrying_task_id)
+            goal, mode = task.delivery_position, "delivery"
+        else:
+            available = [task for task in env.state.tasks
+                         if task.status == "available"]
+            if not available:
+                return None, None
+            task = min(available, key=lambda item: (
+                _shortest_path_distance(env, candidate, item.pickup_position),
+                item.task_id,
+            ))
+            goal, mode = task.pickup_position, "pickup"
+        before = _shortest_path_distance(env, agent.position, goal)
+        after = _shortest_path_distance(env, candidate, goal)
+        if action == "WAIT" or after >= before or not agreement:
+            return None, {"kind": mode, "before": before, "after": after,
+                          "task": task.task_id}
+        number = str(task.task_id).replace("task_", "")
+        if language == "zh":
+            target = "交付点" if mode == "delivery" else "取货点"
+            return f"是在接近任务{number}的{target}", {
+                "kind": mode, "before": before, "after": after,
+                "task": task.task_id,
+            }
+        return f"was moving toward task {number}'s {mode} point", {
+            "kind": mode, "before": before, "after": after,
+            "task": task.task_id,
+        }
+
+    def _charging_need_answer(self, env, language, agent_ids=("robot_2",)):
+        facts = {key: self._route_need(env, key) for key in agent_ids}
+        if language == "zh":
+            parts = []
+            for key in agent_ids:
+                name = "你" if key == "robot_1" else "机器人2"
+                row = facts[key]
+                verdict = "需要充电" if row["needs"] else "暂时不需要充电"
+                parts.append(f"{name}{verdict}，当前电量为 {row['battery']:.0f}%")
+            answer = "；".join(parts) + "。"
+            detail = "；".join(
+                f"{key}：任务及返程估计 {row['route']} 步，按每步 3% 并保留两步余量，约需 {row['required']:.0f}%"
+                for key, row in facts.items()) + "。"
+        else:
+            parts = []
+            for key in agent_ids:
+                name = "You" if key == "robot_1" else "Robot 2"
+                row = facts[key]
+                verdict = "needs to charge" if row["needs"] else "does not need to charge yet"
+                parts.append(f"{name} {verdict} at {row['battery']:.0f}% battery")
+            answer = "; ".join(parts) + "."
+            detail = "; ".join(
+                f"{key}: {row['route']} task-and-return moves, about {row['required']:.0f}% at 3% per move with a two-move reserve"
+                for key, row in facts.items()) + "."
+        return answer, detail
+
+    def answer_study(self, question, record, runtime, *, access_context):
+        self._allowed(access_context)
+        self._assert_current(runtime)
+        language = "en" if question.get("language") == "en" else "zh"
+        intent = self._infer_intent(question)
+        before_payload = record.get("before") if isinstance(record, Mapping) else None
+        after_payload = record.get("after") if isinstance(record, Mapping) else None
+        if not isinstance(after_payload, Mapping):
+            return {"answer": ("所选帧缺少可核验状态。" if language == "zh"
+                               else "The selected frame lacks verified state."),
+                    "evidence_detail": ""}
+        after_env = runtime.from_snapshot(deepcopy(after_payload))
+        if not isinstance(before_payload, Mapping):
+            if intent not in ("charging_need", "both_charging_need", "rule_question",
+                              "task_direction"):
+                return {"answer": ("这是第0步，尚未发生动作。" if language == "zh"
+                                   else "This is frame 0; no action has occurred yet."),
+                        "evidence_detail": "0 → 0"}
+            before_env = after_env
+        else:
+            before_env = runtime.from_snapshot(deepcopy(before_payload))
+        frame = int(after_payload["state"]["frame"])
+        transition = f"{max(0, frame - 1)} → {frame}"
+        action = str(record.get("submitted_actions", {}).get("robot_2", "WAIT"))
+        player_action = str(record.get("submitted_actions", {}).get("robot_1", "WAIT"))
+        label = self._LABELS[language].get(action, action)
+        player_label = self._LABELS[language].get(player_action, player_action)
+        program_action = self.program.action(before_env.observations()["robot_2"])
+        agreement = program_action == action
+        events = record.get("events", [])
+        collision = self._event(record, "collision")
+        charge = self._event(record, "charge", "robot_2")
+        pickup = self._event(record, "pickup", "robot_2")
+        delivery = self._event(record, "delivery", "robot_2")
+        penalty = self._event(record, "charger_occupancy_penalty")
+        before_agent = before_env.state.by_id("robot_2")
+        after_agent = after_env.state.by_id("robot_2")
+        entered_charger = (
+            tuple(before_agent.position) != tuple(before_env.layout.charger_position)
+            and tuple(after_agent.position) == tuple(after_env.layout.charger_position)
+        )
+        role, role_detail = self._action_role(
+            before_env, action, language=language, agreement=agreement)
+
+        if intent == "rule_question":
+            answer = ("占桩者电量至少60%、队友电量不超过20%且距充电桩两格内时，如有安全离桩动作，连续主动等待两步后再等一步会扣50分。"
+                      if language == "zh" else
+                      "If the occupant has at least 60% battery while an active teammate has at most 20% and is within two cells, a third active wait after two grace waits costs 50 points when a safe exit exists.")
+        elif intent == "penalty_reason":
+            if penalty:
+                who = (("你" if penalty.get("agent_id") == "robot_1" else "机器人2")
+                       if language == "zh" else
+                       ("You" if penalty.get("agent_id") == "robot_1" else "Robot 2"))
+                answer = ((f"{who}在满足占桩条件后连续等待超过两步，因此本步触发充电桩占用处罚，团队扣50分。")
+                          if language == "zh" else
+                          (f"{who} kept waiting on the charger beyond the two-step grace period, so this step triggered the 50-point shared-charger penalty."))
+            else:
+                answer = ("所选这一步没有发生充电桩占用处罚。" if language == "zh"
+                          else "No shared-charger penalty occurred on this step.")
+        elif intent in ("charging_need", "both_charging_need"):
+            ids = (("robot_1", "robot_2") if intent == "both_charging_need"
+                   else ("robot_2",))
+            answer, extra = self._charging_need_answer(after_env, language, ids)
+            role_detail = extra
+        elif intent == "charging_reason":
+            question_text = str(question.get("question", "")).casefold()
+            asks_not_leave = any(token in question_text for token in (
+                "没有离开", "没离开", "不离开", "didn't leave", "not leave"))
+            if penalty and asks_not_leave:
+                answer = (("机器人2这一步仍主动停在充电桩，因此继续占用了共享充电位置并触发50分处罚；现有证据不能确认它为何没有离开。")
+                          if language == "zh" else
+                          ("Robot 2 actively stayed on the charger and triggered the 50-point shared-charger penalty; the available evidence cannot establish why it did not leave."))
+            elif charge and asks_not_leave:
+                answer = ((f"机器人2这一步仍停在充电桩，电量由 {before_agent.battery:.0f}% 恢复到 {after_agent.battery:.0f}%；现有证据不能确认它为何没有离开。")
+                          if language == "zh" else
+                          (f"Robot 2 stayed on the charger and rose from {before_agent.battery:.0f}% to {after_agent.battery:.0f}% battery; the available evidence cannot establish why it did not leave."))
+            elif charge:
+                answer = ((f"机器人2刚才停留在充电桩，电量由 {before_agent.battery:.0f}% 恢复到 {after_agent.battery:.0f}%。")
+                          if language == "zh" else
+                          (f"Robot 2 stayed on the charger and its battery rose from {before_agent.battery:.0f}% to {after_agent.battery:.0f}%."))
+            elif entered_charger:
+                answer = ((f"机器人2刚才{label}进入充电桩，到达时电量为 {after_agent.battery:.0f}%；这一步尚未开始补电。")
+                          if language == "zh" else
+                          (f"Robot 2 {label} onto the charger at {after_agent.battery:.0f}% battery; charging has not started on this move."))
+            elif (action == "WAIT" and before_agent.battery <= 20
+                  and before_agent.position != before_env.layout.charger_position):
+                occupant = before_env.state.by_id("robot_1")
+                occupied = occupant.position == before_env.layout.charger_position
+                answer = ((f"机器人2当前电量为 {before_agent.battery:.0f}%，但充电桩{'正由你占用' if occupied else '尚未到达'}，所以本步没有获得充电。")
+                          if language == "zh" else
+                          (f"Robot 2 had {before_agent.battery:.0f}% battery, but the charger was {'occupied by you' if occupied else 'not yet reached'}, so it did not gain energy on this step."))
+            else:
+                answer = ((f"机器人2刚才选择了{label}；现有证据不能确认这一步与充电有关。")
+                          if language == "zh" else
+                          (f"Robot 2 chose to {label}; the available evidence does not establish a charging reason."))
+        elif intent == "counterfactual":
+            alternative = self._counterfactual_action(question.get("question", ""))
+            if alternative is None or not isinstance(before_payload, Mapping):
+                answer = ("请明确给出要替换的动作，例如“如果我刚才向下会怎样”。" if language == "zh"
+                          else "Please name the alternative action, for example, “What if I had moved down?”")
+            else:
+                result = runtime.counterfactual(deepcopy(before_payload), [alternative], steps=1)
+                transition_row = result["transitions"][0]
+                hit = any(event.get("event") == "collision"
+                          for event in transition_row.get("events", []))
+                alt_label = self._LABELS[language][alternative]
+                answer = ((f"如果你把这一步改为{alt_label}，{'仍会发生碰撞' if hit else '不会发生机器人碰撞'}；该模拟不改变当前回合。")
+                          if language == "zh" else
+                          (f"If you changed this action to {alt_label}, {'a collision would still occur' if hit else 'the robots would not collide'}; this simulation does not change the round."))
+        elif intent == "collision_reason":
+            if collision:
+                kind = str(record.get("info", {}).get("collision_kind", collision.get("kind", "")))
+                cause = (self._COLLISION_ZH if language == "zh" else self._COLLISION_EN).get(kind)
+                factual_role, factual_detail = self._action_role(
+                    before_env, action, language=language, agreement=True)
+                if language == "zh":
+                    if (before_agent.carrying_task_id and factual_role
+                            and factual_detail.get("kind") == "delivery"):
+                        number = str(before_agent.carrying_task_id).replace("task_", "")
+                        first = f"机器人2携带A{number}，{label}会使它更接近交付点B{number}"
+                    elif factual_role:
+                        first = f"机器人2{label}{factual_role.replace('是在', '，使它')}"
+                    else:
+                        first = f"机器人2选择了{label}"
+                    answer = f"{first}。你同时{player_label}，{cause or '双方动作发生冲突'}，因此发生碰撞并停在原位。"
+                else:
+                    if before_agent.carrying_task_id and factual_role:
+                        first = f"Robot 2 carried task {str(before_agent.carrying_task_id).replace('task_', '')}, and moving {label} would bring it closer to that delivery point"
+                    elif factual_role:
+                        first = f"Robot 2 chose to {label} and {factual_role}"
+                    else:
+                        first = f"Robot 2 chose to {label}"
+                    answer = f"{first}. You simultaneously chose to {player_label}; {cause or 'the joint actions conflicted'}, so both robots stayed in place."
+            else:
+                answer = ("所选这一步没有发生机器人碰撞。" if language == "zh"
+                          else "No robot collision occurred on the selected step.")
+        elif intent == "player_reason":
+            answer = ((f"这一步你提交了{player_label}；系统能核验动作及结果，但不能判断你选择它的主观原因。")
+                      if language == "zh" else
+                      (f"You submitted {player_label} on this step. The system can verify the action and result, but not your reason for choosing it."))
+        elif intent == "human_influence":
+            if collision:
+                answer = ("机器人2无法提前读取你的本步输入，但双方同时执行的动作共同造成了这次碰撞。" if language == "zh"
+                          else "Robot 2 could not read your current input in advance, but the simultaneously executed actions jointly caused this collision.")
+            else:
+                answer = ("机器人2无法提前读取你的本步输入；所选这一步没有发生双方动作冲突。" if language == "zh"
+                          else "Robot 2 could not read your current input in advance, and no joint-action collision occurred on this step.")
+        elif intent == "task_direction":
+            next_actions, _ = runtime.decision(after_env)
+            next_action = next_actions["robot_2"]
+            next_program = self.program.action(after_env.observations()["robot_2"])
+            next_role, _ = self._action_role(after_env, next_action,
+                                               language=language,
+                                               agreement=next_program == next_action)
+            answer = ((f"机器人2当前{next_role}。" if next_role else "现有证据无法可靠判断机器人2正在推进哪个具体任务。")
+                      if language == "zh" else
+                      (f"Robot 2 currently {next_role}." if next_role else "The available evidence cannot reliably identify a specific task Robot 2 is advancing."))
+        elif intent == "wait_reason":
+            if action != "WAIT":
+                answer = ((f"机器人2在所选这一步没有等待，而是选择了{label}。")
+                          if language == "zh" else
+                          (f"Robot 2 did not wait on this step; it chose to {label}."))
+            elif charge:
+                answer = ((f"机器人2刚才在充电桩等待，电量由 {before_agent.battery:.0f}% 恢复到 {after_agent.battery:.0f}%。")
+                          if language == "zh" else
+                          (f"Robot 2 waited on the charger and its battery rose from {before_agent.battery:.0f}% to {after_agent.battery:.0f}%."))
+            else:
+                answer = ("机器人2刚才选择了等待，但现有证据无法可靠说明更具体的原因。" if language == "zh"
+                          else "Robot 2 chose to wait, but the available evidence cannot reliably establish a more specific reason.")
+        else:
+            if delivery:
+                answer = ((f"机器人2刚才{label}到达对应交付点，并完成了任务{str(delivery['task_id']).replace('task_', '')}。")
+                          if language == "zh" else
+                          (f"Robot 2 {label} onto the matching delivery point and completed task {str(delivery['task_id']).replace('task_', '')}."))
+            elif pickup:
+                answer = ((f"机器人2刚才{label}到达取货点，并领取了任务{str(pickup['task_id']).replace('task_', '')}。")
+                          if language == "zh" else
+                          (f"Robot 2 {label} onto the pickup point and collected task {str(pickup['task_id']).replace('task_', '')}."))
+            elif charge:
+                answer = ((f"机器人2刚才在充电桩等待，电量由 {before_agent.battery:.0f}% 恢复到 {after_agent.battery:.0f}%。")
+                          if language == "zh" else
+                          (f"Robot 2 waited on the charger and its battery rose from {before_agent.battery:.0f}% to {after_agent.battery:.0f}%."))
+            elif entered_charger:
+                answer = ((f"机器人2刚才{label}进入充电桩，到达时电量为 {after_agent.battery:.0f}%；这一步尚未开始补电。")
+                          if language == "zh" else
+                          (f"Robot 2 {label} onto the charger at {after_agent.battery:.0f}% battery; charging has not started on this move."))
+            elif role:
+                detail = role_detail or {}
+                answer = ((f"机器人2刚才{label}，{role}；距离从 {detail.get('before')} 格缩短到 {detail.get('after')} 格。")
+                          if language == "zh" else
+                          (f"Robot 2 chose to {label} and {role}; the distance fell from {detail.get('before')} to {detail.get('after')}."))
+            else:
+                answer = ((f"机器人2刚才选择了{label}，但现有证据无法可靠说明更具体的原因。")
+                          if language == "zh" else
+                          (f"Robot 2 chose to {label}, but the available evidence cannot reliably establish a more specific reason."))
+        detail = ((f"状态关系 {transition}；机器人2提交动作 {action}；近似程序动作 {program_action}；两者{'一致' if agreement else '不一致'}。")
+                  if language == "zh" else
+                  (f"State transition {transition}; Robot 2 submitted {action}; approximate program action {program_action}; {'agreement' if agreement else 'disagreement'}."))
+        if isinstance(role_detail, str):
+            detail += " " + role_detail
+        if penalty:
+            detail += ((f" 处罚事件：责任方 {penalty.get('agent_id')}，金额 {penalty.get('amount')}。")
+                       if language == "zh" else
+                       (f" Penalty event: responsible agent {penalty.get('agent_id')}, amount {penalty.get('amount')}."))
+        return {"answer": answer, "evidence_detail": detail}
+
+
 @dataclass
 class R42ReleaseContext:
     runtime: object
@@ -720,7 +1112,7 @@ def _load_standalone(manifest, artifacts, *, expected_package_sha256,
         scenarios = json.loads(paths["runtime_manifest"].read_text(encoding="utf-8"))
         scenario_content = deepcopy(scenarios)
         scenario_claimed = scenario_content.pop("content_sha256", None)
-        runtime = R41DiagnosticOnlineAlignmentRuntime(
+        runtime = R43WarehouseRuntime(
             paths["actor"],
             training_protocol_path=paths["protocol"],
             manifest_path=paths["runtime_manifest"],
@@ -734,7 +1126,7 @@ def _load_standalone(manifest, artifacts, *, expected_package_sha256,
         program = R42DecisionProgram(json.loads(
             paths["program"].read_text(encoding="utf-8")
         ))
-        explainer = R42DirectExplainer(program)
+        explainer = R43UnifiedExplainer(program)
         question_bank = R42CompactQuestionBank(json.loads(
             paths["question_bank"].read_text(encoding="utf-8")
         ), runtime=runtime)
@@ -749,7 +1141,7 @@ def _load_standalone(manifest, artifacts, *, expected_package_sha256,
                 or behavior.get("passed") is not True
                 or behavior.get("actor_sha256") != runtime.actor_sha256
                 or training.get("action_authority", {}).get("runtime_overrides") != 0):
-            raise ValueError("r4.2 standalone runtime evidence differs")
+            raise ValueError("r4.3 standalone runtime evidence differs")
         release = {
             "release_version": PUBLIC_RELEASE_VERSION,
             "pilot_class": "internal_pilot",

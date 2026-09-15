@@ -25,10 +25,10 @@ def test_r42_identity_and_fixed_intent_parser():
         assert _infer_quick_intent(question) == expected
 
 
-def test_render_blueprint_is_pinned_to_r42_package():
+def test_render_blueprint_is_pinned_to_r43_package():
     blueprint = (ROOT / "render.yaml").read_text()
     assert "ui.warehouse_alignment_r42_server" in blueprint
     assert "ui.warehouse_alignment_r42_release" in blueprint
-    assert "49239e233b284f5b2ef212824fa0d2be803f68e84ed59b53008e597c56e95c42" in blueprint
-    assert "fe29f87a8e23ad97c0867bc65a03572c24cc0df1a6978bd42b211842e7a97acc" in blueprint
+    assert "71e7ffbbb87fae66cb6b3993b3929d8f81cd77859145366e65a3c2f13d44f585" in blueprint
+    assert "9dc714c2e4a6fa3565fa672dd547ab3e994fef85875eb77d95866eb43b0d879f" in blueprint
     assert "warehouse_alignment_r41_diagnostic_release_v9" not in blueprint

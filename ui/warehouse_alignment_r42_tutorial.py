@@ -1,4 +1,4 @@
-"""Build and replay the complete 120-step neutral r4.2 teaching demo."""
+"""Build and replay the complete 120-step neutral r4.3 teaching demo."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -9,9 +9,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from backend.training.warehouse_native_common import digest, file_hash
+from backend.warehouse_r43_runtime import R43WarehouseEnv
 from backend.warehouse_r41_diagnostic_online_runtime import (
     R41DiagnosticConflictWarehouseEnv,
 )
+from env.warehouse_native.environment import collaborative_study_config
 from env.warehouse_native.r41_diagnostic_conflict import reset_diagnostic_scenario
 from ui import warehouse_alignment_online_server as projection
 from ui import warehouse_alignment_r41_tutorial as base
@@ -19,6 +21,7 @@ from ui import warehouse_alignment_r41_tutorial as base
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "warehouse-alignment-r42-neutral-tutorial.v2"
+R43_VERSION = "warehouse-alignment-r43-neutral-tutorial.v3"
 SOURCE = "independent_neutral_ai_ai"
 DURATION_MS = 380
 FRAME_COUNT = 121
@@ -28,11 +31,20 @@ _COVERAGE_FIELDS = frozenset((
 ))
 
 
+def _environment(scene):
+    snapshot = scene.get("snapshot", {})
+    if "r43_shared_charger" in snapshot:
+        return R43WarehouseEnv(
+            collaborative_study_config(move_battery_cost=3.0))
+    return R41DiagnosticConflictWarehouseEnv()
+
+
 def _source_sha256() -> str:
     paths = (
         Path(__file__), ROOT / "ui/warehouse_alignment_online_server.py",
         ROOT / "ui/warehouse_alignment_r41_tutorial.py",
-        ROOT / "backend/warehouse_r41_diagnostic_online_runtime.py",
+        ROOT / "backend/warehouse_r43_runtime.py",
+        ROOT / "env/warehouse_native/r43_charger.py",
         ROOT / "env/warehouse_native/r41_diagnostic_conflict.py",
         ROOT / "env/warehouse_native/environment.py",
     )
@@ -156,7 +168,7 @@ def build_tutorial(scenarios: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(play, list) or len(play) < 7:
         raise ValueError("r4.2 requires tutorial plus six frozen scenes")
     scene = deepcopy(play[0])
-    env = R41DiagnosticConflictWarehouseEnv()
+    env = _environment(scene)
     reset_diagnostic_scenario(env, scene)
     if int(env.config.horizon) != 120:
         raise ValueError("r4.2 tutorial requires a 120-step environment")
@@ -179,7 +191,8 @@ def build_tutorial(scenarios: Mapping[str, Any]) -> dict[str, Any]:
         metrics, _ = _append(env, frames, coverage, metrics, actions,
                              final=env.state.frame == 119)
     payload = {
-        "version": VERSION,
+        "version": (R43_VERSION if "r43_shared_charger" in scene["snapshot"]
+                    else VERSION),
         "source": SOURCE,
         "uses_final_actor": False,
         "scene_id": scene["id"],
@@ -199,7 +212,9 @@ def build_tutorial(scenarios: Mapping[str, Any]) -> dict[str, Any]:
 
 def validate_tutorial(payload: Mapping[str, Any], scene: Mapping[str, Any]):
     if (not isinstance(payload, Mapping)
-            or payload.get("version") != VERSION
+            or payload.get("version") != (
+                R43_VERSION if "r43_shared_charger" in scene.get("snapshot", {})
+                else VERSION)
             or payload.get("source") != SOURCE
             or payload.get("uses_final_actor") is not False
             or payload.get("duration_ms") != DURATION_MS
@@ -213,7 +228,7 @@ def validate_tutorial(payload: Mapping[str, Any], scene: Mapping[str, Any]):
     }
     if payload.get("bindings") != expected_bindings:
         raise ValueError("r4.2 tutorial binding differs")
-    env = R41DiagnosticConflictWarehouseEnv()
+    env = _environment(scene)
     reset_diagnostic_scenario(env, deepcopy(scene))
     metrics = base._metrics(env)
     if payload["frames"][0] != base._public_frame(env, metrics, {}):

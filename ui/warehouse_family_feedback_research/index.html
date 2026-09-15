@@ -113,7 +113,7 @@
             <li data-i18n="tutorialRulePickup">机器人到达 A 点自动取货，到达同色 B 点自动交付。</li>
             <li data-i18n="tutorialRuleJoint">你和队友从同一个行动前状态独立选择，再同步执行动作。</li>
             <li data-i18n="tutorialRuleControls">方向键／WASD 移动，空格等待；每次输入推进一步。</li>
-            <li data-i18n="tutorialRuleEnergy">成功移动消耗 2% 电量；在充电格实际停留一步最多恢复 10%。</li>
+            <li data-i18n="tutorialRuleEnergy">成功移动消耗 3% 电量；在充电格实际停留一步最多恢复 10%。</li>
             <li data-i18n="tutorialRuleCollision">撞墙、争用同格或交换位置会取消移动，但仍消耗一步。</li>
             <li data-i18n="tutorialRuleEnd">每局最多 120 步；任一机器人在充电格外耗尽电量会结束本局。</li>
             <li data-i18n="tutorialRuleScore">每次配送 +100，机器人碰撞 −200，断电 −50，每步 −1；回放不推进时间。</li>
@@ -150,7 +150,7 @@
       <div class="connection" role="status" aria-live="polite"><span id="statusText"></span><button id="retryButton" type="button" class="secondary hidden" data-i18n="retry">重试待确认操作</button></div>
 
       <section id="explanationPanel" class="live-explanation hidden">
-        <span class="eyebrow" data-i18n="explanation">行为解释</span>
+        <span class="eyebrow" data-i18n="explanation">系统问答</span>
         <p id="questionFrame" class="question-frame"></p>
         <div class="preset-question-list quick-questions">
           <button type="button" data-question="whyAction" data-focus="executed" data-i18n="whyAction">机器人2刚才为什么这样行动？</button>
@@ -159,8 +159,8 @@
           <button type="button" data-question="humanInfluence" data-focus="executed" data-i18n="humanInfluence">我的上一步动作影响了机器人2吗？</button>
           <button type="button" data-question="currentGoal" data-focus="next" data-i18n="currentGoal">机器人2当前在朝哪个任务前进？</button>
           <button type="button" data-question="chargingNeed" data-focus="next" data-i18n="chargingNeed">机器人2现在需要充电吗？</button>
+          <button id="penaltyQuestionButton" type="button" class="hidden" data-question="whyPenalty" data-focus="executed" data-i18n="whyPenalty">刚才为什么扣分？</button>
         </div>
-        <label class="field question-focus"><span data-i18n="questionFocus">问题对象</span><select id="questionFocus"><option value="executed" data-i18n="executed">已发生的动作</option><option value="next" data-i18n="nextState">所选状态的下一步</option></select></label>
         <label class="field"><span class="sr-only" data-i18n="questionInput">输入问题</span><textarea id="questionInput" rows="2" maxlength="1000"></textarea></label>
         <button id="askButton" type="button" class="primary full" data-i18n="ask">提问</button>
         <div id="answerList" aria-live="polite"></div>
@@ -176,6 +176,8 @@
       <details class="technical"><summary data-i18n="details">版本与状态</summary><p id="fullReleaseMessage" class="small"></p><dl><dt data-i18n="modelVersion">模型版本</dt><dd id="modelVersion">—</dd><dt data-i18n="runId">回合 ID</dt><dd id="runId">—</dd></dl><p class="small" data-i18n="technicalNote"></p></details>
     </aside>
   </main>
+  <div id="penaltyFlash" class="penalty-flash" aria-hidden="true"></div>
+  <div id="penaltyToast" class="penalty-toast" role="status" aria-live="assertive" hidden><strong>−50</strong><span data-i18n="chargerPenalty">充电桩占用处罚</span></div>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

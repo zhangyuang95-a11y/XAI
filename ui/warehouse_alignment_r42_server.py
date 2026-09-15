@@ -34,6 +34,7 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "ui/warehouse_family_feedback_research"
 VERSION = "warehouse-alignment-online-study-server.r4.2"
+R43_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.3"
 DIAGNOSTIC_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.1-diagnostic"
 SERVICE_FAMILY = "warehouse_alignment_online_r2"
 R41_RELEASE_CONTEXT_VERSION = "warehouse-r41-online-release.v1"
@@ -46,6 +47,7 @@ R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V7 = "warehouse-r41-diagnostic-online-rel
 R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V8 = "warehouse-r41-diagnostic-online-release.v8"
 R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V9 = "warehouse-r41-diagnostic-online-release.v9"
 R42_RELEASE_CONTEXT_VERSION = "warehouse-r42-internal-pilot-release.v1"
+R43_RELEASE_CONTEXT_VERSION = "warehouse-r43-internal-pilot-release.v1"
 R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS = (
     R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION,
     R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V4,
@@ -57,12 +59,15 @@ R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS = (
 )
 R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION = "r4.1-diagnostic"
 R42_PUBLIC_RELEASE_VERSION = "r4.2-internal-pilot"
+R43_PUBLIC_RELEASE_VERSION = "r4.3-internal-pilot"
 NAMESPACE = "online_demo"
 COOKIE = "warehouse_alignment_online_session_v1"
 DIAGNOSTIC_NAMESPACE = "online_diagnostic"
 DIAGNOSTIC_COOKIE = "warehouse_alignment_online_session_r41_diagnostic"
 R42_NAMESPACE = "online_r42_internal_pilot"
 R42_COOKIE = "warehouse_alignment_online_session_r42"
+R43_NAMESPACE = "online_r43_internal_pilot"
+R43_COOKIE = "warehouse_alignment_online_session_r43"
 DEFAULT_PORT = 8000
 DEFAULT_ORIGIN = "https://policylens-warehouse-study.onrender.com"
 DEFAULT_DATABASE = Path(os.environ.get("WAREHOUSE_ONLINE_DATABASE", "/tmp/warehouse_alignment_online.sqlite3"))
@@ -91,7 +96,9 @@ MAX_SECRET_FILE_BYTES = 1_000_000
 _ACTIONS = {"UP", "DOWN", "LEFT", "RIGHT", "WAIT"}
 _QUICK_INTENTS = {
     "action_reason", "wait_reason", "collision_reason", "human_influence",
-    "task_direction", "charging_need",
+    "task_direction", "charging_need", "charging_reason",
+    "both_charging_need", "penalty_reason", "rule_question",
+    "counterfactual", "player_reason",
 }
 _COLLISION_KINDS = {"none", "same_target", "swap", "occupied_stationary"}
 _TERMINAL_REASONS = {None, "horizon", "battery_shutdown", "participant_ended"}
@@ -112,12 +119,29 @@ _PRIVATE_EVIDENCE_LINE = re.compile(
 
 
 def _infer_quick_intent(question):
-    """Recognize the six preregistered intents in free Chinese/English text."""
+    """Route quick and free questions through one semantic classifier."""
     text = str(question or "").casefold()
-    if any(token in text for token in ("充电", "电量", "charge", "battery")):
-        return "charging_need"
+    if any(token in text for token in (
+            "扣分", "分数少", "分数降", "处罚", "罚", "-50", "penalty",
+            "deduct", "lost 50", "lose 50", "lost points", "lose points",
+            "score fell", "score drop")):
+        return "penalty_reason"
+    if any(token in text for token in ("如果", "假如", "接下来", "what if", "if i", "next")):
+        return "counterfactual"
+    if any(token in text for token in ("规则", "占桩", "阈值", "rule", "occupancy", "threshold")):
+        return "rule_question"
     if any(token in text for token in ("碰撞", "撞", "冲突", "collid", "collision", "crash")):
         return "collision_reason"
+    charge = any(token in text for token in ("充电", "电量", "充电桩", "charge", "battery", "charger"))
+    if charge and any(token in text for token in ("我们", "分别", "两台", "both", "each")):
+        return "both_charging_need"
+    if charge and any(token in text for token in ("为什么", "为何", "怎么", "why", "didn't", "not charge")):
+        return "charging_reason"
+    if charge:
+        return "charging_need"
+    if (("我" in text or "my " in text or " i " in f" {text} ")
+            and any(token in text for token in ("为什么", "为何", "why"))):
+        return "player_reason"
     if (("我" in text or "我的" in text or "my " in text or " i " in f" {text} ")
             and any(token in text for token in ("影响", "改变", "affect", "influence"))):
         return "human_influence"
@@ -318,7 +342,26 @@ def _participant_metrics(value):
     """Expose scorecard values, never training/runtime diagnostics."""
     value = value if isinstance(value, dict) else {}
     return {key: deepcopy(value.get(key)) for key in
-            ("deliveries", "score", "legacy_score", "steps", "collisions", "shutdowns")}
+            ("deliveries", "score", "legacy_score", "steps", "collisions", "shutdowns",
+             "charger_occupancy_penalties")}
+
+
+def _participant_events(value):
+    """Expose observable events without leaking rule counters or policy data."""
+    allowed = {
+        "pickup", "delivery", "charge", "collision", "shutdown",
+        "task_created", "charger_occupancy_penalty",
+    }
+    fields = {
+        "event", "event_id", "agent_id", "teammate_id", "task_id",
+        "amount", "battery_before", "battery_after", "kind",
+    }
+    result = []
+    for raw in value if isinstance(value, list) else ():
+        if not isinstance(raw, dict) or raw.get("event") not in allowed:
+            continue
+        result.append({key: deepcopy(raw[key]) for key in fields if key in raw})
+    return result
 
 
 def _participant_frame(value):
@@ -333,8 +376,11 @@ def _participant_frame(value):
         raise ValueError("public frame actions must be an object")
     actions = {key: actions[key] for key in ("robot_1", "robot_2")
                if key in actions and actions[key] in _ACTIONS}
-    return {"state": state, "metrics": _participant_metrics(value.get("metrics")),
-            "actions": actions}
+    result = {"state": state, "metrics": _participant_metrics(value.get("metrics")),
+              "actions": actions}
+    if "events" in value:
+        result["events"] = _participant_events(value.get("events"))
+    return result
 
 
 def _participant_preview(value):
@@ -443,37 +489,45 @@ def _questionnaire_items():
         )]
 
 
-def _assets(*, diagnostic=False, r42=False):
+def _assets(*, diagnostic=False, r42=False, r43=False):
     data = {name: (WEB / name).read_bytes()
             for name in ("index.html", "app.js", "styles.css", "favicon.svg")}
     js = data["app.js"].decode("utf-8")
     js = js.replace('const FRONTEND_VERSION="warehouse-family-feedback-research.r4";',
-                    ('const FRONTEND_VERSION="warehouse-alignment-online.r4.2";'
+                    ('const FRONTEND_VERSION="warehouse-alignment-online.r4.3";'
+                     if r43 else
+                     'const FRONTEND_VERSION="warehouse-alignment-online.r4.2";'
                      if r42 else
                      'const FRONTEND_VERSION="warehouse-alignment-online.r4.1-diagnostic";'
                      if diagnostic else
                      'const FRONTEND_VERSION="warehouse-alignment-online.r4.1";'))
     js = re.sub(r'const PENDING_KEY="[^"]+", LANGUAGE_KEY="[^"]+";',
-        ('const PENDING_KEY="warehouse-alignment-online.r4_2.pending", LANGUAGE_KEY="warehouse-alignment-online.r4_2.lang";'
+        ('const PENDING_KEY="warehouse-alignment-online.r4_3.pending", LANGUAGE_KEY="warehouse-alignment-online.r4_3.lang";'
+         if r43 else
+         'const PENDING_KEY="warehouse-alignment-online.r4_2.pending", LANGUAGE_KEY="warehouse-alignment-online.r4_2.lang";'
          if r42 else
          'const PENDING_KEY="warehouse-alignment-online.r4_1_diagnostic.pending", LANGUAGE_KEY="warehouse-alignment-online.r4_1_diagnostic.lang";'
          if diagnostic else
          'const PENDING_KEY="warehouse-alignment-online.r4_1.pending", LANGUAGE_KEY="warehouse-alignment-online.r4_1.lang";'),
         js, count=1)
     js = js.replace('localStudy:"本地预实验 · 已核验"',
-                    ('localStudy:"内部预实验 · r4.2"'
+                    ('localStudy:"内部预实验 · r4.3"'
+                     if r43 else 'localStudy:"内部预实验 · r4.2"'
                      if r42 else 'localStudy:"内部诊断实验 · r4.1-diagnostic"'
                      if diagnostic else 'localStudy:"内部预实验 · r4.1"'))
     js = js.replace('localStudyMessage:"本地预实验 · 已核验。当前记录不作为正式研究样本。"',
-                    ('localStudyMessage:"r4.2 内部预实验。当前免费实例重启后可能丢失记录，数据不作为正式研究样本。"'
+                    ('localStudyMessage:"r4.3 内部预实验。当前免费实例重启后可能丢失记录，数据不作为正式研究样本。"'
+                     if r43 else 'localStudyMessage:"r4.2 内部预实验。当前免费实例重启后可能丢失记录，数据不作为正式研究样本。"'
                      if r42 else 'localStudyMessage:"内部诊断实验。当前免费实例重启后可能丢失记录，数据仅用于内部探索，不作为正式研究样本。"'
                      if diagnostic else 'localStudyMessage:"线上试玩已核验。当前免费实例重启后可能丢失记录，不作为正式研究样本。"'))
     js = js.replace('localStudy:"Local pilot · Verified"',
-                    ('localStudy:"Internal pilot · r4.2"'
+                    ('localStudy:"Internal pilot · r4.3"'
+                     if r43 else 'localStudy:"Internal pilot · r4.2"'
                      if r42 else 'localStudy:"Internal diagnostic · r4.1-diagnostic"'
                      if diagnostic else 'localStudy:"Internal pilot · r4.1"'))
     js = js.replace('localStudyMessage:"Local pilot · Verified. These records are not formal research samples."',
-                    ('localStudyMessage:"R4.2 internal pilot. The free instance may lose records after a restart; data are not formal research samples."'
+                    ('localStudyMessage:"R4.3 internal pilot. The free instance may lose records after a restart; data are not formal research samples."'
+                     if r43 else 'localStudyMessage:"R4.2 internal pilot. The free instance may lose records after a restart; data are not formal research samples."'
                      if r42 else 'localStudyMessage:"Internal diagnostic study. The free instance may lose records after a restart; data are for internal exploration and are not formal research samples."'
                      if diagnostic else 'localStudyMessage:"Verified online demo. The free instance may lose records after a restart; these are not formal research samples."'))
     js = js.replace('request("/api/command",{method:"POST"',
@@ -502,14 +556,14 @@ def _assets(*, diagnostic=False, r42=False):
         'void execute({kind:"start",mode:"study",participant_id:id});',
         'void execute({kind:"start",mode:"study",participant_id:id,consent:true});',
     )
-    if r42:
+    if r42 or r43:
         html = data["index.html"].decode("utf-8")
         group_field = '''          <label class="field"><span data-i18n="previewGroup">内部体验分组</span><select id="groupChoice"><option value="auto" data-i18n="groupAuto">自动分组</option><option value="A" data-i18n="groupA">Group A · Task 1 有解释</option><option value="B" data-i18n="groupB">Group B · 无解释</option></select></label>
           <p class="small" data-i18n="previewGroupNote">手动选组仅用于内部体验，单独标记；开始后不能切换。自动分组仍采用平衡随机分配。</p>
 '''
         group_anchor = '          <p class="small" id="consentText"'
         if group_anchor not in html:
-            raise ValueError("r4.2 enrollment HTML anchor changed")
+            raise ValueError("current enrollment HTML anchor changed")
         html = html.replace(group_anchor, group_field + group_anchor, 1)
         preview = '''      <section id="roundPreviewPanel" class="round-preview hidden">
         <span class="eyebrow" data-i18n="roundPreview">本局预览</span>
@@ -521,7 +575,7 @@ def _assets(*, diagnostic=False, r42=False):
 '''
         anchor = '      <section id="operationPanel">\n'
         if anchor not in html:
-            raise ValueError("r4.2 round preview HTML anchor changed")
+            raise ValueError("current round preview HTML anchor changed")
         html = html.replace(anchor, preview + anchor, 1)
         data["index.html"] = html.encode("utf-8")
         js = js.replace(
@@ -581,19 +635,31 @@ def _assets(*, diagnostic=False, r42=False):
             '  $("beginRoundButton").addEventListener("click",()=>{if(allowed(ui.view,"begin_round"))void execute({kind:"begin_round"});});',
             1,
         )
+    if r43:
+        js = js.replace(
+            '  const ui={view:null,',
+            '  Object.assign(WORDS.zh,{publicRulesText:"前往 A 自动取货，运到同色 B 自动交付。每局最多 120 步，方向键移动，空格等待。成功移动一格消耗 3% 电量；在充电格实际停留一步最多恢复 10%，上限 100%。共享充电资源长时间占用可能产生扣分。撞墙、争用同格或交换位置会取消移动，仍消耗一步。",publicScoreText:"得分：每次配送 +100，机器人碰撞 −200，断电 −50，每步 −1；共享充电桩占用处罚另行计入。回放和提问不推进时间。",tutorialRuleEnergy:"成功移动消耗 3% 电量；在充电格实际停留一步最多恢复 10%。",tutorialRuleScore:"每次配送 +100，机器人碰撞 −200，断电 −50，每步 −1；共享充电资源长时间占用可能产生扣分。"});\n'
+            '  Object.assign(WORDS.en,{publicRulesText:"Visit A to pick up automatically, then deliver to the matching-color B. A run lasts at most 120 turns. Arrows move; Space waits. Each successful move costs 3% battery. Staying on the charger restores up to 10% per turn, capped at 100%. Prolonged use of the shared charger may incur a score penalty. Walls and robot conflicts cancel movement but consume a turn.",publicScoreText:"Score: +100 per delivery, −200 per robot collision, −50 per shutdown and −1 per turn; shared-charger occupancy penalties are recorded separately. Playback and questions do not advance time.",tutorialRuleEnergy:"A successful move costs 3% battery; physically staying on the charger restores up to 10% per turn.",tutorialRuleScore:"Score: +100 per delivery, −200 per robot collision, −50 per shutdown and −1 per turn. Prolonged use of the shared charger may incur a score penalty."});\n'
+            '  const ui={view:null,', 1,
+        )
     required = ("registrationStage", "participant_id:id,consent:true",
                 'request("/api/study/command",{method:"POST"',
-                ("内部预实验 · r4.2" if r42 else
+                ("内部预实验 · r4.3" if r43 else
+                 "内部预实验 · r4.2" if r42 else
                  "内部诊断实验 · r4.1-diagnostic" if diagnostic
                  else "内部预实验 · r4.1"),
-                ("Internal pilot · r4.2" if r42 else
+                ("Internal pilot · r4.3" if r43 else
+                 "Internal pilot · r4.2" if r42 else
                  "Internal diagnostic · r4.1-diagnostic" if diagnostic
                  else "Internal pilot · r4.1"),
                 "local(r.message,ui.language)")
-    if r42:
+    if r42 or r43:
         required += ("QUICK_INTENTS", "intent_id:intentId", "roundPreviewPanel",
                      'kind:"begin_round"', 'group_choice:$("groupChoice").value',
                      'assignment_source==="manual_preview"')
+    if r43:
+        required += ("warehouse-alignment-online.r4.3", "3% battery",
+                     "whyPenalty", "seenPenalties")
     if any(value not in js for value in required):
         raise ValueError("online frontend transformation anchor changed")
     data["app.js"] = js.encode("utf-8")
@@ -662,10 +728,14 @@ class OnlineAlignmentStudyStore:
                 or release.get("formal_ready") is not False):
             raise ValueError("a genuine technically verified local-pilot release is required")
         context_version = str(getattr(context, "provenance", {}).get("version", ""))
-        self.is_r42 = context_version == R42_RELEASE_CONTEXT_VERSION
+        self.is_r43 = context_version == R43_RELEASE_CONTEXT_VERSION
+        self.is_r42 = context_version in {
+            R42_RELEASE_CONTEXT_VERSION, R43_RELEASE_CONTEXT_VERSION}
         self.is_diagnostic = context_version in R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS
+        expected_current_release = (R43_PUBLIC_RELEASE_VERSION if self.is_r43
+                                    else R42_PUBLIC_RELEASE_VERSION)
         if self.is_r42 and (
-                release.get("release_version") != R42_PUBLIC_RELEASE_VERSION
+                release.get("release_version") != expected_current_release
                 or release.get("pilot_class") != "internal_pilot"
                 or release.get("formal_sample_eligible") is not False
                 or release.get("human_explanation_effect_validated") is not False
@@ -688,14 +758,15 @@ class OnlineAlignmentStudyStore:
                     == R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION):
             raise ValueError("diagnostic release requires its exact context version")
         self.public_release_version = (
-            R42_PUBLIC_RELEASE_VERSION if self.is_r42 else
+            expected_current_release if self.is_r42 else
             R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION if self.is_diagnostic
             else R41_PUBLIC_RELEASE_VERSION
             if context_version == R41_RELEASE_CONTEXT_VERSION else "legacy")
         self.pilot_class = ("internal_pilot" if self.is_r42 else
                             "internal_diagnostic" if self.is_diagnostic
                             else "internal_pilot")
-        self.service_version = (VERSION if self.is_r42 else
+        self.service_version = (R43_SERVER_VERSION if self.is_r43 else
+                                VERSION if self.is_r42 else
                                 DIAGNOSTIC_SERVER_VERSION if self.is_diagnostic
                                 else VERSION)
         play = self.scenarios.get("splits", {}).get("play")
@@ -734,11 +805,15 @@ class OnlineAlignmentStudyStore:
             raise ValueError("diagnostic release requires explicitly ephemeral storage")
         self.data_persistent = mode == "persistent"
         self.database = requested
-        self.namespace = (R42_NAMESPACE if self.is_r42 else
+        self.namespace = (R43_NAMESPACE if self.is_r43 else
+                          R42_NAMESPACE if self.is_r42 else
                           DIAGNOSTIC_NAMESPACE if self.is_diagnostic else NAMESPACE)
-        self.cookie_name = (R42_COOKIE if self.is_r42 else
+        self.cookie_name = (R43_COOKIE if self.is_r43 else
+                            R42_COOKIE if self.is_r42 else
                             DIAGNOSTIC_COOKIE if self.is_diagnostic else COOKIE)
-        self.web_assets = _assets(diagnostic=self.is_diagnostic, r42=self.is_r42)
+        self.web_assets = _assets(diagnostic=self.is_diagnostic,
+                                  r42=self.is_r42 and not self.is_r43,
+                                  r43=self.is_r43)
         self.asset_sha256 = {k: sha256(v).hexdigest() for k, v in self.web_assets.items()}
         template = self.runtime.environment(play[0])
         self._map = _public_map(template)
@@ -749,8 +824,8 @@ class OnlineAlignmentStudyStore:
             "bank": str(self.question_bank.signature), "scenarios": _digest(self.scenarios),
             "assets": self.asset_sha256, "tutorial": self.tutorial_signature})
         message = ({
-            "zh": "r4.2 内部预实验：A 组在 Task 1 可随时询问行为解释，B 组不提供解释；Task 2 两组均不提供解释。当前免费实例重启后可能丢失记录。",
-            "en": "R4.2 internal pilot: condition A can ask for behavior explanations during Task 1; condition B cannot. Explanations are unavailable to both conditions in Task 2. A free-instance restart may erase records.",
+            "zh": f"{expected_current_release} 内部预实验：A 组在 Task 1 可随时使用系统问答，B 组不提供问答；Task 2 两组均不提供问答。当前免费实例重启后可能丢失记录。",
+            "en": f"{expected_current_release} internal pilot: condition A can use system questions during Task 1; condition B cannot. Questions are unavailable to both conditions in Task 2. A free-instance restart may erase records.",
         } if self.is_r42 else {
             "zh": "r4.1-diagnostic 内部诊断实验：数据仅用于内部探索，不作为正式实验样本。当前 Render 免费实例没有持久磁盘，服务重启可能丢失记录。",
             "en": "R4.1-diagnostic internal study: data are for internal exploration and are not formal research samples. This free Render instance has no persistent disk, so a restart may erase records.",
@@ -783,7 +858,8 @@ class OnlineAlignmentStudyStore:
         returned by participant HTTP endpoints: task fingerprints and artifact
         hashes reveal experiment allocation and implementation metadata.
         """
-        result = {"event": ("warehouse_r42_deployment_identity" if self.is_r42 else
+        result = {"event": ("warehouse_r43_deployment_identity" if self.is_r43 else
+                            "warehouse_r42_deployment_identity" if self.is_r42 else
                             "warehouse_r41_diagnostic_deployment_identity"
                             if self.is_diagnostic
                             else "warehouse_r41_deployment_identity"),
@@ -952,7 +1028,8 @@ class OnlineAlignmentStudyStore:
 
     def _metrics(self, env, old=None, outcome=None):
         state = _state(env)
-        result = dict(old or {"ai_waits": 0, "ai_blocked": 0, "overrides": 0})
+        result = dict(old or {"ai_waits": 0, "ai_blocked": 0, "overrides": 0,
+                              "charger_occupancy_penalties": 0})
         agents = list(_attr(state, "agents", ()))
         result.update(steps=int(_attr(state, "frame", 0)),
             deliveries=int(_attr(state, "total_deliveries", 0)),
@@ -967,6 +1044,10 @@ class OnlineAlignmentStudyStore:
             ai_submitted, ai_executed = submitted.get("robot_2"), executed.get("robot_2")
             result["ai_waits"] = int(result.get("ai_waits", 0)) + int(ai_submitted == "WAIT")
             result["ai_blocked"] = int(result.get("ai_blocked", 0)) + int(ai_submitted not in (None, "WAIT") and ai_executed == "WAIT")
+            result["charger_occupancy_penalties"] = int(
+                result.get("charger_occupancy_penalties", 0)) + sum(
+                    1 for event in outcome.get("events", ())
+                    if event.get("event") == "charger_occupancy_penalty")
         return result
 
     def _validated_tutorial(self, context):
@@ -981,7 +1062,9 @@ class OnlineAlignmentStudyStore:
         signature = getattr(context, "tutorial_signature", None)
         expected_fields = {"version", "source", "uses_final_actor", "scene_id",
             "duration_ms", "map_sha256", "bindings", "coverage", "frames"}
-        tutorial_version = ("warehouse-alignment-r42-neutral-tutorial.v2"
+        tutorial_version = ("warehouse-alignment-r43-neutral-tutorial.v3"
+                            if self.is_r43 else
+                            "warehouse-alignment-r42-neutral-tutorial.v2"
                             if self.is_r42 else
                             "warehouse-alignment-diagnostic-neutral-tutorial.v3"
                             if self.is_diagnostic else
@@ -1086,7 +1169,8 @@ class OnlineAlignmentStudyStore:
         state["public_feedback"] = _public_history(env, outcome)
         return {"state": state, "metrics": _participant_metrics(metrics),
             "actions": {key: actions[key] for key in ("robot_1", "robot_2")
-                        if key in actions and actions[key] in _ACTIONS}}
+                        if key in actions and actions[key] in _ACTIONS},
+            "events": _participant_events((outcome or {}).get("events", []))}
 
     def _initial_record(self, env, scene):
         snapshot = _plain(env.snapshot())
@@ -1152,8 +1236,8 @@ class OnlineAlignmentStudyStore:
         session = self._session(db, sid)
         permitted = self._can_explain(db, session)
         consent_text = ({
-            "zh": "本 r4.2 内部预实验记录用户 ID、操作、问答和问卷，仅用于内部研究，不纳入正式实验样本。当前 Render 免费实例没有持久磁盘，服务重启可能丢失记录。请使用不含姓名、邮箱或电话号码的研究编号。",
-            "en": "This r4.2 internal pilot records the study ID, actions, questions, and questionnaire for internal research only; the data are not formal-study samples. The free Render instance has no persistent disk, so a restart may erase records. Use an ID without a name, email, or telephone number.",
+            "zh": f"本 {self.public_release_version} 内部预实验记录用户 ID、操作、问答和问卷，仅用于内部研究，不纳入正式实验样本。当前 Render 免费实例没有持久磁盘，服务重启可能丢失记录。请使用不含姓名、邮箱或电话号码的研究编号。",
+            "en": f"This {self.public_release_version} internal pilot records the study ID, actions, questions, and questionnaire for internal research only; the data are not formal-study samples. The free Render instance has no persistent disk, so a restart may erase records. Use an ID without a name, email, or telephone number.",
         } if self.is_r42 else {
             "zh": "本内部诊断实验记录用户 ID、操作、问答和问卷，数据仅用于内部探索，不纳入正式实验样本。当前 Render 免费实例没有持久磁盘，服务重启可能丢失记录。请使用不含姓名、邮箱或电话号码的研究编号。",
             "en": "This internal diagnostic study records the study ID, actions, questions, and questionnaire for internal exploration only; the data are not formal research samples. The free Render instance has no persistent disk, so a restart may erase records. Use an ID without a name, email, or telephone number.",
@@ -1403,6 +1487,13 @@ class OnlineAlignmentStudyStore:
         record.setdefault("runtime_signature", str(self.runtime.signature))
         db.execute("INSERT INTO frames VALUES(?,?,?,?)", (run["id"], frame,
             _canonical(self._frame(env, metrics, outcome)), _canonical(record)))
+        for event in outcome.get("events", ()):
+            if isinstance(event, dict):
+                db.execute(
+                    "INSERT INTO events(session_id,run_id,kind,payload,created) VALUES(?,?,?,?,?)",
+                    (session["id"], run["id"], str(event.get("event", "environment_event")),
+                     _canonical(event), _utcnow()),
+                )
 
     def _begin_round(self, db, session):
         if (not self.is_r42 or session["stage"] not in ("task1", "task2")
@@ -1499,14 +1590,17 @@ class OnlineAlignmentStudyStore:
         question = payload.get("question")
         if not isinstance(question, str) or not 1 <= len(question.strip()) <= 1000:
             raise CommandError("invalid_question")
-        language, focus = payload.get("language", "zh"), payload.get("focus", "executed")
-        if language not in ("zh", "en") or focus not in ("executed", "next"):
+        language = payload.get("language", "zh")
+        if language not in ("zh", "en"):
             raise CommandError("invalid_question_reference")
         intent_id = payload.get("intent_id")
         if intent_id is not None and intent_id not in _QUICK_INTENTS:
             raise CommandError("invalid_question_intent")
         if intent_id is None:
             intent_id = _infer_quick_intent(question)
+        # The server binds semantics to the selected frame.  Legacy clients
+        # may still submit ``focus``, but cannot redirect the evidence frame.
+        focus = "next" if intent_id == "counterfactual" else "executed"
         sequence = db.execute(
             "SELECT coalesce(max(question_sequence),0)+1 FROM questions WHERE session_id=?",
             (session["id"],)).fetchone()[0]

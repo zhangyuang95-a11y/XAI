@@ -410,7 +410,11 @@ class R41ConflictMixin:
     """Task-creation mixin; place before a native environment in the MRO."""
 
     def _initialize_r41_conflict(self) -> None:
-        if self.config != collaborative_study_config():
+        current = asdict(self.config)
+        frozen = asdict(collaborative_study_config())
+        current_cost = current.pop("move_battery_cost", None)
+        frozen.pop("move_battery_cost", None)
+        if current != frozen or current_cost not in (2.0, 3.0):
             raise ValueError("r4.1 conflict dynamics require the frozen study configuration")
         self._r41_sampler_draws = 0
         self._r41_creation_history: list[dict[str, Any]] = []

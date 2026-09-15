@@ -17,15 +17,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.training import warehouse_r4_question_bank as question_api
-from backend.warehouse_r41_diagnostic_online_runtime import (
-    R41DiagnosticOnlineAlignmentRuntime,
-)
+from backend.warehouse_r43_runtime import R43WarehouseEnv, R43WarehouseRuntime
+from env.warehouse.domain import collaborative_study_config
+from env.warehouse_native.r41_diagnostic_conflict import diagnostic_scene_fingerprint
+from env.warehouse_native.r43_charger import SNAPSHOT_KEY, VERSION as CHARGER_VERSION
 from env.warehouse_native.partners import partner_action
 from ui import warehouse_alignment_r42_release as release_api
 from ui import warehouse_alignment_r42_tutorial as tutorial_api
 
 
-VERSION = "warehouse-r42-delivery-release-builder.v1"
+VERSION = "warehouse-r43-internal-pilot-release-builder.v1"
 
 
 def canonical(value):
@@ -55,7 +56,7 @@ def _runtime(actor_path, protocol_path, manifest_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     content = deepcopy(manifest)
     claimed = content.pop("content_sha256", None)
-    return R41DiagnosticOnlineAlignmentRuntime(
+    return R43WarehouseRuntime(
         actor_path,
         training_protocol_path=protocol_path,
         manifest_path=manifest_path,
@@ -66,6 +67,37 @@ def _runtime(actor_path, protocol_path, manifest_path):
         expected_manifest_content_sha256=claimed,
         expected_manifest_semantic_sha256=digest(manifest),
     )
+
+
+def migrate_manifest(payload):
+    """Bind every frozen scene to 3% movement and resumable rule state."""
+    result = deepcopy(payload)
+    migrated = {}
+    for rows in result.get("splits", {}).values():
+        for index, entry in enumerate(rows):
+            identity = (str(entry.get("id")), str(entry.get("fingerprint")))
+            if identity in migrated:
+                rows[index] = deepcopy(migrated[identity])
+                continue
+            scene = deepcopy(entry)
+            snapshot = deepcopy(scene["snapshot"])
+            snapshot["configuration"]["move_battery_cost"] = 3.0
+            snapshot[SNAPSHOT_KEY] = {
+                "version": CHARGER_VERSION,
+                "streaks": {"robot_1": 0, "robot_2": 0},
+                "penalized": {"robot_1": False, "robot_2": False},
+                "last_event": None,
+            }
+            env = R43WarehouseEnv(
+                collaborative_study_config(move_battery_cost=3.0))
+            env.restore(snapshot)
+            scene["snapshot"] = env.snapshot()
+            scene["fingerprint"] = diagnostic_scene_fingerprint(env)
+            migrated[identity] = deepcopy(scene)
+            rows[index] = scene
+    result.pop("content_sha256", None)
+    result["content_sha256"] = digest(result)
+    return result
 
 
 def _agent_position(snapshot):
@@ -163,7 +195,8 @@ def build(args):
         protocol = temporary / "training_protocol.json"
         runtime_manifest = temporary / "runtime_manifest.json"
         protocol.write_bytes(protocol_raw)
-        runtime_manifest.write_bytes(runtime_manifest_raw)
+        migrated_manifest = migrate_manifest(json.loads(runtime_manifest_raw))
+        write_json(runtime_manifest, migrated_manifest, compact=True)
         runtime = _runtime(actor, protocol, runtime_manifest)
         scenarios = json.loads(runtime_manifest.read_text(encoding="utf-8"))
         bank = build_bank(runtime, scenarios)
@@ -179,7 +212,7 @@ def build(args):
         write_json(tutorial_path, tutorial, compact=True)
         shutil.copyfile(protocol, protocol_path)
         shutil.copyfile(runtime_manifest, runtime_manifest_path)
-        package = output / "warehouse_r42_delivery_release.zip"
+        package = output / "warehouse_r43_internal_pilot_release.zip"
         receipt = release_api.build_standalone_package(
             output_path=package,
             actor=actor, protocol=protocol_path,
@@ -187,7 +220,7 @@ def build(args):
             program=program, question_bank=bank_path, tutorial=tutorial_path,
             training_report=training_report, behavior_report=behavior_report,
         )
-        encoded = output / "warehouse_r42_delivery_release.b64"
+        encoded = output / "warehouse_r43_internal_pilot_release.b64"
         receipt["base64_sha256"] = release_api.write_base64(package, encoded)
         receipt.update({
             "version": VERSION,

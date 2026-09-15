@@ -160,7 +160,14 @@ summary { cursor: pointer; }
 .question-frame { margin: 5px 0 10px; color: var(--muted); font-size: 12px; }
 .preset-question-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
 .preset-question-list button { min-width: 0; min-height: 46px; padding: 8px 10px; color: #4f46c8; border-color: rgba(101,88,232,.25); background: #f7f5ff; font-size: 12px; line-height: 1.35; text-align: left; }
-.question-focus { grid-template-columns: auto minmax(0,1fr); align-items: center; }
+.penalty-flash { position: fixed; z-index: 1000; inset: 0; pointer-events: none; border: 0 solid rgba(220,38,38,0); box-shadow: inset 0 0 0 rgba(220,38,38,0); }
+.penalty-flash.active { animation: penalty-edge 1050ms ease-out both; }
+.penalty-toast { position: fixed; z-index: 1001; left: 50%; top: 18%; transform: translate(-50%,-10px); min-width: 210px; padding: 14px 22px; border: 1px solid #dc2626; border-radius: 12px; background: rgba(255,247,247,.97); color: #991b1b; box-shadow: 0 12px 34px rgba(127,29,29,.2); text-align: center; pointer-events: none; }
+.penalty-toast.active { animation: penalty-toast 1050ms ease-out both; }
+.penalty-toast strong { display: block; font-size: 32px; line-height: 1; }
+.penalty-toast span { display: block; margin-top: 6px; font-size: 13px; font-weight: 800; }
+@keyframes penalty-edge { 0%{border-width:0;box-shadow:inset 0 0 0 rgba(220,38,38,0)} 18%{border-width:10px;box-shadow:inset 0 0 65px rgba(220,38,38,.34)} 100%{border-width:0;box-shadow:inset 0 0 0 rgba(220,38,38,0)} }
+@keyframes penalty-toast { 0%{opacity:0;transform:translate(-50%,-14px)} 18%,68%{opacity:1;transform:translate(-50%,0)} 100%{opacity:0;transform:translate(-50%,-6px)} }
 .answer { margin-top: 14px; padding: 14px; border: 1px solid rgba(101,88,232,.28); border-radius: 11px; background: #fff; }
 .answer > strong { display: block; overflow-wrap: anywhere; font-size: 13px; }
 .answer > p { margin: 9px 0; color: var(--text); font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }

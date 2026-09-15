@@ -61,9 +61,9 @@ class WarehouseConfig:
             raise ValueError("minimum_task_distance must be positive.")
         if self.human_agent_id != "robot_1":
             raise ValueError("Participants must control robot_1.")
-        if self.move_battery_cost != 2.0:
+        if self.move_battery_cost not in (2.0, 3.0):
             raise ValueError(
-                "The collaborative study requires a movement battery cost of 2."
+                "The collaborative study movement battery cost must be 2 or 3."
             )
         if self.charge_per_wait <= 0:
             raise ValueError("The charging rate must be positive.")

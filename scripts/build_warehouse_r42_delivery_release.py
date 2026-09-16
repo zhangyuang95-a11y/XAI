@@ -1,4 +1,4 @@
-"""Build the compact r4.5 internal-pilot Render release."""
+"""Build the compact r4.6 internal-pilot Render release."""
 from __future__ import annotations
 
 import argparse
@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 
 from backend.training import warehouse_r4_question_bank as question_api
 from backend.warehouse_r45_runtime import R45WarehouseEnv, R45WarehouseRuntime
+from backend.warehouse_r46_runtime import R46WarehouseRuntime
 from env.warehouse.domain import collaborative_study_config
 from env.warehouse_native.r41_diagnostic_conflict import diagnostic_scene_fingerprint
 from env.warehouse_native.r44_charger import SNAPSHOT_KEY, VERSION as CHARGER_VERSION
@@ -26,7 +27,7 @@ from ui import warehouse_alignment_r42_release as release_api
 from ui import warehouse_alignment_r42_tutorial as tutorial_api
 
 
-VERSION = "warehouse-r45-internal-pilot-release-builder.v1"
+VERSION = "warehouse-r46-internal-pilot-release-builder.v1"
 
 
 def canonical(value):
@@ -56,7 +57,7 @@ def _runtime(actor_path, protocol_path, manifest_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     content = deepcopy(manifest)
     claimed = content.pop("content_sha256", None)
-    return R45WarehouseRuntime(
+    return R46WarehouseRuntime(
         actor_path,
         training_protocol_path=protocol_path,
         manifest_path=manifest_path,

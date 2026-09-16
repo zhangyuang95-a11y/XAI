@@ -131,6 +131,9 @@ class R41DiagnosticOnlineAlignmentRuntime(R41OnlineAlignmentRuntime):
         environment_config_overrides: Mapping[str, Any] | None = None,
         additional_observation_feature_names: tuple[str, ...] = (),
         expected_hidden: int = 128,
+        expected_state_dim: int = 354,
+        exact_observation_feature_names: tuple[str, ...] | None = None,
+        expected_protocol_version: str = "warehouse-r41-active-trainer.v1",
     ) -> None:
         self._actor_path = _regular(actor_path, "Diagnostic Actor")
         self._training_protocol_path = _regular(
@@ -224,12 +227,16 @@ class R41DiagnosticOnlineAlignmentRuntime(R41OnlineAlignmentRuntime):
             raise ValueError("Additional observation feature names differ")
         self._additional_observation_feature_names = additional
         metadata = self.actor.metadata
+        exact_features = (None if exact_observation_feature_names is None else
+                          tuple(exact_observation_feature_names))
+        expected_features = (list(observation_names(self.config))
+                             + list(HISTORY_FEATURE_NAMES) + list(additional)
+                             if exact_features is None else list(exact_features))
         metadata_contract = {
-            "obs_dim": 197 + len(additional),
-            "state_dim": 354,
+            "obs_dim": len(expected_features),
+            "state_dim": int(expected_state_dim),
             "hidden": int(expected_hidden),
-            "feature_names": list(observation_names(self.config))
-            + list(HISTORY_FEATURE_NAMES) + list(additional),
+            "feature_names": expected_features,
             "public_feedback_mode": "observed",
             "action_masks": False,
             "runtime_action_override": False,
@@ -239,7 +246,7 @@ class R41DiagnosticOnlineAlignmentRuntime(R41OnlineAlignmentRuntime):
         }
         if any(metadata.get(key) != value for key, value in metadata_contract.items()):
             raise ValueError("Final Actor metadata differs from diagnostic external binding")
-        if (protocol.get("version") != "warehouse-r41-active-trainer.v1"
+        if (protocol.get("version") != expected_protocol_version
                 or protocol.get("runtime_action_override") is not False
                 or protocol.get("feedback", {}).get("runtime_action_override") is not False
                 or source_contract_version != DIAGNOSTIC_CONTRACT_VERSION):

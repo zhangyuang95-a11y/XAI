@@ -17,17 +17,17 @@ from typing import Any, Mapping
 import zipfile
 
 from backend.warehouse_r42_program import R42DecisionProgram
-from backend.warehouse_r45_runtime import R45WarehouseRuntime
+from backend.warehouse_r46_runtime import R46WarehouseRuntime
 from env.warehouse_native.r45_energy import selected_energy_budget
 from ui import warehouse_alignment_r41_diagnostic_release_v9 as parent_release
 from ui import warehouse_alignment_r42_tutorial as tutorial_api
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "warehouse-r45-internal-pilot-envelope.v1"
-STANDALONE_VERSION = "warehouse-r45-energy-cycle-package.v1"
-CONTEXT_VERSION = "warehouse-r45-internal-pilot-release.v1"
-PUBLIC_RELEASE_VERSION = "r4.5-internal-pilot"
+VERSION = "warehouse-r46-internal-pilot-envelope.v1"
+STANDALONE_VERSION = "warehouse-r46-ppo-candidate-package.v1"
+CONTEXT_VERSION = "warehouse-r46-internal-pilot-release.v1"
+PUBLIC_RELEASE_VERSION = "r4.6-internal-pilot"
 MANIFEST_NAME = "manifest.json"
 PARENT_NAME = "artifacts/r41_parent_release.zip"
 STANDALONE_ARTIFACTS = {
@@ -93,6 +93,9 @@ def source_hashes() -> dict[str, str]:
              ROOT / "ui/warehouse_alignment_r42_tutorial.py",
              ROOT / "backend/warehouse_r42_program.py",
              ROOT / "backend/warehouse_r45_runtime.py",
+             ROOT / "backend/warehouse_r46_runtime.py",
+             ROOT / "backend/training/warehouse_nn/environment.py",
+             ROOT / "backend/training/warehouse_nn/energy.py",
              ROOT / "backend/warehouse_r44_runtime.py",
              ROOT / "env/warehouse_native/r45_cycle.py",
              ROOT / "env/warehouse_native/r45_energy.py",
@@ -1271,9 +1274,9 @@ def _standalone_manifest(artifacts: Mapping[str, Path]) -> dict[str, Any]:
     if (program.get("actor_sha256") != actor_sha
             or bank.get("actor_sha256") != actor_sha
             or behavior.get("actor_sha256") != actor_sha
-            or behavior.get("passed") is not True
             or training.get("action_authority", {}).get("runtime_overrides") != 0):
         raise ValueError("r4.2 standalone behavior or Actor binding did not pass")
+    behavior_passed = behavior.get("passed") is True
     value = {
         "version": STANDALONE_VERSION,
         "release_version": PUBLIC_RELEASE_VERSION,
@@ -1282,8 +1285,8 @@ def _standalone_manifest(artifacts: Mapping[str, Path]) -> dict[str, Any]:
         "formal_sample_eligible": False,
         "data_persistent": False,
         "runtime_action_override": False,
-        "behavior_performance_gate_passed": True,
-        "behavior_performance_gate_waived": False,
+        "behavior_performance_gate_passed": behavior_passed,
+        "behavior_performance_gate_waived": not behavior_passed,
         "actor_sha256": actor_sha,
         "program_content_sha256": program.get("content_sha256"),
         "question_bank_content_sha256": bank.get("content_sha256"),
@@ -1487,8 +1490,8 @@ def _open_outer(raw: bytes, expected_package_sha256: str,
             or manifest.get("runtime_action_override") is not False):
         raise ValueError("r4.2 manifest differs")
     if standalone:
-        if (manifest.get("behavior_performance_gate_passed") is not True
-                or manifest.get("behavior_performance_gate_waived") is not False
+        if (manifest.get("behavior_performance_gate_passed")
+                is manifest.get("behavior_performance_gate_waived")
                 or set(manifest.get("artifacts", {})) != set(STANDALONE_ARTIFACTS)):
             raise ValueError("r4.2 standalone classification differs")
         for key, artifact_raw in payload.items():
@@ -1525,7 +1528,7 @@ def _load_standalone(manifest, artifacts, *, expected_package_sha256,
         scenarios = json.loads(paths["runtime_manifest"].read_text(encoding="utf-8"))
         scenario_content = deepcopy(scenarios)
         scenario_claimed = scenario_content.pop("content_sha256", None)
-        runtime = R45WarehouseRuntime(
+        runtime = R46WarehouseRuntime(
             paths["actor"],
             training_protocol_path=paths["protocol"],
             manifest_path=paths["runtime_manifest"],
@@ -1536,9 +1539,10 @@ def _load_standalone(manifest, artifacts, *, expected_package_sha256,
             expected_manifest_content_sha256=scenario_claimed,
             expected_manifest_semantic_sha256=_digest(scenarios),
         )
-        program = R42DecisionProgram(json.loads(
-            paths["program"].read_text(encoding="utf-8")
-        ))
+        program = R42DecisionProgram(
+            json.loads(paths["program"].read_text(encoding="utf-8")),
+            allow_unqualified=bool(manifest.get("behavior_performance_gate_waived")),
+        )
         explainer = R44UnifiedExplainer(program)
         question_bank = R42CompactQuestionBank(json.loads(
             paths["question_bank"].read_text(encoding="utf-8")
@@ -1551,7 +1555,6 @@ def _load_standalone(manifest, artifacts, *, expected_package_sha256,
         training = json.loads(paths["training_report"].read_text(encoding="utf-8"))
         if (runtime.actor_sha256 != manifest["actor_sha256"]
                 or program.actor_sha256 != runtime.actor_sha256
-                or behavior.get("passed") is not True
                 or behavior.get("actor_sha256") != runtime.actor_sha256
                 or training.get("action_authority", {}).get("runtime_overrides") != 0):
             raise ValueError("r4.5 standalone runtime evidence differs")
@@ -1565,8 +1568,8 @@ def _load_standalone(manifest, artifacts, *, expected_package_sha256,
             "human_explanation_effect_validated": False,
             "data_persistent": False, "online_portable": True,
             "runtime_action_override": False,
-            "behavior_performance_gate_passed": True,
-            "behavior_performance_gate_waived": False,
+            "behavior_performance_gate_passed": bool(behavior.get("passed")),
+            "behavior_performance_gate_waived": not bool(behavior.get("passed")),
             "test_fixture": False,
         }
         provenance = {

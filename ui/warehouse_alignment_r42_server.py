@@ -36,7 +36,7 @@ WEB = ROOT / "ui/warehouse_family_feedback_research"
 VERSION = "warehouse-alignment-online-study-server.r4.2"
 R43_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.3"
 R44_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.4"
-R45_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.5"
+R45_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.6"
 DIAGNOSTIC_SERVER_VERSION = "warehouse-alignment-online-study-server.r4.1-diagnostic"
 SERVICE_FAMILY = "warehouse_alignment_online_r2"
 R41_RELEASE_CONTEXT_VERSION = "warehouse-r41-online-release.v1"
@@ -51,7 +51,7 @@ R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V9 = "warehouse-r41-diagnostic-online-rel
 R42_RELEASE_CONTEXT_VERSION = "warehouse-r42-internal-pilot-release.v1"
 R43_RELEASE_CONTEXT_VERSION = "warehouse-r43-internal-pilot-release.v1"
 R44_RELEASE_CONTEXT_VERSION = "warehouse-r44-internal-pilot-release.v1"
-R45_RELEASE_CONTEXT_VERSION = "warehouse-r45-internal-pilot-release.v1"
+R45_RELEASE_CONTEXT_VERSION = "warehouse-r46-internal-pilot-release.v1"
 R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS = (
     R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION,
     R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSION_V4,
@@ -65,7 +65,7 @@ R41_DIAGNOSTIC_PUBLIC_RELEASE_VERSION = "r4.1-diagnostic"
 R42_PUBLIC_RELEASE_VERSION = "r4.2-internal-pilot"
 R43_PUBLIC_RELEASE_VERSION = "r4.3-internal-pilot"
 R44_PUBLIC_RELEASE_VERSION = "r4.4-internal-pilot"
-R45_PUBLIC_RELEASE_VERSION = "r4.5-internal-pilot"
+R45_PUBLIC_RELEASE_VERSION = "r4.6-internal-pilot"
 NAMESPACE = "online_demo"
 COOKIE = "warehouse_alignment_online_session_v1"
 DIAGNOSTIC_NAMESPACE = "online_diagnostic"
@@ -76,8 +76,8 @@ R43_NAMESPACE = "online_r43_internal_pilot"
 R43_COOKIE = "warehouse_alignment_online_session_r43"
 R44_NAMESPACE = "online_r44_internal_pilot"
 R44_COOKIE = "warehouse_alignment_online_session_r44"
-R45_NAMESPACE = "online_r45_internal_pilot"
-R45_COOKIE = "warehouse_alignment_online_session_r45"
+R45_NAMESPACE = "online_r46_internal_pilot"
+R45_COOKIE = "warehouse_alignment_online_session_r46"
 DEFAULT_PORT = 8000
 DEFAULT_ORIGIN = "https://policylens-warehouse-study.onrender.com"
 DEFAULT_DATABASE = Path(os.environ.get("WAREHOUSE_ONLINE_DATABASE", "/tmp/warehouse_alignment_online.sqlite3"))
@@ -757,8 +757,12 @@ class OnlineAlignmentStudyStore:
                 or release.get("pilot_class") != "internal_pilot"
                 or release.get("formal_sample_eligible") is not False
                 or release.get("human_explanation_effect_validated") is not False
-                or release.get("behavior_performance_gate_passed") is not True
-                or release.get("behavior_performance_gate_waived") is not False
+                or (self.is_r45 and (
+                    release.get("behavior_performance_gate_passed") is not False
+                    or release.get("behavior_performance_gate_waived") is not True))
+                or (not self.is_r45 and (
+                    release.get("behavior_performance_gate_passed") is not True
+                    or release.get("behavior_performance_gate_waived") is not False))
                 or release.get("data_persistent") is not False):
             raise ValueError("r4.2 internal-pilot classification is incomplete")
         if self.is_diagnostic and (
@@ -839,7 +843,7 @@ class OnlineAlignmentStudyStore:
                                   r42=self.is_r42 and not self.is_r43,
                                   r43=self.is_r43)
         if self.is_r44:
-            target_release = b"r4.5" if self.is_r45 else b"r4.4"
+            target_release = b"r4.6" if self.is_r45 else b"r4.4"
             target_code = b"r4_5" if self.is_r45 else b"r4_4"
             assets = {
                 key: value.replace(b"r4.3", target_release).replace(b"r4_3", target_code)

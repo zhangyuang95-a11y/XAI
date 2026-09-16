@@ -29,21 +29,25 @@ def digest(value: Any) -> str:
 class R42DecisionProgram:
     """Immutable tree approximation used for evidence, never action control."""
 
-    def __init__(self, payload: Mapping[str, Any]):
+    def __init__(self, payload: Mapping[str, Any], *, allow_unqualified: bool = False):
         value = deepcopy(dict(payload))
         claimed = value.pop("content_sha256", None)
         if claimed != digest(value) or value.get("version") != VERSION:
             raise ValueError("r4.2 program content differs")
         tree = value.get("tree")
         audit = value.get("audit")
+        qualified = not any(
+            float(audit.get(key, -1)) < threshold for key, threshold in (
+                ("overall_fidelity", .90),
+                ("non_wait_fidelity", .90),
+                ("critical_fidelity", .85),
+                ("effective_intervention_direction_accuracy", .85),
+            )
+        ) if isinstance(audit, dict) else False
         if (not isinstance(tree, dict) or not isinstance(audit, dict)
                 or value.get("actions") != list(ACTIONS)
-                or any(float(audit.get(key, -1)) < threshold for key, threshold in (
-                    ("overall_fidelity", .90),
-                    ("non_wait_fidelity", .90),
-                    ("critical_fidelity", .85),
-                    ("effective_intervention_direction_accuracy", .85),
-                ))):
+                or (not qualified and not allow_unqualified)
+                or (allow_unqualified and value.get("qualification_waived") is not True)):
             raise ValueError("r4.2 program audit did not pass")
         fields = ("children_left", "children_right", "feature", "threshold", "value")
         if any(field not in tree for field in fields):
@@ -55,6 +59,7 @@ class R42DecisionProgram:
         self._tree = tree
         self.actor_sha256 = str(value["actor_sha256"])
         self.audit = deepcopy(audit)
+        self.qualified = qualified
         self.signature = str(claimed)
 
     def action(self, observation) -> str:

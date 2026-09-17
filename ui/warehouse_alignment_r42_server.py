@@ -716,13 +716,15 @@ COMMIT;
 class OnlineAlignmentStudyStore:
     """Authoritative study state backed by one identity-bound SQLite file."""
 
-    def __init__(self, context, *, database=DEFAULT_DATABASE, storage_mode="auto"):
+    def __init__(self, context, *, database=DEFAULT_DATABASE, storage_mode="auto",
+                 allow_internal_manual_groups: bool | None = None):
         self._closed = False
         self._context = context
         if not callable(getattr(context, "close", None)):
             raise ValueError("online release context must own its artifact lifetime")
         self.runtime = context.runtime
         self.explainer = context.explainer
+        self._step_explanation_cache = {}
         self.question_bank = context.question_bank
         self.scenarios = deepcopy(context.scenarios)
         for name in ("environment", "from_snapshot", "step"):
@@ -747,6 +749,12 @@ class OnlineAlignmentStudyStore:
         self.is_r42 = context_version in {
             R42_RELEASE_CONTEXT_VERSION, R43_RELEASE_CONTEXT_VERSION,
             R44_RELEASE_CONTEXT_VERSION, R45_RELEASE_CONTEXT_VERSION}
+        # This is intentionally opt-in and local-development only.  The
+        # production default remains balanced random allocation.
+        self.manual_group_selection_enabled = bool(
+            os.environ.get("WAREHOUSE_INTERNAL_MANUAL_GROUPS") == "1"
+            if allow_internal_manual_groups is None else allow_internal_manual_groups
+        ) and self.is_r42
         self.is_diagnostic = context_version in R41_DIAGNOSTIC_RELEASE_CONTEXT_VERSIONS
         expected_current_release = (R45_PUBLIC_RELEASE_VERSION if self.is_r45
                                     else R44_PUBLIC_RELEASE_VERSION if self.is_r44
@@ -849,28 +857,33 @@ class OnlineAlignmentStudyStore:
                 key: value.replace(b"r4.3", target_release).replace(b"r4_3", target_code)
                 for key, value in self.web_assets.items()
             }
-            # r4.4 returns to the study protocol's balanced automatic
-            # allocation.  The r4.2/r4.3 manual selector remains available in
-            # their frozen internal-preview assets, but is not exposed here.
             html = assets["index.html"].decode("utf-8")
-            html = re.sub(
-                r'\s*<label class="field"><span data-i18n="previewGroup">.*?'
-                r'</label>\s*<p class="small" data-i18n="previewGroupNote">.*?'
-                r'</p>\s*',
-                "\n",
-                html,
-                count=1,
-                flags=re.DOTALL,
-            )
             js = assets["app.js"].decode("utf-8")
-            js = js.replace(
-                'participant_id:id,consent:true,group_choice:$("groupChoice").value});',
-                'participant_id:id,consent:true,group_choice:"auto"});',
-            )
-            js = js.replace(
-                '    if(v?.flow?.preview_condition)$("groupChoice").value=v.flow.preview_condition;disable($("groupChoice"),locked || !registrationStage);',
-                '',
-            )
+            if not self.manual_group_selection_enabled:
+                # r4.4+ production keeps balanced automatic allocation.  The
+                # selector is restored only by the explicit local flag.
+                html = re.sub(
+                    r'\s*<label class="field"><span data-i18n="previewGroup">.*?'
+                    r'</label>\s*<p class="small" data-i18n="previewGroupNote">.*?'
+                    r'</p>\s*',
+                    "\n",
+                    html,
+                    count=1,
+                    flags=re.DOTALL,
+                )
+                js = js.replace(
+                    'participant_id:id,consent:true,group_choice:$("groupChoice").value});',
+                    'participant_id:id,consent:true,group_choice:"auto"});',
+                )
+                js = js.replace(
+                    '    if(v?.flow?.preview_condition)$("groupChoice").value=v.flow.preview_condition;disable($("groupChoice"),locked || !registrationStage);',
+                    '',
+                )
+            else:
+                js = js.replace(
+                    'v?.flow?.assignment_source==="manual_preview"',
+                    '["manual_preview","manual_self_select"].includes(v?.flow?.assignment_source)',
+                )
             assets["index.html"] = html.encode("utf-8")
             assets["app.js"] = js.encode("utf-8")
             self.web_assets = assets
@@ -1297,6 +1310,45 @@ class OnlineAlignmentStudyStore:
             "bank": {"status": "version_mismatch" if blocked or not bound else "candidate_ready",
                 "available": bool(bound), "formal_ready": False, "bound_at_enrollment": bool(bound)}}
 
+    def _step_explanation(self, db, session, run, view):
+        """Render the exact confirmed transition through the question renderer.
+
+        Called only after the authoritative A/Task 1 gate. Automatic captions
+        do not create participant questions or advance the environment.
+        """
+        frame = int(view["state"]["frame"])
+        key = (run["id"], frame)
+        if key in self._step_explanation_cache:
+            return deepcopy(self._step_explanation_cache[key])
+        caption = {"run_id": run["id"], "frame": frame, "text": {}}
+        if frame == 0:
+            caption["text"] = {"zh": "机器人2正在准备开始本局。",
+                               "en": "Robot 2 is ready to start this round."}
+        else:
+            rows = list(db.execute(
+                "SELECT internal FROM frames WHERE run_id=? AND frame<=? ORDER BY frame DESC LIMIT 24",
+                (run["id"], frame)))
+            record = json.loads(rows[0][0])
+            record["_history"] = [json.loads(row[0]) for row in reversed(rows)]
+            for language, text in (("zh", "机器人2刚才为什么这样行动？"),
+                                   ("en", "Why did Robot 2 choose that action?")):
+                question = {"run_id": run["id"], "frame": frame,
+                            "question": text, "language": language,
+                            "target": "executed"}
+                access = self._explanation_access_context(db, session, question)
+                answer_study = getattr(self.explainer, "answer_study", None)
+                answer = (answer_study(question, record, self.runtime, access_context=access)
+                          if callable(answer_study) else
+                          self.explainer.answer(question, record, self.runtime))
+                answer = answer.get("answer", answer.get("text")) if isinstance(answer, dict) else answer
+                if not isinstance(answer, str) or not answer.strip() or _MAIN_ANSWER_FORBIDDEN.search(answer):
+                    raise ValueError("automatic explanation returned no verified answer")
+                caption["text"][language] = answer
+        if len(self._step_explanation_cache) >= 256:
+            self._step_explanation_cache.clear()
+        self._step_explanation_cache[key] = deepcopy(caption)
+        return caption
+
     def _view(self, db, sid):
         session = self._session(db, sid)
         permitted = self._can_explain(db, session)
@@ -1336,9 +1388,14 @@ class OnlineAlignmentStudyStore:
             "tutorial": None,
             "questionnaire": self._questionnaire(session)}
         if self.is_r42:
-            result["enrollment"]["manual_preview_available"] = not self.is_r44
+            result["enrollment"]["manual_preview_available"] = bool(
+                not self.is_r44 or self.manual_group_selection_enabled
+            )
+            result["enrollment"]["manual_self_select_enabled"] = bool(
+                self.manual_group_selection_enabled
+            )
             result["flow"]["assignment_source"] = session["assignment_source"]
-            if session["assignment_source"] == "manual_preview":
+            if session["assignment_source"] in {"manual_preview", "manual_self_select"}:
                 result["flow"]["preview_condition"] = session["condition"]
         if session["stage"] == "instructions":
             last = len(self.tutorial_frames) - 1
@@ -1361,6 +1418,7 @@ class OnlineAlignmentStudyStore:
                 version_mismatch=run["signature"] != self.signature,
                 history_count=db.execute("SELECT count(*) FROM frames WHERE run_id=?", (run["id"],)).fetchone()[0])
             if permitted:
+                result["step_explanation"] = self._step_explanation(db, session, run, result)
                 result["answers"] = [_participant_answer(q) for q in db.execute(
                     "SELECT * FROM questions WHERE session_id=? AND run_id=? ORDER BY coalesce(question_sequence,0) DESC,created DESC,id DESC LIMIT 1",
                     (sid, run["id"]))]
@@ -1434,10 +1492,16 @@ class OnlineAlignmentStudyStore:
         group_choice = payload.get("group_choice", "auto")
         if not isinstance(group_choice, str) or group_choice not in {"auto", "A", "B"}:
             raise CommandError("invalid_group_choice")
-        if group_choice != "auto" and (not self.is_r42 or self.is_r44):
+        if group_choice != "auto" and (
+                not self.is_r42
+                or (self.is_r44 and not self.manual_group_selection_enabled)):
             raise CommandError("manual_preview_unavailable", 403)
-        assignment_source = "manual_preview" if group_choice != "auto" else "random_block"
-        if assignment_source == "manual_preview":
+        assignment_source = (
+            "manual_self_select" if group_choice != "auto" and self.is_r44
+            else "manual_preview" if group_choice != "auto"
+            else "random_block"
+        )
+        if assignment_source in {"manual_preview", "manual_self_select"}:
             position, condition, task_order = None, group_choice, "XY"
         else:
             position = db.execute("SELECT count(*) FROM sessions WHERE position IS NOT NULL").fetchone()[0]
@@ -1938,6 +2002,8 @@ def main(argv=None):
         default=os.environ.get("WAREHOUSE_RELEASE_MODULE", DEFAULT_RELEASE_MODULE))
     parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     parser.add_argument("--storage-mode", choices=("auto","persistent","ephemeral"), default=os.environ.get("WAREHOUSE_STORAGE_MODE", "auto"))
+    parser.add_argument("--allow-internal-manual-groups", action="store_true",
+        help="local-only: allow an internal participant to choose A or B")
     parser.add_argument("--public-origin", default=os.environ.get("WAREHOUSE_PUBLIC_ORIGIN", DEFAULT_ORIGIN))
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", DEFAULT_PORT)))
@@ -1958,7 +2024,10 @@ def main(argv=None):
         expected_manifest_sha256=args.expected_manifest_sha256,
         package_path=args.package, base64_path=args.base64,
         release_module=args.release_module)
-    store = OnlineAlignmentStudyStore(context, database=args.database, storage_mode=args.storage_mode)
+    store = OnlineAlignmentStudyStore(
+        context, database=args.database, storage_mode=args.storage_mode,
+        allow_internal_manual_groups=args.allow_internal_manual_groups or None,
+    )
     server = ThreadingHTTPServer((args.host, args.port), handler_class(store, public_origin=args.public_origin))
     server.daemon_threads = False
     handlers = {}

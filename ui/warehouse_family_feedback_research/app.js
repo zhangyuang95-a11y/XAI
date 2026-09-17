@@ -338,22 +338,9 @@
   }
   function aiStepReason(view){
     if(!aiReasonAllowed(view))return "";
-    const state=view?.state || {},map=view?.map,ai=(state.agents || []).find(agent=>agent.id==="robot_2");if(!ai || !map)return "";
-    const zh=ui.language!=="en",frame=Number(state.frame || 0),history=framePublicHistory(view),action=history?.submitted_actions?.robot_2 || ai.last_executed_action || "WAIT",word=actionWord(action),tasks=state.tasks || [];
-    if(frame<=0)return zh?"机器人2正在准备开始本局。":"Robot 2 is ready to start this round.";
-    if(history?.valid===true && history.move_canceled?.robot_2===true && ["same_target","swap","occupied_stationary"].includes(history.collision_kind))return zh?`机器人2刚才想向${word}移动，但这一步发生碰撞，所以停在原位。`:`Robot 2 tried to move ${word}, but a collision canceled the move.`;
-    if(action==="WAIT"){
-      if(sameCell(ai.position,map.charger_position) && Number(ai.battery)<100)return zh?`机器人2这一步等待，是在充电桩补电；当前电量约 ${Math.round(ai.battery)}%。`:`Robot 2 waited on the charger to recharge; its battery is about ${Math.round(ai.battery)}%.`;
-      if(Number(ai.consecutive_waits || 0)>=3)return zh?`机器人2已经连续等待 ${ai.consecutive_waits} 步，这段时间没有直接推进配送。`:`Robot 2 has waited ${ai.consecutive_waits} steps in a row without direct delivery progress.`;
-      return zh?"机器人2这一步等待，是在保留当前位置并观察通路变化。":"Robot 2 waited to keep its position while the path changes.";
-    }
-    if(ai.carrying_label){const n=Number(String(ai.carrying_label).match(/(\d+)$/)?.[1] || 0),task=n?tasks[n-1]:null;if(task?.delivery_position)return zh?`机器人2携带 ${ai.carrying_label}，刚才向${word}，是在把货物送往对应 B 点。`:`Robot 2 is carrying ${ai.carrying_label}; moving ${word} helps deliver it to the matching B point.`;return zh?`机器人2携带 ${ai.carrying_label}，刚才向${word}，是在继续配送。`:`Robot 2 is carrying ${ai.carrying_label}; moving ${word} continues the delivery.`;}
-    if(Number(ai.battery)<=25 && map.charger_position){return zh?`机器人2电量较低，刚才向${word}，是在靠近充电桩。`:`Robot 2's battery is low, so moving ${word} heads toward the charger.`;}
-    const available=tasks.filter(task=>task?.status==="available" || task?.available===true || !task?.holder && task?.pickup_position);
-    const nearest=nearestTaskByDistance(map,ai.position,available,"pickup_position");
-    if(nearest)return zh?`机器人2刚才向${word}，是在靠近任务${taskOrdinal(nearest.task,nearest.index)}的取货点。`:`Robot 2 moved ${word} toward task ${taskOrdinal(nearest.task,nearest.index)}'s pickup point.`;
-    if(map.charger_position && sameCell(ai.position,map.charger_position))return zh?`机器人2刚才向${word}后停在充电桩附近，准备补电或让位。`:`Robot 2 moved ${word} and is now near the charger.`;
-    return zh?`机器人2刚才向${word}，当前看是一次位置调整，还没有直接完成取货或交付。`:`Robot 2 moved ${word}; this looks like a position adjustment rather than a pickup or delivery.`;
+    const caption=view?.step_explanation;
+    if(!caption || caption.run_id!==view.run_id || Number(caption.frame)!==Number(view.state?.frame))return "";
+    return caption.text?.[ui.language==="en"?"en":"zh"] || "";
   }
   function positionAiReasonBubble(view,visualPositions=null,layout=null){
     const bubble=$("aiReasonBubble");if(!bubble)return;const text=aiStepReason(view);if(!text){bubble.classList.add("hidden");bubble.textContent="";return;}

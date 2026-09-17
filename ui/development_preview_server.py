@@ -14,6 +14,7 @@ controller to Robot 2's submitted action.
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -37,6 +38,8 @@ from env.warehouse.contracts import RUNTIME_CONTROLLER
 from env.warehouse.decision_protocol import distribution_decision_metadata
 from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.navigation import ACTIONS, MOVE_DELTAS
+from env.warehouse.layouts import get_map_layout
+from env.warehouse.navigation import shortest_path_distance
 from env.warehouse.numpy_policy import NumpyWarehousePolicy
 from env.warehouse.runtime_coordination import (
     guard_participant_action,
@@ -610,7 +613,7 @@ class DevelopmentPreviewState:
                 ),
             },
             "study": {
-                "release_version": "sep2-rule-assisted-20260917-hotfix1",
+                "release_version": "sep2-explanation-evidence-20260917",
                 "pilot_class": "internal_pre_experiment",
                 "formal_ready": False,
                 "run_id": self.run_id,
@@ -722,12 +725,28 @@ class DevelopmentPreviewState:
             trace = outcome.info.get("decision_trace", {})
             runtime = trace.get("runtime_decision", {}) if isinstance(trace, Mapping) else {}
             runtime = runtime if isinstance(runtime, Mapping) else {}
-            if runtime.get("mode") == "human_ai_robust_selection":
+            rule_events = outcome.info.get("rule_events", ())
+            has_charger_penalty = any(
+                isinstance(event, Mapping)
+                and str(event.get("event", "")) == "shared_charger_occupancy"
+                for event in rule_events
+            ) or any(
+                isinstance(event, Mapping)
+                and str(event.get("event", "")) == "shared_charger_occupancy"
+                for event in outcome.events
+            )
+            if (
+                runtime.get("mode") == "human_ai_robust_selection"
+                or outcome.info.get("robot_collision_event")
+                or outcome.info.get("robot_collision_kind")
+                or has_charger_penalty
+            ):
                 variants = self._controller_action_bubble(
                     self.round_frames[index - 1].state,
                     outcome.state,
                     outcome,
                     runtime,
+                    focus="action",
                 )
         except Exception:
             # A bubble must never stop a confirmed movement.  This fallback
@@ -844,134 +863,321 @@ class DevelopmentPreviewState:
         after: WarehouseState,
         outcome: PreviewFrame,
         runtime: Mapping[str, Any],
+        *,
+        focus: str = "action",
     ) -> dict[str, str]:
-        """Render runtime facts as public prose, never as reason codes."""
+        """Render one frame from the same pre/post evidence used by Q&A."""
 
+        trace = outcome.info.get("decision_trace", {})
+        trace = trace if isinstance(trace, Mapping) else {}
+        decisions = trace.get("agents", {})
+        decisions = decisions if isinstance(decisions, Mapping) else {}
+        decision = decisions.get("robot_2", {})
+        decision = decision if isinstance(decision, Mapping) else {}
         before_agent = before.by_id("robot_2")
         after_agent = after.by_id("robot_2")
-        selected = str(
-            runtime.get("selected_actions", {}).get(
-                "robot_2", outcome.actions.get("robot_2", "WAIT")
-            )
-        )
-        actual = str(
-            outcome.info.get("executed_actions", {}).get(
-                "robot_2", selected
-            )
-        )
+        selected_actions = runtime.get("selected_actions", {})
+        selected_actions = selected_actions if isinstance(selected_actions, Mapping) else {}
+        selected = str(selected_actions.get("robot_2", outcome.actions.get("robot_2", "WAIT")))
+        executed_actions = outcome.info.get("executed_actions", {})
+        executed_actions = executed_actions if isinstance(executed_actions, Mapping) else {}
+        actual = str(executed_actions.get("robot_2", selected))
         selected_record = runtime.get("selected_ai_action", {})
-        selected_record = (
-            selected_record if isinstance(selected_record, Mapping) else {}
-        )
+        selected_record = selected_record if isinstance(selected_record, Mapping) else {}
+        effect = decision.get("direct_effect", {})
+        effect = effect if isinstance(effect, Mapping) else {}
+        before_distance = int(effect.get("distance_before", 0) or 0)
+        after_distance = int(effect.get("distance_after", before_distance) or 0)
+        frozen_goal = decision.get("frozen_goal", {})
+        frozen_goal = frozen_goal if isinstance(frozen_goal, Mapping) else {}
+        resolved_goal = decision.get("resolved_goal", {})
+        resolved_goal = resolved_goal if isinstance(resolved_goal, Mapping) else {}
         task_id = str(
             before_agent.carrying_task_id
-            or before_agent.route_commitment_task_id
-            or before_agent.goal_id
+            or resolved_goal.get("goal_id")
+            or frozen_goal.get("goal_id")
+            or decision.get("committed_task")
             or ""
         )
-        task_number = task_id.removeprefix("task_") if task_id else ""
-        en_task = f"task {task_number}" if task_number else "the current task"
-        zh_task = f"任务{task_number}" if task_number else "当前任务"
+        tasks = [item for item in trace.get("tasks", ()) if isinstance(item, Mapping)]
+        if not tasks:
+            tasks = [
+                {
+                    "task_id": task.task_id,
+                    "status": task.status,
+                    "carrier_agent_id": task.carrier_agent_id,
+                    "pickup_position": task.pickup_position,
+                    "delivery_position": task.delivery_position,
+                }
+                for task in sorted(before.tasks, key=lambda item: item.task_id)
+            ]
+        task_slots = {str(item.get("task_id", "")): index for index, item in enumerate(tasks, 1)}
+        slot = task_slots.get(task_id)
+        pickup_label = f"A{slot}" if slot is not None else "当前取货点"
+        delivery_label = f"B{slot}" if slot is not None else "当前交付点"
+        goal_type = str(
+            resolved_goal.get("goal_type")
+            or frozen_goal.get("goal_type")
+            or before_agent.goal_type
+            or ""
+        ).upper()
+        carrying = before_agent.carrying_task_id is not None or goal_type in {
+            "DELIVERY", "GO_TO_DROPOFF"
+        }
+        goal_phrase_en = (
+            f"toward {delivery_label} to deliver the cargo"
+            if carrying
+            else f"toward {pickup_label} to collect the cargo"
+        )
+        goal_phrase_zh = (
+            f"前往{delivery_label}交付货物"
+            if carrying
+            else f"前往{pickup_label}取货"
+        )
         en_action, zh_action = self._action_words(actual)
         en_selected, zh_selected = self._action_words(selected)
 
-        collision = bool(
-            outcome.info.get("robot_collision_event")
-            and actual == "WAIT"
-            and selected in MOVE_DELTAS
+        def _events() -> list[Mapping[str, Any]]:
+            values = list(outcome.events)
+            values.extend(
+                event for event in outcome.info.get("rule_events", ())
+                if isinstance(event, Mapping)
+            )
+            return [event for event in values if isinstance(event, Mapping)]
+
+        penalty = next(
+            (event for event in reversed(_events())
+             if str(event.get("event", "")) == "shared_charger_occupancy"),
+            None,
         )
-        if collision:
+
+        def _energy_summary(agent_id: str) -> tuple[str, float | None, float | None]:
+            agent_decision = decisions.get(agent_id, {})
+            agent_decision = agent_decision if isinstance(agent_decision, Mapping) else {}
+            agent = before.by_id(agent_id)
+            charging = agent_decision.get("charging_state", {})
+            charging = charging if isinstance(charging, Mapping) else {}
+            selected_id = str(
+                agent.carrying_task_id
+                or charging.get("task_id")
+                or (agent_decision.get("resolved_goal", {}) or {}).get("goal_id", "")
+                or (agent_decision.get("frozen_goal", {}) or {}).get("goal_id", "")
+            )
+            candidates = [item for item in agent_decision.get("battery_feasibility", ()) if isinstance(item, Mapping)]
+            item = next((item for item in candidates if str(item.get("task_id", "")) == selected_id), None)
+            required = None
+            if charging.get("route_energy") is not None and charging.get("task_id"):
+                required = float(charging.get("route_energy", 0.0) or 0.0)
+                selected_id = str(charging.get("task_id"))
+            elif item is not None:
+                required = float(item.get("required_energy", 0.0) or 0.0)
+            elif candidates:
+                item = max(candidates, key=lambda value: float(value.get("required_energy", 0.0) or 0.0))
+                required = float(item.get("required_energy", 0.0) or 0.0)
+                selected_id = str(item.get("task_id", ""))
+            else:
+                config = collaborative_study_config()
+                fallback_tasks = [
+                    task for task in before.tasks
+                    if task.status == "available"
+                    or (task.status == "carried" and task.carrier_agent_id == agent_id)
+                ]
+                estimates: list[tuple[str, float]] = []
+                for task in fallback_tasks:
+                    if agent.carrying_task_id == task.task_id:
+                        legs = (
+                            shortest_path_distance(agent.position, task.delivery_position, config.map_layout_id)
+                            + shortest_path_distance(task.delivery_position, get_map_layout(config.map_layout_id).charger_position, config.map_layout_id)
+                        )
+                    else:
+                        legs = (
+                            shortest_path_distance(agent.position, task.pickup_position, config.map_layout_id)
+                            + shortest_path_distance(task.pickup_position, task.delivery_position, config.map_layout_id)
+                            + shortest_path_distance(task.delivery_position, get_map_layout(config.map_layout_id).charger_position, config.map_layout_id)
+                        )
+                    estimates.append((task.task_id, float(legs + config.mission_reserve_steps) * config.move_battery_cost))
+                if estimates:
+                    selected_id, required = max(estimates, key=lambda item: item[1])
+            task_slot = task_slots.get(selected_id)
+            label = f"A{task_slot}→B{task_slot}" if task_slot is not None else "当前可执行方案"
+            return label, required, float(agent.battery)
+
+        if penalty is not None:
+            responsible = str(penalty.get("responsible_agent_id", "robot_2"))
+            occupant = "你" if responsible == "robot_1" else "机器人2"
+            teammate = "机器人2" if responsible == "robot_1" else "你"
+            occupant_before = float(penalty.get("occupant_battery_before", 0.0) or 0.0)
+            occupant_after = float(penalty.get("occupant_battery_after", occupant_before) or occupant_before)
+            teammate_battery = float(penalty.get("teammate_battery_before", 0.0) or 0.0)
+            distance = int(penalty.get("teammate_distance_to_charger", 0) or 0)
+            label, required, occupant_now = _energy_summary(responsible)
+            if required is not None and occupant_after >= required:
+                budget_zh = f"{occupant}当前{occupant_after:g}%电量已足够按{label}方案完成配送并返桩"
+                budget_en = f"{occupant} had enough ({occupant_after:g}%) for the {label} delivery-and-return plan"
+            elif required is not None:
+                budget_zh = f"按{label}方案预计需要{required:g}%，{occupant}当前电量为{occupant_after:g}%"
+                budget_en = f"the {label} plan required about {required:g}%, while {occupant} had {occupant_after:g}%"
+            else:
+                budget_zh = f"{occupant}当前电量为{occupant_after:g}%"
+                budget_en = f"{occupant} had {occupant_after:g}%"
             return {
-                "en": (
-                    f"Robot 2 tried to move {en_selected}, but the joint move "
-                    "collided and the environment cancelled it."
-                ),
-                "zh-CN": (
-                    f"机器人2本步尝试向{zh_selected}，但联合移动发生碰撞，"
-                    "环境取消了这一步。"
-                ),
+                "en": f"{budget_en}; {teammate} had only {teammate_battery:g}% and was {distance} cells from the charger. {occupant} stayed on the charger after charging from {occupant_before:g}% to {occupant_after:g}%, so the shared-charger rule applied −50; {occupant} should yield the charger.",
+                "zh-CN": f"{budget_zh}；{teammate}当时只有{teammate_battery:g}%电量，距充电桩{distance}格。{occupant}从{occupant_before:g}%充到{occupant_after:g}%后仍占用充电桩，因此触发共享充电桩−50处罚；{occupant}应先让出充电位置。",
             }
 
+        collision = bool(
+            outcome.info.get("robot_collision_event")
+            or outcome.info.get("robot_collision_kind")
+        )
+        if collision:
+            human_action = str(outcome.actions.get("robot_1", "WAIT"))
+            human_en, human_zh = self._action_words(human_action)
+            kind = str(outcome.info.get("robot_collision_kind") or "joint_conflict")
+            if kind == "same_target":
+                en_result = "you tried to enter the same cell"
+                zh_result = "双方尝试进入同一格"
+            elif kind == "swap":
+                en_result = "you and Robot 2 tried to swap cells"
+                zh_result = "双方尝试交换位置"
+            elif kind == "occupied_stationary":
+                en_result = "you remained in the target cell"
+                zh_result = "你仍停留在机器人2准备进入的格子"
+            else:
+                en_result = "the joint movement conflicted"
+                zh_result = "双方移动发生冲突"
+            ai_clause_en = (
+                f"Robot 2 tried to move {en_selected} {goal_phrase_en}"
+                if selected in MOVE_DELTAS
+                else "Robot 2 stayed in its cell"
+            )
+            ai_clause_zh = (
+                f"机器人2原本准备向{zh_selected}{goal_phrase_zh}"
+                if selected in MOVE_DELTAS
+                else "机器人2当时停留在原格"
+            )
+            return {
+                "en": f"{ai_clause_en}; you simultaneously moved {human_en}, and {en_result}. The shared pre-move resolver cancelled this step from the shared pre-move state; Robot 2 did not observe your current action first.",
+                "zh-CN": f"{ai_clause_zh}；你同时向{human_zh}移动，{zh_result}，发生冲突。这一步被环境取消；机器人2没有提前看到你的本帧动作。",
+            }
+
+        charging = decision.get("charging_state", {})
+        charging = charging if isinstance(charging, Mapping) else {}
+        before_battery = float(before_agent.battery)
+        after_battery = float(after_agent.battery)
+        label, required, _ = _energy_summary("robot_2")
+        if focus in {"energy", "charge_threshold"} and required is not None:
+            deficit = max(0.0, required - after_battery)
+            return {
+                "en": f"Robot 2 has {after_battery:g}% battery; the current {label} delivery-and-return plan needs about {required:g}%, so it is {('short by ' + str(deficit).rstrip('0').rstrip('.') + ' percentage points' if deficit else 'ready to leave when the exit is safe')}.",
+                "zh-CN": f"机器人2当前电量{after_battery:g}%；按{label}配送并返桩预计需要{required:g}%，因此{('还差' + str(deficit).rstrip('0').rstrip('.') + '个百分点' if deficit else '已达到工作段需求，出口安全时可以离桩')}。",
+            }
+        if actual == "WAIT" and after_battery > before_battery:
+            deficit = max(0.0, (required or 0.0) - after_battery)
+            if required is not None:
+                return {
+                    "en": f"Robot 2 is charging from {before_battery:g}% to {after_battery:g}%; the current {label} delivery-and-return plan needs about {required:g}%{', so ' + str(deficit).rstrip('0').rstrip('.') + ' more percentage points are needed' if deficit else ', so the work requirement is met' }.",
+                    "zh-CN": f"机器人2正在充电，电量从{before_battery:g}%恢复到{after_battery:g}%；按当前{label}配送并返桩预计需要{required:g}%{('，还需' + str(deficit).rstrip('0').rstrip('.') + '个百分点' if deficit else '，已达到工作段需求')}。",
+                }
+            return {
+                "en": f"Robot 2 is charging; its battery rose from {before_battery:g}% to {after_battery:g}%, and no executable task budget is currently available.",
+                "zh-CN": f"机器人2正在充电，电量从{before_battery:g}%恢复到{after_battery:g}%；当前没有可核验的下一项任务预算。",
+            }
+
+        goal_position = resolved_goal.get("position")
+        if not isinstance(goal_position, (list, tuple)):
+            task = next((item for item in tasks if str(item.get("task_id", "")) == task_id), None)
+            if task is not None:
+                goal_position = task.get("delivery_position" if carrying else "pickup_position")
+        participant = before.by_id("robot_1")
+        blocked_by_participant = False
+        if isinstance(goal_position, (list, tuple)):
+            layout_id = collaborative_study_config().map_layout_id
+            blocked = {tuple(participant.position)}
+            blocked_by_participant = (
+                tuple(participant.position) != tuple(before_agent.position)
+                and self._path_exists(tuple(before_agent.position), tuple(goal_position), layout_id, blocked)
+                is False
+                and self._path_exists(tuple(before_agent.position), tuple(goal_position), layout_id, set())
+            )
         if actual == "WAIT":
-            battery_before = float(before_agent.battery)
-            battery_after = float(after_agent.battery)
-            if battery_after > battery_before:
+            if participant.position == get_map_layout(collaborative_study_config().map_layout_id).charger_position and bool(runtime.get("participant_occupies_charger")):
                 return {
-                    "en": (
-                        f"Robot 2 is charging; its battery rose from "
-                        f"{battery_before:g}% to {battery_after:g}%."
-                    ),
-                    "zh-CN": (
-                        f"机器人2正在充电，电量从{battery_before:g}%恢复到"
-                        f"{battery_after:g}%。"
-                    ),
+                    "en": "You are occupying the charger, so Robot 2 waits beside it instead of entering your cell.",
+                    "zh-CN": "你当前占用充电桩，机器人2先在桩外等待，避免进入你所在的格子。",
                 }
-            if bool(runtime.get("participant_occupies_charger")):
+            if blocked_by_participant:
                 return {
-                    "en": (
-                        "You are occupying the charger, so Robot 2 waits "
-                        "beside it instead of entering your cell."
-                    ),
-                    "zh-CN": (
-                        "充电桩当前被你占用，机器人2先在旁边等待，"
-                        "避免进入同一格发生碰撞。"
-                    ),
+                    "en": f"You are occupying the only route to {delivery_label if carrying else pickup_label}; Robot 2 waits because no alternative walkable route is available in this state.",
+                    "zh-CN": f"你当前占住了通往{delivery_label if carrying else pickup_label}的路口，机器人2暂时没有可行绕路，因此先等待。",
                 }
-            if bool(runtime.get("pass_through_plan_current")):
+            plan = decision.get("joint_coordination_plan", {})
+            plan = plan if isinstance(plan, Mapping) else {}
+            if runtime.get("pass_through_plan_current") and plan.get("priority_agent_id"):
                 return {
-                    "en": (
-                        "Robot 2 waits for the already-started pass-through "
-                        "step, then will recheck the route."
-                    ),
-                    "zh-CN": (
-                        "机器人2暂时等待已开始的通行步骤完成，下一步重新检查路线。"
-                    ),
+                    "en": "Robot 2 waits for the confirmed one-step clearance in the current state; the plan will be rechecked after that passage.",
+                    "zh-CN": "当前状态仍有已确认的一步让行安排，机器人2先等待通道释放，随后重新核对路线。",
                 }
             if bool(selected_record.get("energy_violation")):
                 return {
-                    "en": (
-                        "Robot 2 keeps its battery because the available move "
-                        "would not preserve a feasible return to charging."
-                    ),
-                    "zh-CN": (
-                        "当前移动会破坏返桩电量余量，机器人2先保留电量。"
-                    ),
+                    "en": "Robot 2 waits because the available move would not preserve a feasible return to the charger.",
+                    "zh-CN": "当前可移动作会破坏返桩所需电量余量，机器人2先保留电量。",
                 }
             if bool(runtime.get("physical_clearance_required")):
                 return {
-                    "en": (
-                        "Robot 2 waits for the confirmed aisle clearance "
-                        "shown in the current state."
-                    ),
-                    "zh-CN": "当前状态仍有已确认的通道阻挡，机器人2先等待让路。",
+                    "en": "Robot 2 waits for a currently verified clearance condition; this is based on the present state, not a guessed future move.",
+                    "zh-CN": "当前状态仍有已核验的通行阻挡，机器人2先等待；这不是对你下一步动作的猜测。",
                 }
             return {
-                "en": (
-                    "Robot 2 waits for this step; no movement was executed, "
-                    "and the route will be checked again next step."
-                ),
-                "zh-CN": "机器人2本步暂时停留，没有执行移动，下一步会重新检查路线。",
+                "en": f"Robot 2 waited without moving toward {delivery_label if carrying else pickup_label}; the current evidence does not show a charging, blocking, or route-necessity reason.",
+                "zh-CN": f"机器人2本步没有向{delivery_label if carrying else pickup_label}推进；当前证据没有显示充电、阻挡或必须等待的原因。",
             }
 
-        goal_kind = str(
-            before_agent.navigation_goal_kind
-            or before_agent.goal_type
-            or ""
-        ).lower()
-        if before_agent.carrying_task_id is not None or goal_kind == "delivery":
-            en_reason = f"Robot 2 moved {en_action} to deliver {en_task}."
-            zh_reason = f"机器人2向{zh_action}移动，把{zh_task}的货物送往交付点。"
-        elif goal_kind in {"charge", "go_to_charger"}:
-            en_reason = f"Robot 2 moved {en_action} toward the charger."
-            zh_reason = f"机器人2向{zh_action}移动，前往充电桩补电。"
-        else:
-            en_reason = f"Robot 2 moved {en_action} toward {en_task}'s pickup point."
-            zh_reason = f"机器人2向{zh_action}移动，前往{zh_task}的取货点。"
+        if actual in MOVE_DELTAS:
+            if after_distance < before_distance:
+                return {
+                    "en": f"Robot 2 moved {en_action} {goal_phrase_en}; the walkable distance fell from {before_distance} to {after_distance} cells.",
+                    "zh-CN": f"机器人2向{zh_action}{goal_phrase_zh}，可通行距离从{before_distance}格缩短到{after_distance}格。",
+                }
+            reason = str(decision.get("primary_reason_code", ""))
+            if reason in {"CLEAR_PARTICIPANT_ROUTE", "CLEAR_PARTICIPANT_STANDOFF"}:
+                return {
+                    "en": f"Robot 2 moved {en_action} to clear your route, then can continue {goal_phrase_en}.",
+                    "zh-CN": f"机器人2向{zh_action}为你让出通道，之后继续{goal_phrase_zh}。",
+                }
+            return {
+                "en": f"Robot 2 moved {en_action} while continuing {goal_phrase_en}; this step did not shorten the remaining static route.",
+                "zh-CN": f"机器人2向{zh_action}继续{goal_phrase_zh}；这一步没有缩短静态剩余路线。",
+            }
+        return {
+            "en": "Robot 2's submitted action was resolved by the environment without a completed move; the frame evidence is shown in the details.",
+            "zh-CN": "机器人2提交的动作由环境结算，但这一步没有完成移动；详细证据显示在展开区域。",
+        }
 
-        if bool(runtime.get("selection_changed_policy")):
-            en_reason += " The current occupied cells and route were checked before this move."
-            zh_reason += " 这一步先检查了当前占用位置和可通行路线。"
-        return {"en": en_reason, "zh-CN": zh_reason}
+    @staticmethod
+    def _path_exists(
+        start: tuple[int, int],
+        goal: tuple[int, int],
+        layout_id: str,
+        blocked: set[tuple[int, int]],
+    ) -> bool:
+        if start == goal:
+            return start not in blocked
+        layout = get_map_layout(layout_id)
+        if not layout.is_passable(start) or not layout.is_passable(goal):
+            return False
+        queue = deque([start])
+        visited = {start}
+        while queue:
+            row, col = queue.popleft()
+            for delta in MOVE_DELTAS.values():
+                candidate = (row + delta[0], col + delta[1])
+                if candidate in visited or candidate in blocked or not layout.is_passable(candidate):
+                    continue
+                if candidate == goal:
+                    return True
+                visited.add(candidate)
+                queue.append(candidate)
+        return False
 
     def _ask_live_task1(
         self,
@@ -1083,6 +1289,17 @@ class DevelopmentPreviewState:
             ][-5:]
             context_frames = [int(frame.state.frame) for _, frame in context]
             adapter, snapshot = self._round_explanation_snapshot(anchor_index)
+            trace_for_runtime = outcome.info.get("decision_trace", {})
+            trace_for_runtime = trace_for_runtime if isinstance(trace_for_runtime, Mapping) else {}
+            runtime = trace_for_runtime.get("runtime_decision", {})
+            runtime = runtime if isinstance(runtime, Mapping) else {}
+            controller_variants = self._controller_action_bubble(
+                self.round_frames[anchor_index - 1].state,
+                outcome.state,
+                outcome,
+                runtime,
+                focus=focus,
+            )
             trace = snapshot.metadata.get("decision_trace", {})
             trace = trace if isinstance(trace, Mapping) else {}
             agents = trace.get("agents", {})
@@ -1155,58 +1372,16 @@ class DevelopmentPreviewState:
             if focus == "charger_penalty":
                 event = penalty_events[-1] if penalty_events else {}
                 evidence["penalty_event_id"] = str(event.get("event_id", ""))
-                responsible = str(event.get("responsible_agent_id", "robot_2"))
-                occupant_before = float(event.get("occupant_battery_before", 0.0))
-                occupant_after = float(event.get("occupant_battery_after", occupant_before))
-                teammate_battery = float(event.get("teammate_battery_before", 0.0))
-                distance = int(event.get("teammate_distance_to_charger", 0))
-                if responsible == "robot_2":
-                    answer_en = (
-                        f"Robot 2 remained on the charger after charging from {occupant_before:g}% "
-                        f"to {occupant_after:g}%. You had {teammate_battery:g}% battery and were "
-                        f"{distance} cells away, so Robot 2's continued occupancy triggered the −50 penalty."
-                    )
-                    answer_zh = (
-                        f"机器人2在充电后仍占用充电桩，电量从{occupant_before:g}%升至{occupant_after:g}%。"
-                        f"你当时电量为{teammate_battery:g}%，距充电桩{distance}格，因此本步触发−50处罚。"
-                    )
-                else:
-                    answer_en = (
-                        f"Robot 1 remained on the charger after charging from {occupant_before:g}% "
-                        f"to {occupant_after:g}%. Robot 2 had {teammate_battery:g}% battery and was "
-                        f"{distance} cells away, so the shared-charger rule triggered −50."
-                    )
-                    answer_zh = (
-                        f"机器人1在充电后仍占用充电桩，电量从{occupant_before:g}%升至{occupant_after:g}%。"
-                        f"机器人2当时电量为{teammate_battery:g}%，距充电桩{distance}格，因此触发共享充电桩−50处罚。"
-                    )
+                answer_en = controller_variants["en"]
+                answer_zh = controller_variants["zh-CN"]
             elif focus == "collision" and recent_collision:
-                human_action = proposed(outcome, "robot_1")
-                ai_action = proposed(outcome, "robot_2")
-                human_en, human_zh = self._action_words(human_action)
-                ai_en, ai_zh = self._action_words(ai_action)
-                kind = str(
-                    outcome.info.get("robot_collision_kind") or "joint_conflict"
-                )
-                kind_en = {
-                    "same_target": "a same-target-cell conflict",
-                    "swap": "a position-swap conflict",
-                    "occupied_stationary": "an occupied-cell conflict",
-                }.get(kind, "a joint movement conflict")
-                kind_zh = {
-                    "same_target": "同一目标格冲突",
-                    "swap": "位置交换冲突",
-                    "occupied_stationary": "进入未释放格子的冲突",
-                }.get(kind, "联合移动冲突")
-                answer_en = (
-                    f"You moved {human_en} while Robot 2 simultaneously moved {ai_en}; "
-                    f"the joint resolver recorded {kind_en}. Robot 2 decided from the "
-                    "shared pre-move state and did not observe your current action first."
-                )
-                answer_zh = (
-                    f"你向{human_zh}移动，机器人2同时向{ai_zh}移动；联合解析器记录为{kind_zh}。"
-                    "机器人2依据共同的移动前状态决策，没有提前看到你的本帧动作。"
-                )
+                answer_en = controller_variants["en"]
+                answer_zh = controller_variants["zh-CN"]
+            elif focus in {
+                "action", "wait", "energy", "charge_threshold", "task", "collaboration"
+            }:
+                answer_en = controller_variants["en"]
+                answer_zh = controller_variants["zh-CN"]
             else:
                 routed_focus = {
                     "wait": "action",

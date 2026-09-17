@@ -552,6 +552,8 @@ def test_group_a_receives_a_per_step_robot_2_bubble_only_in_task1() -> None:
     assert bubble["text"]
     assert "no_safe_progress" not in bubble["text"]
     assert "向等待" not in bubble["text"]
+    assert "A1" in bubble["text"] or "充电" in bubble["text"]
+    assert "检查了当前占用位置" not in bubble["text"]
 
     state.command(_envelope(state, "set_language", locale="zh-CN"))
     assert state.view()["study"]["action_bubble"]["text"] != bubble["text"]
@@ -596,6 +598,11 @@ def test_charger_penalty_question_remains_bound_after_five_steps(monkeypatch) ->
     state._advance_round("WAIT")
     penalty = state.view()["study"]["latest_charger_penalty"]
     assert penalty and penalty["event_id"]
+    bubble = state.view()["study"]["action_bubble"]
+    assert bubble["frame"] == penalty["frame"]
+    assert "−50" in bubble["text"]
+    assert "63%" in bubble["text"]
+    assert "19%" in bubble["text"]
 
     for _ in range(6):
         state._advance_round("WAIT")

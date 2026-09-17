@@ -54,12 +54,12 @@ def _with_history(snapshot: dict) -> dict:
     value = deepcopy(snapshot)
     if SNAPSHOT_KEY in value:
         return value
-    env = WarehouseNNEnv({"move_battery_cost": 3.0})
+    env = WarehouseNNEnv({"move_battery_cost": 3.0, "observation_contract": "r4.6"})
     history = env._empty_history()
     for agent in value["state"]["agents"]:
         history[agent["agent_id"]]["positions"] = [tuple(agent["position"])]
     value[SNAPSHOT_KEY] = {
-        "version": ENVIRONMENT_VERSION,
+        "version": env._environment_version,
         "history": history,
     }
     return value
@@ -103,7 +103,7 @@ class R46WarehouseRuntime(R41DiagnosticOnlineAlignmentRuntime):
         return getattr(self, "signature", base)
 
     def _new_environment(self):
-        return WarehouseNNEnv({"move_battery_cost": 3.0})
+        return WarehouseNNEnv({"move_battery_cost": 3.0, "observation_contract": "r4.6"})
 
     def _check_environment(self, env):
         if (type(env) is not WarehouseNNEnv

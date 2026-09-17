@@ -5,14 +5,14 @@ services:
     plan: free
     region: singapore
     buildCommand: python -m pip install -r requirements-render.txt
-    startCommand: python -m ui.warehouse_alignment_r42_server --release-module ui.warehouse_alignment_r42_release --base64 /etc/secrets/warehouse_alignment_release.b64
+    startCommand: python -m ui.warehouse_alignment_r42_server --release-module ui.warehouse_alignment_r42_release --base64 /etc/secrets/warehouse_alignment_release.b64 --allow-internal-manual-groups
     healthCheckPath: /health
     autoDeployTrigger: "off"
     envVars:
       - key: WAREHOUSE_RELEASE_PACKAGE_SHA256
-        value: b10ff9d56cbb0687f215e28fccd978a362115442a5c3d49329061b0fd0d12267
+        value: 05c9476c90bd50ca7f46ce90e188fa92c9e8da67c57f18eb7c5494dfeb32e23d
       - key: WAREHOUSE_RELEASE_MANIFEST_SHA256
-        value: 66e7f3850c5ab3eadb9acb0ad814152ebb202b4e5fd0466ac11cb61d888ba555
+        value: 167a019110f967f97d0c53acd68f8afa8fe814938a1ae30a2a935a5c6e6a294a
       - key: WAREHOUSE_ONLINE_DATABASE
         value: /tmp/warehouse_alignment_online.sqlite3
       - key: WAREHOUSE_STORAGE_MODE

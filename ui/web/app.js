@@ -472,6 +472,36 @@ function renderRobots(agents, transition = null, showActions = false, agentContr
   }));
 }
 
+function renderActionBubble(view, revealOutcome) {
+  const bubble = $("aiActionBubble");
+  const payload = view.study?.action_bubble;
+  const enabled = Boolean(
+    revealOutcome
+    && view.study?.stage === "task1"
+    && view.study?.condition === "explanation"
+    && payload?.target_agent === "robot_2"
+    && payload?.text
+  );
+  bubble.classList.toggle("hidden", !enabled);
+  if (!enabled) return;
+  const agent = (view.state?.agents || []).find((item) => item.id === "robot_2");
+  if (!agent) { bubble.classList.add("hidden"); return; }
+  const canvas = $("warehouseCanvas");
+  const cols = Math.max(1, Number(view.map?.cols || 1));
+  const rows = Math.max(1, Number(view.map?.rows || 1));
+  const width = Math.max(1, canvas.clientWidth);
+  const height = Math.max(1, canvas.clientHeight);
+  const size = Math.min((width - 36) / cols, (height - 36) / rows);
+  const originX = (width - cols * size) / 2;
+  const originY = (height - rows * size) / 2;
+  const left = originX + (Number(agent.position[1]) + .5) * size;
+  const top = originY + (Number(agent.position[0]) + .5) * size;
+  bubble.textContent = payload.text;
+  bubble.style.left = `${Math.max(92, Math.min(width - 92, left))}px`;
+  bubble.style.top = `${top}px`;
+  bubble.classList.toggle("below", top < 86);
+}
+
 function renderScores(snapshot) {
   const breakdown = snapshot.score_breakdown || {};
   $("stepValue").textContent = `${snapshot.frame || 0} / 120`;
@@ -602,6 +632,7 @@ function paintView(view, revealOutcome = false) {
     revealOutcome,
   );
   renderScores(view.state || {});
+  renderActionBubble(view, revealOutcome);
   renderStage();
 }
 

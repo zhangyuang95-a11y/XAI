@@ -539,3 +539,25 @@ def test_no_recent_collision_answer_is_explicit_and_anchored_to_last_five() -> N
     assert result["view"]["last_explanation"]["answer_en"] == (
         "No collision occurred in the last five steps."
     )
+
+
+def test_group_a_receives_a_per_step_robot_2_bubble_only_in_task1() -> None:
+    state = DevelopmentPreviewState()
+    _start_task1(state, condition="explanation", locale="en")
+
+    result = state.command(_envelope(state, "human_action", action="WAIT"))
+    bubble = result["view"]["study"]["action_bubble"]
+    assert bubble["target_agent"] == "robot_2"
+    assert bubble["frame"] == 1
+    assert bubble["text"]
+
+    state.command(_envelope(state, "set_language", locale="zh-CN"))
+    assert state.view()["study"]["action_bubble"]["text"] != bubble["text"]
+
+    control = DevelopmentPreviewState()
+    _start_task1(control, condition="control")
+    control.command(_envelope(control, "human_action", action="WAIT"))
+    assert control.view()["study"]["action_bubble"] is None
+
+    state.stage = "task2"
+    assert state.view()["study"]["action_bubble"] is None

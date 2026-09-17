@@ -321,6 +321,7 @@ class DevelopmentPreviewState:
         self.task1: dict[str, Any] | None = None
         self.task2: dict[str, Any] | None = None
         self.last_explanation: dict[str, Any] | None = None
+        self.action_bubble: dict[str, Any] | None = None
         self.explanation_count = 0
         self.round_frames: list[PreviewFrame] = [self.round_frame]
         self.question_log: list[dict[str, Any]] = []
@@ -410,6 +411,7 @@ class DevelopmentPreviewState:
         self.round_frames = [self.round_frame]
         self.stage = stage
         self.last_explanation = None
+        self.action_bubble = None
         self.pending_question_sequences = []
 
     @staticmethod
@@ -490,6 +492,7 @@ class DevelopmentPreviewState:
             action_distributions=dict(distributions),
         )
         self.round_frames.append(self.round_frame)
+        self._refresh_action_bubble()
         for sequence in self.pending_question_sequences:
             for record in reversed(self.question_log):
                 if int(record.get("question_sequence", -1)) == sequence:
@@ -598,6 +601,11 @@ class DevelopmentPreviewState:
                 "live_explanation_available": bool(
                     self.stage == "task1" and self.condition == "explanation"
                 ),
+                "action_bubble": (
+                    self._localized_action_bubble()
+                    if self.stage == "task1" and self.condition == "explanation"
+                    else None
+                ),
                 "controlled_agent": "robot_1",
                 "explanation_target_agent": "robot_2",
                 "explanation_target_agents": ["robot_2"],
@@ -617,6 +625,57 @@ class DevelopmentPreviewState:
             },
             "trial": None,
             "last_explanation": self._localized_explanation(),
+        }
+
+    def _refresh_action_bubble(self) -> None:
+        """Create the concise per-step Group A label from the executed decision."""
+
+        self.action_bubble = None
+        if self.stage != "task1" or self.condition != "explanation":
+            return
+        index = len(self.round_frames) - 1
+        if index < 1:
+            return
+        try:
+            adapter, snapshot = self._round_explanation_snapshot(index)
+            variants = {
+                language: adapter.concise_study_explanation(
+                    snapshot,
+                    target_agent="robot_2",
+                    policy=None,
+                    focus="action",
+                    language=language,
+                )
+                for language in ("en", "zh-CN")
+            }
+        except Exception:
+            # A bubble must never stop a confirmed movement.  This fallback
+            # reports only the action that the environment recorded.
+            outcome = self.round_frames[index]
+            action = str(outcome.info.get("executed_actions", {}).get(
+                "robot_2", outcome.actions.get("robot_2", "WAIT")
+            ))
+            en, zh = self._action_words(action)
+            variants = {
+                "en": f"Robot 2 moved {en} in this step.",
+                "zh-CN": f"机器人2本步向{zh}移动。",
+            }
+        self.action_bubble = {
+            "target_agent": "robot_2",
+            "frame": int(self.round_frames[index].state.frame),
+            "_language_variants": variants,
+        }
+
+    def _localized_action_bubble(self) -> dict[str, Any] | None:
+        if self.action_bubble is None:
+            return None
+        variants = self.action_bubble.get("_language_variants", {})
+        locale = "zh-CN" if self.locale != "en" else "en"
+        text = variants.get(locale) if isinstance(variants, Mapping) else None
+        return {
+            "target_agent": "robot_2",
+            "frame": self.action_bubble.get("frame"),
+            "text": str(text or ""),
         }
 
     def _localized_explanation(self) -> dict[str, Any] | None:
@@ -980,6 +1039,7 @@ class DevelopmentPreviewState:
             self.task1 = None
             self.task2 = None
             self.last_explanation = None
+            self.action_bubble = None
             self.explanation_count = 0
             self.question_log = []
             self.pending_question_sequences = []

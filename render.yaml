@@ -5,7 +5,7 @@ services:
     plan: free
     region: singapore
     buildCommand: python -m pip install -r requirements-render.txt
-    startCommand: python -m ui.warehouse_alignment_r42_server --release-module ui.warehouse_alignment_r42_release --base64 /etc/secrets/warehouse_alignment_release.b64 --allow-internal-manual-groups
+    startCommand: python -m ui.domain_hub_server --release-module ui.warehouse_alignment_r42_release --base64 /etc/secrets/warehouse_alignment_release.b64 --allow-internal-manual-groups
     healthCheckPath: /health
     autoDeployTrigger: "off"
     envVars:

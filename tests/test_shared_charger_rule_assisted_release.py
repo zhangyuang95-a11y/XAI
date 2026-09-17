@@ -54,3 +54,22 @@ def test_rule_assisted_selection_records_nn_and_controller_actions():
     assert runtime["selected_actions"]["robot_2"] == selected
     assert "controller_reason" in runtime
     assert all("score" in candidate for candidate in runtime["ai_action_candidates"])
+
+
+def test_rule_assisted_robot_never_enters_charger_occupied_by_participant():
+    env = _charger_state(52.0, 12.0)
+    state = env.get_state()
+    state.by_id("robot_2").position = (4, 3)
+    env.set_state(state)
+
+    selected, runtime = select_human_ai_action(env, "DOWN")
+
+    charger_candidate = next(
+        item
+        for item in runtime["ai_action_candidates"]
+        if item["action"] == "DOWN"
+    )
+    assert charger_candidate["target"] == list(env.layout.charger_position)
+    assert charger_candidate["target_occupied_by_participant"] is True
+    assert selected != "DOWN"
+    assert runtime["participant_occupies_charger"] is True

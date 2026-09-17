@@ -610,7 +610,7 @@ class DevelopmentPreviewState:
                 ),
             },
             "study": {
-                "release_version": "sep2-rule-assisted-20260917",
+                "release_version": "sep2-rule-assisted-20260917-hotfix1",
                 "pilot_class": "internal_pre_experiment",
                 "formal_ready": False,
                 "run_id": self.run_id,
@@ -722,31 +722,13 @@ class DevelopmentPreviewState:
             trace = outcome.info.get("decision_trace", {})
             runtime = trace.get("runtime_decision", {}) if isinstance(trace, Mapping) else {}
             runtime = runtime if isinstance(runtime, Mapping) else {}
-            selected = str(
-                runtime.get("selected_actions", {}).get(
-                    "robot_2", outcome.actions.get("robot_2", "WAIT")
+            if runtime.get("mode") == "human_ai_robust_selection":
+                variants = self._controller_action_bubble(
+                    self.round_frames[index - 1].state,
+                    outcome.state,
+                    outcome,
+                    runtime,
                 )
-            )
-            actual = str(
-                outcome.info.get("executed_actions", {}).get("robot_2", selected)
-            )
-            if (
-                bool(runtime.get("selection_changed_policy"))
-                and actual == selected
-                and runtime.get("controller_reason")
-            ):
-                reason = str(runtime["controller_reason"])
-                words = self._action_words(selected)
-                variants = {
-                    "en": (
-                        f"Robot 2 moved {words[0]} because the coordination rule "
-                        f"selected {reason.replace('_', ' ')} from the frozen state."
-                    ),
-                    "zh-CN": (
-                        f"机器人2本步向{words[1]}，因为规则根据行动前状态选择了"
-                        f"{reason.replace('_', '、')}。"
-                    ),
-                }
         except Exception:
             # A bubble must never stop a confirmed movement.  This fallback
             # reports only the action that the environment recorded.
@@ -855,6 +837,141 @@ class DevelopmentPreviewState:
             "WAIT": "等待",
         }
         return en.get(action, action.lower()), zh.get(action, action)
+
+    def _controller_action_bubble(
+        self,
+        before: WarehouseState,
+        after: WarehouseState,
+        outcome: PreviewFrame,
+        runtime: Mapping[str, Any],
+    ) -> dict[str, str]:
+        """Render runtime facts as public prose, never as reason codes."""
+
+        before_agent = before.by_id("robot_2")
+        after_agent = after.by_id("robot_2")
+        selected = str(
+            runtime.get("selected_actions", {}).get(
+                "robot_2", outcome.actions.get("robot_2", "WAIT")
+            )
+        )
+        actual = str(
+            outcome.info.get("executed_actions", {}).get(
+                "robot_2", selected
+            )
+        )
+        selected_record = runtime.get("selected_ai_action", {})
+        selected_record = (
+            selected_record if isinstance(selected_record, Mapping) else {}
+        )
+        task_id = str(
+            before_agent.carrying_task_id
+            or before_agent.route_commitment_task_id
+            or before_agent.goal_id
+            or ""
+        )
+        task_number = task_id.removeprefix("task_") if task_id else ""
+        en_task = f"task {task_number}" if task_number else "the current task"
+        zh_task = f"任务{task_number}" if task_number else "当前任务"
+        en_action, zh_action = self._action_words(actual)
+        en_selected, zh_selected = self._action_words(selected)
+
+        collision = bool(
+            outcome.info.get("robot_collision_event")
+            and actual == "WAIT"
+            and selected in MOVE_DELTAS
+        )
+        if collision:
+            return {
+                "en": (
+                    f"Robot 2 tried to move {en_selected}, but the joint move "
+                    "collided and the environment cancelled it."
+                ),
+                "zh-CN": (
+                    f"机器人2本步尝试向{zh_selected}，但联合移动发生碰撞，"
+                    "环境取消了这一步。"
+                ),
+            }
+
+        if actual == "WAIT":
+            battery_before = float(before_agent.battery)
+            battery_after = float(after_agent.battery)
+            if battery_after > battery_before:
+                return {
+                    "en": (
+                        f"Robot 2 is charging; its battery rose from "
+                        f"{battery_before:g}% to {battery_after:g}%."
+                    ),
+                    "zh-CN": (
+                        f"机器人2正在充电，电量从{battery_before:g}%恢复到"
+                        f"{battery_after:g}%。"
+                    ),
+                }
+            if bool(runtime.get("participant_occupies_charger")):
+                return {
+                    "en": (
+                        "You are occupying the charger, so Robot 2 waits "
+                        "beside it instead of entering your cell."
+                    ),
+                    "zh-CN": (
+                        "充电桩当前被你占用，机器人2先在旁边等待，"
+                        "避免进入同一格发生碰撞。"
+                    ),
+                }
+            if bool(runtime.get("pass_through_plan_current")):
+                return {
+                    "en": (
+                        "Robot 2 waits for the already-started pass-through "
+                        "step, then will recheck the route."
+                    ),
+                    "zh-CN": (
+                        "机器人2暂时等待已开始的通行步骤完成，下一步重新检查路线。"
+                    ),
+                }
+            if bool(selected_record.get("energy_violation")):
+                return {
+                    "en": (
+                        "Robot 2 keeps its battery because the available move "
+                        "would not preserve a feasible return to charging."
+                    ),
+                    "zh-CN": (
+                        "当前移动会破坏返桩电量余量，机器人2先保留电量。"
+                    ),
+                }
+            if bool(runtime.get("physical_clearance_required")):
+                return {
+                    "en": (
+                        "Robot 2 waits for the confirmed aisle clearance "
+                        "shown in the current state."
+                    ),
+                    "zh-CN": "当前状态仍有已确认的通道阻挡，机器人2先等待让路。",
+                }
+            return {
+                "en": (
+                    "Robot 2 waits for this step; no movement was executed, "
+                    "and the route will be checked again next step."
+                ),
+                "zh-CN": "机器人2本步暂时停留，没有执行移动，下一步会重新检查路线。",
+            }
+
+        goal_kind = str(
+            before_agent.navigation_goal_kind
+            or before_agent.goal_type
+            or ""
+        ).lower()
+        if before_agent.carrying_task_id is not None or goal_kind == "delivery":
+            en_reason = f"Robot 2 moved {en_action} to deliver {en_task}."
+            zh_reason = f"机器人2向{zh_action}移动，把{zh_task}的货物送往交付点。"
+        elif goal_kind in {"charge", "go_to_charger"}:
+            en_reason = f"Robot 2 moved {en_action} toward the charger."
+            zh_reason = f"机器人2向{zh_action}移动，前往充电桩补电。"
+        else:
+            en_reason = f"Robot 2 moved {en_action} toward {en_task}'s pickup point."
+            zh_reason = f"机器人2向{zh_action}移动，前往{zh_task}的取货点。"
+
+        if bool(runtime.get("selection_changed_policy")):
+            en_reason += " The current occupied cells and route were checked before this move."
+            zh_reason += " 这一步先检查了当前占用位置和可通行路线。"
+        return {"en": en_reason, "zh-CN": zh_reason}
 
     def _ask_live_task1(
         self,

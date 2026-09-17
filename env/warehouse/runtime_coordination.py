@@ -643,13 +643,43 @@ def select_human_ai_action(
     teammate_route_clearance_required = bool(
         necessary_teammate_route_clearance(environment, state, ai)
     )
+    # A PASS_THROUGH plan is a one-step reservation, not a standing
+    # instruction to wait.  Keep it only while the planned mover is still
+    # adjacent to the recorded target and the waiting robot is still holding
+    # the clearing cell.  This catches participant deviations and stale plans
+    # before they can suppress a fresh delivery route.
+    pass_through_plan_current = False
+    if ai_is_planned_waiter and str(active_plan.get("phase", "")) == "PASS_THROUGH":
+        moving_id = str(active_plan.get("moving_agent_id", ""))
+        moving = state.by_id(moving_id) if moving_id in environment.agent_ids else None
+        clearing_target = active_plan.get("clearing_target", ())
+        moving_target = active_plan.get("moving_target", ())
+        occupied_position = active_plan.get("occupied_position", ())
+        if (
+            moving is not None
+            and isinstance(clearing_target, (list, tuple))
+            and isinstance(moving_target, (list, tuple))
+            and isinstance(occupied_position, (list, tuple))
+            and tuple(clearing_target) == ai.position
+            and tuple(moving_target) == tuple(occupied_position)
+            and tuple(moving_target) != ai.position
+            and shortest_path_distance(
+                moving.position,
+                tuple(moving_target),
+                environment.config.map_layout_id,
+            ) == 1
+        ):
+            planned_action = str(active_plan.get("moving_action", ""))
+            mover_mask = masks.get(moving_id, ())
+            pass_through_plan_current = bool(
+                planned_action in ACTIONS
+                and ACTIONS.index(planned_action) < len(mover_mask)
+                and mover_mask[ACTIONS.index(planned_action)] > 0.5
+            )
     # A stored yielding plan is evidence about a previous frozen state.  It
     # is only binding while the same physical clearance is still required;
     # otherwise it must not outrank an executable delivery route.
-    plan_requires_wait = bool(
-        ai_is_planned_waiter
-        and str(active_plan.get("phase", "")) == "PASS_THROUGH"
-    )
+    plan_requires_wait = pass_through_plan_current
     physical_clearance_required = bool(
         ai_is_planned_clearer
         or (
@@ -704,6 +734,7 @@ def select_human_ai_action(
                     }
                 )
         target = _target(ai, action)
+        target_occupied_by_participant = bool(target == participant.position)
         satisfies_planned_clearance = bool(
             ai_is_planned_clearer
             and action in allowed_clearing_actions
@@ -764,6 +795,12 @@ def select_human_ai_action(
         score = [
             energy_violation,
             recent_unproductive_charger_reentry,
+            # The participant's current cell is occupied at decision time.
+            # Entering it would collide when the participant waits, so this
+            # is a hard state constraint rather than an uncertain
+            # counterfactual conflict.  In particular it protects a player
+            # who is currently charging at the shared station.
+            int(target_occupied_by_participant),
             int(plan_requires_wait and action != "WAIT"),
             int(
                 ai_is_planned_clearer
@@ -809,10 +846,14 @@ def select_human_ai_action(
                     or ai.last_executed_action == "WAIT"
                 )
             ),
-            int(bool(conflicts)),
-            len(conflicts),
+            # A partial counterfactual conflict is uncertainty, not a reason
+            # to outrank a strict mission-progress move.  Keep these costs
+            # after route progress so Robot 2 does not wait merely because
+            # one possible participant command would share a cell.
             after_distance,
             int(action == "WAIT"),
+            int(bool(conflicts)),
+            len(conflicts),
             # Once an action is proven safe and makes strict mission
             # progress, that progress outranks the cosmetic cost of reversing
             # a prior clearance/lifecycle step.  Putting reversal before goal
@@ -826,6 +867,10 @@ def select_human_ai_action(
             {
                 "action": action,
                 "target": list(target),
+                "target_occupied_by_participant": target_occupied_by_participant,
+                "target_occupied_position": list(participant.position)
+                if target_occupied_by_participant
+                else None,
                 "safe_for_all_participant_actions": not conflicts,
                 "conflict_against_all_participant_actions": bool(conflicts)
                 and len(conflicts) == len(participant_actions),
@@ -873,6 +918,11 @@ def select_human_ai_action(
         "teammate_route_clearance_required": teammate_route_clearance_required,
         "ai_is_planned_waiter": ai_is_planned_waiter,
         "plan_requires_wait": plan_requires_wait,
+        "pass_through_plan_current": pass_through_plan_current,
+        "participant_position": list(participant.position),
+        "participant_occupies_charger": bool(
+            participant.position == environment.layout.charger_position
+        ),
         "ai_is_planned_clearer": ai_is_planned_clearer,
         "charger_handoff_action": charger_handoff_action,
         "recent_goal_event": recent_goal_event,

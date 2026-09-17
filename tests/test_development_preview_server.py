@@ -550,6 +550,8 @@ def test_group_a_receives_a_per_step_robot_2_bubble_only_in_task1() -> None:
     assert bubble["target_agent"] == "robot_2"
     assert bubble["frame"] == 1
     assert bubble["text"]
+    assert "no_safe_progress" not in bubble["text"]
+    assert "向等待" not in bubble["text"]
 
     state.command(_envelope(state, "set_language", locale="zh-CN"))
     assert state.view()["study"]["action_bubble"]["text"] != bubble["text"]

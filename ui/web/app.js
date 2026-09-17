@@ -14,6 +14,7 @@ const state = {
   animationFrame: null,
   visualFrame: null,
   questionTimer: null,
+  lastPenaltyFrame: null,
 };
 
 const COPY = {
@@ -25,7 +26,7 @@ const COPY = {
     participantId: "参与者编号", agreement: "我已阅读并理解实验说明。", start: "开始实验",
     requiredDemo: "AI–AI 协作演示（可提前结束）", demoText: "您可以完整观看演示，也可以随时提前结束并开始任务 1。演示展示两台机器人认领、交付、协调让路和充电。",
     ruleJobs: "地图始终有两个未预分配的 A→B 共享任务。", ruleControl: "方向键、WASD 或按钮每次提交一个联合决策步；空格表示等待。",
-    ruleCharge: "成功移动耗电 2；在充电站等待恢复 10；断电会提前结束本轮。", ruleScore: "计分：配送 +100、机器人碰撞 −200、断电 −50、每步 −1、参与者绕路每单位 −2。",
+    ruleCharge: "成功移动耗电 2；在充电站等待恢复 10；断电会提前结束本轮。", ruleScore: "计分：配送 +100、机器人碰撞 −200、断电 −50、每步 −1、参与者绕路每单位 −2；协作资源使用可能触发额外扣分。",
     playDemo: "播放演示", pauseDemo: "暂停演示", beginTask1: "开始任务 1", endDemoEarly: "提前结束演示并开始任务 1", roundInstruction: "控制机器人 1，与机器人 2 协作配送",
     roundHint: "你和机器人 2 都只根据同一移动前状态独立选动作，两个动作随后同时执行。", up: "上", down: "下", left: "左", right: "右", wait: "等待", spaceKey: "空格",
     task1Complete: "任务 1 已完成",
@@ -36,7 +37,7 @@ const COPY = {
     interrupted: "本轮已中断", interruptedHint: "此实验已在另一页面继续，或服务恢复后旧运行被放弃。请重新开始。", desktopRequired: "请使用宽度至少 1024 像素的桌面或笔记本电脑。",
     participant: "参与者", ai: "AI", battery: "电量", cargo: "承运", none: "无", available: "可认领", carried: "运输中", carrier: "承运者",
     coordinationUnderstanding: "我理解如何与机器人 2 协调。", aiPredictability: "机器人 2 的行为对我而言是可预测的。", interfaceClarity: "界面与计分信息清晰易懂。",
-    deliveryScore: "配送得分", collisionPenalty: "碰撞扣分（每次 −200）", shutdownPenalty: "断电扣分", timePenalty: "步数扣分", detourPenalty: "绕路扣分",
+    deliveryScore: "配送得分", collisionPenalty: "碰撞扣分（每次 −200）", shutdownPenalty: "断电扣分", timePenalty: "步数扣分", detourPenalty: "绕路扣分", chargerOccupancyPenalty: "占桩扣分（每次 −50）",
     loading: "处理中…", requiredFields: "请填写参与者编号并确认已阅读说明。", requestFailed: "操作失败", taskLabel: "任务", roundScore: "本轮得分",
     action: "动作", requestedAction: "请求", executedAction: "实际", batteryChange: "电量",
     transitionActions: "动作", causalFrameNote: "双方从同一移动前状态决策并同步执行。", workingExplanation: "正在根据最近的人机交互生成回答…", stillWorking: "仍在生成，请稍候…",
@@ -50,7 +51,7 @@ const COPY = {
     participantId: "Participant ID", agreement: "I have read and understood the study instructions.", start: "Start study",
     requiredDemo: "AI–AI collaboration demonstration", demoText: "You may watch the complete standardized demonstration or finish it early and begin Task 1 at any time. It shows both robots claiming, delivering, yielding, and charging.",
     ruleJobs: "The map always contains two unassigned shared A-to-B jobs.", ruleControl: "Arrow keys, WASD, or a button submits one joint decision step; Space means wait.",
-    ruleCharge: "A successful move costs 2 battery; waiting at the charger restores 10; shutdown ends the round.", ruleScore: "Score: +100 delivery, −200 robot collision, −50 shutdown, −1 per step, and −2 per human detour unit.",
+    ruleCharge: "A successful move costs 2 battery; waiting at the charger restores 10; shutdown ends the round.", ruleScore: "Score: +100 delivery, −200 robot collision, −50 shutdown, −1 per step, and −2 per human detour unit; shared-resource use may incur an additional penalty.",
     playDemo: "Play demonstration", pauseDemo: "Pause demonstration", beginTask1: "Begin Task 1", endDemoEarly: "Finish demo early and begin Task 1", roundInstruction: "Control robot 1 and collaborate with robot 2",
     roundHint: "You and robot 2 choose independently from the same pre-move state; both actions then execute simultaneously.", up: "Up", down: "Down", left: "Left", right: "Right", wait: "Wait", spaceKey: "Space",
     task1Complete: "Task 1 complete",
@@ -61,7 +62,7 @@ const COPY = {
     interrupted: "Run interrupted", interruptedHint: "This run continued in another page or was abandoned during recovery. Please restart.", desktopRequired: "Use a desktop or laptop at least 1024 pixels wide.",
     participant: "Participant", ai: "AI", battery: "Battery", cargo: "Carrying", none: "None", available: "Available", carried: "In transit", carrier: "Carrier",
     coordinationUnderstanding: "I understand how to coordinate with robot 2.", aiPredictability: "Robot 2's behavior is predictable to me.", interfaceClarity: "The interface and scoring information are clear.",
-    deliveryScore: "Delivery points", collisionPenalty: "Collision penalty (−200 each)", shutdownPenalty: "Shutdown penalty", timePenalty: "Step penalty", detourPenalty: "Detour penalty",
+    deliveryScore: "Delivery points", collisionPenalty: "Collision penalty (−200 each)", shutdownPenalty: "Shutdown penalty", timePenalty: "Step penalty", detourPenalty: "Detour penalty", chargerOccupancyPenalty: "Charger occupancy penalty (−50 each)",
     loading: "Working…", requiredFields: "Enter a participant ID and confirm the instructions.", requestFailed: "Request failed", taskLabel: "Task", roundScore: "Round score",
     action: "Action", requestedAction: "Requested", executedAction: "Executed", batteryChange: "Battery",
     transitionActions: "Actions", causalFrameNote: "Both agents decide from the same pre-move state and execute simultaneously.", workingExplanation: "Answering from your recent Human–AI interaction…", stillWorking: "Still generating—please wait…",
@@ -510,10 +511,22 @@ function renderScores(snapshot) {
   $("collisionValue").textContent = snapshot.robot_collision_events || 0;
   $("shutdownValue").textContent = snapshot.shutdown_count || 0;
   $("detourValue").textContent = Number(snapshot.human_route_regret_units || 0).toFixed(1);
-  const labels = { delivery: tr("deliveryScore"), robot_collision: tr("collisionPenalty"), shutdown: tr("shutdownPenalty"), time: tr("timePenalty"), human_detour: tr("detourPenalty") };
+  const labels = { delivery: tr("deliveryScore"), robot_collision: tr("collisionPenalty"), shutdown: tr("shutdownPenalty"), time: tr("timePenalty"), human_detour: tr("detourPenalty"), shared_charger_occupancy: tr("chargerOccupancyPenalty") };
   $("scoreBreakdown").replaceChildren(...Object.entries(labels).map(([key,label]) => {
     const row = document.createElement("div"); row.innerHTML = `<span>${label}</span><strong>${Math.round(breakdown[key] || 0)}</strong>`; return row;
   }));
+  const penalty = (snapshot.rule_events || []).find((event) => event?.event === "shared_charger_occupancy");
+  const flash = $("penaltyFlash");
+  if (penalty && Number(snapshot.frame || 0) !== state.lastPenaltyFrame) {
+    state.lastPenaltyFrame = Number(snapshot.frame || 0);
+    flash.textContent = "−50";
+    flash.classList.remove("hidden");
+    document.body.classList.add("charger-penalty-flash");
+    window.setTimeout(() => {
+      flash.classList.add("hidden");
+      document.body.classList.remove("charger-penalty-flash");
+    }, 900);
+  }
 }
 
 function renderWorkflow(stage, condition) {

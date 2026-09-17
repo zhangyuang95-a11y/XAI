@@ -9,8 +9,10 @@
 - 成功移动消耗 2 电量；在充电站执行等待恢复 10；阻塞动作不耗电。
 - 正式地图是 `warehouse_staggered_aisles_6x7_v2_three_cell_exit_no_cross`：左右作业通道错位，不形成四向十字路口。机器人从 `(5,2)`、`(5,4)` 出发，充电站位于 `(5,3)`；正上方 `(4,2)`、`(4,3)`、`(4,4)` 是三个连续且真实可通行的出口格。取货点、交付点、充电站、路径规划、观测、碰撞判定和浏览器全部读取同一个 `MapLayout`。
 - 每一步先冻结共同状态 `S_t`，两个共享参数 Actor 分别只读取各自的 `S_t` 本地观察并独立产生动作，最后只调用一次 `env.step({robot_1: a1, robot_2: a2})`。参与者命令只在两个分布都计算完成后替换 `robot_1`；`robot_2` 永远看不到 `robot_1` 本帧动作。
-- 机器人冲突时双方本步均等待，计一次碰撞但不终止。除参与者在 Task 1/2 中替换 `robot_1` 的输入外，AI 命令由共享 MAPPO Actor 直接输出并原样提交给环境；系统不存在运行时通行权规则、coordination shield、教师策略或决策树动作改写。撞墙、货架阻塞、同格争抢、交换位置和进入未离开的队友位置，均只由环境动力学解析。网络必须自行学习任务分工、充电、让行和避免绕路。
-- 用户得分保持为：`100×配送数 − 200×机器人碰撞事件 − 50×断电事件 − 步数 − 2×参与者绕路单位`。断电提前结束时补扣到 120 步。
+- 机器人冲突时双方本步均等待，计一次碰撞但不终止。参与者在 Task 1/2 中替换 `robot_1` 的输入；Robot 2 先保存冻结 Actor 的建议，再由只读取决策前状态的规则辅助控制器选择提交动作。该控制器只放宽不确定会车的过度等待，仍保留墙体、不可通行格、明确能源不可行和必然碰撞等硬限制；它不得读取参与者本步输入，也不得接管 `robot_1`。每帧保存 `nn_proposed_action`、`controller_selected_action`、`environment_executed_action` 和规则原因。
+- 用户得分保持为：`100×配送数 − 200×机器人碰撞事件 − 50×断电事件 − 步数 − 2×参与者绕路单位 − 50×共享充电桩违规事件`。共享充电桩规则在同一步结算：占桩者主动等待且充电后严格超过 60%，队友行动前低于 20% 且距桩不超过两格，并存在安全离桩动作、当步无碰撞时触发；同一次连续占桩只扣一次，实际离桩后才重置。成功移动仍耗电 2，在桩等待最多恢复 10%。
+
+本次公开试玩仍是 9 月 2 日版本的内部预实验，保留 A 组逐步理由气泡和快捷/自由提问；B 组无解释，Task 2 两组都不能读取新旧回答。它使用冻结的现有 Actor 加上上述 Robot 2 规则辅助控制器，因此不再是“纯 NN 原样动作”实验，也不宣称解释已经改善人类表现。
 
 ## 强化学习 Reward
 
@@ -55,7 +57,7 @@ reward_i = user_score_delta / 100
 - seed 库合同：`warehouse_parallel_seed_pairs_v60_compact6`
 - 人机时间线合同：`warehouse_human_ai_timeline_v60`
 - 动作执行：`frozen_joint_plan_atomic_actor_v14`
-- 运行时控制器：`mappo_frozen_state_actor_atomic_joint_execution`
+- 运行时控制器：`mappo_actor_plus_rule_assisted_robot_2.v1`（Actor 参数不变；Robot 2 的提交动作可能由冻结状态规则辅助选择）
 - 日志：`human-study-log.v30`
 
 PyTorch checkpoint 位于 `output/deployment/warehouse_mappo_v68_6x7.pt`。Render 使用从该 checkpoint 精确导出的 `output/deployment/warehouse_mappo_v68_6x7_actor.npz`，以 NumPy 执行同一神经网络；测试逐 logit 比对两种运行时，允许误差不超过 `1e-4`。两个 Actor 只读取同一个冻结决策前状态；同格、换位和通道冲突由一次联合审计原子解析。v68 使用无四向十字的 6×7 错位通道、三格机器人出口、2–4步瓶颈预约、载货优先和经反事实验证的精简解释。正式验收分别覆盖 AI–AI 与 Human–AI 的100个固定种子和100个随机种子；完整指标见 `output/deployment/warehouse_mappo_v68_6x7_acceptance.json`。

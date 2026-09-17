@@ -13,6 +13,7 @@ def finalize_transition_outcome(
     delivered_count: int,
     robot_collision: bool,
     route_regret: float,
+    shared_charger_penalty_count: int = 0,
 ) -> tuple[tuple[str, ...], dict[str, float], float, bool, bool, str | None]:
     """Apply shutdown, score, and terminal facts after motion/task effects."""
 
@@ -37,6 +38,8 @@ def finalize_transition_outcome(
         "shutdown": config.shutdown_points * len(shutdown_agents),
         "time": config.step_points,
         "human_detour": config.human_detour_points_per_unit * route_regret,
+        "shared_charger_occupancy": config.shared_charger_occupancy_points
+        * max(0, int(shared_charger_penalty_count)),
     }
     if shutdown_agents and next_state.frame < config.horizon:
         score_components["time"] += config.step_points * (

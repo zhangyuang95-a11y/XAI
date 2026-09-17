@@ -739,6 +739,11 @@ def _transition_events(info: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
         for item in info.get("energy_events", ())
         if isinstance(item, Mapping)
     )
+    events.extend(
+        dict(item)
+        for item in info.get("rule_events", ())
+        if isinstance(item, Mapping)
+    )
     if info.get("robot_collision_event"):
         events.append(
             {

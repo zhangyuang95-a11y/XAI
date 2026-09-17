@@ -637,26 +637,22 @@ def select_human_ai_action(
         )
         if isinstance(target, (list, tuple)) and len(target) == 2
     }
+    participant_standoff_required = bool(
+        necessary_participant_standoff_clearance(environment, state, ai)
+    )
+    teammate_route_clearance_required = bool(
+        necessary_teammate_route_clearance(environment, state, ai)
+    )
     physical_clearance_required = bool(
         ai_is_planned_clearer
         or (
-            ai.carrying_task_id is None
-            and (
-                charger_handoff_action is not None
-                or (
-                    not (
-                        ai.position == environment.layout.charger_position
-                        and environment._requires_charge(state, ai)
-                    )
-                    and (
-                        necessary_teammate_route_clearance(
-                            environment, state, ai
-                        )
-                        or necessary_participant_standoff_clearance(
-                            environment, state, ai
-                        )
-                    )
+            charger_handoff_action is not None
+            or (
+                not (
+                    ai.position == environment.layout.charger_position
+                    and environment._requires_charge(state, ai)
                 )
+                and (teammate_route_clearance_required or participant_standoff_required)
             )
         )
     )
@@ -759,18 +755,40 @@ def select_human_ai_action(
             action in MOVE_DELTAS and after_distance >= before_distance
         )
         score = [
-            int(bool(conflicts)),
-            len(conflicts),
             energy_violation,
             recent_unproductive_charger_reentry,
-            int(ai_is_planned_waiter and action != "WAIT"),
+            int(
+                ai_is_planned_waiter
+                and action != "WAIT"
+                and not physical_clearance_required
+            ),
             int(
                 ai_is_planned_clearer
                 and not satisfies_planned_clearance
             ),
             int(physical_clearance_required and action == "WAIT"),
+            # A collision against every legal participant action is a hard
+            # constraint.  A collision against only some possible actions is
+            # uncertainty, not a reason to make Robot 2 wait by default.
+            int(bool(conflicts) and len(conflicts) == len(participant_actions)),
+            int(physical_clearance_required and bool(conflicts)),
+            int(ai.carrying_task_id is not None and after_distance > before_distance),
             int(after_distance > before_distance),
             nonprogress_move,
+            int(
+                action == "WAIT"
+                and not (
+                    ai.position == environment.layout.charger_position
+                    and ai.battery < 100.0
+                )
+                and not ai_is_planned_waiter
+                and (
+                    ai.avoidable_wait_streak >= 2
+                    or ai.last_executed_action == "WAIT"
+                )
+            ),
+            int(bool(conflicts)),
+            len(conflicts),
             after_distance,
             int(action == "WAIT"),
             # Once an action is proven safe and makes strict mission
@@ -787,6 +805,8 @@ def select_human_ai_action(
                 "action": action,
                 "target": list(target),
                 "safe_for_all_participant_actions": not conflicts,
+                "conflict_against_all_participant_actions": bool(conflicts)
+                and len(conflicts) == len(participant_actions),
                 "collision_counterfactuals": conflicts,
                 "distance_before": int(before_distance),
                 "distance_after": int(after_distance),
@@ -801,6 +821,24 @@ def select_human_ai_action(
         )
     selected_record = min(candidates, key=lambda item: item["score"])
     selected = str(selected_record["action"])
+    reason_codes: list[str] = []
+    if selected != str(preferred_action):
+        if selected_record.get("distance_after", 0) < selected_record.get(
+            "distance_before", 0
+        ):
+            reason_codes.append("mission_progress")
+        if selected_record.get("collision_counterfactuals"):
+            reason_codes.append("possible_conflict_softened")
+        if selected_record.get("energy_violation"):
+            reason_codes.append("energy_constraint")
+        if physical_clearance_required:
+            reason_codes.append("charger_or_route_clearance")
+        if selected == "WAIT":
+            reason_codes.append("no_safe_progress")
+    if not reason_codes:
+        reason_codes.append("preserve_nn_action")
+    selected_record["controller_reason_codes"] = reason_codes
+    selected_record["controller_reason"] = ",".join(reason_codes)
     return selected, {
         "mode": "human_ai_robust_selection",
         "policy_actions": {"robot_2": str(preferred_action)},
@@ -809,6 +847,8 @@ def select_human_ai_action(
         "participant_legal_actions": list(participant_actions),
         "public_coordination_action": public_coordination_action,
         "physical_clearance_required": physical_clearance_required,
+        "participant_standoff_required": participant_standoff_required,
+        "teammate_route_clearance_required": teammate_route_clearance_required,
         "ai_is_planned_waiter": ai_is_planned_waiter,
         "ai_is_planned_clearer": ai_is_planned_clearer,
         "charger_handoff_action": charger_handoff_action,
@@ -818,6 +858,8 @@ def select_human_ai_action(
         ),
         "ai_action_candidates": candidates,
         "selected_ai_action": selected_record,
+        "controller_reason": selected_record["controller_reason"],
+        "controller_reason_codes": list(reason_codes),
         "selection_changed_policy": selected != str(preferred_action),
         "same_frozen_state": True,
     }

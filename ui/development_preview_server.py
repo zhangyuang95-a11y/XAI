@@ -7,7 +7,8 @@ scoring, task replacement, and the 120-step terminal boundary.
 
 The training checkpoint is exported to a dependency-light NumPy artifact for
 Render.  It evaluates the same decentralized neural Actor as the PyTorch
-runtime; no rule controller substitutes for the model in the public study.
+runtime, then applies the explicitly versioned frozen-state coordination
+controller to Robot 2's submitted action.
 """
 
 from __future__ import annotations
@@ -131,11 +132,25 @@ def _transition_payload(
     invalid = set(info.get("invalid_move_agents", ()))
     collision = bool(info.get("robot_collision_event", False))
     events = _transition_events(info)
+    trace = info.get("decision_trace", {})
+    runtime = (
+        trace.get("runtime_decision", {})
+        if isinstance(trace, Mapping)
+        else {}
+    )
+    runtime = runtime if isinstance(runtime, Mapping) else {}
+    policy_actions = dict(runtime.get("policy_actions", {}))
+    selected_actions = dict(runtime.get("selected_actions", {}))
     agents: list[dict[str, Any]] = []
     for after_agent in after.agents:
         before_agent = before.by_id(after_agent.agent_id)
         proposed = str(actions.get(after_agent.agent_id, "WAIT"))
         actual = str(executed.get(after_agent.agent_id, after_agent.last_executed_action))
+        nn_proposed = str(policy_actions.get(after_agent.agent_id, proposed))
+        controller_selected = str(
+            selected_actions.get(after_agent.agent_id, proposed)
+        )
+        changed = controller_selected != nn_proposed
         agents.append(
             {
                 "id": after_agent.agent_id,
@@ -144,6 +159,23 @@ def _transition_payload(
                 "proposed_action": (
                     proposed
                     if reveal_ai_action or after_agent.agent_id == "robot_1"
+                    else None
+                ),
+                "nn_proposed_action": (
+                    nn_proposed
+                    if reveal_ai_action or after_agent.agent_id == "robot_1"
+                    else None
+                ),
+                "controller_selected_action": (
+                    controller_selected
+                    if reveal_ai_action or after_agent.agent_id == "robot_1"
+                    else None
+                ),
+                "environment_executed_action": actual,
+                "controller_changed_action": bool(changed),
+                "controller_reason": (
+                    str(runtime.get("controller_reason", ""))
+                    if after_agent.agent_id == "robot_2"
                     else None
                 ),
                 "executed_action": actual,
@@ -282,6 +314,7 @@ def _event_tags(events: tuple[Mapping[str, Any], ...]) -> list[str]:
         "collision_risk": "conflict",
         "head_on_conflict_risk": "conflict",
         "robot_collision": "collision",
+        "shared_charger_occupancy": "charger_penalty",
     }
     result: list[str] = []
     for event in events:
@@ -429,6 +462,9 @@ class DevelopmentPreviewState:
             "deliveries": int(state.total_deliveries),
             "robot_collisions": int(state.robot_collision_events),
             "shutdowns": int(state.shutdown_count),
+            "shared_charger_penalties": float(
+                state.score_breakdown.get("shared_charger_occupancy", 0.0)
+            ),
             "human_route_regret_units": float(state.human_route_regret_units),
             "mean_delivery_latency": (
                 sum(latencies) / len(latencies) if latencies else None
@@ -562,6 +598,9 @@ class DevelopmentPreviewState:
                 ),
             },
             "study": {
+                "release_version": "sep2-rule-assisted-20260917",
+                "pilot_class": "internal_pre_experiment",
+                "formal_ready": False,
                 "run_id": self.run_id,
                 "stage": self.stage,
                 "state_version": self.version,
@@ -578,6 +617,20 @@ class DevelopmentPreviewState:
                 "test_condition_selector": True,
                 "development_controller": (
                     RUNTIME_CONTROLLER
+                ),
+                "runtime_action_mode": "nn_proposal_plus_rule_assisted_robot_2",
+                "rule_version": "shared-charger-occupancy.v1",
+                "action_override_authorized": True,
+                "action_override_count": sum(
+                    int(
+                        bool(
+                            frame.info.get("decision_trace", {})
+                            .get("runtime_decision", {})
+                            .get("selection_changed_policy", False)
+                        )
+                    )
+                    for frame in self.round_frames
+                    if isinstance(frame.info.get("decision_trace", {}), Mapping)
                 ),
                 "formal_policy_loaded": True,
                 "policy_model_version": actor.metadata.model_version,
@@ -648,6 +701,35 @@ class DevelopmentPreviewState:
                 )
                 for language in ("en", "zh-CN")
             }
+            outcome = self.round_frames[index]
+            trace = outcome.info.get("decision_trace", {})
+            runtime = trace.get("runtime_decision", {}) if isinstance(trace, Mapping) else {}
+            runtime = runtime if isinstance(runtime, Mapping) else {}
+            selected = str(
+                runtime.get("selected_actions", {}).get(
+                    "robot_2", outcome.actions.get("robot_2", "WAIT")
+                )
+            )
+            actual = str(
+                outcome.info.get("executed_actions", {}).get("robot_2", selected)
+            )
+            if (
+                bool(runtime.get("selection_changed_policy"))
+                and actual == selected
+                and runtime.get("controller_reason")
+            ):
+                reason = str(runtime["controller_reason"])
+                words = self._action_words(selected)
+                variants = {
+                    "en": (
+                        f"Robot 2 moved {words[0]} because the coordination rule "
+                        f"selected {reason.replace('_', ' ')} from the frozen state."
+                    ),
+                    "zh-CN": (
+                        f"机器人2本步向{words[1]}，因为规则根据行动前状态选择了"
+                        f"{reason.replace('_', '、')}。"
+                    ),
+                }
         except Exception:
             # A bubble must never stop a confirmed movement.  This fallback
             # reports only the action that the environment recorded.
@@ -800,6 +882,19 @@ class DevelopmentPreviewState:
                 ),
                 None,
             )
+        elif focus == "charger_penalty":
+            anchor = next(
+                (
+                    item
+                    for item in reversed(recent)
+                    if any(
+                        str(event.get("event", "")) == "shared_charger_occupancy"
+                        for event in item[1].info.get("rule_events", ())
+                        if isinstance(event, Mapping)
+                    )
+                ),
+                None,
+            )
 
         current_frame = int(self.round_frame.state.frame)
         if anchor is None:
@@ -809,6 +904,9 @@ class DevelopmentPreviewState:
             if focus == "collision":
                 answer_en = "No collision occurred in the last five steps."
                 answer_zh = "最近五步内没有发生碰撞。"
+            elif focus == "charger_penalty":
+                answer_en = "No shared-charger penalty occurred in the last five steps."
+                answer_zh = "最近五步内没有触发共享充电桩处罚。"
             elif focus == "wait":
                 answer_en = "Robot 2 did not wait in the last five steps."
                 answer_zh = "机器人2在最近五步内没有等待。"
@@ -872,6 +970,12 @@ class DevelopmentPreviewState:
                 outcome.info.get("robot_collision_event", False)
                 or outcome.info.get("robot_collision_kind")
             )
+            penalty_events = tuple(
+                event
+                for event in outcome.info.get("rule_events", ())
+                if isinstance(event, Mapping)
+                and str(event.get("event", "")) == "shared_charger_occupancy"
+            )
             evidence = {
                 "event_type": focus,
                 "anchor_frame": anchor_frame,
@@ -892,8 +996,38 @@ class DevelopmentPreviewState:
                 "pre_state_hash": trace.get("pre_state_hash"),
                 "outcome_frame": trace.get("outcome_frame"),
                 "fact_valid": bool(trace.get("fact_valid", False)),
+                "shared_charger_penalty_events": [
+                    dict(event) for event in penalty_events
+                ],
             }
-            if focus == "collision" and recent_collision:
+            if focus == "charger_penalty":
+                event = penalty_events[-1] if penalty_events else {}
+                responsible = str(event.get("responsible_agent_id", "robot_2"))
+                occupant_before = float(event.get("occupant_battery_before", 0.0))
+                occupant_after = float(event.get("occupant_battery_after", occupant_before))
+                teammate_battery = float(event.get("teammate_battery_before", 0.0))
+                distance = int(event.get("teammate_distance_to_charger", 0))
+                if responsible == "robot_2":
+                    answer_en = (
+                        f"Robot 2 remained on the charger after charging from {occupant_before:g}% "
+                        f"to {occupant_after:g}%. You had {teammate_battery:g}% battery and were "
+                        f"{distance} cells away, so Robot 2's continued occupancy triggered the −50 penalty."
+                    )
+                    answer_zh = (
+                        f"机器人2在充电后仍占用充电桩，电量从{occupant_before:g}%升至{occupant_after:g}%。"
+                        f"你当时电量为{teammate_battery:g}%，距充电桩{distance}格，因此本步触发−50处罚。"
+                    )
+                else:
+                    answer_en = (
+                        f"Robot 1 remained on the charger after charging from {occupant_before:g}% "
+                        f"to {occupant_after:g}%. Robot 2 had {teammate_battery:g}% battery and was "
+                        f"{distance} cells away, so the shared-charger rule triggered −50."
+                    )
+                    answer_zh = (
+                        f"机器人1在充电后仍占用充电桩，电量从{occupant_before:g}%升至{occupant_after:g}%。"
+                        f"机器人2当时电量为{teammate_battery:g}%，距充电桩{distance}格，因此触发共享充电桩−50处罚。"
+                    )
+            elif focus == "collision" and recent_collision:
                 human_action = proposed(outcome, "robot_1")
                 ai_action = proposed(outcome, "robot_2")
                 human_en, human_zh = self._action_words(human_action)
@@ -1097,6 +1231,7 @@ class DevelopmentPreviewState:
                 "allocation",
                 "collision",
                 "wait",
+                "charger_penalty",
                 "human_influence",
                 "goal",
             }

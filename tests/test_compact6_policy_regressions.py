@@ -424,7 +424,10 @@ def test_human_ai_unknown_action_wait_records_specific_counterfactual() -> None:
     environment.set_state(state)
 
     selected, runtime = select_human_ai_action(environment, "LEFT")
-    assert selected == "WAIT"
+    # r4.6 rule-assisted Robot 2 no longer waits solely because one possible
+    # participant action conflicts; the mission-progress move is submitted and
+    # the counterfactual risk remains explicit evidence.
+    assert selected == "LEFT"
     risky_left = next(
         item
         for item in runtime["ai_action_candidates"]
@@ -456,9 +459,7 @@ def test_human_ai_unknown_action_wait_records_specific_counterfactual() -> None:
     )
     trace = info["decision_trace"]
     decision = trace["agents"]["robot_2"]
-    assert decision["primary_reason_code"] == (
-        "WAIT_FOR_UNKNOWN_PARTICIPANT_ACTION"
-    )
+    assert decision["primary_reason_code"] == "PICKUP_ROUTE_PROGRESS"
     assert decision["human_action_uncertainty"]["collision_counterfactuals"]
     assert trace["fact_valid"] is True
     explanation = _Explainer()._decision_trace_explanation(
@@ -468,7 +469,7 @@ def test_human_ai_unknown_action_wait_records_specific_counterfactual() -> None:
         language="en",
     )
     assert explanation is not None
-    assert "did not know your current move" in explanation
+    assert "collect" in explanation.lower() or "取货" in explanation
     assert "trace" not in explanation.lower()
 
 
@@ -655,9 +656,7 @@ def test_counterfactual_safe_retreat_is_explained_as_avoidance() -> None:
     trace = info["decision_trace"]
     decision = trace["agents"]["robot_2"]
 
-    assert decision["primary_reason_code"] == (
-        "MOVE_TO_AVOID_UNKNOWN_PARTICIPANT_ACTION"
-    )
+    assert decision["primary_reason_code"] == "CLEAR_PARTICIPANT_ROUTE"
     assert decision["human_action_uncertainty"]["riskier_progress_actions"]
     assert trace["fact_valid"] is True
 

@@ -30,6 +30,12 @@ class WarehouseConfig:
     participant_detour_scoring: bool = True
     move_battery_cost: float = 2.0
     charge_per_wait: float = 10.0
+    # Public study coordination rule. Scored by the environment at the same
+    # transition as charging; separate from training reward and Actor params.
+    shared_charger_occupancy_points: float = -50.0
+    shared_charger_occupancy_threshold: float = 60.0
+    shared_charger_low_battery_threshold: float = 20.0
+    shared_charger_distance_limit: int = 2
     battery_safety_margin: float = 2.0
     # Expected clearance for one ordinary two-robot passing manoeuvre. This
     # is energy planning, not an action rule: it keeps a neural robot from
@@ -67,6 +73,12 @@ class WarehouseConfig:
             )
         if self.charge_per_wait <= 0:
             raise ValueError("The charging rate must be positive.")
+        if self.shared_charger_occupancy_threshold < 0:
+            raise ValueError("shared_charger_occupancy_threshold cannot be negative.")
+        if self.shared_charger_low_battery_threshold < 0:
+            raise ValueError("shared_charger_low_battery_threshold cannot be negative.")
+        if self.shared_charger_distance_limit < 0:
+            raise ValueError("shared_charger_distance_limit cannot be negative.")
         if self.battery_safety_margin < 0:
             raise ValueError("battery_safety_margin cannot be negative.")
         if self.coordination_energy_reserve_steps < 0:
@@ -195,6 +207,7 @@ def empty_score_breakdown() -> dict[str, float]:
         "shutdown": 0.0,
         "time": 0.0,
         "human_detour": 0.0,
+        "shared_charger_occupancy": 0.0,
     }
 
 
@@ -221,6 +234,12 @@ class WarehouseState:
     last_robot_collision_event: bool = False
     last_robot_collision_kind: str | None = None
     last_coordination_events: tuple[dict[str, Any], ...] = ()
+    # Rule-audit events are separate from coordination hypotheses so scoring
+    # cannot alter route-planning state.
+    last_rule_events: tuple[dict[str, Any], ...] = ()
+    # Agents already charged for the current continuous occupancy. Only an
+    # actual departure clears this marker.
+    shared_charger_penalty_occupants: tuple[str, ...] = ()
     ineffective_joint_wait_streak: int = 0
     # A frozen multi-frame clearance contract.  The first transition clears
     # the occupied route cell; the second lets the original priority robot

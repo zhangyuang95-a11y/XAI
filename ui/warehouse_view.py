@@ -30,6 +30,14 @@ def _study_question_focus(question: str) -> str:
     if any(
         token in normalized
         for token in (
+            "扣分", "占桩", "让出充电", "充电桩处罚", "penalty",
+            "charger occupancy", "charger penalty",
+        )
+    ):
+        return "charger_penalty"
+    if any(
+        token in normalized
+        for token in (
             "电量", "电池", "充电", "battery", "energy", "charge", "charging",
         )
     ):
@@ -178,6 +186,12 @@ def serialize_warehouse_state(
         ),
         "robot_collision_events": int(state.robot_collision_events),
         "invalid_move_count": int(state.invalid_move_count),
+        # Rule feedback is safe to expose even when policy actions are hidden
+        # from Group A/B participants.
+        "rule_events": [dict(item) for item in state.last_rule_events],
+        "shared_charger_penalty_occupants": list(
+            state.shared_charger_penalty_occupants
+        ),
         "events": events if reveal_policy else None,
         "policy_hidden": not reveal_policy,
     }

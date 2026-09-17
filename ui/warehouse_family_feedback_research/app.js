@@ -198,7 +198,9 @@
     $("operationPanel").classList.toggle("hidden",!v?.run_id || ["consent","instructions","questionnaire","completed"].includes(p));
     document.querySelectorAll("[data-action]").forEach(b=>disable(b,!canAct(v,ui.replay,ui.busy,pending,ui.historyLoading!==null)));
     disable($("endButton"),locked || !allowed(v,"end") || ui.replay!==null);$("endButton").classList.toggle("hidden",!allowed(v,"end"));
-    disable($("nextButton"),locked || !allowed(v,"next") || ui.replay!==null);$("nextButton").classList.toggle("hidden",!allowed(v,"next"));
+    disable($("nextButton"),locked || !allowed(v,"next") || ui.replay!==null && !ended(v));$("nextButton").classList.toggle("hidden",!allowed(v,"next"));
+    const finalRound=Number(v?.flow?.round_index)>=Number(v?.flow?.round_count || 3);
+    $("nextButton").textContent=isStudy && ended(v) && ["task1","task2"].includes(p)?(finalRound?(p==="task1"?(ui.language==="zh"?"进入 Task 2":"Begin Task 2"):(ui.language==="zh"?"进入问卷":"Begin questionnaire")):(ui.language==="zh"?"进入下一局":"Next round")):tr("next");
     $("robotStatus").classList.toggle("hidden",!v?.run_id && !tutorialActive);
     $("primaryRoleLabel").textContent=tutorialActive?tr("aiOne"):tr("you");$("primaryStatusLabel").textContent=tutorialActive?tr("aiOne"):tr("you");
     for(const [id,role] of [["humanStatus","robot_1"],["aiStatus","robot_2"]]){const a=f?.state?.agents?.find(a=>a.id===role);$(id).textContent=a?`${tr("battery")} ${Math.round(a.battery)}% · ${a.carrying_label?tr("carrying")+" "+a.carrying_label:tr("empty")}`:"—";}
@@ -375,7 +377,7 @@
   $("tutorialSlider").addEventListener("change",event=>{const index=Number(event.target.value);if(Number.isInteger(index) && phase(ui.view)==="instructions")void execute({kind:"tutorial_select",frame_index:index});});
   $("beginTask1Button").addEventListener("click",()=>void beginTask1());
   document.querySelectorAll("[data-action]").forEach(b=>b.addEventListener("click",()=>{if(canAct(ui.view,ui.replay,ui.busy,transport.pending(),ui.historyLoading!==null))void execute({kind:"action",action:b.dataset.action});}));
-  $("endButton").addEventListener("click",()=>{if(allowed(ui.view,"end") && ui.replay===null)void execute({kind:"end"});});$("nextButton").addEventListener("click",()=>{if(allowed(ui.view,"next") && ui.replay===null)void execute({kind:"next",...(phase(ui.view)==="consent"?{consent:true}:{})});});
+  $("endButton").addEventListener("click",()=>{if(allowed(ui.view,"end") && ui.replay===null)void execute({kind:"end"});});$("nextButton").addEventListener("click",()=>{if(allowed(ui.view,"next") && (ui.replay===null || ended(ui.view)))void execute({kind:"next",...(phase(ui.view)==="consent"?{consent:true}:{})});});
   $("retryButton").addEventListener("click",()=>void execute({},true));$("historySlider").addEventListener("input",e=>void selectFrame(Number(e.target.value)));$("previousFrame").addEventListener("click",()=>void selectFrame(Math.max(0,Number($("historySlider").value)-1)));$("liveButton").addEventListener("click",()=>{if(readLocked(ui.view,ui.busy,transport.pending()))return;ui.historyToken++;ui.historyLoading=null;ui.replay=null;render();});
   $("runSelect").addEventListener("change",e=>{if(e.target.value && e.target.value!==ui.view?.run_id && !study(ui.view))void execute({kind:"select_run",run_id:e.target.value});});
   function ask(question,intentId=null){if(!explanationsAllowed(ui.view) || ui.busy || ui.historyLoading!==null || transport.pending())return;const q=question.trim();if(!q){ui.error="questionRequired";render();return;}$("questionInput").value=q;const text=q.toLowerCase(),focus=intentId==="counterfactual" || /如果|假如|接下来|what if|if i|next/.test(text)?"next":"executed";void execute({kind:"question",question:q,focus,language:ui.language,run_id:ui.view.run_id,frame:shown()?.state?.frame ?? 0,intent_id:intentId});}

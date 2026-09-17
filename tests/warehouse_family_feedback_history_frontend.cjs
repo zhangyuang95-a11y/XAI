@@ -89,6 +89,7 @@ async function harness(initial=view()) {
       if(body.kind==='tutorial_select')current={...current,tutorial:{...current.tutorial,frame_index:body.frame_index},state:{...current.state,frame:body.frame_index}};
       if(body.kind==='tutorial_restart')current={...current,tutorial:{...current.tutorial,frame_index:0},state:{...current.state,frame:0}};
       if(body.kind==='begin_task1')current={...view({run:'task1-run',frame:0,version:current.version,stage:'task1'}),allowed_kinds:['action','end']};
+      if(body.kind==='next')current={...view({run:'task2-run',frame:0,version:current.version,stage:'task2'}),allowed_kinds:['begin_round'],explain_allowed:false};
       return response(structuredClone(current));
     }};
   vm.runInNewContext(script,context,{filename:path.join(web,'app.js')});await tick();
@@ -102,6 +103,23 @@ async function harness(initial=view()) {
     disabledActions(){return elements.filter(e=>e.dataset.action).every(e=>e.disabled);},
   };
 }
+
+test('completed third Task 1 round advances from historical replay to Task 2 without requiring Return live',async t=>{
+  const initial={...view({explain:true}),ended:true,done:true,allowed_kinds:['next','question','answer_seen']};
+  initial.flow.round_index=3;initial.flow.round_count=3;
+  const h=await harness(initial);t.after(()=>h.cleanup());
+  h.click('previousFrame');h.requests[0].resolve(response(history()));await tick();
+  assert.equal(h.document.body.dataset.replay,'true');
+  assert.equal(h.ids.get('nextButton').disabled,false);
+  assert.equal(h.ids.get('nextButton').textContent,'进入 Task 2');
+  h.click('nextButton');await tick();
+  assert.equal(h.posts.length,1);assert.equal(h.posts[0].kind,'next');
+  assert.equal(h.posts[0].expected_version,initial.version);
+  assert.equal(h.document.body.dataset.stage,'task2');
+  assert.equal(h.document.body.dataset.frame,'0');
+  assert.equal(h.document.body.dataset.replay,'false');
+  assert.equal(h.document.body.dataset.explanationAllowed,'false');
+});
 
 test('pending history immediately blocks keyboard and all command buttons; replay and live retain their rules',async t=>{
   const h=await harness();t.after(()=>h.cleanup());h.click('previousFrame');

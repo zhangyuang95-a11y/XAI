@@ -5,5 +5,5 @@ services:
     plan: free
     region: singapore
     buildCommand: python -m pip install -r requirements-render.txt
-    startCommand: python -m ui.development_preview_server --host 0.0.0.0 --port $PORT
-    healthCheckPath: /
+    startCommand: python -m ui.domain_hub_server --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health

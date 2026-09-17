@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Cooperative Pong · PolicyLens</title>
+  <link rel="stylesheet" href="/pong/assets/styles.css">
+</head>
+<body>
+<main>
+  <header>
+    <span class="eyebrow">Cooperative Pong · grid-three-small-two-large-v6-smooth</span>
+    <h1>合作接球</h1>
+    <p>30×18 格子像素场地，三个小球 A1、A2、A3 和两个合作大球 B1、B2 同时运动。机器人1由你控制，机器人2由系统控制。</p>
+  </header>
+
+  <section class="setup" id="setup">
+    <label>参与者 ID<input id="participant" value="local"></label>
+    <label>组别<select id="group"><option value="A">A 组（Task 1 后可回放问答）</option><option value="B">B 组（跳过回放）</option></select></label>
+    <label>实验协议<select id="protocol"><option value="coordination_explanation">协作解释</option><option value="rule_discovery">规则发现</option></select></label>
+      <p class="protocol-hint" id="protocolHint">协作球 B1、B2 需要两块球拍在同一时刻分别覆盖左右接触点。</p>
+    <button id="start">开始 Task 1</button>
+  </section>
+
+  <section class="layout" id="game" hidden>
+    <div>
+      <div class="stats">
+        <span>Task <b id="task">1</b></span><span>时间 <b id="time">0.0</b>s</span>
+        <span>漏接 <b id="missed">0</b></span><span>机会 <b id="opportunities">0</b></span>
+      </div>
+      <div class="court" id="court">
+        <div class="boundary"></div><div class="ball-layer" id="balls"></div>
+        <div class="paddle player" id="playerPaddle"><span>机器人1 · 你</span></div>
+        <div class="paddle ai" id="aiPaddle"><span>机器人2</span></div>
+      </div>
+      <div class="intent-bubble" id="intentBubble" hidden aria-live="polite"><span id="intentText"></span><small id="intentDistance"></small></div>
+      <div class="controls">
+        <button id="left">← 左</button><button id="pause">暂停</button><button id="right">右 →</button>
+        <button id="task2" disabled>进入 Task 2</button>
+      </div>
+      <p class="hint">按住 A/D 或左右方向键持续移动，松开后停止。浏览器失焦时会暂停。</p>
+      <div class="status" id="status">准备开始</div>
+    </div>
+
+    <aside id="review" hidden>
+      <h2>Task 1 回放</h2>
+      <p>A 组先从关键事件进入，也可以拖动到任意已记录帧，再针对 A1、A2、A3、B1、B2 提问。</p>
+      <div class="review-events" id="reviewEvents"><div class="review-events-empty">暂无关键事件</div></div>
+      <input id="timeline" type="range" min="0" max="0" value="0">
+      <div class="replay-meta">帧 <b id="replayFrame">0</b> · 时间 <b id="replayTime">0.0</b>s</div>
+      <div class="replay-actions"><button id="playReplay">播放</button><button id="prevFrame">上一帧</button><button id="nextFrame">下一帧</button></div>
+      <div class="replay-state" id="replayState"></div>
+      <label>提问对象<select id="ballSelect"><option value="">整帧</option><option>A1</option><option>A2</option><option>A3</option><option>B1</option><option>B2</option></select></label>
+      <div class="quick">
+        <button data-question="此时机器人2准备接哪个球？">此时机器人2准备接哪个球？</button>
+        <button data-question="为什么向这边移动？">为什么向这边移动？</button>
+        <button data-question="为什么没有接住这个球？">为什么没有接住这个球？</button>
+        <button data-question="如果我当时不移动，会发生什么？">如果我当时不移动，会发生什么？</button>
+      </div>
+      <textarea id="question" placeholder="输入问题"></textarea><button id="ask">提问</button>
+      <div class="answer" id="answer">选择一帧后再提问。</div>
+    </aside>
+  </section>
+</main>
+<script src="/pong/assets/app.js" defer></script>
+</body>
+</html>

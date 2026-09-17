@@ -69,6 +69,20 @@ def test_domain_hub_mounts_existing_warehouse_and_pong():
         assert b'"/warehouse/api/view"' in body
         status, _headers, body = request(port, "GET", "/warehouse/api/view", headers={"X-Warehouse-Page": "page-1"})
         assert status == 200 and json.loads(body)["domain_id"] == "warehouse"
+        command = json.dumps({"command": "start"}).encode()
+        status, _headers, body = request(
+            port,
+            "POST",
+            "/warehouse/api/study/command",
+            body=command,
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(command)),
+                "X-Warehouse-Page": "page-1",
+            },
+        )
+        assert status == 200 and json.loads(body)["accepted"] is True
+        assert sessions.state.command_requests == ["start"]
 
         status, _headers, body = request(port, "GET", "/pong/")
         assert status == 200 and "合作接球".encode() in body

@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 HUB_ASSETS = ROOT / "ui" / "domain_hub"
 PONG_ASSETS = ROOT / "domains" / "pong" / "web"
 MAX_PONG_BODY = 100_000
+MAX_WAREHOUSE_BODY = 100_000
 
 
 def _hub_asset(name: str) -> bytes:
@@ -183,7 +184,7 @@ def domain_hub_handler(warehouse_sessions: Any, pong: PongApplication, public_or
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 <= length <= warehouse.MAX_BODY:
+                if not 0 <= length <= MAX_WAREHOUSE_BODY:
                     raise ValueError("invalid_body_size")
                 payload = json.loads(self.rfile.read(length) or b"{}")
                 if not isinstance(payload, Mapping):

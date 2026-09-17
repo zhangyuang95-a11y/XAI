@@ -102,7 +102,7 @@
         </div>
         <div class="score-breakdown" id="scoreBreakdown"></div>
         <section class="live-explanation hidden" id="liveExplanationPanel" aria-live="polite">
-          <span class="eyebrow" data-i18n="askRobot2Title">Ask Robot 2</span>
+          <span class="eyebrow" data-i18n="askSystemTitle">System questions</span>
           <p data-i18n="liveExplanationHint">Ask about what Robot 2 just did. The task pauses while the answer is prepared.</p>
           <div class="preset-question-list" id="presetQuestions">
             <button type="button" data-question-kind="action" data-question-key="presetWhyAction" data-i18n="presetWhyAction">Why did Robot 2 do that?</button>
@@ -111,6 +111,7 @@
             <button type="button" data-question-kind="human_influence" data-question-key="presetHumanInfluence" data-i18n="presetHumanInfluence">Did my action affect Robot 2?</button>
             <button type="button" data-question-kind="goal" data-question-key="presetGoal" data-i18n="presetGoal">What is Robot 2 trying to do?</button>
             <button type="button" data-question-kind="energy" data-question-key="presetEnergy" data-i18n="presetEnergy">Does Robot 2 need to charge?</button>
+            <button class="hidden" id="chargerPenaltyQuestionButton" type="button" data-question-kind="charger_penalty" data-question-key="presetChargerPenalty">Why did I lose 50 points just now?</button>
           </div>
           <label class="field"><span data-i18n="question">Your question</span><textarea id="questionInput" rows="2" data-i18n-placeholder="questionPlaceholder" placeholder="Ask Robot 2 about the last few steps."></textarea></label>
           <button class="primary" id="askButton" type="button" data-i18n="ask">Ask Robot 2</button>

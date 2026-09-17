@@ -30,8 +30,8 @@ const COPY = {
     playDemo: "播放演示", pauseDemo: "暂停演示", beginTask1: "开始任务 1", endDemoEarly: "提前结束演示并开始任务 1", roundInstruction: "控制机器人 1，与机器人 2 协作配送",
     roundHint: "你和机器人 2 都只根据同一移动前状态独立选动作，两个动作随后同时执行。", up: "上", down: "下", left: "左", right: "右", wait: "等待", spaceKey: "空格",
     task1Complete: "任务 1 已完成",
-    askRobot2Title: "询问机器人2", liveExplanationHint: "询问机器人2刚才的行为；生成回答时任务会暂停。", question: "你的问题", questionPlaceholder: "询问机器人2最近几步的行为。", ask: "询问机器人2", answer: "机器人2", emptyExplanation: "暂时无法生成可靠回答，请重试。",
-    presetWhyAction: "机器人2刚才为什么这样做？", presetWhyWait: "机器人2为什么等待？", presetCollision: "我们刚才为什么碰撞？", presetHumanInfluence: "我的动作影响机器人2了吗？", presetGoal: "机器人2当前想做什么？", presetEnergy: "机器人2需要充电吗？",
+    askRobot2Title: "询问机器人2", askSystemTitle: "系统问答", liveExplanationHint: "询问机器人2刚才的行为；生成回答时任务会暂停。", question: "你的问题", questionPlaceholder: "询问机器人2最近几步的行为。", ask: "询问机器人2", answer: "机器人2", emptyExplanation: "暂时无法生成可靠回答，请重试。",
+    presetWhyAction: "机器人2刚才为什么这样做？", presetWhyWait: "机器人2为什么等待？", presetCollision: "我们刚才为什么碰撞？", presetHumanInfluence: "我的动作影响机器人2了吗？", presetGoal: "机器人2当前想做什么？", presetEnergy: "机器人2需要充电吗？", presetChargerPenalty: "刚才为什么扣了50分？",
     surveyTitle: "结束问卷", surveyHint: "请对以下陈述按 1（非常不同意）到 5（非常同意）评分。", comment: "可选意见", submitSurvey: "提交问卷",
     complete: "实验完成", saved: "记录已保存。", task1Score: "任务 1 得分", task2Score: "任务 2 得分", scoreDelta: "得分变化", restart: "开始新的参与者",
     interrupted: "本轮已中断", interruptedHint: "此实验已在另一页面继续，或服务恢复后旧运行被放弃。请重新开始。", desktopRequired: "请使用宽度至少 1024 像素的桌面或笔记本电脑。",
@@ -55,8 +55,8 @@ const COPY = {
     playDemo: "Play demonstration", pauseDemo: "Pause demonstration", beginTask1: "Begin Task 1", endDemoEarly: "Finish demo early and begin Task 1", roundInstruction: "Control robot 1 and collaborate with robot 2",
     roundHint: "You and robot 2 choose independently from the same pre-move state; both actions then execute simultaneously.", up: "Up", down: "Down", left: "Left", right: "Right", wait: "Wait", spaceKey: "Space",
     task1Complete: "Task 1 complete",
-    askRobot2Title: "Ask Robot 2", liveExplanationHint: "Ask about what Robot 2 just did. The task pauses while the answer is prepared.", question: "Your question", questionPlaceholder: "Ask Robot 2 about the last few steps.", ask: "Ask Robot 2", answer: "Robot 2", emptyExplanation: "No grounded answer was available. Please try again.",
-    presetWhyAction: "Why did Robot 2 do that?", presetWhyWait: "Why did Robot 2 wait?", presetCollision: "Why did we just collide?", presetHumanInfluence: "Did my action affect Robot 2?", presetGoal: "What is Robot 2 trying to do?", presetEnergy: "Does Robot 2 need to charge?",
+    askRobot2Title: "Ask Robot 2", askSystemTitle: "System questions", liveExplanationHint: "Ask about what Robot 2 just did. The task pauses while the answer is prepared.", question: "Your question", questionPlaceholder: "Ask Robot 2 about the last few steps.", ask: "Ask Robot 2", answer: "Robot 2", emptyExplanation: "No grounded answer was available. Please try again.",
+    presetWhyAction: "Why did Robot 2 do that?", presetWhyWait: "Why did Robot 2 wait?", presetCollision: "Why did we just collide?", presetHumanInfluence: "Did my action affect Robot 2?", presetGoal: "What is Robot 2 trying to do?", presetEnergy: "Does Robot 2 need to charge?", presetChargerPenalty: "Why did I lose 50 points just now?",
     surveyTitle: "Final survey", surveyHint: "Rate each statement from 1 (strongly disagree) to 5 (strongly agree).", comment: "Optional comment", submitSurvey: "Submit survey",
     complete: "Study complete", saved: "The record has been saved.", task1Score: "Task 1 score", task2Score: "Task 2 score", scoreDelta: "Score change", restart: "Start a new participant",
     interrupted: "Run interrupted", interruptedHint: "This run continued in another page or was abandoned during recovery. Please restart.", desktopRequired: "Use a desktop or laptop at least 1024 pixels wide.",
@@ -593,6 +593,18 @@ function renderStage() {
     && study.live_explanation_available
   );
   $("liveExplanationPanel").classList.toggle("hidden", !liveExplanationVisible);
+  const penaltyQuestion = $("chargerPenaltyQuestionButton");
+  const latestPenalty = study.latest_charger_penalty;
+  const penaltyVisible = Boolean(liveExplanationVisible && latestPenalty?.event_id);
+  penaltyQuestion.classList.toggle("hidden", !penaltyVisible);
+  if (penaltyVisible) {
+    penaltyQuestion.textContent = `${tr("presetChargerPenalty")} · ${tr("step")} ${latestPenalty.frame}`;
+    penaltyQuestion.dataset.eventId = String(latestPenalty.event_id);
+    penaltyQuestion.dataset.penaltyFrame = String(latestPenalty.frame);
+  } else {
+    penaltyQuestion.dataset.eventId = "";
+    penaltyQuestion.dataset.penaltyFrame = "";
+  }
   if (stage === "task1_complete") {
     const summary = study.round_summaries?.task1;
     $("controlTask1Score").textContent = Math.round(summary?.score ?? 0);
@@ -736,7 +748,7 @@ $("beginTask1Button").addEventListener("click", async () => {
 });
 $("beginTask2Button").addEventListener("click", () => command("begin_task2"));
 document.querySelectorAll("#actionPad button").forEach((button) => button.addEventListener("click", () => command("human_action", { action: button.dataset.action })));
-async function submitExplanationQuestion(question, questionKind = null) {
+async function submitExplanationQuestion(question, questionKind = null, anchor = null) {
   const prompt = String(question || "").trim();
   if (!prompt || state.busy || !allowed("ask_explanation")) return;
   $("questionInput").value = prompt;
@@ -751,14 +763,25 @@ async function submitExplanationQuestion(question, questionKind = null) {
     target_agent: "robot_2",
   };
   if (questionKind) payload.question_kind = questionKind;
+  if (anchor?.event_id) payload.penalty_event_id = String(anchor.event_id);
+  if (anchor?.frame != null) payload.penalty_frame = Number(anchor.frame);
   await command("ask_explanation", payload);
   clearTimeout(state.questionTimer);
   $("questionStatus").classList.add("hidden");
 }
 document.querySelectorAll("#presetQuestions button").forEach((button) => {
+  if (button.id === "chargerPenaltyQuestionButton") return;
   button.addEventListener("click", () => {
     submitExplanationQuestion(tr(button.dataset.questionKey), button.dataset.questionKind);
   });
+});
+$("chargerPenaltyQuestionButton").addEventListener("click", () => {
+  const penalty = state.view?.study?.latest_charger_penalty;
+  submitExplanationQuestion(
+    tr("presetChargerPenalty"),
+    "charger_penalty",
+    penalty,
+  );
 });
 $("askButton").addEventListener("click", () => {
   submitExplanationQuestion($("questionInput").value);

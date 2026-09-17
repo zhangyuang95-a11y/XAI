@@ -561,3 +561,56 @@ def test_group_a_receives_a_per_step_robot_2_bubble_only_in_task1() -> None:
 
     state.stage = "task2"
     assert state.view()["study"]["action_bubble"] is None
+
+
+def test_charger_penalty_question_remains_bound_after_five_steps(monkeypatch) -> None:
+    state = DevelopmentPreviewState()
+    _start_task1(state, condition="explanation", locale="en")
+    environment = WarehouseMultiAgentEnv(collaborative_study_config())
+    environment.reset(seed=901)
+    scenario = environment.get_state()
+    scenario.by_id("robot_1").position = environment.layout.charger_position
+    scenario.by_id("robot_1").battery = 53.0
+    scenario.by_id("robot_2").position = (4, 2)
+    scenario.by_id("robot_2").battery = 19.0
+    environment.set_state(scenario)
+    state.environment = environment
+    state.round_frame = _initial_frame(environment)
+    state.round_frames = [state.round_frame]
+
+    monkeypatch.setattr(
+        preview_server,
+        "_neural_actions",
+        lambda *_args, **_kwargs: (
+            {"robot_1": "WAIT", "robot_2": "WAIT"},
+            {},
+            {
+                "policy_actions": {"robot_1": "WAIT", "robot_2": "WAIT"},
+                "selected_actions": {"robot_1": "WAIT", "robot_2": "WAIT"},
+                "selection_changed_policy": False,
+            },
+        ),
+    )
+    state._advance_round("WAIT")
+    penalty = state.view()["study"]["latest_charger_penalty"]
+    assert penalty and penalty["event_id"]
+
+    for _ in range(6):
+        state._advance_round("WAIT")
+
+    result = state.command(
+        _envelope(
+            state,
+            "ask_explanation",
+            target_agent="robot_2",
+            question="Why did I lose 50 points just now?",
+            question_kind="charger_penalty",
+            penalty_event_id=penalty["event_id"],
+            penalty_frame=penalty["frame"],
+        )
+    )
+    answer = result["view"]["last_explanation"]["answer_en"]
+    assert "63%" in answer
+    assert "19%" in answer
+    assert "−50" in answer
+    assert result["view"]["last_explanation"]["structured_evidence"]["penalty_event_id"] == penalty["event_id"]

@@ -397,6 +397,10 @@ def test_frontend_uses_one_command_per_action_and_current_controls() -> None:
     assert 'data-question-key="presetWhyWait"' in html
     assert 'data-question-key="presetHumanInfluence"' in html
     assert 'data-question-key="presetGoal"' in html
+    assert 'id="chargerPenaltyQuestionButton"' in html
+    assert 'data-question-key="presetChargerPenalty"' in html
+    assert 'askSystemTitle' in html
+    assert 'penalty_event_id' in source
     assert 'submitExplanationQuestion(tr(button.dataset.questionKey), button.dataset.questionKind)' in source
     assert "locale: DEFAULT_LOCALE" in source
     assert 'command("timeline_select"' not in source

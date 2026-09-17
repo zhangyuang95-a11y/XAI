@@ -355,6 +355,10 @@ class DevelopmentPreviewState:
         self.task2: dict[str, Any] | None = None
         self.last_explanation: dict[str, Any] | None = None
         self.action_bubble: dict[str, Any] | None = None
+        # The latest penalty is a durable, frame-bound UI affordance.  It is
+        # kept independently from the five-step explanation context so a
+        # participant can ask about a penalty several steps after it fired.
+        self.latest_charger_penalty: dict[str, Any] | None = None
         self.explanation_count = 0
         self.round_frames: list[PreviewFrame] = [self.round_frame]
         self.question_log: list[dict[str, Any]] = []
@@ -445,6 +449,7 @@ class DevelopmentPreviewState:
         self.stage = stage
         self.last_explanation = None
         self.action_bubble = None
+        self.latest_charger_penalty = None
         self.pending_question_sequences = []
 
     @staticmethod
@@ -509,6 +514,13 @@ class DevelopmentPreviewState:
         )
         after = self.environment.get_state()
         events = _transition_events(info)
+        for event in events:
+            if str(event.get("event", "")) == "shared_charger_occupancy":
+                self.latest_charger_penalty = {
+                    **deepcopy(dict(event)),
+                    "event_id": str(event.get("event_id", "")),
+                    "frame": int(after.frame),
+                }
         transition_payload = _transition_payload(
             before,
             after,
@@ -656,6 +668,11 @@ class DevelopmentPreviewState:
                 ),
                 "action_bubble": (
                     self._localized_action_bubble()
+                    if self.stage == "task1" and self.condition == "explanation"
+                    else None
+                ),
+                "latest_charger_penalty": (
+                    deepcopy(self.latest_charger_penalty)
                     if self.stage == "task1" and self.condition == "explanation"
                     else None
                 ),
@@ -844,8 +861,16 @@ class DevelopmentPreviewState:
         *,
         question: str,
         focus: str,
+        penalty_event_id: str | None = None,
+        penalty_frame: int | None = None,
     ) -> None:
-        """Answer from at most five completed Task 1 transitions, never the future."""
+        """Answer from completed Task 1 transitions, never from the future.
+
+        Ordinary questions intentionally use a compact recent context.  A
+        charger-penalty question is different: it is anchored to the exact
+        durable penalty event selected by the UI, so it remains answerable
+        after more than five subsequent steps.
+        """
 
         if self.stage != "task1" or self.condition != "explanation":
             raise RuntimeError("Live questions are available only to Group A during Task 1.")
@@ -883,18 +908,20 @@ class DevelopmentPreviewState:
                 None,
             )
         elif focus == "charger_penalty":
-            anchor = next(
-                (
-                    item
-                    for item in reversed(recent)
-                    if any(
-                        str(event.get("event", "")) == "shared_charger_occupancy"
-                        for event in item[1].info.get("rule_events", ())
-                        if isinstance(event, Mapping)
-                    )
-                ),
-                None,
-            )
+            penalty_matches: list[tuple[int, PreviewFrame, Mapping[str, Any]]] = []
+            for item in completed:
+                for event in item[1].info.get("rule_events", ()):
+                    if not isinstance(event, Mapping):
+                        continue
+                    if str(event.get("event", "")) != "shared_charger_occupancy":
+                        continue
+                    if penalty_event_id and str(event.get("event_id", "")) != str(penalty_event_id):
+                        continue
+                    if penalty_frame is not None and int(item[1].state.frame) != int(penalty_frame):
+                        continue
+                    penalty_matches.append((item[0], item[1], event))
+            if penalty_matches:
+                anchor = (penalty_matches[-1][0], penalty_matches[-1][1])
 
         current_frame = int(self.round_frame.state.frame)
         if anchor is None:
@@ -905,8 +932,12 @@ class DevelopmentPreviewState:
                 answer_en = "No collision occurred in the last five steps."
                 answer_zh = "最近五步内没有发生碰撞。"
             elif focus == "charger_penalty":
-                answer_en = "No shared-charger penalty occurred in the last five steps."
-                answer_zh = "最近五步内没有触发共享充电桩处罚。"
+                if penalty_event_id or penalty_frame is not None:
+                    answer_en = "That shared-charger penalty event is not available in this Task 1 run."
+                    answer_zh = "这次任务1中没有找到所选的共享充电桩处罚事件。"
+                else:
+                    answer_en = "No shared-charger penalty has been recorded in this Task 1 run."
+                    answer_zh = "本次任务1还没有记录共享充电桩处罚。"
             elif focus == "wait":
                 answer_en = "Robot 2 did not wait in the last five steps."
                 answer_zh = "机器人2在最近五步内没有等待。"
@@ -917,7 +948,11 @@ class DevelopmentPreviewState:
                 "event_type": focus,
                 "anchor_frame": anchor_frame,
                 "context_frames": context_frames,
-                "reason_code": "NO_MATCHING_RECENT_EVENT",
+                "reason_code": (
+                    "NO_MATCHING_PENALTY_EVENT"
+                    if focus == "charger_penalty"
+                    else "NO_MATCHING_RECENT_EVENT"
+                ),
                 "fact_valid": True,
             }
             recent_collision = False
@@ -1002,6 +1037,7 @@ class DevelopmentPreviewState:
             }
             if focus == "charger_penalty":
                 event = penalty_events[-1] if penalty_events else {}
+                evidence["penalty_event_id"] = str(event.get("event_id", ""))
                 responsible = str(event.get("responsible_agent_id", "robot_2"))
                 occupant_before = float(event.get("occupant_battery_before", 0.0))
                 occupant_after = float(event.get("occupant_battery_after", occupant_before))
@@ -1134,6 +1170,11 @@ class DevelopmentPreviewState:
                 "question_sequence": sequence,
                 "question": question,
                 "question_focus": focus,
+                "penalty_event_id": (
+                    evidence.get("penalty_event_id")
+                    if focus == "charger_penalty"
+                    else None
+                ),
                 "target_agent": "robot_2",
                 "current_frame": current_frame,
                 "anchor_frame": anchor_frame,
@@ -1174,6 +1215,7 @@ class DevelopmentPreviewState:
             self.task2 = None
             self.last_explanation = None
             self.action_bubble = None
+            self.latest_charger_penalty = None
             self.explanation_count = 0
             self.question_log = []
             self.pending_question_sequences = []
@@ -1238,9 +1280,17 @@ class DevelopmentPreviewState:
             if requested_focus and requested_focus not in allowed_focuses:
                 raise ValueError("Unknown explanation question kind.")
             focus = requested_focus or _study_question_focus(question)
+            penalty_event_id = payload.get("penalty_event_id", payload.get("event_id"))
+            penalty_frame_value = payload.get("penalty_frame", payload.get("anchor_frame"))
+            try:
+                penalty_frame = int(penalty_frame_value) if penalty_frame_value is not None else None
+            except (TypeError, ValueError):
+                raise ValueError("Invalid penalty frame.") from None
             self._ask_live_task1(
                 question=question,
                 focus=focus,
+                penalty_event_id=(str(penalty_event_id) if penalty_event_id else None),
+                penalty_frame=penalty_frame,
             )
         elif command == "submit_survey" and self.stage == "survey":
             self.stage = "completed"

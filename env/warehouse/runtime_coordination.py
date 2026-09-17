@@ -643,6 +643,13 @@ def select_human_ai_action(
     teammate_route_clearance_required = bool(
         necessary_teammate_route_clearance(environment, state, ai)
     )
+    # A stored yielding plan is evidence about a previous frozen state.  It
+    # is only binding while the same physical clearance is still required;
+    # otherwise it must not outrank an executable delivery route.
+    plan_requires_wait = bool(
+        ai_is_planned_waiter
+        and str(active_plan.get("phase", "")) == "PASS_THROUGH"
+    )
     physical_clearance_required = bool(
         ai_is_planned_clearer
         or (
@@ -757,21 +764,36 @@ def select_human_ai_action(
         score = [
             energy_violation,
             recent_unproductive_charger_reentry,
-            int(
-                ai_is_planned_waiter
-                and action != "WAIT"
-                and not physical_clearance_required
-            ),
+            int(plan_requires_wait and action != "WAIT"),
             int(
                 ai_is_planned_clearer
                 and not satisfies_planned_clearance
             ),
-            int(physical_clearance_required and action == "WAIT"),
             # A collision against every legal participant action is a hard
             # constraint.  A collision against only some possible actions is
             # uncertainty, not a reason to make Robot 2 wait by default.
             int(bool(conflicts) and len(conflicts) == len(participant_actions)),
-            int(physical_clearance_required and bool(conflicts)),
+            # A physical-clearance plan only blocks actions that are actually
+            # unsafe against every legal participant action.  A partial,
+            # uncertain stand-off is kept as evidence and a small tie-breaker
+            # below; it must not turn Robot 2 into a permanent waiter.
+            int(
+                physical_clearance_required
+                and bool(conflicts)
+            ),
+            # A confirmed route-clearance or handoff has priority over a
+            # speculative delivery move.  This is deliberately narrower than
+            # the old blanket planned-wait rule: stale plans no longer block
+            # progress, while a live physical clearance still gets one step.
+            int(
+                physical_clearance_required
+                and (
+                    participant_standoff_required
+                    or teammate_route_clearance_required
+                    or charger_handoff_action is not None
+                )
+                and action == "WAIT"
+            ),
             int(ai.carrying_task_id is not None and after_distance > before_distance),
             int(after_distance > before_distance),
             nonprogress_move,
@@ -781,7 +803,7 @@ def select_human_ai_action(
                     ai.position == environment.layout.charger_position
                     and ai.battery < 100.0
                 )
-                and not ai_is_planned_waiter
+                and not plan_requires_wait
                 and (
                     ai.avoidable_wait_streak >= 2
                     or ai.last_executed_action == "WAIT"
@@ -850,6 +872,7 @@ def select_human_ai_action(
         "participant_standoff_required": participant_standoff_required,
         "teammate_route_clearance_required": teammate_route_clearance_required,
         "ai_is_planned_waiter": ai_is_planned_waiter,
+        "plan_requires_wait": plan_requires_wait,
         "ai_is_planned_clearer": ai_is_planned_clearer,
         "charger_handoff_action": charger_handoff_action,
         "recent_goal_event": recent_goal_event,

@@ -9,6 +9,9 @@ let replayFrame = null;
 let replayLocked = false;
 let reviewRequestId = 0;
 let refreshInFlight = false;
+let latestFrame = null;
+let latestFrameReceivedAt = 0;
+let animationRequest = null;
 const heldKeys = new Set();
 
 async function request(path, options = {}) {
@@ -32,7 +35,14 @@ function updateKeyboardAction() {
   setAction('stay');
 }
 
-function drawCourt(frame) {
+function visualSeconds() {
+  // Server snapshots correct the picture; rAF fills the gaps without turning
+  // network cadence into visible movement cadence. The short cap prevents a
+  // stalled request from showing a fictitious future catch or bounce.
+  return Math.min(.07, Math.max(0, (performance.now() - latestFrameReceivedAt) / 1000));
+}
+
+function drawCourt(frame, { extrapolate = false } = {}) {
   if (!frame) return;
   const cols = Math.max(1, Number(view?.grid_columns || 30));
   const rows = Math.max(1, Number(view?.grid_rows || 18));
@@ -46,10 +56,11 @@ function drawCourt(frame) {
   $('court').style.setProperty('--paddle-height', `${(paddleHeight / rows) * 100}%`);
   const playerCol = Number(frame.player_col ?? frame.player_x ?? cols / 2);
   const aiCol = Number(frame.ai_col ?? frame.ai_x ?? cols / 2);
+  const paddleTop = (paddleY / rows) * 100;
   $('playerPaddle').style.left = `${(playerCol / cols) * 100}%`;
+  $('playerPaddle').style.top = `${paddleTop}%`;
   $('aiPaddle').style.left = `${(aiCol / cols) * 100}%`;
-  $('playerPaddle').style.top = `${(paddleY / rows) * 100}%`;
-  $('aiPaddle').style.top = `${(paddleY / rows) * 100}%`;
+  $('aiPaddle').style.top = `${paddleTop}%`;
   const layer = $('balls');
   const present = new Set();
   (frame.balls || []).forEach(ball => {
@@ -60,23 +71,14 @@ function drawCourt(frame) {
       node.dataset.ballId = ball.ball_id;
       layer.appendChild(node);
     }
-    node.className = `ball ${ball.kind === 'large' ? 'large' : 'small'}`;
+    const assigned = view?.group === 'A' && view?.task === 1 && view?.intent_bubble?.target_ball_id === ball.ball_id;
+    node.className = `ball ${ball.kind === 'large' ? 'large' : 'small'}${assigned ? ' assigned' : ''}`;
     node.textContent = ball.ball_id;
-    const gridX = Number(ball.grid_x ?? ball.x ?? 0);
-    const gridY = Number(ball.grid_y ?? ball.y ?? 0);
-    // Physics remains authoritative on integer cells.  Between two cell
-    // updates, render the recorded previous/current anchors at the engine's
-    // motion phase so a ball moves through the cell rather than jumping after
-    // its 0.4-second grid interval.
-    const previousX = Number(ball.previous_grid_x ?? gridX);
-    const previousY = Number(ball.previous_grid_y ?? gridY);
-    const interval = Math.max(1, Number(view?.ball_step_interval_updates || 1));
-    const phase = Math.max(0, Math.min(interval, Number(ball.motion_phase || 0)));
-    const progress = phase / interval;
-    const x = previousX + (gridX - previousX) * progress;
-    const y = previousY + (gridY - previousY) * progress;
     const widthCells = Math.max(1, Number(ball.width_cells || (ball.kind === 'large' ? 2 : 1)));
     const heightCells = Math.max(1, Number(ball.height_cells || (ball.kind === 'large' ? 2 : 1)));
+    const elapsed = extrapolate ? visualSeconds() : 0;
+    const x = Math.max(0, Math.min(cols - widthCells, Number(ball.x ?? 0) + Number(ball.vx ?? 0) * elapsed));
+    const y = Math.max(0, Math.min(rows - heightCells, Number(ball.y ?? 0) + Number(ball.vy ?? 0) * elapsed));
     node.style.left = `${(x / cols) * 100}%`;
     node.style.top = `${(y / rows) * 100}%`;
     node.style.setProperty('--ball-width', `${(widthCells / cols) * 100}%`);
@@ -87,6 +89,13 @@ function drawCourt(frame) {
   });
 }
 
+function animateCourt() {
+  if (latestFrame && !replayLocked && view && !view.frame?.terminal) {
+    drawCourt(latestFrame, { extrapolate: true });
+  }
+  animationRequest = requestAnimationFrame(animateCourt);
+}
+
 function draw(next) {
   view = next;
   if (!view || !view.started) return;
@@ -95,7 +104,9 @@ function draw(next) {
   $('time').textContent = Number(frame.time_seconds || 0).toFixed(1);
   $('missed').textContent = frame.missed_balls;
   $('opportunities').textContent = frame.total_opportunities;
-  drawCourt(frame);
+  latestFrame = frame;
+  latestFrameReceivedAt = performance.now();
+  drawCourt(frame, { extrapolate: true });
   const bubble = $('intentBubble');
   const showBubble = view.group === 'A' && view.task === 1 && !frame.terminal && view.intent_bubble;
   bubble.hidden = !showBubble;
@@ -303,7 +314,9 @@ $('ask').onclick = async () => {
   $('answer').textContent = result.answer || '当前阶段不提供解释。';
 };
 
-// Poll at the 20 Hz physics rate.  The in-flight guard avoids queued requests
-// on slower local machines; DOM interpolation uses each returned micro-phase.
+// Snapshots are deliberately less frequent than rendering. Motion stays
+// smooth through requestAnimationFrame and is corrected by each authoritative
+// snapshot; the in-flight guard avoids request queues on slower machines.
 setInterval(() => { if (!document.hidden) void refresh(); }, 50);
+if (!animationRequest) animationRequest = requestAnimationFrame(animateCourt);
 void refresh();

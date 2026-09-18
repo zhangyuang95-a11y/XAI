@@ -39,6 +39,7 @@ class PongStudySession:
     _bubble_signature: tuple[Any, ...] | None = field(default=None, init=False)
     _bubble_last_update_time: float = field(default=-1.0, init=False)
     _last_target_ball_id: str | None = field(default=None, init=False)
+    _last_conflict_signature: tuple[str, ...] = field(default=(), init=False)
     _review_event_ids: set[str] = field(default_factory=set, init=False)
 
     def __post_init__(self) -> None:
@@ -193,6 +194,7 @@ class PongStudySession:
         self.review_events.clear()
         self._review_event_ids.clear()
         self._last_target_ball_id = None
+        self._last_conflict_signature = ()
         self.frame_history = [self._public_frame(self.environment.frame())]
         self.snapshot_history = {0: deepcopy(self.environment.snapshot())}
         self.current_decision = self.controller.choose(self.environment.frame())
@@ -248,7 +250,7 @@ class PongStudySession:
             "paddle_width_cells": self.config.paddle_width,
             "paddle_height_cells": self.config.paddle_height_cells,
             "fixed_dt": self.config.fixed_dt,
-            "ball_step_interval_updates": self.config.ball_step_interval_updates,
+            "continuous_motion": True,
             "run_id": self.run_id,
             "participant_id": self.participant_id,
             "group": self.group,
@@ -285,9 +287,9 @@ class PongStudySession:
     def _update_intent_bubble(self, decision: Any, frame: Any) -> None:
         """Keep a stable, human-readable intent summary for the live A view.
 
-        The controller can change its low-level direction at the 20 Hz physics rate.  The bubble
-        intentionally changes only when the target/intent changes or a coarse
-        distance bucket changes after a short dwell, so it remains readable.
+        The bubble is an assignment cue, not a live stopwatch. It changes when
+        the target, responsibility, readiness or feasibility changes; small
+        position changes do not replace the sentence every physics frame.
         """
         target_id = decision.target_ball_id
         distance = decision.distance_cells
@@ -299,6 +301,7 @@ class PongStudySession:
             decision.target_kind,
             decision.contact_side,
             bool(decision.requires_partner),
+            decision.commitment_state,
             action_kind,
             bucket,
         )
@@ -306,48 +309,27 @@ class PongStudySession:
         old = self._bubble_signature
         core_changed = old is None or signature[:-1] != old[:-1]
         bucket_changed = old is not None and signature[-1] != old[-1]
-        if old is not None and not core_changed and bucket_changed and now - self._bubble_last_update_time < 1.0:
-            # The wording remains readable, while the compact number below is
-            # still refreshed from the current independent grid calculation.
+        if old is not None and not core_changed and (
+            not bucket_changed or now - self._bubble_last_update_time < 0.75
+        ):
             assert self.intent_bubble is not None
-            self.intent_bubble["distance_cells"] = distance
-            self.intent_bubble["distance_label"] = _distance_label(distance)
-            self.intent_bubble["eta_updates"] = decision.eta_updates
-            self.intent_bubble["eta_seconds"] = _eta_seconds(decision.eta_updates, self.config)
-            self.intent_bubble["player_distance_cells"] = decision.player_distance_cells
-            self.intent_bubble["small_first_ball_id"] = decision.small_first_ball_id
-            self.intent_bubble["small_first_feasible"] = decision.small_first_feasible
-            self.intent_bubble["detail_text"] = _intent_details(decision, self.config)
-            self.intent_bubble["frame"] = int(frame.frame)
-            return
-        if old is not None and not core_changed and not bucket_changed:
-            assert self.intent_bubble is not None
-            self.intent_bubble["distance_cells"] = distance
-            self.intent_bubble["distance_label"] = _distance_label(distance)
-            self.intent_bubble["eta_updates"] = decision.eta_updates
-            self.intent_bubble["eta_seconds"] = _eta_seconds(decision.eta_updates, self.config)
-            self.intent_bubble["player_distance_cells"] = decision.player_distance_cells
-            self.intent_bubble["small_first_ball_id"] = decision.small_first_ball_id
-            self.intent_bubble["small_first_feasible"] = decision.small_first_feasible
-            self.intent_bubble["detail_text"] = _intent_details(decision, self.config)
-            self.intent_bubble["frame"] = int(frame.frame)
             return
         self._bubble_signature = signature
         self._bubble_last_update_time = now
         self.intent_bubble = {
             "frame": int(frame.frame),
-            "time_seconds": now,
             "intent_type": decision.intent_type,
             "target_ball_id": target_id,
             "target_kind": decision.target_kind,
             "contact_side": decision.contact_side,
             "distance_cells": distance,
             "player_distance_cells": decision.player_distance_cells,
-            "eta_updates": decision.eta_updates,
-            "eta_seconds": _eta_seconds(decision.eta_updates, self.config),
             "requires_partner": bool(decision.requires_partner),
             "action": decision.action,
             "opportunity_id": decision.opportunity_id,
+            "commitment_state": decision.commitment_state,
+            "player_closest_ball_id": decision.player_closest_ball_id,
+            "player_closest_distance_cells": decision.player_closest_distance_cells,
             "small_first_ball_id": decision.small_first_ball_id,
             "small_first_feasible": decision.small_first_feasible,
             "distance_label": _distance_label(distance),
@@ -367,13 +349,19 @@ class PongStudySession:
                     "label": _target_event_label(decision),
                 })
             self._last_target_ball_id = decision.target_ball_id
-        if decision.conflict_ball_ids:
+        conflict_signature = tuple(sorted(decision.conflict_ball_ids))
+        if conflict_signature and conflict_signature != self._last_conflict_signature:
             self._append_review_event({
-                "event_id": self._event_id(before.frame, "+".join(decision.conflict_ball_ids), "competing_opportunities"),
+                "event_id": (
+                    f"{self.run_id}:task{self.task}:"
+                    f"{decision.opportunity_id or 'no-opportunity'}:"
+                    f"{'+'.join(conflict_signature)}:competing_opportunities"
+                ),
                 "type": "competing_opportunities", "frame": before.frame,
                 "time_seconds": before.time_seconds, "ball_id": decision.target_ball_id,
-                "label": f"{', '.join(decision.conflict_ball_ids)} 的接球时间接近；机器人2选择了当前更紧急且可覆盖的目标。",
+                "label": f"{', '.join(conflict_signature)} 的接球时间接近；机器人2选择了当前更紧急且可覆盖的目标。",
             })
+        self._last_conflict_signature = conflict_signature
         for candidate in decision.candidates:
             if not candidate.get("viable") and not candidate.get("handoff"):
                 opportunity = str(candidate.get("opportunity_id") or candidate.get("ball_id"))
@@ -445,7 +433,7 @@ def _action_text(action: str) -> str:
     return {"left": "向左", "right": "向右", "stay": "停止移动"}.get(action, action)
 
 
-def _distance_bucket(distance: int | None) -> str:
+def _distance_bucket(distance: float | None) -> str:
     if distance is None:
         return "unknown"
     if distance <= 0:
@@ -457,45 +445,44 @@ def _distance_bucket(distance: int | None) -> str:
     return "6+"
 
 
-def _distance_label(distance: int | None) -> str:
+def _distance_label(distance: float | None) -> str:
     if distance is None:
         return ""
-    return f"距离 {distance} 格"
+    return f"距离约 {_cells(distance)} 格"
 
 
 def _intent_text(decision: Any, config: PongConfig) -> str:
     if decision.intent_type == "handoff" and decision.target_ball_id:
-        return f"机器人1已覆盖小球{decision.target_ball_id}的预计接球格；我继续查看其余来球。"
+        return f"你已守住小球{decision.target_ball_id}，我继续分担其余来球。"
     if decision.intent_type == "no_urgent":
-        return "当前没有我能及时承担的来球，我保持位置。"
+        return "当前没有我能及时承担的来球，我保持位置等待新的分工。"
     if decision.target_ball_id is None:
         return "当前没有需要接的球，我先停留观察。"
     kind = "合作大球" if decision.target_kind == "large" else "小球"
     target = f"{kind}{decision.target_ball_id}"
     if decision.requires_partner:
-        side = "左侧" if decision.contact_side == "left" else "右侧"
-        return f"我负责{target}的{side}接触点；机器人1需要同时覆盖另一侧。"
-    return f"我去接{target}。"
+        side = "左" if decision.contact_side == "left" else "右"
+        if decision.commitment_state == "waiting_for_large":
+            return f"我已守住{target}的{side}侧，会等这次接球结算；你需要覆盖另一侧。"
+        return f"我负责{target}的{side}侧；你需要同时覆盖另一侧。"
+    player_ball = decision.player_closest_ball_id
+    if player_ball and player_ball != decision.target_ball_id:
+        return f"我去接{target}；小球{player_ball}离你更近，建议你优先守它。"
+    return f"我去接{target}，因为它的接球位置离我更近。"
 
 
 def _intent_details(decision: Any, config: PongConfig) -> str:
-    """Current numbers shown under a stable intent sentence.
-
-    The target sentence changes only when the assignment changes.  This line
-    intentionally refreshes each fixed update, so it never claims an old
-    distance or arrival time after the paddles and balls have moved.
-    """
+    """Short action guidance; intentionally omits an always-changing clock."""
     if decision.target_ball_id is None:
         return ""
-    distance = "距离正在重新计算" if decision.distance_cells is None else f"我还差{decision.distance_cells}格"
-    eta = _eta_seconds(decision.eta_updates, config)
-    detail = f"{distance}；约{eta:.1f}秒后到接球线"
+    distance = "距离正在重新计算" if decision.distance_cells is None else f"我离接球位置约{_cells(decision.distance_cells)}格"
+    detail = distance
     if decision.requires_partner:
         if decision.player_distance_cells is not None:
-            detail += f"；机器人1距另一侧{decision.player_distance_cells}格"
+            detail += f"；你离另一侧约{_cells(decision.player_distance_cells)}格"
         if decision.small_first_ball_id and decision.small_first_feasible is not None:
             if decision.small_first_feasible:
-                detail += f"。先接小球{decision.small_first_ball_id}后仍赶得上"
+                detail += f"。先接小球{decision.small_first_ball_id}后仍赶得上这颗大球"
             else:
                 detail += f"。先接小球{decision.small_first_ball_id}会赶不上这颗大球"
         return detail + "。"
@@ -509,8 +496,8 @@ def _intent_details(decision: Any, config: PongConfig) -> str:
     return detail + "。"
 
 
-def _eta_seconds(updates: int | None, config: PongConfig) -> float:
-    return 0.0 if updates is None else max(0.0, float(updates) * config.fixed_dt)
+def _cells(distance: float) -> str:
+    return str(max(0, int(round(distance))))
 
 
 def _target_event_label(decision: Any) -> str:

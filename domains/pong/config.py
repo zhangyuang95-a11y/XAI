@@ -8,28 +8,27 @@ from typing import Any, Mapping
 
 @dataclass(frozen=True)
 class PongConfig:
-    """Versioned grid/continuous four-ball physics configuration."""
+    """Versioned grid/continuous five-ball physics configuration."""
 
-    version: str = "pong-grid-three-small-two-large-v6-smooth"
+    version: str = "pong-continuous-24x14-v7"
     domain_id: str = "pong"
     # Physics coordinates are grid columns/rows. Rendering uses the same
     # values, so a displayed cell and a collision cell cannot diverge.
-    width: float = 30.0
-    height: float = 18.0
-    # Row 15 is the catch line; rows 16 and 17 stay visibly empty below it.
-    paddle_y: float = 15.0
+    width: float = 24.0
+    height: float = 14.0
+    # The paddle occupies row 12 (one-based); the last two rows remain open.
+    paddle_y: float = 11.0
     paddle_width: float = 4.0
     paddle_height_cells: int = 1
     paddle_speed_per_second: float = 5.0
-    fixed_hz: int = 20
+    fixed_hz: int = 60
     duration_seconds: float = 90.0
     small_radius: float = 0.5
     large_radius: float = 1.5
-    # 2.5 cells per second at 20 Hz gives one integer-grid move every eight
-    # updates. The browser interpolates these authoritative cell changes.
-    # Positions are integer top-left cell anchors; movement phase is saved.
-    ball_speed_y_per_second: float = 2.5
-    ball_speed_x_per_second: float = 2.5
+    # Physics uses continuous grid coordinates. Cells define object size and
+    # the board only; neither balls nor paddles are quantized while moving.
+    ball_speed_y_per_second: float = 2.0
+    ball_speed_x_per_second: float = 2.0
     small_ball_width_cells: int = 1
     small_ball_height_cells: int = 1
     # A large ball occupies twice the side length of a small ball, not a
@@ -72,22 +71,6 @@ class PongConfig:
         return self.fixed_hz
 
     @property
-    def cell_dt(self) -> float:
-        return self.fixed_dt * self.ball_speed_y_per_second
-
-    @property
-    def ball_step_interval_updates(self) -> int:
-        """Number of logic updates between one grid-cell ball move."""
-        if self.ball_speed_y_per_second <= 0:
-            raise ValueError("ball_speed_y_per_second must be positive")
-        return int(round(self.fixed_hz / self.ball_speed_y_per_second))
-
-    @property
-    def paddle_step_interval_updates(self) -> int:
-        if self.paddle_speed_per_second <= 0:
-            raise ValueError("paddle_speed_per_second must be positive")
-        return int(round(self.fixed_hz / self.paddle_speed_per_second))
-
     def to_dict(self) -> dict[str, Any]:
         return asdict(self) | {
             "fixed_dt": self.fixed_dt,
@@ -96,9 +79,6 @@ class PongConfig:
             "grid_columns": self.grid_columns,
             "grid_rows": self.grid_rows,
             "logic_hz": self.logic_hz,
-            "cell_dt": self.cell_dt,
-            "ball_step_interval_updates": self.ball_step_interval_updates,
-            "paddle_step_interval_updates": self.paddle_step_interval_updates,
         }
 
     @classmethod
@@ -106,8 +86,11 @@ class PongConfig:
         values = dict(values)
         values.pop("fixed_dt", None)
         values.pop("max_frames", None)
+        # v6 snapshots exposed discrete-grid interpolation fields. They are
+        # derived implementation details and intentionally have no v7 input.
         values.pop("ball_step_interval_updates", None)
         values.pop("paddle_step_interval_updates", None)
+        values.pop("cell_dt", None)
         for key in ("ball_ids", "small_ball_ids", "large_ball_ids", "player_actions"):
             if isinstance(values.get(key), list):
                 values[key] = tuple(values[key])
@@ -146,10 +129,10 @@ class PongConfig:
             raise ValueError("paddles must occupy exactly one grid row")
         if not (0 < self.paddle_y < self.height):
             raise ValueError("paddle_y must be inside the board")
-        y_interval = self.fixed_hz / self.ball_speed_y_per_second
-        paddle_interval = self.fixed_hz / self.paddle_speed_per_second
-        if abs(y_interval - round(y_interval)) > 1e-6 or abs(paddle_interval - round(paddle_interval)) > 1e-6:
-            raise ValueError("ball and paddle speeds must produce integral grid movement intervals")
+        if self.ball_speed_x_per_second <= 0 or self.ball_speed_y_per_second <= 0:
+            raise ValueError("ball speeds must be positive")
+        if self.paddle_speed_per_second <= 0:
+            raise ValueError("paddle speed must be positive")
         if self.small_ball_width_cells != 1 or self.small_ball_height_cells != 1:
             raise ValueError("small balls must occupy one cell")
         if self.large_ball_width_cells != 2 or self.large_ball_height_cells != 2:

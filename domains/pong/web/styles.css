@@ -27,8 +27,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .layout { display: grid; grid-template-columns: minmax(520px, 1fr) 360px; gap: 18px; margin-top: 18px; }
 .stats { display: flex; gap: 22px; flex-wrap: wrap; margin-bottom: 12px; }
 .court {
-  --grid-columns: 30;
-  --grid-rows: 18;
+  --grid-columns: 24;
+  --grid-rows: 14;
   position: relative;
   aspect-ratio: var(--board-aspect, 30 / 18);
   background-color: #15213c;
@@ -42,28 +42,32 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .boundary { position: absolute; inset: 0; border: 2px solid #aeb9d1; pointer-events: none; }
 .paddle {
   position: absolute;
-  top: var(--paddle-top, 88.9%);
-  width: calc(var(--paddle-width, 13.33%) - 6px);
-  height: calc(var(--paddle-height, 5.56%) - 6px);
+  left: 0;
+  top: 0;
+  /* The outer rectangle is the physical collision rectangle.  Borders are
+     drawn inside it by box-sizing, so the sprite never becomes shorter than
+     the server-side 4 x 1 paddle. */
+  width: var(--paddle-width, 13.33%);
+  height: var(--paddle-height, 5.56%);
   border: 1px solid #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 3;
-  max-width: calc(100% - 6px);
+  max-width: 100%;
   overflow: hidden;
-  transition: left .08s linear;
-  margin: 3px;
+  will-change: left, top;
 }
 .paddle span { color: #fff; font-size: clamp(6px, 1.2vw, 11px); line-height: 1; white-space: nowrap; text-shadow: 1px 1px #18233e; pointer-events: none; }
 .player { background: #4f73e9; }
 .ai { background: #e75c3d; }
 .ball-layer { position: absolute; inset: 0; }
-.ball { position: absolute; display: flex; align-items: center; justify-content: center; width: var(--ball-width, 3.33%); height: var(--ball-height, 5.56%); background: #e9f2ff; border: 2px solid #fff; color: #15213c; font: 700 clamp(6px, 1.1vw, 10px) "Courier New", monospace; z-index: 2; transition: left .07s linear, top .07s linear; will-change: left, top; }
-/* A small-ball sprite sits inside its one authoritative cell.  Its grid anchor
-   remains the upper-left occupied cell supplied by the physics engine. */
-.ball.small { margin: 3px; width: calc(var(--ball-width, 3.33%) - 6px); height: calc(var(--ball-height, 5.56%) - 6px); border-width: 1px; }
+.ball { position: absolute; left: 0; top: 0; display: flex; align-items: center; justify-content: center; width: var(--ball-width, 3.33%); height: var(--ball-height, 5.56%); background: #e9f2ff; border: 2px solid #fff; color: #15213c; font: 700 clamp(6px, 1.1vw, 10px) "Courier New", monospace; z-index: 2; will-change: left, top; }
+/* The outer sprite rectangle exactly matches the authoritative 1 x 1 or 2 x 2
+   grid geometry.  Its border is included inside that rectangle. */
+.ball.small { border-width: 1px; }
 .ball.large { background: #ffd33d; border: 3px solid #fff; }
+.ball.assigned { outline: 3px solid #ff8860; outline-offset: 2px; }
 .ball.large::before, .ball.large::after { content: ''; position: absolute; bottom: 1px; width: 18%; min-width: 4px; height: 4px; background: #ff8b56; border: 1px solid #fff; }
 .ball.large::before { left: 0; }
 .ball.large::after { right: 0; }

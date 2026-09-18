@@ -22,25 +22,28 @@ class ActionEvidence:
     controller_source: str
     controller_version: str
     intent_type: str
-    ai_target_x: int | None
+    ai_target_x: float | None
     ai_target_ball_id: str | None
     ai_target_kind: str | None
     ai_contact_side: str | None
-    distance_cells: int | None
-    player_distance_cells: int | None
+    distance_cells: float | None
+    player_distance_cells: float | None
     eta_updates: int | None
-    step_seconds: float
+    time_until_contact: float | None
     requires_partner: bool
     opportunity_id: str | None
+    commitment_state: str
+    player_closest_ball_id: str | None
+    player_closest_distance_cells: float | None
     small_first_ball_id: str | None
     small_first_feasible: bool | None
     reason: str
     candidates: tuple[dict[str, Any], ...]
     conflict_ball_ids: tuple[str, ...]
-    before_player_x: int
-    before_ai_x: int
-    after_player_x: int
-    after_ai_x: int
+    before_player_x: float
+    before_ai_x: float
+    after_player_x: float
+    after_ai_x: float
     balls: tuple[dict[str, Any], ...]
     events: tuple[dict[str, Any], ...]
 
@@ -49,7 +52,7 @@ class ActionEvidence:
         cls, transition: PongTransition, decision: ControllerDecision, *,
         study_protocol: str = "coordination_explanation",
         controller_source: str = "rule_demo",
-        controller_version: str = "rule-demo-grid-three-small-two-large-v6-smooth",
+        controller_version: str = "rule-demo-continuous-24x14-v7",
     ) -> "ActionEvidence":
         before, after = transition.before, transition.after
         return cls(
@@ -62,9 +65,12 @@ class ActionEvidence:
             ai_contact_side=decision.contact_side, distance_cells=decision.distance_cells,
             player_distance_cells=decision.player_distance_cells,
             eta_updates=decision.eta_updates,
-            step_seconds=max(0.0, float(after.time_seconds - before.time_seconds)),
+            time_until_contact=decision.time_until_contact,
             requires_partner=decision.requires_partner,
             opportunity_id=decision.opportunity_id,
+            commitment_state=decision.commitment_state,
+            player_closest_ball_id=decision.player_closest_ball_id,
+            player_closest_distance_cells=decision.player_closest_distance_cells,
             small_first_ball_id=decision.small_first_ball_id,
             small_first_feasible=decision.small_first_feasible, reason=decision.reason,
             candidates=tuple(dict(item) for item in decision.candidates),
@@ -102,28 +108,28 @@ class ExplanationEngine:
         if encounter is not None:
             label = _ball_label(encounter.get("ball_id"), encounter.get("ball_kind"))
             if encounter.get("outcome") == "caught":
-                return f"第{evidence.frame}帧，{label}的实际接球格被覆盖，因此这次接住了。"
+                return f"{label}的实际接球格被覆盖，因此这次接住了。"
             penalty = 3 if encounter.get("ball_kind") == "large" else 1
-            return f"第{evidence.frame}帧，{label}的实际接球格没有被完整覆盖，因此这次漏接，计为{penalty}次漏接。"
+            return f"{label}的实际接球格没有被完整覆盖，因此这次漏接，计为{penalty}次漏接。"
         if evidence.intent_type == "handoff" and target:
-            return f"第{evidence.frame}帧，机器人1已经覆盖{_ball_label(target, evidence.ai_target_kind)}的预计接球格；机器人2没有把它当成唯一目标，继续检查其余来球。"
+            return f"机器人1已经覆盖{_ball_label(target, evidence.ai_target_kind)}的预计接球格；机器人2没有把它当成唯一目标，继续检查其余来球。"
         if evidence.intent_type == "no_urgent":
-            return f"第{evidence.frame}帧，当前没有机器人2能在预计时间内承担的来球，因此它保持位置。"
+            return "当前没有机器人2能在预计时间内承担的来球，因此它保持位置。"
         if target:
             label = _ball_label(target, evidence.ai_target_kind)
             point = "左侧接触格" if evidence.ai_contact_side == "left" else "右侧接触格" if evidence.ai_contact_side == "right" else "预计接球格"
-            distance = f"机器人2距{point}{evidence.distance_cells}格" if evidence.distance_cells is not None else "距离正在重新计算"
-            eta = _eta_text(evidence.eta_updates, evidence.step_seconds)
+            distance = f"机器人2距{point}约{_cells(evidence.distance_cells)}格" if evidence.distance_cells is not None else "距离正在重新计算"
             if evidence.requires_partner:
                 teammate = (
-                    f"机器人1距另一侧{evidence.player_distance_cells}格"
+                    f"机器人1距另一侧约{_cells(evidence.player_distance_cells)}格"
                     if evidence.player_distance_cells is not None else "另一侧由机器人1覆盖"
                 )
                 detour = _small_first_text(evidence)
-                return f"第{evidence.frame}帧，机器人2提交{_action_text(evidence.ai_action)}，前往{label}的{point}（{distance}，{eta}到接球线）；{teammate}。{detour}"
+                state = "已就位等待这次接球结算" if evidence.commitment_state == "waiting_for_large" else "正在靠近分配侧"
+                return f"机器人2{_action_text(evidence.ai_action)}，前往{label}的{point}（{distance}）；{teammate}，{state}。{detour}"
             closer = _nearest_text(evidence)
-            return f"第{evidence.frame}帧，机器人2提交{_action_text(evidence.ai_action)}，前往{label}的{point}（{distance}，{eta}到接球线）。{closer}"
-        return f"第{evidence.frame}帧，机器人2提交{_action_text(evidence.ai_action)}。"
+            return f"机器人2{_action_text(evidence.ai_action)}，前往{label}的{point}（{distance}）。{closer}"
+        return f"机器人2{_action_text(evidence.ai_action)}。"
 
     def _english(self, evidence: ActionEvidence, ball_id: str | None,
                  encounter: dict[str, Any] | None) -> str:
@@ -154,10 +160,8 @@ def _ball_label(ball_id: str | None, kind: str | None) -> str:
     return f"{'合作大球' if kind == 'large' else '小球'}{ball_id}"
 
 
-def _eta_text(updates: int | None, step_seconds: float) -> str:
-    if updates is None:
-        return "到达时间正在重新计算"
-    return f"约{max(0.0, updates * step_seconds):.1f}秒"
+def _cells(distance: float) -> str:
+    return str(max(0, int(round(distance))))
 
 
 def _nearest_text(evidence: ActionEvidence) -> str:

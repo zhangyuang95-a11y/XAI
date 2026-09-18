@@ -73,11 +73,12 @@ def test_default_is_a_24x14_continuous_five_ball_game() -> None:
     assert large["occupied_cells"]["width"] == large["occupied_cells"]["height"] == 2
 
 
-def test_browser_loop_uses_millisecond_clock_and_drops_resume_backlog() -> None:
+def test_browser_loop_uses_one_fixed_simulation_tick_per_interval() -> None:
     app = (Path(__file__).parents[1] / "domains" / "pong" / "web" / "app.js").read_text()
-    assert "const now = Date.now();" in app
-    assert "const MAX_ANIMATION_DELTA = SPEC.fixedDt;" in app
-    assert "Math.min(MAX_ANIMATION_DELTA" in app
+    assert "function simulationTick()" in app
+    assert "game.step(currentAction);" in app
+    assert "window.setInterval(simulationTick, 1000 / 60);" in app
+    assert "while (accumulator" not in app
 
 
 def test_paddles_move_continuously_and_never_leave_the_board() -> None:

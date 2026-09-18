@@ -88,7 +88,14 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .quick { display: grid; gap: 7px; margin: 12px 0; }
 .quick button { background: #f0efff; color: #514dbd; text-align: left; }
 .answer { min-height: 110px; border: 2px solid #e2e6f1; padding: 12px; line-height: 1.6; margin-top: 10px; white-space: pre-wrap; }
+#technicalEvidence { margin-top: 12px; }
+#technicalEvidence pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 textarea { width: 100%; min-height: 80px; margin: 8px 0; }
+#questionnaire, #completed { margin-top: 18px; background: #fff; border: 2px solid #cdd5e3; border-radius: 4px; padding: 18px; box-shadow: 4px 4px 0 #c1cadb; }
+#surveyItems { display: grid; gap: 12px; }
+#surveyItems fieldset { border: 2px solid #d9def0; display: flex; gap: 12px; flex-wrap: wrap; }
+#surveyItems legend { font-weight: 700; }
+#surveyItems label { display: flex; gap: 4px; align-items: center; }
 @media (max-width: 850px) {
   main { padding: 14px; }
   .layout { grid-template-columns: 1fr; }

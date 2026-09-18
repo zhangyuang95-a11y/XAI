@@ -1,47 +1,29 @@
-# Cooperative Pong
+# Cooperative Pong：本地 v2.3 候选版
 
-这是与 Warehouse 共存的合作接球 domain。场地是 **24×14 格**：A1、A2、A3 是 1×1 小球；B1、B2 是 2×2 合作大球；两块板子都是 4×1 格，位于第12行，下面保留两行空间。球和板子用连续坐标移动，格子只定义尺寸和边界。
+机器人2先用公开球位比较接球机会、给两块球拍分工，再参考**冻结 NN** 的动作建议；建议会破坏分工时，规则可以改选。小球漏接计 1，大球需要双方同时覆盖两侧，漏接计 3。Group A 在 Task 1 看分工气泡、暂停或局后提问；Group B 不看解释；Task 2 两组都不看解释。两组的游戏和控制器相同。
 
-漏小球计 1 次；漏大球计 3 次。大球的两个接触点需要由两块不同的板子同时覆盖。球会反弹且不会消失。
+冻结 Actor 来自 `output/pong_nn/v22_hybrid_seed_260920/best_hybrid_candidate.pt`，参数 SHA-256 为 `90f86aa11ef66cba65e87d24f3eab05bb2f3ae05cd4e3e4b0258574573a07667`。本版没有重新训练；该 Actor 没有匹配的已抽取解释程序，因此气泡解释的是**实际规则分工**，不声称知道 NN 的内部想法。
 
-## 本地运行
+以下命令可以从任意目录直接运行。在 PyCharm 终端选择装有 PyTorch、NumPy、PyYAML 的解释器。Apple Silicon 使用 `mps`；也可将设备改为 `cpu`。
 
-直接双击打开 [`web/index.html`](web/index.html) 即可试玩；游戏开始后全部物理、机器人分工、气泡、回放和问答均在浏览器本地运行，不依赖持续网络连接。
-
-如需从项目入口选择 Warehouse 或 Pong，在项目根目录运行：
+先用同一批场景比较纯 NN、旧有限辅助、纯规则和 v2.3：
 
 ```bash
-python3 -m ui.domain_hub_server --host 127.0.0.1 --port 8765
+python3 /Users/zhangyuang/Desktop/ICLR/XAI/scripts/evaluate_pong_controller_v23.py --config /Users/zhangyuang/Desktop/ICLR/XAI/configs/pong_controller_v23.json --output /Users/zhangyuang/Desktop/ICLR/XAI/output/pong_controller/v23 --split validation --device mps
 ```
 
-打开 <http://127.0.0.1:8765/pong/>。按住 A/D 或左右方向键移动机器人1，松开停止。90 秒由浏览器的连续时钟计算，不会因服务器轮询而拉长。
-
-## A/B 与解释
-
-- A 组的 Task 1 显示机器人2当前分工提示和目标球高亮。
-- 气泡说明机器人2负责哪颗球、为什么这样分工、哪颗球更适合机器人1，以及大球是否需要一起接；它不显示不断变化的秒数。
-- B 组没有气泡和解释性高亮，Task 1 后直接进入 Task 2。
-- Task 2 两组都不提供解释或回放问答。
-
-机器人2当前是透明的规则控制器，不是已训练的 Pong NN。它对每次大球下落建立承诺：进入大球接球准备或就位等待后，不会仅因新小球出现就离开，直到该次接球结算或自身已确定无法到位。
-
-## 文件说明
-
-| 文件 | 用途 |
-| --- | --- |
-| `config.py` 与 `configs/default.json` | 24×14地图、连续速度、球和板子尺寸 |
-| `environment/engine.py` | 唯一的连续物理、反弹、接球与计分逻辑 |
-| `policies/rule_demo.py` | 机器人2的分工、大球承诺和可行性判断 |
-| `study.py` | A/B权限、Task流程、气泡、回放和问答绑定 |
-| `explanation/evidence.py` | 由保存的决策证据生成解释 |
-| `web/` | 自包含的离线游戏界面；浏览器以 60Hz 连续物理运行 |
-| `tests/test_pong_domain.py` | 物理、承诺、解释、A/B和服务生命周期测试 |
-
-## 测试
+首次本地试玩先导出冻结 Actor；如果 `output/pong_controller/v23/export` 已存在，跳过此步：
 
 ```bash
-pytest -q tests/test_pong_domain.py
-python3 -m py_compile domains/pong/config.py domains/pong/environment/engine.py domains/pong/policies/rule_demo.py domains/pong/study.py domains/pong/web/server.py
+python3 /Users/zhangyuang/Desktop/ICLR/XAI/scripts/export_pong_nn.py --run /Users/zhangyuang/Desktop/ICLR/XAI/output/pong_nn/v22_hybrid_seed_260920 --checkpoint best_hybrid_candidate.pt --controller-mode coordinated --controller-config /Users/zhangyuang/Desktop/ICLR/XAI/configs/pong_controller_v23.json --allow-candidate --output /Users/zhangyuang/Desktop/ICLR/XAI/output/pong_controller/v23/export --device mps
 ```
 
-这些测试验证代码和固定场景，不证明解释已经提高玩家成绩。正式发布前仍需要实际试玩和A/B数据验证。
+启动本地网站：
+
+```bash
+python3 /Users/zhangyuang/Desktop/ICLR/XAI/scripts/serve_pong_nn.py --bundle /Users/zhangyuang/Desktop/ICLR/XAI/output/pong_controller/v23/export --port 18768
+```
+
+打开 [本地 Pong](http://127.0.0.1:18768/pong/)。游戏在浏览器内运行，无需把每一步发送到服务器。A 组可点“暂停”，选择单帧或拖动“这段过程从”选择时间段，并输入自己的问题；回放区的“下载本局决策与问答记录”保存逐帧动作、规则依据、接球结果和问答。比较结果在 [`comparison_validation.json`](/Users/zhangyuang/Desktop/ICLR/XAI/output/pong_controller/v23/comparison_validation.json)。
+
+固定验证集的 16 局中，v2.3 双自动球拍平均加权漏接 **18.5**；相同场景纯规则双球拍 **23.25**、旧有限辅助双自动球拍 **48.56**。独立的 16 局最终集分别为 **18.31、25.81、48.63**。10 个受控合作大球机会全部接住。v2.3 的规则改选约占 65%，因此它是**规则协调的混合控制器**，不是纯 NN。验证检查已通过，但它仍是候选版：真人操作、解释是否改善得分尚未验证，不要自动用于正式实验。详细结果在 [`comparison_final_test.json`](/Users/zhangyuang/Desktop/ICLR/XAI/output/pong_controller/v23/comparison_final_test.json)。训练命令与历史 v2.2 说明保留在 [`training/README.md`](/Users/zhangyuang/Desktop/ICLR/XAI/domains/pong/training/README.md)。

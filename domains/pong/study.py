@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from copy import deepcopy
-from typing import Any
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from .config import PongConfig
 from .environment.engine import PongEnvironment, VALID_ACTIONS
 from .explanation.evidence import ActionEvidence, ExplanationEngine, QuestionAnswerer
 from .policies.rule_demo import RuleDemoController
+from .policies.frozen_nn import FrozenNNController
 
 
 @dataclass
@@ -21,10 +22,11 @@ class PongStudySession:
     condition_source: str = "manual_self_select"
     study_protocol: str | None = None
     config: PongConfig = field(default_factory=PongConfig)
+    nn_policy: Callable[[Mapping[str, float]], Mapping[str, float]] | None = None
     task: int = 1
     run_id: str = field(default_factory=lambda: uuid4().hex)
     environment: PongEnvironment = field(init=False)
-    controller: RuleDemoController = field(init=False)
+    controller: Any = field(init=False)
     explanations: ExplanationEngine = field(default_factory=ExplanationEngine, init=False)
     questions: QuestionAnswerer = field(default_factory=QuestionAnswerer, init=False)
     evidence_history: dict[int, ActionEvidence] = field(default_factory=dict, init=False)
@@ -51,12 +53,13 @@ class PongStudySession:
         if self.study_protocol not in {"coordination_explanation", "rule_discovery"}:
             raise ValueError("study_protocol must be coordination_explanation or rule_discovery")
         self.config.validate()
-        if self.config.control_mode != "rule_demo":
-            raise NotImplementedError(
-                "Pong frozen_nn control is not implemented; use control_mode=rule_demo"
-            )
         self.environment = PongEnvironment(self.config, seed=self.seed)
-        self.controller = RuleDemoController(self.environment.config)
+        if self.config.control_mode == "frozen_nn":
+            if self.nn_policy is None:
+                raise ValueError("frozen_nn control requires an explicit frozen nn_policy")
+            self.controller = FrozenNNController(self.environment, self.nn_policy)
+        else:
+            self.controller = RuleDemoController(self.environment.config)
         self.current_decision = self.controller.choose(self.environment.frame())
         self._update_intent_bubble(self.current_decision, self.environment.frame())
         self.frame_history = [self._public_frame(self.environment.frame())]
@@ -107,6 +110,7 @@ class PongStudySession:
             transition,
             decision,
             study_protocol=self.study_protocol or self.config.study_protocol,
+            controller_source="frozen_nn" if self.config.control_mode == "frozen_nn" else "rule_demo",
             controller_version=self.controller.version,
         )
         self.evidence_history[transition.before.frame] = evidence

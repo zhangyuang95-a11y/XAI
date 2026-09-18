@@ -1,0 +1,72 @@
+version: pong-nn-ppo-rcpd.v2.1-cooperation-continuation-early-reward-control
+seed: 260919
+environment:
+  version: pong-continuous-24x14-v7
+  decision_interval_frames: 6
+  parallel_environments: 16
+  episode_seconds: 90
+network:
+  hidden_size: 128
+ppo:
+  actor_learning_rate: 0.0001
+  critic_learning_rate: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip: 0.2
+  update_epochs: 4
+  minibatch_size: 256
+  rollout_decisions: 128
+  entropy_coefficient: 0.01
+  value_coefficient: 0.5
+  max_grad_norm: 0.5
+training:
+  max_joint_steps: 250000
+  checkpoint_every_joint_steps: 25000
+  evaluation_episodes: 16
+  self_play_fraction: 0.70
+  rule_partner_fraction: 0.20
+  perturb_partner_fraction: 0.10
+  perturb_min_decisions: 2
+  perturb_max_decisions: 8
+  extraction_trajectory_cache: 16
+initialization:
+  parent_candidates:
+    - /Users/zhangyuang/Desktop/ICLR/XAI/output/pong_nn/v2_seed_260918/best_candidate.pt
+    - /Users/zhangyuang/Desktop/ICLR/XAI/output/pong_nn/v2_seed_260918/last.pt
+curriculum:
+  foundation_until_joint_steps: 50000
+  coordination_until_joint_steps: 125000
+reward:
+  timing: failure_at_contact
+feedback_gate:
+  minimum_joint_steps: 125000
+  consecutive_validations: 3
+  idle_baseline_reduction: 0.10
+  minimum_large_success_rate: 0.50
+  initial_feedback_lambda: 0.002
+  maximum_feedback_lambda: 0.005
+  feedback_ramp_joint_steps: 25000
+evaluation:
+  version: pong-v2.1-fixed-content-encounter-accounting
+  validation_seeds: [5001, 5002, 5003, 5004, 5005, 5006, 5007, 5008, 5009, 5010, 5011, 5012, 5013, 5014, 5015, 5016]
+  final_test_seeds: [9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9010, 9011, 9012, 9013, 9014, 9015, 9016]
+  controlled_hold_seeds: [7001, 7002, 7003, 7004, 7005, 7006, 7007, 7008, 7009, 7010]
+rcpd:
+  enabled: true
+  extraction_interval: 25000
+  minimum_extraction_samples: 256
+  regularization_lambda: 0.005
+  maximum_regularization_lambda: 0.005
+  regularization_start_fraction: 0.0
+  regularization_ramp_fraction: 0.0
+  max_depth: 6
+  max_leaf_nodes: 32
+  min_samples_leaf: 12
+  validation_fraction: 0.20
+  minimum_overall_fidelity_for_feedback: 0.80
+  maximum_mean_kl_for_feedback: 0.50
+  minimum_overall_fidelity_for_explanation: 0.90
+  maximum_mean_kl_for_explanation: 0.25
+stopping:
+  minimum_full_stage_steps: 50000
+  minimum_improvement_fraction: 0.01

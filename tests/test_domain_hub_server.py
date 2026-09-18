@@ -52,7 +52,11 @@ def test_domain_hub_mounts_both_studies_without_rewriting_warehouse_release(tmp_
         status, _headers, body = _request(port, "GET", "/pong/styles.css")
         assert status == 200 and b".court" in body
         status, _headers, body = _request(port, "GET", "/pong/app.js")
-        assert status == 200 and b"fetch(" not in body
+        assert status == 200 and b"nn_model.json" in body
+        for asset in ("coordinated.js", "explain.js", "nn_model.json", "controller_config.json"):
+            status, _headers, body = _request(port, "GET", f"/pong/{asset}")
+            assert status == 200 and body
+        assert json.loads(_request(port, "GET", "/pong/controller_config.json")[2])["controller_mode"] == "coordinated"
         status, headers, _body = _request(port, "GET", "/pong")
         assert status == 308 and headers["Location"] == "/pong/"
         payload = json.dumps({"group": "A", "participant_id": "hub_test"}).encode()

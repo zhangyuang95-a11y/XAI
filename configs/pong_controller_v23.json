@@ -1,0 +1,21 @@
+{
+  "version": "pong-coordinated.v2.3",
+  "source_run": "output/pong_nn/v22_hybrid_seed_260920",
+  "source_checkpoint": "best_hybrid_candidate.pt",
+  "actor_sha256": "90f86aa11ef66cba65e87d24f3eab05bb2f3ae05cd4e3e4b0258574573a07667",
+  "controller": {
+    "horizon_seconds": 10.0,
+    "max_opportunities": 3,
+    "switch_gain": 1.5
+  },
+  "validation_seeds": [5301, 5302, 5303, 5304, 5305, 5306, 5307, 5308, 5309, 5310, 5311, 5312, 5313, 5314, 5315, 5316],
+  "final_test_seeds": [9301, 9302, 9303, 9304, 9305, 9306, 9307, 9308, 9309, 9310, 9311, 9312, 9317, 9314, 9318, 9316],
+  "final_seed_note": "9313 and 9315 repeated frozen Actor training initial-state signatures. Before any final replay, replace them by the first content-disjoint seeds 9317 and 9318; selection used only state hashes, never outcomes.",
+  "controlled_hold_seeds": [7001, 7002, 7003, 7004, 7005, 7006, 7007, 7008, 7009, 7010],
+  "criteria": {
+    "weighted_misses_relative_to_rule": 1.0,
+    "maximum_partner_regression_fraction": 0.05,
+    "minimum_feasible_hold_success_rate": 0.95,
+    "action_chain_required": true
+  }
+}

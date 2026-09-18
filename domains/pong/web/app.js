@@ -16,16 +16,11 @@ const SPEC = Object.freeze({
   snapshotEvery: 6,
 });
 const EPSILON = 1e-6;
-// Browser animation timestamps can occasionally jump after a tab resumes.
-// Never turn that pause into a burst of simulated game time.
-const MAX_ANIMATION_DELTA = SPEC.fixedDt;
 const heldKeys = new Set();
 
 let game = null;
 let running = false;
 let currentAction = 'stay';
-let lastAnimationAt = null;
-let accumulator = 0;
 let replayPlaying = false;
 let replayTimer = null;
 let replayIndex = null;
@@ -479,19 +474,9 @@ function updateKeyboardAction() {
   setAction('stay');
 }
 
-function animationLoop() {
-  const now = Date.now();
-  if (lastAnimationAt === null) lastAnimationAt = now;
-  const elapsed = Math.min(MAX_ANIMATION_DELTA, Math.max(0, (now - lastAnimationAt) / 1000));
-  lastAnimationAt = now;
+function simulationTick() {
   if (running && game && !game.paused && !game.terminal && !replayLocked) {
-    accumulator += elapsed;
-    let updates = 0;
-    while (accumulator >= SPEC.fixedDt && updates < 900 && !game.terminal) {
-      game.step(currentAction);
-      accumulator -= SPEC.fixedDt;
-      updates += 1;
-    }
+    game.step(currentAction);
     if (game.terminal) {
       running = false;
       currentAction = 'stay';
@@ -499,15 +484,12 @@ function animationLoop() {
     }
     render();
   }
-  requestAnimationFrame(animationLoop);
 }
 
 $('start').onclick = () => {
   game = new OfflinePong({ group: $('group').value, participantId: $('participant').value, task: 1, seed: 260918 });
   running = true;
   currentAction = 'stay';
-  lastAnimationAt = Date.now();
-  accumulator = 0;
   replayLocked = false;
   replayIndex = null;
   $('setup').hidden = true;
@@ -542,8 +524,6 @@ $('task2').onclick = () => {
   game = new OfflinePong({ group: game.group, participantId: game.participantId, task: 2, seed: 260919 });
   running = true;
   currentAction = 'stay';
-  lastAnimationAt = Date.now();
-  accumulator = 0;
   replayPlaying = false;
   if (replayTimer) clearInterval(replayTimer);
   replayLocked = false;
@@ -580,4 +560,4 @@ $('ask').onclick = () => {
   $('answer').textContent = answerForReview(frame, $('ballSelect').value || null);
 };
 
-requestAnimationFrame(animationLoop);
+window.setInterval(simulationTick, 1000 / 60);

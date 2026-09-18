@@ -125,8 +125,6 @@ def domain_hub_handler(store: Any, pong: PongApplication, public_origin: str):
             assets = {
                 "/": ("index.html", "text/html; charset=utf-8"),
                 "/index.html": ("index.html", "text/html; charset=utf-8"),
-                "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-                "/styles.css": ("styles.css", "text/css; charset=utf-8"),
                 "/assets/app.js": ("app.js", "text/javascript; charset=utf-8"),
                 "/assets/styles.css": ("styles.css", "text/css; charset=utf-8"),
                 "/assets/favicon.svg": ("favicon.svg", "image/svg+xml"),
@@ -177,6 +175,8 @@ def domain_hub_handler(store: Any, pong: PongApplication, public_origin: str):
             assets = {
                 "/": ("index.html", "text/html; charset=utf-8"),
                 "/index.html": ("index.html", "text/html; charset=utf-8"),
+                "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                "/styles.css": ("styles.css", "text/css; charset=utf-8"),
                 "/assets/app.js": ("app.js", "text/javascript; charset=utf-8"),
                 "/assets/styles.css": ("styles.css", "text/css; charset=utf-8"),
             }

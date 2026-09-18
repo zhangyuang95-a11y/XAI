@@ -48,6 +48,13 @@ def test_domain_hub_mounts_both_studies_without_rewriting_warehouse_release(tmp_
         status, _headers, body = _request(port, "GET", "/pong/")
         assert status == 200
         assert "合作接球".encode() in body
+        assert b'href="styles.css"' in body and b'src="app.js"' in body
+        status, _headers, body = _request(port, "GET", "/pong/styles.css")
+        assert status == 200 and b".court" in body
+        status, _headers, body = _request(port, "GET", "/pong/app.js")
+        assert status == 200 and b"fetch(" not in body
+        status, headers, _body = _request(port, "GET", "/pong")
+        assert status == 308 and headers["Location"] == "/pong/"
         payload = json.dumps({"group": "A", "participant_id": "hub_test"}).encode()
         status, headers, body = _request(
             port, "POST", "/pong/api/start", body=payload,

@@ -6,13 +6,15 @@
 
 ## 本地运行
 
-在项目根目录运行：
+直接双击打开 [`web/index.html`](web/index.html) 即可试玩；游戏开始后全部物理、机器人分工、气泡、回放和问答均在浏览器本地运行，不依赖持续网络连接。
+
+如需从项目入口选择 Warehouse 或 Pong，在项目根目录运行：
 
 ```bash
 python3 -m ui.domain_hub_server --host 127.0.0.1 --port 8765
 ```
 
-打开 <http://127.0.0.1:8765/pong>。按住 A/D 或左右方向键移动机器人1，松开停止；浏览器失焦会暂停。
+打开 <http://127.0.0.1:8765/pong/>。按住 A/D 或左右方向键移动机器人1，松开停止。90 秒由浏览器的连续时钟计算，不会因服务器轮询而拉长。
 
 ## A/B 与解释
 
@@ -32,7 +34,7 @@ python3 -m ui.domain_hub_server --host 127.0.0.1 --port 8765
 | `policies/rule_demo.py` | 机器人2的分工、大球承诺和可行性判断 |
 | `study.py` | A/B权限、Task流程、气泡、回放和问答绑定 |
 | `explanation/evidence.py` | 由保存的决策证据生成解释 |
-| `web/` | 游戏界面；浏览器以逐帧绘制显示服务器连续状态 |
+| `web/` | 自包含的离线游戏界面；浏览器以 60Hz 连续物理运行 |
 | `tests/test_pong_domain.py` | 物理、承诺、解释、A/B和服务生命周期测试 |
 
 ## 测试

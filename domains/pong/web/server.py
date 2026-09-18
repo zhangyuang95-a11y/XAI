@@ -142,6 +142,11 @@ class PongRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        if path == "/pong":
+            self.send_response(HTTPStatus.PERMANENT_REDIRECT)
+            self.send_header("Location", "/pong/")
+            self.end_headers()
+            return
         if path == "/pong" or path.startswith("/pong/"):
             path = path[len("/pong"):] or "/"
         if path == "/api/view":
@@ -160,6 +165,8 @@ class PongRequestHandler(BaseHTTPRequestHandler):
         assets = {
             "/": ("index.html", "text/html; charset=utf-8"),
             "/index.html": ("index.html", "text/html; charset=utf-8"),
+            "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+            "/styles.css": ("styles.css", "text/css; charset=utf-8"),
             "/assets/app.js": ("app.js", "text/javascript; charset=utf-8"),
             "/assets/styles.css": ("styles.css", "text/css; charset=utf-8"),
         }

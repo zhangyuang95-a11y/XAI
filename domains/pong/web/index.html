@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Cooperative Pong · PolicyLens</title>
-  <link rel="stylesheet" href="/pong/assets/styles.css">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <main>
   <header>
     <span class="eyebrow">Cooperative Pong · continuous-24x14-v7</span>
     <h1>合作接球</h1>
-    <p>24×14 格子像素场地，三个小球 A1、A2、A3 和两个合作大球 B1、B2 同时运动。机器人1由你控制，机器人2由系统控制。</p>
+    <p>24×14 格子像素场地，三个小球 A1、A2、A3 和两个合作大球 B1、B2 同时运动。机器人1由你控制，机器人2由系统控制；游戏开始后在浏览器本地连续运行。</p>
   </header>
 
   <section class="setup" id="setup">
@@ -36,7 +36,7 @@
         <button id="left">← 左</button><button id="pause">暂停</button><button id="right">右 →</button>
         <button id="task2" disabled>进入 Task 2</button>
       </div>
-      <p class="hint">按住 A/D 或左右方向键持续移动，松开后停止。浏览器失焦时会暂停。</p>
+      <p class="hint">按住 A/D 或左右方向键持续移动，松开后停止。游戏物理在浏览器本地运行，不会因网络延迟变慢。</p>
       <div class="status" id="status">准备开始</div>
     </div>
 
@@ -60,6 +60,6 @@
     </aside>
   </section>
 </main>
-<script src="/pong/assets/app.js" defer></script>
+<script src="app.js" defer></script>
 </body>
 </html>

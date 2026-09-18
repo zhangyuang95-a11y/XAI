@@ -163,19 +163,20 @@ def test_web_client_retries_transient_tunnel_failures() -> None:
     assert 'new Error(tr("temporaryNetworkError"))' in source
 
 
-def test_web_client_defaults_the_registration_page_to_english() -> None:
+def test_web_client_defaults_the_registration_page_to_chinese() -> None:
     root = Path(__file__).parents[1] / "ui" / "web"
     source = (root / "app.js").read_text(encoding="utf-8")
     html = (root / "index.html").read_text(encoding="utf-8")
 
-    assert 'const DEFAULT_LOCALE = "en"' in source
+    assert 'const DEFAULT_LOCALE = "zh"' in source
     assert 'setLanguage(DEFAULT_LOCALE, false)' in source
     assert 'requestedStage !== "idle" && view.study?.locale' in source
-    assert "PolicyLens · Two-Robot Collaborative Delivery Study" in html
-    assert 'id="languageButtonLabel">中</span>' in html
-    assert 'data-i18n="participantSetup">Participant setup</span>' in html
-    assert 'data-i18n="start">Start study</button>' in html
-    assert '<kbd data-i18n="spaceKey">Space</kbd>' in html
+    assert '<html lang="zh-CN">' in html
+    assert "PolicyLens · 双机器人协作配送实验" in html
+    assert 'id="languageButtonLabel">English</span>' in html
+    assert 'data-i18n="participantSetup">参与者登记</span>' in html
+    assert 'data-i18n="start">开始实验</button>' in html
+    assert '<kbd data-i18n="spaceKey">空格</kbd>' in html
 
 
 def test_web_cli_seed_library_defaults_to_checkpoint_sibling() -> None:
@@ -379,7 +380,7 @@ def test_frontend_uses_one_command_per_action_and_current_controls() -> None:
     assert 'condition_override: $("testConditionSelector").value' not in source
     assert 'id="testConditionSelector"' in html
     assert 'value="explanation" data-i18n="conditionExplanation" selected' in html
-    assert "Development test condition" in html
+    assert "开发测试条件" in html
     assert 'id="testConditionStatus"' in html
     assert 'id="assignmentGroupBanner"' in html
     assert "您已分配到 A 组（有解释）" in source
@@ -431,8 +432,8 @@ def test_frontend_uses_one_command_per_action_and_current_controls() -> None:
     assert 'if (state.pendingBeginTask1)' in source
     assert 'await command("begin_task1")' in source
     assert 'id="beginTask1Button" type="button" data-i18n="endDemoEarly"' in html
-    assert "Task 1 complete" in html
-    assert "Begin Task 2" in html
+    assert "任务 1 已完成" in html
+    assert "开始任务 2" in html
     assert "ArrowUp" in source and '" ":"WAIT"' in source
     assert '"/api/study/command"' in source
     assert "/api/study/posttest" not in source

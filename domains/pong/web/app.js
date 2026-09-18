@@ -31,6 +31,48 @@ let nnProgram = null;
 let nnController = { controller_mode: 'pure_nn' };
 let nnLoadError = null;
 const completedRuns = [];
+const ONLINE_PONG_URL = 'https://policylens-warehouse-study.onrender.com/pong/';
+
+class ModelLoadError extends Error {
+  constructor(kind, message) { super(message); this.kind = kind; }
+}
+
+async function loadJsonAsset(path, { optional = false } = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  let response;
+  try {
+    response = await fetch(path, { cache: 'no-store', signal: controller.signal });
+  } catch (error) {
+    throw new ModelLoadError('network', error.name === 'AbortError'
+      ? '加载模型超时，请检查网络或本地服务后重试。'
+      : '无法连接模型服务，请检查网络或本地服务后重试。');
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (optional && response.status === 404) return null;
+  if (response.status === 404) throw new ModelLoadError('missing', `${path} 不存在，请检查模型导出包。`);
+  if (!response.ok) throw new ModelLoadError('network', `${path} 请求失败（HTTP ${response.status}），请重试。`);
+  try { return await response.json(); }
+  catch (_) { throw new ModelLoadError('json', `${path} 不是有效 JSON，请重新导出模型。`); }
+}
+
+function showModelLoadError(message, { directFile = false } = {}) {
+  const error = $('setupError');
+  error.replaceChildren(document.createTextNode(message));
+  if (directFile) {
+    const link = document.createElement('a');
+    link.href = ONLINE_PONG_URL;
+    link.textContent = '打开在线 Pong';
+    error.append(' ', link);
+  }
+  $('retryLoad').hidden = directFile;
+  $('start').disabled = directFile;
+}
+
+if (location.protocol === 'file:') {
+  showModelLoadError('当前是直接打开的本地文件，浏览器无法加载模型。请通过本地服务或在线地址打开游戏。', { directFile: true });
+}
 
 function validateProgramFeatures(program, featureNames) {
   if (!program?.root) return;
@@ -46,31 +88,25 @@ function validateProgramFeatures(program, featureNames) {
 async function loadFrozenNN() {
   nnLoadError = null;
   try {
-    const response = await fetch('nn_model.json', { cache: 'no-store' });
-    if (!response.ok) throw new Error(`模型文件不可用 (${response.status})`);
-    const candidate = await response.json();
-    if (candidate.format !== 'pong-browser-float32.v2' || candidate.actions?.join('|') !== 'left|right|stay') throw new Error('模型动作或特征版本不兼容；请导出 Pong v2 模型');
+    const candidate = await loadJsonAsset('nn_model.json');
+    if (candidate.format !== 'pong-browser-float32.v2' || candidate.actions?.join('|') !== 'left|right|stay') throw new ModelLoadError('signature', '模型动作或特征版本不兼容；请导出 Pong v2 模型');
     if (candidate.signature?.domain_id !== 'pong' || candidate.signature?.version !== 'pong-continuous-24x14-v7'
       || !Array.isArray(candidate.signature?.feature_names)) {
-      throw new Error('模型观察签名与当前 Pong v2 物理规则不兼容');
+      throw new ModelLoadError('signature', '模型观察签名与当前 Pong v2 物理规则不兼容');
     }
-    let candidateProgram = null;
-    const programResponse = await fetch('program.json', { cache: 'no-store' });
-    if (programResponse.ok) {
-      candidateProgram = await programResponse.json();
-      validateProgramFeatures(candidateProgram, candidate.signature.feature_names);
-    }
-    const controllerResponse = await fetch('controller_config.json', { cache: 'no-store' });
-    nnController = controllerResponse.ok ? await controllerResponse.json() : { controller_mode: 'pure_nn' };
-    if (!['pure_nn', 'hybrid', 'rule_only', 'coordinated'].includes(nnController.controller_mode)) throw new Error('不支持的 Pong 控制器模式');
-    if (nnController.controller_mode === 'hybrid' && nnController.rule_version !== 'pong-limited-assist.v2.2') throw new Error('规则辅助版本不兼容');
-    if (nnController.controller_mode === 'coordinated' && nnController.rule_version !== 'pong-coordinated.v2.3') throw new Error('规则协调版本不兼容');
+    const candidateProgram = await loadJsonAsset('program.json', { optional: true });
+    if (candidateProgram) validateProgramFeatures(candidateProgram, candidate.signature.feature_names);
+    nnController = await loadJsonAsset('controller_config.json');
+    if (!['pure_nn', 'hybrid', 'rule_only', 'coordinated'].includes(nnController.controller_mode)) throw new ModelLoadError('signature', '不支持的 Pong 控制器模式');
+    if (nnController.controller_mode === 'hybrid' && nnController.rule_version !== 'pong-limited-assist.v2.2') throw new ModelLoadError('signature', '规则辅助版本不兼容');
+    if (nnController.controller_mode === 'coordinated' && nnController.rule_version !== 'pong-coordinated.v2.3') throw new ModelLoadError('signature', '规则协调版本不兼容');
     if (nnController.model_sha256 && nnController.model_sha256 !== candidate.model_sha256)
-      throw new Error('控制器绑定的冻结 Actor 哈希与当前模型不一致');
+      throw new ModelLoadError('signature', '控制器绑定的冻结 Actor 哈希与当前模型不一致');
     nnModel = candidate;
     nnProgram = candidateProgram;
   } catch (error) {
-    nnModel = null; nnProgram = null; nnController = { controller_mode: 'pure_nn' }; nnLoadError = String(error.message || error);
+    nnModel = null; nnProgram = null; nnController = { controller_mode: 'pure_nn' };
+    nnLoadError = error instanceof ModelLoadError ? error.message : `模型或解释程序不兼容：${String(error.message || error)}`;
   }
 }
 
@@ -960,17 +996,22 @@ function showQuestionnaire() {
 }
 
 $('start').onclick = async () => {
-  await loadFrozenNN();
+  if (location.protocol === 'file:' || running) return;
+  $('start').disabled = true;
+  if (!nnModel) await loadFrozenNN();
   if (!nnModel) {
-    $('setupError').textContent = `无法启动：${nnLoadError || '冻结模型不可用'}。请检查本地导出包。`;
+    showModelLoadError(nnLoadError || '冻结模型不可用，请重试。');
+    $('start').disabled = false;
     return;
   }
-  $('setupError').textContent = '';
+  $('setupError').replaceChildren();
+  $('retryLoad').hidden = true;
   completedRuns.length = 0;
   try {
     game = new OfflinePong({ group: $('group').value, participantId: $('participant').value, task: 1, seed: 260918 });
   } catch (error) {
     $('setupError').textContent = `无法启动：${String(error.message || error)}`;
+    $('start').disabled = false;
     return;
   }
   running = true;
@@ -982,6 +1023,17 @@ $('start').onclick = async () => {
   $('game').hidden = false;
   $('questionnaire').hidden = true; $('completed').hidden = true;
   render();
+};
+
+$('retryLoad').onclick = async () => {
+  if (location.protocol === 'file:' || running) return;
+  $('retryLoad').disabled = true;
+  await loadFrozenNN();
+  if (nnModel) {
+    $('setupError').textContent = '模型已加载，可以开始游戏。';
+    $('retryLoad').hidden = true;
+  } else showModelLoadError(nnLoadError || '冻结模型不可用，请重试。');
+  $('retryLoad').disabled = false;
 };
 function bindDirectionButton(id, action) {
   const button = $(id);

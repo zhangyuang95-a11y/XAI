@@ -24,6 +24,6 @@ python3 /Users/zhangyuang/Desktop/ICLR/XAI/scripts/export_pong_nn.py --run /User
 python3 /Users/zhangyuang/Desktop/ICLR/XAI/scripts/serve_pong_nn.py --bundle /Users/zhangyuang/Desktop/ICLR/XAI/output/pong_controller/v23/export --port 18768
 ```
 
-打开 [本地 Pong](http://127.0.0.1:18768/pong/)。游戏在浏览器内运行，无需把每一步发送到服务器。A 组可点“暂停”，选择单帧或拖动“这段过程从”选择时间段，并输入自己的问题；回放区的“下载本局决策与问答记录”保存逐帧动作、规则依据、接球结果和问答。比较结果在 [`comparison_validation.json`](/Users/zhangyuang/Desktop/ICLR/XAI/output/pong_controller/v23/comparison_validation.json)。
+启动上述命令后，再打开 [本地 Pong](http://127.0.0.1:18768/pong/)；也可以直接打开 [在线 Pong](https://policylens-warehouse-study.onrender.com/pong/)。不要双击 `index.html`：`file://` 页面无法读取模型文件。网页加载模型后，游戏在浏览器内运行，无需把每一步发送到服务器。A 组可点“暂停”，选择单帧或拖动“这段过程从”选择时间段，并输入自己的问题；回放区的“下载本局决策与问答记录”保存逐帧动作、规则依据、接球结果和问答。比较结果在 [`comparison_validation.json`](/Users/zhangyuang/Desktop/ICLR/XAI/output/pong_controller/v23/comparison_validation.json)。
 
 固定验证集的 16 局中，v2.3 双自动球拍平均加权漏接 **18.5**；相同场景纯规则双球拍 **23.25**、旧有限辅助双自动球拍 **48.56**。独立的 16 局最终集分别为 **18.31、25.81、48.63**。10 个受控合作大球机会全部接住。v2.3 的规则改选约占 65%，因此它是**规则协调的混合控制器**，不是纯 NN。验证检查已通过，但它仍是候选版：真人操作、解释是否改善得分尚未验证，不要自动用于正式实验。详细结果在 [`comparison_final_test.json`](/Users/zhangyuang/Desktop/ICLR/XAI/output/pong_controller/v23/comparison_final_test.json)。训练命令与历史 v2.2 说明保留在 [`training/README.md`](/Users/zhangyuang/Desktop/ICLR/XAI/domains/pong/training/README.md)。

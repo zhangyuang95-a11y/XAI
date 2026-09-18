@@ -110,6 +110,21 @@ button:disabled { cursor: not-allowed; opacity: .48; }
   pointer-events: none;
   transform: translate(-50%, -115%);
 }
+.ai-action-bubble.compact { width: max-content; max-width: 42%; }
+.ai-action-bubble .bubble-toggle {
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+  border: 0;
+  border-radius: 8px;
+  background: #f56b3d;
+  color: #fff;
+  padding: 5px 9px;
+  font: inherit;
+  cursor: pointer;
+}
+.ai-action-bubble .bubble-toggle:focus-visible { outline: 3px solid #254edb; outline-offset: 2px; }
+.ai-action-bubble p { margin: 8px 0 0; }
 .ai-action-bubble::after {
   content: "";
   position: absolute;

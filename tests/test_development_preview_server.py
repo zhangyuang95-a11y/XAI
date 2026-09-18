@@ -61,6 +61,13 @@ def _start_task1(
     state.command(_envelope(state, "begin_task1"))
 
 
+def test_new_warehouse_session_defaults_to_chinese_without_locale_parameter() -> None:
+    state = DevelopmentPreviewState()
+    assert state.view()["study"]["locale"] == "zh-CN"
+    state.command(_envelope(state, "start", participant_id="default-locale"))
+    assert state.view()["study"]["locale"] == "zh-CN"
+
+
 def _append_explicit_transition(
     state: DevelopmentPreviewState,
     environment: WarehouseMultiAgentEnv,
@@ -541,7 +548,7 @@ def test_no_recent_collision_answer_is_explicit_and_anchored_to_last_five() -> N
     )
 
 
-def test_group_a_receives_a_per_step_robot_2_bubble_only_in_task1() -> None:
+def test_group_a_receives_only_a_frame_bound_ask_why_affordance_until_clicked() -> None:
     state = DevelopmentPreviewState()
     _start_task1(state, condition="explanation", locale="en")
 
@@ -549,22 +556,55 @@ def test_group_a_receives_a_per_step_robot_2_bubble_only_in_task1() -> None:
     bubble = result["view"]["study"]["action_bubble"]
     assert bubble["target_agent"] == "robot_2"
     assert bubble["frame"] == 1
-    assert bubble["text"]
-    assert "no_safe_progress" not in bubble["text"]
-    assert "向等待" not in bubble["text"]
-    assert "A1" in bubble["text"] or "充电" in bubble["text"]
-    assert "检查了当前占用位置" not in bubble["text"]
+    assert bubble["run_id"] == state.run_id
+    assert "text" not in bubble
+    assert result["view"]["last_explanation"] is None
+
+    before = deepcopy(state.environment.get_state())
+    answer = state.command(_envelope(
+        state, "ask_explanation", question="Why?", question_kind="action",
+        target_agent="robot_2", action_run_id=state.run_id,
+        action_stage="task1", action_frame=1, request_id="click-1",
+    ))["view"]["last_explanation"]
+    assert state.environment.get_state() == before
+    assert answer["requested_action_frame"] == answer["anchor_frame"] == 1
+    assert answer["request_id"] == "click-1"
+    assert "no_safe_progress" not in answer["explanation"]
+    assert "向等待" not in answer["explanation"]
+    assert state.question_log[-1]["displayed_frame"] == 1
 
     state.command(_envelope(state, "set_language", locale="zh-CN"))
-    assert state.view()["study"]["action_bubble"]["text"] != bubble["text"]
+    assert state.view()["study"]["action_bubble"] == bubble
+    assert state.view()["last_explanation"]["anchor_frame"] == 1
+    assert state.view()["last_explanation"]["explanation"] != answer["explanation"]
+
+    with pytest.raises(ValueError, match="current completed"):
+        state.command(_envelope(
+            state, "ask_explanation", question="Why?", question_kind="action",
+            target_agent="robot_2", action_run_id=state.run_id,
+            action_stage="task1", action_frame=2, request_id="future",
+        ))
+    with pytest.raises(ValueError, match="this run"):
+        state.command(_envelope(
+            state, "ask_explanation", question="Why?", question_kind="action",
+            target_agent="robot_2", action_run_id="another-run",
+            action_stage="task1", action_frame=1, request_id="other",
+        ))
 
     control = DevelopmentPreviewState()
     _start_task1(control, condition="control")
     control.command(_envelope(control, "human_action", action="WAIT"))
     assert control.view()["study"]["action_bubble"] is None
+    with pytest.raises(RuntimeError):
+        control.command(_envelope(
+            control, "ask_explanation", question="Why?", question_kind="action",
+            target_agent="robot_2", action_run_id=control.run_id,
+            action_stage="task1", action_frame=1,
+        ))
 
     state.stage = "task2"
     assert state.view()["study"]["action_bubble"] is None
+    assert state.view()["last_explanation"] is None
 
 
 def test_charger_penalty_question_remains_bound_after_five_steps(monkeypatch) -> None:
@@ -600,9 +640,7 @@ def test_charger_penalty_question_remains_bound_after_five_steps(monkeypatch) ->
     assert penalty and penalty["event_id"]
     bubble = state.view()["study"]["action_bubble"]
     assert bubble["frame"] == penalty["frame"]
-    assert "−50" in bubble["text"]
-    assert "63%" in bubble["text"]
-    assert "19%" in bubble["text"]
+    assert "text" not in bubble
 
     for _ in range(6):
         state._advance_round("WAIT")

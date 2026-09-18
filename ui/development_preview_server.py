@@ -349,7 +349,7 @@ class DevelopmentPreviewState:
         self.stage = "idle"
         self.version = 0
         self.run_id: str | None = None
-        self.locale = "en"
+        self.locale = "zh-CN"
         self.condition = "explanation"
         self.participant_id = ""
         self.tutorial_index = 0
@@ -613,7 +613,8 @@ class DevelopmentPreviewState:
                 ),
             },
             "study": {
-                "release_version": "sep2-explanation-evidence-20260917",
+                "release_version": "sep2-on-demand-explanation-20260919",
+                "explanation_display_version": "warehouse-on-demand-explanation.v1",
                 "pilot_class": "internal_pre_experiment",
                 "formal_ready": False,
                 "run_id": self.run_id,
@@ -697,11 +698,15 @@ class DevelopmentPreviewState:
                 "allowed_commands": list(self.commands()),
             },
             "trial": None,
-            "last_explanation": self._localized_explanation(),
+            "last_explanation": (
+                self._localized_explanation()
+                if self.stage == "task1" and self.condition == "explanation"
+                else None
+            ),
         }
 
     def _refresh_action_bubble(self) -> None:
-        """Create the concise per-step Group A label from the executed decision."""
+        """Expose only the completed frame; generate its explanation on request."""
 
         self.action_bubble = None
         if self.stage != "task1" or self.condition != "explanation":
@@ -709,73 +714,18 @@ class DevelopmentPreviewState:
         index = len(self.round_frames) - 1
         if index < 1:
             return
-        try:
-            adapter, snapshot = self._round_explanation_snapshot(index)
-            variants = {
-                language: adapter.concise_study_explanation(
-                    snapshot,
-                    target_agent="robot_2",
-                    policy=None,
-                    focus="action",
-                    language=language,
-                )
-                for language in ("en", "zh-CN")
-            }
-            outcome = self.round_frames[index]
-            trace = outcome.info.get("decision_trace", {})
-            runtime = trace.get("runtime_decision", {}) if isinstance(trace, Mapping) else {}
-            runtime = runtime if isinstance(runtime, Mapping) else {}
-            rule_events = outcome.info.get("rule_events", ())
-            has_charger_penalty = any(
-                isinstance(event, Mapping)
-                and str(event.get("event", "")) == "shared_charger_occupancy"
-                for event in rule_events
-            ) or any(
-                isinstance(event, Mapping)
-                and str(event.get("event", "")) == "shared_charger_occupancy"
-                for event in outcome.events
-            )
-            if (
-                runtime.get("mode") == "human_ai_robust_selection"
-                or outcome.info.get("robot_collision_event")
-                or outcome.info.get("robot_collision_kind")
-                or has_charger_penalty
-            ):
-                variants = self._controller_action_bubble(
-                    self.round_frames[index - 1].state,
-                    outcome.state,
-                    outcome,
-                    runtime,
-                    focus="action",
-                )
-        except Exception:
-            # A bubble must never stop a confirmed movement.  This fallback
-            # reports only the action that the environment recorded.
-            outcome = self.round_frames[index]
-            action = str(outcome.info.get("executed_actions", {}).get(
-                "robot_2", outcome.actions.get("robot_2", "WAIT")
-            ))
-            en, zh = self._action_words(action)
-            variants = {
-                "en": f"Robot 2 moved {en} in this step.",
-                "zh-CN": f"机器人2本步向{zh}移动。",
-            }
         self.action_bubble = {
             "target_agent": "robot_2",
             "frame": int(self.round_frames[index].state.frame),
-            "_language_variants": variants,
         }
 
     def _localized_action_bubble(self) -> dict[str, Any] | None:
         if self.action_bubble is None:
             return None
-        variants = self.action_bubble.get("_language_variants", {})
-        locale = "zh-CN" if self.locale != "en" else "en"
-        text = variants.get(locale) if isinstance(variants, Mapping) else None
         return {
             "target_agent": "robot_2",
             "frame": self.action_bubble.get("frame"),
-            "text": str(text or ""),
+            "run_id": self.run_id,
         }
 
     def _localized_explanation(self) -> dict[str, Any] | None:
@@ -1186,6 +1136,8 @@ class DevelopmentPreviewState:
         focus: str,
         penalty_event_id: str | None = None,
         penalty_frame: int | None = None,
+        action_frame: int | None = None,
+        request_id: str | None = None,
     ) -> None:
         """Answer from completed Task 1 transitions, never from the future.
 
@@ -1210,7 +1162,16 @@ class DevelopmentPreviewState:
             return str(values.get(agent_id, proposed(frame, agent_id)))
 
         anchor: tuple[int, PreviewFrame] | None = recent[-1] if recent else None
-        if focus == "wait":
+        if action_frame is not None:
+            if focus != "action" or action_frame < 1 or action_frame != int(self.round_frame.state.frame):
+                raise ValueError("Ask why must refer to the current completed Task 1 frame.")
+            anchor = next(
+                (item for item in completed if int(item[1].state.frame) == action_frame),
+                None,
+            )
+            if anchor is None:
+                raise ValueError("The requested Task 1 action frame is unavailable.")
+        elif focus == "wait":
             anchor = next(
                 (
                     item
@@ -1351,6 +1312,17 @@ class DevelopmentPreviewState:
                 "context_frames": context_frames,
                 "human_action": proposed(outcome, "robot_1"),
                 "ai_action": proposed(outcome, "robot_2"),
+                "nn_proposed_action": (
+                    runtime.get("policy_actions", {}).get("robot_2")
+                    if isinstance(runtime.get("policy_actions"), Mapping)
+                    else None
+                ),
+                "controller_selected_action": (
+                    runtime.get("selected_actions", {}).get("robot_2")
+                    if isinstance(runtime.get("selected_actions"), Mapping)
+                    else proposed(outcome, "robot_2")
+                ),
+                "environment_executed_action": snapshot.executed_actions.get("robot_2"),
                 "executed_actions": dict(snapshot.executed_actions),
                 "collision_type": outcome.info.get("robot_collision_kind"),
                 "current_goal": (
@@ -1406,6 +1378,10 @@ class DevelopmentPreviewState:
         self.explanation_count += 1
         sequence = self.explanation_count
         common = {
+            "explanation_display_version": "warehouse-on-demand-explanation.v1",
+            "run_id": self.run_id,
+            "requested_action_frame": action_frame,
+            "request_id": request_id,
             "target_agent": "robot_2",
             "question": question,
             "question_sequence": sequence,
@@ -1462,6 +1438,11 @@ class DevelopmentPreviewState:
                 "question_sequence": sequence,
                 "question": question,
                 "question_focus": focus,
+                "explanation_display_version": "warehouse-on-demand-explanation.v1",
+                "requested_action_frame": action_frame,
+                "request_id": request_id,
+                "displayed_frame": anchor_frame,
+                "language": self.locale,
                 "penalty_event_id": (
                     evidence.get("penalty_event_id")
                     if focus == "charger_penalty"
@@ -1498,7 +1479,7 @@ class DevelopmentPreviewState:
                 if override in {"control", "explanation"}
                 else "explanation"
             )
-            self.locale = str(payload.get("locale", "en"))
+            self.locale = "en" if payload.get("locale") == "en" else "zh-CN"
             self.run_id = uuid4().hex
             self.stage = "instructions"
             self.tutorial_index = 0
@@ -1513,7 +1494,7 @@ class DevelopmentPreviewState:
             self.pending_question_sequences = []
             self._start_round("instructions", TASK1_SEED)
         elif command == "set_language":
-            self.locale = str(payload.get("locale", self.locale))
+            self.locale = "en" if payload.get("locale", self.locale) == "en" else "zh-CN"
         elif command == "tutorial_advance" and self.stage == "instructions":
             self.tutorial_index = min(
                 len(self.tutorial_frames) - 1,
@@ -1572,6 +1553,18 @@ class DevelopmentPreviewState:
             if requested_focus and requested_focus not in allowed_focuses:
                 raise ValueError("Unknown explanation question kind.")
             focus = requested_focus or _study_question_focus(question)
+            action_frame_value = payload.get("action_frame")
+            try:
+                action_frame = int(action_frame_value) if action_frame_value is not None else None
+            except (TypeError, ValueError):
+                raise ValueError("Invalid action frame.") from None
+            if action_frame is not None and (
+                str(envelope.get("run_id", "")) != str(self.run_id)
+                or str(payload.get("action_run_id", "")) != str(self.run_id)
+                or str(payload.get("action_stage", "")) != "task1"
+                or str(payload.get("target_agent", "")) != "robot_2"
+            ):
+                raise ValueError("Ask why must use this run's Robot 2 Task 1 action.")
             penalty_event_id = payload.get("penalty_event_id", payload.get("event_id"))
             penalty_frame_value = payload.get("penalty_frame", payload.get("anchor_frame"))
             try:
@@ -1583,6 +1576,8 @@ class DevelopmentPreviewState:
                 focus=focus,
                 penalty_event_id=(str(penalty_event_id) if penalty_event_id else None),
                 penalty_frame=penalty_frame,
+                action_frame=action_frame,
+                request_id=(str(payload.get("request_id")) if action_frame is not None else None),
             )
         elif command == "submit_survey" and self.stage == "survey":
             self.stage = "completed"

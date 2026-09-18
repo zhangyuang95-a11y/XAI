@@ -2,7 +2,7 @@
 
 const $ = (id) => document.getElementById(id);
 const PAGE_ID = crypto.randomUUID ? crypto.randomUUID() : `page-${Date.now()}`;
-const DEFAULT_LOCALE = "en";
+const DEFAULT_LOCALE = "zh";
 const state = {
   view: null,
   locale: DEFAULT_LOCALE,
@@ -15,6 +15,9 @@ const state = {
   visualFrame: null,
   questionTimer: null,
   lastPenaltyFrame: null,
+  expandedBubble: null,
+  bubbleAnswers: new Map(),
+  pendingBubbleRequest: null,
 };
 
 const COPY = {
@@ -42,6 +45,7 @@ const COPY = {
     action: "动作", requestedAction: "请求", executedAction: "实际", batteryChange: "电量",
     transitionActions: "动作", causalFrameNote: "双方从同一移动前状态决策并同步执行。", workingExplanation: "正在根据最近的人机交互生成回答…", stillWorking: "仍在生成，请稍候…",
     eventPickup: "取货", eventDelivery: "交付", eventCharging: "充电", eventChargerQueue: "排队", eventYield: "让行", eventConflict: "冲突风险", eventCollision: "碰撞",
+    askWhy: "为什么？", hideWhy: "收起", answerFrame: "所问步数",
   },
   en: {
     appTitle: "Two-Robot Collaborative Delivery Study", workflowDemo: "Instructions & demo", task1: "Task 1", task2: "Task 2", survey: "Survey",
@@ -67,6 +71,7 @@ const COPY = {
     action: "Action", requestedAction: "Requested", executedAction: "Executed", batteryChange: "Battery",
     transitionActions: "Actions", causalFrameNote: "Both agents decide from the same pre-move state and execute simultaneously.", workingExplanation: "Answering from your recent Human–AI interaction…", stillWorking: "Still generating—please wait…",
     eventPickup: "Pickup", eventDelivery: "Delivery", eventCharging: "Charging", eventChargerQueue: "Queue", eventYield: "Yield", eventConflict: "Conflict risk", eventCollision: "Collision",
+    askWhy: "Ask why", hideWhy: "Hide", answerFrame: "Answered step",
   },
 };
 
@@ -171,7 +176,7 @@ function showError(error) {
 function setBusy(value) {
   state.busy = value;
   document.querySelectorAll("button").forEach((button) => {
-    if (button.id === "languageButton" || button.id === "toastClose") return;
+    if (button.id === "toastClose") return;
     const tutorialActive = state.view?.study?.stage === "instructions";
     if (tutorialActive && button.id === "beginTask1Button") {
       button.disabled = !allowed("begin_task1") || state.pendingBeginTask1;
@@ -187,6 +192,11 @@ function setBusy(value) {
 
 async function command(name, payload = {}) {
   if (state.busy) return null;
+  if (name === 'human_action') {
+    state.expandedBubble = null;
+    state.pendingBubbleRequest = null;
+    $('aiActionBubble').classList.add('hidden');
+  }
   const study = state.view?.study || { stage: "idle", state_version: 0, run_id: null };
   const envelope = {
     operation_id: operationId(),
@@ -218,14 +228,22 @@ function setLanguage(locale, notify = true, rerender = true) {
   document.documentElement.lang = requestedLocale;
   document.querySelectorAll("[data-i18n]").forEach((node) => { node.textContent = tr(node.dataset.i18n); });
   document.querySelectorAll("[data-i18n-placeholder]").forEach((node) => { node.placeholder = tr(node.dataset.i18nPlaceholder); });
-  $("languageButtonLabel").textContent = state.locale === "zh" ? "EN" : "中";
+  $("languageButtonLabel").textContent = state.locale === "zh" ? "English" : "中文";
+  const surveyAnswers = Object.fromEntries(
+    [...document.querySelectorAll('#surveyQuestions input:checked')].map((input) => [input.name, input.value])
+  );
   buildSurvey();
+  Object.entries(surveyAnswers).forEach(([name, value]) => {
+    const selected = [...document.querySelectorAll('#surveyQuestions input')]
+      .find((input) => input.name === name && input.value === value);
+    if (selected) selected.checked = true;
+  });
   if (state.view && rerender) {
     state.view = {
       ...state.view,
       study: { ...(state.view.study || {}), locale: requestedLocale },
     };
-    void render(state.view);
+    void render(state.view, { skipAnimation: true });
   }
   if (notify && allowed("set_language")) command("set_language", { locale: requestedLocale });
 }
@@ -481,7 +499,8 @@ function renderActionBubble(view, revealOutcome) {
     && view.study?.stage === "task1"
     && view.study?.condition === "explanation"
     && payload?.target_agent === "robot_2"
-    && payload?.text
+    && payload?.run_id === view.study?.run_id
+    && Number(payload?.frame) > 0
   );
   bubble.classList.toggle("hidden", !enabled);
   if (!enabled) return;
@@ -497,7 +516,56 @@ function renderActionBubble(view, revealOutcome) {
   const originY = (height - rows * size) / 2;
   const left = originX + (Number(agent.position[1]) + .5) * size;
   const top = originY + (Number(agent.position[0]) + .5) * size;
-  bubble.textContent = payload.text;
+  const key = `${payload.run_id}:${payload.frame}`;
+  const expanded = state.expandedBubble === key;
+  const answer = state.bubbleAnswers.get(key);
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'bubble-toggle';
+  button.textContent = tr(expanded ? 'hideWhy' : 'askWhy');
+  button.disabled = state.busy;
+  button.setAttribute('aria-expanded', String(expanded));
+  button.setAttribute('aria-label', `${button.textContent} · ${tr('step')} ${payload.frame}`);
+  button.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    if (state.busy) return;
+    if (state.expandedBubble === key) {
+      state.expandedBubble = null;
+      renderActionBubble(state.view, true);
+      return;
+    }
+    if (answer) {
+      state.expandedBubble = key;
+      renderAnswer(answer);
+      renderActionBubble(state.view, true);
+      return;
+    }
+    const requestId = operationId();
+    state.pendingBubbleRequest = requestId;
+    const result = await command('ask_explanation', {
+      question: tr('presetWhyAction'), question_kind: 'action', target_agent: 'robot_2',
+      action_run_id: payload.run_id, action_stage: 'task1', action_frame: Number(payload.frame),
+      requested_language: localeCode(), request_id: requestId,
+    });
+    const report = result?.view?.last_explanation;
+    if (state.pendingBubbleRequest === requestId && report?.request_id === requestId
+      && report?.run_id === payload.run_id && Number(report?.requested_action_frame) === Number(payload.frame)
+      && state.view?.study?.stage === 'task1' && state.view?.study?.condition === 'explanation'
+      && state.view?.study?.run_id === payload.run_id
+      && Number(state.view?.study?.action_bubble?.frame) === Number(payload.frame)) {
+      state.bubbleAnswers.set(key, report);
+      state.expandedBubble = key;
+      renderActionBubble(state.view, true);
+    }
+    if (state.pendingBubbleRequest === requestId) state.pendingBubbleRequest = null;
+  });
+  bubble.replaceChildren(button);
+  if (expanded && answer) {
+    const explanation = document.createElement('p');
+    explanation.textContent = state.locale === 'zh' ? answer.answer_zh : answer.answer_en;
+    bubble.appendChild(explanation);
+  }
+  bubble.classList.toggle('compact', !expanded);
   bubble.style.left = `${Math.max(92, Math.min(width - 92, left))}px`;
   bubble.style.top = `${top}px`;
   bubble.classList.toggle("below", top < 86);
@@ -619,12 +687,16 @@ function renderStage() {
 }
 
 function renderAnswer(report) {
-  const text = report?.explanation_document?.text || report?.explanation || "";
+  if (state.view?.study?.stage !== 'task1' || state.view?.study?.condition !== 'explanation') return;
+  const text = (state.locale === 'zh' ? report?.answer_zh : report?.answer_en)
+    || report?.explanation_document?.text || report?.explanation || "";
   if (!text.trim()) {
     showError(new Error(tr("emptyExplanation")));
     return;
   }
-  $("answerText").textContent = text; $("answerPanel").classList.remove("hidden");
+  $("answerText").textContent = text;
+  $("answerFrame").textContent = `${tr('answerFrame')} ${report.anchor_frame ?? report.selected_timeline_frame ?? '—'}`;
+  $("answerPanel").classList.remove("hidden");
 }
 
 function transitionBeforeView(view) {
@@ -662,23 +734,42 @@ function paintView(view, revealOutcome = false) {
 }
 
 async function render(view, options = {}) {
+  const previous = state.view?.study;
   const requestedStage = view.study?.stage || "idle";
   if (requestedStage !== "idle" && view.study?.locale) {
     const requestedLocale = view.study.locale === "en" ? "en" : "zh";
     if (requestedLocale !== state.locale) setLanguage(requestedLocale, false, false);
   }
   const stage = view.study?.stage || "idle";
+  if (stage !== 'task1' || view.study?.condition !== 'explanation'
+      || view.study?.run_id !== previous?.run_id) {
+    state.expandedBubble = null;
+    state.pendingBubbleRequest = null;
+    if (stage !== 'task1' || view.study?.condition !== 'explanation') state.bubbleAnswers.clear();
+  } else if (Number(view.study?.action_bubble?.frame) !== Number(previous?.action_bubble?.frame)) {
+    state.expandedBubble = null;
+    state.pendingBubbleRequest = null;
+  }
   const beforeView = transitionBeforeView(view);
-  paintView(beforeView);
-  if (view.transition) {
+  const newTransition = Boolean(view.transition && previous
+    && Number(view.study?.progress) !== Number(previous.progress) && !options.skipAnimation);
+  if (newTransition) {
+    paintView(beforeView);
     await animateOnce(beforeView, view.transition, 400);
     paintView(view, true);
     drawWarehouse(view);
   } else {
     cancelMotion();
+    paintView(view, true);
     drawWarehouse(view);
   }
-  if (view.last_explanation) renderAnswer(view.last_explanation);
+  if (stage === 'task1' && view.study?.condition === 'explanation' && view.last_explanation) {
+    renderAnswer(view.last_explanation);
+  } else if (stage !== 'task1' || view.study?.condition !== 'explanation') {
+    $("answerPanel").classList.add("hidden");
+    $("answerText").textContent = '';
+    $("questionStatus").classList.add("hidden");
+  }
 }
 
 function buildSurvey() {

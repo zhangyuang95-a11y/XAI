@@ -35,8 +35,6 @@ class PongApplication:
             participant_id=str(payload.get("participant_id", "local")),
             seed=int(payload.get("seed", config.seed)),
             condition_source=str(payload.get("assignment_source", "manual_self_select")),
-            study_protocol=(None if payload.get("study_protocol") is None
-                            else str(payload.get("study_protocol"))),
             config=config,
         )
         session_id = uuid4().hex

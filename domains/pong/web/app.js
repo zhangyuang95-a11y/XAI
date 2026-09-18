@@ -212,7 +212,6 @@ $('start').onclick = async () => {
   const result = await post('/start', {
     participant_id: $('participant').value,
     group: $('group').value,
-    study_protocol: $('protocol').value,
   });
   running = true;
   currentAction = 'stay';
@@ -220,14 +219,6 @@ $('start').onclick = async () => {
   $('game').hidden = false;
   draw(result);
 };
-
-function updateProtocolHint() {
-  $('protocolHint').textContent = $('protocol').value === 'rule_discovery'
-    ? '本协议不在开局完整公布合作规则，Task 1 后可在回放中根据实际结果分析。'
-    : '协作球 B1、B2 需要两块球拍在同一时刻分别覆盖左右接触点。';
-}
-$('protocol').onchange = updateProtocolHint;
-updateProtocolHint();
 
 function bindDirectionButton(id, action) {
   const button = $(id);

@@ -17,6 +17,18 @@ const url = process.env.PONG_SMOKE_URL || 'http://127.0.0.1:18768/pong/';
       await page.selectOption('#group', group);
       await page.click('#start');
       await page.waitForFunction(() => document.querySelector('#game').hidden === false);
+      await page.keyboard.press('s');
+      assert.equal(await page.evaluate(() => game.paused), true);
+      await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', repeat: true, bubbles: true })));
+      assert.equal(await page.evaluate(() => game.paused), true, 'holding S must not toggle repeatedly');
+      if (group === 'A') {
+        await page.locator('#question').fill('s');
+        await page.keyboard.press('s');
+        assert.equal(await page.evaluate(() => game.paused), true, 'typing in the question must not resume play');
+        await page.locator('#pause').focus();
+      }
+      await page.keyboard.press('s');
+      assert.equal(await page.evaluate(() => game.paused), false);
       const initial = await page.evaluate(() => {
         game.paused = true; render();
         return { source: game.controllerSource, decision: game.latestDecision,

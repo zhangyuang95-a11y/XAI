@@ -993,9 +993,25 @@ function bindDirectionButton(id, action) {
 }
 bindDirectionButton('left', 'left');
 bindDirectionButton('right', 'right');
+function togglePause() {
+  if (!game || game.terminal) return;
+  game.paused = !game.paused;
+  heldKeys.clear();
+  currentAction = 'stay';
+  replayLocked = false;
+  replayIndex = null;
+  rangeSelected = false;
+  render();
+}
 window.addEventListener('keydown', event => {
-  if (event.target && ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(event.target.tagName)) return;
   const key = event.key.toLowerCase();
+  const editing = event.target && (['INPUT', 'SELECT', 'TEXTAREA'].includes(event.target.tagName) || event.target.isContentEditable);
+  if (key === 's' && game && !game.terminal && !editing && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault();
+    if (!event.repeat) togglePause();
+    return;
+  }
+  if (event.target && ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(event.target.tagName)) return;
   if (event.key === 'ArrowLeft' || key === 'a') { event.preventDefault(); heldKeys.add('left'); updateKeyboardAction(); }
   if (event.key === 'ArrowRight' || key === 'd') { event.preventDefault(); heldKeys.add('right'); updateKeyboardAction(); }
 });
@@ -1005,7 +1021,7 @@ window.addEventListener('keyup', event => {
   if (event.key === 'ArrowRight' || key === 'd') { event.preventDefault(); heldKeys.delete('right'); updateKeyboardAction(); }
 });
 window.addEventListener('blur', () => { heldKeys.clear(); currentAction = 'stay'; if (game && !game.terminal) { game.paused = true; render(); } });
-$('pause').onclick = () => { if (game && !game.terminal) { game.paused = !game.paused; heldKeys.clear(); currentAction = 'stay'; replayLocked = false; replayIndex = null; rangeSelected = false; render(); } };
+$('pause').onclick = togglePause;
 function beginTask2() {
   if (!game?.terminal || game.task !== 1) return;
   game = new OfflinePong({ group: game.group, participantId: game.participantId, task: 2, seed: 260919 });

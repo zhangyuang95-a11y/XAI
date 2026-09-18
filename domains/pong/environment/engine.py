@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 import random
 from typing import Any, Mapping
 
@@ -10,115 +10,110 @@ from .model import Ball, BallKind, PongFrame, PongTransition
 
 
 VALID_ACTIONS = ("left", "right", "stay")
+_EPSILON = 1e-6
 
 
-@dataclass(frozen=True)
 class PredictedContact:
-    """The next catch-line crossing computed with the engine's grid rules."""
+    """One next downward crossing produced by the same continuous physics."""
 
-    ball_id: str
-    ball_kind: str
-    opportunity_id: str
-    updates_until_contact: int
-    contact_frame: int
-    ball_left: int
-    ball_top: int
-    contact_cells: tuple[int, ...]
+    def __init__(self, *, ball_id: str, ball_kind: str, opportunity_id: str,
+                 updates_until_contact: int, time_until_contact: float,
+                 contact_frame: int, ball_left: float, ball_top: float,
+                 contact_cells: tuple[float, ...]) -> None:
+        self.ball_id = ball_id
+        self.ball_kind = ball_kind
+        self.opportunity_id = opportunity_id
+        self.updates_until_contact = updates_until_contact
+        self.time_until_contact = time_until_contact
+        self.contact_frame = contact_frame
+        self.ball_left = ball_left
+        self.ball_top = ball_top
+        self.contact_cells = contact_cells
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "ball_id": self.ball_id,
-            "ball_kind": self.ball_kind,
-            "opportunity_id": self.opportunity_id,
-            "updates_until_contact": self.updates_until_contact,
-            "contact_frame": self.contact_frame,
-            "ball_left": self.ball_left,
-            "ball_top": self.ball_top,
-            "contact_cells": list(self.contact_cells),
-        }
+        return self.__dict__.copy() | {"contact_cells": list(self.contact_cells)}
 
 
-def ball_contact_cells(ball: Ball, config: PongConfig) -> tuple[int, ...]:
-    """Return the exact lower cells used for the next catch-line test."""
+def ball_contact_cells(ball: Ball, config: PongConfig) -> tuple[float, ...]:
+    """Return the actual lower-edge contact coordinates for the ball."""
     if ball.is_large:
         return (
-            ball.x + config.large_contact_left_offset,
-            ball.x + config.large_contact_right_offset,
+            ball.x + float(config.large_contact_left_offset),
+            ball.x + float(config.large_contact_right_offset),
         )
     return (ball.x,)
 
 
-def paddle_covers_cell(paddle_left: int, cell: int, config: PongConfig) -> bool:
-    return paddle_left <= cell < paddle_left + int(config.paddle_width)
+def paddle_covers_cell(paddle_left: float, cell: float, config: PongConfig) -> bool:
+    return paddle_left - _EPSILON <= cell < paddle_left + float(config.paddle_width) - _EPSILON
 
 
-def paddle_target_left(paddle_left: int, cell: int, config: PongConfig) -> int:
-    """Closest legal left anchor that covers ``cell``."""
-    width = int(config.paddle_width)
-    if paddle_left <= cell < paddle_left + width:
-        return paddle_left
-    candidate = cell if cell < paddle_left else cell - width + 1
-    return max(0, min(int(config.width) - width, candidate))
+def paddle_target_left(paddle_left: float, cell: float, config: PongConfig) -> float:
+    """Closest legal continuous anchor whose four-cell paddle covers ``cell``."""
+    width = float(config.paddle_width)
+    maximum = float(config.width) - width
+    if paddle_covers_cell(paddle_left, cell, config):
+        return max(0.0, min(maximum, paddle_left))
+    target = cell if cell < paddle_left else cell - width + _EPSILON
+    return max(0.0, min(maximum, target))
 
 
-def _advance_grid_ball(ball: Ball, config: PongConfig) -> tuple[bool, int, int]:
-    """Advance one ball using the authoritative integer-grid motion.
+def _reflect(position: float, velocity: float, lower: float, upper: float) -> tuple[float, float]:
+    """Reflect a continuous coordinate within a closed interval."""
+    while position < lower - _EPSILON or position > upper + _EPSILON:
+        if position < lower:
+            position = lower + (lower - position)
+            velocity = abs(velocity)
+        elif position > upper:
+            position = upper - (position - upper)
+            velocity = -abs(velocity)
+    return max(lower, min(upper, position)), velocity
 
-    Lower-edge rebounding is left to the caller, which must first settle an
-    encounter at the catch line and record any miss.
-    """
+
+def _advance_probe(ball: Ball, config: PongConfig, dt: float) -> tuple[float, float]:
+    """Advance a ball without resolving paddle contact; shared by prediction."""
     old_x, old_y = ball.x, ball.y
-    interval = config.ball_step_interval_updates
-    ball.motion_phase = (ball.motion_phase + 1) % interval
-    if ball.motion_phase != 0:
-        return False, old_x, old_y
-    ball.previous_x, ball.previous_y = old_x, old_y
-    max_x = int(config.width) - ball.width_cells
-    ball.x += int(ball.vx)
-    if ball.x < 0:
-        ball.x = 0
-        ball.vx = abs(int(ball.vx))
-    elif ball.x > max_x:
-        ball.x = max_x
-        ball.vx = -abs(int(ball.vx))
-    ball.y += int(ball.vy)
-    if ball.y < 0:
-        ball.y = 0
-        ball.vy = abs(int(ball.vy))
-        ball.descending_encounter = False
-    return True, old_x, old_y
+    ball.x, ball.vx = _reflect(
+        ball.x + ball.vx * dt, ball.vx, 0.0, float(config.width - ball.width_cells),
+    )
+    ball.y, ball.vy = _reflect(
+        ball.y + ball.vy * dt, ball.vy, 0.0, float(config.height - ball.height_cells),
+    )
+    return old_x, old_y
 
 
 def predict_next_contact(ball: Ball, frame: PongFrame, config: PongConfig) -> PredictedContact | None:
-    """Predict a ball's next downward crossing through the shared motion helper."""
+    """Predict the next descending catch-line crossing using production motion."""
     probe = ball.clone()
-    lower_top = int(config.height) - probe.height_cells
-    for offset in range(1, max(1, config.max_frames - frame.frame) + 1):
-        moved, _old_x, old_y = _advance_grid_ball(probe, config)
-        if not moved:
-            continue
-        old_bottom = old_y + probe.height_cells - 1
-        new_bottom = probe.y + probe.height_cells - 1
-        if probe.vy > 0 and not probe.descending_encounter and old_bottom < int(config.paddle_y) <= new_bottom:
-            return PredictedContact(
-                ball_id=probe.ball_id,
-                ball_kind=probe.kind.value,
-                opportunity_id=f"{probe.ball_id}:{probe.encounter_index + 1}",
-                updates_until_contact=offset,
-                contact_frame=frame.frame + offset,
-                ball_left=probe.x,
-                ball_top=probe.y,
-                contact_cells=ball_contact_cells(probe, config),
+    elapsed = 0.0
+    max_updates = max(1, config.max_frames - frame.frame)
+    for update in range(1, max_updates + 1):
+        old_x, old_y = _advance_probe(probe, config, config.fixed_dt)
+        elapsed += config.fixed_dt
+        old_bottom = old_y + probe.height_cells
+        new_bottom = probe.y + probe.height_cells
+        if probe.vy > 0 and not probe.descending_encounter and old_bottom < config.paddle_y <= new_bottom:
+            fraction = (config.paddle_y - old_bottom) / max(_EPSILON, new_bottom - old_bottom)
+            contact_x = old_x + (probe.x - old_x) * fraction
+            contact_cells = (
+                (contact_x + config.large_contact_left_offset, contact_x + config.large_contact_right_offset)
+                if probe.is_large else (contact_x,)
             )
-        if probe.y > lower_top:
-            probe.y = lower_top
-            probe.vy = -abs(int(probe.vy))
+            return PredictedContact(
+                ball_id=probe.ball_id, ball_kind=probe.kind.value,
+                opportunity_id=f"{probe.ball_id}:{probe.encounter_index + 1}",
+                updates_until_contact=update,
+                time_until_contact=max(0.0, elapsed - config.fixed_dt + fraction * config.fixed_dt),
+                contact_frame=frame.frame + update, ball_left=contact_x,
+                ball_top=config.paddle_y - probe.height_cells, contact_cells=contact_cells,
+            )
+        if probe.vy > 0 and probe.y >= float(config.height - probe.height_cells) - _EPSILON:
             probe.descending_encounter = False
     return None
 
 
 class PongEnvironment:
-    """Fixed-time-step four-ball Pong with one authoritative integer grid."""
+    """Authoritative 60 Hz continuous physics on a grid-sized court."""
 
     ACTIONS = VALID_ACTIONS
 
@@ -134,11 +129,9 @@ class PongEnvironment:
             self.seed = int(seed)
             self._rng = random.Random(self.seed)
         self.frame_index = 0
-        width = int(self.config.paddle_width)
-        self.player_x = max(0, min(int(self.config.width) - width, int(self.config.width * 0.30) - width // 2))
-        self.ai_x = max(0, min(int(self.config.width) - width, int(self.config.width * 0.70) - width // 2))
-        self.player_motion_phase = self.config.paddle_step_interval_updates - 1
-        self.ai_motion_phase = self.config.paddle_step_interval_updates - 1
+        width = float(self.config.paddle_width)
+        self.player_x = max(0.0, min(self.config.width - width, self.config.width * 0.28 - width / 2))
+        self.ai_x = max(0.0, min(self.config.width - width, self.config.width * 0.72 - width / 2))
         self.player_last_action = "stay"
         self.ai_last_action = "stay"
         self.phase = "active"
@@ -152,20 +145,21 @@ class PongEnvironment:
         return self.frame()
 
     def _initial_balls(self) -> list[Ball]:
-        starts = {"A1": (6, 3), "A2": (22, 7), "A3": (15, 10), "B1": (10, 1), "B2": (20, 8)}
+        starts = {"A1": (3.0, 2.0), "A2": (18.0, 5.0), "A3": (12.0, 8.0),
+                  "B1": (7.0, 1.0), "B2": (16.0, 6.0)}
         balls: list[Ball] = []
         for ball_id in self.config.ball_ids:
             base_x, base_y = starts[ball_id]
             large = ball_id in self.config.large_ball_ids
             width = self.config.large_ball_width_cells if large else self.config.small_ball_width_cells
             height = self.config.large_ball_height_cells if large else self.config.small_ball_height_cells
-            x = max(0, min(int(self.config.width) - width, base_x + self._rng.choice((-1, 0, 1))))
+            x = max(0.0, min(float(self.config.width - width), base_x + self._rng.choice((-0.35, 0.0, 0.35))))
             balls.append(Ball(
-                ball_id=ball_id,
-                kind=BallKind.LARGE if large else BallKind.SMALL,
+                ball_id=ball_id, kind=BallKind.LARGE if large else BallKind.SMALL,
                 radius=self.config.large_radius if large else self.config.small_radius,
-                x=x, y=base_y, vx=-1 if self._rng.random() < 0.5 else 1, vy=1,
-                width_cells=width, height_cells=height,
+                x=x, y=base_y,
+                vx=(-self.config.ball_speed_x_per_second if self._rng.random() < 0.5 else self.config.ball_speed_x_per_second),
+                vy=self.config.ball_speed_y_per_second, width_cells=width, height_cells=height,
             ))
         return balls
 
@@ -194,7 +188,7 @@ class PongEnvironment:
             "paddle_y": self.config.paddle_y, "paddle_width_cells": self.config.paddle_width,
             "paddle_height_cells": self.config.paddle_height_cells,
             "fixed_dt": self.config.fixed_dt, "max_frames": self.config.max_frames,
-            "ball_step_interval_updates": self.config.ball_step_interval_updates,
+            "continuous_motion": True,
         }
 
     def features(self, agent: str = "ai") -> dict[str, float]:
@@ -208,7 +202,8 @@ class PongEnvironment:
             prefix = f"ball.{ball.ball_id}"
             values.update({
                 f"{prefix}.x": ball.x / self.config.width, f"{prefix}.y": ball.y / self.config.height,
-                f"{prefix}.vx": float(ball.vx), f"{prefix}.vy": float(ball.vy),
+                f"{prefix}.vx": ball.vx / self.config.ball_speed_x_per_second,
+                f"{prefix}.vy": ball.vy / self.config.ball_speed_y_per_second,
                 f"{prefix}.large": float(ball.is_large), f"{prefix}.descending": float(ball.vy > 0),
                 f"{prefix}.encounters": float(ball.encounter_index),
             })
@@ -221,10 +216,9 @@ class PongEnvironment:
         if self.terminal:
             return PongTransition(before, before, player_action, ai_action, ())
         self.frame_index += 1
-        self.player_x = self._move_paddle(self.player_x, player_action, "player")
-        self.ai_x = self._move_paddle(self.ai_x, ai_action, "ai")
-        assert 0 <= self.player_x <= int(self.config.width) - int(self.config.paddle_width)
-        assert 0 <= self.ai_x <= int(self.config.width) - int(self.config.paddle_width)
+        self.player_x = self._move_paddle(self.player_x, player_action)
+        self.ai_x = self._move_paddle(self.ai_x, ai_action)
+        self.player_last_action, self.ai_last_action = player_action, ai_action
         events: list[dict[str, Any]] = []
         for ball in self.balls:
             events.extend(self._advance_ball(ball))
@@ -235,63 +229,63 @@ class PongEnvironment:
             self.history.extend(deepcopy(events))
         return PongTransition(before, self.frame(), player_action, ai_action, tuple(events))
 
-    def _move_paddle(self, left: int, action: str, paddle: str) -> int:
-        phase_name, action_name = f"{paddle}_motion_phase", f"{paddle}_last_action"
-        if action == "stay":
-            setattr(self, phase_name, self.config.paddle_step_interval_updates - 1)
-            setattr(self, action_name, action)
-            return left
-        if getattr(self, action_name) != action:
-            # Direction changes are responsive; holding the direction then
-            # advances at the configured cells-per-second rate.
-            setattr(self, phase_name, self.config.paddle_step_interval_updates - 1)
-        phase = (int(getattr(self, phase_name)) + 1) % self.config.paddle_step_interval_updates
-        setattr(self, phase_name, phase)
-        setattr(self, action_name, action)
-        if phase != 0:
-            return left
-        delta = -1 if action == "left" else 1 if action == "right" else 0
-        return max(0, min(int(self.config.width) - int(self.config.paddle_width), left + delta))
+    def _move_paddle(self, left: float, action: str) -> float:
+        delta = -1.0 if action == "left" else 1.0 if action == "right" else 0.0
+        maximum = self.config.width - self.config.paddle_width
+        return max(0.0, min(maximum, left + delta * self.config.paddle_speed_per_second * self.config.fixed_dt))
 
     def _advance_ball(self, ball: Ball) -> list[dict[str, Any]]:
-        moved, _old_x, old_y = _advance_grid_ball(ball, self.config)
-        if not moved:
-            return []
+        old_x, old_y = ball.x, ball.y
+        ball.previous_x, ball.previous_y = old_x, old_y
+        ball.x, ball.vx = _reflect(
+            old_x + ball.vx * self.config.fixed_dt, ball.vx, 0.0, float(self.config.width - ball.width_cells),
+        )
+        if ball.vy < 0:
+            ball.y, ball.vy = _reflect(
+                old_y + ball.vy * self.config.fixed_dt, ball.vy, 0.0,
+                float(self.config.height - ball.height_cells),
+            )
+        else:
+            # A downward ball is allowed to reach the lower edge so this
+            # method can score a missed catch exactly once before bouncing.
+            ball.y = old_y + ball.vy * self.config.fixed_dt
         events: list[dict[str, Any]] = []
-        old_bottom = old_y + ball.height_cells - 1
-        new_bottom = ball.y + ball.height_cells - 1
-        if ball.vy > 0 and not ball.descending_encounter and old_bottom < int(self.config.paddle_y) <= new_bottom:
-            event = self._resolve_encounter(ball)
+        old_bottom, new_bottom = old_y + ball.height_cells, ball.y + ball.height_cells
+        if ball.vy > 0 and not ball.descending_encounter and old_bottom < self.config.paddle_y <= new_bottom:
+            fraction = (self.config.paddle_y - old_bottom) / max(_EPSILON, new_bottom - old_bottom)
+            contact_x = old_x + (ball.x - old_x) * fraction
+            event = self._resolve_encounter(ball, contact_x)
             events.append(event)
             ball.descending_encounter = True
             if event["outcome"] == "caught":
                 ball.pending_miss = False
                 ball.pending_miss_id = None
-                ball.y = int(self.config.paddle_y) - ball.height_cells
-                ball.vy = -1
-        if ball.vy < 0 and ball.y + ball.height_cells - 1 < int(self.config.paddle_y):
-            ball.descending_encounter = False
-        lower_top = int(self.config.height) - ball.height_cells
-        if ball.y > lower_top:
+                ball.y = self.config.paddle_y - ball.height_cells
+                ball.vy = -abs(ball.vy)
+        lower_top = float(self.config.height - ball.height_cells)
+        if ball.vy > 0 and ball.y >= lower_top - _EPSILON:
             ball.y = lower_top
-            ball.vy = -1
+            ball.vy = -abs(ball.vy)
             ball.descending_encounter = False
             if ball.pending_miss:
-                miss_penalty = 3 if ball.is_large else 1
-                self.missed_balls += miss_penalty
-                kind = ball.kind.value
-                self.missed_by_type[kind] += miss_penalty
+                penalty = 3 if ball.is_large else 1
+                self.missed_balls += penalty
+                self.missed_by_type[ball.kind.value] += penalty
                 events.append({"event": "miss_scored", "encounter_id": ball.pending_miss_id,
-                               "ball_id": ball.ball_id, "ball_kind": kind, "frame": self.frame_index,
-                               "time_seconds": self.time_seconds, "miss_penalty": miss_penalty})
+                               "ball_id": ball.ball_id, "ball_kind": ball.kind.value,
+                               "frame": self.frame_index, "time_seconds": self.time_seconds,
+                               "miss_penalty": penalty})
                 ball.pending_miss = False
                 ball.pending_miss_id = None
             events.append({"event": "bottom_bounce", "ball_id": ball.ball_id,
                            "frame": self.frame_index, "time_seconds": self.time_seconds})
+        if ball.vy < 0 and ball.y + ball.height_cells < self.config.paddle_y - _EPSILON:
+            ball.descending_encounter = False
         return events
 
-    def _resolve_encounter(self, ball: Ball) -> dict[str, Any]:
-        contacts = ball_contact_cells(ball, self.config)
+    def _resolve_encounter(self, ball: Ball, contact_left: float) -> dict[str, Any]:
+        contacts = ((contact_left, contact_left + self.config.large_contact_right_offset)
+                    if ball.is_large else (contact_left,))
         player = tuple(paddle_covers_cell(self.player_x, cell, self.config) for cell in contacts)
         ai = tuple(paddle_covers_cell(self.ai_x, cell, self.config) for cell in contacts)
         if ball.is_large:
@@ -315,13 +309,13 @@ class PongEnvironment:
                 "ball_kind": ball.kind.value, "encounter_index": ball.encounter_index,
                 "outcome": outcome, "coverage": coverage, "frame": self.frame_index,
                 "time_seconds": self.time_seconds, "player_x": self.player_x, "ai_x": self.ai_x,
-                "ball_left": ball.x, "ball_top": ball.y, "contact_cells": list(contacts)}
+                "ball_left": contact_left, "ball_top": self.config.paddle_y - ball.height_cells,
+                "contact_cells": list(contacts)}
 
     def snapshot(self) -> dict[str, Any]:
         return {"version": self.config.version, "domain_id": self.config.domain_id, "seed": self.seed,
                 "rng": self._rng.getstate(), "frame_index": self.frame_index,
                 "player_x": self.player_x, "ai_x": self.ai_x, "phase": self.phase,
-                "player_motion_phase": self.player_motion_phase, "ai_motion_phase": self.ai_motion_phase,
                 "player_last_action": self.player_last_action, "ai_last_action": self.ai_last_action,
                 "balls": [asdict(ball) | {"kind": ball.kind.value} for ball in self.balls],
                 "missed_balls": self.missed_balls, "successful_opportunities": self.successful_opportunities,
@@ -335,9 +329,7 @@ class PongEnvironment:
         self._rng = random.Random()
         self._rng.setstate(_tupleize(snapshot["rng"]))
         self.frame_index = int(snapshot["frame_index"])
-        self.player_x, self.ai_x = int(snapshot["player_x"]), int(snapshot["ai_x"])
-        self.player_motion_phase = int(snapshot.get("player_motion_phase", self.config.paddle_step_interval_updates - 1))
-        self.ai_motion_phase = int(snapshot.get("ai_motion_phase", self.config.paddle_step_interval_updates - 1))
+        self.player_x, self.ai_x = float(snapshot["player_x"]), float(snapshot["ai_x"])
         self.player_last_action = str(snapshot.get("player_last_action", "stay"))
         self.ai_last_action = str(snapshot.get("ai_last_action", "stay"))
         self.phase = str(snapshot["phase"])

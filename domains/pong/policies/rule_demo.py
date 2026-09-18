@@ -12,28 +12,31 @@ from ..environment.engine import (
 )
 from ..environment.model import PongFrame
 
+_EPSILON = 1e-6
+
 
 @dataclass(frozen=True)
 class ControllerDecision:
-    """One transparent rule-controller decision for a single fixed update."""
+    """Factual rule-controller decision for one authoritative state."""
 
     action: str
     reason: str
     intent_type: str = "no_urgent"
-    target_x: int | None = None
+    target_x: float | None = None
     target_ball_id: str | None = None
     target_kind: str | None = None
     contact_side: str | None = None
-    distance_cells: int | None = None
+    distance_cells: float | None = None
     eta_updates: int | None = None
+    time_until_contact: float | None = None
     requires_partner: bool = False
     opportunity_id: str | None = None
+    commitment_state: str = "none"
     candidates: tuple[dict[str, Any], ...] = ()
     conflict_ball_ids: tuple[str, ...] = ()
-    # These are factual comparisons computed from the same prediction used to
-    # select the target.  They support an explanation of *why this ball now*,
-    # rather than exposing an internal controller label.
-    player_distance_cells: int | None = None
+    player_distance_cells: float | None = None
+    player_closest_ball_id: str | None = None
+    player_closest_distance_cells: float | None = None
     small_first_ball_id: str | None = None
     small_first_feasible: bool | None = None
 
@@ -44,44 +47,58 @@ class ControllerDecision:
 @dataclass(frozen=True)
 class _Candidate:
     prediction: PredictedContact
-    target_x: int
+    target_x: float
     contact_side: str | None
     requires_partner: bool
-    ai_distance: int
-    player_distance: int
+    ai_distance: float
+    player_distance: float
     viable: bool
+    ai_viable: bool
     handoff: bool
     reason: str
+
+    @property
+    def penalty(self) -> int:
+        return 3 if self.prediction.ball_kind == "large" else 1
 
     def public(self) -> dict[str, Any]:
         return {
             "ball_id": self.prediction.ball_id,
             "kind": self.prediction.ball_kind,
             "opportunity_id": self.prediction.opportunity_id,
-            "eta_updates": self.prediction.updates_until_contact,
-            "target_x": self.target_x,
+            "time_until_contact": round(self.prediction.time_until_contact, 4),
+            "target_x": round(self.target_x, 4),
             "contact_side": self.contact_side,
-            "ai_distance": self.ai_distance,
-            "player_distance": self.player_distance,
+            "ai_distance": round(self.ai_distance, 4),
+            "player_distance": round(self.player_distance, 4),
             "viable": self.viable,
+            "ai_viable": self.ai_viable,
             "handoff": self.handoff,
             "reason": self.reason,
         }
 
 
-class RuleDemoController:
-    """Rule baseline that allocates all four balls without reading user input.
+@dataclass(frozen=True)
+class _Commitment:
+    ball_id: str
+    opportunity_id: str
+    contact_side: str | None
 
-    It is deliberately labelled as a rule controller.  It shares the engine's
-    integer trajectory predictor; it is not a claim that a neural policy made
-    the choice.
+
+class RuleDemoController:
+    """A transparent, state-only baseline with stable large-ball commitments.
+
+    It never reads the player's unsubmitted action.  A large-ball commitment
+    is bound to a ball and its particular downward opportunity, rather than to
+    a fragile exact target coordinate, so a small prediction adjustment cannot
+    make Robot 2 leave before the actual catch has been settled.
     """
 
-    version = "rule-demo-grid-three-small-two-large-v6-smooth"
+    version = "rule-demo-continuous-24x14-v7"
 
     def __init__(self, config: PongConfig | None = None) -> None:
         self.config = config or PongConfig()
-        self._commitment: tuple[str, str, int, str | None] | None = None
+        self._commitment: _Commitment | None = None
 
     def reset(self) -> None:
         self._commitment = None
@@ -91,48 +108,88 @@ class RuleDemoController:
             return ControllerDecision("stay", "本局已经结束。")
         candidates = self._candidates(frame)
         public = tuple(candidate.public() for candidate in candidates)
-        viable = [candidate for candidate in candidates if candidate.viable and not candidate.handoff]
-        handoffs = [candidate for candidate in candidates if candidate.handoff]
-        selected = self._retain_or_select(viable)
-        conflict = self._conflicts(viable)
+        conflict = self._conflicts(candidates)
+        player_closest = min(candidates, key=lambda item: item.player_distance, default=None)
+
+        committed = self._committed_candidate(candidates)
+        if committed is not None:
+            return self._decision(
+                frame, committed, public, conflict, player_closest,
+                commitment_state="waiting_for_large" if committed.ai_distance <= 0.05 else "approaching_large",
+                candidates=candidates,
+            )
+
+        available = [item for item in candidates if item.viable and not item.handoff]
+        selected = min(available, key=self._selection_key, default=None)
         if selected is None:
             self._commitment = None
-            if handoffs:
-                target = min(handoffs, key=lambda item: item.prediction.updates_until_contact)
+            handoff = min((item for item in candidates if item.handoff),
+                          key=lambda item: item.prediction.time_until_contact, default=None)
+            if handoff is not None:
                 return ControllerDecision(
-                    "stay", "机器人1已经覆盖这颗球的预计接球格；我继续检查其余来球。",
-                    "handoff", target.target_x, target.prediction.ball_id, target.prediction.ball_kind,
-                    target.contact_side, target.ai_distance, target.prediction.updates_until_contact,
-                    target.requires_partner, target.prediction.opportunity_id, public, conflict,
-                    target.player_distance,
+                    "stay", "机器人1已经覆盖这颗小球的接球位置；我继续观察其他来球。",
+                    "handoff", handoff.target_x, handoff.prediction.ball_id, handoff.prediction.ball_kind,
+                    handoff.contact_side, handoff.ai_distance, handoff.prediction.updates_until_contact,
+                    handoff.prediction.time_until_contact, handoff.requires_partner, handoff.prediction.opportunity_id,
+                    "none", public, conflict, handoff.player_distance,
+                    player_closest.prediction.ball_id if player_closest else None,
+                    player_closest.player_distance if player_closest else None,
                 )
-            return ControllerDecision("stay", "当前没有机器人2能及时承担的来球。", "no_urgent",
-                                      candidates=public, conflict_ball_ids=conflict)
+            return ControllerDecision(
+                "stay", "当前没有机器人2能及时承担的来球。", "no_urgent",
+                candidates=public, conflict_ball_ids=conflict,
+                player_closest_ball_id=player_closest.prediction.ball_id if player_closest else None,
+                player_closest_distance_cells=player_closest.player_distance if player_closest else None,
+            )
 
-        self._commitment = (
-            selected.prediction.ball_id, selected.prediction.opportunity_id,
-            selected.target_x, selected.contact_side,
-        )
-        action = "stay"
-        if frame.ai_x < selected.target_x:
-            action = "right"
-        elif frame.ai_x > selected.target_x:
-            action = "left"
-        if action == "stay":
-            reason = "我已覆盖预计接球格，保留位置等待来球。"
-            intent = "hold_target"
-        elif selected.requires_partner:
-            reason = "我在移动到合作大球的分配接触点。"
-            intent = "catch_large"
+        if selected.requires_partner:
+            self._commitment = _Commitment(
+                selected.prediction.ball_id, selected.prediction.opportunity_id, selected.contact_side,
+            )
         else:
-            reason = "我在移动到小球的预计接球格。"
-            intent = "catch_small"
-        small_first_ball_id, small_first_feasible = self._small_first_feasibility(selected, candidates)
+            self._commitment = None
+        return self._decision(frame, selected, public, conflict, player_closest,
+                              commitment_state="approaching_large" if selected.requires_partner else "none",
+                              candidates=candidates)
+
+    def _committed_candidate(self, candidates: list[_Candidate]) -> _Candidate | None:
+        if self._commitment is None:
+            return None
+        committed = next((item for item in candidates if item.requires_partner and (
+            item.prediction.ball_id, item.prediction.opportunity_id, item.contact_side,
+        ) == (self._commitment.ball_id, self._commitment.opportunity_id, self._commitment.contact_side)), None)
+        if committed is None:
+            self._commitment = None
+            return None
+        # Preserve a valid own-side preparation through the actual encounter,
+        # even if a tempting small ball appears. Only a proven loss of Robot
+        # 2's own reachability releases this particular large-ball plan.
+        if not committed.ai_viable:
+            self._commitment = None
+            return None
+        return committed
+
+    def _decision(self, frame: PongFrame, selected: _Candidate,
+                  public: tuple[dict[str, Any], ...], conflict: tuple[str, ...],
+                  player_closest: _Candidate | None, *, commitment_state: str,
+                  candidates: list[_Candidate] | None = None) -> ControllerDecision:
+        difference = selected.target_x - frame.ai_x
+        action = "right" if difference > 0.025 else "left" if difference < -0.025 else "stay"
+        if selected.requires_partner:
+            intent = "hold_large" if action == "stay" else "catch_large"
+            reason = "我已覆盖合作大球分配侧，等待本次接球结算。" if action == "stay" else "我在靠近合作大球的分配接触点。"
+        else:
+            intent = "hold_target" if action == "stay" else "catch_small"
+            reason = "我已覆盖小球接球位置。" if action == "stay" else "我在靠近小球接球位置。"
+        small_first_ball_id, small_first_feasible = self._small_first_feasibility(selected, candidates or [])
         return ControllerDecision(
             action, reason, intent, selected.target_x, selected.prediction.ball_id,
             selected.prediction.ball_kind, selected.contact_side, selected.ai_distance,
-            selected.prediction.updates_until_contact, selected.requires_partner,
-            selected.prediction.opportunity_id, public, conflict, selected.player_distance,
+            selected.prediction.updates_until_contact, selected.prediction.time_until_contact,
+            selected.requires_partner, selected.prediction.opportunity_id, commitment_state,
+            public, conflict, selected.player_distance,
+            player_closest.prediction.ball_id if player_closest else None,
+            player_closest.player_distance if player_closest else None,
             small_first_ball_id, small_first_feasible,
         )
 
@@ -142,104 +199,75 @@ class RuleDemoController:
             prediction = predict_next_contact(ball, frame, self.config)
             if prediction is None:
                 continue
-            if prediction.ball_kind == "large":
-                candidates.append(self._large_candidate(prediction, frame))
-            else:
-                candidates.append(self._small_candidate(prediction, frame))
+            candidates.append(self._large_candidate(prediction, frame) if prediction.ball_kind == "large"
+                              else self._small_candidate(prediction, frame))
         return candidates
 
     def _small_candidate(self, prediction: PredictedContact, frame: PongFrame) -> _Candidate:
         cell = prediction.contact_cells[0]
         target_x = paddle_target_left(frame.ai_x, cell, self.config)
-        ai_distance = abs(target_x - frame.ai_x)
         player_target = paddle_target_left(frame.player_x, cell, self.config)
-        player_distance = abs(player_target - frame.player_x)
+        ai_distance, player_distance = abs(target_x - frame.ai_x), abs(player_target - frame.player_x)
+        ai_viable = self._travel_seconds(ai_distance) <= prediction.time_until_contact + _EPSILON
         player_covers = paddle_covers_cell(frame.player_x, cell, self.config)
-        viable = self._travel_updates(ai_distance) <= prediction.updates_until_contact
-        # A player already covering the predicted contact is a hand-off, but it
-        # never stops the controller from evaluating the other three balls.
         return _Candidate(
             prediction, target_x, None, False, ai_distance, player_distance,
-            viable, player_covers,
-            "机器人1已覆盖预计接球格" if player_covers else "机器人2可及时覆盖预计接球格",
+            ai_viable, ai_viable, player_covers,
+            "机器人1已覆盖接球位置" if player_covers else "机器人2可以及时覆盖接球位置",
         )
 
     def _large_candidate(self, prediction: PredictedContact, frame: PongFrame) -> _Candidate:
         left_cell, right_cell = prediction.contact_cells
-        options: list[tuple[int, int, str, int, int]] = []
+        options: list[tuple[float, float, str, float, float]] = []
         for cell, side in ((left_cell, "left"), (right_cell, "right")):
             other = right_cell if side == "left" else left_cell
             target = paddle_target_left(frame.ai_x, cell, self.config)
             player_target = paddle_target_left(frame.player_x, other, self.config)
             ai_distance, player_distance = abs(target - frame.ai_x), abs(player_target - frame.player_x)
-            options.append((ai_distance + player_distance, target, side, ai_distance, player_distance))
+            options.append((self._travel_seconds(ai_distance) + self._travel_seconds(player_distance),
+                            target, side, ai_distance, player_distance))
         _cost, target_x, side, ai_distance, player_distance = min(options, key=lambda option: option[0])
-        viable = (
-            self._travel_updates(ai_distance) <= prediction.updates_until_contact
-            and self._travel_updates(player_distance) <= prediction.updates_until_contact
-        )
+        ai_viable = self._travel_seconds(ai_distance) <= prediction.time_until_contact + _EPSILON
+        viable = ai_viable and self._travel_seconds(player_distance) <= prediction.time_until_contact + _EPSILON
         return _Candidate(
-            prediction, target_x, side, True, ai_distance, player_distance, viable, False,
-            "双方可分别覆盖大球的两个实际接触格" if viable else "双方距离不足以共同覆盖大球接触格",
+            prediction, target_x, side, True, ai_distance, player_distance, viable, ai_viable, False,
+            "双方按当前距离可覆盖合作大球两侧" if viable else "当前双方无法同时覆盖合作大球两侧",
         )
 
-    def _retain_or_select(self, viable: list[_Candidate]) -> _Candidate | None:
-        if not viable:
-            return None
-        if self._commitment:
-            ball_id, opportunity_id, target_x, side = self._commitment
-            committed = next((candidate for candidate in viable if (
-                candidate.prediction.ball_id, candidate.prediction.opportunity_id,
-                candidate.target_x, candidate.contact_side,
-            ) == (ball_id, opportunity_id, target_x, side)), None)
-            if committed is not None:
-                earliest = min(viable, key=lambda item: (item.prediction.updates_until_contact, item.ai_distance))
-                if earliest.prediction.updates_until_contact + 2 >= committed.prediction.updates_until_contact:
-                    return committed
-        return min(viable, key=lambda item: (
-            item.prediction.updates_until_contact, item.ai_distance, item.player_distance,
-        ))
+    def _selection_key(self, candidate: _Candidate) -> tuple[float, float, float, str]:
+        # A large-ball miss costs three, so urgency is compared against that
+        # cost. This is a prioritisation rule, not a claim that every large
+        # ball is automatically worth abandoning an immediately catchable one.
+        slack = max(0.0, candidate.prediction.time_until_contact - self._travel_seconds(candidate.ai_distance))
+        return (slack / candidate.penalty, -float(candidate.penalty), candidate.ai_distance, candidate.prediction.ball_id)
 
-    def _small_first_feasibility(
-        self, selected: _Candidate, candidates: list[_Candidate],
-    ) -> tuple[str | None, bool | None]:
-        """Report whether an urgent small-ball detour still preserves a large catch.
-
-        This is deliberately an explanatory counterfactual, not an instruction
-        sent to either paddle.  It uses only the same current-frame positions
-        and fixed-grid travel estimate available to the controller.
-        """
+    def _small_first_feasibility(self, selected: _Candidate,
+                                 candidates: list[_Candidate]) -> tuple[str | None, bool | None]:
         if not selected.requires_partner:
             return None, None
-        small = [
-            candidate for candidate in candidates
-            if candidate.prediction.ball_kind == "small" and candidate.viable and not candidate.handoff
-        ]
+        small = [item for item in candidates if item.prediction.ball_kind == "small" and item.viable and not item.handoff]
         if not small:
             return None, None
-        first = min(small, key=lambda item: (
-            item.prediction.updates_until_contact, item.ai_distance,
-        ))
-        # Approximate the second leg from the small-ball contact position to
-        # this robot's allocated large-ball contact.  The answer is presented
-        # as an estimate because both balls continue moving after this frame.
-        detour_updates = self._travel_updates(first.ai_distance) + self._travel_updates(
-            abs(selected.target_x - first.target_x)
-        )
-        return first.prediction.ball_id, detour_updates <= selected.prediction.updates_until_contact
+        first = min(small, key=self._selection_key)
+        # The second leg starts when the small ball reaches and is actually
+        # caught at its own contact line, rather than when Robot 2 merely
+        # reaches its waiting position.
+        reach_small = self._travel_seconds(first.ai_distance)
+        leave_small_at = max(reach_small, first.prediction.time_until_contact)
+        transfer = self._travel_seconds(abs(selected.target_x - first.target_x))
+        player_ready = self._travel_seconds(selected.player_distance) <= selected.prediction.time_until_contact + _EPSILON
+        feasible = leave_small_at + transfer <= selected.prediction.time_until_contact + _EPSILON and player_ready
+        return first.prediction.ball_id, feasible
 
     @staticmethod
-    def _conflicts(viable: list[_Candidate]) -> tuple[str, ...]:
+    def _conflicts(candidates: list[_Candidate]) -> tuple[str, ...]:
+        viable = [item for item in candidates if item.viable and not item.handoff]
         if len(viable) < 2:
             return ()
-        first, second = sorted(viable, key=lambda item: item.prediction.updates_until_contact)[:2]
-        if second.prediction.updates_until_contact - first.prediction.updates_until_contact <= 2:
-            return (first.prediction.ball_id, second.prediction.ball_id)
+        first, second = sorted(viable, key=lambda item: item.prediction.time_until_contact)[:2]
+        if second.prediction.time_until_contact - first.prediction.time_until_contact <= 0.75:
+            return first.prediction.ball_id, second.prediction.ball_id
         return ()
 
-    def _travel_updates(self, distance: int) -> int:
-        if distance <= 0:
-            return 0
-        # A newly chosen direction moves immediately, then each remaining cell
-        # follows the configured paddle update interval.
-        return 1 + (distance - 1) * self.config.paddle_step_interval_updates
+    def _travel_seconds(self, distance: float) -> float:
+        return max(0.0, distance) / self.config.paddle_speed_per_second

@@ -63,6 +63,7 @@ class PongApplication:
         return self._sessions[session_id]
 
     def _run(self, session_id: str, task: int) -> None:
+        next_tick = time.monotonic()
         while True:
             with self._lock:
                 session = self._sessions.get(session_id)
@@ -71,12 +72,22 @@ class PongApplication:
                 if not session.paused:
                     session.tick()
                 interval = session.config.fixed_dt
-            time.sleep(interval)
+            # Use a monotonic deadline instead of "work, then sleep(dt)".
+            # The latter slows the simulation by its own computation time and
+            # creates visible periodic stutter as the worker drifts.
+            next_tick += interval
+            remaining = next_tick - time.monotonic()
+            if remaining > 0:
+                time.sleep(remaining)
+            else:
+                # Do not run an unbounded catch-up burst: it would make a
+                # delayed browser miss a series of visible contact events.
+                next_tick = time.monotonic()
 
     def view(self, session_id: str | None) -> dict[str, Any]:
         with self._lock:
             if not session_id or session_id not in self._sessions:
-                return {"started": False, "domain_id": "pong", "version": "pong-grid-three-small-two-large-v6-smooth"}
+                return {"started": False, "domain_id": "pong", "version": "pong-continuous-24x14-v7"}
             return {"started": True, **self._sessions[session_id].summary()}
 
     def set_input(self, session_id: str | None, payload: dict[str, Any]) -> dict[str, Any]:

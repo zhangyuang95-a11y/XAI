@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from enum import Enum
 from typing import Any
 
@@ -22,14 +22,14 @@ class Ball:
     ball_id: str
     kind: BallKind
     radius: float
-    # Integer top-left anchors.  Rendering, wall collision and contact use
-    # these same occupied cells; no consumer rounds an independent position.
-    x: int
-    y: int
-    vx: int
-    vy: int
-    # Previous anchor is retained only for visual interpolation. Collision and
-    # scoring always use x/y, the authoritative integer grid cell.
+    # Continuous top-left positions measured in grid cells. Rendering, wall
+    # collision and contact use these same coordinates.
+    x: float
+    y: float
+    vx: float
+    vy: float
+    # Previous positions are saved for replay and diagnostics, not for a
+    # second, independent visual physics system.
     previous_x: int | None = None
     previous_y: int | None = None
     width_cells: int = 1
@@ -39,7 +39,6 @@ class Ball:
     last_outcome: str | None = None
     pending_miss: bool = False
     pending_miss_id: str | None = None
-    motion_phase: int = 0
 
     @property
     def is_large(self) -> bool:
@@ -54,13 +53,17 @@ class Ball:
         return self.height_cells / 2
 
     def clone(self) -> "Ball":
-        return Ball(**self.__dict__)
+        # Snapshots and tests must not accidentally make arbitrary runtime
+        # attributes part of authoritative physics state.
+        return Ball(**{field.name: getattr(self, field.name) for field in fields(Ball)})
 
     def to_dict(self) -> dict[str, Any]:
         previous_x = self.x if self.previous_x is None else self.previous_x
         previous_y = self.y if self.previous_y is None else self.previous_y
         return self.__dict__.copy() | {
             "kind": self.kind.value,
+            # Grid size determines the occupied rectangle; x/y are allowed to
+            # be fractional while an object crosses between visible cells.
             "grid_x": self.x,
             "grid_y": self.y,
             "occupied_cells": {
@@ -79,9 +82,9 @@ class PongFrame:
     frame: int
     time_seconds: float
     phase: str
-    # Integer left anchors for four-cell paddles.
-    player_x: int
-    ai_x: int
+    # Continuous left anchors for four-cell paddles.
+    player_x: float
+    ai_x: float
     balls: tuple[Ball, ...]
     total_opportunities: int
     successful_opportunities: int
@@ -90,7 +93,7 @@ class PongFrame:
     encounter_events: tuple[dict[str, Any], ...]
     terminal: bool
     domain_id: str = "pong"
-    version: str = "pong-grid-three-small-two-large-v6-smooth"
+    version: str = "pong-continuous-24x14-v7"
 
     def to_dict(self) -> dict[str, Any]:
         return {

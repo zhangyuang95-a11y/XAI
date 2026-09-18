@@ -18,11 +18,14 @@ from collections import deque
 from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import threading
+import time
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -51,6 +54,7 @@ from ui.warehouse_view import (
     serialize_warehouse_state,
     warehouse_map_payload,
 )
+from study_three_tasks import VERSION as STUDY_VERSION, permits as study_permits, task as study_task
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,8 +63,10 @@ WEB = ROOT / "ui" / "web"
 # With fixed stochastic Actor sampling it produces a complete productive
 # mission with claiming, delivery, charging, and coordination-yield events.
 TUTORIAL_SEED = 40_786
-TASK1_SEED = 51_000
-TASK2_SEED = 51_500
+TASK1_SEED = int(study_task("warehouse", 1)["seed"])
+TASK2_SEED = int(study_task("warehouse", 2)["seed"])
+TASK3_SEED = int(study_task("warehouse", 3)["seed"])
+STUDY_RECORD_DIR = ROOT / "output" / "study_records" / "warehouse" / STUDY_VERSION
 DEPLOYED_ACTOR_PATH = (
     ROOT / "output" / "deployment" / "warehouse_mappo_v68_6x7_actor.npz"
 )
@@ -351,11 +357,17 @@ class DevelopmentPreviewState:
         self.run_id: str | None = None
         self.locale = "zh-CN"
         self.condition = "explanation"
+        self.assignment_source = "development_default_A"
         self.participant_id = ""
         self.tutorial_index = 0
         self.tutorial_max_index = 0
         self.task1: dict[str, Any] | None = None
         self.task2: dict[str, Any] | None = None
+        self.task3: dict[str, Any] | None = None
+        self.task_run_id: str | None = None
+        self.round_started_at = time.monotonic()
+        self.survey_answers: dict[str, Any] | None = None
+        self.record_saved = False
         self.last_explanation: dict[str, Any] | None = None
         self.action_bubble: dict[str, Any] | None = None
         # The latest penalty is a durable, frame-bound UI affordance.  It is
@@ -417,9 +429,9 @@ class DevelopmentPreviewState:
         return {**identity, "trajectory_hash": sha256(encoded).hexdigest()}
 
     def commands(self) -> tuple[str, ...]:
-        task1_commands = (
+        task2_commands = (
             ("human_action", "ask_explanation")
-            if self.condition == "explanation"
+            if self._explanation_allowed()
             else ("human_action",)
         )
         values = {
@@ -430,13 +442,20 @@ class DevelopmentPreviewState:
                 "tutorial_select",
                 "begin_task1",
             ),
-            "task1": task1_commands,
+            "task1": ("human_action",),
             "task1_complete": ("begin_task2",),
-            "task2": ("human_action",),
+            "task2": task2_commands,
+            "task2_complete": ("begin_task3",),
+            "task3": ("human_action",),
             "survey": ("submit_survey",),
             "completed": (),
         }[self.stage]
         return ("set_language", "restart", *values) if self.stage != "idle" else values
+
+    def _explanation_allowed(self) -> bool:
+        return self.stage == "task2" and study_permits(
+            "warehouse", 2, "A" if self.condition == "explanation" else "B"
+        )
 
     def _start_round(self, stage: str, seed: int) -> None:
         self.environment = WarehouseMultiAgentEnv(collaborative_study_config())
@@ -447,6 +466,8 @@ class DevelopmentPreviewState:
         )
         self.environment.set_state(participant_state)
         self.policy_seed = int(seed)
+        self.task_run_id = uuid4().hex
+        self.round_started_at = time.monotonic()
         self.round_frame = _initial_frame(self.environment)
         self.round_frames = [self.round_frame]
         self.stage = stage
@@ -554,21 +575,68 @@ class DevelopmentPreviewState:
         if not (terminated or truncated):
             return
         if round_name == "task1":
-            self.task1 = self._summary("task1", TASK1_SEED, after)
+            self.task1 = self._completed_summary("task1", TASK1_SEED, after)
             self.stage = "task1_complete"
+        elif round_name == "task2":
+            self.task2 = self._completed_summary("task2", TASK2_SEED, after)
+            self.stage = "task2_complete"
         else:
-            self.task2 = self._summary("task2", TASK2_SEED, after)
+            self.task3 = self._completed_summary("task3", TASK3_SEED, after)
             self.stage = "survey"
+
+    def _completed_summary(self, name: str, seed: int, state: WarehouseState) -> dict[str, Any]:
+        number = int(name[-1])
+        questions = sum(row.get("round") == name for row in self.question_log)
+        return {
+            **self._summary(name, seed, state),
+            "protocol_version": STUDY_VERSION,
+            "task_id": number,
+            "purpose": study_task("warehouse", number)["purpose"],
+            "next_stage": study_task("warehouse", number)["next_stage"],
+            "run_id": self.task_run_id,
+            "elapsed_seconds": max(0.0, time.monotonic() - self.round_started_at),
+            "pause_seconds": 0.0,
+            "review_seconds": 0.0,
+            "question_count": questions,
+            "explanation_count": questions,
+            "explanation_allowed": study_permits(
+                "warehouse", number, "A" if self.condition == "explanation" else "B"
+            ),
+        }
+
+    def _save_study_record(self) -> None:
+        """Write only the new protocol's completed session; never rewrite old records."""
+        actor = _require_deployed_actor()
+        record = {
+            "protocol_version": STUDY_VERSION,
+            "domain_id": "warehouse",
+            "session_id": self.run_id,
+            "participant_id": self.participant_id,
+            "group": "A" if self.condition == "explanation" else "B",
+            "assignment_source": self.assignment_source,
+            "model_version": actor.metadata.model_version,
+            "model_sha256": actor.artifact_sha256,
+            "controller_version": RUNTIME_CONTROLLER,
+            "rounds": [deepcopy(self.task1), deepcopy(self.task2), deepcopy(self.task3)],
+            "questions": deepcopy(self.question_log),
+            "survey_answers": deepcopy(self.survey_answers),
+            "saved_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        STUDY_RECORD_DIR.mkdir(parents=True, exist_ok=True)
+        destination = STUDY_RECORD_DIR / f"{self.run_id}.json"
+        temporary = STUDY_RECORD_DIR / f".{self.run_id}.{uuid4().hex}.tmp"
+        try:
+            temporary.write_text(json.dumps(record, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+        self.record_saved = True
 
     def _display_frame(self) -> tuple[PreviewFrame, bool, str]:
         if self.stage == "instructions":
             return self.tutorial_frames[self.tutorial_index], True, "ai_ai_demonstration"
-        trajectory_kind = (
-            "human_ai_task1"
-            if self.stage in {"task1", "task1_complete"}
-            else "human_ai_task2"
-        )
-        return self.round_frame, self.stage not in {"task1", "task2"}, trajectory_kind
+        number = 1 if self.stage in {"task1", "task1_complete"} else 2 if self.stage in {"task2", "task2_complete"} else 3
+        return self.round_frame, self.stage not in {"task1", "task2", "task3"}, f"human_ai_task{number}"
 
     def view(self) -> dict[str, Any]:
         actor = _require_deployed_actor()
@@ -583,7 +651,7 @@ class DevelopmentPreviewState:
         )
         summaries = {
             key: value
-            for key, value in (("task1", self.task1), ("task2", self.task2))
+            for key, value in (("task1", self.task1), ("task2", self.task2), ("task3", self.task3))
             if value is not None
         }
         tutorial_count = len(self.tutorial_frames)
@@ -604,7 +672,9 @@ class DevelopmentPreviewState:
                 "trajectory_seed": (
                     TUTORIAL_SEED
                     if self.stage == "instructions"
-                    else TASK1_SEED if self.stage in {"task1", "task1_complete"} else TASK2_SEED
+                    else TASK1_SEED if self.stage in {"task1", "task1_complete"}
+                    else TASK2_SEED if self.stage in {"task2", "task2_complete"}
+                    else TASK3_SEED
                 ),
                 "agent_control": (
                     {"robot_1": "ai", "robot_2": "ai"}
@@ -613,7 +683,12 @@ class DevelopmentPreviewState:
                 ),
             },
             "study": {
-                "release_version": "sep2-on-demand-explanation-20260919",
+                "release_version": "three-task-study-20260919",
+                "protocol_version": STUDY_VERSION,
+                "domain_id": "warehouse",
+                "task_run_id": self.task_run_id,
+                "task_id": int(self.stage[4]) if self.stage.startswith("task") else None,
+                "task_seed": self.policy_seed if self.stage.startswith("task") else None,
                 "explanation_display_version": "warehouse-on-demand-explanation.v1",
                 "pilot_class": "internal_pre_experiment",
                 "formal_ready": False,
@@ -623,11 +698,12 @@ class DevelopmentPreviewState:
                 "locale": self.locale,
                 "participant_id": self.participant_id,
                 "condition": self.condition if self.stage != "idle" else None,
+                "assignment_source": self.assignment_source if self.stage != "idle" else None,
                 "group_code": (
                     "A" if self.condition == "explanation" else "B"
                 ) if self.stage != "idle" else None,
                 "group_explanation_available": (
-                    self.condition == "explanation"
+                    self._explanation_allowed()
                     if self.stage != "idle" else None
                 ),
                 "test_condition_selector": True,
@@ -653,31 +729,27 @@ class DevelopmentPreviewState:
                 "policy_artifact_sha256": actor.artifact_sha256,
                 "progress": (
                     int(self.environment.state.frame)
-                    if self.stage in {"task1", "task2"}
+                    if self.stage in {"task1", "task2", "task3"}
                     and self.environment.state is not None
                     else 0
                 ),
                 "total": int(self.environment.config.horizon),
                 "round_summaries": summaries,
-                "score_delta": (
-                    self.task2["score"] - self.task1["score"]
-                    if self.task1 is not None and self.task2 is not None
-                    and self.stage == "completed"
-                    else None
-                ),
-                "explanation_presented": self.explanation_count > 0,
-                "explanation_count": self.explanation_count,
+                "score_delta": None,
+                "survey_answers": deepcopy(self.survey_answers) if self.stage == "completed" else None,
+                "explanation_presented": self._explanation_allowed() and self.explanation_count > 0,
+                "explanation_count": self.explanation_count if self._explanation_allowed() else 0,
                 "live_explanation_available": bool(
-                    self.stage == "task1" and self.condition == "explanation"
+                    self._explanation_allowed()
                 ),
                 "action_bubble": (
                     self._localized_action_bubble()
-                    if self.stage == "task1" and self.condition == "explanation"
+                    if self._explanation_allowed()
                     else None
                 ),
                 "latest_charger_penalty": (
                     deepcopy(self.latest_charger_penalty)
-                    if self.stage == "task1" and self.condition == "explanation"
+                    if self._explanation_allowed()
                     else None
                 ),
                 "controlled_agent": "robot_1",
@@ -695,12 +767,13 @@ class DevelopmentPreviewState:
                     "complete": self.tutorial_index >= tutorial_count - 1,
                 },
                 "survey_submitted": self.stage == "completed",
+                "record_saved": self.record_saved,
                 "allowed_commands": list(self.commands()),
             },
             "trial": None,
             "last_explanation": (
                 self._localized_explanation()
-                if self.stage == "task1" and self.condition == "explanation"
+                if self._explanation_allowed()
                 else None
             ),
         }
@@ -709,7 +782,7 @@ class DevelopmentPreviewState:
         """Expose only the completed frame; generate its explanation on request."""
 
         self.action_bubble = None
-        if self.stage != "task1" or self.condition != "explanation":
+        if not self._explanation_allowed():
             return
         index = len(self.round_frames) - 1
         if index < 1:
@@ -725,7 +798,7 @@ class DevelopmentPreviewState:
         return {
             "target_agent": "robot_2",
             "frame": self.action_bubble.get("frame"),
-            "run_id": self.run_id,
+            "run_id": self.task_run_id,
         }
 
     def _localized_explanation(self) -> dict[str, Any] | None:
@@ -748,14 +821,14 @@ class DevelopmentPreviewState:
         self,
         index: int,
     ) -> tuple[WarehouseAdapter, Any]:
-        """Rebuild evidence for one executed Human-AI Task 1 transition."""
+        """Rebuild evidence for one executed Human-AI Task 2 transition."""
 
         if index < 1 or index >= len(self.round_frames):
-            raise ValueError("The requested Task 1 action has not been executed.")
+            raise ValueError("The requested Task 2 action has not been executed.")
         before = self.round_frames[index - 1]
         outcome = self.round_frames[index]
         environment = WarehouseMultiAgentEnv(collaborative_study_config())
-        environment.reset(seed=TASK1_SEED)
+        environment.reset(seed=TASK2_SEED)
         environment.set_state(before.state)
         actor = _require_deployed_actor()
         adapter = WarehouseAdapter(environment)
@@ -1129,7 +1202,7 @@ class DevelopmentPreviewState:
                 queue.append(candidate)
         return False
 
-    def _ask_live_task1(
+    def _ask_live_task2(
         self,
         *,
         question: str,
@@ -1139,7 +1212,7 @@ class DevelopmentPreviewState:
         action_frame: int | None = None,
         request_id: str | None = None,
     ) -> None:
-        """Answer from completed Task 1 transitions, never from the future.
+        """Answer from completed Task 2 transitions, never from the future.
 
         Ordinary questions intentionally use a compact recent context.  A
         charger-penalty question is different: it is anchored to the exact
@@ -1147,8 +1220,8 @@ class DevelopmentPreviewState:
         after more than five subsequent steps.
         """
 
-        if self.stage != "task1" or self.condition != "explanation":
-            raise RuntimeError("Live questions are available only to Group A during Task 1.")
+        if not self._explanation_allowed():
+            raise RuntimeError("Live questions are available only to Group A during Task 2.")
 
         completed = list(enumerate(self.round_frames))[1:]
         recent = completed[-5:]
@@ -1164,13 +1237,13 @@ class DevelopmentPreviewState:
         anchor: tuple[int, PreviewFrame] | None = recent[-1] if recent else None
         if action_frame is not None:
             if focus != "action" or action_frame < 1 or action_frame != int(self.round_frame.state.frame):
-                raise ValueError("Ask why must refer to the current completed Task 1 frame.")
+                raise ValueError("Ask why must refer to the current completed Task 2 frame.")
             anchor = next(
                 (item for item in completed if int(item[1].state.frame) == action_frame),
                 None,
             )
             if anchor is None:
-                raise ValueError("The requested Task 1 action frame is unavailable.")
+                raise ValueError("The requested Task 2 action frame is unavailable.")
         elif focus == "wait":
             anchor = next(
                 (
@@ -1217,17 +1290,17 @@ class DevelopmentPreviewState:
                 answer_zh = "最近五步内没有发生碰撞。"
             elif focus == "charger_penalty":
                 if penalty_event_id or penalty_frame is not None:
-                    answer_en = "That shared-charger penalty event is not available in this Task 1 run."
-                    answer_zh = "这次任务1中没有找到所选的共享充电桩处罚事件。"
+                    answer_en = "That shared-charger penalty event is not available in this Task 2 run."
+                    answer_zh = "这次任务2中没有找到所选的共享充电桩处罚事件。"
                 else:
-                    answer_en = "No shared-charger penalty has been recorded in this Task 1 run."
-                    answer_zh = "本次任务1还没有记录共享充电桩处罚。"
+                    answer_en = "No shared-charger penalty has been recorded in this Task 2 run."
+                    answer_zh = "本次任务2还没有记录共享充电桩处罚。"
             elif focus == "wait":
                 answer_en = "Robot 2 did not wait in the last five steps."
                 answer_zh = "机器人2在最近五步内没有等待。"
             else:
-                answer_en = "Robot 2 has not completed an action in Task 1 yet."
-                answer_zh = "机器人2在任务1中还没有完成任何动作。"
+                answer_en = "Robot 2 has not completed an action in Task 2 yet."
+                answer_zh = "机器人2在任务2中还没有完成任何动作。"
             evidence: dict[str, Any] = {
                 "event_type": focus,
                 "anchor_frame": anchor_frame,
@@ -1379,7 +1452,10 @@ class DevelopmentPreviewState:
         sequence = self.explanation_count
         common = {
             "explanation_display_version": "warehouse-on-demand-explanation.v1",
-            "run_id": self.run_id,
+            "run_id": self.task_run_id,
+            "session_id": self.run_id,
+            "protocol_version": STUDY_VERSION,
+            "task_id": 2,
             "requested_action_frame": action_frame,
             "request_id": request_id,
             "target_agent": "robot_2",
@@ -1391,8 +1467,8 @@ class DevelopmentPreviewState:
             "anchor_frame": anchor_frame,
             "context_frames": context_frames,
             "current_frame": current_frame,
-            "trajectory_kind": "human_ai_task1",
-            "trajectory_seed": TASK1_SEED,
+            "trajectory_kind": "human_ai_task2",
+            "trajectory_seed": TASK2_SEED,
             "agent_control": {"robot_1": "human", "robot_2": "ai"},
             "structured_evidence": evidence,
             "fact_validation": {
@@ -1434,7 +1510,9 @@ class DevelopmentPreviewState:
             {
                 "participant_id": self.participant_id,
                 "condition": self.condition,
-                "round": "task1",
+                "round": "task2",
+                "protocol_version": STUDY_VERSION,
+                "task_run_id": self.task_run_id,
                 "question_sequence": sequence,
                 "question": question,
                 "question_focus": focus,
@@ -1452,7 +1530,7 @@ class DevelopmentPreviewState:
                 "current_frame": current_frame,
                 "anchor_frame": anchor_frame,
                 "context_frames": context_frames,
-                "trajectory_kind": "human_ai_task1",
+                "trajectory_kind": "human_ai_task2",
                 "agent_control": {"robot_1": "human", "robot_2": "ai"},
                 "answer_en": answer_en,
                 "answer_zh": answer_zh,
@@ -1467,13 +1545,26 @@ class DevelopmentPreviewState:
     def command(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
         operation = str(envelope["operation_id"])
         if operation in self.operations:
-            return self.operations[operation]
+            cached = self.operations[operation]
+            cached_study = cached.get("view", {}).get("study", {})
+            if (
+                cached_study.get("run_id") != self.run_id
+                or cached_study.get("task_run_id") != self.task_run_id
+                or cached_study.get("stage") != self.stage
+                or cached_study.get("state_version") != self.version
+            ):
+                raise RuntimeError("This operation belongs to an earlier study state.")
+            return cached
         command = str(envelope["command"])
         payload = dict(envelope.get("payload", {}))
         self.command_requests.append(command)
         if command in {"start", "restart"}:
             self.participant_id = str(payload.get("participant_id", "development-preview"))
             override = str(payload.get("condition_override", "auto"))
+            self.assignment_source = (
+                "manual_self_select" if override in {"control", "explanation"}
+                else "development_default_A"
+            )
             self.condition = (
                 override
                 if override in {"control", "explanation"}
@@ -1486,6 +1577,9 @@ class DevelopmentPreviewState:
             self.tutorial_max_index = 0
             self.task1 = None
             self.task2 = None
+            self.task3 = None
+            self.survey_answers = None
+            self.record_saved = False
             self.last_explanation = None
             self.action_bubble = None
             self.latest_charger_penalty = None
@@ -1514,21 +1608,22 @@ class DevelopmentPreviewState:
             )
         elif command == "begin_task1" and self.stage == "instructions":
             self._start_round("task1", TASK1_SEED)
-        elif command == "human_action" and self.stage in {"task1", "task2"}:
+        elif command == "human_action" and self.stage in {"task1", "task2", "task3"}:
             self._advance_round(str(payload.get("action", "")))
         elif command == "begin_task2" and self.stage == "task1_complete":
             self._start_round("task2", TASK2_SEED)
+        elif command == "begin_task3" and self.stage == "task2_complete":
+            self._start_round("task3", TASK3_SEED)
         elif (
             command == "ask_explanation"
-            and self.stage == "task1"
-            and self.condition == "explanation"
+            and self._explanation_allowed()
         ):
             if any(
                 key in payload
                 for key in ("selected_frame", "trajectory_hash", "reference_index")
             ):
                 raise ValueError(
-                    "Live Task 1 questions cannot select an AI-AI replay frame."
+                    "Live Task 2 questions cannot select an AI-AI replay frame."
                 )
             target_agent = str(payload.get("target_agent", "robot_2"))
             if target_agent != "robot_2":
@@ -1560,18 +1655,18 @@ class DevelopmentPreviewState:
                 raise ValueError("Invalid action frame.") from None
             if action_frame is not None and (
                 str(envelope.get("run_id", "")) != str(self.run_id)
-                or str(payload.get("action_run_id", "")) != str(self.run_id)
-                or str(payload.get("action_stage", "")) != "task1"
+                or str(payload.get("action_run_id", "")) != str(self.task_run_id)
+                or str(payload.get("action_stage", "")) != "task2"
                 or str(payload.get("target_agent", "")) != "robot_2"
             ):
-                raise ValueError("Ask why must use this run's Robot 2 Task 1 action.")
+                raise ValueError("Ask why must use this run's Robot 2 Task 2 action.")
             penalty_event_id = payload.get("penalty_event_id", payload.get("event_id"))
             penalty_frame_value = payload.get("penalty_frame", payload.get("anchor_frame"))
             try:
                 penalty_frame = int(penalty_frame_value) if penalty_frame_value is not None else None
             except (TypeError, ValueError):
                 raise ValueError("Invalid penalty frame.") from None
-            self._ask_live_task1(
+            self._ask_live_task2(
                 question=question,
                 focus=focus,
                 penalty_event_id=(str(penalty_event_id) if penalty_event_id else None),
@@ -1580,6 +1675,13 @@ class DevelopmentPreviewState:
                 request_id=(str(payload.get("request_id")) if action_frame is not None else None),
             )
         elif command == "submit_survey" and self.stage == "survey":
+            self.survey_answers = {
+                key: payload.get(key) for key in (
+                    "coordination_understanding", "ai_predictability", "interface_clarity",
+                    "explanation_clarity", "explanation_usefulness", "question_helpfulness", "comment",
+                )
+            }
+            self._save_study_record()
             self.stage = "completed"
         else:
             raise RuntimeError(f"Command {command!r} is not valid during {self.stage!r}.")

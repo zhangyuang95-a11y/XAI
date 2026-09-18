@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlparse
 from domains.pong.web.server import CONFIG_PATH as PONG_CONFIG_PATH
 from domains.pong.web.server import COOKIE_NAME as PONG_COOKIE
 from domains.pong.web.server import PongApplication
+from study_three_tasks import PATH as STUDY_PROTOCOL_PATH
 from ui import development_preview_server as warehouse
 
 
@@ -196,6 +197,9 @@ def domain_hub_handler(warehouse_sessions: Any, pong: PongApplication, public_or
                 self._reply(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
 
         def _pong_view(self, suffix: str) -> None:
+            if suffix == "/study_protocol.json":
+                self._reply(HTTPStatus.OK, STUDY_PROTOCOL_PATH.read_bytes(), content_type="application/json; charset=utf-8")
+                return
             if suffix == "/api/view":
                 self._reply(HTTPStatus.OK, pong.view(self._pong_session()))
                 return
@@ -234,6 +238,7 @@ def domain_hub_handler(warehouse_sessions: Any, pong: PongApplication, public_or
                 "/api/step": "tick",
                 "/api/ask": "ask",
                 "/api/task2": "task2",
+                "/api/task3": "task3",
             }
             operation = routes.get(suffix)
             if operation is None:
@@ -258,8 +263,10 @@ def domain_hub_handler(warehouse_sessions: Any, pong: PongApplication, public_or
                     self._reply(HTTPStatus.OK, pong.tick(session_id, payload))
                 elif operation == "ask":
                     self._reply(HTTPStatus.OK, pong.ask(session_id, payload))
-                else:
+                elif operation == "task2":
                     self._reply(HTTPStatus.OK, pong.task2(session_id))
+                else:
+                    self._reply(HTTPStatus.OK, pong.task3(session_id))
             except (ValueError, KeyError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
                 self._reply(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
 

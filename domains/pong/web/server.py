@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from ..config import PongConfig
 from ..study import PongStudySession
+from study_three_tasks import PATH as STUDY_PROTOCOL_PATH, task as study_task
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT.parent / "configs" / "default.json"
@@ -33,11 +34,12 @@ class PongApplication:
         session = PongStudySession(
             group=str(payload.get("group", "A")).upper(),
             participant_id=str(payload.get("participant_id", "local")),
-            seed=int(payload.get("seed", config.seed)),
+            seed=int(study_task("pong", 1)["seed"]),
             condition_source=str(payload.get("assignment_source", "manual_self_select")),
             config=config,
         )
         session_id = uuid4().hex
+        session.session_id = session_id
         with self._lock:
             self._sessions[session_id] = session
             self._ensure_runner(session_id)
@@ -116,6 +118,13 @@ class PongApplication:
             self._ensure_runner(session_id)
             return result
 
+    def task3(self, session_id: str | None) -> dict[str, Any]:
+        with self._lock:
+            result = self._session(session_id).advance_task()
+            assert session_id is not None
+            self._ensure_runner(session_id)
+            return result
+
 
 class PongHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
@@ -162,6 +171,15 @@ class PongRequestHandler(BaseHTTPRequestHandler):
                 return
             self._json(HTTPStatus.OK, result)
             return
+        if path == "/study_protocol.json":
+            content = STUDY_PROTOCOL_PATH.read_bytes()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(content)
+            return
         assets = {
             "/": ("index.html", "text/html; charset=utf-8"),
             "/index.html": ("index.html", "text/html; charset=utf-8"),
@@ -192,7 +210,7 @@ class PongRequestHandler(BaseHTTPRequestHandler):
             path = path[len("/pong"):] or "/"
         routes = {
             "/api/start": "start", "/api/input": "input", "/api/pause": "pause",
-            "/api/tick": "tick", "/api/step": "tick", "/api/ask": "ask", "/api/task2": "task2",
+            "/api/tick": "tick", "/api/step": "tick", "/api/ask": "ask", "/api/task2": "task2", "/api/task3": "task3",
         }
         operation = routes.get(path)
         if operation is None:
@@ -218,8 +236,10 @@ class PongRequestHandler(BaseHTTPRequestHandler):
                 result = self.server.application.tick(session_id, body)
             elif operation == "ask":
                 result = self.server.application.ask(session_id, body)
-            else:
+            elif operation == "task2":
                 result = self.server.application.task2(session_id)
+            else:
+                result = self.server.application.task3(session_id)
             self._json(HTTPStatus.OK, result)
         except (ValueError, KeyError, TypeError, json.JSONDecodeError, RuntimeError) as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})

@@ -18,6 +18,7 @@
       <span id="workflowInstructions" class="active" data-i18n="workflowDemo">说明与演示</span>
       <i></i><span id="workflowTask1" data-i18n="task1">任务 1</span>
       <i></i><span id="workflowTask2" data-i18n="task2">任务 2</span>
+      <i></i><span id="workflowTask3" data-i18n="task3">任务 3</span>
       <i></i><span id="workflowSurvey" data-i18n="survey">问卷</span>
     </nav>
     <button class="ghost" id="languageButton" type="button"><span id="languageButtonLabel">English</span></button>
@@ -58,7 +59,7 @@
       <section id="setupPanel">
         <span class="eyebrow" data-i18n="participantSetup">参与者登记</span>
         <h2 data-i18n="welcome">开始协作配送实验</h2>
-        <p data-i18n="overview">你将固定控制机器人 1，与 AI 控制的机器人 2 完成两轮 120 步配送任务。</p>
+        <p data-i18n="overview">你将固定控制机器人 1，与 AI 控制的机器人 2 完成三轮 120 步配送任务。</p>
         <label class="field"><span data-i18n="participantId">参与者编号</span><input id="participantInput" autocomplete="off" maxlength="80"></label>
         <label class="field test-condition hidden" id="testConditionField">
           <span data-i18n="testCondition">开发测试条件</span>
@@ -126,8 +127,16 @@
         <div class="result-grid single-result">
           <div><span data-i18n="task1Score">任务 1 得分</span><strong id="controlTask1Score">—</strong></div>
         </div>
-        <p class="transition-note" data-i18n="controlTransitionHint">任务 2 不提供即时提问，将从新的机器人状态、电量 100 和不同任务序列开始。</p>
+        <p class="transition-note" data-i18n="task2TransitionHint">任务 2 将从新的机器人状态开始；只有 A 组可以询问机器人 2。</p>
         <button class="primary" id="beginTask2Button" type="button" data-i18n="beginTask2">开始任务 2</button>
+      </section>
+
+      <section class="hidden" id="task2CompletePanel">
+        <span class="phase" data-i18n="task2Complete">任务 2 已完成</span>
+        <h2 data-i18n="task2Complete">任务 2 已完成</h2>
+        <div class="result-grid single-result"><div><span data-i18n="task2Score">任务 2 得分</span><strong id="controlTask2Score">—</strong></div></div>
+        <p class="transition-note" data-i18n="task3TransitionHint">任务 3 从新的机器人状态开始，两组均不提供解释。</p>
+        <button class="primary" id="beginTask3Button" type="button" data-i18n="beginTask3">开始任务 3</button>
       </section>
 
       <form class="hidden" id="surveyPanel">
@@ -140,7 +149,7 @@
 
       <section class="hidden" id="completePanel">
         <span class="phase">完成</span><h2 data-i18n="complete">实验完成</h2><p data-i18n="saved">记录已保存。</p>
-        <div class="result-grid"><div><span data-i18n="task1Score">任务 1 得分</span><strong id="finalTask1">—</strong></div><div><span data-i18n="task2Score">任务 2 得分</span><strong id="finalTask2">—</strong></div><div><span data-i18n="scoreDelta">得分变化</span><strong id="finalDelta">—</strong></div></div>
+        <div class="result-grid"><div><span data-i18n="task1Score">任务 1 得分</span><strong id="finalTask1">—</strong></div><div><span data-i18n="task2Score">任务 2 得分</span><strong id="finalTask2">—</strong></div><div><span data-i18n="task3Score">任务 3 得分</span><strong id="finalTask3">—</strong></div></div>
         <button class="secondary" id="restartButton" type="button" data-i18n="restart">开始新的参与者</button>
       </section>
 

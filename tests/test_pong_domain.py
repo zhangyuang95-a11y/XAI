@@ -220,11 +220,16 @@ def test_small_first_check_counts_waiting_until_the_small_ball_is_caught() -> No
 
 def test_group_a_bubble_has_stable_assignment_without_seconds_and_group_b_is_hidden() -> None:
     a = PongStudySession(group="A", config=short_config(), seed=3)
+    assert "intent_bubble" not in a.summary()
+    a.environment.phase = "terminal"
+    a.advance_task()
     bubble = a.summary()["intent_bubble"]
     assert "秒" not in bubble["text"] + bubble["detail_text"]
     assert "no_safe_progress" not in bubble["text"]
     assert a.summary()["continuous_motion"] is True
     b = PongStudySession(group="B", config=short_config(), seed=3)
+    b.environment.phase = "terminal"
+    b.advance_task()
     assert "intent_bubble" not in b.summary()
 
 
@@ -244,14 +249,24 @@ def test_same_competing_opportunity_is_recorded_once_not_once_per_physics_frame(
     assert len(conflicts) == 1
 
 
-def test_group_a_review_and_group_b_skip_remain_isolated_from_task2() -> None:
+def test_group_a_review_is_only_available_during_task2() -> None:
     config = short_config(duration_seconds=0.05)
     a = PongStudySession(group="A", config=config, seed=1)
     while not a.environment.terminal:
         a.tick("stay")
-    assert a.review(1)["allowed"] is True
+    assert a.review(1)["allowed"] is False
     a.advance_task()
     assert a.summary()["task"] == 2
+    assert a.seed == 260918
+    assert "intent_bubble" in a.summary()
+    a.set_paused(True)
+    assert a.review(0)["allowed"] is True
+    a.set_paused(False)
+    while not a.environment.terminal:
+        a.tick("stay")
+    assert a.review(1)["allowed"] is True
+    a.advance_task()
+    assert a.seed == 260919
     assert a.ask("为什么", 1)["allowed"] is False
     assert "intent_bubble" not in a.summary()
 
@@ -261,6 +276,42 @@ def test_group_a_review_and_group_b_skip_remain_isolated_from_task2() -> None:
     assert b.review(1)["allowed"] is False
     b.advance_task()
     assert b.summary()["task"] == 2
+    assert b.review(0)["allowed"] is False
+
+
+def test_pong_three_task_config_and_server_permission_sequence() -> None:
+    from study_three_tasks import VERSION, task
+
+    config = short_config(duration_seconds=0.05)
+    assert [task("pong", number)["seed"] for number in (1, 2, 3)] == [260920, 260918, 260919]
+    initial = PongEnvironment(seed=260920)
+    frozen = task("pong", 1)["initial_balls"]
+    assert {ball.ball_id: [ball.x, ball.y, ball.vx, ball.vy] for ball in initial.balls} == frozen
+    for group in ("A", "B"):
+        session = PongStudySession(group=group, config=config, seed=260920)
+        assert session.summary()["study_version"] == VERSION
+        assert session.ask("why", 0)["allowed"] is False
+        assert session.review(0)["allowed"] is False
+        while not session.environment.terminal:
+            session.tick("stay")
+        assert session.review(0)["allowed"] is False
+        session.advance_task()
+        assert session.seed == 260918
+        session.set_paused(True)
+        assert session.review(0)["allowed"] is (group == "A")
+        session.set_paused(False)
+        while not session.environment.terminal:
+            session.tick("stay")
+        assert session.review(1)["allowed"] is (group == "A")
+        session.advance_task()
+        assert session.seed == 260919
+        assert session.ask("why", 0)["allowed"] is False
+        assert session.review(0)["allowed"] is False
+        while not session.environment.terminal:
+            session.tick("stay")
+        assert session.next_task_available is False
+        with pytest.raises(RuntimeError, match="Task 3"):
+            session.advance_task()
 
 
 def test_application_runs_at_the_configured_fixed_rate_and_restarts_task2() -> None:

@@ -1,0 +1,20 @@
+{
+  "version": "three-task-explanation.v1",
+  "tasks": {
+    "warehouse": [
+      {"id": 1, "display_name": "无解释基线", "seed": 52000, "purpose": "baseline", "limit": 120, "explanation_groups": [], "review_groups": [], "next_stage": "task2"},
+      {"id": 2, "display_name": "解释对比", "seed": 51000, "purpose": "explanation_comparison", "limit": 120, "explanation_groups": ["A"], "review_groups": [], "next_stage": "task3"},
+      {"id": 3, "display_name": "无解释迁移", "seed": 51500, "purpose": "transfer", "limit": 120, "explanation_groups": [], "review_groups": [], "next_stage": "survey"}
+    ],
+    "pong": [
+      {"id": 1, "display_name": "无解释基线", "seed": 260920, "purpose": "baseline", "limit": 90, "explanation_groups": [], "review_groups": [], "next_stage": "task2",
+        "initial_balls": {
+          "A1": [2.65, 2, 2, 2], "A2": [18.35, 5, 2, 2], "A3": [11.65, 8, -2, 2],
+          "B1": [7, 1, -2, 2], "B2": [15.65, 6, 2, 2]
+        }
+      },
+      {"id": 2, "display_name": "解释对比", "seed": 260918, "purpose": "explanation_comparison", "limit": 90, "explanation_groups": ["A"], "review_groups": ["A"], "next_stage": "task3"},
+      {"id": 3, "display_name": "无解释迁移", "seed": 260919, "purpose": "transfer", "limit": 90, "explanation_groups": [], "review_groups": [], "next_stage": "survey"}
+    ]
+  }
+}

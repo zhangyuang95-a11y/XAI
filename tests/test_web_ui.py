@@ -413,8 +413,8 @@ def test_frontend_uses_one_command_per_action_and_current_controls() -> None:
     assert 'view.timeline?.agent_control || {}' in source
     assert 'aria-label="AI-AI reference trajectory frame"' not in html
     assert "locale: requestedLocale" in source
-    assert "Task 2 has no live questions" in source
-    assert "任务 2 不提供即时提问" in source
+    assert "Task 2 begins with a fresh robot state. Only Group A can ask Robot 2 questions." in source
+    assert "任务 1 和任务 3 无解释；任务 2 可以点击" in source
     assert "成功移动耗电 2" in source
     assert "A successful move costs 2 battery" in source
     assert "AI–AI 协作演示（可提前结束）" in source

@@ -1,7 +1,14 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const PAGE_ID = crypto.randomUUID ? crypto.randomUUID() : `page-${Date.now()}`;
+const PAGE_ID = (() => {
+  const key = 'warehouse.threeTask.pageId';
+  const existing = sessionStorage.getItem(key);
+  if (existing) return existing;
+  const created = crypto.randomUUID ? crypto.randomUUID() : `page-${Date.now()}`;
+  sessionStorage.setItem(key, created);
+  return created;
+})();
 const DEFAULT_LOCALE = "zh";
 const state = {
   view: null,
@@ -18,28 +25,30 @@ const state = {
   expandedBubble: null,
   bubbleAnswers: new Map(),
   pendingBubbleRequest: null,
+  surveyFor: null,
 };
 
 const COPY = {
   zh: {
-    appTitle: "双机器人协作配送实验", workflowDemo: "说明与演示", task1: "任务 1", task2: "任务 2", survey: "问卷",
+    appTitle: "双机器人协作配送实验", workflowDemo: "说明与演示", task1: "任务 1", task2: "任务 2", task3: "任务 3", survey: "问卷",
     warehouse: "6×7 仓库", liveScene: "协作配送现场", step: "步数", score: "总分", deliveries: "配送", collisions: "碰撞", shutdowns: "断电", detours: "绕路单位",
     shelf: "货架", pickup: "取货点", dropoff: "交付点", charger: "充电站", robots: "机器人",
-    participantSetup: "参与者登记", welcome: "开始协作配送实验", overview: "你将固定控制机器人 1，与 AI 控制的机器人 2 完成两轮 120 步配送任务。",
+    participantSetup: "参与者登记", welcome: "开始协作配送实验", overview: "你将固定控制机器人 1，与 AI 控制的机器人 2 完成三轮 120 步配送任务。",
     participantId: "参与者编号", agreement: "我已阅读并理解实验说明。", start: "开始实验",
     requiredDemo: "AI–AI 协作演示（可提前结束）", demoText: "您可以完整观看演示，也可以随时提前结束并开始任务 1。演示展示两台机器人认领、交付、协调让路和充电。",
     ruleJobs: "地图始终有两个未预分配的 A→B 共享任务。", ruleControl: "方向键、WASD 或按钮每次提交一个联合决策步；空格表示等待。",
     ruleCharge: "成功移动耗电 2；在充电站等待恢复 10；断电会提前结束本轮。", ruleScore: "计分：配送 +100、机器人碰撞 −200、断电 −50、每步 −1、参与者绕路每单位 −2；协作资源使用可能触发额外扣分。",
     playDemo: "播放演示", pauseDemo: "暂停演示", beginTask1: "开始任务 1", endDemoEarly: "提前结束演示并开始任务 1", roundInstruction: "控制机器人 1，与机器人 2 协作配送",
     roundHint: "你和机器人 2 都只根据同一移动前状态独立选动作，两个动作随后同时执行。", up: "上", down: "下", left: "左", right: "右", wait: "等待", spaceKey: "空格",
-    task1Complete: "任务 1 已完成",
+    task1Complete: "任务 1 已完成", task2Complete: "任务 2 已完成",
     askRobot2Title: "询问机器人2", askSystemTitle: "系统问答", liveExplanationHint: "询问机器人2刚才的行为；生成回答时任务会暂停。", question: "你的问题", questionPlaceholder: "询问机器人2最近几步的行为。", ask: "询问机器人2", answer: "机器人2", emptyExplanation: "暂时无法生成可靠回答，请重试。",
     presetWhyAction: "机器人2刚才为什么这样做？", presetWhyWait: "机器人2为什么等待？", presetCollision: "我们刚才为什么碰撞？", presetHumanInfluence: "我的动作影响机器人2了吗？", presetGoal: "机器人2当前想做什么？", presetEnergy: "机器人2需要充电吗？", presetChargerPenalty: "刚才为什么扣了50分？",
     surveyTitle: "结束问卷", surveyHint: "请对以下陈述按 1（非常不同意）到 5（非常同意）评分。", comment: "可选意见", submitSurvey: "提交问卷",
-    complete: "实验完成", saved: "记录已保存。", task1Score: "任务 1 得分", task2Score: "任务 2 得分", scoreDelta: "得分变化", restart: "开始新的参与者",
+    complete: "实验完成", saved: "记录已保存。", task1Score: "任务 1 得分", task2Score: "任务 2 得分", task3Score: "任务 3 得分", restart: "开始新的参与者",
     interrupted: "本轮已中断", interruptedHint: "此实验已在另一页面继续，或服务恢复后旧运行被放弃。请重新开始。", desktopRequired: "请使用宽度至少 1024 像素的桌面或笔记本电脑。",
     participant: "参与者", ai: "AI", battery: "电量", cargo: "承运", none: "无", available: "可认领", carried: "运输中", carrier: "承运者",
     coordinationUnderstanding: "我理解如何与机器人 2 协调。", aiPredictability: "机器人 2 的行为对我而言是可预测的。", interfaceClarity: "界面与计分信息清晰易懂。",
+    explanationClarity: "Task 2 的解释让我理解机器人 2 当时的行为。", explanationUsefulness: "Task 2 的解释帮助我决定如何配合。", questionHelpfulness: "Task 2 的问答帮助我理解所选动作。", notUsed: "未使用／不适用",
     deliveryScore: "配送得分", collisionPenalty: "碰撞扣分（每次 −200）", shutdownPenalty: "断电扣分", timePenalty: "步数扣分", detourPenalty: "绕路扣分", chargerOccupancyPenalty: "占桩扣分（每次 −50）",
     loading: "处理中…", requiredFields: "请填写参与者编号并确认已阅读说明。", requestFailed: "操作失败", taskLabel: "任务", roundScore: "本轮得分",
     action: "动作", requestedAction: "请求", executedAction: "实际", batteryChange: "电量",
@@ -48,24 +57,25 @@ const COPY = {
     askWhy: "为什么？", hideWhy: "收起", answerFrame: "所问步数",
   },
   en: {
-    appTitle: "Two-Robot Collaborative Delivery Study", workflowDemo: "Instructions & demo", task1: "Task 1", task2: "Task 2", survey: "Survey",
+    appTitle: "Two-Robot Collaborative Delivery Study", workflowDemo: "Instructions & demo", task1: "Task 1", task2: "Task 2", task3: "Task 3", survey: "Survey",
     warehouse: "6×7 warehouse", liveScene: "Collaborative delivery", step: "Steps", score: "Score", deliveries: "Deliveries", collisions: "Collisions", shutdowns: "Shutdowns", detours: "Detour units",
     shelf: "Shelf", pickup: "Pickup A", dropoff: "Drop-off B", charger: "Charger", robots: "Robots",
-    participantSetup: "Participant setup", welcome: "Start the collaborative delivery study", overview: "You will always control robot 1 and complete two 120-step delivery rounds with AI-controlled robot 2.",
+    participantSetup: "Participant setup", welcome: "Start the collaborative delivery study", overview: "You will always control robot 1 and complete three 120-step delivery rounds with AI-controlled robot 2.",
     participantId: "Participant ID", agreement: "I have read and understood the study instructions.", start: "Start study",
     requiredDemo: "AI–AI collaboration demonstration", demoText: "You may watch the complete standardized demonstration or finish it early and begin Task 1 at any time. It shows both robots claiming, delivering, yielding, and charging.",
     ruleJobs: "The map always contains two unassigned shared A-to-B jobs.", ruleControl: "Arrow keys, WASD, or a button submits one joint decision step; Space means wait.",
     ruleCharge: "A successful move costs 2 battery; waiting at the charger restores 10; shutdown ends the round.", ruleScore: "Score: +100 delivery, −200 robot collision, −50 shutdown, −1 per step, and −2 per human detour unit; shared-resource use may incur an additional penalty.",
     playDemo: "Play demonstration", pauseDemo: "Pause demonstration", beginTask1: "Begin Task 1", endDemoEarly: "Finish demo early and begin Task 1", roundInstruction: "Control robot 1 and collaborate with robot 2",
     roundHint: "You and robot 2 choose independently from the same pre-move state; both actions then execute simultaneously.", up: "Up", down: "Down", left: "Left", right: "Right", wait: "Wait", spaceKey: "Space",
-    task1Complete: "Task 1 complete",
+    task1Complete: "Task 1 complete", task2Complete: "Task 2 complete",
     askRobot2Title: "Ask Robot 2", askSystemTitle: "System questions", liveExplanationHint: "Ask about what Robot 2 just did. The task pauses while the answer is prepared.", question: "Your question", questionPlaceholder: "Ask Robot 2 about the last few steps.", ask: "Ask Robot 2", answer: "Robot 2", emptyExplanation: "No grounded answer was available. Please try again.",
     presetWhyAction: "Why did Robot 2 do that?", presetWhyWait: "Why did Robot 2 wait?", presetCollision: "Why did we just collide?", presetHumanInfluence: "Did my action affect Robot 2?", presetGoal: "What is Robot 2 trying to do?", presetEnergy: "Does Robot 2 need to charge?", presetChargerPenalty: "Why did I lose 50 points just now?",
     surveyTitle: "Final survey", surveyHint: "Rate each statement from 1 (strongly disagree) to 5 (strongly agree).", comment: "Optional comment", submitSurvey: "Submit survey",
-    complete: "Study complete", saved: "The record has been saved.", task1Score: "Task 1 score", task2Score: "Task 2 score", scoreDelta: "Score change", restart: "Start a new participant",
+    complete: "Study complete", saved: "The record has been saved.", task1Score: "Task 1 score", task2Score: "Task 2 score", task3Score: "Task 3 score", restart: "Start a new participant",
     interrupted: "Run interrupted", interruptedHint: "This run continued in another page or was abandoned during recovery. Please restart.", desktopRequired: "Use a desktop or laptop at least 1024 pixels wide.",
     participant: "Participant", ai: "AI", battery: "Battery", cargo: "Carrying", none: "None", available: "Available", carried: "In transit", carrier: "Carrier",
     coordinationUnderstanding: "I understand how to coordinate with robot 2.", aiPredictability: "Robot 2's behavior is predictable to me.", interfaceClarity: "The interface and scoring information are clear.",
+    explanationClarity: "The Task 2 explanations helped me understand Robot 2's actions.", explanationUsefulness: "The Task 2 explanations helped me decide how to cooperate.", questionHelpfulness: "The Task 2 answers helped me understand the selected action.", notUsed: "Not used / not applicable",
     deliveryScore: "Delivery points", collisionPenalty: "Collision penalty (−200 each)", shutdownPenalty: "Shutdown penalty", timePenalty: "Step penalty", detourPenalty: "Detour penalty", chargerOccupancyPenalty: "Charger occupancy penalty (−50 each)",
     loading: "Working…", requiredFields: "Enter a participant ID and confirm the instructions.", requestFailed: "Request failed", taskLabel: "Task", roundScore: "Round score",
     action: "Action", requestedAction: "Requested", executedAction: "Executed", batteryChange: "Battery",
@@ -76,8 +86,10 @@ const COPY = {
 };
 
 Object.assign(COPY.zh, {
-  controlTransitionHint: "任务 2 不提供即时提问，将从新的机器人状态、电量 100 和不同任务序列开始。",
+  task2TransitionHint: "任务 2 将从新的机器人状态开始；只有 A 组可以询问机器人 2。",
+  task3TransitionHint: "任务 3 从新的机器人状态开始，两组均不提供解释。",
   beginTask2: "开始任务 2",
+  beginTask3: "开始任务 3",
   ruleCharge: "成功移动耗电 2；在充电站等待恢复 10；断电会提前结束本轮。",
   testCondition: "开发测试条件",
   conditionAuto: "自动区组分配",
@@ -86,9 +98,9 @@ Object.assign(COPY.zh, {
   testConditionHint: "仅用于界面测试；数据写入独立的 development 命名空间。",
   assignedTestCondition: "当前测试条件",
   groupATitle: "您已分配到 A 组（有解释）",
-  groupADescription: "任务 1 进行期间可以随时询问机器人2；任务 2 不提供即时提问。",
+  groupADescription: "任务 1 和任务 3 无解释；任务 2 可以点击“为什么？”并询问机器人 2。",
   groupBTitle: "您已分配到 B 组（无解释）",
-  groupBDescription: "两轮任务均不显示即时提问面板。",
+  groupBDescription: "三轮任务均不显示解释面板。",
   questionTarget: "提问对象",
   robot1Option: "机器人 1（AI）",
   robot2Option: "机器人 2（AI）",
@@ -97,8 +109,10 @@ Object.assign(COPY.zh, {
   temporaryNetworkError: "临时网络连接中断，请重试；当前进度已保留。",
 });
 Object.assign(COPY.en, {
-  controlTransitionHint: "Task 2 has no live questions and starts with a fresh robot state, 100 battery, and a different task sequence.",
+  task2TransitionHint: "Task 2 begins with a fresh robot state. Only Group A can ask Robot 2 questions.",
+  task3TransitionHint: "Task 3 begins with a fresh robot state. Neither group receives explanations.",
   beginTask2: "Begin Task 2",
+  beginTask3: "Begin Task 3",
   ruleCharge: "A successful move costs 2 battery; waiting at the charger restores 10; shutdown ends the round.",
   testCondition: "Development test condition",
   conditionAuto: "Automatic block allocation",
@@ -107,9 +121,9 @@ Object.assign(COPY.en, {
   testConditionHint: "For interface testing only; records use the isolated development namespace.",
   assignedTestCondition: "Current test condition",
   groupATitle: "You are assigned to Group A (explanations)",
-  groupADescription: "You can ask Robot 2 questions at any time during Task 1; Task 2 has no live questions.",
+  groupADescription: "Tasks 1 and 3 have no explanations. In Task 2, you can click Ask why and question Robot 2.",
   groupBTitle: "You are assigned to Group B (no explanations)",
-  groupBDescription: "The live question panel is not shown in either round.",
+  groupBDescription: "Explanations are not shown in any of the three tasks.",
   questionTarget: "Robot to ask about",
   robot1Option: "Robot 1 (AI)",
   robot2Option: "Robot 2 (AI)",
@@ -496,10 +510,10 @@ function renderActionBubble(view, revealOutcome) {
   const payload = view.study?.action_bubble;
   const enabled = Boolean(
     revealOutcome
-    && view.study?.stage === "task1"
+    && view.study?.stage === "task2"
     && view.study?.condition === "explanation"
     && payload?.target_agent === "robot_2"
-    && payload?.run_id === view.study?.run_id
+    && payload?.run_id === view.study?.task_run_id
     && Number(payload?.frame) > 0
   );
   bubble.classList.toggle("hidden", !enabled);
@@ -516,7 +530,7 @@ function renderActionBubble(view, revealOutcome) {
   const originY = (height - rows * size) / 2;
   const left = originX + (Number(agent.position[1]) + .5) * size;
   const top = originY + (Number(agent.position[0]) + .5) * size;
-  const key = `${payload.run_id}:${payload.frame}`;
+  const key = `${view.study.protocol_version}:warehouse:${view.study.run_id}:task2:${payload.run_id}:${payload.frame}`;
   const expanded = state.expandedBubble === key;
   const answer = state.bubbleAnswers.get(key);
   const button = document.createElement('button');
@@ -544,14 +558,14 @@ function renderActionBubble(view, revealOutcome) {
     state.pendingBubbleRequest = requestId;
     const result = await command('ask_explanation', {
       question: tr('presetWhyAction'), question_kind: 'action', target_agent: 'robot_2',
-      action_run_id: payload.run_id, action_stage: 'task1', action_frame: Number(payload.frame),
+      action_run_id: payload.run_id, action_stage: 'task2', action_frame: Number(payload.frame),
       requested_language: localeCode(), request_id: requestId,
     });
     const report = result?.view?.last_explanation;
     if (state.pendingBubbleRequest === requestId && report?.request_id === requestId
       && report?.run_id === payload.run_id && Number(report?.requested_action_frame) === Number(payload.frame)
-      && state.view?.study?.stage === 'task1' && state.view?.study?.condition === 'explanation'
-      && state.view?.study?.run_id === payload.run_id
+      && state.view?.study?.stage === 'task2' && state.view?.study?.condition === 'explanation'
+      && state.view?.study?.task_run_id === payload.run_id
       && Number(state.view?.study?.action_bubble?.frame) === Number(payload.frame)) {
       state.bubbleAnswers.set(key, report);
       state.expandedBubble = key;
@@ -598,12 +612,12 @@ function renderScores(snapshot) {
 }
 
 function renderWorkflow(stage, condition) {
-  const order = ["instructions", "task1", "task2", "survey"];
+  const order = ["instructions", "task1", "task2", "task3", "survey"];
   const normalized = stage === "completed" ? "survey" : stage;
-  const current = stage === "task1_complete" ? 2 : Math.max(0, order.indexOf(normalized));
-  ["workflowInstructions","workflowTask1","workflowTask2","workflowSurvey"].forEach((id,index) => {
+  const current = stage === "task1_complete" ? 2 : stage === "task2_complete" ? 3 : Math.max(0, order.indexOf(normalized));
+  ["workflowInstructions","workflowTask1","workflowTask2","workflowTask3","workflowSurvey"].forEach((id,index) => {
     $(id).classList.toggle("active", index === current);
-    $(id).classList.toggle("done", stage === "task1_complete" ? index <= 1 : index < current || stage === "completed");
+    $(id).classList.toggle("done", index < current || stage === "completed");
   });
 }
 
@@ -612,8 +626,8 @@ function renderStage() {
   const study = state.view.study || {};
   const stage = study.stage || "idle";
   $("sceneTitle").textContent = tr("liveScene");
-  const panels = { idle: "setupPanel", instructions: "instructionsPanel", task1: "roundPanel", task1_complete: "task1CompletePanel", task2: "roundPanel", survey: "surveyPanel", completed: "completePanel", abandoned: "interruptedPanel" };
-  ["setupPanel","instructionsPanel","roundPanel","task1CompletePanel","surveyPanel","completePanel","interruptedPanel"].forEach((id) => $(id).classList.toggle("hidden", panels[stage] !== id));
+  const panels = { idle: "setupPanel", instructions: "instructionsPanel", task1: "roundPanel", task1_complete: "task1CompletePanel", task2: "roundPanel", task2_complete: "task2CompletePanel", task3: "roundPanel", survey: "surveyPanel", completed: "completePanel", abandoned: "interruptedPanel" };
+  ["setupPanel","instructionsPanel","roundPanel","task1CompletePanel","task2CompletePanel","surveyPanel","completePanel","interruptedPanel"].forEach((id) => $(id).classList.toggle("hidden", panels[stage] !== id));
   renderWorkflow(stage, study.condition);
   const tutorial = study.tutorial || {};
   $("testConditionField").classList.toggle("hidden", !study.test_condition_selector);
@@ -648,7 +662,7 @@ function renderStage() {
     beginTask1Button.textContent = tr(beginTask1Key);
     $("demoPlayButton").textContent = state.demoPlaying ? tr("pauseDemo") : tr("playDemo");
   }
-  if (stage === "task1" || stage === "task2") {
+  if (["task1", "task2", "task3"].includes(stage)) {
     $("roundBadge").textContent = stage.toUpperCase();
     const permitted = new Set(study.allowed_human_actions || []);
     document.querySelectorAll("#actionPad button").forEach((button) => {
@@ -656,7 +670,7 @@ function renderStage() {
     });
   }
   const liveExplanationVisible = Boolean(
-    stage === "task1"
+    stage === "task2"
     && study.condition === "explanation"
     && study.live_explanation_available
   );
@@ -679,15 +693,22 @@ function renderStage() {
     $("beginTask2Button").disabled = state.busy || !allowed("begin_task2");
     $("beginTask2Button").dataset.locked = allowed("begin_task2") ? "false" : "true";
   }
+  if (stage === "task2_complete") {
+    const summary = study.round_summaries?.task2;
+    $("controlTask2Score").textContent = Math.round(summary?.score ?? 0);
+    $("beginTask3Button").disabled = state.busy || !allowed("begin_task3");
+    $("beginTask3Button").dataset.locked = allowed("begin_task3") ? "false" : "true";
+  }
+  if (stage === "survey" && state.surveyFor !== study.group_code) buildSurvey();
   if (stage === "completed") {
     $("finalTask1").textContent = Math.round(study.round_summaries?.task1?.score ?? 0);
     $("finalTask2").textContent = Math.round(study.round_summaries?.task2?.score ?? 0);
-    $("finalDelta").textContent = Math.round(study.score_delta ?? 0);
+    $("finalTask3").textContent = Math.round(study.round_summaries?.task3?.score ?? 0);
   }
 }
 
 function renderAnswer(report) {
-  if (state.view?.study?.stage !== 'task1' || state.view?.study?.condition !== 'explanation') return;
+  if (state.view?.study?.stage !== 'task2' || state.view?.study?.condition !== 'explanation') return;
   const text = (state.locale === 'zh' ? report?.answer_zh : report?.answer_en)
     || report?.explanation_document?.text || report?.explanation || "";
   if (!text.trim()) {
@@ -741,11 +762,11 @@ async function render(view, options = {}) {
     if (requestedLocale !== state.locale) setLanguage(requestedLocale, false, false);
   }
   const stage = view.study?.stage || "idle";
-  if (stage !== 'task1' || view.study?.condition !== 'explanation'
-      || view.study?.run_id !== previous?.run_id) {
+  if (stage !== 'task2' || view.study?.condition !== 'explanation'
+      || view.study?.task_run_id !== previous?.task_run_id) {
     state.expandedBubble = null;
     state.pendingBubbleRequest = null;
-    if (stage !== 'task1' || view.study?.condition !== 'explanation') state.bubbleAnswers.clear();
+    if (stage !== 'task2' || view.study?.condition !== 'explanation') state.bubbleAnswers.clear();
   } else if (Number(view.study?.action_bubble?.frame) !== Number(previous?.action_bubble?.frame)) {
     state.expandedBubble = null;
     state.pendingBubbleRequest = null;
@@ -763,9 +784,9 @@ async function render(view, options = {}) {
     paintView(view, true);
     drawWarehouse(view);
   }
-  if (stage === 'task1' && view.study?.condition === 'explanation' && view.last_explanation) {
+  if (stage === 'task2' && view.study?.condition === 'explanation' && view.last_explanation) {
     renderAnswer(view.last_explanation);
-  } else if (stage !== 'task1' || view.study?.condition !== 'explanation') {
+  } else if (stage !== 'task2' || view.study?.condition !== 'explanation') {
     $("answerPanel").classList.add("hidden");
     $("answerText").textContent = '';
     $("questionStatus").classList.add("hidden");
@@ -773,16 +794,24 @@ async function render(view, options = {}) {
 }
 
 function buildSurvey() {
+  const group = state.view?.study?.group_code;
   const questions = [
     ["coordination_understanding", tr("coordinationUnderstanding")],
     ["ai_predictability", tr("aiPredictability")],
     ["interface_clarity", tr("interfaceClarity")],
   ];
+  if (group === 'A') questions.push(
+    ["explanation_clarity", tr("explanationClarity")],
+    ["explanation_usefulness", tr("explanationUsefulness")],
+    ["question_helpfulness", tr("questionHelpfulness")],
+  );
   $("surveyQuestions").replaceChildren(...questions.map(([name,label]) => {
     const section = document.createElement("section"); section.className = "survey-question";
-    section.innerHTML = `<p>${label}</p><div class="scale">${[1,2,3,4,5].map((value) => `<label><input type="radio" name="${name}" value="${value}" required><span>${value}</span></label>`).join("")}</div>`;
+    const optional = group === 'A' && (name.startsWith('explanation_') || name === 'question_helpfulness');
+    section.innerHTML = `<p>${label}</p><div class="scale">${[1,2,3,4,5].map((value) => `<label><input type="radio" name="${name}" value="${value}" required><span>${value}</span></label>`).join("")}${optional ? `<label><input type="radio" name="${name}" value="na"><span>${tr('notUsed')}</span></label>` : ''}</div>`;
     return section;
   }));
+  state.surveyFor = group || 'none';
 }
 
 async function playDemo() {
@@ -838,6 +867,7 @@ $("beginTask1Button").addEventListener("click", async () => {
   await command("begin_task1");
 });
 $("beginTask2Button").addEventListener("click", () => command("begin_task2"));
+$("beginTask3Button").addEventListener("click", () => command("begin_task3"));
 document.querySelectorAll("#actionPad button").forEach((button) => button.addEventListener("click", () => command("human_action", { action: button.dataset.action })));
 async function submitExplanationQuestion(question, questionKind = null, anchor = null) {
   const prompt = String(question || "").trim();
@@ -879,12 +909,20 @@ $("askButton").addEventListener("click", () => {
 });
 $("surveyPanel").addEventListener("submit", (event) => {
   event.preventDefault(); const form = new FormData(event.currentTarget);
-  command("submit_survey", { coordination_understanding: Number(form.get("coordination_understanding")), ai_predictability: Number(form.get("ai_predictability")), interface_clarity: Number(form.get("interface_clarity")), comment: $("surveyComment").value.trim() });
+  const value = (name) => form.get(name) === 'na' ? 'na' : form.has(name) ? Number(form.get(name)) : null;
+  command("submit_survey", {
+    coordination_understanding: value('coordination_understanding'),
+    ai_predictability: value('ai_predictability'), interface_clarity: value('interface_clarity'),
+    explanation_clarity: value('explanation_clarity'),
+    explanation_usefulness: value('explanation_usefulness'),
+    question_helpfulness: value('question_helpfulness'),
+    comment: $("surveyComment").value.trim(),
+  });
 });
 [$("restartButton"), $("interruptedRestartButton")].forEach((button) => button.addEventListener("click", () => command("restart", restartPayload())));
 
 window.addEventListener("keydown", (event) => {
-  if (state.busy || !["task1","task2"].includes(state.view?.study?.stage) || ["INPUT","TEXTAREA"].includes(document.activeElement?.tagName)) return;
+  if (state.busy || !["task1","task2","task3"].includes(state.view?.study?.stage) || ["INPUT","TEXTAREA"].includes(document.activeElement?.tagName)) return;
   const action = { ArrowUp:"UP", w:"UP", W:"UP", ArrowDown:"DOWN", s:"DOWN", S:"DOWN", ArrowLeft:"LEFT", a:"LEFT", A:"LEFT", ArrowRight:"RIGHT", d:"RIGHT", D:"RIGHT", " ":"WAIT" }[event.key];
   if (action) { event.preventDefault(); command("human_action", { action }); }
 });

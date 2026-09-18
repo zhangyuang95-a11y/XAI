@@ -15,7 +15,8 @@
 
   <section class="setup" id="setup">
     <label>参与者 ID<input id="participant" value="local"></label>
-    <label>组别<select id="group"><option value="A">A 组（实时分工提示＋局后回放问答）</option><option value="B">B 组（无提示，跳过回放）</option></select></label>
+    <label>组别<select id="group"><option value="A">A 组（只在 Task 2 有分工提示与问答）</option><option value="B">B 组（三局均无解释）</option></select></label>
+    <p>共三局：Task 1 两组无解释；Task 2 仅 A 组有解释；Task 3 两组无解释。</p>
     <p class="cooperation-hint">协作球 B1、B2 需要两块球拍在同一时刻分别覆盖左右接触点。</p>
     <button id="start">开始 Task 1</button>
     <p id="setupError" role="alert"></p>
@@ -36,14 +37,14 @@
       <div class="intent-bubble" id="intentBubble" hidden aria-live="polite"><span id="intentText"></span><small id="intentDistance"></small></div>
       <div class="controls">
         <button id="left">← 左</button><button id="pause">暂停</button><button id="right">右 →</button>
-        <button id="task2" disabled>进入 Task 2</button>
+        <button id="nextTask" disabled hidden>进入 Task 2</button>
       </div>
-      <p class="hint">按住 A/D 或左右方向键持续移动，松开后停止；按 S 键暂停或继续。暂停后，A组可针对当前帧或已发生的一段过程提问。</p>
+      <p class="hint">按住 A/D 或左右方向键持续移动，松开后停止；按 S 键暂停或继续。仅 A 组在 Task 2 暂停后可针对已发生的过程提问。</p>
       <div class="status" id="status">准备开始</div>
     </div>
 
     <aside id="review" hidden>
-      <h2 id="reviewTitle">Task 1 回放与提问</h2>
+      <h2 id="reviewTitle">Task 2 回放与提问</h2>
       <p>A 组可拖动到任意已记录帧；也可设定一段过程的起点，再提问机器人2为何改变行为。</p>
       <div class="review-events" id="reviewEvents"><div class="review-events-empty">暂无关键事件</div></div>
       <input id="timeline" type="range" min="0" max="0" value="0">
@@ -66,7 +67,7 @@
   </section>
 
   <section id="questionnaire" hidden>
-    <h2>两局成绩与问卷</h2>
+    <h2>三局成绩与问卷</h2>
     <p id="scoreSummary"></p>
     <p>请按 1–5 分评分：1＝非常不同意，5＝非常同意。</p>
     <form id="surveyForm">
@@ -76,7 +77,7 @@
     </form>
     <p class="status" id="surveyStatus"></p>
   </section>
-  <section id="completed" hidden><h2>已完成</h2><p>本局成绩和问卷已保存到这台设备。</p></section>
+  <section id="completed" hidden><h2>已完成</h2><p>三局成绩和问卷已保存到这台设备。</p></section>
 </main>
 <script src="coordinated.js" defer></script>
 <script src="explain.js" defer></script>

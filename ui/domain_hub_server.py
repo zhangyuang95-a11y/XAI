@@ -138,6 +138,8 @@ def domain_hub_handler(warehouse_sessions: Any, pong: PongApplication, public_or
             assets = {
                 "/": ("index.html", "text/html; charset=utf-8"),
                 "/index.html": ("index.html", "text/html; charset=utf-8"),
+                "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                "/styles.css": ("styles.css", "text/css; charset=utf-8"),
                 "/assets/app.js": ("app.js", "text/javascript; charset=utf-8"),
                 "/assets/styles.css": ("styles.css", "text/css; charset=utf-8"),
                 "/assets/favicon.svg": ("favicon.svg", "image/svg+xml"),
@@ -280,7 +282,13 @@ def domain_hub_handler(warehouse_sessions: Any, pong: PongApplication, public_or
             if path == "/warehouse" or path.startswith("/warehouse/"):
                 self._warehouse_view(path[len("/warehouse"):] or "/")
                 return
-            if path == "/pong" or path.startswith("/pong/"):
+            if path == "/pong":
+                self.send_response(HTTPStatus.PERMANENT_REDIRECT)
+                self.send_header("Location", "/pong/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if path.startswith("/pong/"):
                 self._pong_view(path[len("/pong"):] or "/")
                 return
             # Keep previously bookmarked Warehouse API and static links valid.

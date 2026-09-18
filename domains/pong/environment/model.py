@@ -39,6 +39,9 @@ class Ball:
     last_outcome: str | None = None
     pending_miss: bool = False
     pending_miss_id: str | None = None
+    # Curriculum scenarios keep every stable ball slot but may temporarily
+    # deactivate a ball. Inactive balls never move, collide or score.
+    active: bool = True
 
     @property
     def is_large(self) -> bool:

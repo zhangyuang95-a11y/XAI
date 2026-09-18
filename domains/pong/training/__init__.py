@@ -1,1 +1,5 @@
-"""Pong-specific training entry points are kept separate from Warehouse."""
+"""Pong PPO/RCPD training package."""
+
+from .networks import PongActorCritic
+
+__all__ = ["PongActorCritic"]

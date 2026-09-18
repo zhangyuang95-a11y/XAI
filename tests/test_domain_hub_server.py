@@ -91,7 +91,11 @@ def test_domain_hub_mounts_existing_warehouse_and_pong():
         status, _headers, body = request(port, "GET", "/pong/styles.css")
         assert status == 200 and b".court" in body
         status, _headers, body = request(port, "GET", "/pong/app.js")
-        assert status == 200 and b"fetch(" not in body
+        assert status == 200 and b"nn_model.json" in body
+        for asset in ("coordinated.js", "explain.js", "nn_model.json", "controller_config.json"):
+            status, _headers, body = request(port, "GET", f"/pong/{asset}")
+            assert status == 200 and body
+        assert json.loads(request(port, "GET", "/pong/controller_config.json")[2])["controller_mode"] == "coordinated"
         status, headers, _body = request(port, "GET", "/pong")
         assert status == 308 and headers["Location"] == "/pong/"
 

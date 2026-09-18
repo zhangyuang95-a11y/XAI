@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any
 
 from ..environment.model import PongTransition
@@ -147,7 +148,56 @@ class ExplanationEngine:
 class QuestionAnswerer:
     def answer(self, question: str, evidence: ActionEvidence,
                ball_id: str | None = None, language: str = "zh") -> str:
-        return ExplanationEngine().review_text(evidence, ball_id, language)
+        question = question.strip()
+        if language.startswith("en"):
+            return ExplanationEngine().review_text(evidence, ball_id, language)
+        if not question:
+            return "请问一个具体问题，例如‘为什么接B1’或‘我该去哪里？’。"
+        mentioned = re.search(r"[AB][123]", question.upper())
+        target = mentioned.group(0) if mentioned else ball_id or evidence.ai_target_ball_id
+        if any(token in question for token in ("漏", "接住", "结果", "发生")):
+            encounter = next((item for item in evidence.events if item.get("event") == "encounter"
+                              and (target is None or item.get("ball_id") == target)), None)
+            if encounter is None:
+                return f"这次动作记录里没有{target or '目标球'}的接球结算，请选择发生接球的帧。"
+            if encounter.get("outcome") == "caught":
+                return (f"{_ball_label(target, encounter.get('ball_kind'))}实际接住了；"
+                        + ("双方分别覆盖了两侧。" if encounter.get("ball_kind") == "large" else
+                           "至少一块球拍覆盖了接触点。"))
+            coverage = encounter.get("coverage", {})
+            if encounter.get("ball_kind") == "large":
+                player = coverage.get("player", ())
+                ai = coverage.get("ai", ())
+                return (f"{_ball_label(target, 'large')}漏接，计3次。实际接球时你覆盖了"
+                        f"{sum(bool(value) for value in player)}侧，机器人2覆盖了"
+                        f"{sum(bool(value) for value in ai)}侧，双方未分别覆盖左右接触点。")
+            return f"{_ball_label(target, 'small')}漏接，计1次；两块球拍都没有覆盖接触点。"
+        if any(token in question for token in ("为什么不", "为何不", "怎么不", "没去接")):
+            if target is None:
+                return "请指出你问的是A1、A2、A3、B1还是B2。"
+            if target == evidence.ai_target_ball_id:
+                return f"这一帧实际选择了{_ball_label(target, evidence.ai_target_kind)}。"
+            candidate = next((item for item in evidence.candidates if item.get("ball_id") == target), None)
+            if candidate is None:
+                return f"这帧没有{target}的可核验接球预测，不能断定它一定不可达。"
+            if not candidate.get("viable"):
+                return f"{target}在当前预测中不满足接球可达条件，因此未列入可执行分工。"
+            return f"{target}当时也可能接到；控制器选择了{evidence.ai_target_ball_id or '另一方案'}，需要结合其他同时来球比较。"
+        if any(token in question for token in ("我该", "我应该", "我去", "怎么配合", "哪边")):
+            if evidence.requires_partner and evidence.ai_target_ball_id:
+                other = "右侧" if evidence.ai_contact_side == "left" else "左侧"
+                return f"请你覆盖合作大球{evidence.ai_target_ball_id}的{other}；机器人2负责另一侧。你必须实际到位。"
+            return (f"机器人2当前负责{evidence.ai_target_ball_id}，你可关注另一颗能及时接到的球。"
+                    if evidence.ai_target_ball_id else "当前没有可核验的玩家分工，请查看下一个接球机会。")
+        if any(token in question for token in ("为什么停", "为什么不动", "为什么等待")):
+            if evidence.commitment_state == "waiting_for_large":
+                return f"机器人2已覆盖{evidence.ai_target_ball_id}的分配侧，等待该次接球结算。"
+            return f"机器人2本步提交{_action_text(evidence.ai_action)}；这帧没有已证实的等待原因。"
+        if any(token in question for token in ("NN", "神经", "规则", "谁控制")):
+            return f"这帧提交动作由{evidence.controller_source}控制器产生；记录的动作是{_action_text(evidence.ai_action)}。"
+        if any(token in question for token in ("为什么", "为何", "哪个球", "什么球", "准备接", "接什么")):
+            return ExplanationEngine().review_text(evidence, target, language)
+        return "我能回答这一帧的分工、动作和接球结果；请指出具体球或想问的选择。"
 
 
 def _action_text(action: str) -> str:

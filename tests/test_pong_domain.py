@@ -73,12 +73,15 @@ def test_default_is_a_24x14_continuous_five_ball_game() -> None:
     assert large["occupied_cells"]["width"] == large["occupied_cells"]["height"] == 2
 
 
-def test_browser_loop_uses_one_fixed_simulation_tick_per_interval() -> None:
+def test_browser_loop_keeps_fixed_physics_steps_independent_of_rendering() -> None:
     app = (Path(__file__).parents[1] / "domains" / "pong" / "web" / "app.js").read_text()
     assert "function simulationTick()" in app
     assert "game.step(currentAction);" in app
-    assert "window.setInterval(simulationTick, 1000 / 60);" in app
-    assert "while (accumulator" not in app
+    assert "const interval = SPEC.fixedDt * 1000;" in app
+    assert "requestAnimationFrame(animationLoop);" in app
+    assert "while (physicsAccumulator >= interval" in app
+    assert "模型观察签名与当前 Pong v2 物理规则不兼容" in app
+    assert "浏览器缺少模型所需特征" in app
 
 
 def test_paddles_move_continuously_and_never_leave_the_board() -> None:
@@ -143,6 +146,23 @@ def test_prediction_and_engine_share_the_same_continuous_contact_geometry() -> N
     assert prediction is not None
     event = next_encounter(env)
     assert event["contact_cells"] == pytest.approx(list(prediction.contact_cells))
+
+
+def test_prediction_remains_exact_after_a_side_wall_reflection() -> None:
+    env = PongEnvironment(short_config(duration_seconds=5.0), seed=4)
+    hide_other_balls(env, {"A1"})
+    item = ball(env, "A1")
+    item.x, item.y, item.vx, item.vy = 21.8, 5.0, 2.0, 2.0
+    prediction = predict_next_contact(item, env.frame(), env.config)
+    assert prediction is not None
+    for _ in range(240):
+        transition = env.step("stay", "stay")
+        event = next((value for value in transition.events if value.get("event") == "encounter"), None)
+        if event:
+            assert event["contact_cells"] == pytest.approx(list(prediction.contact_cells))
+            break
+    else:
+        raise AssertionError("expected a reflected contact")
 
 
 def test_snapshot_restores_continuous_positions_and_replays_identically() -> None:
@@ -289,5 +309,5 @@ def test_invalid_action_and_unsupported_nn_are_explicit() -> None:
     with pytest.raises(ValueError):
         env.step("teleport", "stay")
     assert env.snapshot() == before
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ValueError, match="explicit frozen nn_policy"):
         PongStudySession(group="A", config=short_config(control_mode="frozen_nn"))

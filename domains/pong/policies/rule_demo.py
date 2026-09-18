@@ -96,12 +96,33 @@ class RuleDemoController:
 
     version = "rule-demo-continuous-24x14-v7"
 
-    def __init__(self, config: PongConfig | None = None) -> None:
+    def __init__(self, config: PongConfig | None = None, *, controlled_agent: str = "ai") -> None:
         self.config = config or PongConfig()
+        if controlled_agent not in {"player", "ai"}:
+            raise ValueError("controlled_agent must be 'player' or 'ai'")
+        self.controlled_agent = controlled_agent
         self._commitment: _Commitment | None = None
 
     def reset(self) -> None:
         self._commitment = None
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "controlled_agent": self.controlled_agent,
+            "commitment": self._commitment.__dict__.copy() if self._commitment else None,
+        }
+
+    def restore_state(self, payload: dict[str, Any]) -> None:
+        if payload.get("controlled_agent", self.controlled_agent) != self.controlled_agent:
+            raise ValueError("rule-controller role mismatch")
+        commitment = payload.get("commitment")
+        self._commitment = _Commitment(**commitment) if commitment else None
+
+    def _own_x(self, frame: PongFrame) -> float:
+        return frame.ai_x if self.controlled_agent == "ai" else frame.player_x
+
+    def _other_x(self, frame: PongFrame) -> float:
+        return frame.player_x if self.controlled_agent == "ai" else frame.ai_x
 
     def choose(self, frame: PongFrame) -> ControllerDecision:
         if frame.terminal:
@@ -173,7 +194,7 @@ class RuleDemoController:
                   public: tuple[dict[str, Any], ...], conflict: tuple[str, ...],
                   player_closest: _Candidate | None, *, commitment_state: str,
                   candidates: list[_Candidate] | None = None) -> ControllerDecision:
-        difference = selected.target_x - frame.ai_x
+        difference = selected.target_x - self._own_x(frame)
         action = "right" if difference > 0.025 else "left" if difference < -0.025 else "stay"
         if selected.requires_partner:
             intent = "hold_large" if action == "stay" else "catch_large"
@@ -205,11 +226,12 @@ class RuleDemoController:
 
     def _small_candidate(self, prediction: PredictedContact, frame: PongFrame) -> _Candidate:
         cell = prediction.contact_cells[0]
-        target_x = paddle_target_left(frame.ai_x, cell, self.config)
-        player_target = paddle_target_left(frame.player_x, cell, self.config)
-        ai_distance, player_distance = abs(target_x - frame.ai_x), abs(player_target - frame.player_x)
+        own_x, other_x = self._own_x(frame), self._other_x(frame)
+        target_x = paddle_target_left(own_x, cell, self.config)
+        player_target = paddle_target_left(other_x, cell, self.config)
+        ai_distance, player_distance = abs(target_x - own_x), abs(player_target - other_x)
         ai_viable = self._travel_seconds(ai_distance) <= prediction.time_until_contact + _EPSILON
-        player_covers = paddle_covers_cell(frame.player_x, cell, self.config)
+        player_covers = paddle_covers_cell(other_x, cell, self.config)
         return _Candidate(
             prediction, target_x, None, False, ai_distance, player_distance,
             ai_viable, ai_viable, player_covers,
@@ -221,9 +243,10 @@ class RuleDemoController:
         options: list[tuple[float, float, str, float, float]] = []
         for cell, side in ((left_cell, "left"), (right_cell, "right")):
             other = right_cell if side == "left" else left_cell
-            target = paddle_target_left(frame.ai_x, cell, self.config)
-            player_target = paddle_target_left(frame.player_x, other, self.config)
-            ai_distance, player_distance = abs(target - frame.ai_x), abs(player_target - frame.player_x)
+            own_x, other_x = self._own_x(frame), self._other_x(frame)
+            target = paddle_target_left(own_x, cell, self.config)
+            player_target = paddle_target_left(other_x, other, self.config)
+            ai_distance, player_distance = abs(target - own_x), abs(player_target - other_x)
             options.append((self._travel_seconds(ai_distance) + self._travel_seconds(player_distance),
                             target, side, ai_distance, player_distance))
         _cost, target_x, side, ai_distance, player_distance = min(options, key=lambda option: option[0])

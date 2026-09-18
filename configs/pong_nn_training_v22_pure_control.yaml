@@ -1,0 +1,8 @@
+version: pong-nn-ppo-rcpd.v2.2-pure-control
+seed: 260920
+base_config: pong_nn_training_v22_hybrid.yaml
+hybrid:
+  enabled: false
+training:
+  assisted_joint_steps_budget: 0
+  assisted_fraction: 0.0

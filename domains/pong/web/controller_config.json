@@ -1,0 +1,15 @@
+{
+  "controller_mode": "coordinated",
+  "rule_version": "pong-coordinated.v2.3",
+  "urgent_window_seconds": 0.6,
+  "tradeoff_window_seconds": 1.2,
+  "minimum_recovery_margin_seconds": 0.1,
+  "model_sha256": "90f86aa11ef66cba65e87d24f3eab05bb2f3ae05cd4e3e4b0258574573a07667",
+  "program_sha256": null,
+  "candidate_only": true,
+  "source_checkpoint": "best_hybrid_candidate.pt",
+  "source_joint_steps": 266240,
+  "horizon_seconds": 10.0,
+  "max_opportunities": 3,
+  "switch_gain": 1.5
+}

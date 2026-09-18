@@ -80,6 +80,10 @@ def test_domain_hub_mounts_existing_warehouse_and_pong():
                 "Content-Length": str(len(command)),
                 "X-Warehouse-Page": "page-1",
             },
+        )
+        assert status == 200 and json.loads(body)["accepted"] is True
+        assert sessions.state.command_requests == ["start"]
+
         status, _headers, body = request(port, "GET", "/pong/")
         assert status == 200
         assert "合作接球".encode() in body
@@ -90,7 +94,6 @@ def test_domain_hub_mounts_existing_warehouse_and_pong():
         assert status == 200 and b"fetch(" not in body
         status, headers, _body = request(port, "GET", "/pong")
         assert status == 308 and headers["Location"] == "/pong/"
-        assert sessions.state.command_requests == ["start"]
 
         status, _headers, body = request(port, "GET", "/pong/")
         assert status == 200 and "合作接球".encode() in body

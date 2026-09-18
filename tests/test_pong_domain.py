@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+from pathlib import Path
 import threading
 import time
 from urllib.request import Request, urlopen
@@ -70,6 +71,13 @@ def test_default_is_a_24x14_continuous_five_ball_game() -> None:
     assert next(item for item in public["balls"] if item["ball_id"] == "A1")["occupied_cells"]["width"] == 1
     large = next(item for item in public["balls"] if item["ball_id"] == "B1")
     assert large["occupied_cells"]["width"] == large["occupied_cells"]["height"] == 2
+
+
+def test_browser_loop_uses_millisecond_clock_and_drops_resume_backlog() -> None:
+    app = (Path(__file__).parents[1] / "domains" / "pong" / "web" / "app.js").read_text()
+    assert "const now = Date.now();" in app
+    assert "const MAX_ANIMATION_DELTA = SPEC.fixedDt;" in app
+    assert "Math.min(MAX_ANIMATION_DELTA" in app
 
 
 def test_paddles_move_continuously_and_never_leave_the_board() -> None:

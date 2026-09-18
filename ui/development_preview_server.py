@@ -1,7 +1,7 @@
 """Deployable Web study backed by the real warehouse environment and Actor.
 
 Unlike ``tests/browser_fixture_server.py``, this service never fabricates a
-two-step round.  The demonstration and both interactive rounds use
+two-step round.  The demonstration and all three interactive rounds use
 ``WarehouseMultiAgentEnv`` for task sampling, movement, collisions, charging,
 scoring, task replacement, and the 120-step terminal boundary.
 
@@ -33,9 +33,11 @@ from backend.adapters.warehouse import WarehouseAdapter
 from backend.adapters.warehouse_context import _transition_events
 from core.policy_contracts import ActionDistribution
 from env.warehouse.domain import (
+    PARTICIPANT_SCORE_COEFFICIENTS,
+    PARTICIPANT_SCORE_VERSION,
     WarehouseConfig,
     WarehouseState,
-    collaborative_study_config,
+    participant_study_config,
 )
 from env.warehouse.contracts import RUNTIME_CONTROLLER
 from env.warehouse.decision_protocol import distribution_decision_metadata
@@ -241,7 +243,7 @@ def build_development_tutorial() -> tuple[PreviewFrame, ...]:
     """Generate one verified 120-step trajectory from the real simulator."""
 
     environment = WarehouseMultiAgentEnv(
-        replace(collaborative_study_config(), participant_detour_scoring=False)
+        replace(participant_study_config(), participant_detour_scoring=False)
     )
     environment.reset(seed=TUTORIAL_SEED)
     state = environment.get_state()
@@ -348,7 +350,7 @@ class DevelopmentPreviewState:
             if tutorial_frames is not None
             else build_development_tutorial()
         )
-        self.environment = WarehouseMultiAgentEnv(collaborative_study_config())
+        self.environment = WarehouseMultiAgentEnv(participant_study_config())
         self.environment.reset(seed=TASK1_SEED)
         self.policy_seed = TASK1_SEED
         self.round_frame = _initial_frame(self.environment)
@@ -458,7 +460,7 @@ class DevelopmentPreviewState:
         )
 
     def _start_round(self, stage: str, seed: int) -> None:
-        self.environment = WarehouseMultiAgentEnv(collaborative_study_config())
+        self.environment = WarehouseMultiAgentEnv(participant_study_config())
         self.environment.reset(seed=seed)
         participant_state = self.environment.get_state()
         participant_state.participant_controlled_agent_id = (
@@ -484,6 +486,8 @@ class DevelopmentPreviewState:
             if task.delivered_frame is not None and task.claimed_frame is not None
         ]
         return {
+            "score_version": PARTICIPANT_SCORE_VERSION,
+            "score_coefficients": dict(PARTICIPANT_SCORE_COEFFICIENTS),
             "round_name": round_name,
             "seed": int(seed),
             "score": float(state.user_score),
@@ -609,6 +613,8 @@ class DevelopmentPreviewState:
         actor = _require_deployed_actor()
         record = {
             "protocol_version": STUDY_VERSION,
+            "score_version": PARTICIPANT_SCORE_VERSION,
+            "score_coefficients": dict(PARTICIPANT_SCORE_COEFFICIENTS),
             "domain_id": "warehouse",
             "session_id": self.run_id,
             "participant_id": self.participant_id,
@@ -685,6 +691,8 @@ class DevelopmentPreviewState:
             "study": {
                 "release_version": "three-task-study-20260919",
                 "protocol_version": STUDY_VERSION,
+                "score_version": PARTICIPANT_SCORE_VERSION,
+                "score_coefficients": dict(PARTICIPANT_SCORE_COEFFICIENTS),
                 "domain_id": "warehouse",
                 "task_run_id": self.task_run_id,
                 "task_id": int(self.stage[4]) if self.stage.startswith("task") else None,
@@ -827,7 +835,7 @@ class DevelopmentPreviewState:
             raise ValueError("The requested Task 2 action has not been executed.")
         before = self.round_frames[index - 1]
         outcome = self.round_frames[index]
-        environment = WarehouseMultiAgentEnv(collaborative_study_config())
+        environment = WarehouseMultiAgentEnv(participant_study_config())
         environment.reset(seed=TASK2_SEED)
         environment.set_state(before.state)
         actor = _require_deployed_actor()
@@ -999,7 +1007,7 @@ class DevelopmentPreviewState:
                 required = float(item.get("required_energy", 0.0) or 0.0)
                 selected_id = str(item.get("task_id", ""))
             else:
-                config = collaborative_study_config()
+                config = participant_study_config()
                 fallback_tasks = [
                     task for task in before.tasks
                     if task.status == "available"
@@ -1033,6 +1041,8 @@ class DevelopmentPreviewState:
             occupant_after = float(penalty.get("occupant_battery_after", occupant_before) or occupant_before)
             teammate_battery = float(penalty.get("teammate_battery_before", 0.0) or 0.0)
             distance = int(penalty.get("teammate_distance_to_charger", 0) or 0)
+            penalty_points = abs(float(penalty.get("score_delta", 0.0)))
+            penalty_label = f"{penalty_points:g}"
             label, required, occupant_now = _energy_summary(responsible)
             if required is not None and occupant_after >= required:
                 budget_zh = f"{occupant}当前{occupant_after:g}%电量已足够按{label}方案完成配送并返桩"
@@ -1044,8 +1054,8 @@ class DevelopmentPreviewState:
                 budget_zh = f"{occupant}当前电量为{occupant_after:g}%"
                 budget_en = f"{occupant} had {occupant_after:g}%"
             return {
-                "en": f"{budget_en}; {teammate} had only {teammate_battery:g}% and was {distance} cells from the charger. {occupant} stayed on the charger after charging from {occupant_before:g}% to {occupant_after:g}%, so the shared-charger rule applied −50; {occupant} should yield the charger.",
-                "zh-CN": f"{budget_zh}；{teammate}当时只有{teammate_battery:g}%电量，距充电桩{distance}格。{occupant}从{occupant_before:g}%充到{occupant_after:g}%后仍占用充电桩，因此触发共享充电桩−50处罚；{occupant}应先让出充电位置。",
+                "en": f"{budget_en}; {teammate} had only {teammate_battery:g}% and was {distance} cells from the charger. {occupant} stayed on the charger after charging from {occupant_before:g}% to {occupant_after:g}%, so the shared-charger rule applied −{penalty_label}; {occupant} should yield the charger.",
+                "zh-CN": f"{budget_zh}；{teammate}当时只有{teammate_battery:g}%电量，距充电桩{distance}格。{occupant}从{occupant_before:g}%充到{occupant_after:g}%后仍占用充电桩，因此触发共享充电桩−{penalty_label}处罚；{occupant}应先让出充电位置。",
             }
 
         collision = bool(
@@ -1114,7 +1124,7 @@ class DevelopmentPreviewState:
         participant = before.by_id("robot_1")
         blocked_by_participant = False
         if isinstance(goal_position, (list, tuple)):
-            layout_id = collaborative_study_config().map_layout_id
+            layout_id = participant_study_config().map_layout_id
             blocked = {tuple(participant.position)}
             blocked_by_participant = (
                 tuple(participant.position) != tuple(before_agent.position)
@@ -1123,7 +1133,7 @@ class DevelopmentPreviewState:
                 and self._path_exists(tuple(before_agent.position), tuple(goal_position), layout_id, set())
             )
         if actual == "WAIT":
-            if participant.position == get_map_layout(collaborative_study_config().map_layout_id).charger_position and bool(runtime.get("participant_occupies_charger")):
+            if participant.position == get_map_layout(participant_study_config().map_layout_id).charger_position and bool(runtime.get("participant_occupies_charger")):
                 return {
                     "en": "You are occupying the charger, so Robot 2 waits beside it instead of entering your cell.",
                     "zh-CN": "你当前占用充电桩，机器人2先在桩外等待，避免进入你所在的格子。",

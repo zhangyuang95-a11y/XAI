@@ -41,6 +41,7 @@
       </div>
       <p class="hint">按住 A/D 或左右方向键持续移动，松开后停止；按 S 键暂停或继续。仅 A 组在 Task 2 暂停后可针对已发生的过程提问。</p>
       <div class="status" id="status">准备开始</div>
+      <section class="round-result" id="roundResult" hidden aria-live="polite"></section>
     </div>
 
     <aside id="review" hidden>
@@ -68,7 +69,7 @@
 
   <section id="questionnaire" hidden>
     <h2>三局成绩与问卷</h2>
-    <p id="scoreSummary"></p>
+    <div id="scoreSummary"></div>
     <p>请按 1–5 分评分：1＝非常不同意，5＝非常同意。</p>
     <form id="surveyForm">
       <div id="surveyItems"></div>
@@ -77,7 +78,7 @@
     </form>
     <p class="status" id="surveyStatus"></p>
   </section>
-  <section id="completed" hidden><h2>已完成</h2><p>三局成绩和问卷已保存到这台设备。</p></section>
+  <section id="completed" hidden><h2>已完成</h2><p>三局成绩和问卷已保存到这台设备。</p><div id="completedScores"></div><button id="newParticipant" type="button">开始新的参与者</button></section>
 </main>
 <script src="coordinated.js" defer></script>
 <script src="explain.js" defer></script>

@@ -167,6 +167,11 @@ function studyRecord(current) {
     seed: current.seed, group: current.group, assignment_source: 'manual_self_select',
     missed_balls: current.missedBalls,
     missed_by_type: clone(current.missedByType),
+    missed_by_type_format: 'weighted_legacy_compatibility',
+    score_format: 'pong-misses.v2',
+    small_misses: current.missedByType.small,
+    large_misses: current.missedByType.large / 3,
+    weighted_misses: current.missedBalls,
     total_opportunities: current.totalOpportunities,
     successful_opportunities: current.successfulOpportunities,
     explanation_allowed: mayExplain(current),
@@ -198,6 +203,44 @@ function readSession() {
       || ![1, 2, 3].includes(data.task) || !Array.isArray(data.completed_runs)) return null;
     return data;
   } catch (_) { return null; }
+}
+
+function missCounts(run) {
+  if (!run) return null;
+  const small = Number(run.score_format === 'pong-misses.v2'
+    ? run.small_misses : run.missed_by_type?.small);
+  const large = Number(run.score_format === 'pong-misses.v2'
+    ? run.large_misses : Number(run.missed_by_type?.large) / 3);
+  const weighted = Number(run.score_format === 'pong-misses.v2'
+    ? run.weighted_misses : run.missed_balls);
+  if (![small, large, weighted].every(value => Number.isInteger(value) && value >= 0)
+      || weighted !== small + 3 * large) return null;
+  return { small, large, weighted };
+}
+
+function renderScoresTable(hostId) {
+  const table = document.createElement('table');
+  table.className = 'score-table';
+  table.setAttribute('aria-label', '三局漏球成绩');
+  const header = document.createElement('tr');
+  ['任务', '小球漏接次数', '大球漏接次数', '加权漏球数'].forEach(label => {
+    const cell = document.createElement('th'); cell.textContent = label; header.appendChild(cell);
+  });
+  const thead = document.createElement('thead'); thead.appendChild(header); table.appendChild(thead);
+  const body = document.createElement('tbody');
+  for (let taskId = 1; taskId <= 3; taskId += 1) {
+    const matches = completedRuns.filter(run => Number(run.task_id) === taskId);
+    const counts = matches.length === 1 ? missCounts(matches[0]) : null;
+    const row = document.createElement('tr');
+    [`Task ${taskId}`, counts?.small ?? '记录缺失', counts?.large ?? '—', counts?.weighted ?? '—'].forEach(value => {
+      const cell = document.createElement('td'); cell.textContent = String(value);
+      if (!counts) cell.className = 'missing';
+      row.appendChild(cell);
+    });
+    body.appendChild(row);
+  }
+  table.appendChild(body);
+  $(hostId).replaceChildren(table);
 }
 
 function reflect(position, velocity, lower, upper) {
@@ -899,6 +942,15 @@ function render(frame = game?.snapshot()) {
   $('status').textContent = reviewAvailable ? (frame.terminal ? 'Task 2 已结束，可以回放提问' : '已暂停：A组可查看当前帧或一段过程')
     : frame.terminal ? (game.task === 3 ? 'Task 3 已结束，请填写问卷' : `本局结束，点击进入 Task ${game.task + 1}`)
       : game.paused ? '已暂停' : controllerStatus;
+  const roundResult = $('roundResult');
+  roundResult.hidden = !frame.terminal;
+  if (frame.terminal) {
+    const run = completedRuns.find(item => Number(item.task_id) === game.task);
+    const scores = missCounts(run);
+    roundResult.textContent = scores
+      ? `Task ${game.task} 成绩：小球漏接 ${scores.small} 次，大球漏接 ${scores.large} 次，加权漏球数 ${scores.weighted}。`
+      : `Task ${game.task} 成绩记录缺失。`;
+  }
 }
 
 function renderTechnical(frame) {
@@ -1058,8 +1110,7 @@ function answerForRange(start, end, question) {
 function showQuestionnaire() {
   if (!game || game.task !== 3 || !game.terminal) return;
   $('questionnaire').hidden = false;
-  const line = completedRuns.map((run, index) => `Task ${index + 1}：小球漏接${run.missed_by_type.small || 0}，大球漏接${(run.missed_by_type.large || 0) / 3}，加权漏接${run.missed_balls}，合作接住${run.successful_opportunities}`).join('； ');
-  $('scoreSummary').textContent = line;
+  renderScoresTable('scoreSummary');
   const shared = ['我能理解机器人2正在做什么。','我能预测机器人2接下来的动作。','我知道自己和机器人2应该如何分工接球。','我能与机器人2配合接住大球。','机器人2的行为符合我的预期。'];
   const extra = game.group === 'A' ? ['Task 2 的气泡清楚地说明了机器人2的行为。','Task 2 暂停后的问答帮助我理解了所选片段。','Task 2 的解释帮助我判断自己应该去接哪个球。'] : [];
   const holder = $('surveyItems'); holder.replaceChildren();
@@ -1261,7 +1312,26 @@ $('surveyForm').onsubmit = event => {
     runs: completedRuns, answers: values, note: $('surveyNote').value, saved_at: new Date().toISOString() };
   localStorage.setItem(`pong.questionnaire.${game.participantId}.${Date.now()}`, JSON.stringify(record));
   $('surveyStatus').textContent = '已保存到这台设备。'; $('questionnaire').hidden = true; $('completed').hidden = false;
+  $('game').hidden = true;
+  renderScoresTable('completedScores');
+  saveSession('completed');
+};
+
+$('newParticipant').onclick = () => {
   sessionStorage.removeItem(SESSION_KEY);
+  pendingSession = null;
+  completedRuns.length = 0;
+  game = null;
+  running = false;
+  studySessionId = crypto.randomUUID ? crypto.randomUUID() : `session-${Date.now()}`;
+  $('participant').disabled = false;
+  $('group').disabled = false;
+  $('participant').value = 'local';
+  $('start').textContent = '开始 Task 1';
+  $('start').disabled = false;
+  $('setupError').textContent = '';
+  $('completed').hidden = true;
+  $('setup').hidden = false;
 };
 
 async function restoreSessionOnLoad() {
@@ -1272,6 +1342,15 @@ async function restoreSessionOnLoad() {
   $('group').value = pendingSession.group;
   $('participant').disabled = true;
   $('group').disabled = true;
+  if (pendingSession.phase === 'completed') {
+    completedRuns.push(...pendingSession.completed_runs);
+    $('setup').hidden = true;
+    $('game').hidden = true;
+    $('questionnaire').hidden = true;
+    $('completed').hidden = false;
+    renderScoresTable('completedScores');
+    return;
+  }
   if (pendingSession.phase === 'survey') {
     await loadFrozenNN();
     if (!studyProtocol) {

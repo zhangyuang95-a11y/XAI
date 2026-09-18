@@ -14,7 +14,7 @@ from backend.training.warehouse_study_acceptance import (
     _pareto_dominating_joint_actions,
 )
 from env.warehouse.layouts import STUDY_MAP_LAYOUT
-from env.warehouse.domain import collaborative_study_config
+from env.warehouse.domain import collaborative_study_config, participant_study_config
 from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.runtime_coordination import select_ai_ai_joint_actions
@@ -30,6 +30,37 @@ from ui.development_preview_server import (
     _transition_payload,
     build_development_tutorial,
 )
+
+
+def test_tutorial_scoring_change_preserves_actions_motion_energy_and_events(monkeypatch) -> None:
+    current = build_development_tutorial()
+    actual_factory = preview_server.participant_study_config
+    monkeypatch.setattr(
+        preview_server, "participant_study_config",
+        lambda **kwargs: actual_factory(
+            delivery_points=100, robot_collision_points=-200,
+            shutdown_points=-50, shared_charger_occupancy_points=-50,
+            **kwargs,
+        ),
+    )
+    legacy_scoring = build_development_tutorial()
+    assert len(current) == len(legacy_scoring) == 121
+    for new, old in zip(current, legacy_scoring):
+        assert new.actions == old.actions
+        assert [(agent.position, agent.battery, agent.carrying_task_id)
+                for agent in new.state.agents] == [
+                    (agent.position, agent.battery, agent.carrying_task_id)
+                    for agent in old.state.agents
+                ]
+        assert [(task.task_id, task.status, task.carrier_agent_id)
+                for task in new.state.tasks] == [
+                    (task.task_id, task.status, task.carrier_agent_id)
+                    for task in old.state.tasks
+                ]
+        assert [event["event"] for event in new.events] == [
+            event["event"] for event in old.events
+        ]
+    assert current[-1].state.user_score != legacy_scoring[-1].state.user_score
 
 
 def _envelope(state: DevelopmentPreviewState, command: str, **payload):
@@ -677,7 +708,7 @@ def test_group_a_receives_only_a_frame_bound_ask_why_affordance_until_clicked() 
 def test_charger_penalty_question_remains_bound_after_five_steps(monkeypatch) -> None:
     state = DevelopmentPreviewState()
     _start_task2(state, condition="explanation", locale="en")
-    environment = WarehouseMultiAgentEnv(collaborative_study_config())
+    environment = WarehouseMultiAgentEnv(participant_study_config())
     environment.reset(seed=901)
     scenario = environment.get_state()
     scenario.by_id("robot_1").position = environment.layout.charger_position
@@ -717,7 +748,7 @@ def test_charger_penalty_question_remains_bound_after_five_steps(monkeypatch) ->
             state,
             "ask_explanation",
             target_agent="robot_2",
-            question="Why did I lose 50 points just now?",
+            question="Why was there a penalty just now?",
             question_kind="charger_penalty",
             penalty_event_id=penalty["event_id"],
             penalty_frame=penalty["frame"],
@@ -726,5 +757,23 @@ def test_charger_penalty_question_remains_bound_after_five_steps(monkeypatch) ->
     answer = result["view"]["last_explanation"]["answer_en"]
     assert "63%" in answer
     assert "19%" in answer
-    assert "−50" in answer
+    assert "−5" in answer
+    assert result["view"]["study"]["score_version"] == "warehouse-participant-score.v2"
+
+    # The answer must use the recorded event amount even when reading an
+    # archived event scored under the previous participant formula.
+    historical = state.round_frames[1].info["rule_events"][0]
+    historical["score_delta"] = -50.0
+    previous = state.command(
+        _envelope(
+            state,
+            "ask_explanation",
+            target_agent="robot_2",
+            question="Why was this older penalty applied?",
+            question_kind="charger_penalty",
+            penalty_event_id=penalty["event_id"],
+            penalty_frame=penalty["frame"],
+        )
+    )
+    assert "−50" in previous["view"]["last_explanation"]["answer_en"]
     assert result["view"]["last_explanation"]["structured_evidence"]["penalty_event_id"] == penalty["event_id"]

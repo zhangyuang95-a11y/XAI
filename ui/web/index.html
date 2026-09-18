@@ -39,7 +39,7 @@
         <div><span data-i18n="detours">绕路单位</span><strong id="detourValue">0</strong></div>
       </div>
 
-      <div class="canvas-wrap"><canvas id="warehouseCanvas" aria-label="仓库地图"></canvas><aside id="aiActionBubble" class="ai-action-bubble hidden" aria-live="polite"></aside><div id="penaltyFlash" class="penalty-flash hidden" aria-live="assertive">−50</div></div>
+      <div class="canvas-wrap"><canvas id="warehouseCanvas" aria-label="仓库地图"></canvas><aside id="aiActionBubble" class="ai-action-bubble hidden" aria-live="polite"></aside><div id="penaltyFlash" class="penalty-flash hidden" aria-live="assertive">−5</div></div>
       <div class="legend">
         <span><i class="shelf"></i><b data-i18n="shelf">货架</b></span>
         <span><i class="pickup">A</i><b data-i18n="pickup">取货点</b></span>
@@ -81,7 +81,7 @@
           <li data-i18n="ruleJobs">地图始终有两个未预分配的 A→B 共享任务。</li>
           <li data-i18n="ruleControl">方向键、WASD 或按钮每次提交一个联合决策步；空格表示等待。</li>
           <li data-i18n="ruleCharge">成功移动耗电 2；在充电站等待恢复 10；断电会提前结束本轮。</li>
-          <li data-i18n="ruleScore">计分：配送 +100、机器人碰撞 −200、断电 −50、每步 −1、参与者绕路每单位 −2；协作资源使用可能触发额外扣分。</li>
+          <li data-i18n="ruleScore">计分：配送 +10、机器人碰撞 −10、每台断电 −5、违规占用充电桩 −5、每步 −1、参与者绕路每单位 −2。</li>
         </ul>
         <div class="demo-progress"><span id="demoProgressBar"></span></div>
         <p id="demoStatus">0 / 0</p>
@@ -112,7 +112,7 @@
             <button type="button" data-question-kind="human_influence" data-question-key="presetHumanInfluence" data-i18n="presetHumanInfluence">我的动作影响机器人2了吗？</button>
             <button type="button" data-question-kind="goal" data-question-key="presetGoal" data-i18n="presetGoal">机器人2当前想做什么？</button>
             <button type="button" data-question-kind="energy" data-question-key="presetEnergy" data-i18n="presetEnergy">机器人2需要充电吗？</button>
-            <button class="hidden" id="chargerPenaltyQuestionButton" type="button" data-question-kind="charger_penalty" data-question-key="presetChargerPenalty">刚才为什么扣了50分？</button>
+            <button class="hidden" id="chargerPenaltyQuestionButton" type="button" data-question-kind="charger_penalty" data-question-key="presetChargerPenalty">刚才为什么被扣分？</button>
           </div>
           <label class="field"><span data-i18n="question">你的问题</span><textarea id="questionInput" rows="2" data-i18n-placeholder="questionPlaceholder" placeholder="询问机器人2最近几步的行为。"></textarea></label>
           <button class="primary" id="askButton" type="button" data-i18n="ask">询问机器人2</button>

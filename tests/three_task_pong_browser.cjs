@@ -83,6 +83,8 @@ const url = process.env.PONG_SMOKE_URL || 'http://127.0.0.1:18765/pong/';
       await page.keyboard.press('s');
       await finish();
       assert.equal(await page.locator('#questionnaire').isVisible(), true);
+      assert.equal(await page.locator('#scoreSummary tbody tr').count(), 3);
+      assert.equal(await page.locator('#scoreSummary .missing').count(), 0);
       assert.equal(await page.evaluate(() => completedRuns.length), 3);
       const saved = await page.evaluate(() => completedRuns.map(run =>
         [run.task_id, run.seed, run.explanation_allowed, run.protocol_version]));
@@ -100,12 +102,17 @@ const url = process.env.PONG_SMOKE_URL || 'http://127.0.0.1:18765/pong/';
       }
       await page.click('#surveyForm button[type="submit"]');
       assert.equal(await page.locator('#completed').isVisible(), true);
+      assert.equal(await page.locator('#completedScores tbody tr').count(), 3);
       const stored = await page.evaluate(() => {
         const key = Object.keys(localStorage).find(item => item.startsWith('pong.questionnaire.three-task-'));
         return JSON.parse(localStorage.getItem(key));
       });
       assert.equal(stored.version, 'three-task-explanation.v1');
       assert.equal(stored.runs.length, 3);
+      await page.reload();
+      await page.waitForFunction(() => !document.querySelector('#completed').hidden);
+      assert.equal(await page.locator('#completedScores tbody tr').count(), 3);
+      assert.equal(await page.locator('#review').isVisible(), false);
       assert.deepEqual(errors, []);
       await page.close();
     }

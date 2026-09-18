@@ -8,6 +8,16 @@ from typing import Any
 from .layouts import DEFAULT_MAP_LAYOUT, STUDY_MAP_LAYOUT, get_map_layout
 from .rewards import RewardConfig
 
+PARTICIPANT_SCORE_VERSION = "warehouse-participant-score.v2"
+PARTICIPANT_SCORE_COEFFICIENTS = {
+    "delivery": 10.0,
+    "robot_collision": -10.0,
+    "shutdown": -5.0,
+    "shared_charger_occupancy": -5.0,
+    "time": -1.0,
+    "human_detour": -2.0,
+}
+
 
 @dataclass(frozen=True)
 class WarehouseConfig:
@@ -111,6 +121,21 @@ def collaborative_study_config(**overrides: Any) -> WarehouseConfig:
     }
     values.update(overrides)
     return WarehouseConfig(**values)
+
+
+def participant_study_config(**overrides: Any) -> WarehouseConfig:
+    """Apply v2 participant scoring without changing training reward configs."""
+
+    values = {
+        "delivery_points": PARTICIPANT_SCORE_COEFFICIENTS["delivery"],
+        "robot_collision_points": PARTICIPANT_SCORE_COEFFICIENTS["robot_collision"],
+        "shutdown_points": PARTICIPANT_SCORE_COEFFICIENTS["shutdown"],
+        "shared_charger_occupancy_points": PARTICIPANT_SCORE_COEFFICIENTS["shared_charger_occupancy"],
+        "step_points": PARTICIPANT_SCORE_COEFFICIENTS["time"],
+        "human_detour_points_per_unit": PARTICIPANT_SCORE_COEFFICIENTS["human_detour"],
+    }
+    values.update(overrides)
+    return collaborative_study_config(**values)
 
 
 @dataclass

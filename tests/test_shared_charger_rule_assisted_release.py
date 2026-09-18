@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from env.warehouse.domain import collaborative_study_config
+from env.warehouse.domain import collaborative_study_config, participant_study_config
 from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.runtime_coordination import select_human_ai_action
+from env.warehouse.transition_outcome import finalize_transition_outcome
 
 
 def _charger_state(occupant_battery: float, teammate_battery: float):
-    env = WarehouseMultiAgentEnv(collaborative_study_config())
+    env = WarehouseMultiAgentEnv(participant_study_config())
     env.reset(seed=901)
     state = env.get_state()
     state.by_id("robot_1").position = env.layout.charger_position
@@ -22,11 +23,67 @@ def test_shared_charger_penalty_is_immediate_and_continuous_occupancy_is_idempot
     _, _, _, _, info = env.step({"robot_1": "WAIT", "robot_2": "WAIT"})
     assert env.state.by_id("robot_1").battery == 63.0
     assert info["shared_charger_penalty_count"] == 1
-    assert env.state.score_breakdown["shared_charger_occupancy"] == -50.0
+    assert env.state.score_breakdown["shared_charger_occupancy"] == -5.0
     assert env.state.last_rule_events[0]["event_id"]
 
     env.step({"robot_1": "WAIT", "robot_2": "WAIT"})
-    assert env.state.score_breakdown["shared_charger_occupancy"] == -50.0
+    assert env.state.score_breakdown["shared_charger_occupancy"] == -5.0
+
+
+def test_participant_score_coefficients_and_early_shutdown_time() -> None:
+    assert collaborative_study_config().delivery_points == 100
+    assert collaborative_study_config().robot_collision_points == -200
+    env = WarehouseMultiAgentEnv(participant_study_config())
+    env.reset(seed=901)
+    state = env.get_state()
+    state.frame = 1
+    _, components, score, _, _, _ = finalize_transition_outcome(
+        env.config, env.layout, state, delivered_count=1,
+        robot_collision=False, route_regret=0,
+    )
+    assert components["delivery"] == 10
+    assert score == 9
+
+    state = env.get_state()
+    state.frame = 1
+    _, components, score, _, _, _ = finalize_transition_outcome(
+        env.config, env.layout, state, delivered_count=0,
+        robot_collision=True, route_regret=0,
+    )
+    assert components["robot_collision"] == -10
+    assert score == -11
+
+    state = env.get_state()
+    state.frame = 1
+    _, components, score, _, _, _ = finalize_transition_outcome(
+        env.config, env.layout, state, delivered_count=0,
+        robot_collision=False, route_regret=0, shared_charger_penalty_count=1,
+    )
+    assert components["shared_charger_occupancy"] == -5
+    assert score == -6
+
+    state = env.get_state()
+    state.frame = 1
+    state.by_id("robot_1").battery = 0
+    _, components, score, terminated, _, _ = finalize_transition_outcome(
+        env.config, env.layout, state, delivered_count=0,
+        robot_collision=False, route_regret=0,
+    )
+    assert components["shutdown"] == -5
+    assert components["time"] == -120
+    assert score == -125 and terminated
+    state = env.get_state()
+    state.frame = 1
+    state.by_id("robot_1").battery = 0
+    state.by_id("robot_2").battery = 0
+    shutdown_agents, components, score, _, _, _ = finalize_transition_outcome(
+        env.config, env.layout, state, delivered_count=0,
+        robot_collision=False, route_regret=0,
+    )
+    assert len(shutdown_agents) == 2
+    assert components["shutdown"] == -10
+    assert score == -130
+    assert 8 * env.config.delivery_points + 120 * env.config.step_points == -40
 
 
 def test_shared_charger_thresholds_and_departure_reset():

@@ -1,6 +1,6 @@
 {
   "protocol_version": "three-domain-task2-only.v1",
-  "release_id": "policylens-three-domain-20260920.v1",
+  "release_id": "policylens-three-domain-20260920.v2",
   "snapshot_date": "2026-09-20",
   "artifact_role": "Auditable protocol snapshot. The current runtime implements these rules in study_v3/store.py and the domain configurations; it does not load this file as an independent state-machine authority.",
   "human_effect_status": "not_measured",
@@ -96,7 +96,7 @@
     }
   },
   "question_service": {
-    "version": "study-evidence-qa.v3.0",
+    "version": "study-evidence-qa.v3.1",
     "default_counterfactual_steps": 1,
     "maximum_counterfactual_steps": 12,
     "first_simulated_ai_action": "recorded pre-action decision",

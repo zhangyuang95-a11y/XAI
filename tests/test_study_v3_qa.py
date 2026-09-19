@@ -282,10 +282,13 @@ def test_recorded_terminal_frame_has_no_next_action_even_with_empty_decision():
     assert "no next action" in result["answer"]
 
 
-def test_real_http_transport_structure_auth_and_no_secret_audit():
+@pytest.mark.parametrize("include_semantics", (True, False))
+def test_real_http_transport_structure_auth_and_no_secret_audit(include_semantics):
     received = []
     state = fixture()
     selected = plan(state)
+    if include_semantics:
+        selected["intents"][0].update(subject="ai", purpose="observation")
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -303,7 +306,9 @@ def test_real_http_transport_structure_auth_and_no_secret_audit():
     try:
         instance = Explainer(Settings(database=":memory:", llm_base_url=f"http://127.0.0.1:{server.server_port}/v1", llm_model="fixture", llm_api_key="test-secret"))
         result = ask(instance, state)
-        assert result["status"] == "answered"
+        assert result["status"] == ("answered" if include_semantics else "unavailable")
+        if not include_semantics:
+            assert result["audit"]["failure_code"] == "missing_provider_semantics"
         assert received[0]["path"] == "/v1/chat/completions"
         assert received[0]["auth"] == "Bearer test-secret"
         assert received[0]["body"]["response_format"] == {"type": "json_object"}
@@ -395,3 +400,81 @@ def test_real_provider_evaluator_does_not_count_string_outputs_as_correctness():
     actual = ask(explainer_for_plan(plan(state, ids=("position",))), state)
     report = evaluate_case(case, actual, pong)
     assert report["passed"] and report["requires_human_review"]
+
+
+@pytest.mark.parametrize("domain", ("warehouse", "pong", "kitchen"))
+def test_concrete_human_advice_and_ai_intention_have_authoritative_separate_roles(domain):
+    engine = get_engine(domain)
+    state = engine.initial_state(730100, 2)
+    original = deepcopy(state)
+    decision = engine.decide(state)
+    evidence = _catalog(engine, state, decision, [])
+    advice = evidence["system:human_advice"]
+    assert advice["subject"] == "human"
+    assert advice["action"] == engine.human_advisor(state)
+    assert advice["action"] in engine.legal_actions(state)
+    assert evidence["system:ai_reason"]["en"] == decision["reason_en"]
+    assert evidence["system:ai_reason"]["zh"] == decision["reason_zh"]
+    assert evidence["system:ai_action"]["subject"] == "ai"
+    assert state == original
+
+
+def test_historical_ai_reason_cannot_be_answered_with_human_event_evidence():
+    engine = get_engine("warehouse")
+    state = engine.initial_state(730100, 1)
+    for _ in range(10):
+        state = engine.step(state, engine.human_advisor(state))
+    wrong = plan(state, intents=[{"kind": "facts", "subject": "ai", "purpose": "reason",
+                                 "evidence_ids": ["human_state", "human_charger_distance"]}])
+    result = explainer_for_plan(wrong).answer(engine, state, engine.decide(state), "What were you trying to do and why?")
+    assert result["status"] == "unavailable"
+    assert result["audit"]["failure_code"] == "missing_subject_evidence"
+    assert result["audit"]["repair_attempt"]["failure_code"] == "missing_subject_evidence"
+
+
+def test_human_advice_cannot_be_replaced_with_legal_action_list():
+    state = fixture()
+    wrong = plan(state, intents=[{"kind": "facts", "subject": "human", "purpose": "advice",
+                                 "evidence_ids": ["system:available_actions"]}])
+    result = ask(explainer_for_plan(wrong), state, question="Which move should I choose?")
+    assert result["status"] == "unavailable"
+    assert result["audit"]["failure_code"] == "missing_subject_evidence"
+
+
+def test_human_comparison_rejects_ai_alternative_and_preserves_two_real_branches():
+    engine = get_engine("warehouse")
+    state = engine.initial_state(730100, 2)
+    wrong = plan(state, intents=[{"kind": "facts", "subject": "human", "purpose": "comparison",
+                                 "evidence_ids": ["alternative_wait"]}])
+    result = explainer_for_plan(wrong).answer(engine, state, engine.decide(state), "Why is that better than waiting here?")
+    assert result["status"] == "unavailable"
+    assert result["audit"]["failure_code"] == "wrong_actor_evidence"
+    recommended = engine.human_advisor(state)
+    correct = plan(state, intents=[{"kind": "counterfactual", "subject": "human", "purpose": "comparison",
+        "evidence_ids": [], "actions": [action], "horizon": 1} for action in (recommended, "wait")])
+    original = deepcopy(state)
+    result = explainer_for_plan(correct).answer(engine, state, engine.decide(state), "Why is that better than waiting here?")
+    assert result["status"] == "answered"
+    assert [s["requested_actions"] for s in result["audit"]["simulations"]] == [[recommended], ["wait"]]
+    assert state == original
+
+
+def test_provider_payload_disambiguates_speakers_and_carries_concrete_action():
+    state = fixture()
+    captured = []
+    selected = plan(state, intents=[{"kind": "facts", "subject": "human", "purpose": "advice",
+        "evidence_ids": ["system:human_advice"]}])
+    result = ask(explainer_for_plan(selected, captured), state, question="How should I help?")
+    assert result["status"] == "answered"
+    assert captured[0]["speaker_roles"]["participant_question_you"] == "ai"
+    assert captured[0]["speaker_roles"]["assistant_answer_you"] == "human"
+    assert captured[0]["recommended_human_action"] == pong.human_advisor(state)
+
+
+def test_simulation_cannot_be_bound_to_ai_actor():
+    state = fixture()
+    selected = plan(state, intents=[{"kind": "counterfactual", "subject": "ai", "purpose": "comparison",
+        "evidence_ids": [], "actions": ["wait"], "horizon": 1}])
+    result = ask(explainer_for_plan(selected), state)
+    assert result["status"] == "unavailable"
+    assert result["audit"]["failure_code"] == "wrong_simulation_actor"

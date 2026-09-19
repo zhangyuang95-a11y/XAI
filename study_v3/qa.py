@@ -15,7 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-VERSION = "study-evidence-qa.v3.0"
+VERSION = "study-evidence-qa.v3.1"
 MAX_STEPS = 12
 _ACTIONS = {
     "left": ("move left", "左移"), "right": ("move right", "右移"),
@@ -42,8 +42,32 @@ Schema:
 {"language":"en"|"zh", "binding":{"task":integer,"turn":integer},
  "premise":"supported"|"contradicted"|"unclear",
  "clarification":null|"ambiguous_object"|"select_frame"|"unsupported_question"|"missing_action",
- "intents":[{"kind":"facts","evidence_ids":["provided exact fact ID"]},
-            {"kind":"counterfactual","evidence_ids":[],"actions":["left"],"horizon":1}]}
+ "intents":[{"kind":"facts","subject":"ai"|"human"|"shared",
+             "purpose":"action"|"reason"|"advice"|"comparison"|"observation"|"rule",
+             "evidence_ids":["provided exact fact ID"]},
+            {"kind":"counterfactual","subject":"human","purpose":"comparison",
+             "evidence_ids":[],"actions":["left"],"horizon":1}]}
+
+Resolve the SPEAKER before selecting facts. In the participant's QUESTION,
+"I/me/my" means the human and "you/your" means the AI teammate being addressed.
+In earlier ASSISTANT ANSWERS and decision evidence, "I/my" means the AI and
+"you/your" means the human. Do not confuse these opposite perspectives.
+"What were you trying to do and why?" asks the AI's recorded decision, NOT a
+human position/event simply because its evidence says "you". selected_frame is
+already the complete state for the selected turn, including when it is earlier
+than the active task. Its system:ai_reason and system:ai_action describe that
+exact frame. Use them for the AI's intention and next action, respectively.
+Every intent must state its subject and purpose. An AI-reason intent must
+include system:ai_reason; an AI-action intent must include system:ai_action.
+For advice to the human, include system:human_advice, which contains a concrete
+legal suggested action. Legal-action lists or an AI plan alone are NOT human
+advice. Add relevant current facts to explain the coordination condition.
+For a comparison after human advice, keep subject=human even when the previous
+answer also mentioned the AI. "that" refers to the recommended HUMAN action.
+Compare its supplied recommended_human_action with the requested alternative
+using two human counterfactual intents. AI alternative facts describe the AI,
+so cannot substitute for a human comparison. If both outcomes are equal over
+the stated window, do not claim one is better or assume a longer-term benefit.
 
 Use the language of the current question, even if it differs from the interface.
 For a very short ambiguous-language question follow the interface language.
@@ -121,6 +145,23 @@ def _redact(value, secret):
 
 def _catalog(engine, state, decision, public_history):
     rows = deepcopy(engine.facts(state, decision))
+    rows.extend([
+        {"id": "system:ai_action", "subject": "ai", "purpose": "action",
+         "en": "The task has finished; there is no next action." if state["terminal"] else "My next action is to " + _ACTIONS[decision["action"]][0] + ".",
+         "zh": "本任务已结束，没有下一步动作。" if state["terminal"] else "我下一步会" + _ACTIONS[decision["action"]][1] + "。"},
+        {"id": "system:ai_reason", "subject": "ai", "purpose": "reason",
+         "en": decision["reason_en"], "zh": decision["reason_zh"]},
+    ])
+    if not state["terminal"]:
+        # All three advisors use the present state and the actual fixed AI.
+        # They never submit an action or inspect undisclosed future scenarios.
+        advisor_state = deepcopy(state)
+        suggestion = engine.human_advisor(advisor_state)
+        if advisor_state != state or suggestion not in engine.legal_actions(state):
+            raise PlanError("invalid_human_advice")
+        rows.append({"id": "system:human_advice", "subject": "human", "purpose": "advice", "action": suggestion,
+            "en": "A coordination option for your next action is to " + _ACTIONS[suggestion][0] + ". This uses the current situation and your teammate's fixed plan; you still choose and confirm the action. It is not a guarantee of the best eventual score.",
+            "zh": "建议你下一步" + _ACTIONS[suggestion][1] + "。这项配合建议依据当前状态和队友的固定计划；仍由你选择并确认动作，不保证最终得分最优。"})
     public_score = engine.score(state)
     raw_name = "net score" if state["domain"] == "warehouse" else "catch points" if state["domain"] == "pong" else "correctly completed orders"
     raw_zh = "辅助净分" if state["domain"] == "warehouse" else "接球原始分" if state["domain"] == "pong" else "正确完成订单数"
@@ -185,14 +226,30 @@ def _validate_plan(plan, evidence):
     for intent in intents:
         if not isinstance(intent, dict) or intent.get("kind") not in ("facts", "counterfactual"):
             raise PlanError("invalid_intent")
-        if set(intent) - {"kind", "evidence_ids", "actions", "horizon"}:
+        if set(intent) - {"kind", "evidence_ids", "actions", "horizon", "subject", "purpose"}:
             raise PlanError("unexpected_intent_fields")
+        subject, purpose = intent.get("subject"), intent.get("purpose")
+        # Optional only for archived injected composition fixtures. New
+        # provider plans are explicitly required to resolve these semantics.
+        if subject is not None and subject not in ("ai", "human", "shared"):
+            raise PlanError("invalid_subject")
+        if purpose is not None and purpose not in ("action", "reason", "advice", "comparison", "observation", "rule"):
+            raise PlanError("invalid_purpose")
         ids = intent.get("evidence_ids", [])
         if not isinstance(ids, list) or len(ids) > 8 or any(not isinstance(i, str) or i not in evidence for i in ids):
             raise PlanError("unknown_evidence")
         if intent["kind"] == "facts" and not ids:
             raise PlanError("facts_without_evidence")
+        if subject == "ai" and purpose in ("action", "reason") and "system:ai_" + purpose not in ids:
+            raise PlanError("missing_subject_evidence")
+        if subject == "human" and purpose == "advice" and "system:human_advice" not in ids:
+            raise PlanError("missing_subject_evidence")
+        if subject == "human" and purpose in ("action", "advice", "comparison") and any(
+                i.startswith("alternative") or i.startswith("system:ai_") for i in ids):
+            raise PlanError("wrong_actor_evidence")
         if intent["kind"] == "counterfactual":
+            if subject not in (None, "human"):
+                raise PlanError("wrong_simulation_actor")
             actions = intent.get("actions")
             horizon = intent.get("horizon", 1)
             if not isinstance(actions, list) or not actions or len(actions) > MAX_STEPS or any(a not in _ACTIONS for a in actions):
@@ -295,7 +352,7 @@ def _simulation_text(result, language, domain):
 
 
 class Explainer:
-    def __init__(self, settings, *, timeout=25):
+    def __init__(self, settings, *, timeout=45):
         self.settings = settings
         self.timeout = timeout
 
@@ -322,7 +379,12 @@ class Explainer:
             content = document["choices"][0]["message"]["content"]
             if not isinstance(content, str) or len(content) > 32000:
                 raise ProviderError("invalid_response_content")
-            return json.loads(content), {"provider_response_id": str(document.get("id", ""))[:120],
+            plan = json.loads(content)
+            if isinstance(plan, dict) and isinstance(plan.get("intents"), list) and any(
+                    isinstance(intent, dict) and not {"subject", "purpose"} <= set(intent)
+                    for intent in plan["intents"]):
+                raise ProviderError("missing_provider_semantics")
+            return plan, {"provider_response_id": str(document.get("id", ""))[:120],
                 "reported_model": str(document.get("model", self.settings.llm_model))[:120],
                 "raw_plan": content}
         except HTTPError as error:
@@ -344,25 +406,28 @@ class Explainer:
             evidence = _catalog(engine, state, decision, public_history or [])
             payload = {"question": str(question), "interface_language": language,
                 "selected_frame": {"task": state["task"], "turn": state["turn"], "domain": state["domain"]},
+                "speaker_roles": {"participant_question_I": "human", "participant_question_you": "ai",
+                                  "assistant_answer_I": "ai", "assistant_answer_you": "human"},
                 "public_observation": engine.public_state(state),
                 "prior_dialogue": [{"question": str(p.get("question", ""))[:2000],
                                     "answer": str(p.get("answer", ""))[:6000]} for p in (previous_dialogue or [])[-6:]],
                 "allowed_action_ids": list(_ACTIONS), "currently_legal_human_actions": engine.legal_actions(state),
+                "recommended_human_action": evidence.get("system:human_advice", {}).get("action"),
                 "evidence": list(evidence.values())}
             plan, provider_audit = self._request_plan(payload)
             audit.update(provider_audit)
             try:
                 plan = _validate_plan(plan, evidence)
             except PlanError as first_error:
-                if str(first_error) != "unknown_evidence":
+                if str(first_error) not in ("unknown_evidence", "missing_subject_evidence", "wrong_actor_evidence", "wrong_simulation_actor"):
                     raise
-                # Exactly one semantic repair for invented/mistyped evidence
-                # identifiers. Never map them heuristically to a guessed fact.
+                # Exactly one model repair for evidence IDs or role mismatches.
+                # Never heuristically substitute a guessed actor or fact.
                 audit["repair_attempt"] = {"failure_code": str(first_error),
                     "original_plan": deepcopy(plan), "original_provider": deepcopy(provider_audit)}
                 repaired_payload = deepcopy(payload)
                 repaired_payload["repair_request"] = {
-                    "error": "Your previous response referenced a fact ID that does not exist. Select exact IDs from the provided catalog; do not invent IDs. This is your only repair attempt.",
+                    "error": "The previous plan failed validation: " + str(first_error) + ". Recheck the question's speaker and requested purpose. Use exact provided IDs. AI action/reason requires system:ai_action/system:ai_reason; human advice requires system:human_advice; simulations control the human only. This is your only repair attempt.",
                     "previous_plan": _redact(plan, self.settings.llm_api_key)}
                 plan, provider_audit = self._request_plan(repaired_payload)
                 audit.update(provider_audit)

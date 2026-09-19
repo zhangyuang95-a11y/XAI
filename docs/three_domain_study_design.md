@@ -1,5 +1,7 @@
 # Three-domain study design
 
+> Historical v2 implementation/evidence snapshot, retained for audit. The new v3 revision is documented in [three_domain_revision_v3.md](three_domain_revision_v3.md); deployment status is tracked separately.
+
 Protocol implementation snapshot: `policylens-three-domain-20260920.v2`,
 2026-09-20. The original execution brief is
 `analysis/THREE_DOMAIN_HUMAN_STUDY_CODEX_BRIEF_20260919.md` in the parent research

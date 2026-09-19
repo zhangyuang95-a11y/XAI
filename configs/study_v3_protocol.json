@@ -1,6 +1,6 @@
 {
   "protocol_version": "three-domain-task2-only.v1",
-  "release_id": "policylens-three-domain-20260920.v2",
+  "release_id": "policylens-three-domain-20260920.v3",
   "snapshot_date": "2026-09-20",
   "artifact_role": "Auditable protocol snapshot. The current runtime implements these rules in study_v3/store.py and the domain configurations; it does not load this file as an independent state-machine authority.",
   "human_effect_status": "not_measured",
@@ -11,11 +11,22 @@
     "pong": "/pong/",
     "kitchen": "/kitchen/"
   },
-  "flow": ["welcome_consent", "demo", "task1", "task2", "task3", "questionnaire", "completed"],
+  "flow": [
+    "welcome_consent",
+    "demo",
+    "task1",
+    "task2",
+    "task3",
+    "questionnaire",
+    "completed"
+  ],
   "scored_runs_per_task": 1,
   "language": {
     "first_visit_default": "en",
-    "choices": ["en", "zh"],
+    "choices": [
+      "en",
+      "zh"
+    ],
     "browser_language_detection": false,
     "remember_explicit_preference": true,
     "answer_language": "current question language when identifiable, otherwise interface preference"
@@ -25,8 +36,17 @@
     "stage": "task2",
     "run_status": "active",
     "creation_and_read_and_delivery_recheck": true,
-    "ownership_bindings": ["participant", "study_instance", "domain", "release", "current_task2_run"],
-    "allowed_target_tasks": [1, 2],
+    "ownership_bindings": [
+      "participant",
+      "study_instance",
+      "domain",
+      "release",
+      "current_task2_run"
+    ],
+    "allowed_target_tasks": [
+      1,
+      2
+    ],
     "target_frames": "already stored frames from the same instance",
     "terminal_summary_access": false,
     "task1_access": false,
@@ -39,9 +59,16 @@
   },
   "assignment": {
     "unit": "participant",
-    "group_values": ["A", "B"],
+    "group_values": [
+      "A",
+      "B"
+    ],
     "group_persists_across_domains": true,
-    "new_participant_counts_scope": ["domain", "mode", "release_id"],
+    "new_participant_counts_scope": [
+      "domain",
+      "mode",
+      "release_id"
+    ],
     "new_participant_algorithm": "Assign the group with fewer created instances; secure random tie-break when equal.",
     "returning_participant_algorithm": "Keep the existing participant group.",
     "seed_algorithm": "Use the configured reserved seed with the fewest allocations in the assigned group; then prefer the most allocations in the opposite group; then frozen-list order. Counts are scoped to domain, mode and release.",
@@ -50,59 +77,150 @@
     "max_unfinished_domain_instances_per_participant": 1,
     "cross_mode_identity_reuse": false,
     "participant_selected_group": false,
-    "researcher_group_override_modes": ["preview", "test"]
+    "researcher_group_override_modes": [
+      "preview",
+      "test"
+    ]
   },
   "modes": {
-    "supported": ["pilot", "preview", "test"],
+    "supported": [
+      "pilot",
+      "preview",
+      "test"
+    ],
     "runtime_default": "pilot",
     "formal_enrollment_supported": false,
-    "researcher_authorization_required": ["preview", "test"],
-    "exclude_from_human_effect_analysis": ["preview", "test"],
-    "pilot_requires": ["persistent_database", "configured_semantic_provider", "admin_credential", "explicit_deployment_verified_flag", "current_semantic_health"]
+    "researcher_authorization_required": [
+      "preview",
+      "test"
+    ],
+    "exclude_from_human_effect_analysis": [
+      "preview",
+      "test"
+    ],
+    "pilot_requires": [
+      "persistent_database",
+      "configured_semantic_provider",
+      "admin_credential",
+      "explicit_deployment_verified_flag",
+      "current_semantic_health"
+    ]
   },
   "domains": {
     "warehouse": {
       "config": "configs/study_v3_warehouse.json",
-      "rules_version": "warehouse-turnbased-v3.2",
-      "scenario_version": "warehouse-scenarios-v3.2",
+      "rules_version": "warehouse-legacy-restored.v3.3",
+      "scenario_version": "warehouse-legacy-three-tasks.v3.3",
       "enrollment_seed_key": "heldout_seeds",
-      "task_turn_budgets": [120, 120, 120],
-      "assigned_deliveries_per_task": [6, 6, 6],
-      "task_score": "100 * delivered / assigned_deliveries",
-      "raw_score": "100 * delivered - 200 * collision_events - 50 * shutdown_events - elapsed_turns"
+      "task_turn_budgets": [
+        120,
+        120,
+        120
+      ],
+      "task_score": "raw score, unbounded and possibly negative",
+      "raw_score": "10 * deliveries - 10 * collisions - 5 * shutdowns - charged_budget_steps - 2 * human_detour_units - 5 * shared_charger_violations",
+      "physics_commit": "af97df8589080a6b1b79bad591059b4d52fe33ee",
+      "controller_commit": "de16551d3d6b99c7ab426dfed1db2871159e6b5c",
+      "historical_deployment_timestamp_verified": false,
+      "task_seeds": {
+        "1": 52000,
+        "2": 51000,
+        "3": 51500
+      },
+      "map": {
+        "width": 7,
+        "height": 6
+      },
+      "shared_orders": 2
     },
     "pong": {
       "config": "configs/study_v3_pong.json",
-      "rules_version": "pong-turnbased.v3.0",
-      "scenario_version": "pong-waves.v3.0",
+      "rules_version": "pong-rolling.v4.0",
+      "scenario_version": "pong-rolling-schedule.v4.0",
       "enrollment_seed_key": "heldout_seeds",
-      "task_turn_budgets": [30, 41, 41],
-      "waves_per_task": [6, 8, 8],
+      "task_turn_budgets": [
+        60,
+        90,
+        90
+      ],
       "lanes": 9,
-      "weights": {"ordinary": 1, "cooperative": 3},
+      "weights": {
+        "ordinary": 1,
+        "cooperative": 3
+      },
       "task_score": "100 * catch_points / all_scheduled_points",
       "raw_score": "catch_points",
-      "score_100_always_reachable": false
+      "score_100_always_reachable": false,
+      "height": 12,
+      "ball_limits": {
+        "ordinary": 3,
+        "cooperative": 2
+      },
+      "speed": {
+        "ordinary": 2,
+        "cooperative": 1
+      },
+      "initial_arrival_turns": {
+        "ordinary": [
+          1,
+          3,
+          5
+        ],
+        "cooperative": [
+          6,
+          12
+        ]
+      },
+      "hidden_schedule": "pre-generated using seed, unchanged by group, score or question",
+      "commitment": "nearest reachable cooperative ball locked; later cooperative ball explicitly tentative"
     },
     "kitchen": {
       "config": "configs/study_v3_kitchen.json",
-      "rules_version": "kitchen-v3.1.0",
-      "scenario_version": "kitchen-scenarios-v3.1.0",
+      "rules_version": "kitchen-v4.0.0",
+      "scenario_version": "kitchen-scenarios-v4.0.0",
       "enrollment_seed_key": "held_out_seeds",
-      "task_turn_budgets": [140, 160, 160],
-      "assigned_orders_per_task": [4, 6, 6],
+      "task_turn_budgets": [
+        240,
+        360,
+        360
+      ],
+      "assigned_orders_per_task": [
+        4,
+        6,
+        6
+      ],
       "task_score": "100 * completed_correct_on_time_orders / assigned_orders",
-      "raw_score": "completed_correct_on_time_orders"
+      "raw_score": "completed_correct_on_time_orders",
+      "recipes": [
+        "egg_tomato",
+        "pepper_meat"
+      ],
+      "prepare_turns": 2,
+      "cook_turns": {
+        "egg": 4,
+        "meat": 6,
+        "tomato": 4,
+        "pepper": 4
+      },
+      "mix_turns": 2,
+      "ready_window": 8,
+      "containers": [
+        "temporary protein plate",
+        "output container",
+        "formal serving plate"
+      ],
+      "interaction": "server-resolved front-cell interact; invalid interaction does not advance",
+      "parallelism": "two recipes can overlap across two pans; exact simultaneous cooking is not asserted"
     }
   },
   "question_service": {
-    "version": "study-evidence-qa.v3.1",
+    "version": "study-evidence-qa.v3.2",
     "default_counterfactual_steps": 1,
     "maximum_counterfactual_steps": 12,
     "first_simulated_ai_action": "recorded pre-action decision",
     "later_simulated_ai_actions": "unchanged controller on the branch",
     "unspecified_human_actions": "explicitly disclosed assumed waits",
-    "future_external_information": "stop at first newly revealed order or wave and filter its new content",
+    "future_external_information": "stop after the first newly revealed order or ball and filter its contents",
     "recent_dialogue_limit": 6,
     "public_history_frame_limit": 16,
     "question_character_limit": 2000,
@@ -110,10 +228,25 @@
     "arbitrary_question_accuracy_guaranteed": false
   },
   "questionnaire": {
-    "scale": {"min": 1, "max": 7, "anchor_min": "Strongly disagree", "anchor_max": "Strongly agree"},
+    "scale": {
+      "min": 1,
+      "max": 7,
+      "anchor_min": "Strongly disagree",
+      "anchor_max": "Strongly agree"
+    },
     "validated_scale": false,
-    "common_item_ids": ["predictable", "understood", "coordinate", "workload", "smooth"],
-    "group_a_task2_item_ids": ["relevant", "clear", "helpful"],
+    "common_item_ids": [
+      "predictable",
+      "understood",
+      "coordinate",
+      "workload",
+      "smooth"
+    ],
+    "group_a_task2_item_ids": [
+      "relevant",
+      "clear",
+      "helpful"
+    ],
     "group_a_task2_na_value": "na",
     "understanding_items_per_domain": 3,
     "participant_receives_answer_keys": false,
@@ -125,22 +258,70 @@
     "primary_outcome": "Task score",
     "target_relative_gain": 0.5,
     "relative_gain_definition": "(mean_A - mean_B) / mean_B",
-    "zero_b_mean": "undefined ratio; report absolute difference and distributions",
-    "report_also": ["absolute_mean_difference", "sample_sizes", "uncertainty_intervals", "each_domain_separately"],
+    "report_also": [
+      "absolute_mean_difference",
+      "sample_sizes",
+      "uncertainty_intervals",
+      "each_domain_separately"
+    ],
     "baseline_task": 1,
     "transfer_task": 3,
     "simulation_is_human_evidence": false,
-    "pending_before_effect_evaluating_recruitment": ["sample_size_rationale", "analysis_and_interval_method", "missingness_and_exclusions", "baseline_adjustment", "three_domain_multiplicity_plan", "domain_order_if_repeated_participation"]
+    "pending_before_effect_evaluating_recruitment": [
+      "sample_size_rationale",
+      "analysis_and_interval_method",
+      "missingness_and_exclusions",
+      "baseline_adjustment",
+      "three_domain_multiplicity_plan",
+      "domain_order_if_repeated_participation"
+    ],
+    "zero_or_negative_b_mean": "Do not report a relative percentage gain when mean B <= 0; report absolute difference, distribution, deliveries and auxiliary outcomes."
   },
   "storage": {
     "table_prefix": "pl3_",
-    "supported_backends": ["sqlite_on_verified_persistent_mount", "postgresql"],
+    "supported_backends": [
+      "sqlite_on_verified_persistent_mount",
+      "postgresql"
+    ],
     "local_storage_authoritative": false,
     "researcher_export_path": "/api/study/admin/export",
-    "export_formats": ["jsonl", "csv_table_and_record_json"],
-    "export_filters": ["release_id", "mode"],
-    "export_excludes": ["session_tokens", "session_hash_table", "command_hash_table", "participant_recovery_hash", "provider_api_credentials"]
+    "export_formats": [
+      "jsonl",
+      "csv_table_and_record_json"
+    ],
+    "export_filters": [
+      "release_id",
+      "mode"
+    ],
+    "export_excludes": [
+      "session_tokens",
+      "session_hash_table",
+      "command_hash_table",
+      "participant_recovery_hash",
+      "provider_api_credentials"
+    ]
   },
   "deployment_target": "https://policylens-warehouse-study.onrender.com/",
-  "deployment_status_source": "docs/three_domain_deployment.md and live /api/release; this configuration is not deployment evidence"
+  "deployment_status_source": "docs/three_domain_deployment.md and live /api/release; this configuration is not deployment evidence",
+  "interaction": {
+    "time": "one server-confirmed logic turn per key action; no autonomous clock",
+    "animation_ms": 400,
+    "held_directions": "repeat only after prior response and animation; no queued commands",
+    "edge_only": [
+      "wait",
+      "interact"
+    ],
+    "pause_held_input_on": [
+      "question_input",
+      "replay",
+      "blur",
+      "hidden",
+      "terminal"
+    ],
+    "keyboard": {
+      "warehouse": "WASD/arrows + Space",
+      "pong": "A/D + Space",
+      "kitchen": "WASD + E in front + Space"
+    }
+  }
 }

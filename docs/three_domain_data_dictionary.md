@@ -1,5 +1,7 @@
 # Three-domain data dictionary
 
+> Historical v2 implementation/evidence snapshot, retained for audit. The new v3 revision is documented in [three_domain_revision_v3.md](three_domain_revision_v3.md); deployment status is tracked separately.
+
 Schema and serializer snapshot for `policylens-three-domain-20260920.v2`,
 2026-09-20. The authoritative definitions are `study_v3/database.py`,
 `study_v3/store.py` and each versioned domain engine. Tables use the `pl3_`

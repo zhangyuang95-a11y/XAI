@@ -1,5 +1,7 @@
 # Shared study service validation
 
+> Historical v2 implementation/evidence snapshot, retained for audit. The new v3 revision is documented in [three_domain_revision_v3.md](three_domain_revision_v3.md); deployment status is tracked separately.
+
 Recorded on 2026-09-20 (Asia/Shanghai) in the isolated `XAI-study-v3` worktree.
 Actual hosted release: `policylens-three-domain-20260920.v2`, commit
 `68a50da906e30a3ac2f7712858cc2b19d2cd159a`, source SHA-256

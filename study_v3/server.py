@@ -30,6 +30,11 @@ def manifest(settings):
     source=hashlib.sha256()
     paths=list((ROOT/'study_v3').rglob('*.py'))+list(WEB.glob('*'))
     paths+=[ROOT/(p.replace('.','/')+'.py') for p in MODULES.values()]
+    # Warehouse runs the preserved physical engine and the pinned historical
+    # controller. Include its actual transitive runtime sources and Actor.
+    paths+=list((ROOT/'env/warehouse').rglob('*.py'))
+    paths+=[ROOT/'backend/adapters/warehouse_explanations.py',
+            ROOT/'output/deployment/warehouse_mappo_v68_6x7_actor.npz']
     paths+=list((ROOT/'configs').glob('study_v3_*.json'))
     paths+=[ROOT/'ui/domain_hub_server.py',ROOT/'requirements-render.txt',ROOT/'.python-version']
     for path in sorted(set(paths)):
@@ -131,6 +136,7 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
                 if path in ('/warehouse','/pong','/kitchen'):
                     self.send_response(308);self.send_header('Location',path+'/');self.send_header('Content-Length','0');self.end_headers();return
                 assets={'/study-assets/app.js':('app.js','text/javascript; charset=utf-8'),
+                    '/study-assets/board.js':('board.js','text/javascript; charset=utf-8'),
                     '/study-assets/styles.css':('styles.css','text/css; charset=utf-8'),
                     '/study-assets/favicon.svg':('favicon.svg','image/svg+xml')}
                 if path in assets:

@@ -1,236 +1,219 @@
-"""Mechanism checks plus fixed-AI human-only feasibility certificates."""
+"""Parity against the actual historical policy and preserved Warehouse physics."""
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from dataclasses import asdict
+from hashlib import sha256
 import json
+import subprocess
+import types
 
 import pytest
 
 from domains.warehouse import turnbased as w
+from env.warehouse.domain import participant_study_config
+from env.warehouse.environment import WarehouseMultiAgentEnv
+from env.warehouse.decision_protocol import distribution_decision_metadata
+from env.warehouse.navigation import ACTIONS
 
 
-def charge_fixture():
+def historic_from_git():
+    raw = subprocess.check_output(["git", "show", w.CONFIG["controller_commit"] + ":env/warehouse/runtime_coordination.py"], cwd=w.ROOT)
+    module = types.ModuleType("env.warehouse.independent_history_test")
+    module.__package__ = "env.warehouse"
+    exec(compile(raw, "git:de16551:runtime_coordination", "exec"), module.__dict__)
+    return raw, module
+
+
+def old_initial(task):
+    env = WarehouseMultiAgentEnv(participant_study_config())
+    env.reset(seed=w.CONFIG["task_seeds"][str(task)])
+    s = env.get_state(); s.participant_controlled_agent_id = "robot_1"; env.set_state(s)
+    return env
+
+
+def old_step(env, history, seed, human):
+    s = env.get_state()
+    proposed, dist = w._actor().act(env.observations(), deterministic=False,
+        base_seed=seed, decision_key=(s.episode_id, s.frame))
+    action, runtime = history.select_human_ai_action(env, proposed["robot_2"])
+    submitted, guard = history.guard_participant_action(env, human.upper())
+    actions = {**proposed, "robot_1": submitted, "robot_2": action}
+    runtime = {**runtime, "participant_action_guard": guard, "selected_actions": dict(actions)}
+    info = env.step(actions, decision_metadata=distribution_decision_metadata(dist,
+        decision_source="participant_plus_robust_numpy_actor", participant_overrides={"robot_1": submitted},
+        policy_actions=proposed, selected_actions=actions, runtime_decision=runtime))[-1]
+    return action, runtime, info
+
+
+def test_exact_history_module_actor_and_dependencies_are_pinned():
+    raw, _ = historic_from_git()
+    assert raw == (w.ROOT / "env/warehouse/historical_sep2_coordination.py").read_bytes()
+    assert sha256(raw).hexdigest() == "ebcbf38c6365752a73b2175ab44750f3231da369421424f5cccd4aada23729c8"
+    assert w._actor().artifact_sha256 == "96762a46f59abd24a10b1abedf8dc325d72c85f3af39424c33e2dcba4ef5ffd3"
+    for path, digest in w.CONFIG["source_sha256"].items():
+        assert sha256((w.ROOT / path).read_bytes()).hexdigest() == digest
+    assert w.CONFIG["historical_deployment_timestamp_verified"] is False
+
+
+@pytest.mark.parametrize("task", (1, 2, 3))
+def test_original_map_initial_state_task_seeds_and_all_step_physics_match(task):
+    _, history = historic_from_git()
+    state = w.initial_state(100, task)
+    original = old_initial(task)
+    assert w.WIDTH == 7 and w.HEIGHT == 6
+    assert w._restore(state).state == original.state
+    # Enrollment IDs do not secretly vary the exact requested legacy scenarios.
+    assert w.public_state(w.initial_state(987654, task)) == w.public_state(state)
+    while not state["terminal"]:
+        decision = w.decide(state)
+        # Include both informed commands and periodic deliberate waits; real
+        # unchanged physics handles every transition, task replacement and score.
+        human = "wait" if state["turn"] % 19 == 0 else w.human_advisor(state)
+        chosen, runtime, _ = old_step(original, history, state["scenario_seed"], human)
+        assert decision["action"] == chosen.lower()
+        assert decision["controller_trace"]["selected_ai_action"] == w._plain(runtime["selected_ai_action"])
+        state = w.step(state, human, decision)
+        restored = w._restore(json.loads(json.dumps(state)))
+        assert asdict(restored.state) == asdict(original.state)
+        assert restored.get_rng_state() == original.get_rng_state()
+        assert restored._episode_counter == original._episode_counter
+        assert w.score(state)["task_score"] == original.state.user_score
+    assert state["turn"] == 120 or state["shutdown_events"] > 0
+    assert sum(w.score(state)["breakdown"].values()) == w.score(state)["task_score"]
+
+
+def test_snapshot_preserves_tuples_active_handoff_memory_and_future_jobs():
     state = w.initial_state(100, 2)
-    state["human"].update(x=1, y=5, battery=90)
-    state["ai"].update(x=4, y=2, battery=40)
-    state["orders"][3].update(pickup=[7, 1], dropoff=[1, 4])
-    return state
+    saw_plan = saw_replacement = False
+    original_orders = {o["id"] for o in state["orders"]}
+    for _ in range(120):
+        env = w._restore(state)
+        saw_plan |= env.state.active_coordination_plan is not None
+        saw_replacement |= bool({o["id"] for o in state["orders"]} - original_orders)
+        restored = json.loads(json.dumps(state))
+        assert w._snapshot(w._restore(restored)) == state["snapshot"]
+        assert w.decide(restored) == w.decide(state)
+        if state["terminal"]: break
+        action = w.human_advisor(state)
+        assert w.step(state, action) == w.step(restored, action)
+        state = w.step(state, action)
+    assert saw_plan and saw_replacement
 
 
-def crossing_fixture():
-    state = w.initial_state(100, 2)
-    state["human"].update(x=3, y=3, battery=90)
-    state["ai"].update(x=5, y=3, battery=90, carrying="A1")
-    state["orders"][3].update(status="carried", dropoff=[1, 3])
-    return state
-
-
-def test_path_distance_uses_walls():
-    # The central wall blocks the apparent four-step straight route.
-    assert w._distance((2, 5), (6, 5)) == 8
-    assert w._distance((1, 5), (4, 2)) == 6
-
-
-def test_decision_and_facts_never_mutate_state_or_read_extra_future():
-    state = charge_fixture()
+def test_read_operations_and_parallel_decisions_are_pure_and_group_blind():
+    state = w.initial_state(11, 2)
     before = deepcopy(state)
-    decision = w.decide(state)
-    assert w.decide(state) == decision
-    w.facts(state, decision)
+    expected = w.decide(state)
+    w.facts(state, expected); w.human_advisor(state); w.public_state(state)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        assert all(x == expected for x in pool.map(w.decide, [state] * 12))
     assert state == before
-    other = deepcopy(state)
-    other["future_schedule"] = [{"private_future": "changed"}]
-    other["unsubmitted_human_action"] = "right"
-    other["group"] = "B"
-    assert w.decide(other) == decision
-    assert w.public_state(other) == w.public_state(state)
+    changed = deepcopy(state)
+    changed.update(group="B", future_schedule=["unrelated"], unsubmitted_human_action="left")
+    assert w.decide(changed) == expected
+    assert w.public_state(changed) == w.public_state(state)
 
 
-def test_charging_threshold_and_departure_are_exact():
-    state = charge_fixture()
-    # Independent sum: charger→pickup 4 + pickup→dropoff 9 +
-    # dropoff→charger 5 + two reserve moves = 20 moves = 60%.
-    assert w._energy_required(state, "ai") == 60
-    assert w.decide(state)["action"] == "wait"
-    state = w.step(state, "wait")
-    assert state["ai"]["battery"] == 50
-    state = w.step(state, "wait")
-    assert state["ai"]["battery"] == 60
-    assert w.decide(state)["reason_code"] == "leave_charger"
-    assert w.decide(state)["action"] != "wait"
-    assert w._pos(w.step(state, "wait")["ai"]) != w.CHARGER
-
-
-def test_wait_unlocks_when_possible_human_conflict_removed():
-    state = crossing_fixture()
-    assert w.decide(state)["action"] == "wait"
-    next_state = w.step(state, "left")
-    assert w.decide(next_state)["action"] == "left"
-
-
-def test_same_risk_active_clearance_releases_occupied_route():
-    state = crossing_fixture()
-    state["human"].update(x=4, y=3)
-    state["ai"]["carrying"] = None
-    state["orders"][3].update(status="available", pickup=[1, 3])
-    state["orders"][0].update(pickup=[7, 3])
-    decision = w.decide(state)
-    assert decision["action"] in ("up", "down", "right")
-    assert decision["reason_code"] == "clear_shared_route"
-    assert decision["facts"][1]["id"] == "ai_risk"
-    next_state = w.step(state, "wait")
-    assert w._pos(next_state["ai"]) != (5, 3)
-    assert next_state["collision_events"] == 0
-    assert "simultaneous" in decision["reason_en"]
-
-
-def test_charger_has_safe_escape_even_when_person_blocks_one_exit():
-    state = charge_fixture()
-    state["ai"]["battery"] = 90
-    state["human"].update(x=4, y=3, battery=6)
-    decision = w.decide(state)
-    assert decision["action"] in ("left", "right")
-    next_state = w.step(state, "wait")
-    assert w._pos(next_state["ai"]) != w.CHARGER
-
-
-def test_loaded_crossing_commitment_is_stable_and_observably_released():
-    state = crossing_fixture()
-    state["human"].update(x=4, y=3)
-    state["orders"][0].update(pickup=[7, 3])
-    assert w.decide(state)["reason_code"] == "committed_crossing_wait"
-    for _ in range(3):
-        state = w.step(state, "wait")
-        assert state["last_actions"]["ai"] == "wait"
-    # A human retreat through two real steps clears the possible next-cell
-    # conflict. The policy advances without needing any special command.
-    state = w.step(state, "left")
-    state = w.step(state, "left")
-    assert w.decide(state)["action"] == "left"
-    assert w._pos(w.step(state, "wait")["ai"]) == (4, 3)
-
-
-def test_charge_shortfall_answers_arithmetic_without_user_inference():
-    state = charge_fixture()
-    fact = next(row for row in w.facts(state) if row["id"] == "ai_charge_shortfall")
-    assert "20% more" in fact["en"]
-    assert "2 charging turns" in fact["en"]
-    assert "还差20%" in fact["zh"]
-    assert state["turn"] == 0 and state["ai"]["battery"] == 40
-
-
-def test_collision_once_preserves_human_submission_and_no_move_energy():
-    state = crossing_fixture()
-    state["human"].update(x=4, y=3)
-    original = deepcopy(state)
-    state = w.step(state, "right")
-    assert state["last_actions"]["human"] == "right"
-    assert state["human"] == original["human"]
-    assert state["ai"] == original["ai"]
-    assert state["collision_events"] == 1
-    assert len([e for e in state["events"] if e["type"] == "collision"]) == 1
-    assert w.score(state)["raw_score"] == -201
-
-
-def test_shutdown_is_new_event_once_and_charge_can_recover_at_station():
-    state = charge_fixture()
-    state["human"].update(x=1, y=5, battery=4)
-    state = w.step(state, "up")
-    assert state["human"]["battery"] == 1
-    assert state["shutdown_events"] == 1
-    assert w.legal_actions(state) == ["wait"]
-    state = w.step(state, "wait")
-    assert state["shutdown_events"] == 1
-    state["human"].update(x=4, y=2, battery=1)
-    state["ai"].update(x=7, y=5, battery=90)
-    state = w.step(state, "wait")
-    assert state["human"]["battery"] == 11
-    assert not state["human"]["shutdown"]
-
-
-def test_charge_caps_and_only_confirmed_wait_charges():
-    state = charge_fixture()
-    state["human"].update(x=4, y=2, battery=95)
-    state["ai"].update(x=7, y=5, battery=90)
-    next_state = w.step(state, "wait")
-    assert next_state["human"]["battery"] == 100
-    assert next(e for e in next_state["events"] if e["actor"] == "human")["amount"] == 5
-    assert w.step(state, "left")["human"]["battery"] == 92
-
-
-def test_pickup_delivery_finite_and_score_not_group_dependent():
-    state = charge_fixture()
-    state["human"].update(x=1, y=5)
-    state["orders"][0].update(pickup=[1, 4], dropoff=[2, 4])
-    state = w.step(state, "up")
-    assert state["human"]["carrying"] == "H1"
-    state = w.step(state, "right")
-    assert state["deliveries"] == 1
-    assert state["human"]["carrying"] is None
-    assert w.score(state)["task_score"] == pytest.approx(100 / 6, abs=1e-6)
-    state["group"] = "A"
-    assert w.score(state)["task_score"] == pytest.approx(100 / 6, abs=1e-6)
-    assert len(state["orders"]) == 6
-
-
-def test_terminal_illegal_stale_decision_rejections():
+def test_recognized_wall_command_is_preserved_and_costs_no_movement_battery():
     state = w.initial_state(100, 1)
+    assert set(w.legal_actions(state)) == {"up", "down", "left", "right", "wait"}
+    after = w.step(state, "down")  # human starts on the bottom row
+    assert after["last_actions"]["human"] == "down"
+    assert after["human"]["battery"] == 100
+    assert w._pos(after["human"]) == (2, 5)
+    assert any(e["type"] == "blocked" for e in after["events"])
+    assert w.score(after)["breakdown"]["time"] == -1
+
+
+def test_shared_charger_penalty_uses_latest_physics_and_new_score_not_old_controller_score():
+    # Direct physical fixture: both stationary on distinct cells, occupant
+    # >60 after WAIT, partner <20 two map steps away, safe departure exists.
+    env = old_initial(1)
+    s = env.get_state()
+    s.by_id("robot_1").position = env.layout.charger_position
+    s.by_id("robot_1").battery = 65
+    s.by_id("robot_2").position = (4, 2)
+    s.by_id("robot_2").battery = 18
+    env.set_state(s)
+    before = env.get_state()
+    info = env.step({"robot_1": "WAIT", "robot_2": "WAIT"})[-1]
+    state = w._state(env, 1, 100, w._events(before, env.state, info))
+    assert w.score(state)["breakdown"]["shared_charger_occupancy"] == -5
+    assert w.score(state)["task_score"] == env.state.user_score
+    assert w.score(state)["score_max"] is None
+    assert w.score(state)["task_score"] < 0
+    fact = next(f for f in w.facts(state) if f["id"] == "score_shared_charger_occupancy")
+    assert "-5" in fact["en"]
+    env.step({"robot_1": "WAIT", "robot_2": "WAIT"})
+    assert env.state.score_breakdown["shared_charger_occupancy"] == -5
+
+
+def test_low_battery_shutdown_debits_entire_remaining_step_budget():
+    env = old_initial(1)
+    s = env.get_state()
+    s.by_id("robot_1").battery = 2
+    env.set_state(s)
+    state = w._state(env, 1, 100)
+    state = w.step(state, "up")
+    assert state["terminal"]
+    assert w.score(state)["breakdown"]["time"] == -120
+    assert w.score(state)["breakdown"]["shutdown"] == -5
+    assert w.legal_actions(state) == []
+    with pytest.raises(ValueError, match="complete"):
+        w.step(state, "wait")
+
+
+def test_illegal_or_stale_decisions_are_rejected():
+    state = w.initial_state(100, 2)
     with pytest.raises(ValueError, match="illegal"):
         w.step(state, "teleport")
     decision = w.decide(state)
-    decision["action"] = "wait"
+    decision["reason_en"] += " fabricated"
     with pytest.raises(ValueError, match="decision"):
         w.step(state, "wait", decision)
-    state["turn"] = 119
-    state = w.step(state, "wait")
-    assert state["terminal"]
-    with pytest.raises(ValueError, match="complete"):
-        w.step(state, "wait")
-    assert w.legal_actions(state) == []
+    bad = deepcopy(state); bad["turn"] += 1
+    with pytest.raises(ValueError, match="boundary"):
+        w.decide(bad)
 
 
-def test_public_projection_whitelist_and_json_roundtrip():
-    state = charge_fixture()
-    state["policy_memory"] = {"secret": "should not be public"}
+def test_public_projection_has_shared_jobs_and_no_private_decision_or_rng():
+    state = w.initial_state(100, 2)
+    state["human"]["private_note"] = "SECRET"
     public = w.public_state(state)
-    assert not {"policy_memory", "seed", "last_actions", "decision"}.intersection(public)
-    assert set(public["ai"]) == {"x", "y", "battery", "carrying"}
+    assert not {"snapshot", "seed", "scenario_seed", "policy_memory", "last_actions", "controller_trace"} & set(public)
+    assert "SECRET" not in json.dumps(public)
+    assert all(o["owner"] == "shared" for o in public["orders"])
+    assert public["chargers"] == [[3, 5]]
+    assert len(public["orders"]) == 2
     assert json.loads(json.dumps(public)) == public
-    assert "secret" not in json.dumps(public)
 
 
-@pytest.mark.parametrize("task", [1, 2, 3])
-@pytest.mark.parametrize("seed", w.CONFIG["development_seeds"] + w.CONFIG["heldout_seeds"])
-def test_fixed_ai_reaches_all_six_deliveries_in_original_budget(seed, task):
-    state = w.initial_state(seed, task)
-    while not state["terminal"]:
-        decision = w.decide(state)
-        action = w.human_advisor(state)
-        next_state = w.step(state, action, decision)
-        assert next_state["last_actions"]["ai"] == decision["action"]
-        assert next_state == w.step(deepcopy(state), action, deepcopy(decision))
-        state = next_state
-    assert state["deliveries"] == 6
-    assert state["turn"] <= 120
-    assert state["collision_events"] == state["shutdown_events"] == 0
+def test_demonstration_runs_real_transitions_and_six_neutral_captions():
+    demo = w.demonstration()
+    assert len(demo["captions"]) == 6
+    assert [f["turn"] for f in demo["frames"]] == list(range(len(demo["frames"])))
+    assert {"charge", "pickup", "delivery", "collision", "complete"} <= {e["type"] for f in demo["frames"] for e in f["events"]}
+    assert demo["frames"][-1]["terminal"]
+    assert demo["frames"][-1]["score"]["metrics"]["deliveries"] > 0
+    assert not any("neural" in c["en"].lower() or "policy" in c["en"].lower() for c in demo["captions"])
 
 
-def test_demonstration_is_real_execution_with_failure_and_repair():
-    demonstration = w.demonstration()
-    assert 4 <= len(demonstration["captions"]) <= 6
-    frames = demonstration["frames"]
-    assert [frame["turn"] for frame in frames] == list(range(len(frames)))
-    events = [event["type"] for frame in frames for event in frame["events"]]
-    assert {"collision", "charge", "pickup", "delivery", "complete"} <= set(events)
-    assert frames[-1]["score"]["task_score"] == 100
-    assert all("reason" not in caption["en"].lower() for caption in demonstration["captions"])
+def test_comprehension_is_bilingual_and_tracks_actual_physical_rules():
+    assert [q["answer"] for q in w.comprehension()] == [0, 1, 2]
+    assert len(w.comprehension("zh")) == 3
+    env = old_initial(1)
+    state = env.get_state(); state.by_id("robot_1").position = env.layout.charger_position; state.by_id("robot_1").battery = 40; env.set_state(state)
+    env.step({"robot_1": "WAIT", "robot_2": "WAIT"})
+    assert env.state.by_id("robot_1").battery == 50
+    assert "no fixed 100" in " ".join(w.rules())
 
 
-def test_comprehension_answers_match_verified_fixtures():
-    assert w.decide(charge_fixture())["action"] == "wait"
-    assert w.decide(crossing_fixture())["reason_code"] == "committed_crossing_wait"
-    state = charge_fixture()
-    state["ai"]["battery"] = 60
-    assert w.decide(state)["reason_code"] == "leave_charger"
-    for language in ("en", "zh"):
-        items = w.comprehension(language)
-        assert len(items) == 3
-        assert [item["answer"] for item in items] == [0, 1, 2]
+def test_question_bank_is_reproducible_bilingual_and_not_a_model_understanding_claim():
+    from domains.warehouse.build_qa_cases import build
+    recorded = json.loads((w.ROOT / "domains/warehouse/qa_cases.json").read_text())
+    assert recorded == build()
+    assert len(recorded) >= 60
+    assert len({c["question"] for c in recorded}) == len(recorded)
+    assert {c["language"] for c in recorded} == {"en", "zh"}
+    assert {c["expected_kind"] for c in recorded} == {"facts", "counterfactual", "clarification"}
+    assert all(c["evaluation_kind"] == "injected_plan_composition_not_language_understanding" for c in recorded)

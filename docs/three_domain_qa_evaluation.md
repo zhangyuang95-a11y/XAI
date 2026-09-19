@@ -1,5 +1,7 @@
 # Three-domain question answering: evidence, tests and deployment status
 
+> Historical v2 implementation/evidence snapshot, retained for audit. The new v3 revision is documented in [three_domain_revision_v3.md](three_domain_revision_v3.md); deployment status is tracked separately.
+
 Implementation: `study_v3/qa.py`, version `study-evidence-qa.v3.1`. Interface: `Explainer(settings).answer(engine, state, decision, question, language, previous_dialogue, public_history)`. It returns `status`, `answer`, `evidence_ids`, `language` and a researcher-only `audit`. The shared store owns participant authorization and removes audit data from participant responses. This service never issues real gameplay actions.
 
 ## Semantic service and truthful composition

@@ -1,5 +1,7 @@
 # Shared implementation contract
 
+> Historical v2 implementation/evidence snapshot, retained for audit. The new v3 revision is documented in [three_domain_revision_v3.md](three_domain_revision_v3.md); deployment status is tracked separately.
+
 Worktree: `/Users/zhangyuang/Desktop/ICLR/XAI-study-v3`.
 Full brief: `/Users/zhangyuang/Desktop/ICLR/analysis/THREE_DOMAIN_HUMAN_STUDY_CODEX_BRIEF_20260919.md`.
 All functions are pure and JSON serializable. Never accept group/participant credentials in an engine.

@@ -15,17 +15,19 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-VERSION = "study-evidence-qa.v3.1"
+VERSION = "study-evidence-qa.v3.2"
 MAX_STEPS = 12
 _ACTIONS = {
     "left": ("move left", "左移"), "right": ("move right", "右移"),
     "up": ("move up", "上移"), "down": ("move down", "下移"), "wait": ("wait", "等待"),
+    "interact": ("use the station directly in front", "操作正前方工位"),
+    "take_egg": ("take an egg", "取鸡蛋"), "take_meat": ("take meat", "取肉"), "take_pepper": ("take a pepper", "取辣椒"),
     "take_tomato": ("take a tomato", "拿番茄"), "take_onion": ("take an onion", "拿洋葱"),
     "interact_handoff": ("use the handoff counter", "使用交接台"),
     "interact_buffer": ("use the storage counter", "使用暂存台"),
     "interact_pot1": ("use stove 1", "使用炉灶1"), "interact_pot2": ("use stove 2", "使用炉灶2"),
-    "chop": ("chop the ingredient", "切菜"), "plate": ("plate the soup", "装盘"),
-    "serve": ("serve the soup", "上菜"), "discard": ("discard the held item", "丢弃手持物品"),
+    "chop": ("chop the ingredient", "切菜"), "plate": ("plate the dish", "装盘"),
+    "serve": ("serve the dish", "上菜"), "discard": ("discard the held item", "丢弃手持物品"),
 }
 _CLARIFICATIONS = {
     "ambiguous_object": ("Which ball, order, stove or teammate are you referring to? Please name it or select its turn.", "你指的是哪个球、订单、炉灶或队友？请说出对象，或选择对应回合。"),
@@ -66,7 +68,7 @@ For a comparison after human advice, keep subject=human even when the previous
 answer also mentioned the AI. "that" refers to the recommended HUMAN action.
 Compare its supplied recommended_human_action with the requested alternative
 using two human counterfactual intents. AI alternative facts describe the AI,
-so cannot substitute for a human comparison. If both outcomes are equal over
+so cannot substitute for a human comparison. If the recommended action and the proposed alternative are the SAME action, explain the same action using its actual advice/reason facts; do not ask for clarification. If both outcomes are equal over
 the stated window, do not claim one is better or assume a longer-term benefit.
 
 Use the language of the current question, even if it differs from the interface.
@@ -100,6 +102,15 @@ not simulated as if the participant controls it. Compare alternatives using two
 counterfactual intents. Default horizon is 1; maximum is 12. Do not silently
 invent an optimal human future. If horizon exceeds explicit actions, the service
 will assume waiting for the missing turns and clearly disclose that assumption.
+When only one human action sequence is requested, simulate only that sequence;
+do not add a recommended alternative unless a comparison was requested. An
+explicit "what if I press E" still requires an interact counterfactual when E
+is currently unavailable. Its verified zero-step rejection answers the question;
+general control rules alone do not establish that outcome.
+In "If I wait four turns, can you catch both balls?", the condition is a HUMAN
+action sequence, so use a human counterfactual for four waits even though the
+requested outcome concerns the AI. AI plan facts alone cannot verify the
+conditional outcome. Apply this equally to Chinese conditional questions.
 If no action can be identified, ask missing_action. Use only the provided action
 IDs. First-step unavailability will be explained without executing an illegal
 action. The server performs all physics and score calculations after this plan.
@@ -143,12 +154,26 @@ def _redact(value, secret):
     return value
 
 
+def _action_pair(engine, state, action, *, actor="human", decision=None):
+    if actor == "ai" and decision and decision.get("action_label_en") and decision.get("action_label_zh"):
+        return decision["action_label_en"], decision["action_label_zh"]
+    if action == "interact" and actor == "human":
+        interaction = engine.public_state(state).get("interaction", {})
+        if isinstance(interaction, dict) and interaction.get("label_en") and interaction.get("label_zh"):
+            return interaction["label_en"], interaction["label_zh"]
+    if hasattr(engine, "action_label"):
+        return engine.action_label(action, "en"), engine.action_label(action, "zh")
+    if action not in _ACTIONS:
+        raise PlanError("unknown_engine_action")
+    return _ACTIONS[action]
+
+
 def _catalog(engine, state, decision, public_history):
     rows = deepcopy(engine.facts(state, decision))
     rows.extend([
         {"id": "system:ai_action", "subject": "ai", "purpose": "action",
-         "en": "The task has finished; there is no next action." if state["terminal"] else "My next action is to " + _ACTIONS[decision["action"]][0] + ".",
-         "zh": "本任务已结束，没有下一步动作。" if state["terminal"] else "我下一步会" + _ACTIONS[decision["action"]][1] + "。"},
+         "en": "The task has finished; there is no next action." if state["terminal"] else "My next action is to " + _action_pair(engine, state, decision["action"], actor="ai", decision=decision)[0] + ".",
+         "zh": "本任务已结束，没有下一步动作。" if state["terminal"] else "我下一步会" + _action_pair(engine, state, decision["action"], actor="ai", decision=decision)[1] + "。"},
         {"id": "system:ai_reason", "subject": "ai", "purpose": "reason",
          "en": decision["reason_en"], "zh": decision["reason_zh"]},
     ])
@@ -160,16 +185,21 @@ def _catalog(engine, state, decision, public_history):
         if advisor_state != state or suggestion not in engine.legal_actions(state):
             raise PlanError("invalid_human_advice")
         rows.append({"id": "system:human_advice", "subject": "human", "purpose": "advice", "action": suggestion,
-            "en": "A coordination option for your next action is to " + _ACTIONS[suggestion][0] + ". This uses the current situation and your teammate's fixed plan; you still choose and confirm the action. It is not a guarantee of the best eventual score.",
-            "zh": "建议你下一步" + _ACTIONS[suggestion][1] + "。这项配合建议依据当前状态和队友的固定计划；仍由你选择并确认动作，不保证最终得分最优。"})
+            "en": "A coordination option for your next action is to " + _action_pair(engine, state, suggestion)[0] + ". This uses the current situation and your teammate's fixed plan; you still choose and perform the action. It is not a guarantee of the best eventual score.",
+            "zh": "建议你下一步" + _action_pair(engine, state, suggestion)[1] + "。这项配合建议依据当前状态和队友的固定计划；仍由你选择并执行动作，不保证最终得分最优。"})
     public_score = engine.score(state)
-    raw_name = "net score" if state["domain"] == "warehouse" else "catch points" if state["domain"] == "pong" else "correctly completed orders"
-    raw_zh = "辅助净分" if state["domain"] == "warehouse" else "接球原始分" if state["domain"] == "pong" else "正确完成订单数"
-    rows.append({"id": "system:score", "en": f"Task score is {public_score['task_score']:g} out of 100; {raw_name}: {public_score['raw_score']:g}.",
-                 "zh": f"任务得分为{public_score['task_score']:g}分（满分100）；{raw_zh}为{public_score['raw_score']:g}。"})
+    raw_name = "score" if state["domain"] == "warehouse" else "catch points" if state["domain"] == "pong" else "correctly completed orders"
+    raw_zh = "原始得分" if state["domain"] == "warehouse" else "接球原始分" if state["domain"] == "pong" else "正确完成订单数"
+    raw_scale = public_score.get("score_max", 100) is None or public_score.get("score_scale") == "raw"
+    if raw_scale:
+        rows.append({"id": "system:score", "en": f"Task score is {public_score['task_score']:g}. This is the original point total, with no fixed maximum; penalties can make it negative.",
+                     "zh": f"任务得分为{public_score['task_score']:g}分。这是原始计分，没有固定满分；扣分可能使其为负数。"})
+    else:
+        rows.append({"id": "system:score", "en": f"Task score is {public_score['task_score']:g} out of 100; {raw_name}: {public_score['raw_score']:g}.",
+                     "zh": f"任务得分为{public_score['task_score']:g}分（满分100）；{raw_zh}为{public_score['raw_score']:g}。"})
     legal = engine.legal_actions(state)
-    rows.append({"id": "system:available_actions", "en": "Your currently available actions are: " + ", ".join(_ACTIONS[a][0] for a in legal) + ". These are legal options, not a claim that all lead to the same outcome.",
-                 "zh": "你当前可选的动作是：" + "、".join(_ACTIONS[a][1] for a in legal) + "。这些是合法选项，不表示它们的结果相同。"})
+    rows.append({"id": "system:available_actions", "en": "Your currently available actions are: " + ", ".join(_action_pair(engine, state, a)[0] for a in legal) + ". These are legal options, not a claim that all lead to the same outcome.",
+                 "zh": "你当前可选的动作是：" + "、".join(_action_pair(engine, state, a)[1] for a in legal) + "。这些是合法选项，不表示它们的结果相同。"})
     rows.append({"id": "system:teammate", "en": "Your teammate follows fixed coordination rules in this study. Questions explain its decisions; they do not change its controls.",
                  "zh": "本研究中的队友按照固定协作规则行动。提问用于解释其决策，不会更改它的控制指令。"})
     for i, (en, zh) in enumerate(zip(engine.rules("en"), engine.rules("zh"))):
@@ -271,6 +301,7 @@ def simulate(engine, state, decision, actions, horizon=1):
     sequence = list(actions) + ["wait"] * assumed
     initial_public = engine.public_state(current)
     known_orders = {o["id"] for o in initial_public.get("orders", [])}
+    known_balls = {b["id"] for b in initial_public.get("balls", [])}
     events, trace = [], []
     boundary, illegal, done = False, None, 0
     for index, action in enumerate(sequence):
@@ -282,10 +313,12 @@ def simulate(engine, state, decision, actions, horizon=1):
         actual_decision = deepcopy(decision) if index == 0 else engine.decide(current)
         nxt = engine.step(current, action, actual_decision)
         view = engine.public_state(nxt)
-        boundary = (view.get("wave") != initial_public.get("wave") or
-                    bool({o["id"] for o in view.get("orders", [])} - known_orders))
+        boundary = (bool({o["id"] for o in view.get("orders", [])} - known_orders) or
+                    bool({b["id"] for b in view.get("balls", [])} - known_balls))
         safe_events = [deepcopy(e) for e in view.get("events", [])
-                       if e.get("type") not in ("wave_started", "order_arrived")
+                       if e.get("type") not in ("wave_started", "order_arrived", "balls_spawned")
+                       and ("ball_id" not in e or e["ball_id"] in known_balls)
+                       and not (set(e.get("ball_ids", [])) - known_balls)
                        and ("order_id" not in e or e["order_id"] in known_orders)
                        and not (isinstance(e.get("order"), dict) and e["order"].get("id") not in known_orders)]
         events.extend(safe_events)
@@ -338,7 +371,7 @@ def _simulation_text(result, language, domain):
         position = _text((f"You finish at column {result['human']['x']}, row {result['human']['y']}; your teammate at column {result['ai']['x']}, row {result['ai']['y']}. ",
                           f"你最终在第{result['human']['x']}列、第{result['human']['y']}行；队友在第{result['ai']['x']}列、第{result['ai']['y']}行。"), language)
     text += position
-    raw_en, raw_zh = (("Net score", "辅助净分") if domain == "warehouse" else
+    raw_en, raw_zh = (("Score", "原始得分") if domain == "warehouse" else
                      ("Catch points", "接球原始分") if domain == "pong" else
                      ("Correctly completed order count", "正确完成订单数"))
     raw_verb = "change" if domain == "pong" else "changes"
@@ -413,7 +446,7 @@ class Explainer:
                 "public_observation": engine.public_state(state),
                 "prior_dialogue": [{"question": str(p.get("question", ""))[:2000],
                                     "answer": str(p.get("answer", ""))[:6000]} for p in (previous_dialogue or [])[-6:]],
-                "allowed_action_ids": list(_ACTIONS), "currently_legal_human_actions": engine.legal_actions(state),
+                "allowed_action_ids": (["left", "right", "wait"] if state["domain"] == "pong" else ["up", "down", "left", "right", "wait", "interact", "discard"] if state["domain"] == "kitchen" else ["up", "down", "left", "right", "wait"]), "currently_legal_human_actions": engine.legal_actions(state),
                 "recommended_human_action": evidence.get("system:human_advice", {}).get("action"),
                 "evidence": list(evidence.values())}
             plan, provider_audit = self._request_plan(payload)
@@ -455,7 +488,9 @@ class Explainer:
                 for intent in plan["intents"]:
                     for identifier in intent.get("evidence_ids", []):
                         if identifier not in ids:
-                            factual_parts.append(evidence[identifier][selected_language])
+                            wording = evidence[identifier][selected_language]
+                            if wording not in factual_parts:
+                                factual_parts.append(wording)
                             ids.append(identifier)
                     if intent["kind"] == "counterfactual":
                         simulation = simulate(engine, state, decision, intent["actions"], intent.get("horizon", 1))

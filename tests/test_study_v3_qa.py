@@ -66,6 +66,16 @@ def test_final_factual_text_is_selected_verified_evidence_not_model_prose():
     assert result["answer"] == "Task 2 · Turn 0\n\n" + evidence["position"]["en"] + "\n\n" + evidence["decision"]["en"]
 
 
+def test_duplicate_fact_aliases_render_once_but_preserve_audit_ids():
+    state = fixture()
+    decision = pong.decide(state)
+    selected = plan(state, ids=("decision", "system:ai_reason"))
+    result = ask(explainer_for_plan(selected), state)
+    assert result["status"] == "answered"
+    assert result["answer"].count(decision["reason_en"]) == 1
+    assert result["evidence_ids"] == ["decision", "system:ai_reason"]
+
+
 def test_model_cannot_add_assertions_or_select_nonexistent_evidence():
     state = fixture()
     wrong = plan(state, ids=("fake:guaranteed-win",))
@@ -248,7 +258,7 @@ def test_pong_forward_simulation_stops_before_exposing_hidden_next_wave():
 def test_kitchen_forward_simulation_hides_unannounced_order_contents():
     kitchen = get_engine("kitchen")
     state = kitchen.initial_state(730100, 3)
-    state["_future_orders"] = [{"id": "SECRET-ORDER", "ingredient": "onion", "arrival": 1, "deadline": 200}]
+    state["_future_orders"] = [{"id": "SECRET-ORDER", "recipe": "egg_tomato", "arrival": 1, "deadline": 200, "status": "pending"}]
     result = simulate(kitchen, state, kitchen.decide(state), ["wait"], 4)
     assert result["steps_completed"] == 1
     assert result["stopped_at_public_boundary"]
@@ -256,15 +266,17 @@ def test_kitchen_forward_simulation_hides_unannounced_order_contents():
     assert "order_arrived" not in json.dumps(result)
 
 
-def test_warehouse_net_score_and_task_score_are_distinguished_in_counterfactual():
+def test_restored_warehouse_counterfactual_uses_actual_unbounded_score():
     warehouse = get_engine("warehouse")
     state = warehouse.initial_state(730100, 2)
     selected = plan(state, intents=[{"kind": "counterfactual", "evidence_ids": [], "actions": ["wait"], "horizon": 1}])
     result = explainer_for_plan(selected).answer(warehouse, state, warehouse.decide(state), "What is the net score change if I wait?", "en", [], [])
     simulation = result["audit"]["simulations"][0]
     assert result["status"] == "answered"
-    assert f"Net score changes by {simulation['raw_score_delta']:g}" in result["answer"]
+    assert f"Score changes by {simulation['raw_score_delta']:g}" in result["answer"]
     assert f"Task score changes by {simulation['task_score_delta']:g}" in result["answer"]
+    assert simulation['raw_score_delta'] == simulation['task_score_delta']
+    assert '/100' not in result['answer']
 
 
 def test_simulation_returns_public_actor_projection_not_internal_actor_fields():

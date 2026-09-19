@@ -177,8 +177,13 @@ def test_complete_three_task_flow_and_explanation_permission_matrix(store, domai
         assert not flow.view["can_ask"] and flow.view["questions"] == []
         denied(lambda: store.ask(flow.token, flow.question()), "explanations_unavailable", 403)
         score = flow.view["state"]["score"]["task_score"]
-        assert 0 <= score <= 100
-        assert score >= 50, f"{domain} task {task} cooperation fixture became infeasible"
+        if domain == "warehouse":
+            assert score == flow.view["state"]["score"]["raw_score"]
+            assert flow.view["state"]["score"]["score_max"] is None
+        else:
+            assert 0 <= score <= 100
+        if domain != "warehouse":
+            assert score >= 50, f"{domain} task {task} cooperation fixture became infeasible"
         completed.append(flow.view["run_id"])
         flow.command("next")
     assert flow.view["stage"] == "questionnaire"

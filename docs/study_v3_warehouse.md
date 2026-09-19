@@ -1,137 +1,143 @@
-# Warehouse v3.2 controller and calibration
+# Warehouse restored legacy environment (v3.3)
 
-This new deterministic engine is independent of the old Warehouse release and
-does not import Torch, NumPy, or a saved actor. It follows the conservative
-coordination principles in the September 2 reference candidate `de16551`.
-The code does not claim to restore that historic deployment byte-for-byte.
+This release restores the pre-three-domain **6-row × 7-column** Warehouse
+map, physics and raw participant scoring from commit
+`af97df8589080a6b1b79bad591059b4d52fe33ee`. AI control actually imports a
+byte-for-byte copy of the September 2 source commit
+`de16551d3d6b99c7ab426dfed1db2871159e6b5c`; it is not an inspired reimplementation.
+The user's 13:11 reference is a source-reference candidate: an exact September 2
+Render deployment timestamp has not been verified.
 
-## Mechanics
+## Frozen controller and physical boundary
 
-The 9 × 7 map has two rooms linked by a narrow shared crossing. The shared
-charger at (4, 2) has exits to both rooms and to the crossing at (4, 3). Each
-robot has three publicly visible, finite orders. Orders are handled in ID order;
-reaching the current pickup/dropoff automatically performs that interaction.
-One robot cannot complete the other's assigned deliveries.
+The historical source is `env/warehouse/historical_sep2_coordination.py`, SHA-256
+`ebcbf38c6365752a73b2175ab44750f3231da369421424f5cccd4aada23729c8`.
+It uses the original v68 6×7 NumPy Actor, SHA-256
+`96762a46f59abd24a10b1abedf8dc325d72c85f3af39424c33e2dcba4ef5ffd3`.
+The adapter verifies the Actor, historical controller, and relevant preserved
+source hashes in `configs/study_v3_warehouse.json` before opening a new task.
+Those source and artifact identities belong to the release manifest.
 
-One human choice and the AI's pre-action decision settle simultaneously.
-Entering a partner's occupied cell, swapping cells, or selecting the same
-destination cancels both moves and records **one** collision. A successful move
-costs 3% battery. A submitted wait on the charger restores up to 10%, capped at
-100%. Cancelled moves and waits elsewhere cost no battery. Dropping below 3%
-away from the charger creates one shutdown event because the robot can no
-longer pay for a move; repeated waiting does not create more shutdown events.
-This explicit below-3% immobility rule closes the previous 1–2% stranded-state
-gap and is displayed in the public instructions.
+Actor sampling retains `deterministic=False` with the original independent
+`base_seed`, `episode_id`, `frame` keys. This is reproducible sampling, not a new
+argmax policy. The historical conservative selector considers every statically
+possible human action before seeing the actual submitted command. It ranks
+possible conflicts before energy, handoff obligations and route progress. The
+September 17 delivery-first changes are not used. The human's recognized command
+is submitted unchanged; the old simultaneous physical resolver handles it.
 
-All tasks retain the original 120-turn budget. Task score is 100 × deliveries
-/ 6. The separate net score is 100 × deliveries − 200 × collision events −
-50 × shutdown events − elapsed turns. There is no charger occupancy penalty,
-group multiplier, hidden score adjustment, order refresh, or wall-clock cost.
+Map topology:
 
-## Actual controller
+```text
+###.###
+....###
+##.....
+...####
+##...##
+##...##
+```
 
-The policy reads the public current state and its own prior clearance memory.
-It cannot read an unsubmitted human action; it does not accept group. Every
-legal human move is checked from the same pre-action state. Rules rank:
+Human/AI start at zero-based `(column,row)=(2,5)/(4,5)`. The charger is `(3,5)`
+with three real exit cells above the starting row. Two shared unassigned A→B
+jobs remain active. Reaching A claims a parcel, reaching its B delivers it,
+and the real seeded sampler replaces that job. Jobs are never pre-assigned to
+a human or AI. Task 1/2/3 preserve the original seeds **52000/51000/51500** and
+120-step limit; the enrollment seed is retained privately but does not secretly
+change these exact historical scenes.
 
-1. Avoid moving into an unrecoverable energy state; open-cell shortest paths
-   determine the energy to complete the current order, return, and retain two
-   moves of reserve.
-2. Minimize how many legal human actions can collide. A collision-free option
-   is preferred; when every option has risk, remaining risk is counted and
-   stated rather than claiming absolute safety.
-3. Maintain an applicable loaded crossing, short clearance plan, or charging
-   plan. While carrying a parcel across the shared crossing, the AI retains its
-   crossing direction and waits rather than making a lateral detour of equal
-   collision risk. The person can release this wait by retreating beside the
-   entrance. The ordinary active-yield rule applies when the person's remaining
-   battery cannot cover a two-move clearance detour plus a charger return.
-   The commitment ends once the AI reaches the other room. A clearance
-   hold lasts at most two turns and is released earlier when the person leaves
-   the conflict area. Every turn rechecks safety and energy.
-4. Leave a sufficiently charged station when another robot needs it, and
-   actively clear an occupied cell on the person's route. Among equally safe
-   clearance actions, prefer one that also advances the current mission.
-5. Continue safe goal progress; wait when the alternatives are less safe or
-   cannot preserve return energy. Finished robots park away from the remaining
-   partner pickup locations instead of creating an unnecessary final crossing.
+A successful move costs 2 battery. Waiting at the charger restores up to 10,
+capped at 100. Walls cancel movement without a battery cost. Same-target moves,
+swaps and moves into a stationary partner create a collision; following into a
+cell the other robot actually leaves is resolved by the original physics.
+Reaching the charger at exactly zero battery is safe; a shutdown elsewhere
+ends the task. Initial batteries are 100, as in the original environment.
 
-The explanation is generated from this exact decision and real alternative
-comparisons: action, open-cell distance, remaining battery and collision counts.
-It distinguishes a possible collision from knowing a participant's next move.
-Querying, translating, replaying and simulating do not update policy memory.
-Memory is copied into state only in a real `step` transition.
+The displayed score is the original raw score, **not a percentage**:
++10 delivery, −10 collision, −5 per shutdown robot, −1 per budget step,
+−2 per human detour unit, and −5 for a shared-charger violation. A shutdown
+also charges the unused step budget. Detour units use the same frozen human
+target and physical alternative moves as before; a wait can count if safe
+progress was available. The charger penalty is charged once during a continuous
+stay only when the exact latest legacy conditions hold; it is not removed by
+restoring the older controller. Both groups have identical scoring.
 
-## Pre-release calibration and evidence
+## Shared study adapter and persistence
 
-Development seeds 100–123 and held-out seeds 1000–1023 are frozen in
-`configs/study_v3_warehouse.json`. All three tasks use the same policy; Task 1
-has one same-room delivery per robot followed by cross-room work, Task 2 has
-repeated cross-room deliveries, and Task 3 changes endpoint combinations and
-starting positions. All six orders are public from turn zero, so there is no
-hidden future schedule for either controller or explanations to access.
-Task 1 and Task 3 start with human/AI battery 54%/48%; Task 2 starts both at
-78%, allowing their loaded routes to meet before their next shared recharge.
-This creates a natural crossing decision without changing either group's rules.
+`domains/warehouse/turnbased.py` implements the existing pure engine API. It
+creates an isolated `WarehouseMultiAgentEnv` per operation. Its private snapshot
+contains the complete dataclass state, all coordination memory, random generator
+state and episode counter. Tagged tuple serialization preserves nested tuple
+values even inside coordination-plan dictionaries. Recovery **does not call**
+legacy `set_state()`, since that intervention helper recomputes navigation goals
+and handoff plans. Instead it validates and restores the exact committed state.
 
-Initial calibration used a charger cul-de-sac. A depleted human standing at its
-only exit could prevent every safe AI departure. This was a real feasibility
-failure, so the shared map was changed to give the charger two side exits.
-The fixed shared 120-turn budget and score were retained. A second issue was
-finished robots parking near another robot's later pickup; the controller now
-selects an in-room corner away from remaining publicly known pickup points.
+The old start-round lifecycle still calls `set_state()` once during task
+creation after declaring the human-controlled robot, matching af97df8. There is
+no global monkeypatch, global mutable environment, or shared random generator.
+The loaded Actor is shared read-only; each sampling call uses its own keyed RNG.
 
-A human-only coordination proxy uses the same immutable AI, yields real space
-when needed and sometimes charges the human longer to allow manoeuvring.
-It never commands the AI or reads future schedules. Across **144 actual
-episodes** (48 seeds × 3 tasks), all six deliveries finish with zero collisions
-and zero shutdowns. Maximum elapsed turns by task are **83 / 86 / 89**.
-These are feasibility results, not participant A/B results or evidence of a
-50% explanation effect. A real human can still make poor moves, collide, run
-out of battery, or finish with a lower score.
+Public state exposes `width=7`, `height=6`, map walls, charger, human/AI position,
+heading, battery and carried task, and the two shared jobs with `carrier`.
+It does not expose the private snapshot, seed, RNG, policy memory or next action.
+Score exposes `task_score == raw_score`, `score_scale="raw"`, `score_max=null`,
+all six score components and auxiliary counts. Scores may be negative.
 
-The fixed neutral demo has 67 transitions with six public-mechanics captions:
-controls, pickup, charging, one deliberate collision, recovery/delivery and
-completion. It uses actual engine transitions and finishes six deliveries.
-The three comprehension keys are checked against explicit charging, crossing,
-and charger-departure states; they are not supplied to participant views.
+The common study service still owns enrollment, stage permissions, persistent
+records and questionnaires. Only group A during active Task 2 may obtain
+explanations; restoring the old engine does not restore the older access rules.
+The shared frontend supplies the old Warehouse appearance and animation.
 
-## Proxy comparison and remaining ceiling
+## Explanation evidence and demonstration
 
-The first feasible version allowed even the public-rule greedy proxy to finish
-all 48 Task 2 scenes. Version 3.2 adds the loaded-crossing commitment described
-above and uses the public initial-energy adjustment. This changed actual shared
-coordination; score formulas and group conditions were not changed.
+Plain bilingual facts bind to the real historical decision candidate table,
+selected action, goal distances, collision alternatives and charge calculation.
+They distinguish potential human conflicts from knowing a future command.
+Charging evidence includes route legs, reserve, current threshold and arithmetic
+for the missing battery; a handoff can require leaving before that threshold.
+Current rule facts and score reasons read the af97df8 configuration and actual
+transition events, including the newer charger-occupancy fee.
 
-Reproduce the following figures with `screening_report()` in the engine. Each
-split contains 24 Task 2 scenes. All proxies control **only the human** while
-the same AI runs its real rules:
+Human advice controls only a proposed human command; it cannot replace or tune
+the AI. It uses the currently visible state and fixed AI, and is a coordination
+suggestion rather than a claim of globally optimal play. Its short branch checks
+stop looking ahead when a newly sampled job would be disclosed. Counterfactual
+answers use real isolated engine transitions and the current fixed AI.
 
-| Proxy | Development mean Task score | Held-out mean Task score |
-|---|---:|---:|
-| Random legal human actions | 43.75 | 39.58 |
-| Greedy own-task route, occupied-cell avoidance, wait after collision | 41.67 | 54.17 |
-| Public-history learner that explores away after two unchanged turns | 98.61 | 98.61 |
-| Human planner informed about the fixed coordination rule | 100.00 | 100.00 |
+The six-caption neutral demonstration runs a real trajectory using the original
+40786 demonstration seed. It shows pickup, delivery/replacement, charging, one
+intentional human collision and completion. Its AI is exactly the same frozen
+historical AI. Three bilingual comprehension items test charging arithmetic,
+conservative conflict handling and replacement jobs; correct answers remain
+server-side.
 
-The public-history learner does not read AI decisions or memory. It reacts to
-two unchanged position pairs with three energy-safe retreat/exploration moves,
-then resumes its own shortest-path/charging strategy. Its near-perfect result is
-a real **remaining ceiling limitation**: a participant may also learn the
-cooperation pattern quickly without explanations. These proxies therefore do
-not establish a robust explanation advantage, let alone a 50% human A/B effect.
-The pilot must measure that outcome; version 3.2 is frozen rather than weakening
-the learning baseline or adding arbitrary score penalties to manufacture a gap.
+## Verification and honest limits
 
-## Question evidence
+The domain tests compare all successive states, random generator state, sampled
+replacement jobs and raw score with an independently Git-loaded historical
+controller running the preserved physical environment. They additionally cover
+JSON restoration of active plans, concurrent pure decisions, group blindness,
+wall input preservation, charging, once-per-stay penalties, shutdown accounting,
+private/public boundaries and the actual demonstration.
 
-`domains/warehouse/qa_cases.json` contains 80 bilingual cases (40 substantive
-questions in English and Chinese). They cover current decisions, exact battery
-and route counts, charging thresholds, interaction order, a real collision,
-history, follow-up object binding, wrong premises, clarification, and read-only
-multi-step alternatives. Each includes the actual selected state and decision,
-expected evidence IDs, and independent state/score checks. Explicit battery
-shortfall and charging-turn facts allow the answer to state "20%, two turns"
-instead of requiring the user to infer them from separate numbers.
-These fixtures verify evidence and simulation; they alone do not prove the
-external semantic model understands every possible question.
+Regenerate the **82** fixed bilingual question cases with
+`python -m domains.warehouse.build_qa_cases`. The builder includes hand-written
+questions and independent numerical expectations, not generated answer copies.
+Coverage includes current reasons, alternatives, history, human-only simulation,
+false premises, ambiguity, raw scoring, charging arithmetic and charger handoff.
+Injected response plans test evidence composition and state binding; they do
+**not** test language-model question understanding. A real-provider evaluation
+and independent semantic review are separate deployment checks.
+
+Historical restoration invalidates the previous v3.2 9×7/144-episode feasibility
+claim and its six-delivery 100-point ceiling for this version. Existing records
+must retain their old version identity. No simulation, technical test, or
+successful deployment establishes the targeted 50% human Task 2 improvement.
+
+The human advice helper is not a certified optimum or a guarantee of finishing
+without shutdown. A current development run on the three fixed task seeds
+produced 2 / 13 / 0 deliveries with raw scores −161 / −22 / −193; Tasks 1 and 3
+ended in a battery shutdown. These are synthetic feasibility observations only.
+They preserve the exact requested historical AI rather than silently changing
+its behavior to pass a proxy. The neutral demonstration uses a separately fixed
+human demonstration policy and shows seven deliveries, one collision and actual
+charging over 120 steps. The real human pilot remains necessary.

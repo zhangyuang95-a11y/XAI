@@ -1,5 +1,7 @@
 # Three-domain controller and transition contracts
 
+> Historical v2 implementation/evidence snapshot, retained for audit. The new v3 revision is documented in [three_domain_revision_v3.md](three_domain_revision_v3.md); deployment status is tracked separately.
+
 Implementation snapshot for `policylens-three-domain-20260920.v2`, prepared on
 2026-09-20. This document describes the new engines. It is not evidence that a
 particular Render deployment passed acceptance or that explanations improved

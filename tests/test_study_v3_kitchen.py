@@ -1,391 +1,538 @@
-"""Mechanics boundaries and independent fixed-AI feasibility checks.
+"""Independent mechanism boundaries and real fixed-controller trajectories.
 
-Microstates below are explicitly test fixtures, never participant samples.
-Full-run tests begin at frozen initial_state and control the human role only.
+Fixtures are synthetic engine unit states. No test/proxy is a human sample.
 """
+from collections import deque
 from copy import deepcopy
 import json
-from pathlib import Path
+import random
 import unittest
-
 from domains.kitchen import engine as e
-
-
-def item(recipe="tomato", stage="chopped", item_id="fixture-item"):
-    return {"id": item_id, "ingredient": recipe, "stage": stage, "chop_progress": 0 if stage == "raw" else 2}
 
 
 def fixture():
     state = e.initial_state(1000, 2)
-    for order in state["orders"]:
-        order["deadline"] = 190
-    state["max_turns"] = 200
+    state['max_turns'] = 1000
+    for order in state['orders']:
+        order['deadline'] = 1000
     return state
 
 
-def action_decision(action):
-    return {"action": action, "memory": {}, "reason_code": "test_fixture", "reason_en": "Test action", "reason_zh": "测试动作"}
+def item(ingredient='egg', stage='prepared', iid='test-egg', order='order1', pot=None):
+    return {'id': iid, 'ingredient': ingredient, 'ingredients': [ingredient], 'recipe': e.INGREDIENT_RECIPE[ingredient], 'stage': stage,
+            'prepare_progress': 0 if stage == 'raw' else 2, 'components': [iid], 'order_id': order, 'pot_id': pot,
+            'container': 'temporary_plate' if stage == 'cooked_protein' else None, 'was_buffered': False}
 
 
-def tick(state, human="wait", ai="wait"):
-    return e.step(state, human, action_decision(ai))
+def dish(order='order1', pot='pot1'):
+    result = item(stage='finished', order=order, pot=pot)
+    result.update(ingredients=['egg', 'tomato'], components=['test-egg', 'test-tomato'], container='output_container', was_buffered=True)
+    return result
 
 
-def run(seed, task, waits=()):
+def tick(state, human='wait', ai='wait', slot=None):
+    return e.step(state, human, {'action': ai, 'memory': {}, 'slot': slot, 'reason_code': 'independent_fixture'})
+
+
+def run(seed, task, human=None):
     state = e.initial_state(seed, task)
-    trajectory = [deepcopy(state)]
-    decisions = []
-    actions = []
-    while not state["terminal"]:
-        decisions.append(e.decide(state))
-        human_action = "wait" if state["turn"] in waits else e.human_advisor(state)
-        actions.append(human_action)
-        state = e.step(state, human_action)
-        trajectory.append(state)
-    return trajectory, decisions, actions
+    frames, events = [deepcopy(state)], []
+    while not state['terminal']:
+        action = human(state) if human else e.human_advisor(state)
+        state = e.step(state, action)
+        frames.append(state)
+        events.extend(state['events'])
+    return frames, events
 
 
-class KitchenMechanics(unittest.TestCase):
-    def test_movement_walls_stations_and_work_area(self):
+def ready_pot(state, phase='protein', ingredient='egg', age=0, pot_id='pot1'):
+    pot = e._pot(state, pot_id)
+    portion = dish(pot=pot_id) if phase == 'mix' else item(ingredient, 'cooked_vegetable' if phase == 'vegetable' else 'cooked_protein', pot=pot_id)
+    pot.update(phase=phase, status='ready', item=portion, order_id='order1', recipe='egg_tomato', remaining=0, ready_age=age)
+    return pot
+
+
+class FacingAndInteraction(unittest.TestCase):
+    def test_exact_map_and_connected_work_areas(self):
+        expected = {'egg': (1, 1), 'tomato': (3, 1), 'meat': (1, 2), 'pepper': (3, 2), 'prep': (1, 3),
+                    'human_buffer': (1, 4), 'plate': (1, 5), 'serve': (3, 5), 'handoff': (4, 3),
+                    'pot1': (7, 1), 'protein1': (7, 2), 'ai_raw': (7, 3), 'protein2': (7, 4), 'pot2': (7, 5)}
+        self.assertEqual({key: (value['x'], value['y']) for key, value in e.STATION_BY_ID.items()}, expected)
+        self.assertEqual(sum(x < 4 for x, y in e.FLOOR), 7)
+        self.assertEqual(sum(x > 4 for x, y in e.FLOOR), 10)
+        for station in e.STATIONS:
+            actor = 'human' if station['x'] < 4 else 'ai'
+            start = (2, 3) if actor == 'human' else (6, 3)
+            route = e._route(start, 'right', station['id'])
+            x, y, face = e._route_end(start, 'right', route)
+            self.assertEqual(e._front({'x': x, 'y': y, 'facing': face})['id'], station['id'])
+
+    def test_move_changes_facing_and_blocked_turn_costs_one(self):
         state = fixture()
-        self.assertNotIn("interact_handoff", e.legal_actions(state))
-        state["human"].update(x=3, y=3)
-        self.assertNotIn("right", e.legal_actions(state))
-        with self.assertRaises(ValueError):
-            e.step(state, "right")
-        state["human"].update(x=2, y=1)
-        self.assertNotIn("left", e.legal_actions(state))
-        self.assertNotIn("right", e.legal_actions(state))
-        self.assertIn("take_tomato", e.legal_actions(state))
+        state['human'].update(x=2, y=1, facing='down')
+        for action, station in [('left', 'egg'), ('right', 'tomato')]:
+            nxt = tick(state, action)
+            self.assertEqual((nxt['human']['x'], nxt['human']['y']), (2, 1))
+            self.assertEqual(nxt['human']['facing'], action)
+            self.assertEqual(nxt['turn'], 1)
+            self.assertEqual(e._front(nxt['human'])['id'], station)
+        nxt = tick(state, 'down')
+        self.assertEqual((nxt['human']['x'], nxt['human']['y'], nxt['human']['facing']), (2, 2, 'down'))
 
-    def test_one_portion_two_chops_and_progress_survives_queries(self):
+    def test_only_facing_station_interacts_and_invalid_does_not_mutate(self):
         state = fixture()
-        state["human"].update(x=2, y=1)
-        state = tick(state, "take_tomato")
-        state = tick(state, "chop")
-        self.assertEqual(state["human"]["holding"]["chop_progress"], 1)
-        saved = deepcopy(state)
-        e.facts(state)
-        e.rules("zh")
-        e.public_state(state)
-        self.assertEqual(state, saved)
-        state = tick(state, "chop")
-        self.assertEqual(state["human"]["holding"]["stage"], "chopped")
-        self.assertNotIn("chop", e.legal_actions(state))
+        state['human'].update(x=2, y=1, facing='down')
+        before = deepcopy(state)
+        self.assertNotIn('interact', e.legal_actions(state))
+        with self.assertRaises(ValueError): e.step(state, 'interact')
+        self.assertEqual(before, state)
+        for face, ingredient in [('left', 'egg'), ('right', 'tomato')]:
+            state['human']['facing'] = face
+            nxt = tick(state, 'interact')
+            self.assertEqual(nxt['human']['holding']['ingredient'], ingredient)
+            self.assertEqual(nxt['turn'], 1)
 
-    def test_cooking_exact_twelve_and_fourteen_full_turns(self):
-        for recipe, duration in (("tomato", 12), ("onion", 14)):
-            state = fixture()
-            state["ai"].update(x=6, y=1, holding=item(recipe))
-            state = tick(state, ai="interact_pot1")
-            self.assertEqual(state["pots"][0]["remaining"], duration)
-            for remaining in range(duration - 1, 0, -1):
-                state = tick(state)
-                self.assertEqual(state["pots"][0]["remaining"], remaining)
-                self.assertEqual(state["pots"][0]["status"], "cooking")
-            state = tick(state)
-            self.assertEqual(state["pots"][0]["status"], "ready")
-            self.assertEqual(state["pots"][0]["ready_age"], 0)
-            self.assertEqual(state["turn"], duration + 1)
-
-    def test_six_full_ready_turns_and_removal_at_boundary(self):
-        state = fixture()
-        state["ai"].update(x=6, y=1)
-        state["pots"][0].update(status="ready", item=item(stage="cooked"), remaining=0, ready_age=0)
-        for age in range(1, 6):
-            state = tick(state)
-            self.assertEqual(state["pots"][0]["status"], "ready")
-            self.assertEqual(state["pots"][0]["ready_age"], age)
-        removed = tick(state, ai="interact_pot1")
-        self.assertEqual(removed["pots"][0]["status"], "empty")
-        self.assertEqual(removed["metrics"]["burnt"], 0)
-        burned = tick(state)
-        self.assertEqual(burned["pots"][0]["status"], "burnt")
-        self.assertEqual(burned["metrics"]["burnt"], 1)
-        cleared = tick(burned, ai="interact_pot1")
-        self.assertEqual(cleared["pots"][0]["status"], "empty")
-        self.assertEqual(cleared["metrics"]["waste"], 1)
-        self.assertEqual(cleared["metrics"]["burnt"], 1)
-
-    def test_removed_soup_has_no_spoil_timer(self):
-        state = fixture()
-        state["human"]["holding"] = item(stage="cooked")
-        for _ in range(20):
-            state = tick(state)
-        self.assertEqual(state["human"]["holding"]["stage"], "cooked")
-        self.assertEqual(state["metrics"]["burnt"], 0)
-
-    def test_simultaneous_handoff_placements_and_pickups_both_fail(self):
-        for placement in (True, False):
-            state = fixture()
-            state["human"].update(x=3, y=3)
-            state["ai"].update(x=5, y=3)
-            if placement:
-                state["human"]["holding"] = item(item_id="h")
-                state["ai"]["holding"] = item(stage="cooked", item_id="a")
-            else:
-                state["handoff"] = item(item_id="counter")
-            before = deepcopy(state)
-            state = tick(state, "interact_handoff", "interact_handoff")
-            self.assertEqual(state["human"], before["human"])
-            self.assertEqual(state["ai"], before["ai"])
-            self.assertEqual(state["handoff"], before["handoff"])
-            self.assertEqual(state["turn"], before["turn"] + 1)
-            self.assertEqual(state["metrics"]["handoff_conflicts"], 1)
-            self.assertEqual([ev["type"] for ev in state["events"]], ["handoff_conflict"])
-
-    def test_new_handoff_item_cannot_be_collected_same_turn(self):
-        state = fixture()
-        state["human"].update(x=3, y=3, holding=item())
-        state["ai"].update(x=5, y=3)
-        self.assertNotIn("interact_handoff", e.legal_actions(state, "ai"))
-        with self.assertRaises(ValueError):
-            tick(state, "interact_handoff", "interact_handoff")
-        state = e.step(state, "interact_handoff")
-        self.assertIsNotNone(state["handoff"])
-        self.assertIsNone(state["ai"]["holding"])
-        state = e.step(state, "wait")
-        self.assertIsNone(state["handoff"])
-        self.assertEqual(state["ai"]["holding"]["stage"], "chopped")
-
-    def test_buffer_capacity_and_human_can_recover_own_item(self):
-        state = fixture()
-        state["human"].update(x=3, y=3, holding=item())
-        state = tick(state, "interact_handoff")
-        state = tick(state, "interact_handoff")
-        self.assertIsNone(state["handoff"])
-        state = tick(state, "left")
-        state = tick(state, "interact_buffer")
-        self.assertIsNone(state["human"]["holding"])
-        self.assertIsNotNone(state["buffers"]["human"])
-        state["human"]["holding"] = item(item_id="second")
-        self.assertNotIn("interact_buffer", e.legal_actions(state))
-        state = tick(state, "discard")
-        state = tick(state, "interact_buffer")
-        self.assertEqual(state["human"]["holding"]["id"], "fixture-item")
-
-    def test_discard_every_held_stage_at_any_legal_position(self):
-        for actor in ("human", "ai"):
-            for stage in ("raw", "chopped", "cooked", "plated"):
+    def test_four_separate_cupboards_and_no_selection_menu(self):
+        for ingredient, point, face in [('egg', (2, 1), 'left'), ('tomato', (2, 1), 'right'), ('meat', (2, 2), 'left'), ('pepper', (2, 2), 'right')]:
+            with self.subTest(ingredient=ingredient):
                 state = fixture()
-                state[actor]["holding"] = item(stage=stage)
-                self.assertIn("discard", e.legal_actions(state, actor))
-                state = tick(state, "discard" if actor == "human" else "wait", "discard" if actor == "ai" else "wait")
-                self.assertIsNone(state[actor]["holding"])
-                self.assertEqual(state["metrics"]["waste"], 1)
-                self.assertEqual(e.score(state)["task_score"], 0)
+                state['human'].update(x=point[0], y=point[1], facing=face)
+                state = tick(state, 'interact')
+                self.assertEqual(state['human']['holding']['ingredient'], ingredient)
+                self.assertNotIn('interact', e.legal_actions(state))
+                self.assertIn('full', e.interaction_label(state))
 
-    def test_full_hands_and_counters_have_a_public_recovery_path(self):
-        state = fixture()
-        state["human"].update(x=3, y=3, holding=item(stage="plated", item_id="held_h"))
-        state["ai"].update(x=5, y=3, holding=item(stage="cooked", item_id="held_a"))
-        state["handoff"] = item(item_id="handoff")
-        state["buffers"] = {"human": item(item_id="buffer_h"), "ai": item(item_id="buffer_a")}
-        state = e.step(state, "discard")
-        state = e.step(state, "interact_handoff")
-        self.assertIsNone(state["handoff"])
-        # AI's already chosen wait cannot be replaced by a magically same-turn
-        # delivery. It can hand over on the following legal turn.
-        state = e.step(state, "discard")
-        self.assertIsNotNone(state["handoff"])
-        self.assertEqual(state["handoff"]["stage"], "cooked")
-        self.assertIsNone(state["ai"]["holding"])
+    def test_wait_advances_once_without_movement_or_facing_change(self):
+        state = fixture(); before = deepcopy(state['human'])
+        nxt = tick(state)
+        self.assertEqual(before, nxt['human'])
+        self.assertEqual(nxt['turn'], 1)
+        self.assertEqual(nxt['metrics']['human_waits'], 1)
 
-    def test_serve_on_deadline_then_expire_other_order(self):
-        state = fixture()
-        state["turn"] = 4
-        state["orders"][0].update(ingredient="tomato", deadline=5)
-        state["orders"][1].update(ingredient="tomato", deadline=5)
-        state["human"].update(x=2, y=5, holding=item(stage="plated"))
-        state = tick(state, "serve")
-        self.assertEqual(state["orders"][0]["status"], "completed")
-        self.assertEqual(state["orders"][0]["served_turn"], 5)
-        self.assertEqual(state["orders"][1]["status"], "expired")
-        self.assertEqual(e.score(state)["raw_score"], 1)
+    def test_raw_requires_two_preparations(self):
+        for ingredient in e.LABELS:
+            state = fixture(); state['human'].update(x=2, y=3, facing='left', holding=item(ingredient, 'raw', order=None))
+            once = tick(state, 'interact'); twice = tick(once, 'interact')
+            self.assertEqual(once['human']['holding']['stage'], 'raw')
+            self.assertEqual(once['human']['holding']['prepare_progress'], 1)
+            self.assertEqual(twice['human']['holding']['stage'], 'prepared')
+            self.assertNotIn('interact', e.legal_actions(twice))
+            self.assertEqual('Whisk egg' if ingredient == 'egg' else 'Prepare ingredient', e.interaction_label(state))
 
-    def test_wrong_or_expired_order_cannot_score_twice(self):
+    def test_role_boundaries(self):
         state = fixture()
-        for order in state["orders"]:
-            order["ingredient"] = "onion"
-        state["human"].update(x=2, y=5, holding=item(stage="plated"))
-        state = tick(state, "serve")
-        self.assertIsNotNone(state["human"]["holding"])
-        self.assertEqual(state["metrics"]["completed_orders"], 0)
-        self.assertEqual(state["events"][0]["type"], "serve_rejected")
-        state["orders"][0]["ingredient"] = "tomato"
-        state = tick(state, "serve")
-        self.assertEqual(state["metrics"]["completed_orders"], 1)
-        state["human"]["holding"] = item(stage="plated", item_id="extra")
-        state = tick(state, "serve")
-        self.assertEqual(state["metrics"]["completed_orders"], 1)
+        state['human'].update(x=6, y=1, facing='right', holding=item())
+        self.assertNotIn('interact', e.legal_actions(state))
+        state['ai'].update(x=2, y=1, facing='left')
+        self.assertNotIn('interact', e.legal_actions(state, 'ai'))
 
-    def test_budget_end_and_terminal_rejection(self):
+    def test_full_counter_never_swaps_or_overwrites(self):
+        state = fixture(); state['human'].update(x=3, y=3, facing='right', holding=item(iid='held'))
+        state['handoff'] = item('tomato', iid='counter')
+        before = deepcopy(state)
+        self.assertNotIn('interact', e.legal_actions(state))
+        self.assertIn('cannot be swapped', e.interaction_label(state))
+        with self.assertRaises(ValueError): e.step(state, 'interact')
+        self.assertEqual(before, state)
+
+    def test_same_turn_handoff_conflict_is_simultaneous(self):
+        state = fixture(); state['human'].update(x=3, y=3, facing='right'); state['ai'].update(x=5, y=3, facing='left')
+        state['handoff'] = item()
+        before = deepcopy(state['handoff'])
+        nxt = tick(state, 'interact', 'interact')
+        self.assertEqual(nxt['handoff'], before)
+        self.assertIsNone(nxt['human']['holding']); self.assertIsNone(nxt['ai']['holding'])
+        self.assertEqual(nxt['metrics']['handoff_conflicts'], 1)
+        self.assertEqual(nxt['turn'], 1)
+
+    def test_newly_placed_item_not_taken_same_turn(self):
+        state = fixture(); state['human'].update(x=3, y=3, facing='right', holding=item()); state['ai'].update(x=5, y=3, facing='left')
+        self.assertNotIn('interact', e.legal_actions(state, 'ai'))
+        nxt = tick(state, 'interact')
+        self.assertIsNone(nxt['ai']['holding']); self.assertIsNotNone(nxt['handoff'])
+        later = tick(nxt, ai='interact')
+        self.assertEqual(later['ai']['holding']['id'], 'test-egg')
+
+    def test_physical_interaction_text_names_item_and_counter(self):
+        state = fixture(); state['ai'].update(x=5, y=3, facing='left'); state['handoff'] = item()
+        label = e.interaction_label(state, 'ai')
+        self.assertIn('prepared egg', label); self.assertIn('handoff', label)
+        self.assertIn('备好的鸡蛋', e.interaction_label(state, 'ai', 'zh'))
+
+
+class RecipeStateMachine(unittest.TestCase):
+    def test_exact_protein_cooking_times_loading_excluded(self):
+        for ingredient, order, duration in [('egg', 'order1', 4), ('meat', 'order2', 6)]:
+            state = fixture(); state['ai'].update(x=6, y=1, facing='right', holding=item(ingredient, order=order))
+            state = tick(state, ai='interact')
+            self.assertEqual(state['pots'][0]['remaining'], duration)
+            for remaining in range(duration - 1, 0, -1):
+                state = tick(state); self.assertEqual(state['pots'][0]['remaining'], remaining)
+                self.assertEqual(state['pots'][0]['status'], 'cooking')
+            state = tick(state); self.assertEqual(state['pots'][0]['status'], 'ready')
+            self.assertEqual(state['pots'][0]['ready_age'], 0)
+
+    def test_vegetable_cannot_start_first(self):
+        state = fixture(); state['ai'].update(x=6, y=1, facing='right', holding=item('tomato'))
+        self.assertNotIn('interact', e.legal_actions(state, 'ai'))
+        self.assertEqual(e.decide(state)['reason_code'], 'store_early_vegetable')
+
+    def test_protein_requires_real_temporary_counter_visit(self):
+        state = fixture(); ready_pot(state); state['ai'].update(x=6, y=1, facing='right')
+        state = tick(state, ai='interact')
+        self.assertEqual(state['ai']['holding']['container'], 'temporary_plate')
+        self.assertEqual(state['pots'][0]['phase'], 'await_protein_store')
+        self.assertFalse(state['ai']['holding']['was_buffered'])
+        state['buffers']['ai_raw'][0] = item('tomato', iid='tomato')
+        self.assertEqual(e._loadable(state, state['buffers']['ai_raw'][0]), [])
+        state['ai'].update(x=6, y=2, facing='right')
+        state = tick(state, ai='interact')
+        self.assertIsNone(state['ai']['holding'])
+        self.assertTrue(state['buffers']['protein']['pot1']['was_buffered'])
+        self.assertEqual(state['pots'][0]['phase'], 'await_vegetable')
+        self.assertEqual(e._loadable(state, state['buffers']['ai_raw'][0])[0]['id'], 'pot1')
+
+    def test_dedicated_counter_rejects_other_pan_protein(self):
+        state = fixture(); state['ai'].update(x=6, y=4, facing='right', holding=item(stage='cooked_protein', pot='pot1'))
+        self.assertNotIn('interact', e.legal_actions(state, 'ai'))
+
+    def test_vegetable_requires_matching_order_and_same_pan(self):
+        state = fixture(); state['pots'][0].update(phase='await_vegetable', order_id='order1', recipe='egg_tomato')
+        state['ai'].update(x=6, y=1, facing='right', holding=item('pepper', order='order2'))
+        self.assertNotIn('interact', e.legal_actions(state, 'ai'))
+
+    def test_returned_protein_starts_exact_two_turn_mix_preserves_ids(self):
+        state = fixture(); ready_pot(state, 'vegetable', 'tomato')
+        state['pots'][0]['item']['id'] = 'vegetable'; state['pots'][0]['item']['components'] = ['vegetable']
+        protein = item(stage='cooked_protein', pot='pot1'); protein['was_buffered'] = True
+        state['ai'].update(x=6, y=1, facing='right', holding=protein)
+        state = tick(state, ai='interact')
+        pot = state['pots'][0]
+        self.assertEqual((pot['phase'], pot['status'], pot['remaining']), ('mix', 'cooking', 2))
+        self.assertEqual(pot['item']['components'], ['test-egg', 'vegetable'])
+        self.assertIsNone(state['ai']['holding'])
+        state = tick(state); self.assertEqual(state['pots'][0]['remaining'], 1)
+        state = tick(state); self.assertEqual(state['pots'][0]['status'], 'ready')
+        state = tick(state, ai='interact')
+        self.assertEqual(state['ai']['holding']['stage'], 'finished')
+        self.assertEqual(state['ai']['holding']['container'], 'output_container')
+        self.assertEqual(state['pots'][0]['phase'], 'idle')
+
+    def test_unbuffered_or_wrong_order_protein_cannot_combine(self):
+        for buffered, order in [(False, 'order1'), (True, 'order2')]:
+            state = fixture(); ready_pot(state, 'vegetable', 'tomato')
+            protein = item(stage='cooked_protein', pot='pot1', order=order); protein['was_buffered'] = buffered
+            state['ai'].update(x=6, y=1, facing='right', holding=protein)
+            self.assertNotIn('interact', e.legal_actions(state, 'ai'))
+
+    def test_eight_ready_turn_boundary_including_safe_last_action(self):
+        state = fixture(); ready_pot(state); state['ai'].update(x=6, y=1, facing='right')
+        for age in range(1, 8):
+            state = tick(state); self.assertEqual(state['pots'][0]['ready_age'], age)
+            self.assertEqual(state['pots'][0]['status'], 'ready')
+        saved = tick(state, ai='interact'); burned = tick(state)
+        self.assertEqual(saved['metrics']['burnt'], 0)
+        self.assertEqual(burned['pots'][0]['status'], 'burnt')
+        self.assertEqual(burned['metrics']['burnt'], 1)
+        cleared = tick(burned, ai='interact')
+        self.assertEqual(cleared['pots'][0]['phase'], 'idle')
+        self.assertEqual(cleared['metrics']['waste'], 1)
+
+    def test_removed_food_does_not_burn(self):
+        state = fixture(); state['ai']['holding'] = item(stage='cooked_protein', pot='pot1')
+        for _ in range(20): state = tick(state)
+        self.assertEqual(state['ai']['holding']['stage'], 'cooked_protein')
+        self.assertEqual(state['metrics']['burnt'], 0)
+
+    def test_two_raw_slots_are_distinct_and_preserve_other_slot(self):
+        state = fixture(); state['ai'].update(x=6, y=3, facing='right', holding=item('tomato', iid='held'))
+        state['buffers']['ai_raw'][0] = item('pepper', iid='slot0', order='order2')
+        nxt = tick(state, ai='interact', slot=1)
+        self.assertEqual([it['id'] for it in nxt['buffers']['ai_raw']], ['slot0', 'held'])
+        nxt = tick(nxt, ai='interact', slot=0)
+        self.assertEqual(nxt['ai']['holding']['id'], 'slot0')
+        self.assertEqual(nxt['buffers']['ai_raw'][1]['id'], 'held')
+
+    def test_output_needs_distinct_human_final_plating(self):
+        state = fixture(); state['human'].update(x=2, y=5, facing='right', holding=dish())
+        self.assertNotIn('interact', e.legal_actions(state))
+        self.assertIn('serving plate', e.interaction_label(state))
+        state['human']['facing'] = 'left'; state = tick(state, 'interact')
+        self.assertEqual(state['human']['holding']['container'], 'serving_plate')
+        state['human']['facing'] = 'right'; state = tick(state, 'interact')
+        self.assertEqual(state['metrics']['completed_orders'], 1)
+        self.assertIsNone(state['human']['holding'])
+
+    def test_partial_or_mismatched_dish_is_not_served(self):
+        state = fixture(); bad = dish(); bad.update(stage='plated', ingredients=['egg'], components=['test-egg'])
+        state['human'].update(x=2, y=5, facing='right', holding=bad)
+        nxt = tick(state, 'interact')
+        self.assertEqual(nxt['metrics']['completed_orders'], 0)
+        self.assertIsNotNone(nxt['human']['holding'])
+        self.assertEqual(nxt['events'][0]['type'], 'serve_rejected')
+
+    def test_bound_order_cannot_be_stolen_by_same_recipe_order(self):
+        state = fixture(); state['orders'][1]['recipe'] = 'egg_tomato'
+        food = dish(order='order2'); food.update(stage='plated', container='serving_plate')
+        state['human'].update(x=2, y=5, facing='right', holding=food)
+        nxt = tick(state, 'interact')
+        self.assertEqual(nxt['orders'][0]['status'], 'pending')
+        self.assertEqual(nxt['orders'][1]['status'], 'completed')
+
+    def test_serve_on_deadline_precedes_expiry(self):
+        state = fixture(); state['orders'][0]['deadline'] = 1
+        food = dish(); food.update(stage='plated', container='serving_plate')
+        state['human'].update(x=2, y=5, facing='right', holding=food)
+        self.assertEqual(tick(state, 'interact')['orders'][0]['status'], 'completed')
+        self.assertEqual(tick(state)['orders'][0]['status'], 'expired')
+
+    def test_discard_recovery_frees_hand_without_hidden_penalty(self):
+        state = fixture(); state['human']['holding'] = item()
+        nxt = tick(state, 'discard')
+        self.assertIsNone(nxt['human']['holding']); self.assertEqual(nxt['metrics']['waste'], 1)
+        self.assertEqual(e.score(nxt)['task_score'], e.score(state)['task_score'])
+
+    def test_clearing_burnt_vegetable_keeps_stored_protein_and_job(self):
+        state = fixture(); ready_pot(state, 'vegetable', 'tomato', age=7)
+        protein = item(stage='cooked_protein', pot='pot1'); protein['was_buffered'] = True
+        state['buffers']['protein']['pot1'] = protein; state['ai'].update(x=6, y=1, facing='right')
+        state = tick(state); state = tick(state, ai='interact')
+        self.assertEqual(state['pots'][0]['phase'], 'await_vegetable')
+        self.assertEqual(state['buffers']['protein']['pot1']['id'], protein['id'])
+
+
+class ControllerAndEvidence(unittest.TestCase):
+    def test_actual_wrong_vegetable_first_is_buffered_then_recovered(self):
+        state = e.initial_state(1000, 2)
+        # Drive only human actions to fetch, chop and deliver tomato first.
+        targets = [('tomato', 1), ('prep', 2), ('handoff', 1)]
+        events = []
+        for target, count in targets:
+            for _ in range(count):
+                while e._front(state['human']) is None or e._front(state['human'])['id'] != target:
+                    state = e.step(state, e._approach(state, 'human', target)); events.extend(state['events'])
+                state = e.step(state, 'interact'); events.extend(state['events'])
+        while not any(it for it in state['buffers']['ai_raw']):
+            state = e.step(state, 'wait'); events.extend(state['events'])
+        self.assertEqual(state['buffers']['ai_raw'][0]['ingredient'], 'tomato')
+        original_id = state['buffers']['ai_raw'][0]['id']
+        self.assertEqual(state['metrics']['wrong_order_buffered'], 1)
+        while not state['terminal']:
+            state = e.step(state, e.human_advisor(state)); events.extend(state['events'])
+        self.assertTrue(any(event['type'] == 'served' and original_id in event['item']['components'] for event in events))
+        self.assertEqual(state['metrics']['completed_orders'], 6)
+
+    def test_raw_delivery_recovery_for_all_four_ingredients_from_initial_state(self):
+        for ingredient in e.LABELS:
+            with self.subTest(ingredient=ingredient):
+                state = e.initial_state(1000, 2)
+                events = []
+                for target in (ingredient, 'handoff'):
+                    while e._front(state['human']) is None or e._front(state['human'])['id'] != target:
+                        state = e.step(state, e._approach(state, 'human', target)); events.extend(state['events'])
+                    state = e.step(state, 'interact'); events.extend(state['events'])
+                wrong_id = state['handoff']['id']
+                self.assertEqual(e.decide(state)['reason_code'], 'await_preparation')
+                self.assertEqual(e.human_advisor(state), 'interact')
+                evidence = {row['id']: row for row in e.facts(state)}
+                self.assertIn('Take it back', evidence['handoff_recovery']['en'])
+                self.assertIn(ingredient, evidence['next_input_ingredient']['en'])
+                while not state['terminal']:
+                    state = e.step(state, e.human_advisor(state)); events.extend(state['events'])
+                self.assertEqual(state['metrics']['completed_orders'], 6)
+                self.assertEqual(state['metrics']['waste'], 0)
+                self.assertTrue(any(event['type'] == 'served' and wrong_id in event['item']['components'] for event in events))
+
+    def test_invalid_handoff_recovery_with_full_human_hand_and_storage(self):
         state = fixture()
-        state["max_turns"] = 1
-        state = e.step(state, "wait")
-        self.assertTrue(state["terminal"])
-        self.assertEqual(state["termination_reason"], "turn_budget")
+        state['human'].update(x=3, y=3, facing='right', holding=item('meat', iid='held', order='order2'))
+        state['handoff'] = item('egg', 'raw', iid='raw-blocker', order=None)
+        state['buffers']['human'] = item('tomato', iid='buffered', order=None)
+        before_counter = deepcopy(state['handoff'])
+        self.assertEqual(e.human_advisor(state), 'discard')
+        state = e.step(state, e.human_advisor(state))
+        self.assertEqual(state['handoff'], before_counter)
+        self.assertEqual(state['buffers']['human']['id'], 'buffered')
+        self.assertEqual(e.human_advisor(state), 'interact')
+        state = e.step(state, 'interact')
+        self.assertIsNone(state['handoff'])
+        self.assertEqual(state['human']['holding']['id'], 'raw-blocker')
+        self.assertEqual(e._next_input_portion(state)['ingredient'], 'egg')
+
+    def test_expired_handoff_is_retrieved_and_discarded(self):
+        state = fixture(); state['orders'][0]['status'] = 'expired'
+        state['handoff'] = item(order='order1')
+        state['human'].update(x=3, y=3, facing='right')
+        self.assertEqual(e.human_advisor(state), 'interact')
+        state = e.step(state, 'interact')
+        self.assertEqual(e.human_advisor(state), 'discard')
+        state = e.step(state, 'discard')
+        self.assertIsNone(state['human']['holding']); self.assertIsNone(state['handoff'])
+
+    def test_ingredient_locations_and_pan_contents_are_container_accurate(self):
+        frames, _ = run(1000, 2)
+        ready = next(frame for frame in frames if frame['pots'][0]['status'] == 'ready' and frame['pots'][0]['phase'] == 'protein')
+        rows = {row['id']: row for row in e.facts(ready)}
+        self.assertIn("stove 1's pan", rows['ingredient_location_egg']['en'])
+        self.assertNotIn('temporary plate', rows['pot1_contents']['en'])
+        self.assertIn('order1', rows['pot1_contents']['en'])
+        self.assertIn('item1', rows['pot1_contents']['en'])
+        stored = next(frame for frame in frames if frame['buffers']['protein']['pot1'])
+        rows = {row['id']: row for row in e.facts(stored)}
+        self.assertIn('temporary plate counter', rows['ingredient_location_egg']['en'])
+        mixed = next(frame for frame in frames if frame['pots'][0]['phase'] == 'mix')
+        rows = {row['id']: row for row in e.facts(mixed)}
+        self.assertIn('ingredients: egg, tomato', rows['pot1_contents']['en'])
+        self.assertIn("stove 1's pan", rows['ingredient_location_egg']['en'])
+        self.assertIn("stove 1's pan", rows['ingredient_location_tomato']['en'])
+
+    def test_ingredient_goal_is_distinct_from_next_movement_and_ignores_future(self):
+        state = e.initial_state(1000, 3)
+        before = deepcopy(state)
+        rows = {row['id']: row for row in e.facts(state)}
+        self.assertIn('next input portion', rows['next_input_ingredient']['en'])
+        self.assertIn('order1', rows['next_input_ingredient']['en'])
+        self.assertNotIn('order3', rows['missing_ingredients']['en'])
+        self.assertNotEqual(e.human_advisor(state), 'interact')
+        self.assertEqual(before, state)
+        changed = deepcopy(state); changed['_future_orders'] = []
+        self.assertEqual(rows, {row['id']:row for row in e.facts(changed)})
+
+    def test_terminal_evidence_has_no_executable_wait_or_input_advice(self):
+        frames, _ = run(1000, 1)
+        rows = {row['id']: row for row in e.facts(frames[-1])}
+        self.assertIn('no executable next action', rows['ai_next_action']['en'])
+        self.assertIn('no next ingredient', rows['next_input_ingredient']['en'])
+        self.assertNotIn('human_available_option', rows)
+
+    def test_rescue_frees_hand_then_commits_to_ready_pan(self):
+        state = fixture(); ready_pot(state); state['ai'].update(x=6, y=3, facing='right', holding=item('tomato', iid='tomato'))
+        d = e.decide(state); self.assertEqual(d['reason_code'], 'free_for_rescue')
+        self.assertEqual(d['action'], 'interact')
+        state = e.step(state, 'wait')
+        self.assertEqual(state['policy_memory']['rescue_pot'], 'pot1')
+        self.assertIsNone(state['ai']['holding'])
+        for _ in range(4): state = e.step(state, 'wait')
+        self.assertEqual(state['ai']['holding']['stage'], 'cooked_protein')
+        self.assertEqual(state['metrics']['burnt'], 0)
+
+    def test_actual_route_distance_includes_facing(self):
+        state = fixture(); state['ai'].update(x=6, y=1, facing='up')
+        self.assertEqual(e._distance(state, 'ai', 'pot1'), 1)
+        state['ai']['facing'] = 'right'
+        self.assertEqual(e._distance(state, 'ai', 'pot1'), 0)
+        route = e._route((6, 1), 'right', 'pot2')
+        self.assertEqual(len(route) + 1, 6)
+
+    def test_impossible_rescue_is_not_claimed_possible(self):
+        state = fixture(); ready_pot(state, age=7); state['ai'].update(x=5, y=5, facing='down')
+        self.assertIn('cannot reach', e.decide(state)['reason_en'])
+
+    def test_queries_are_pure_and_hidden_future_is_not_observed(self):
+        state = e.initial_state(1000, 3); original = deepcopy(state)
+        decision, facts, public, advice = e.decide(state), e.facts(state), e.public_state(state), e.human_advisor(state)
+        self.assertEqual(original, state)
+        changed = deepcopy(state); changed['_future_orders'] = [{'id': 'secret', 'recipe': 'pepper_meat', 'arrival': 1, 'deadline': 9}]
+        self.assertEqual(e.decide(changed), decision); self.assertEqual(e.facts(changed), facts)
+        self.assertEqual(e.public_state(changed), public); self.assertEqual(e.human_advisor(changed), advice)
+        for forbidden in ('policy_memory', '_future_orders', 'seed', 'reason_en', 'reason_code', 'human_advisor'):
+            self.assertNotIn(forbidden, public)
+
+    def test_counterfactual_branch_does_not_change_source_or_decision(self):
+        state = fixture(); decision = e.decide(state); before, frozen = deepcopy(state), deepcopy(decision)
+        one, two = e.step(state, 'up', decision), e.step(state, 'wait', decision)
+        self.assertEqual(state, before); self.assertEqual(decision, frozen)
+        self.assertNotEqual(one['human'], two['human'])
+        self.assertEqual(one['ai'], two['ai'])
+
+    def test_actual_interaction_decision_and_evidence_are_specific(self):
+        state = fixture(); state['handoff'] = item(); state['ai'].update(x=5, y=3, facing='left')
+        decision = e.decide(state)
+        self.assertEqual(decision['action'], 'interact')
+        self.assertIn('prepared egg', decision['action_label_en'])
+        fact = next(row for row in e.facts(state) if row['id'] == 'ai_next_action')
+        self.assertIn('prepared egg', fact['en'])
+
+    def test_terminal_state_rejects_all_new_actions(self):
+        state = fixture(); state['terminal'] = True
         self.assertEqual(e.legal_actions(state), [])
-        with self.assertRaises(ValueError):
-            e.step(state, "wait")
+        for action in ('wait', 'left', 'interact'):
+            with self.assertRaises(ValueError): e.step(state, action)
+        self.assertEqual(e.decide(state)['reason_code'], 'terminal')
 
-
-class KitchenControllerAndEvidence(unittest.TestCase):
-    def test_group_absent_from_api_and_ai_cannot_operate_human_stations(self):
-        import inspect
-        self.assertNotIn("group", inspect.signature(e.decide).parameters)
-        state = fixture()
-        self.assertTrue(all(a not in e.legal_actions(state, "ai") for a in ("take_tomato", "chop", "plate", "serve")))
-        while not state["terminal"]:
-            state = e.step(state, "wait")
-        self.assertEqual(state["metrics"]["completed_orders"], 0)
-        self.assertEqual(state["next_item_id"], 1)
-
-    def test_decision_and_facts_ignore_hidden_future_and_do_not_mutate(self):
-        state = e.initial_state(1000, 3)
-        changed = deepcopy(state)
-        changed["_future_orders"] = [{"id": "SECRET_future", "ingredient": "onion", "arrival": 123, "deadline": 500}]
-        saved = deepcopy(state)
-        self.assertEqual(e.decide(state), e.decide(changed))
-        self.assertEqual(e.facts(state), e.facts(changed))
-        self.assertEqual(e.human_advisor(state), e.human_advisor(changed))
-        self.assertEqual(e.public_state(state), e.public_state(changed))
-        self.assertEqual(state, saved)
-
-    def test_public_projection_omits_decision_and_future(self):
-        state = e.initial_state(1000, 3)
-        state["policy_memory"] = {"hidden_marker": "SECRET_POLICY"}
-        view = json.dumps(e.public_state(state))
-        for forbidden in ("SECRET_POLICY", "policy_memory", "reason_code", "_future_orders", '"seed"', "emergency_rescues"):
-            self.assertNotIn(forbidden, view)
-        self.assertEqual(len(e.public_state(state)["orders"]), 2)
-
-    def test_known_order_only_appears_after_arrival(self):
-        state = e.initial_state(1000, 3)
-        upcoming = deepcopy(state["_future_orders"][0])
-        for _ in range(upcoming["arrival"] - 1):
-            state = e.step(state, "wait")
-        self.assertNotIn(upcoming["id"], [o["id"] for o in e.public_state(state)["orders"]])
-        state = e.step(state, "wait")
-        self.assertIn(upcoming["id"], [o["id"] for o in e.public_state(state)["orders"]])
-
-    def test_emergency_free_hand_then_rescue_is_persistent_and_real(self):
-        trajectory, decisions, _ = run(2000, 2, waits=(9, 10, 11, 12))
-        triggers = [(state, d) for state, d in zip(trajectory, decisions) if d.get("emergency")]
-        self.assertTrue(triggers)
-        before, decision = triggers[0]
-        self.assertEqual(before["turn"], 24)
-        self.assertEqual(decision["emergency"]["normal_plan_turns"], 9)
-        self.assertEqual(decision["emergency"]["burn_in"], 8)
-        self.assertEqual(decision["emergency"]["rescue_turns"], 5)
-        self.assertEqual(decision["action"], "interact_handoff")
-        self.assertEqual(decisions[25]["action"], "up")
-        self.assertTrue(any(ev["type"] == "pot_removed" and ev["pot"] == "pot1" for ev in trajectory[29]["events"]))
-        self.assertEqual(trajectory[-1]["metrics"]["burnt"], 0)
-        self.assertGreaterEqual(trajectory[-1]["metrics"]["emergency_rescues"], 1)
-
-    def test_buffered_cooked_soup_releases_after_counter_clears(self):
-        state = fixture()
-        state["ai"].update(x=6, y=3)
-        state["buffers"]["ai"] = item(stage="cooked")
-        state["handoff"] = item(item_id="block")
-        # An empty pot and prepared item is useful alternative work: AI accepts
-        # it rather than pretending that the blocked soup prevents all work.
-        self.assertNotEqual(e.decide(state)["action"], "wait")
-        state["handoff"] = None
-        self.assertEqual(e.decide(state)["action"], "interact_buffer")
-        state = e.step(state, "wait")
-        state = e.step(state, "wait")
-        state = e.step(state, "wait")
-        self.assertEqual(state["handoff"]["stage"], "cooked")
-
-    def test_unstarted_ingredients_prioritize_earliest_due_order(self):
-        state = fixture()
-        state["orders"][0].update(ingredient="tomato", deadline=80)
-        state["orders"][1].update(ingredient="onion", deadline=100)
-        state["handoff"] = item("tomato")
-        state["buffers"]["ai"] = item("onion", item_id="later")
-        self.assertEqual(e.decide(state)["goal"], "handoff")
-
-    def test_load_commitment_does_not_change_for_new_different_order(self):
-        state = fixture()
-        state["ai"]["holding"] = item("onion")
-        state["policy_memory"] = {"load_pot": "pot2"}
-        before = e.decide(state)
-        state["orders"].append({"id": "new_visible", "ingredient": "tomato", "arrival": 0, "deadline": 30, "status": "pending", "served_turn": None})
-        after = e.decide(state)
-        self.assertEqual(before["action"], after["action"])
-        self.assertEqual(after["goal"], "pot2")
-
-    def test_rules_and_comprehension_claims_match_engine(self):
-        self.assertEqual(len(e.rules()), len(e.rules("zh")))
-        self.assertEqual(len(e.comprehension()), 3)
-        state = fixture()
-        state["ai"].update(x=6, y=5)
-        state["pots"][1].update(status="ready", item=item(stage="cooked"), remaining=0, ready_age=5)
-        state["handoff"] = item("onion")
-        self.assertEqual(e.decide(state)["action"], "interact_pot2")
-        state = fixture()
-        state["ai"]["holding"] = item("onion", "cooked")
-        state["handoff"] = item("tomato")
-        self.assertEqual(e.decide(state)["goal"], "ai_buffer")
-        state["buffers"]["ai"] = item()
-        self.assertEqual(e.decide(state)["action"], "wait")
-        state["handoff"] = None
-        self.assertEqual(e.decide(state)["goal"], "handoff")
-
-    def test_all_facts_are_bilingual_and_no_implementation_jargon(self):
-        import re
-        trajectory, _, _ = run(2000, 2, waits=(9, 10, 11, 12))
-        for state in trajectory[::5]:
-            facts = e.facts(state)
-            self.assertEqual(len({f["id"] for f in facts}), len(facts))
-            for fact in facts:
-                self.assertTrue(fact["en"] and fact["zh"])
-                self.assertIsNone(re.search(r"\b(?:NN|PPO|logit|embedding|checkpoint|Q-value|policy head|reward shaping)\b", fact["en"], re.I))
+    def test_unusable_raw_and_expired_items_have_recovery_paths(self):
+        state = fixture(); state['orders'][0]['status'] = 'expired'
+        state['ai']['holding'] = item()
+        self.assertEqual(e.decide(state)['action'], 'discard')
+        state = e.step(state, 'wait')
+        self.assertIsNone(state['ai']['holding'])
 
 
 class KitchenFeasibility(unittest.TestCase):
-    def test_48_frozen_seeds_use_only_legal_human_actions_and_fixed_ai(self):
-        config = e._configuration()
-        dev, hold = config["development_seeds"], config["held_out_seeds"]
-        self.assertEqual(len(dev), 24)
-        self.assertEqual(len(hold), 24)
-        self.assertFalse(set(dev) & set(hold))
-        for task in (1, 2, 3):
-            for seed in dev + hold:
-                with self.subTest(task=task, seed=seed):
-                    trajectory, decisions, actions = run(seed, task)
-                    final = trajectory[-1]
-                    self.assertGreaterEqual(final["metrics"]["completed_orders"], 4 if task == 1 else 5)
-                    self.assertEqual(final["metrics"]["burnt"], 0)
-                    if task == 2:
-                        self.assertEqual(final["metrics"]["completed_orders"], 6)
-                        self.assertGreater(final["metrics"]["parallel_cooking_turns"], 0)
-                        # Item IDs prove both simultaneously cooking items
-                        # eventually appear in actual served events.
-                        overlap = next(s for s in trajectory if all(p["status"] == "cooking" for p in s["pots"]))
-                        in_both = {p["item"]["id"] for p in overlap["pots"]}
-                        served = {ev["item"]["id"] for s in trajectory for ev in s["events"] if ev["type"] == "served"}
-                        self.assertTrue(in_both <= served)
-                    for before, after, decision, action in zip(trajectory, trajectory[1:], decisions, actions):
-                        self.assertIn(action, e.legal_actions(before))
-                        self.assertEqual(after, e.step(before, action, decision))
-                        if action in e.MOVES:
-                            dx, dy = e.MOVES[action]
-                            self.assertEqual((after["human"]["x"], after["human"]["y"]), (before["human"]["x"] + dx, before["human"]["y"] + dy))
+    def test_all_frozen_scenarios_with_actual_fixed_ai(self):
+        cfg = e._configuration()
+        for seed in cfg['development_seeds'] + cfg['held_out_seeds']:
+            for task in (1, 2, 3):
+                with self.subTest(seed=seed, task=task):
+                    frames, events = run(seed, task)
+                    final = frames[-1]
+                    self.assertEqual(e.score(final)['task_score'], 100)
+                    self.assertLessEqual(final['turn'], {1: 240, 2: 360, 3: 360}[task])
+                    self.assertEqual(final['metrics']['burnt'], 0)
+                    self.assertGreater(final['metrics']['parallel_recipe_turns'], 0)
+                    self.assertEqual(final['metrics']['parallel_cooking_turns'], 0)
+                    self.assertEqual({event['pot'] for event in events if event['type'] == 'pot_loaded'}, {'pot1', 'pot2'})
+                    served = [event['item'] for event in events if event['type'] == 'served']
+                    component_ids = [identifier for food in served for identifier in food['components']]
+                    taken = [event['item']['id'] for event in events if event['type'] == 'ingredient_taken']
+                    self.assertEqual(sorted(component_ids), sorted(taken))
+                    self.assertEqual(len(component_ids), len(set(component_ids)))
+                    for food in served:
+                        self.assertEqual(food['container'], 'serving_plate')
+                        self.assertEqual(len(food['components']), 2)
 
-    def test_demo_is_real_has_six_captions_success_and_conflict(self):
+    def test_deterministic_replay_and_save_resume(self):
+        initial = e.initial_state(1000, 2); state = deepcopy(initial)
+        actions, decisions = [], []
+        for _ in range(90):
+            actions.append(e.human_advisor(state)); decisions.append(e.decide(state))
+            state = e.step(state, actions[-1], decisions[-1])
+        restored = json.loads(json.dumps(initial))
+        for action, decision in zip(actions, decisions): restored = e.step(restored, action, decision)
+        self.assertEqual(restored, state)
+        restored = json.loads(json.dumps(restored))
+        self.assertEqual(e.step(restored, e.human_advisor(restored)), e.step(state, e.human_advisor(state)))
+
+    def test_random_legal_human_actions_do_not_break_controller(self):
+        for seed in range(5):
+            rng = random.Random(seed); state = e.initial_state(1000 + seed, 2)
+            while not state['terminal']:
+                before = deepcopy(state)
+                state = e.step(state, rng.choice(e.legal_actions(state)))
+                self.assertEqual(state['turn'], before['turn'] + 1)
+                ids = [component for item_ in e._all_items(state) if item_ for component in item_['components']]
+                self.assertEqual(len(ids), len(set(ids)))
+
+    def test_demo_has_six_real_captions_and_complete_recipe(self):
         demo = e.demonstration()
-        self.assertEqual(len(demo["captions"]), 6)
-        self.assertEqual([f["turn"] for f in demo["frames"]], list(range(len(demo["frames"]))))
-        types = {ev["type"] for frame in demo["frames"] for ev in frame["events"]}
-        self.assertTrue({"served", "handoff_conflict", "chop", "pot_ready"} <= types)
-        self.assertGreater(demo["frames"][-1]["score"]["raw_score"], 0)
-        for caption in demo["captions"]:
-            self.assertIn(caption["index"], range(len(demo["frames"])))
-            self.assertTrue(caption["en"] and caption["zh"])
+        self.assertEqual(len(demo['captions']), 6)
+        self.assertEqual([frame['turn'] for frame in demo['frames']], list(range(len(demo['frames']))))
+        types = {event['type'] for frame in demo['frames'] for event in frame['events']}
+        self.assertTrue({'prepared', 'components_combined', 'plated', 'served'} <= types)
+        self.assertTrue(any(event['type'] == 'item_placed' and event.get('station', '').startswith('protein') for frame in demo['frames'] for event in frame['events']))
+        self.assertGreater(demo['frames'][-1]['score']['raw_score'], 0)
+
+    def test_comprehension_choices_match_independent_mechanisms(self):
+        en, zh = e.comprehension(), e.comprehension('zh')
+        self.assertEqual([row['answer'] for row in en], [0, 1, 0])
+        self.assertEqual([row['answer'] for row in zh], [0, 1, 0])
+        state = fixture(); state['ai']['holding'] = item('tomato')
+        self.assertEqual(e.decide(state)['reason_code'], 'store_early_vegetable')
+        state = fixture(); state['orders'][0]['recipe'] = 'pepper_meat'; ready_pot(state, 'vegetable', 'pepper')
+        state['pots'][0]['recipe'] = 'pepper_meat'
+        protein = item('meat', 'cooked_protein', pot='pot1'); protein['was_buffered'] = True
+        state['buffers']['protein']['pot1'] = protein
+        self.assertEqual(e.decide(state)['reason_code'], 'fetch_protein')
 
 
-if __name__ == "__main__":
-    unittest.main()
+if __name__ == '__main__': unittest.main()

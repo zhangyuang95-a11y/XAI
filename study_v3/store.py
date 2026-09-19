@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import json
+from contextlib import closing
 import re
 import secrets
 import time
@@ -34,6 +35,9 @@ EXPLANATION_ITEMS = [
  ('clear','The Task 2 answers were easy to understand.','Task 2 的回答容易理解。'),
  ('helpful','The Task 2 answers helped me choose my next action.','Task 2 的回答帮助我选择下一步动作。'),
 ]
+
+EXPORT_TABLES = ('participants','enrollments','instances','runs','frames',
+                 'questions','questionnaires','timings','releases')
 
 class Store:
     def __init__(self, settings, explainer=None):
@@ -328,20 +332,56 @@ class Store:
             db.execute('UPDATE pl3_questions SET displayed=? WHERE id=?',(time.time(),qid))
         return {'ok':True}
 
-    def export(self, release_id=None, mode=None):
-        tables=('participants','enrollments','instances','runs','frames','questions','questionnaires','timings','releases')
+    def iter_export(self, release_id=None, mode=None, batch_size=64):
+        """Read one consistent export without loading unrelated historical rows.
+
+        SQL predicates select related rows before transfer. Each query uses a
+        bounded cursor; callers must consume/close this iterator before sending
+        a slow client response so no database transaction follows that client.
+        """
+        clauses, values = [], []
+        if release_id:
+            clauses.append('i.release_id=?'); values.append(release_id)
+        if mode:
+            clauses.append('i.mode=?'); values.append(mode)
+        selected = ' AND '.join(clauses)
+        relationships = {
+            'participants': 'i.participant_id=r.id',
+            'enrollments': 'i.id=r.instance_id',
+            'instances': 'i.id=r.id',
+            'runs': 'i.id=r.instance_id',
+            'questions': 'i.id=r.instance_id',
+            'questionnaires': 'i.id=r.instance_id',
+            'timings': 'i.id=r.instance_id',
+            'releases': 'i.release_id=r.id',
+        }
+        ordering = {'participants':'r.id','enrollments':'r.instance_id','instances':'r.id',
+                    'runs':'r.id','frames':'r.run_id,r.turn','questions':'r.id',
+                    'questionnaires':'r.instance_id','timings':'r.id','releases':'r.id'}
         with self.db.transaction(read_only=True) as db:
-            result={name:db.all('SELECT * FROM pl3_'+name) for name in tables}
-            if release_id or mode:
-                selected=[r for r in result['instances'] if (not release_id or r['release_id']==release_id) and (not mode or r['mode']==mode)]
-                ids={r['id'] for r in selected};pids={r['participant_id'] for r in selected}
-                result['instances']=selected
-                result['participants']=[r for r in result['participants'] if r['id'] in pids]
-                for name in ('enrollments','runs','questions','questionnaires','timings'):
-                    result[name]=[r for r in result[name] if r['instance_id'] in ids]
-                run_ids={r['id'] for r in result['runs']}
-                result['frames']=[r for r in result['frames'] if r['run_id'] in run_ids]
-                release_ids={r['release_id'] for r in selected}
-                result['releases']=[r for r in result['releases'] if r['id'] in release_ids]
-            for row in result['participants']:row.pop('recovery_hash',None)
+            for name in EXPORT_TABLES:
+                # Recovery/session hashes never enter the export cursor.
+                fields = 'r.id,r.group_code,r.created' if name == 'participants' else 'r.*'
+                query = 'SELECT ' + fields + ' FROM pl3_' + name + ' r'
+                if selected:
+                    if name == 'frames':
+                        query += (' WHERE EXISTS (SELECT 1 FROM pl3_runs u JOIN pl3_instances i'
+                                  ' ON i.id=u.instance_id WHERE u.id=r.run_id AND ' + selected + ')')
+                    else:
+                        query += (' WHERE EXISTS (SELECT 1 FROM pl3_instances i WHERE '
+                                  + relationships[name] + ' AND ' + selected + ')')
+                query += ' ORDER BY ' + ordering[name]
+                with closing(db.iterate(query, tuple(values), batch_size=batch_size)) as rows:
+                    for row in rows:
+                        yield {'table':name,'record':row}
+
+    def export(self, release_id=None, mode=None):
+        """Compatibility for local callers that explicitly request a dictionary.
+
+        The HTTP endpoint uses iter_export and a disk file instead, so this
+        materialized convenience API cannot grow production response memory.
+        """
+        result = {name:[] for name in EXPORT_TABLES}
+        for item in self.iter_export(release_id, mode):
+            result[item['table']].append(item['record'])
         return result

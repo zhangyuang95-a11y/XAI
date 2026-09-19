@@ -1,5 +1,6 @@
 """Single same-origin HTTP service for all three turn-based domains."""
 import argparse
+from contextlib import closing, contextmanager
 import csv
 import hashlib
 import hmac
@@ -9,6 +10,7 @@ import logging
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import time
 from http import HTTPStatus
 from http.cookies import SimpleCookie
@@ -23,6 +25,33 @@ from .store import Store, StudyError, encode
 ROOT=Path(__file__).resolve().parents[1]
 WEB=ROOT/'study_v3/web'
 COOKIE='policylens_study_v3'
+
+@contextmanager
+def export_file(store, release_id=None, mode=None, csv_format=False):
+    """Serialize a consistent export to disk, releasing DB before HTTP output.
+
+    Both formats retain the existing logical API. A row, one database batch and
+    small I/O buffers are the only resident export data, regardless of history.
+    The anonymous temporary file is private and is deleted even on disconnect.
+    """
+    with tempfile.TemporaryFile(mode='w+b') as output:
+        text = io.TextIOWrapper(output, encoding='utf-8', newline='')
+        try:
+            writer = csv.writer(text) if csv_format else None
+            if writer:
+                writer.writerow(['table','record_json'])
+            with closing(store.iter_export(release_id, mode)) as records:
+                for item in records:
+                    if writer:
+                        writer.writerow([item['table'],encode(item['record'])])
+                    else:
+                        text.write(encode(item) + '\n')
+            text.flush()
+        finally:
+            # Leave the binary file alive for its bounded HTTP read loop.
+            text.detach()
+        output.seek(0)
+        yield output
 
 def manifest(settings):
     try: commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True,stderr=subprocess.DEVNULL).strip()
@@ -92,9 +121,12 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
             logging.info('%s %s',self.command,urlsplit(self.path).path)
         def reply(self,status,payload,content_type='application/json; charset=utf-8',token=None):
             data=payload if isinstance(payload,bytes) else encode(payload).encode()
+            self.reply_headers(status,len(data),content_type,token)
+            self.wfile.write(data)
+        def reply_headers(self,status,length,content_type,token=None):
             self.send_response(status)
             self.send_header('Content-Type',content_type)
-            self.send_header('Content-Length',str(len(data)))
+            self.send_header('Content-Length',str(length))
             self.send_header('Cache-Control','no-store, private')
             self.send_header('X-Content-Type-Options','nosniff')
             self.send_header('X-Frame-Options','DENY')
@@ -104,7 +136,15 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
             if token:
                 secure='; Secure' if settings.origin.startswith('https:') else ''
                 self.send_header('Set-Cookie',f'{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000{secure}')
-            self.end_headers(); self.wfile.write(data)
+            self.end_headers()
+        def reply_file(self,stream,content_type):
+            stream.seek(0,os.SEEK_END);length=stream.tell();stream.seek(0)
+            self.reply_headers(200,length,content_type)
+            try:
+                while chunk := stream.read(64 * 1024):
+                    self.wfile.write(chunk)
+            except (BrokenPipeError,ConnectionResetError):
+                self.close_connection=True
         def token(self):
             try:
                 c=SimpleCookie();c.load(self.headers.get('Cookie',''))
@@ -162,15 +202,10 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
                     self.reply(200,store.frame(self.token(),q.get('instance_id',[None])[0],q.get('run_id',[None])[0],turn));return
                 if path=='/api/study/admin/export':
                     if not self.admin():raise StudyError('researcher_access_required',403)
-                    data=store.export(q.get('release_id',[None])[0],q.get('mode',[None])[0])
-                    if q.get('format',['jsonl'])[0]=='csv':
-                        output=io.StringIO();writer=csv.writer(output);writer.writerow(['table','record_json'])
-                        for table,rows in data.items():
-                            for row in rows:writer.writerow([table,encode(row)])
-                        self.reply(200,output.getvalue().encode(),'text/csv; charset=utf-8')
-                    else:
-                        lines=[encode({'table':table,'record':row}) for table,rows in data.items() for row in rows]
-                        self.reply(200,('\n'.join(lines)+'\n').encode(),'application/x-ndjson; charset=utf-8')
+                    csv_format=q.get('format',['jsonl'])[0]=='csv'
+                    content_type='text/csv; charset=utf-8' if csv_format else 'application/x-ndjson; charset=utf-8'
+                    with export_file(store,q.get('release_id',[None])[0],q.get('mode',[None])[0],csv_format) as output:
+                        self.reply_file(output,content_type)
                     return
                 raise StudyError('not_found',404)
             except Exception as exc:self.failure(exc)

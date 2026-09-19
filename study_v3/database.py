@@ -6,6 +6,7 @@ import queue
 import sqlite3
 import threading
 import time
+import uuid
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS pl3_participants (
@@ -77,6 +78,32 @@ class Connection:
         return dict(row) if row is not None else None
     def all(self, sql, values=()):
         return [dict(row) for row in self.execute(sql, values).fetchall()]
+    def iterate(self, sql, values=(), batch_size=64):
+        """Fetch a bounded batch, including on PostgreSQL/transaction poolers.
+
+        A normal psycopg cursor buffers the entire result on execute(), even
+        when fetchmany() follows. A named, non-holdable cursor keeps that result
+        on the database server until this transaction consumes or closes it.
+        """
+        if not isinstance(batch_size, int) or not 1 <= batch_size <= 256:
+            raise ValueError('invalid_export_batch_size')
+        cursor = None
+        try:
+            if self.postgres:
+                cursor = self.connection.cursor(name='pl3_export_' + uuid.uuid4().hex,
+                                                withhold=False)
+                cursor.execute(sql.replace('?', '%s'), values if values else None)
+            else:
+                cursor = self.execute(sql, values)
+            while True:
+                rows = cursor.fetchmany(batch_size)
+                if not rows:
+                    break
+                for row in rows:
+                    yield dict(row)
+        finally:
+            if cursor is not None:
+                cursor.close()
 
 # Prefix-specific migration: never inspect or change legacy study tables.
 FLOAT_COLUMNS = {

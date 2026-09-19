@@ -12,7 +12,7 @@ from pathlib import Path
 import random
 
 DOMAIN = "kitchen"
-VERSION = "kitchen-v4.0.0"
+VERSION = "kitchen-v4.0.1"
 SCENARIO_VERSION = "kitchen-scenarios-v4.0.0"
 WIDTH, HEIGHT = 9, 7
 PREPARE_TURNS = CHOP_TURNS = 2
@@ -448,8 +448,29 @@ def _empty_plan(state):
         return _plan(state, pot["id"], f"Stove {pot['id'][-1]} still needs {pot['remaining']} cooking turns. No other currently available ingredient can start now, so I am waiting near this pan.",
                      f"炉灶 {pot['id'][-1]} 还需 {pot['remaining']} 回合；当前没有其他备料能开始下锅，我先在这口锅附近等待。", "watch_pot", at_target="wait")
     needed = next((RECIPES[p["recipe"]]["vegetable"] for p in state["pots"] if p["phase"] == "await_vegetable"), None)
-    reason_en = f"The next missing ingredient for an active pan is prepared {needed}." if needed else "I need prepared protein to start an available recipe; an early vegetable stays in storage."
-    reason_zh = f"进行中的锅还缺备好的{LABELS[needed][1]}。" if needed else "开始新菜需要备好的鸡蛋或肉；提前送来的蔬菜先留在暂存台。"
+    if needed:
+        reason_en = f"The next missing ingredient for an active pan is prepared {needed}."
+        reason_zh = f"进行中的锅还缺备好的{LABELS[needed][1]}。"
+    else:
+        next_input = _next_input_portion(state)
+        if next_input:
+            name_en, name_zh = LABELS[next_input["ingredient"]]
+            preparation = next_input["prepare_remaining"]
+            reason_en = f"The next input to work on is {name_en} for {next_input['order_id']}. " + (f"It needs {preparation} preparation interactions before handoff." if preparation else "It is prepared and still needs to reach the handoff counter.")
+            reason_zh = f"下一份需处理的原料是 {next_input['order_id']} 的{name_zh}。" + (f"交接前还需备料 {preparation} 次。" if preparation else "它已备好，还需要送到交接台。")
+        else:
+            # All required portions can already be inside a completed dish.
+            # Waiting then concerns the human's plating/serving, not new input.
+            held = state["human"]["holding"]
+            if held and held["stage"] == "plated" and _useful(state, held):
+                reason_en = f"You are holding the finished dish for {held['order_id']} on a serving plate. It is ready for you to serve; no additional ingredient is needed now."
+                reason_zh = f"你拿着 {held['order_id']} 已装正式餐盘的成品，可以去上菜；现在不需要再递原料。"
+            elif held and held["stage"] == "finished" and _useful(state, held):
+                reason_en = f"You are holding the finished dish for {held['order_id']} in its output container. Transfer it to a serving plate, then serve it; no additional ingredient is needed now."
+                reason_zh = f"你拿着 {held['order_id']} 出锅容器中的成品，需要先转装正式餐盘再上菜；现在不需要再递原料。"
+            else:
+                reason_en = "All ingredient portions required by the visible orders are already present. No additional ingredient is needed now; the remaining handoff, plating or serving must be completed."
+                reason_zh = "当前订单所需的份料已经齐全，现在不需要再递原料；还需完成已有食物的交接、正式装盘或上菜。"
     return _plan(state, "handoff", reason_en + " I am waiting near the handoff counter.", reason_zh + "我在交接台附近等待。", "await_ingredient", at_target="wait")
 
 

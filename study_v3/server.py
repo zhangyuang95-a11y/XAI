@@ -17,7 +17,7 @@ from urllib.parse import urlsplit, parse_qs
 
 from . import RELEASE_ID
 from .config import Settings
-from .registry import MODULES, engine
+from .registry import MODULES, engine, demonstration
 from .store import Store, StudyError, encode
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -52,6 +52,11 @@ class StudyHTTPServer(ThreadingHTTPServer):
         if hasattr(self,'store'):self.store.db.close()
 
 def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
+    # Cold demonstrations perform complete simulated trajectories. Build them
+    # before opening the database or accepting requests so enrollment/recovery
+    # only read the cache and never hold a transaction while doing this work.
+    for domain in MODULES:
+        demonstration(domain)
     if explainer is None:
         try:
             from .qa import Explainer
@@ -142,7 +147,7 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
                 if path in assets:
                     name,mime=assets[path];self.reply(200,(WEB/name).read_bytes(),mime);return
                 if path=='/health':
-                    with store.db.transaction() as db:db.execute('SELECT 1')
+                    with store.db.transaction(read_only=True) as db:db.execute('SELECT 1')
                     self.reply(200,{'status':'ok','service':'policylens-three-domain',
                         'release_id':RELEASE_ID,'study_ready':store.ready,
                         'domains':{d:'/'+d+'/' for d in MODULES}});return

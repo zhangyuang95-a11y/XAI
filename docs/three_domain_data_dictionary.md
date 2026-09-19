@@ -1,6 +1,6 @@
 # Three-domain data dictionary
 
-Schema and serializer snapshot for `policylens-three-domain-20260920.v1`,
+Schema and serializer snapshot for `policylens-three-domain-20260920.v2`,
 2026-09-20. The authoritative definitions are `study_v3/database.py`,
 `study_v3/store.py` and each versioned domain engine. Tables use the `pl3_`
 prefix to avoid overwriting legacy study tables. Creating them is additive;

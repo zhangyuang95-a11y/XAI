@@ -1,6 +1,6 @@
 # Three-domain question answering: evidence, tests and deployment status
 
-Implementation: `study_v3/qa.py`, version `study-evidence-qa.v3.0`. Interface: `Explainer(settings).answer(engine, state, decision, question, language, previous_dialogue, public_history)`. It returns `status`, `answer`, `evidence_ids`, `language` and a researcher-only `audit`. The shared store owns participant authorization and removes audit data from participant responses. This service never issues real gameplay actions.
+Implementation: `study_v3/qa.py`, version `study-evidence-qa.v3.1`. Interface: `Explainer(settings).answer(engine, state, decision, question, language, previous_dialogue, public_history)`. It returns `status`, `answer`, `evidence_ids`, `language` and a researcher-only `audit`. The shared store owns participant authorization and removes audit data from participant responses. This service never issues real gameplay actions.
 
 ## Semantic service and truthful composition
 
@@ -29,6 +29,8 @@ Question fixtures are loaded from `configs/study_v3_qa_cases.json` and its expli
 The fixture manifest includes **218 cases: 64 Pong, 80 Warehouse and 74 Kitchen**, each domain with English and Chinese questions. Pong cases span ten different physical situations, safe and costly detours, coincident arrivals, impossible cooperative coverage, necessary side changes, movement bounds, multi-step assumptions, ambiguity and false premises. Warehouse cases cover real waiting, clearing a route, crossing, charging, pickup, delivery, conflict, inability to move, follow-up, history and counterfactual situations. Kitchen uses real fixed-AI trajectories for cooking, deadlines, handoff conflicts, emergency hand clearing, storage, legal options, ambiguity, follow-up and counterfactual questions. Its fixture generator is maintained by the Kitchen implementation so changed mechanics cannot silently leave stale expectations.
 
 `python3 -m pytest tests/test_study_v3_pong.py tests/test_study_v3_qa.py -q` passed **279 tests**: 28 Pong engine tests and 251 question/evidence/protocol tests, including all 218 domain fixtures. A separate scan of bilingual participant-facing evidence generated for every fixture found none of the checked internal terms (`NN`, `logit`, `embedding`, `checkpoint`, `reward shaping`, private memory/schedule names, or the Chinese neural-network term). This scan supplements the semantic/projection tests; it is not proof that arbitrary untested text is flawless.
+
+After the production role-binding fixes, the QA suite separately passed **264 tests** in 3.48 seconds. The added regressions cover authoritative human advice, historical AI reasons, wrong-actor evidence, human simulation branches, speaker perspectives, and real HTTP rejection of missing, null or unknown subject/purpose values. This later count is protocol/composition evidence, not additional real-provider questions or a replacement for the earlier 279-test result.
 
 ## Independent review
 
@@ -90,3 +92,94 @@ python3 -m study_v3.qa --evaluate --domain kitchen --limit 10
 The evaluator samples fact, counterfactual and clarification categories in round-robin order, processes requests sequentially and returns a failing exit code for unavailable or mismatched cases. Its reports still mark human review as necessary: exact evidence selection cannot fully measure clarity, relevance or appropriate ambiguity handling. These commands load actual runtime settings and never substitute an injected plan. They must not be called in a large uncontrolled retry loop.
 
 Browser/API acceptance through the shared study remains a separate integration gate. Initial and delivery-time authorization, Task-2 termination, multi-tab revocation, removal of old answers, and researcher-only audit export are enforced and tested by shared study integration. Read-only review found two issues in shared storage that the task owner fixed: task-run summaries now use the domain public score projection, and revoked completed answers commit their audit before the request raises its authorization error. Semantic service readiness must reflect its real configuration and deployment validation; transient errors remain visible and auditable.
+
+
+## Production acceptance and role correction (2026-09-20)
+
+The first deployed release, `policylens-three-domain-20260920.v1` at commit
+`6452ea6`, completed all six real HTTP study flows. Its 15 real production QA
+requests yielded 12 answers and three 25-second provider timeouts. Independent
+review checked all saved states, decisions and fact catalogs, and recomputed
+all three counterfactual branches exactly. It found three substantive Warehouse
+semantic failures: missing a concrete human recommendation, comparing the AI's
+wait when the follow-up concerned the human, and explaining the human's charging
+instead of the AI's selected historical intention. Two Kitchen answers were
+factually usable but weak in causal detail or subject clarity. Those failures
+remain in their original audit and are not counted as successful answers.
+
+Version `study-evidence-qa.v3.1`, released separately as study v2, adds explicit
+semantic subject and purpose fields, validates their actual enumerated values
+on provider responses (missing, null and unknown values are rejected), and
+binds AI action/reason requests to that selected frame's actual decision. Human
+advice includes a concrete legal action from the unchanged human-only advisor;
+its state is copied and checked for mutation. Human comparisons use human
+simulation branches and cannot borrow AI alternative-action evidence. User
+pronouns and evidence pronouns have their distinct perspectives stated in the
+semantic instruction. Exactly one model repair is permitted for an evidence ID
+or subject mismatch, preserving the original plan in the audit.
+
+The bounded provider timeout is now 45 seconds. A single repair can therefore
+bring a request close to 90 seconds; the game does not advance and no database
+transaction is held during that wait. This improves tolerance of slow responses
+without claiming that availability or arbitrary-question understanding is
+perfect. The participant's pending-question lease remains 120 seconds.
+
+A separate local replay of five original problem questions made six actual
+provider calls. All five eventually returned reviewed answers; the Pong Chinese
+question required one model repair and took 48.75 seconds. The Warehouse advice
+now names the human's upward move, the follow-up compares that move with human
+waiting, and its historical answer names the AI's actual safe-route wait. The
+Kitchen follow-up compares the human alternatives. The original Pong English
+follow-up was not included in that six-call local budget. It was subsequently
+tested in the production v2 batch below and produced an excessive clarification;
+that failed response remains in the record. Equal short-window scores are
+reported as equal; position changes do not prove a superior final score.
+
+A native Chrome production Pong A test additionally submitted the real English
+question “What will you do next, and why?” at Task 2 turn 0. The rendered answer
+correctly identified the AI's left move to lane 6, the human's required lane 2
+and the five-turn deadline. The turn stayed at zero. Task 2's terminal action
+removed the answer and question controls in both open study tabs, before Next;
+Task 3 and the questionnaire retained no explanations. This is browser test
+evidence with a preview identity, not a human performance result.
+
+## Final production v2 QA review (2026-09-20)
+
+The deployed release `policylens-three-domain-20260920.v2`, commit `68a50da`, was independently reviewed using **15 new real production requests** and their completed server audits. Its source SHA-256 is `387513ef55e9d2c5ca68c061159b389bc281b5bad88ef4972a399ea960de9858`. These were automated `mode=test` identities and actions on the actual website, not human participants. They are separate from the 26 earlier local attempts, the v1 production batch, and the five-question local repair check.
+
+Delivery status was **14 answered, one clarification, zero unavailable**. Independent semantic review classified the same 15 requests as **10 satisfactory, four factually grounded but incomplete or repetitive, and one excessive clarification**. An `answered` status was not counted automatically as satisfactory.
+
+| Domain | Satisfactory | Grounded but limited | Failed follow-up |
+|---|---:|---:|---:|
+| Warehouse | 3 | 2 | 0 |
+| Cooperative Pong | 4 | 0 | 1 |
+| Cooperative Kitchen | 3 | 2 | 0 |
+| Total | 10 | 4 | 1 |
+
+The reviewed v2 answers corrected the material v1 actor errors: Warehouse now gives a legal human upward move, compares that human move with human waiting, and explains the selected historical AI safe-route wait rather than the human's charging. All three historical questions address the actual saved AI decision. The review observed no incorrect game number or human/AI action substitution in these 15 responses.
+
+The remaining limitations are concrete:
+
+- **Warehouse Chinese advice:** the upward move is legal and explicit, but its explanation cites correct charger feasibility and the AI's goal rather than directly explaining progress toward the human's delivery.
+- **Warehouse and Kitchen “why better” follow-ups:** both correctly simulate human up versus human wait. The positions differ, but both one-turn task-score changes are zero. The answers state the horizon limit and make no false score-advantage claim, yet only partly answer why the action would be better beyond that window.
+- **Kitchen Chinese advice:** its facts are correct, but it repeats the upward recommendation and weakly explains that action's role in ingredient preparation.
+- **Pong follow-up:** after the answer recommends waiting, “Why is that better than waiting here?” receives a generic unsupported-question clarification. The question is already in context and compares the same human action; the answer should acknowledge that equivalence. This is a semantic failure, not a passed clarification.
+
+Grounding was independently checked against the saved inputs. All 15 input-state hashes, decisions and evidence catalogs matched reconstruction. Every selected factual paragraph matched its authorized bilingual fact. All **10 simulated branches** across five comparison/counterfactual answers recomputed field for field, including final positions, events, score changes, assumptions and the unchanged source-state hash. Some answers add an explicitly labeled comparison beyond the requested branch; these extra branches were also checked. Those checks establish factual grounding and simulation consistency, not full semantic understanding.
+
+English and Chinese followed the requested language, and the reviewed answers contained no neural-network terminology or private policy representation. Minor singular/plural errors remain in English. No long-term score improvement is inferred from equal short-window scores.
+
+Observed answer-service durations ranged from **1.830 to 38.007 seconds**, with a median of **9.234 seconds**. None of these 15 final audits contained a repair attempt. Unlike v1's requests, which could overlap across domains and used a 25-second timeout, the v2 questions were serialized and used 45 seconds. Therefore, zero unavailable results in this batch cannot be attributed solely to the semantic fixes or generalized to concurrent participant use.
+
+The detailed independent record is `analysis/three_domain_build_20260920/production_qa_review_v2.md` in the parent workspace. Its private evidence bundle SHA-256 is `0de3dc618e10aa1e7dd2e29a8854117ae598e42347ed73cfbe502558fefa2635`; the companion numeric review explicitly does not claim semantic correctness. The original v1 failures remain preserved separately.
+
+### Separate Pong contextual follow-up supplement
+
+Two additional authorized production questions were independently reviewed after the original 15. Both final answers were satisfactory; they are reported separately and **do not replace or erase the failed same-action follow-up** above.
+
+1. “What will you do next, and why?” correctly explains an AI left move from lane 7 to catch an ordinary ball at lane 6 in two turns, followed by a return to its team-ball lane 7 before the five-turn arrival. The human is assigned lane 3; the stated ball values are one and three points.
+2. “For that plan, which contact lane do I need to cover when the team ball arrives?” directly answers human lane 3 and AI lane 7. Its completed audit confirms that the preceding question was supplied as context. The initial plan failed actor-evidence validation and succeeded after its **single bounded internal repair**; this is not two unconditionally correct initial plans.
+
+Both final answers matched the saved state, recomputed decision, complete catalog and selected text. An additional offline reviewer simulation confirmed that holding human lane 3 for those five turns lets the described AI catch both balls for four raw points. That branch was an offline consistency check, not a production gameplay action or human outcome. The supplement bundle SHA-256 is `2bc135c98d99c31e3eea2376509f3e1c7686756abbd04e4463394c704fbc9846`.
+
+These bounded production samples do not establish arbitrary-question correctness, concurrent service reliability, human comprehension, or the 50% Task 2 human improvement target. Deployment readiness, A/B access controls, browser behavior and restart persistence are reported separately by the deployment and shared validation records.

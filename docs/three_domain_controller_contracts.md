@@ -1,6 +1,6 @@
 # Three-domain controller and transition contracts
 
-Implementation snapshot for `policylens-three-domain-20260920.v1`, prepared on
+Implementation snapshot for `policylens-three-domain-20260920.v2`, prepared on
 2026-09-20. This document describes the new engines. It is not evidence that a
 particular Render deployment passed acceptance or that explanations improved
 human scores. See the separate validation and deployment reports for those

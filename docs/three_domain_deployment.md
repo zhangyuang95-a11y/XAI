@@ -1,155 +1,157 @@
-# Three-domain deployment record and remaining gate
+# Three-domain production deployment
 
-This document separates the implementation candidate from the deployed website.
-The candidate release is `policylens-three-domain-20260920.v1`.
-**This candidate has not yet been deployed to the production URL.**
+The three-domain release is live and public pilot enrollment is open at
+https://policylens-warehouse-study.onrender.com/. This is an actual Render
+deployment, not a local demonstration. The Task 2 human improvement target of
+50% has **not been measured**. All acceptance records use test/preview identities.
 
-## Verified existing service
+## Deployed identity
 
-- Render service: `policylens-warehouse-study`, ID `srv-da66ggbl550s738j2q9g`.
-- Existing project: `prj-da66gg6k1f9s73974rc0`; Singapore, Python 3, Free.
-- Repository: `zhangyuang95-a11y/XAI`; configured branch `sep2-rollback-20260902`.
-- Last successful/live commit at inspection: `af97df8589080a6b1b79bad591059b4d52fe33ee`.
-- Live deploy: `dep-damp8pm7bikc73bv9fjg`.
-- Root directory: blank (repository root).
-- Build: `python -m pip install -r requirements-render.txt`.
-- Start: `python -m ui.domain_hub_server --host 0.0.0.0 --port $PORT`.
-- Current homepage is the prior Chinese two-domain hub. Its `/health` identifies
-  `policylens-domain-hub`, Warehouse `development-preview`, and Pong
-  `pong-continuous-24x14-v7`. This is evidence of the old service, not v3 deployment.
+| Field | Verified value |
+|---|---|
+| Release | `policylens-three-domain-20260920.v2` |
+| Deployed commit | `68a50da906e30a3ac2f7712858cc2b19d2cd159a` |
+| Canonical source SHA-256 | `387513ef55e9d2c5ca68c061159b389bc281b5bad88ef4972a399ea960de9858` |
+| Final pilot configuration deploy | `dep-dandd3mgekts738jt3lg` |
+| Render service | `policylens-warehouse-study`, `srv-da66ggbl550s738j2q9g` |
+| Region / runtime / plan | Singapore / Python 3 / existing Free plan |
+| Branch | `codex/three-domain-study-live-20260920` |
+| Root directory | Repository root (blank setting) |
+| Build | `python -m pip install -r requirements-render.txt` |
+| Start | `python -m ui.domain_hub_server --host 0.0.0.0 --port $PORT` |
+| Health path | `/health` |
+| Automatic deployment | Off; releases deployed manually at a specific commit |
 
-The candidate preserves the existing entry command. Executing the hub module
-now dispatches to `study_v3.server`; legacy code remains available with
-`POLICYLENS_LEGACY_HUB=1`. Rolling back to the previous deployed commit also
-restores its original entry behavior. The candidate adds PostgreSQL support
-without removing legacy dependency pins.
+The Render dashboard reported the final deploy **Live** on 2026-09-20 (Asia/Shanghai).
+The public `/api/release` independently reported the same commit and source hash,
+`mode=pilot`, `storage_persistent=true`, `semantic_qa_configured=true`,
+`deployment_validation_complete=true`, and `study_ready=true`. `/health` reported
+`status=ok` and `study_ready=true`. The timestamped response is saved outside Git
+in `analysis/three_domain_build_20260920/production_release_v2_pilot.json` in the
+parent workspace. Later documentation-only commits do not change this deployed
+commit or imply another deployment.
 
-Target routes on the **same existing service** are `/`, `/warehouse/`, `/pong/`,
-`/kitchen/`, `/api/study/*`, `/health` and `/api/release`. The application listens
-on Render's `PORT`. It serves all assets and APIs from the same origin.
+The public routes are `/`, `/warehouse/`, `/pong/`, and `/kitchen/`. Assets and
+`/api/study/*` share the same origin. All domains use Demo → Task 1 → Task 2 →
+Task 3 → Questionnaire, English by default, and the same persistent explicit
+Chinese language switch. Only active Group A / Task 2 can ask or read answers;
+finishing Task 2 already revokes access before the participant clicks Next.
 
-## Existing resources and backup evidence
+## Acceptance and persistence
 
-The separate existing `policylens-kitchen-study` service has a Neon PostgreSQL
-connection and a DeepSeek semantic service configured. Only necessary settings
-were obtained via the logged-in Render dashboard's normal environment export.
-Secrets and row backups are held outside the repository in a restricted private
-folder; their values do not appear in source, this document, URLs, or logs.
+The frozen v2 source passed 538 tests and 144 subtests. Six actual production
+HTTP flows (three domains × two groups) completed all tasks and questionnaires:
+1,695 requests including the recovery-probe capture, 1,450 human-role test moves,
+18 task runs and six questionnaires, with no flow/state/permission failures.
+Real provider questions, private audit and researcher export were exercised on
+the same website. This is software acceptance evidence, not human-study evidence.
 
-The existing Neon database was read successfully. A full logical row backup of
-its 13 public tables was subsequently completed through the official Neon
-serverless driver using a **read-only, repeatable-read transaction**. Direct
-local port-5432 backup attempts failed and were retained as incomplete attempts;
-they were not counted as successful backups. The completed JSONL backup is
-34,256,578 bytes. A separate column/type/default catalog was also saved.
-`analysis/three_domain_build_20260920/legacy_database_backup_receipt.json` in the
-parent workspace records counts, timestamp and SHA-256. Legacy database tables
-have not been altered by this implementation.
+The native Chrome production check completed the full Pong A workflow and
+checked language persistence, select/confirm keyboard input, a real Task 2
+answer, two-tab terminal revocation, Task 3 without explanations, questionnaire
+draft recovery and completed-state recovery. Kitchen B's six demo steps and
+five real task moves were also visually checked on v2. Browser coverage is
+recorded precisely in `production_browser_acceptance.json`; it is not claimed
+that all six flows were completed manually in the browser.
 
-After the backup, the actual Python/psycopg database adapter passed 14 real
-PostgreSQL checks through a temporary loopback-to-Neon WSS transport. These
-created only the additive `pl3_*` schema and a dedicated transport-test record,
-and covered commit, rollback, read-only enforcement, pooling and close/reopen
-recovery. The temporary bridge was shut down. This verifies the adapter against
-the real database, but Render's direct connection and redeployment recovery
-still require the production checks below.
+A real Render **Restart service** event at approximately 02:28 on 2026-09-20
+preserved the dedicated Warehouse probe at revision 10 / turn 3 with its exact
+state hash. The next real action persisted as revision 11 / turn 4, survived
+refresh and appeared in researcher export. All six completed instances, 18 task
+runs and six questionnaires remained. The immutable first restart receipt is
+`production_restart_probe_v2_receipt.json`. The subsequent configuration-only
+deploy at the same source commit also passed: revision 11 / turn 4 recovered
+exactly, then a real action advanced to revision 12 / turn 5 and appeared in
+fresh state and export. The six completed instances, 18 runs and six
+questionnaires persisted, as did the separate Pong Task 2 instance and its two
+answers. This second check is independently recorded in
+`production_pilot_redeploy_persistence_receipt.json`; the first receipt was not
+overwritten. No fake pilot participant was created for acceptance.
 
-This backup covers the existing **Kitchen database only**. It does not include
-old Warehouse files or Pong browser storage:
+Production uses the existing Neon PostgreSQL database directly from Render,
+with additive `pl3_*` tables, bounded connections, transactions and stored
+recovery data. Existing legacy tables were not modified. PostgreSQL is the
+persistent store; no claim is made that Render Free temporary files survive.
+The existing Free plan may sleep during inactivity; its dashboard warns of cold
+starts of 50 seconds or more. No paid plan or new paid resource was purchased.
 
-- Old Warehouse writes completed results under
-  `output/study_records/warehouse/three-task-explanation.v1/` on the running
-  instance. Active sessions are only in its process memory. No full HTTP export
-  endpoint exists in the old deployed implementation.
-- The Render dashboard confirms that Shell/SSH is unavailable on its Free
-  compute plan. Accessing a fresh process after replacement would not recover
-  the old in-memory session pool or reliably recover the old temporary files.
-- Old Pong questionnaire data is mainly in participants' browser localStorage,
-  while some run/review data is in sessionStorage and server memory. The new
-  frontend uses a separate language preference key and never clears old browser
-  keys, but the server backup cannot collect participants' browser data.
+## Data preservation and authorization
 
-**Production replacement is withheld until the owner confirms an existing
-backup or confirms that old transient records are disposable test data.** This
-implements the task brief's explicit instruction to protect existing research
-records before deploying. It is not a claim that those records were backed up.
+The owner explicitly confirmed that Warehouse has no data requiring backup and
+instructed deployment to this existing URL. That resolved the previous old
+Warehouse transient-data gate; no old Warehouse backup is claimed.
+
+The separate existing Kitchen database was already backed up before deployment:
+13 tables, 13,663 rows, 34,256,578 bytes, matching counts and SHA-256 independently
+checked. The backup and credential files are outside Git in a restricted private
+folder. Existing browser-held Pong records were not deleted or migrated; the new
+frontend does not clear their keys. The original working checkout and its
+pre-existing changes were preserved; implementation used `XAI-study-v3`.
 
 ## Runtime configuration
 
-The implementation expects the following environment variables on the target
-service. None of these variables' secret values should be committed or placed
-in client code.
-
-| Name | Purpose |
+| Name | Purpose / current setting |
 |---|---|
-| `POLICYLENS_DATABASE_URL` or `DATABASE_URL` | Existing PostgreSQL connection. Only additive `pl3_*` tables are used. |
-| `POLICYLENS_ADMIN_TOKEN` | Researcher-only preview creation and export. |
+| `POLICYLENS_DATABASE_URL` | Existing PostgreSQL connection; server-only secret. |
+| `POLICYLENS_ADMIN_TOKEN` | Existing researcher credential; preview/test creation and scoped export. |
 | `POLICYLENS_PUBLIC_ORIGIN` | `https://policylens-warehouse-study.onrender.com` |
-| `POLICYLENS_MODE` | Enrollment gate and public mode label. Readiness requires `pilot`; `preview` and `test` keep public enrollment closed. This release does not support `formal`. |
-| `POLICYLENS_LLM_BASE_URL` | Existing authorized semantic endpoint. |
-| `POLICYLENS_LLM_MODEL` | Model configured for the validated semantic endpoint. |
-| `POLICYLENS_LLM_API_KEY` | Server-side provider authentication. |
-| `POLICYLENS_STUDY_VERIFIED` | Set to `1` only after deployment acceptance checks. |
-| `POLICYLENS_STORAGE_MODE` | Only for explicitly verified persistent SQLite disk use; not needed for PostgreSQL. |
+| `POLICYLENS_MODE` | `pilot`; `preview`/`test` close public enrollment. |
+| `POLICYLENS_STUDY_VERIFIED` | `1`, set after acceptance and actual restart recovery. |
+| `POLICYLENS_LLM_BASE_URL` | Existing `https://api.deepseek.com` endpoint. |
+| `POLICYLENS_LLM_MODEL` | Existing `deepseek-v4-flash` model. |
+| `POLICYLENS_LLM_API_KEY` | Server-only provider credential. |
 
-The known existing provider uses `https://api.deepseek.com` and
-`deepseek-v4-flash`. Local real-provider testing used the workstation's existing
-network proxy; **do not copy that local proxy into Render**.
+Existing legacy environment variables and secret file were retained. Credentials
+are not in source, browser code, public release responses or URLs. The local
+workstation proxy was not copied to Render.
 
-Missing persistence, semantic configuration, researcher access, or the verified
-flag keeps pilot enrollment closed. Verified startup performs a real semantic
-probe. The latest unavailable QA result closes new pilot enrollment until an
-actual successful QA request recovers availability. Database failures fail the
-health request rather than pretending research readiness. `/health` distinguishes
-process health and study readiness; `/api/release` exposes release identity and
-current readiness without secrets.
+Verified startup runs an actual semantic-service probe. Missing configuration,
+persistence or validation keeps public enrollment closed. A latest unavailable
+QA result closes new enrollment until a real successful question recovers
+availability. Database errors fail health checks. Readiness is a runtime signal,
+not a guarantee that every arbitrary question will be understood correctly.
 
-## Final deployment and acceptance steps
-
-1. Resolve the old transient-data gate above and retain the backup receipt.
-2. Finish candidate tests and commit only the isolated worktree changes.
-3. Push the candidate branch. A push alone is not a deployment.
-4. Preserve existing target environment variables; add the validated v3 settings
-   using existing authorized resources. Start in preview/unverified mode.
-5. Use Render **Manual Deploy → Deploy a specific commit** for the candidate SHA
-   in the same repository, or update the configured branch and explicitly deploy.
-   Preserve the existing service ID and public URL. Confirm a successful deploy.
-6. Verify the production `/api/release` commit/source hash and all three routes.
-   Finish all three domains' A/B flows with authenticated `test` identities;
-   perform real English/Chinese/follow-up/history/counterfactual QA through
-   active A/Task 2, and verify terminal/Task 3 revocation.
-7. Verify PostgreSQL writes, researcher export, and a dedicated test instance's
-   recovery after a real application restart/redeployment. No fake participant
-   records may be labeled human pilot results.
-8. Only then set `POLICYLENS_MODE=pilot` and `POLICYLENS_STUDY_VERIFIED=1`, deploy the same immutable release
-   with the approved configuration, and check real readiness again.
-
-A configuration-only deployment does not change the release's rules/source.
-Any code/rule/scenario change after release freeze requires a new release ID.
-Existing instances of a different release must receive a clear old-version
-message, not silently adopt new task rules. The retained `pl3_*` data remains
-separate from old tables when the old commit is restored.
+The original 15 v2 production questions were independently reviewed: ten were
+satisfactory, four were factual but incomplete/repetitive, and one was an
+unnecessary clarification. Two separately reported Pong follow-ups were finally
+correct, one after an internal bounded repair. These limitations and prior
+failures are retained in `three_domain_qa_evaluation.md`; they are not reported
+as 17 perfect answers or as proof of a human performance effect.
 
 ## Researcher export
 
-After the new service is actually deployed and configured, set
-`POLICYLENS_ADMIN_TOKEN` in the researcher's shell and run:
+Set `POLICYLENS_ADMIN_TOKEN` privately in the researcher's shell, then run:
 
 ```sh
-python3 scripts/export_study_v3.py --mode test
-python3 scripts/export_study_v3.py --mode pilot --release-id policylens-three-domain-20260920.v1
+python3 scripts/export_study_v3.py --mode test --release-id policylens-three-domain-20260920.v2
+python3 scripts/export_study_v3.py --mode pilot --release-id policylens-three-domain-20260920.v2
 ```
 
-Exports are read-only, avoid credentials in URLs, and create private local files.
-The default JSONL preserves all research records and private QA audit.
-`--format csv` produces `table,record_json`; it does not invent a flattened
-analysis dataset. Reusing an existing output filename is refused.
+Exports use authenticated headers, are read-only, and create private local files.
+The default JSONL preserves all records and private QA audit. `--format csv`
+produces `table,record_json`, not a flattened analysis dataset. Existing output
+filenames are refused. Test/preview records must stay excluded from human pilot
+analyses. Filter by both mode and release, and follow the frozen analysis protocol.
 
-## Platform references checked during this task
+## Maintenance and rollback
 
-Render documents [manual/specific-commit deployment](https://render.com/docs/deploys),
-[Free service storage/access limits](https://render.com/docs/free), and
-[persistent disk requirements](https://render.com/docs/disks). Neon documents its
-[official HTTP/WebSocket driver](https://neon.com/blog/serverless-driver-ga).
-These platform references inform the deployment and backup procedure; they are
-not evidence that this candidate has been deployed or that a human effect exists.
+A push is not a deployment because automatic deployment is off. For a release,
+complete acceptance, choose Render **Manual Deploy → Deploy a specific commit**,
+then verify `/api/release`, `/health`, recovery and export. Code/rule/scenario
+changes require a new release ID; never reuse an existing ID with changed source.
+Old instances must receive a clear version message rather than silently adopt
+new rules.
+
+The previous pre-v3 commit is `af97df8589080a6b1b79bad591059b4d52fe33ee`
+(previous deploy `dep-damp8pm7bikc73bv9fjg`). It can be selected explicitly for
+rollback using the preserved original start command and legacy environment.
+Rollback does not remove the new `pl3_*` research records, but the old interface
+cannot resume a v3 instance. Close enrollment and retain/export affected data
+before any intentional release change. The legacy entry also remains available
+with `POLICYLENS_LEGACY_HUB=1`; do not set it for this v3 deployment.
+
+Platform references consulted during implementation:
+[Render manual deployment](https://render.com/docs/deploys),
+[Free service limits](https://render.com/docs/free), and
+[Neon serverless driver](https://neon.com/blog/serverless-driver-ga).
+Deployment evidence is the actual dashboard and public response receipts above.

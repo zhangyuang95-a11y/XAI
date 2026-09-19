@@ -1,6 +1,6 @@
 # Three-domain study design
 
-Protocol implementation snapshot: `policylens-three-domain-20260920.v1`,
+Protocol implementation snapshot: `policylens-three-domain-20260920.v2`,
 2026-09-20. The original execution brief is
 `analysis/THREE_DOMAIN_HUMAN_STUDY_CODEX_BRIEF_20260919.md` in the parent research
 workspace. This document records what the shared study and domain engines

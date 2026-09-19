@@ -381,7 +381,9 @@ class Explainer:
                 raise ProviderError("invalid_response_content")
             plan = json.loads(content)
             if isinstance(plan, dict) and isinstance(plan.get("intents"), list) and any(
-                    isinstance(intent, dict) and not {"subject", "purpose"} <= set(intent)
+                    isinstance(intent, dict) and (
+                        intent.get("subject") not in ("ai", "human", "shared") or
+                        intent.get("purpose") not in ("action", "reason", "advice", "comparison", "observation", "rule"))
                     for intent in plan["intents"]):
                 raise ProviderError("missing_provider_semantics")
             return plan, {"provider_response_id": str(document.get("id", ""))[:120],

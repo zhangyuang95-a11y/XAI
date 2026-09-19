@@ -282,13 +282,15 @@ def test_recorded_terminal_frame_has_no_next_action_even_with_empty_decision():
     assert "no next action" in result["answer"]
 
 
-@pytest.mark.parametrize("include_semantics", (True, False))
-def test_real_http_transport_structure_auth_and_no_secret_audit(include_semantics):
+@pytest.mark.parametrize("semantics", ({"subject": "ai", "purpose": "observation"}, {},
+    {"subject": None, "purpose": "observation"}, {"subject": "ai", "purpose": None},
+    {"subject": "unknown", "purpose": "observation"}, {"subject": "ai", "purpose": "unknown"}))
+def test_real_http_transport_structure_auth_and_no_secret_audit(semantics):
     received = []
     state = fixture()
     selected = plan(state)
-    if include_semantics:
-        selected["intents"][0].update(subject="ai", purpose="observation")
+    selected["intents"][0].update(semantics)
+    include_semantics = semantics == {"subject": "ai", "purpose": "observation"}
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass

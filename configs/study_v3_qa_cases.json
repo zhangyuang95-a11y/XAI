@@ -1,0 +1,6569 @@
+{
+  "version": "three-domain-qa-cases.v3.0",
+  "evaluation_status": "deterministic_evidence_and_simulation_only_until_real_provider_runs",
+  "external_case_files": [
+    "domains/kitchen/qa_cases.json",
+    "domains/warehouse/qa_cases.json"
+  ],
+  "cases": [
+    {
+      "case_id": "pong-approach-0",
+      "domain": "pong",
+      "question": "We are approaching from outside the two landing lanes. What will you do next, and what makes that action appropriate here?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 3,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "decision",
+        "next_action"
+      ],
+      "expected_claims": [
+        {
+          "decision_path": "action",
+          "equals": "left"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "decision",
+              "next_action"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-approach-1",
+      "domain": "pong",
+      "question": "双方正从落点外侧接近。我和你分别在哪一道？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 3,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "position"
+      ],
+      "expected_claims": [
+        {
+          "path": "human.x",
+          "equals": 1
+        },
+        {
+          "path": "ai.x",
+          "equals": 7
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "position"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-approach-2",
+      "domain": "pong",
+      "question": "We are approaching from outside the two landing lanes. How long until case-team arrives, where will it land, and how much is it worth?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 3,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "ball:case-team"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "ball:case-team",
+          "contains": "in 3 turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "ball:case-team"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-approach-3",
+      "domain": "pong",
+      "question": "双方正从落点外侧接近。合作球能只靠一块球拍接住吗？两人站同一边行不行？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 3,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:3"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:3",
+          "contains": "两个不同"
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-approach-4",
+      "domain": "pong",
+      "question": "We are approaching from outside the two landing lanes. Does waiting for an answer make the ball arrive sooner or cost points?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 3,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:5"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:5",
+          "contains": "do not advance turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:5"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-covered-0",
+      "domain": "pong",
+      "question": "Both of us already cover different team-ball contacts. What will you do next, and what makes that action appropriate here?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 2,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "decision",
+        "next_action"
+      ],
+      "expected_claims": [
+        {
+          "decision_path": "action",
+          "equals": "wait"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "decision",
+              "next_action"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-covered-1",
+      "domain": "pong",
+      "question": "双方已经分别覆盖合作球两侧。我和你分别在哪一道？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 2,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "position"
+      ],
+      "expected_claims": [
+        {
+          "path": "human.x",
+          "equals": 2
+        },
+        {
+          "path": "ai.x",
+          "equals": 6
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "position"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-covered-2",
+      "domain": "pong",
+      "question": "Both of us already cover different team-ball contacts. How long until case-team arrives, where will it land, and how much is it worth?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 2,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "ball:case-team"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "ball:case-team",
+          "contains": "in 2 turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "ball:case-team"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-covered-3",
+      "domain": "pong",
+      "question": "双方已经分别覆盖合作球两侧。合作球能只靠一块球拍接住吗？两人站同一边行不行？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 2,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:3"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:3",
+          "contains": "两个不同"
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-covered-4",
+      "domain": "pong",
+      "question": "Both of us already cover different team-ball contacts. Does waiting for an answer make the ball arrive sooner or cost points?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 2,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:5"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:5",
+          "contains": "do not advance turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:5"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-safe_detour-0",
+      "domain": "pong",
+      "question": "The ordinary ball arrives earlier, near your assigned side. What will you do next, and what makes that action appropriate here?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              5
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                5
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "decision",
+        "next_action"
+      ],
+      "expected_claims": [
+        {
+          "decision_path": "action",
+          "equals": "left"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "decision",
+              "next_action"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-safe_detour-1",
+      "domain": "pong",
+      "question": "普通球将提前到达你负责一侧的附近。我和你分别在哪一道？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              5
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                5
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "position"
+      ],
+      "expected_claims": [
+        {
+          "path": "human.x",
+          "equals": 2
+        },
+        {
+          "path": "ai.x",
+          "equals": 6
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "position"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-safe_detour-2",
+      "domain": "pong",
+      "question": "The ordinary ball arrives earlier, near your assigned side. How long until case-team arrives, where will it land, and how much is it worth?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              5
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                5
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "ball:case-team"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "ball:case-team",
+          "contains": "in 4 turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "ball:case-team"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-safe_detour-3",
+      "domain": "pong",
+      "question": "普通球将提前到达你负责一侧的附近。合作球能只靠一块球拍接住吗？两人站同一边行不行？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              5
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                5
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:3"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:3",
+          "contains": "两个不同"
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-safe_detour-4",
+      "domain": "pong",
+      "question": "The ordinary ball arrives earlier, near your assigned side. Does waiting for an answer make the ball arrive sooner or cost points?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              5
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                5
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:5"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:5",
+          "contains": "do not advance turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:5"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-costly_detour-0",
+      "domain": "pong",
+      "question": "The ordinary ball arrives only one turn before the team ball. What will you do next, and what makes that action appropriate here?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "decision",
+        "next_action"
+      ],
+      "expected_claims": [
+        {
+          "decision_path": "action",
+          "equals": "wait"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "decision",
+              "next_action"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-costly_detour-1",
+      "domain": "pong",
+      "question": "普通球只比合作球提前一回合到达。我和你分别在哪一道？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "position"
+      ],
+      "expected_claims": [
+        {
+          "path": "human.x",
+          "equals": 2
+        },
+        {
+          "path": "ai.x",
+          "equals": 6
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "position"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-costly_detour-2",
+      "domain": "pong",
+      "question": "The ordinary ball arrives only one turn before the team ball. How long until case-team arrives, where will it land, and how much is it worth?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "ball:case-team"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "ball:case-team",
+          "contains": "in 4 turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "ball:case-team"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-costly_detour-3",
+      "domain": "pong",
+      "question": "普通球只比合作球提前一回合到达。合作球能只靠一块球拍接住吗？两人站同一边行不行？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:3"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:3",
+          "contains": "两个不同"
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-costly_detour-4",
+      "domain": "pong",
+      "question": "The ordinary ball arrives only one turn before the team ball. Does waiting for an answer make the ball arrive sooner or cost points?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:5"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:5",
+          "contains": "do not advance turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:5"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-same_side-0",
+      "domain": "pong",
+      "question": "We are both standing on the same contact lane with only one turn left. What will you do next, and what makes that action appropriate here?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 2
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "decision",
+        "next_action"
+      ],
+      "expected_claims": [
+        {
+          "decision_path": "action",
+          "equals": "wait"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "decision",
+              "next_action"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-same_side-1",
+      "domain": "pong",
+      "question": "我们都站在同一侧，而且只剩一回合。我和你分别在哪一道？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 2
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "position"
+      ],
+      "expected_claims": [
+        {
+          "path": "human.x",
+          "equals": 2
+        },
+        {
+          "path": "ai.x",
+          "equals": 2
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "position"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-same_side-2",
+      "domain": "pong",
+      "question": "We are both standing on the same contact lane with only one turn left. How long until case-team arrives, where will it land, and how much is it worth?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 2
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "ball:case-team"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "ball:case-team",
+          "contains": "in 1 turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "ball:case-team"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-same_side-3",
+      "domain": "pong",
+      "question": "我们都站在同一侧，而且只剩一回合。合作球能只靠一块球拍接住吗？两人站同一边行不行？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 2
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:3"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:3",
+          "contains": "两个不同"
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-same_side-4",
+      "domain": "pong",
+      "question": "We are both standing on the same contact lane with only one turn left. Does waiting for an answer make the ball arrive sooner or cost points?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 2
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:5"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:5",
+          "contains": "do not advance turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:5"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-fallback-0",
+      "domain": "pong",
+      "question": "The left cooperative contact is now too far away for either paddle. What will you do next, and what makes that action appropriate here?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 7
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              7
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                7
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "decision",
+        "next_action"
+      ],
+      "expected_claims": [
+        {
+          "decision_path": "action",
+          "equals": "right"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "decision",
+              "next_action"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-fallback-1",
+      "domain": "pong",
+      "question": "合作球左侧现在离双方都太远。我和你分别在哪一道？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 7
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              7
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                7
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "position"
+      ],
+      "expected_claims": [
+        {
+          "path": "human.x",
+          "equals": 7
+        },
+        {
+          "path": "ai.x",
+          "equals": 6
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "position"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-fallback-2",
+      "domain": "pong",
+      "question": "The left cooperative contact is now too far away for either paddle. How long until case-team arrives, where will it land, and how much is it worth?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 7
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              7
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                7
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "ball:case-team"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "ball:case-team",
+          "contains": "in 1 turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "ball:case-team"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-fallback-3",
+      "domain": "pong",
+      "question": "合作球左侧现在离双方都太远。合作球能只靠一块球拍接住吗？两人站同一边行不行？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 7
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              7
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                7
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:3"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:3",
+          "contains": "两个不同"
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-fallback-4",
+      "domain": "pong",
+      "question": "The left cooperative contact is now too far away for either paddle. Does waiting for an answer make the ball arrive sooner or cost points?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 7
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              7
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                7
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:5"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:5",
+          "contains": "do not advance turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:5"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-opposite_sides-0",
+      "domain": "pong",
+      "question": "The previous side assignment can no longer be reached by the human. What will you do next, and what makes that action appropriate here?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 2,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {
+          "commitment": {
+            "ball_id": "case-team",
+            "ai_contact": 6,
+            "human_contact": 3
+          }
+        },
+        "seed": 999,
+        "human": {
+          "x": 6
+        },
+        "ai": {
+          "x": 4
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              3,
+              6
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                3,
+                6
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "decision",
+        "next_action"
+      ],
+      "expected_claims": [
+        {
+          "decision_path": "action",
+          "equals": "left"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "decision",
+              "next_action"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-opposite_sides-1",
+      "domain": "pong",
+      "question": "人的原分工已经无法及时到达。我和你分别在哪一道？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 2,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {
+          "commitment": {
+            "ball_id": "case-team",
+            "ai_contact": 6,
+            "human_contact": 3
+          }
+        },
+        "seed": 999,
+        "human": {
+          "x": 6
+        },
+        "ai": {
+          "x": 4
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              3,
+              6
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                3,
+                6
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "position"
+      ],
+      "expected_claims": [
+        {
+          "path": "human.x",
+          "equals": 6
+        },
+        {
+          "path": "ai.x",
+          "equals": 4
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "position"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-opposite_sides-2",
+      "domain": "pong",
+      "question": "The previous side assignment can no longer be reached by the human. How long until case-team arrives, where will it land, and how much is it worth?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 2,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {
+          "commitment": {
+            "ball_id": "case-team",
+            "ai_contact": 6,
+            "human_contact": 3
+          }
+        },
+        "seed": 999,
+        "human": {
+          "x": 6
+        },
+        "ai": {
+          "x": 4
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              3,
+              6
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                3,
+                6
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "ball:case-team"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "ball:case-team",
+          "contains": "in 2 turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "ball:case-team"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-opposite_sides-3",
+      "domain": "pong",
+      "question": "人的原分工已经无法及时到达。合作球能只靠一块球拍接住吗？两人站同一边行不行？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 2,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {
+          "commitment": {
+            "ball_id": "case-team",
+            "ai_contact": 6,
+            "human_contact": 3
+          }
+        },
+        "seed": 999,
+        "human": {
+          "x": 6
+        },
+        "ai": {
+          "x": 4
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              3,
+              6
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                3,
+                6
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:3"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:3",
+          "contains": "两个不同"
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-opposite_sides-4",
+      "domain": "pong",
+      "question": "The previous side assignment can no longer be reached by the human. Does waiting for an answer make the ball arrive sooner or cost points?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 2,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {
+          "commitment": {
+            "ball_id": "case-team",
+            "ai_contact": 6,
+            "human_contact": 3
+          }
+        },
+        "seed": 999,
+        "human": {
+          "x": 6
+        },
+        "ai": {
+          "x": 4
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              3,
+              6
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                3,
+                6
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:5"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:5",
+          "contains": "do not advance turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:5"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-unreachable-0",
+      "domain": "pong",
+      "question": "The paddles are at opposite outer boundaries, far from the approaching contacts. What will you do next, and what makes that action appropriate here?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 0
+        },
+        "ai": {
+          "x": 8
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              3,
+              5
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                3,
+                5
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "decision",
+        "next_action"
+      ],
+      "expected_claims": [
+        {
+          "decision_path": "action",
+          "equals": "wait"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "decision",
+              "next_action"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-unreachable-1",
+      "domain": "pong",
+      "question": "球拍位于两端边界，离即将到达的接触位置很远。我和你分别在哪一道？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 0
+        },
+        "ai": {
+          "x": 8
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              3,
+              5
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                3,
+                5
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "position"
+      ],
+      "expected_claims": [
+        {
+          "path": "human.x",
+          "equals": 0
+        },
+        {
+          "path": "ai.x",
+          "equals": 8
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "position"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-unreachable-2",
+      "domain": "pong",
+      "question": "The paddles are at opposite outer boundaries, far from the approaching contacts. How long until case-team arrives, where will it land, and how much is it worth?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 0
+        },
+        "ai": {
+          "x": 8
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              3,
+              5
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                3,
+                5
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "ball:case-team"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "ball:case-team",
+          "contains": "in 1 turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "ball:case-team"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-unreachable-3",
+      "domain": "pong",
+      "question": "球拍位于两端边界，离即将到达的接触位置很远。合作球能只靠一块球拍接住吗？两人站同一边行不行？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 0
+        },
+        "ai": {
+          "x": 8
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              3,
+              5
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                3,
+                5
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:3"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:3",
+          "contains": "两个不同"
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-unreachable-4",
+      "domain": "pong",
+      "question": "The paddles are at opposite outer boundaries, far from the approaching contacts. Does waiting for an answer make the ball arrive sooner or cost points?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 0
+        },
+        "ai": {
+          "x": 8
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              3,
+              5
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                3,
+                5
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:5"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:5",
+          "contains": "do not advance turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:5"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-simultaneous-0",
+      "domain": "pong",
+      "question": "An ordinary ball and a cooperative ball will both arrive on this turn. What will you do next, and what makes that action appropriate here?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              2
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                2
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "decision",
+        "next_action"
+      ],
+      "expected_claims": [
+        {
+          "decision_path": "action",
+          "equals": "left"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "decision",
+              "next_action"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-simultaneous-1",
+      "domain": "pong",
+      "question": "普通球和合作球会在本回合同时到达。我和你分别在哪一道？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              2
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                2
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "position"
+      ],
+      "expected_claims": [
+        {
+          "path": "human.x",
+          "equals": 1
+        },
+        {
+          "path": "ai.x",
+          "equals": 7
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "position"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-simultaneous-2",
+      "domain": "pong",
+      "question": "An ordinary ball and a cooperative ball will both arrive on this turn. How long until case-team arrives, where will it land, and how much is it worth?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              2
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                2
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "ball:case-team"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "ball:case-team",
+          "contains": "in 1 turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "ball:case-team"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-simultaneous-3",
+      "domain": "pong",
+      "question": "普通球和合作球会在本回合同时到达。合作球能只靠一块球拍接住吗？两人站同一边行不行？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              2
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                2
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:3"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:3",
+          "contains": "两个不同"
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-simultaneous-4",
+      "domain": "pong",
+      "question": "An ordinary ball and a cooperative ball will both arrive on this turn. Does waiting for an answer make the ball arrive sooner or cost points?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              2
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                2
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:5"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:5",
+          "contains": "do not advance turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:5"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-human_detour-0",
+      "domain": "pong",
+      "question": "I am close to an earlier ordinary ball while you are at a cooperative contact. What will you do next, and what makes that action appropriate here?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 3
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "decision",
+        "next_action"
+      ],
+      "expected_claims": [
+        {
+          "decision_path": "action",
+          "equals": "left"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "decision",
+              "next_action"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-human_detour-1",
+      "domain": "pong",
+      "question": "我靠近较早到达的普通球，你在合作球的一侧。我和你分别在哪一道？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 3
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "position"
+      ],
+      "expected_claims": [
+        {
+          "path": "human.x",
+          "equals": 3
+        },
+        {
+          "path": "ai.x",
+          "equals": 6
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "position"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-human_detour-2",
+      "domain": "pong",
+      "question": "I am close to an earlier ordinary ball while you are at a cooperative contact. How long until case-team arrives, where will it land, and how much is it worth?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 3
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "ball:case-team"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "ball:case-team",
+          "contains": "in 4 turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "ball:case-team"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-human_detour-3",
+      "domain": "pong",
+      "question": "我靠近较早到达的普通球，你在合作球的一侧。合作球能只靠一块球拍接住吗？两人站同一边行不行？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 3
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:3"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:3",
+          "contains": "两个不同"
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-human_detour-4",
+      "domain": "pong",
+      "question": "I am close to an earlier ordinary ball while you are at a cooperative contact. Does waiting for an answer make the ball arrive sooner or cost points?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 3
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "public_rule:5"
+      ],
+      "expected_claims": [
+        {
+          "fact_id": "public_rule:5",
+          "contains": "do not advance turns"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "public_rule:5"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-sim-team_success",
+      "domain": "pong",
+      "question": "If I move right now, do we catch the team ball?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "counterfactual",
+      "expected_fact_ids": [],
+      "expected_claims": [
+        {
+          "simulation_path": "raw_score_delta",
+          "equals": 3
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "counterfactual",
+            "actions": [
+              "right"
+            ],
+            "horizon": 1,
+            "evidence_ids": []
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-sim-team_miss",
+      "domain": "pong",
+      "question": "如果我现在等待，合作球还能接住吗？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "counterfactual",
+      "expected_fact_ids": [],
+      "expected_claims": [
+        {
+          "simulation_path": "raw_score_delta",
+          "equals": 0
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "counterfactual",
+            "actions": [
+              "wait"
+            ],
+            "horizon": 1,
+            "evidence_ids": []
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-sim-ordinary_success",
+      "domain": "pong",
+      "question": "If I wait, will any points be earned?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 7
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              7
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                7
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "counterfactual",
+      "expected_fact_ids": [],
+      "expected_claims": [
+        {
+          "simulation_path": "raw_score_delta",
+          "equals": 1
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "counterfactual",
+            "actions": [
+              "wait"
+            ],
+            "horizon": 1,
+            "evidence_ids": []
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-sim-ordinary_overlap",
+      "domain": "pong",
+      "question": "如果我们一起站在普通球那里，会得两分吗？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 2
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              2
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                2
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "counterfactual",
+      "expected_fact_ids": [],
+      "expected_claims": [
+        {
+          "simulation_path": "raw_score_delta",
+          "equals": 1
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "counterfactual",
+            "actions": [
+              "wait"
+            ],
+            "horizon": 1,
+            "evidence_ids": []
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-sim-cooperative_plus_small",
+      "domain": "pong",
+      "question": "If I move right, can two arrivals score on the same turn?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              2
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                2
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "counterfactual",
+      "expected_fact_ids": [],
+      "expected_claims": [
+        {
+          "simulation_path": "raw_score_delta",
+          "equals": 4
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "counterfactual",
+            "actions": [
+              "right"
+            ],
+            "horizon": 1,
+            "evidence_ids": []
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-sim-safe_return",
+      "domain": "pong",
+      "question": "如果我等待四个回合，你还能接完普通球再回来吗？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              5
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                5
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "counterfactual",
+      "expected_fact_ids": [],
+      "expected_claims": [
+        {
+          "simulation_path": "raw_score_delta",
+          "equals": 4
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "counterfactual",
+            "actions": [
+              "wait",
+              "wait",
+              "wait",
+              "wait"
+            ],
+            "horizon": 4,
+            "evidence_ids": []
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-sim-costly_chase",
+      "domain": "pong",
+      "question": "If I go right twice, wait once, and then go left, what do we catch?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "counterfactual",
+      "expected_fact_ids": [],
+      "expected_claims": [
+        {
+          "simulation_path": "raw_score_delta",
+          "equals": 1
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "counterfactual",
+            "actions": [
+              "right",
+              "right",
+              "wait",
+              "left"
+            ],
+            "horizon": 4,
+            "evidence_ids": []
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-sim-protect_team",
+      "domain": "pong",
+      "question": "如果我一直等待四步，会丢掉哪些机会？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "counterfactual",
+      "expected_fact_ids": [],
+      "expected_claims": [
+        {
+          "simulation_path": "raw_score_delta",
+          "equals": 3
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "counterfactual",
+            "actions": [
+              "wait",
+              "wait",
+              "wait",
+              "wait"
+            ],
+            "horizon": 4,
+            "evidence_ids": []
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-sim-explicit_assumption",
+      "domain": "pong",
+      "question": "Suppose I move right, then you assume I wait for the other two turns. What happens?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 3,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 1
+        },
+        "ai": {
+          "x": 7
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "counterfactual",
+      "expected_fact_ids": [],
+      "expected_claims": [
+        {
+          "simulation_path": "raw_score_delta",
+          "equals": 3
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "counterfactual",
+            "actions": [
+              "right"
+            ],
+            "horizon": 3,
+            "evidence_ids": []
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-sim-illegal_boundary",
+      "domain": "pong",
+      "question": "如果我在最左边继续左移会怎样？",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 1,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 0
+        },
+        "ai": {
+          "x": 8
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              3,
+              5
+            ],
+            "remaining": 1,
+            "initial_remaining": 1
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                3,
+                5
+              ],
+              "remaining": 1,
+              "initial_remaining": 1
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "counterfactual",
+      "expected_fact_ids": [],
+      "expected_claims": [
+        {
+          "simulation_path": "raw_score_delta",
+          "equals": 0
+        }
+      ],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "supported",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "counterfactual",
+            "actions": [
+              "left"
+            ],
+            "horizon": 1,
+            "evidence_ids": []
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "pong-clarify-ambiguous",
+      "domain": "pong",
+      "question": "Why did you ignore that one?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "clarification",
+      "expected_fact_ids": [],
+      "expected_claims": [],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "unclear",
+        "clarification": "ambiguous_object",
+        "intents": []
+      }
+    },
+    {
+      "case_id": "pong-clarify-other_frame",
+      "domain": "pong",
+      "question": "请解释Task 1第17回合为什么等待。",
+      "language": "zh",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "clarification",
+      "expected_fact_ids": [],
+      "expected_claims": [],
+      "expected_plan": {
+        "language": "zh",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "unclear",
+        "clarification": "select_frame",
+        "intents": []
+      }
+    },
+    {
+      "case_id": "pong-clarify-external",
+      "domain": "pong",
+      "question": "What is the weather in Paris?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 4,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 4,
+            "initial_remaining": 4
+          },
+          {
+            "id": "case-small",
+            "kind": "ordinary",
+            "contacts": [
+              4
+            ],
+            "remaining": 3,
+            "initial_remaining": 3
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 4,
+              "initial_remaining": 4
+            },
+            {
+              "id": "case-small",
+              "kind": "ordinary",
+              "contacts": [
+                4
+              ],
+              "remaining": 3,
+              "initial_remaining": 3
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 4,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 1,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "clarification",
+      "expected_fact_ids": [],
+      "expected_claims": [],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "unclear",
+        "clarification": "unsupported_question",
+        "intents": []
+      }
+    },
+    {
+      "case_id": "pong-wrong-premise",
+      "domain": "pong",
+      "question": "Why are you moving left? You are moving left, right?",
+      "language": "en",
+      "state": {
+        "domain": "pong",
+        "version": "pong-turnbased.v3.0",
+        "scenario_version": "pong-waves.v3.0",
+        "task": 2,
+        "turn": 0,
+        "max_turns": 2,
+        "terminal": false,
+        "events": [],
+        "policy_memory": {},
+        "seed": 999,
+        "human": {
+          "x": 2
+        },
+        "ai": {
+          "x": 6
+        },
+        "lanes": 9,
+        "wave": 1,
+        "wave_count": 1,
+        "balls": [
+          {
+            "id": "case-team",
+            "kind": "cooperative",
+            "contacts": [
+              2,
+              6
+            ],
+            "remaining": 2,
+            "initial_remaining": 2
+          }
+        ],
+        "_schedule": [
+          [
+            {
+              "id": "case-team",
+              "kind": "cooperative",
+              "contacts": [
+                2,
+                6
+              ],
+              "remaining": 2,
+              "initial_remaining": 2
+            }
+          ]
+        ],
+        "raw_score": 0,
+        "total_possible_points": 3,
+        "metrics": {
+          "cooperative_caught": 0,
+          "ordinary_caught": 0,
+          "cooperative_total": 1,
+          "ordinary_total": 0,
+          "misses": 0,
+          "assignment_switches": 0,
+          "assignment_releases": 0,
+          "waiting_turns": 0
+        }
+      },
+      "expected_kind": "facts",
+      "expected_fact_ids": [
+        "next_action",
+        "decision"
+      ],
+      "expected_claims": [
+        {
+          "decision_path": "action",
+          "equals": "wait"
+        }
+      ],
+      "expected_plan": {
+        "language": "en",
+        "binding": {
+          "task": 2,
+          "turn": 0
+        },
+        "premise": "contradicted",
+        "clarification": null,
+        "intents": [
+          {
+            "kind": "facts",
+            "evidence_ids": [
+              "next_action",
+              "decision"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

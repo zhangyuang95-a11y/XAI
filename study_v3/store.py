@@ -1,0 +1,347 @@
+"""Authoritative study flow and Task-2-only explanation authorization."""
+import hashlib
+import hmac
+import json
+import re
+import secrets
+import time
+import uuid
+
+from . import RELEASE_ID
+from .database import Database
+from .registry import engine, demonstration, MODULES, scenario_config
+
+def encode(value): return json.dumps(value, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
+def digest(value): return hashlib.sha256(value.encode()).hexdigest()
+def uid(): return uuid.uuid4().hex
+def public_answer(answer):
+    return {k:answer[k] for k in ('status','answer','evidence_ids','language') if k in answer}
+
+class StudyError(Exception):
+    def __init__(self, code, status=400):
+        self.code, self.status = code, status
+        super().__init__(code)
+
+COMMON_ITEMS = [
+ ('predictable','I could predict what my teammate would do.','我能预测队友接下来会做什么。'),
+ ('understood','I understood when my teammate waited or changed its plan.','我理解队友何时等待或改变计划。'),
+ ('coordinate','I knew how to coordinate my actions with my teammate.','我知道怎样安排自己的动作来配合队友。'),
+ ('workload','The task required a lot of mental effort.','任务需要我投入很多思考。'),
+ ('smooth','Working together felt smooth.','协作过程感觉顺畅。'),
+]
+EXPLANATION_ITEMS = [
+ ('relevant','The Task 2 answers addressed my questions.','Task 2 的回答切中了我的问题。'),
+ ('clear','The Task 2 answers were easy to understand.','Task 2 的回答容易理解。'),
+ ('helpful','The Task 2 answers helped me choose my next action.','Task 2 的回答帮助我选择下一步动作。'),
+]
+
+class Store:
+    def __init__(self, settings, explainer=None):
+        self.settings, self.db, self.explainer = settings, Database(settings.database), explainer
+        self.qa_healthy = settings.verified
+
+    @property
+    def ready(self):
+        return self.settings.ready and self.qa_healthy
+
+    def _participant(self, db, token):
+        if not token: raise StudyError('session_required',401)
+        row=db.one('SELECT p.* FROM pl3_sessions s JOIN pl3_participants p ON p.id=s.participant_id WHERE s.token_hash=?',(digest(token),))
+        if row is None: raise StudyError('session_required',401)
+        return row
+
+    def _instance(self, db, token, instance_id):
+        participant=self._participant(db,token)
+        row=db.one('SELECT * FROM pl3_instances WHERE id=? AND participant_id=?',(instance_id,participant['id']))
+        if row is None: raise StudyError('study_not_found',404)
+        if row['release_id'] != RELEASE_ID: raise StudyError('release_changed',409)
+        return row
+
+    def _ask_allowed(self, db, instance):
+        if instance['group_code']!='A' or instance['stage']!='task2' or not instance['current_run']: return False
+        row=db.one('SELECT status FROM pl3_runs WHERE id=?',(instance['current_run'],))
+        return bool(row and row['status']=='active')
+
+    def create(self, payload, token=None, admin=False):
+        if payload.get('consent') is not True: raise StudyError('consent_required')
+        domain=payload.get('domain')
+        if domain not in MODULES: raise StudyError('unknown_domain')
+        name=str(payload.get('participant_id','')).strip().casefold()
+        if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{2,63}',name): raise StudyError('invalid_participant_id')
+        mode=payload.get('mode','pilot')
+        if mode not in ('pilot','preview','test'): raise StudyError('invalid_mode')
+        if mode!='pilot' and not admin: raise StudyError('researcher_access_required',403)
+        if mode=='pilot' and not self.ready: raise StudyError('study_not_ready',503)
+        language='zh' if payload.get('language')=='zh' else 'en'
+        recovery=None
+        with self.db.transaction() as db:
+            existing=db.one('SELECT * FROM pl3_participants WHERE id=?',(name,))
+            authenticated=None
+            if token:
+                try: authenticated=self._participant(db,token)
+                except StudyError: pass
+            if existing:
+                code=str(payload.get('recovery_code',''))
+                if not (authenticated and authenticated['id']==name) and not (code and hmac.compare_digest(digest(code),existing['recovery_hash'])):
+                    raise StudyError('participant_exists_use_recovery',409)
+                if db.one('SELECT id FROM pl3_instances WHERE participant_id=? AND mode!=?',(name,mode)):
+                    raise StudyError('participant_mode_conflict',409)
+                group=existing['group_code']
+            else:
+                counts={x['group_code']:x['n'] for x in db.all('SELECT group_code,COUNT(*) AS n FROM pl3_instances WHERE domain=? AND mode=? AND release_id=? GROUP BY group_code',(domain,mode,RELEASE_ID))}
+                group=secrets.choice(['A','B']) if counts.get('A',0)==counts.get('B',0) else min(['A','B'],key=lambda g:counts.get(g,0))
+                if admin and mode!='pilot' and payload.get('group') in ('A','B'): group=payload['group']
+                recovery=secrets.token_urlsafe(18)
+                db.execute('INSERT INTO pl3_participants VALUES(?,?,?,?)',(name,group,digest(recovery),time.time()))
+            if not authenticated or authenticated['id']!=name:
+                token=secrets.token_urlsafe(32)
+                db.execute('INSERT INTO pl3_sessions VALUES(?,?,?)',(digest(token),name,time.time()))
+            active=db.all("SELECT * FROM pl3_instances WHERE participant_id=? AND stage!='completed' ORDER BY created DESC",(name,))
+            if any(row['release_id']!=RELEASE_ID for row in active): raise StudyError('release_changed',409)
+            if any(row['domain']!=domain for row in active): raise StudyError('another_domain_active',409)
+            instance=db.one('SELECT * FROM pl3_instances WHERE participant_id=? AND domain=? AND release_id=?',(name,domain,RELEASE_ID))
+            if not instance:
+                iid=uid()
+                config=scenario_config(domain)
+                seeds=config.get('heldout_seeds') or config['held_out_seeds']
+                allocations=db.all('SELECT scenario_seed,group_code,COUNT(*) AS n FROM pl3_instances WHERE domain=? AND mode=? AND release_id=? GROUP BY scenario_seed,group_code',(domain,mode,RELEASE_ID))
+                usage={(r['scenario_seed'],r['group_code']):r['n'] for r in allocations}
+                opposite='B' if group=='A' else 'A'
+                seed=min(seeds,key=lambda candidate:(usage.get((candidate,group),0),-usage.get((candidate,opposite),0),seeds.index(candidate)))
+                db.execute('INSERT INTO pl3_instances VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (iid,name,domain,RELEASE_ID,group,mode,'demo',0,None,0,language,seed,time.time(),None))
+                assignment='existing_participant' if existing else 'researcher_override' if admin and mode!='pilot' and payload.get('group') in ('A','B') else 'randomized_balanced'
+                db.execute('INSERT INTO pl3_enrollments VALUES(?,?,?,?,?,?)',(iid,1,language,assignment,config.get('scenario_version',config['version']),time.time()))
+                instance=db.one('SELECT * FROM pl3_instances WHERE id=?',(iid,))
+            result=self._view(db,instance)
+            result['recovery_code']=recovery
+        return token,result
+
+    def recover_view(self, token, domain=None):
+        with self.db.transaction(read_only=True) as db:
+            p=self._participant(db,token)
+            rows=db.all('SELECT * FROM pl3_instances WHERE participant_id=? ORDER BY created DESC',(p['id'],))
+            instance=next((r for r in rows if r['domain']==domain),None) if domain else next((r for r in rows if r['stage']!='completed'),rows[0] if rows else None)
+            if not instance: return {'participant_id':p['id'],'stage':'welcome'}
+            if instance['release_id']!=RELEASE_ID: raise StudyError('release_changed',409)
+            return self._view(db,instance)
+
+    def view(self, token, instance_id):
+        with self.db.transaction(read_only=True) as db: return self._view(db,self._instance(db,token,instance_id))
+
+    def _view(self,db,instance):
+        eng=engine(instance['domain'])
+        language=instance['language']
+        result={k:instance[k] for k in ('id','domain','stage','revision','language','mode','release_id')}
+        result.update(instance_id=instance['id'],participant_id=instance['participant_id'],
+            can_ask=self._ask_allowed(db,instance),rules=eng.rules(language),
+            task2_explanation_notice=instance['stage']=='task2' and instance['group_code']=='A' and not self._ask_allowed(db,instance),
+            task_runs=[],questions=[],state=None,run_id=instance['current_run'],
+            group=instance['group_code'] if instance['mode']!='pilot' else None)
+        runs=db.all('SELECT id,task,status,score_json,state_json FROM pl3_runs WHERE instance_id=? ORDER BY task',(instance['id'],))
+        result['task_runs']=[{'id':r['id'],'task':r['task'],'status':r['status'],'score':eng.public_state(json.loads(r['state_json']))['score'],'turn':json.loads(r['state_json'])['turn']} for r in runs]
+        if instance['stage']=='demo':
+            demo=demonstration(instance['domain'])
+            result['demo']={'index':instance['demo_index'],'captions':demo['captions'],'frames':demo['frames']}
+        if instance['current_run']:
+            run=db.one('SELECT * FROM pl3_runs WHERE id=?',(instance['current_run'],))
+            state=json.loads(run['state_json'])
+            result.update(state=eng.public_state(state),actions=eng.legal_actions(state) if not state['terminal'] else [],run_status=run['status'])
+            if hasattr(eng,'action_label'):
+                result['action_labels']={a:eng.action_label(a,language) for a in result['actions']}
+        if result['can_ask']:
+            result['questions']=[{'id':q['id'],'question':q['question'],'language':q['language'],
+                'result':public_answer(json.loads(q['result_json'])),'status':q['status'],'target_turn':q['target_turn'],'target_run':q['target_run']}
+                for q in db.all("SELECT * FROM pl3_questions WHERE authorized_run=? AND status IN ('answered','clarification','unavailable') ORDER BY requested",(instance['current_run'],))]
+        if instance['stage']=='questionnaire':
+            items=COMMON_ITEMS+(EXPLANATION_ITEMS if instance['group_code']=='A' else [])
+            result['questionnaire']={'items':[{'id':i[0],'text':i[2 if language=='zh' else 1],'allow_na':i in EXPLANATION_ITEMS} for i in items],
+                'comprehension':[{k:v for k,v in q.items() if k!='answer'} for q in eng.comprehension(language)]}
+        return result
+
+    def command(self,token,kind,payload):
+        command_id=payload.get('command_id')
+        if not isinstance(command_id,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{8,100}',command_id): raise StudyError('command_id_required')
+        fingerprint=digest(encode({'kind':kind,'payload':payload}))
+        with self.db.transaction(scope=payload.get('instance_id')) as db:
+            instance=self._instance(db,token,payload.get('instance_id'))
+            prior=db.one('SELECT * FROM pl3_commands WHERE session_hash=? AND command_id=?',(digest(token),command_id))
+            if prior:
+                if prior['request_hash']!=fingerprint: raise StudyError('idempotency_conflict',409)
+                # Never return a cached response containing now-revoked answers.
+                return self._view(db,instance)
+            if payload.get('revision')!=instance['revision']: raise StudyError('stale_state',409)
+            timings=payload.get('timings',[])
+            if not isinstance(timings,list) or len(timings)>4:raise StudyError('invalid_timing')
+            for measurement in timings:
+                if not isinstance(measurement,dict):raise StudyError('invalid_timing')
+                seconds=measurement.get('seconds');time_kind=measurement.get('kind')
+                if time_kind not in ('active','reading','replay') or type(seconds) not in (int,float) or not 0<=seconds<=86400:raise StudyError('invalid_timing')
+                task=int(instance['stage'][-1]) if instance['stage'].startswith('task') else None
+                db.execute('INSERT INTO pl3_timings VALUES(?,?,?,?,?,?)',(uid(),instance['id'],task,time_kind,seconds,time.time()))
+            if kind=='demo_next':
+                if instance['stage']!='demo': raise StudyError('wrong_stage',409)
+                end=len(demonstration(instance['domain'])['captions'])
+                db.execute('UPDATE pl3_instances SET demo_index=? WHERE id=?',(min(instance['demo_index']+1,end),instance['id']))
+            elif kind=='next': self._next(db,instance)
+            elif kind=='action': self._action(db,instance,payload)
+            elif kind=='language':
+                if payload.get('language') not in ('en','zh'): raise StudyError('invalid_language')
+                db.execute('UPDATE pl3_instances SET language=? WHERE id=?',(payload['language'],instance['id']))
+            elif kind=='questionnaire': self._questionnaire(db,instance,payload)
+            elif kind=='timing':
+                seconds=payload.get('seconds')
+                if not isinstance(seconds,(int,float)) or not 0<=seconds<=86400: raise StudyError('invalid_timing')
+                timing_kind=payload.get('kind')
+                if timing_kind not in ('reading','replay','active','explanation_wait'):raise StudyError('invalid_timing')
+                task=int(instance['stage'][-1]) if instance['stage'].startswith('task') else None
+                db.execute('INSERT INTO pl3_timings VALUES(?,?,?,?,?,?)',(uid(),instance['id'],task,timing_kind,seconds,time.time()))
+            else: raise StudyError('unknown_command',404)
+            db.execute('UPDATE pl3_instances SET revision=revision+1 WHERE id=?',(instance['id'],))
+            updated=db.one('SELECT * FROM pl3_instances WHERE id=?',(instance['id'],))
+            db.execute('INSERT INTO pl3_commands VALUES(?,?,?,?,?)',(digest(token),command_id,fingerprint,'{}',time.time()))
+            return self._view(db,updated)
+
+    def _next(self,db,instance):
+        stage=instance['stage']
+        if stage=='demo':
+            if instance['demo_index']<len(demonstration(instance['domain'])['captions']): raise StudyError('finish_demo',409)
+            task=1
+        elif stage in ('task1','task2','task3'):
+            run=db.one('SELECT * FROM pl3_runs WHERE id=?',(instance['current_run'],))
+            if run['status']!='completed': raise StudyError('finish_task',409)
+            if stage=='task3':
+                db.execute("UPDATE pl3_instances SET stage='questionnaire' WHERE id=?",(instance['id'],))
+                return
+            task=int(stage[-1])+1
+        else: raise StudyError('wrong_stage',409)
+        eng=engine(instance['domain']); state=eng.initial_state(instance['scenario_seed'],task)
+        rid=uid(); now=time.time()
+        db.execute('INSERT INTO pl3_runs VALUES(?,?,?,?,?,?,?,?,?)',
+            (rid,instance['id'],task,instance['scenario_seed'],encode(state),'active',encode(eng.score(state)),now,None))
+        db.execute('INSERT INTO pl3_frames VALUES(?,?,?,?,?,?,?)',
+            (rid,0,encode(state),encode(eng.public_state(state)),encode(eng.decide(state)),None,now))
+        db.execute('UPDATE pl3_instances SET stage=?,current_run=? WHERE id=?',('task'+str(task),rid,instance['id']))
+
+    def _action(self,db,instance,payload):
+        if instance['stage'] not in ('task1','task2','task3'): raise StudyError('wrong_stage',409)
+        if payload.get('run_id')!=instance['current_run']:raise StudyError('wrong_run',409)
+        run=db.one('SELECT * FROM pl3_runs WHERE id=?',(instance['current_run'],))
+        if run['status']!='active':raise StudyError('task_finished',409)
+        state=json.loads(run['state_json']); eng=engine(instance['domain'])
+        if payload.get('turn')!=state['turn']:raise StudyError('stale_state',409)
+        action=payload.get('action')
+        if action not in eng.legal_actions(state):raise StudyError('illegal_action')
+        decision=eng.decide(state)
+        nxt=eng.step(state,action,decision)
+        db.execute('UPDATE pl3_frames SET human_action=?,decision_json=? WHERE run_id=? AND turn=?',
+            (action,encode(decision),run['id'],state['turn']))
+        now=time.time(); terminal=nxt['terminal']
+        db.execute('UPDATE pl3_runs SET state_json=?,status=?,score_json=?,ended=? WHERE id=?',
+            (encode(nxt),'completed' if terminal else 'active',encode(eng.score(nxt)),now if terminal else None,run['id']))
+        db.execute('INSERT INTO pl3_frames VALUES(?,?,?,?,?,?,?)',
+            (run['id'],nxt['turn'],encode(nxt),encode(eng.public_state(nxt)),encode(eng.decide(nxt)) if not terminal else '{}',None,now))
+        if terminal:
+            db.execute("UPDATE pl3_questions SET status='revoked' WHERE authorized_run=? AND status='pending'",(run['id'],))
+
+    def _questionnaire(self,db,instance,payload):
+        if instance['stage']!='questionnaire':raise StudyError('wrong_stage',409)
+        answers=payload.get('answers',{}); comprehension=payload.get('comprehension',{})
+        if not isinstance(answers,dict) or not isinstance(comprehension,dict):raise StudyError('invalid_questionnaire')
+        for q in COMMON_ITEMS+(EXPLANATION_ITEMS if instance['group_code']=='A' else []):
+            value=answers.get(q[0])
+            if q in EXPLANATION_ITEMS and value=='na':continue
+            if type(value) is not int or not 1<=value<=7:raise StudyError('incomplete_questionnaire')
+        graded=[]
+        for q in engine(instance['domain']).comprehension(instance['language']):
+            value=comprehension.get(q['id'])
+            if type(value) is not int or not 0<=value<len(q['options']):raise StudyError('incomplete_questionnaire')
+            graded.append({'id':q['id'],'selected':value,'correct':value==q['answer']})
+        feedback=str(payload.get('feedback',''))[:4000]
+        db.execute('INSERT INTO pl3_questionnaires VALUES(?,?,?,?)',(instance['id'],encode({'ratings':answers,'feedback':feedback}),encode(graded),time.time()))
+        db.execute("UPDATE pl3_instances SET stage='completed',completed=? WHERE id=?",(time.time(),instance['id']))
+
+    def frame(self,token,instance_id,run_id,turn):
+        with self.db.transaction(read_only=True) as db:
+            instance=self._instance(db,token,instance_id)
+            row=db.one('SELECT f.public_json FROM pl3_frames f JOIN pl3_runs r ON r.id=f.run_id WHERE r.instance_id=? AND f.run_id=? AND f.turn=?',(instance['id'],run_id,turn))
+            if not row:raise StudyError('frame_not_found',404)
+            return {'state':json.loads(row['public_json']),'can_ask':self._ask_allowed(db,instance)}
+
+    def ask(self,token,payload):
+        question=str(payload.get('question','')).strip()
+        if not question or len(question)>2000:raise StudyError('invalid_question')
+        qid=payload.get('question_id') or uid()
+        if not isinstance(qid,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{8,100}',qid):raise StudyError('invalid_question_id')
+        with self.db.transaction(scope=payload.get('instance_id')) as db:
+            instance=self._instance(db,token,payload.get('instance_id'))
+            if not self._ask_allowed(db,instance):raise StudyError('explanations_unavailable',403)
+            if payload.get('authorized_run')!=instance['current_run']:raise StudyError('wrong_run',403)
+            target=payload.get('target_run',instance['current_run']);turn=payload.get('turn')
+            row=db.one('SELECT f.*,r.task FROM pl3_frames f JOIN pl3_runs r ON r.id=f.run_id WHERE r.instance_id=? AND f.run_id=? AND f.turn=? AND r.task<=2',(instance['id'],target,turn))
+            if not row:raise StudyError('frame_not_found',404)
+            # Expire interrupted requests after both provider attempts plus a margin.
+            for expired_language in ('en','zh'):
+                expired={'status':'unavailable','answer':'上一次请求已中断，请重新提问。' if expired_language=='zh' else 'The previous request was interrupted. Please ask again.','evidence_ids':[],
+                    'audit':{'error':'request_lease_expired','displayed':False}}
+                db.execute("UPDATE pl3_questions SET status='unavailable',result_json=?,finished=? WHERE authorized_run=? AND status='pending' AND requested<? AND language=?",
+                    (encode(expired),time.time(),instance['current_run'],time.time()-120,expired_language))
+            prior=db.one('SELECT * FROM pl3_questions WHERE id=?',(qid,))
+            if prior:
+                if prior['instance_id']!=instance['id'] or prior['question']!=question or prior['target_run']!=target or prior['target_turn']!=turn:raise StudyError('idempotency_conflict',409)
+                return {'id':qid,'status':prior['status'],'result':public_answer(json.loads(prior['result_json']))}
+            if db.one("SELECT id FROM pl3_questions WHERE authorized_run=? AND status='pending'",(instance['current_run'],)):
+                raise StudyError('question_busy',409)
+            language=payload.get('language',instance['language'])
+            if language not in ('en','zh'):raise StudyError('invalid_language')
+            history=db.all("SELECT id,question,result_json FROM pl3_questions WHERE authorized_run=? AND status IN ('answered','clarification') ORDER BY requested DESC LIMIT 6",(instance['current_run'],))
+            previous=[{'question':h['question'],'answer':json.loads(h['result_json']).get('answer','')} for h in reversed(history)]
+            db.execute('INSERT INTO pl3_questions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                (qid,instance['id'],instance['current_run'],target,turn,question,language,'{}','pending',time.time(),None,None))
+            # Keep only public history and exact selected state for the explainer.
+            earlier=db.all('SELECT public_json FROM pl3_frames WHERE run_id=? AND turn<=? ORDER BY turn DESC LIMIT 16',(target,turn))
+            state=json.loads(row['state_json']);decision=json.loads(row['decision_json'])
+        try:
+            if not self.explainer:raise RuntimeError('model_unavailable')
+            answer=self.explainer.answer(engine(instance['domain']),state,decision,question,language,previous,[json.loads(f['public_json']) for f in reversed(earlier)])
+            status=answer.get('status','answered')
+            if status not in ('answered','clarification','unavailable'):status='unavailable'
+        except Exception:
+            status='unavailable';answer={'status':status,'answer':'问答暂时不可用，请稍后重试。' if language=='zh' else 'Questions are temporarily unavailable. Please try again.','evidence_ids':[]}
+        answer.setdefault('audit',{}).update(context_question_ids=[h['id'] for h in reversed(history)],context_sha256=digest(encode(previous)),authorized_run=instance['current_run'],target_run=target,target_turn=turn,authorization_at_request=True)
+        self.qa_healthy = status in ('answered','clarification')
+        with self.db.transaction(scope=payload.get('instance_id')) as db:
+            current=self._instance(db,token,instance['id'])
+            permitted=self._ask_allowed(db,current) and current['current_run']==instance['current_run']
+            answer['audit']['authorization_at_completion']=permitted
+            db.execute('UPDATE pl3_questions SET result_json=?,status=?,finished=? WHERE id=?',
+                (encode(answer),status if permitted else 'revoked',time.time(),qid))
+        if not permitted:raise StudyError('explanations_unavailable',403)
+        return {'id':qid,'status':status,'result':public_answer(answer),'target_run':target,'target_turn':turn}
+
+    def acknowledge_answer(self,token,instance_id,qid):
+        with self.db.transaction(scope=instance_id) as db:
+            instance=self._instance(db,token,instance_id)
+            if not self._ask_allowed(db,instance):raise StudyError('explanations_unavailable',403)
+            row=db.one('SELECT * FROM pl3_questions WHERE id=? AND instance_id=? AND authorized_run=?',(qid,instance_id,instance['current_run']))
+            if not row or row['status'] not in ('answered','clarification','unavailable'):raise StudyError('answer_unavailable',403)
+            db.execute('UPDATE pl3_questions SET displayed=? WHERE id=?',(time.time(),qid))
+        return {'ok':True}
+
+    def export(self, release_id=None, mode=None):
+        tables=('participants','enrollments','instances','runs','frames','questions','questionnaires','timings','releases')
+        with self.db.transaction(read_only=True) as db:
+            result={name:db.all('SELECT * FROM pl3_'+name) for name in tables}
+            if release_id or mode:
+                selected=[r for r in result['instances'] if (not release_id or r['release_id']==release_id) and (not mode or r['mode']==mode)]
+                ids={r['id'] for r in selected};pids={r['participant_id'] for r in selected}
+                result['instances']=selected
+                result['participants']=[r for r in result['participants'] if r['id'] in pids]
+                for name in ('enrollments','runs','questions','questionnaires','timings'):
+                    result[name]=[r for r in result[name] if r['instance_id'] in ids]
+                run_ids={r['id'] for r in result['runs']}
+                result['frames']=[r for r in result['frames'] if r['run_id'] in run_ids]
+                release_ids={r['release_id'] for r in selected}
+                result['releases']=[r for r in result['releases'] if r['id'] in release_ids]
+            for row in result['participants']:row.pop('recovery_hash',None)
+        return result

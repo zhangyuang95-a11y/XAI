@@ -1,0 +1,10 @@
+{
+  "version": "pong-turnbased.v3.0",
+  "scenario_version": "pong-waves.v3.0",
+  "lanes": 9,
+  "task_waves": {"1": 6, "2": 8, "3": 8},
+  "weights": {"ordinary": 1, "cooperative": 3},
+  "development_seeds": [730100,730101,730102,730103,730104,730105,730106,730107,730108,730109,730110,730111,730112,730113,730114,730115,730116,730117,730118,730119,730120,730121,730122,730123],
+  "heldout_seeds": [731100,731101,731102,731103,731104,731105,731106,731107,731108,731109,731110,731111,731112,731113,731114,731115,731116,731117,731118,731119,731120,731121,731122,731123],
+  "calibration": "Current-wave exact search with the unchanged fixed AI; no future wave access. Contacts remain in lanes 1–7 with 4–6 moves, preserving reachable cooperation while allowing safe and costly ordinary-ball detours. Public weights are 1 and 3. Agent comparisons do not establish a human treatment effect."
+}

@@ -16,6 +16,12 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
+# Keep the deployed command stable without loading the legacy neural runtime.
+if __name__ == "__main__" and os.environ.get("POLICYLENS_LEGACY_HUB") != "1":
+    from study_v3.server import main as three_domain_main
+    three_domain_main()
+    raise SystemExit(0)
+
 from domains.pong.web.server import CONFIG_PATH as PONG_CONFIG_PATH
 from domains.pong.web.server import COOKIE_NAME as PONG_COOKIE
 from domains.pong.web.server import PongApplication

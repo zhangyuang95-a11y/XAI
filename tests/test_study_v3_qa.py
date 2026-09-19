@@ -1,0 +1,397 @@
+"""Semantic-provider protocol, verified evidence and real simulation tests.
+
+Injected plans test composition; they are not scored as model understanding.
+The --smoke CLI exercises an actually configured provider independently.
+"""
+from copy import deepcopy
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+from pathlib import Path
+import threading
+
+import pytest
+
+from domains.pong import turnbased as pong
+from study_v3.config import Settings
+from study_v3.qa import Explainer, PlanError, _catalog, evaluate_case, simulate
+from study_v3.registry import engine as get_engine
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def fixture(*, human=2, ai=6, turns=4, small=None, small_turns=2):
+    balls = [pong._ball("fixture-team", "cooperative", [2, 6], turns)]
+    if small is not None:
+        balls.append(pong._ball("fixture-small", "ordinary", [small], small_turns))
+    return pong._new_state([balls], seed=200, task=2, human=human, ai=ai)
+
+
+def plan(state, *, language="en", ids=("decision",), intents=None, clarification=None):
+    return {"language": language, "binding": {"task": state["task"], "turn": state["turn"]},
+            "premise": "supported", "clarification": clarification,
+            "intents": intents if intents is not None else [{"kind": "facts", "evidence_ids": list(ids)}]}
+
+
+def explainer_for_plan(selected_plan, capture=None):
+    instance = Explainer(Settings(database=":memory:", llm_base_url="http://test.invalid/v1", llm_model="protocol-fixture"))
+    def request(payload):
+        if capture is not None:
+            capture.append(deepcopy(payload))
+        return deepcopy(selected_plan), {"provider_response_id": "injected-protocol-plan", "reported_model": "not-a-semantic-evaluation"}
+    instance._request_plan = request
+    return instance
+
+
+def ask(instance, state, **kwargs):
+    return instance.answer(pong, state, pong.decide(state), kwargs.pop("question", "What happens?"), **kwargs)
+
+
+def test_unconfigured_service_is_honestly_unavailable_without_keyword_answers():
+    state = fixture()
+    instance = Explainer(Settings(database=":memory:"))
+    for question, expected_language in (("Why are you waiting?", "en"), ("你为什么等待？", "zh")):
+        result = ask(instance, state, question=question)
+        assert result["status"] == "unavailable"
+        assert not result["evidence_ids"]
+        assert result["language"] == expected_language
+        assert result["audit"]["failure_code"] == "not_configured"
+
+
+def test_final_factual_text_is_selected_verified_evidence_not_model_prose():
+    state = fixture()
+    selected = plan(state, ids=("position", "decision"))
+    result = ask(explainer_for_plan(selected), state)
+    evidence = {r["id"]: r for r in pong.facts(state)}
+    assert result["status"] == "answered"
+    assert result["answer"] == "Task 2 · Turn 0\n\n" + evidence["position"]["en"] + "\n\n" + evidence["decision"]["en"]
+
+
+def test_model_cannot_add_assertions_or_select_nonexistent_evidence():
+    state = fixture()
+    wrong = plan(state, ids=("fake:guaranteed-win",))
+    assert ask(explainer_for_plan(wrong), state)["status"] == "unavailable"
+    wrong = plan(state)
+    wrong["answer"] = "I guarantee the human will win."
+    result = ask(explainer_for_plan(wrong), state)
+    assert result["status"] == "unavailable"
+    assert "guarantee" not in result["answer"]
+
+
+def test_unknown_evidence_gets_only_one_model_repair_never_heuristic_substitution():
+    state = fixture()
+    bad = plan(state, ids=("invented-fact",))
+    good = plan(state, ids=("position",))
+    instance = explainer_for_plan(good)
+    calls = []
+    def request(payload):
+        calls.append(deepcopy(payload))
+        return deepcopy(bad if len(calls) == 1 else good), {}
+    instance._request_plan = request
+    result = ask(instance, state)
+    assert result["status"] == "answered"
+    assert len(calls) == 2
+    assert "repair_request" in calls[1]
+    assert result["audit"]["repair_attempt"]["successful"]
+    calls.clear()
+    instance._request_plan = lambda payload: (calls.append(payload) or deepcopy(bad), {})
+    result = ask(instance, state)
+    assert result["status"] == "unavailable"
+    assert len(calls) == 2
+
+
+def test_bilingual_question_language_overrides_interface():
+    state = fixture()
+    result = ask(explainer_for_plan(plan(state, language="zh")), state, question="为什么这样做？", language="en")
+    assert result["status"] == "answered"
+    assert "我负责" in result["answer"]
+    assert result["language"] == "zh"
+
+
+def test_context_and_history_sent_as_data_without_hidden_schedule_or_identity():
+    state = pong.initial_state(730100, 2)
+    captured = []
+    prior = [{"question": "What about the other side?", "answer": "A verified earlier response."}]
+    result = ask(explainer_for_plan(plan(state), captured), state, previous_dialogue=prior, public_history=[pong.public_state(state)])
+    assert result["status"] == "answered"
+    payload = captured[0]
+    assert payload["prior_dialogue"] == prior
+    text = json.dumps(payload)
+    for forbidden in ("_schedule", "policy_memory", '"seed"', "participant_id", "llm_api_key"):
+        assert forbidden not in text
+    assert "w2-team" not in text
+
+
+def test_hidden_future_changes_leave_semantic_provider_payload_identical():
+    state = pong.initial_state(730105, 2)
+    other = deepcopy(state)
+    other["_schedule"][1] = [pong._ball("SECRET-UNANNOUNCED", "ordinary", [8], 99)]
+    one, two = [], []
+    ask(explainer_for_plan(plan(state), one), state)
+    ask(explainer_for_plan(plan(state), two), other)
+    assert one == two
+
+
+def test_history_facts_are_bound_and_future_or_other_domain_frames_excluded():
+    state = fixture(turns=3)
+    old = pong.public_state(state)
+    state = pong.step(state, "wait")
+    future = deepcopy(old)
+    future["turn"] = 99
+    future["events"] = [{"type": "secret", "en": "Future secret", "zh": "未来秘密"}]
+    other = deepcopy(old)
+    other["domain"] = "kitchen"
+    rows = _catalog(pong, state, pong.decide(state), [old, future, other])
+    assert "history:task2:turn0:human_position" in rows
+    assert "Future secret" not in json.dumps(rows)
+
+
+def test_explicit_other_turn_requires_selection_without_fabricated_old_reason():
+    state = fixture()
+    selected = plan(state)
+    selected["binding"]["turn"] = 9
+    result = ask(explainer_for_plan(selected), state)
+    assert result["status"] == "clarification"
+    assert "select" in result["answer"].lower()
+
+
+def test_available_historical_position_does_not_need_unnecessary_frame_reselection():
+    first = fixture()
+    current = pong.step(first, "right")
+    selected = plan(current, ids=("history:task2:turn0:human_position",))
+    selected["binding"]["turn"] = 0
+    result = ask(explainer_for_plan(selected), current,
+                 public_history=[pong.public_state(first), pong.public_state(current)])
+    assert result["status"] == "answered"
+    assert result["answer"].startswith("Task 2 · Turn 0")
+    assert "lane 3" in result["answer"]
+
+
+def test_ambiguous_question_can_clarify_and_wrong_premise_uses_correcting_facts():
+    state = fixture()
+    clarification = plan(state, intents=[], clarification="ambiguous_object")
+    assert ask(explainer_for_plan(clarification), state)["status"] == "clarification"
+    selected = plan(state, ids=("next_action",))
+    selected["premise"] = "contradicted"
+    result = ask(explainer_for_plan(selected), state)
+    assert "differs" in result["answer"]
+    assert "wait" in result["answer"]
+
+
+def test_multintent_combines_why_and_actual_counterfactual_results():
+    state = fixture(human=1, ai=7, turns=1)
+    selected = plan(state, intents=[{"kind": "facts", "evidence_ids": ["decision"]},
+        {"kind": "counterfactual", "evidence_ids": [], "actions": ["right"], "horizon": 1}])
+    result = ask(explainer_for_plan(selected), state)
+    assert result["status"] == "answered"
+    assert "caught: +3 points" in result["answer"]
+    assert result["audit"]["simulations"][0]["raw_score_delta"] == 3
+    assert "In the selected recorded state:" in result["answer"]
+    assert result["answer"].index("I will cover") < result["answer"].index("If you move right")
+
+
+def test_two_counterfactuals_compare_real_different_outcomes():
+    state = fixture(human=1, ai=7, turns=1)
+    selected = plan(state, intents=[{"kind": "counterfactual", "evidence_ids": [], "actions": [a], "horizon": 1} for a in ("right", "wait")])
+    result = ask(explainer_for_plan(selected), state)
+    assert [s["raw_score_delta"] for s in result["audit"]["simulations"]] == [3, 0]
+
+
+def test_first_simulated_ai_action_matches_recorded_decision_and_state_unchanged():
+    state = fixture(human=4, ai=4)
+    original = deepcopy(state)
+    decision = pong.decide(state)
+    for human_action in ("left", "right", "wait"):
+        result = simulate(pong, state, decision, [human_action], 2)
+        assert result["trace"][0]["ai_action"] == decision["action"]
+        next_real = pong.step(state, human_action, decision)
+        assert result["trace"][1]["ai_action"] == pong.decide(next_real)["action"]
+    assert state == original
+
+
+def test_multi_step_wait_assumption_is_expressed_and_simulates():
+    state = fixture(human=1, ai=7, turns=3)
+    selected = plan(state, intents=[{"kind": "counterfactual", "evidence_ids": [], "actions": ["right"], "horizon": 3}])
+    result = ask(explainer_for_plan(selected), state)
+    simulation = result["audit"]["simulations"][0]
+    assert simulation["executed_actions"] == ["right", "wait", "wait"]
+    assert "explicit assumption" in result["answer"]
+    assert simulation["raw_score_delta"] == 3
+
+
+@pytest.mark.parametrize("horizon", (0, 13, -1, 1.5, True))
+def test_unbounded_or_invalid_horizon_rejected(horizon):
+    state = fixture()
+    with pytest.raises(PlanError):
+        simulate(pong, state, pong.decide(state), ["wait"], horizon)
+
+
+def test_illegal_action_is_not_executed_and_no_game_state_changes():
+    state = fixture(human=0)
+    result = simulate(pong, state, pong.decide(state), ["left"], 1)
+    assert result["steps_completed"] == 0
+    assert result["illegal_action"] == {"action": "left", "step": 1}
+    assert result["human"] == state["human"]
+
+
+def test_pong_forward_simulation_stops_before_exposing_hidden_next_wave():
+    waves = [[pong._ball("known", "cooperative", [2, 6], 1)],
+             [pong._ball("TOP-SECRET-NEXT-BALL", "cooperative", [0, 8], 6)]]
+    state = pong._new_state(waves, seed=200, task=2, human=2, ai=6)
+    result = simulate(pong, state, pong.decide(state), ["wait"], 5)
+    assert result["steps_completed"] == 1
+    assert result["stopped_at_public_boundary"]
+    assert result["raw_score_delta"] == 3
+    assert "TOP-SECRET" not in json.dumps(result)
+    assert "wave_started" not in json.dumps(result)
+
+
+def test_kitchen_forward_simulation_hides_unannounced_order_contents():
+    kitchen = get_engine("kitchen")
+    state = kitchen.initial_state(730100, 3)
+    state["_future_orders"] = [{"id": "SECRET-ORDER", "ingredient": "onion", "arrival": 1, "deadline": 200}]
+    result = simulate(kitchen, state, kitchen.decide(state), ["wait"], 4)
+    assert result["steps_completed"] == 1
+    assert result["stopped_at_public_boundary"]
+    assert "SECRET-ORDER" not in json.dumps(result)
+    assert "order_arrived" not in json.dumps(result)
+
+
+def test_warehouse_net_score_and_task_score_are_distinguished_in_counterfactual():
+    warehouse = get_engine("warehouse")
+    state = warehouse.initial_state(730100, 2)
+    selected = plan(state, intents=[{"kind": "counterfactual", "evidence_ids": [], "actions": ["wait"], "horizon": 1}])
+    result = explainer_for_plan(selected).answer(warehouse, state, warehouse.decide(state), "What is the net score change if I wait?", "en", [], [])
+    simulation = result["audit"]["simulations"][0]
+    assert result["status"] == "answered"
+    assert f"Net score changes by {simulation['raw_score_delta']:g}" in result["answer"]
+    assert f"Task score changes by {simulation['task_score_delta']:g}" in result["answer"]
+
+
+def test_simulation_returns_public_actor_projection_not_internal_actor_fields():
+    warehouse = get_engine("warehouse")
+    state = warehouse.initial_state(730100, 2)
+    state["human"]["private_note"] = "NEVER-EXPOSE-THIS"
+    result = simulate(warehouse, state, warehouse.decide(state), ["wait"], 1)
+    assert "NEVER-EXPOSE-THIS" not in json.dumps(result)
+
+
+def test_recorded_terminal_frame_has_no_next_action_even_with_empty_decision():
+    state = pong.step(fixture(turns=1), "wait")
+    result = explainer_for_plan(plan(state, ids=("next_action",))).answer(pong, state, {}, "What happens next?", "en", [], [])
+    assert result["status"] == "answered"
+    assert "no next action" in result["answer"]
+
+
+def test_real_http_transport_structure_auth_and_no_secret_audit():
+    received = []
+    state = fixture()
+    selected = plan(state)
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+        def do_POST(self):
+            received.append({"path": self.path, "auth": self.headers.get("Authorization"),
+                             "body": json.loads(self.rfile.read(int(self.headers["Content-Length"])))})
+            body = json.dumps({"id": "test-secret", "model": "fixture", "choices": [{"message": {"content": json.dumps(selected)}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        instance = Explainer(Settings(database=":memory:", llm_base_url=f"http://127.0.0.1:{server.server_port}/v1", llm_model="fixture", llm_api_key="test-secret"))
+        result = ask(instance, state)
+        assert result["status"] == "answered"
+        assert received[0]["path"] == "/v1/chat/completions"
+        assert received[0]["auth"] == "Bearer test-secret"
+        assert received[0]["body"]["response_format"] == {"type": "json_object"}
+        assert "test-secret" not in json.dumps(result)
+        assert "test-secret" not in json.dumps(received[0]["body"])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def test_provider_protocol_failure_is_unavailable_not_fake_success():
+    state = fixture()
+    instance = Explainer(Settings(database=":memory:", llm_base_url="http://127.0.0.1:1/v1", llm_model="unreachable"), timeout=.1)
+    result = ask(instance, state)
+    assert result["status"] == "unavailable"
+    assert result["audit"]["failure_code"] == "connection_or_timeout"
+
+
+def _case_files():
+    config = json.loads((ROOT / "configs/study_v3_qa_cases.json").read_text())
+    cases = list(config["cases"])
+    for name in config["external_case_files"]:
+        path = ROOT / name
+        if path.exists():
+            data = json.loads(path.read_text())
+            cases.extend(data if isinstance(data, list) else data["cases"])
+    return cases
+
+
+def _lookup(value, path):
+    for component in path.split("."):
+        value = value[int(component)] if isinstance(value, list) else value[component]
+    return value
+
+
+@pytest.mark.parametrize("case", _case_files(), ids=lambda c: c["case_id"])
+def test_recorded_question_case_independent_expectations_and_composition(case):
+    engine = get_engine(case.get("domain", case["state"]["domain"]))
+    state = deepcopy(case["state"])
+    decision = engine.decide(state)
+    catalog = _catalog(engine, state, decision, case.get("public_history", []))
+    for identifier in case["expected_fact_ids"]:
+        assert identifier in catalog
+    selected = case.get("expected_plan")
+    if not selected:
+        selected = plan(state, language=case["language"], ids=case["expected_fact_ids"])
+    instance = explainer_for_plan(selected)
+    result = instance.answer(engine, state, decision, case["question"], case["language"], case.get("previous_dialogue", []), case.get("public_history", []))
+    assert result["status"] == ("clarification" if selected.get("clarification") else "answered")
+    for claim in case.get("expected_claims", []):
+        if isinstance(claim, str):
+            assert claim in result["answer"]
+        elif "path" in claim:
+            assert _lookup(state, claim["path"]) == claim["equals"]
+        elif "decision_path" in claim:
+            assert _lookup(decision, claim["decision_path"]) == claim["equals"]
+        elif "simulation_path" in claim:
+            assert _lookup(result["audit"]["simulations"][0], claim["simulation_path"]) == claim["equals"]
+        elif "fact_id" in claim:
+            assert claim["contains"] in catalog[claim["fact_id"]][case["language"]]
+        else:
+            raise AssertionError(f"Unknown independent claim format: {claim}")
+
+
+def test_pong_case_coverage_has_sixty_distinct_questions_and_expected_claims():
+    cases = [c for c in _case_files() if c.get("domain", c["state"]["domain"]) == "pong"]
+    assert len(cases) >= 60
+    assert {c["language"] for c in cases} == {"en", "zh"}
+    assert len({c["case_id"] for c in cases}) == len(cases)
+    assert len({c["question"] for c in cases}) >= 60
+    assert {c["expected_kind"] for c in cases} >= {"facts", "counterfactual", "clarification"}
+
+
+@pytest.mark.parametrize("domain", ("pong", "warehouse", "kitchen"))
+def test_all_three_domains_have_at_least_sixty_bilingual_cases(domain):
+    cases = [c for c in _case_files() if c.get("domain", c["state"]["domain"]) == domain]
+    assert len(cases) >= 60
+    assert {c["language"] for c in cases} == {"en", "zh"}
+
+
+def test_real_provider_evaluator_does_not_count_string_outputs_as_correctness():
+    state = fixture()
+    case = {"state": state, "language": "en", "expected_kind": "facts", "expected_fact_ids": ["position"], "expected_claims": []}
+    unrelated = {"status": "answered", "language": "en", "answer": "This is a string.", "evidence_ids": [], "audit": {"simulations": []}}
+    report = evaluate_case(case, unrelated, pong)
+    assert not report["passed"]
+    assert "missing_evidence:position" in report["issues"]
+    actual = ask(explainer_for_plan(plan(state, ids=("position",))), state)
+    report = evaluate_case(case, actual, pong)
+    assert report["passed"] and report["requires_human_review"]

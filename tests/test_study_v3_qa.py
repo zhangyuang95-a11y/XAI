@@ -196,7 +196,7 @@ def test_multintent_combines_why_and_actual_counterfactual_results():
     assert "caught: +3 points" in result["answer"]
     assert result["audit"]["simulations"][0]["raw_score_delta"] == 3
     assert "In the selected recorded state:" in result["answer"]
-    assert result["answer"].index("I will cover") < result["answer"].index("If you move right")
+    assert result["answer"].index(pong.decide(state)["reason_en"]) < result["answer"].index("If you move right")
 
 
 def test_two_counterfactuals_compare_real_different_outcomes():
@@ -492,3 +492,208 @@ def test_simulation_cannot_be_bound_to_ai_actor():
     result = ask(explainer_for_plan(selected), state)
     assert result["status"] == "unavailable"
     assert result["audit"]["failure_code"] == "wrong_simulation_actor"
+
+
+@pytest.mark.parametrize("language", ["en", "zh"])
+def test_position_hypothesis_recomputes_actual_controller_without_advancing_game(language):
+    state = fixture(human=0, ai=4, turns=4)
+    original = deepcopy(state)
+    actual = pong.decide(state)
+    assert actual['action'] == 'right'
+    intent = {"kind": "counterfactual", "subject": "human", "purpose": "comparison",
+              "evidence_ids": [], "intervention": {"human_lane": 9}, "actions": [], "horizon": 0}
+    capture = []
+    result = ask(explainer_for_plan(plan(state, language=language, intents=[intent]), capture), state,
+                 question="If I were at lane 9, how would you move?" if language == 'en' else "如果我在第9道，你会怎么移动？")
+    assert result['status'] == 'answered'
+    simulation = result['audit']['simulations'][0]
+    assert simulation['intervention']['ai_action'] == 'left'
+    assert simulation['intervention']['actual_human_lane'] == 1
+    assert simulation['intervention']['human_lane'] == 9
+    assert simulation['steps_completed'] == 0 and simulation['trace'] == []
+    assert simulation['human']['x'] == 8 and simulation['ai']['x'] == 4
+    assert simulation['raw_score_delta'] == simulation['task_score_delta'] == 0
+    assert state == original and pong.decide(state) == actual
+    assert result['evidence_ids'] == ['simulation:1']
+    assert capture[0]['public_observation']['human']['x'] == 0
+    assert capture[0]['counterfactual_interventions']['human_lane']['maximum'] == 9
+    if language == 'en':
+        assert 'If you were in lane 9, I would move left next.' in result['answer']
+        assert 'hypothetical position' in result['answer'] and 'game has not changed' in result['answer']
+    else:
+        assert '假设你在第9道，我下一步会左移' in result['answer']
+        assert '实际游戏没有改变' in result['answer']
+
+
+def test_position_hypothesis_preserves_existing_commitment_until_unreachable():
+    state = fixture(human=0, ai=4, turns=4)
+    state['policy_memory'] = deepcopy(pong.decide(state)['memory'])
+    original = deepcopy(state)
+    # Lane 7 makes the other split shorter, but the actual fixed controller
+    # keeps an existing still-reachable agreement instead of erasing memory.
+    maintained = simulate(pong, state, pong.decide(state), [], 0, intervention={'human_lane': 7})
+    assert maintained['intervention']['ai_action'] == 'right'
+    no_commitment = deepcopy(state)
+    no_commitment['policy_memory'] = {}
+    changed = simulate(pong, no_commitment, pong.decide(no_commitment), [], 0,
+                       intervention={'human_lane': 7})
+    assert changed['intervention']['ai_action'] == 'left'
+    released = simulate(pong, state, pong.decide(state), [], 0, intervention={'human_lane': 9})
+    assert released['intervention']['ai_action'] == 'left'
+    assert state == original
+
+
+def test_position_and_action_counterfactual_steps_real_physics_from_modified_state():
+    state = fixture(human=0, ai=4, turns=4)
+    original = deepcopy(state)
+    branch = deepcopy(state)
+    branch['human']['x'] = 6
+    expected = []
+    for action in ['wait', 'wait']:
+        decision = pong.decide(branch)
+        branch = pong.step(branch, action, decision)
+        expected.append((decision['action'], branch['human']['x'], branch['ai']['x']))
+    result = simulate(pong, state, pong.decide(state), ['wait'], 2,
+                      intervention={'human_lane': 7})
+    assert [(row['ai_action'], row['human']['x'], row['ai']['x']) for row in result['trace']] == expected
+    assert expected == [('left', 6, 3), ('left', 6, 2)]
+    assert result['executed_actions'] == ['wait', 'wait'] and result['assumed_wait_turns'] == 1
+    assert result['human'] == branch['human'] and result['ai'] == branch['ai']
+    assert state == original
+
+
+def test_position_hypothesis_with_explicit_window_discloses_assumed_waits():
+    state = fixture(human=0, ai=4, turns=4)
+    selected = plan(state, intents=[{'kind': 'counterfactual', 'subject': 'human',
+        'purpose': 'comparison', 'evidence_ids': [], 'intervention': {'human_lane': 7},
+        'horizon': 2}])
+    result = ask(explainer_for_plan(selected), state)
+    assert result['status'] == 'answered'
+    assert result['audit']['simulations'][0]['executed_actions'] == ['wait', 'wait']
+    assert 'explicit assumption' in result['answer']
+    assert 'From that hypothetical position' in result['answer']
+
+
+@pytest.mark.parametrize('intervention', [{'human_lane': 0}, {'human_lane': 10},
+    {'human_lane': -1}, {'human_lane': True}, {'human_lane': 1.5}, {'human_lane': '3'},
+    {'human_lane': 2, 'ai_lane': 6}, {'ai_lane': 6}, {}, []])
+def test_unvalidated_position_changes_are_never_simulated(intervention):
+    state = fixture()
+    original = deepcopy(state)
+    with pytest.raises(PlanError):
+        simulate(pong, state, pong.decide(state), [], 0, intervention=intervention)
+    assert state == original
+    selected = plan(state, intents=[{'kind': 'counterfactual', 'subject': 'human',
+        'purpose': 'comparison', 'evidence_ids': [], 'intervention': intervention,
+        'actions': [], 'horizon': 0}])
+    result = ask(explainer_for_plan(selected), state)
+    assert result['status'] == 'unavailable'
+    assert result['audit']['simulations'] == []
+
+
+@pytest.mark.parametrize('domain', ['warehouse', 'kitchen'])
+def test_lane_hypotheses_are_not_applied_to_other_domains(domain):
+    engine = get_engine(domain)
+    state = engine.initial_state(730100, 2)
+    original = deepcopy(state)
+    selected = plan(state, intents=[{'kind': 'counterfactual', 'subject': 'human',
+        'purpose': 'comparison', 'evidence_ids': [], 'intervention': {'human_lane': 3},
+        'actions': [], 'horizon': 0}])
+    captured = []
+    result = explainer_for_plan(selected, captured).answer(engine, state, engine.decide(state), 'If I were in lane 3?')
+    assert result['status'] == 'unavailable'
+    assert captured[0]['counterfactual_interventions'] == {}
+    assert result['audit']['simulations'] == [] and state == original
+
+
+def test_position_hypothesis_does_not_leak_new_balls_or_follow_their_schedule():
+    state = pong._new_state([[pong._ball('known-team', 'cooperative', [2, 6], 1)],
+                            [pong._ball('HIDDEN-BALL', 'ordinary', [8], 3)]],
+                           seed=200, task=2, human=0, ai=6)
+    other = deepcopy(state)
+    other['_schedule'][1]['ball']['contacts'] = [0]
+    one = simulate(pong, state, pong.decide(state), ['wait'], 5, intervention={'human_lane': 3})
+    two = simulate(pong, other, pong.decide(other), ['wait'], 5, intervention={'human_lane': 3})
+    assert one['steps_completed'] == two['steps_completed'] == 1
+    assert one['stopped_at_public_boundary'] and two['stopped_at_public_boundary']
+    assert one['trace'] == two['trace'] and one['raw_score_delta'] == 3
+    assert 'HIDDEN-BALL' not in json.dumps(one)
+    assert one['intervention']['ai_action'] == two['intervention']['ai_action']
+
+
+def test_position_hypothesis_requires_exact_selected_historical_state():
+    state = fixture(human=0, ai=4, turns=4)
+    selected = plan(state, intents=[{'kind': 'counterfactual', 'subject': 'human',
+        'purpose': 'comparison', 'evidence_ids': [], 'intervention': {'human_lane': 9}}])
+    selected['binding']['turn'] = 8
+    result = ask(explainer_for_plan(selected), state)
+    assert result['status'] == 'clarification' and 'select' in result['answer'].lower()
+    assert result['audit']['simulations'] == []
+
+
+def test_actual_reason_cannot_masquerade_as_hypothetical_position_evidence():
+    state = fixture(human=0, ai=4, turns=4)
+    selected = plan(state, intents=[{'kind': 'counterfactual', 'subject': 'human',
+        'purpose': 'comparison', 'evidence_ids': ['decision'],
+        'intervention': {'human_lane': 9}, 'actions': [], 'horizon': 0}])
+    result = ask(explainer_for_plan(selected), state)
+    assert result['status'] == 'unavailable' and result['audit']['simulations'] == []
+    assert result['audit']['failure_code'] == 'intervention_has_actual_evidence'
+
+
+def test_focused_pong_counterfactual_keeps_consequence_without_duplicate_score_prose():
+    state = fixture(human=1, ai=7, turns=1)
+    selected = plan(state, intents=[{'kind': 'counterfactual', 'subject': 'human',
+        'purpose': 'comparison', 'evidence_ids': [], 'actions': ['right'], 'horizon': 1}])
+    result = ask(explainer_for_plan(selected), state)
+    assert result['status'] == 'answered'
+    assert 'caught: +3 points' in result['answer']
+    assert len(result['answer'].split()) < 65
+    assert 'Catch points change by' not in result['answer']
+
+
+def test_action_already_present_in_selected_reason_is_not_repeated():
+    state = pong.initial_state(730100, 2)
+    decision = pong.decide(state)
+    assert 'move ' + decision['action'] in decision['reason_en']
+    selected = plan(state, ids=('system:ai_action', 'system:ai_reason'))
+    result = ask(explainer_for_plan(selected), state)
+    assert result['status'] == 'answered'
+    assert result['answer'] == 'Task 2 · Turn 0\n\n' + decision['reason_en']
+    assert result['evidence_ids'] == ['system:ai_action', 'system:ai_reason']
+
+
+def test_pong_equal_window_comparison_states_no_score_advantage_once():
+    state = fixture(human=2, ai=6, turns=4)
+    selected = plan(state, intents=[{'kind': 'counterfactual', 'subject': 'human',
+        'purpose': 'comparison', 'evidence_ids': [], 'actions': [action], 'horizon': 1}
+        for action in ('right', 'wait')])
+    result = ask(explainer_for_plan(selected), state)
+    assert result['status'] == 'answered'
+    assert 'no score advantage' in result['answer']
+    assert result['answer'].count('This window') == 1
+    assert 'Only this window' not in result['answer']
+
+
+def test_kitchen_catalog_uses_facing_station_labels_and_offers_no_remote_discard():
+    kitchen = get_engine('kitchen')
+    state = kitchen.initial_state(730100, 2)
+    interactions = []
+    for _ in range(24):
+        decision = kitchen.decide(state)
+        evidence = _catalog(kitchen, state, decision, [])
+        suggestion = evidence['system:human_advice']['action']
+        assert suggestion in kitchen.legal_actions(state)
+        if suggestion == 'interact':
+            interaction = kitchen.public_state(state)['interaction']
+            assert interaction['available']
+            assert interaction['label_en'] in evidence['system:human_advice']['en']
+            assert interaction['label_zh'] in evidence['system:human_advice']['zh']
+            interactions.append(interaction['station'])
+        state = kitchen.step(state, suggestion, decision)
+    assert {'egg', 'prep', 'handoff'} <= set(interactions)
+    captured = []
+    selected = plan(state, ids=('system:human_advice',))
+    result = explainer_for_plan(selected, captured).answer(kitchen, state, kitchen.decide(state), 'What can I do?')
+    assert result['status'] == 'answered'
+    assert 'discard' not in captured[0]['allowed_action_ids']

@@ -106,11 +106,10 @@ class Store:
                 token=secrets.token_urlsafe(32)
                 db.execute('INSERT INTO pl3_sessions VALUES(?,?,?)',(digest(token),name,time.time()))
             # Switching domains never rewrites or finishes another instance.
-            # Resume the requested domain across explicitly compatible UI-only
-            # releases; unsupported rules block only that domain, not its peers.
-            instance=db.one('SELECT * FROM pl3_instances WHERE participant_id=? AND domain=? ORDER BY created DESC,id DESC LIMIT 1',(name,domain))
-            if instance and instance['release_id'] not in SUPPORTED_RELEASE_IDS:
-                raise StudyError('release_changed',409)
+            # A rules revision starts a separate enrollment. Old runs, frames,
+            # answers and questionnaires remain intact under their release ID.
+            candidates=db.all('SELECT * FROM pl3_instances WHERE participant_id=? AND domain=? ORDER BY created DESC,id DESC',(name,domain))
+            instance=next((r for r in candidates if r['release_id'] in SUPPORTED_RELEASE_IDS),None)
             if not instance:
                 iid=uid()
                 config=scenario_config(domain)
@@ -136,11 +135,12 @@ class Store:
             p=self._participant(db,token)
             rows=db.all('SELECT * FROM pl3_instances WHERE participant_id=? ORDER BY created DESC,id DESC',(p['id'],))
             if domain:
-                instance=next((r for r in rows if r['domain']==domain),None)
+                instance=next((r for r in rows if r['domain']==domain and r['release_id'] in SUPPORTED_RELEASE_IDS),None)
             else:
                 compatible=[r for r in rows if r['release_id'] in SUPPORTED_RELEASE_IDS]
-                instance=next((r for r in compatible if r['stage']!='completed'),compatible[0] if compatible else rows[0] if rows else None)
-            if not instance: return {'participant_id':p['id'],'stage':'welcome'}
+                instance=next((r for r in compatible if r['stage']!='completed'),compatible[0] if compatible else None)
+            if not instance: return {'participant_id':p['id'],'stage':'welcome',
+                'previous_version_saved':any(r['release_id'] not in SUPPORTED_RELEASE_IDS and (not domain or r['domain']==domain) for r in rows)}
             if instance['release_id'] not in SUPPORTED_RELEASE_IDS: raise StudyError('release_changed',409)
             return self._view(db,instance)
 
@@ -176,7 +176,7 @@ class Store:
         if instance['stage']=='questionnaire':
             items=COMMON_ITEMS+(EXPLANATION_ITEMS if instance['group_code']=='A' else [])
             result['questionnaire']={'items':[{'id':i[0],'text':i[2 if language=='zh' else 1],'allow_na':i in EXPLANATION_ITEMS} for i in items],
-                'comprehension':[{k:v for k,v in q.items() if k!='answer'} for q in eng.comprehension(language)]}
+                'comprehension':[]}
         return result
 
     def command(self,token,kind,payload):
@@ -266,17 +266,13 @@ class Store:
 
     def _questionnaire(self,db,instance,payload):
         if instance['stage']!='questionnaire':raise StudyError('wrong_stage',409)
-        answers=payload.get('answers',{}); comprehension=payload.get('comprehension',{})
-        if not isinstance(answers,dict) or not isinstance(comprehension,dict):raise StudyError('invalid_questionnaire')
+        answers=payload.get('answers',{})
+        if not isinstance(answers,dict):raise StudyError('invalid_questionnaire')
         for q in COMMON_ITEMS+(EXPLANATION_ITEMS if instance['group_code']=='A' else []):
             value=answers.get(q[0])
             if q in EXPLANATION_ITEMS and value=='na':continue
             if type(value) is not int or not 1<=value<=7:raise StudyError('incomplete_questionnaire')
         graded=[]
-        for q in engine(instance['domain']).comprehension(instance['language']):
-            value=comprehension.get(q['id'])
-            if type(value) is not int or not 0<=value<len(q['options']):raise StudyError('incomplete_questionnaire')
-            graded.append({'id':q['id'],'selected':value,'correct':value==q['answer']})
         feedback=str(payload.get('feedback',''))[:4000]
         db.execute('INSERT INTO pl3_questionnaires VALUES(?,?,?,?)',(instance['id'],encode({'ratings':answers,'feedback':feedback}),encode(graded),time.time()))
         db.execute("UPDATE pl3_instances SET stage='completed',completed=? WHERE id=?",(time.time(),instance['id']))

@@ -4,7 +4,7 @@ The controller observes only the current kitchen and revealed orders. One human
 command commits one simultaneous turn; animations and questions are not clocks.
 """
 from __future__ import annotations
-from collections import deque
+from collections import Counter, deque
 from copy import deepcopy
 from functools import lru_cache
 import json
@@ -12,8 +12,8 @@ from pathlib import Path
 import random
 
 DOMAIN = "kitchen"
-VERSION = "kitchen-v4.0.1"
-SCENARIO_VERSION = "kitchen-scenarios-v4.0.0"
+VERSION = "kitchen-v4.1.0"
+SCENARIO_VERSION = "kitchen-scenarios-v4.1.0"
 WIDTH, HEIGHT = 9, 7
 PREPARE_TURNS = CHOP_TURNS = 2
 COOK_TURNS = {"egg": 4, "meat": 6, "tomato": 4, "pepper": 4}
@@ -33,6 +33,7 @@ STATIONS = [
     {"id": "plate", "x": 1, "y": 5, "kind": "plate", "label_en": "Serving plates", "label_zh": "正式装盘台"},
     {"id": "serve", "x": 3, "y": 5, "kind": "serve", "label_en": "Serving hatch", "label_zh": "上菜口"},
     {"id": "handoff", "x": 4, "y": 3, "kind": "handoff", "label_en": "Handoff counter", "label_zh": "交接台"},
+    {"id": "trash", "x": 4, "y": 4, "kind": "trash", "label_en": "Trash bin", "label_zh": "垃圾桶"},
     {"id": "pot1", "x": 7, "y": 1, "kind": "pot", "label_en": "Stove 1", "label_zh": "炉灶 1"},
     {"id": "protein1", "x": 7, "y": 2, "kind": "protein_buffer", "pot_id": "pot1", "label_en": "Stove 1 temporary plate", "label_zh": "炉灶 1 临时盘位"},
     {"id": "ai_raw", "x": 7, "y": 3, "kind": "raw_buffer", "capacity": 2, "label_en": "Two ingredient slots", "label_zh": "双槽原料暂存台"},
@@ -42,7 +43,7 @@ STATIONS = [
 STATION_BY_ID = {station["id"]: station for station in STATIONS}
 STATION_AT = {(station["x"], station["y"]): station for station in STATIONS}
 WALLS = [[x, y] for y in range(HEIGHT) for x in range(WIDTH)
-         if x in (0, WIDTH - 1) or y in (0, HEIGHT - 1) or (x == 4 and y != 3)]
+         if x in (0, WIDTH - 1) or y in (0, HEIGHT - 1) or (x == 4 and y not in (3, 4))]
 BLOCKED = frozenset(tuple(p) for p in WALLS) | frozenset(STATION_AT)
 FLOOR = frozenset((x, y) for x in range(WIDTH) for y in range(HEIGHT) if (x, y) not in BLOCKED)
 
@@ -107,6 +108,9 @@ def _name(item, language="en"):
         return "nothing" if language == "en" else "无物品"
     zh = language == "zh"
     stage = item["stage"]
+    if stage == "waste":
+        ingredients = ("、" if zh else " and ").join(LABELS[name][zh] for name in item["ingredients"])
+        return f"待丢弃容器中的{ingredients}" if zh else f"{ingredients} in a disposal container"
     if stage in ("finished", "plated", "mixing"):
         recipe = _recipe_name(item["recipe"], language)
         return ({"finished": f"{recipe} in an output container", "plated": f"{recipe} on a serving plate", "mixing": f"combined {recipe}"} if not zh else
@@ -142,10 +146,12 @@ def _contains(item, ingredient):
 
 
 def _choose_order(state, item):
+    if item["stage"] == "waste":
+        return None
     if item.get("order_id"):
         return _order(state, item["order_id"])
     for order in _pending(state, item["recipe"]):
-        already = any(other and other["id"] != item["id"] and other.get("order_id") == order["id"] and _contains(other, item["ingredient"])
+        already = any(other and other["stage"] != "waste" and other["id"] != item["id"] and other.get("order_id") == order["id"] and _contains(other, item["ingredient"])
                       for other in _all_items(state))
         if not already:
             return order
@@ -226,6 +232,8 @@ def _descriptor(state, actor="human", slot=None):
         return None
     target, kind = station["id"], station["kind"]
     out = {"station": target}
+    if kind == "trash":
+        return dict(out, kind="discard") if held else None
     if target == "handoff" or target == "human_buffer" and actor == "human":
         item = state["handoff"] if target == "handoff" else state["buffers"]["human"]
         if (held is None) == (item is None):
@@ -256,8 +264,11 @@ def _descriptor(state, actor="human", slot=None):
         return None
     if kind == "pot":
         pot = _pot(state, target)
-        if held is None and (pot["status"] == "burnt" or pot["order_id"] and not _order(state, pot["order_id"])):
-            return dict(out, kind="clear_pot")
+        # Completed food is removed intact even when its order has expired.
+        # Pan cleanup transfers food into the hand; only the trash removes it.
+        expired_unfinished = pot["order_id"] and not _order(state, pot["order_id"]) and pot["phase"] != "mix"
+        if held is None and (pot["status"] == "burnt" or expired_unfinished):
+            return dict(out, kind="take_waste" if pot["item"] else "clear_pot")
         if pot in _loadable(state, held):
             return dict(out, kind="load")
         if held is None and pot["status"] == "ready" and pot["phase"] in ("protein", "mix"):
@@ -277,8 +288,6 @@ def legal_actions(state, actor="human"):
     result = ["up", "down", "left", "right", "wait"]
     if _descriptor(state, actor):
         result.append("interact")
-    if state[actor]["holding"]:
-        result.append("discard")
     return result
 
 
@@ -289,6 +298,8 @@ def interaction_label(state, actor="human", language="en", slot=None):
         station, held = _front(state[actor]), state[actor]["holding"]
         if station is None:
             return "请先面向一个工位" if zh else "Face a work station first"
+        if station["kind"] == "trash":
+            return "手中没有可丢弃的物品" if zh else "You are not holding an item to dispose of"
         if actor == "human":
             if station["kind"] == "ingredient":
                 return "你的手里已有物品，请先放下" if zh else "Your hands are full; put down your item first"
@@ -306,7 +317,8 @@ def interaction_label(state, actor="human", language="en", slot=None):
         return "面前工位现在没有可执行的交互" if zh else "No interaction is currently available at the station in front"
     labels = {"take": ("Pick up", "拿起"), "put": ("Put down", "放下"), "prepare": ("Prepare ingredient", "备料"),
               "plate": ("Transfer onto a serving plate", "转装正式餐盘"), "serve": ("Serve dish", "上菜"), "load": ("Add prepared ingredient", "加入备料"),
-              "remove": ("Take cooked food off heat", "出锅"), "combine": ("Return the cooked protein to the pan", "把熟主料倒回锅"), "clear_pot": ("Clear the pan", "清理锅")}
+              "remove": ("Take cooked food off heat", "出锅"), "combine": ("Return the cooked protein to the pan", "把熟主料倒回锅"), "clear_pot": ("Release the empty pan from its expired order", "解除空锅的过期订单绑定"),
+              "take_waste": ("Pick up pan contents for disposal", "取出锅内食物并拿去垃圾桶"), "discard": ("Put the held item into the trash bin", "把手持物品丢进垃圾桶")}
     if descriptor["kind"] in ("put", "take"):
         station = STATION_BY_ID[descriptor["station"]]
         if descriptor["kind"] == "put":
@@ -349,10 +361,9 @@ def _wait(en, zh, reason="waiting"):
 
 def _holding_plan(state):
     item = state["ai"]["holding"]
-    if not _useful(state, item):
-        result = _wait("The food in my hand cannot fill a current order. I am discarding it to free my hand.", "手中食物不能完成当前订单，我先丢弃它以腾出手。", "discard_unusable")
-        result["action"] = "discard"
-        return result
+    if item["stage"] != "finished" and not _useful(state, item):
+        return _plan(state, "trash", "This unfinished or burnt food cannot fill its current order. I am carrying the actual item to the trash bin; it stays in my hand until I use the bin.",
+                     "这份未完成或烧糊的食物无法完成当前订单。我把实物拿到垃圾桶；到桶前交互之前，它会一直留在手中。", "dispose_unusable")
     if item["stage"] == "cooked_protein":
         pid = item["pot_id"]
         pot = _pot(state, pid)
@@ -365,7 +376,10 @@ def _holding_plan(state):
         return _plan(state, "protein" + pid[-1], "I am returning this cooked component to its dedicated temporary counter while its matching pan waits for the vegetable.", "对应锅还在等蔬菜，我把熟主料放回专用临时盘位。", "store_protein")
     if item["stage"] == "finished":
         if state["handoff"] is None:
-            return _plan(state, "handoff", "The dish is finished in its output container. I am handing it over so you can transfer it to a serving plate and serve it.", "这道菜已在出锅容器中完成。我送到交接台，由你转装正式餐盘后上菜。", "deliver")
+            if _useful(state, item):
+                return _plan(state, "handoff", "The dish is finished in its output container. I am handing it over so you can transfer it to a serving plate and serve it.", "这道菜已在出锅容器中完成。我送到交接台，由你转装正式餐盘后上菜。", "deliver")
+            return _plan(state, "handoff", "This finished dish's order has expired, but the food has not disappeared. I am placing the intact dish on the handoff counter; it will not earn a point for the expired order.",
+                         "这份成品对应的订单已过期，但食物仍完整保留。我把它放到交接台；它不能为过期订单得分。", "deliver_expired_finished")
         if state["buffers"]["protein"][item["pot_id"]] is None:
             return _plan(state, "protein" + item["pot_id"][-1], "The handoff counter is occupied. I am putting the finished dish on its pan's temporary counter to free my hand.", "交接台被占用，我先把成品放到对应锅的临时台，腾出手。", "store_finished")
         return _wait("I am holding a finished dish and both its temporary counter and the handoff counter are occupied. Clear the handoff counter so I can deliver it.", "我拿着成品，对应临时台和交接台都被占用；清空交接台后我才能交付。", "blocked")
@@ -385,7 +399,7 @@ def _holding_plan(state):
 
 
 def _empty_plan(state):
-    ready = sorted((pot for pot in state["pots"] if pot["status"] == "ready"), key=lambda p: (_burn_delay(p), p["id"]))
+    ready = sorted((pot for pot in state["pots"] if pot["status"] == "ready" and (pot["phase"] == "mix" or _order(state, pot["order_id"]))), key=lambda p: (_burn_delay(p), p["id"]))
     for pot in ready:
         if pot["phase"] in ("protein", "mix"):
             turns = _distance(state, "ai", pot["id"]) + 1
@@ -400,11 +414,11 @@ def _empty_plan(state):
     # Finished food stored under handoff pressure must leave before this pan can
     # start another order; its dedicated counter is never overwritten.
     for pid, item in state["buffers"]["protein"].items():
-        if item and (not _useful(state, item) or item["stage"] == "finished" and state["handoff"] is None):
+        if item and ((item["stage"] != "finished" and not _useful(state, item)) or item["stage"] == "finished" and state["handoff"] is None):
             return _plan(state, "protein" + pid[-1], "I am collecting food from the temporary counter to complete its handoff or clear food that no current order needs.", "我从临时台取回食物，继续交接，或清理当前订单不再需要的食物。", "fetch_output")
     for pot in state["pots"]:
-        if pot["status"] == "burnt" or pot["order_id"] and not _order(state, pot["order_id"]):
-            return _plan(state, pot["id"], "This pan contains burnt food or belongs to an expired order. I am clearing it so the pan can be used again.", "这口锅的食物已糊，或对应订单已过期。我清理它，使锅可以重新使用。", "clear_pot")
+        if pot["status"] == "burnt" or pot["order_id"] and not _order(state, pot["order_id"]) and pot["phase"] != "mix":
+            return _plan(state, pot["id"], "I am collecting this pan's burnt or unfinished expired food so I can carry it to the trash. Any empty expired pan can be released without removing food.", "我要先取出这口锅中烧糊或订单已过期的未完成食物，再拿到垃圾桶；空锅则解除过期绑定，不移除任何食物。", "clear_pot")
     # Retrieve protein while the vegetable cooks only if it will be ready by
     # the earliest return. The explicit route includes final facing actions.
     for pot in sorted(state["pots"], key=lambda p: (_burn_delay(p), p["id"])):
@@ -486,7 +500,7 @@ def decide(state):
         commitment = state.get("policy_memory", {}).get("rescue_pot")
         ready.sort(key=lambda p: (p["id"] != commitment, _burn_delay(p), p["id"]))
         held = state["ai"]["holding"]
-        if ready and held and held["stage"] in ("prepared", "cooked_protein"):
+        if ready and held and _useful(state, held) and held["stage"] in ("prepared", "cooked_protein"):
             pot = ready[0]
             target = "ai_raw" if held["stage"] == "prepared" else "protein" + held["pot_id"][-1]
             empty = [i for i, value in enumerate(state["buffers"]["ai_raw"]) if value is None] if target == "ai_raw" else []
@@ -524,7 +538,12 @@ def _reset_pot(pot):
 def _interact(state, actor, descriptor, new_turn, newly_loaded):
     who = state[actor]
     held, target, kind = who["holding"], descriptor["station"], descriptor["kind"]
-    if kind == "take_ingredient":
+    if kind == "discard":
+        state["metrics"]["waste"] += len(held["components"])
+        who["holding"] = None
+        _event(state, "waste", f"{'You' if actor == 'human' else 'AI'} put {_name(held)} into the trash bin.",
+               f"{'你' if actor == 'human' else 'AI'}把{_name(held, 'zh')}丢进垃圾桶。", actor=actor, station="trash", item=deepcopy(held))
+    elif kind == "take_ingredient":
         ingredient = descriptor["ingredient"]
         iid = f"item{state['next_item_id']}"
         state["next_item_id"] += 1
@@ -597,17 +616,20 @@ def _interact(state, actor, descriptor, new_turn, newly_loaded):
         newly_loaded.add(target)
         _event(state, "components_combined", f"AI returned the cooked protein to stove {target[-1]} with its cooked vegetable. The dish now needs two full mixing turns.",
                f"AI 把已熟主料倒回炉灶 {target[-1]}，与炒熟的蔬菜合炒，还需完整 2 回合。", pot=target, item=deepcopy(held))
-    elif kind == "clear_pot":
+    elif kind in ("take_waste", "clear_pot"):
         pot = _pot(state, target)
-        item = deepcopy(pot["item"])
-        if item:
-            state["metrics"]["waste"] += len(item["components"])
+        removed = pot["item"]
+        if removed:
+            removed.update(previous_stage=removed["stage"], stage="waste", container="disposal_container",
+                           waste_reason="burnt" if pot["status"] == "burnt" else "expired_unfinished")
+            who["holding"] = removed
         protein = state["buffers"]["protein"][target]
         if pot["phase"] == "vegetable" and protein and _order(state, pot["order_id"]):
             pot.update(status="empty", phase="await_vegetable", item=None, remaining=0, ready_age=0)
         else:
             _reset_pot(pot)
-        _event(state, "pot_cleared", f"AI cleared stove {target[-1]}.", f"AI 清理了炉灶 {target[-1]}。", pot=target, item=item)
+        _event(state, "pan_contents_removed" if removed else "pot_cleared", f"AI {'picked up the pan contents for disposal from' if removed else 'released the empty expired'} stove {target[-1]}.",
+               f"AI {'取出待丢弃食物，腾空了' if removed else '解除空锅的过期绑定：'}炉灶 {target[-1]}。", pot=target, actor=actor, item=deepcopy(removed))
     elif kind == "plate":
         held.update(stage="plated", container="serving_plate")
         _event(state, "plated", "You transferred the finished dish from its output container onto a serving plate.", "你把成品从出锅容器转装到了正式餐盘。", actor=actor, item=deepcopy(held))
@@ -621,6 +643,22 @@ def _interact(state, actor, descriptor, new_turn, newly_loaded):
             _event(state, "served", f"You served {_recipe_name(held['recipe'])} for {order['id']}.", f"你为订单 {order['id']} 上了{_recipe_name(held['recipe'], 'zh')}。", order_id=order["id"], item=deepcopy(held))
         else:
             _event(state, "serve_rejected", "No current order accepts this plated dish. You keep holding it.", "当前没有可接受这份餐盘的订单；物品仍留在你手中。", item=deepcopy(held))
+
+
+def _component_inventory(state):
+    """Physical components, including burnt contents awaiting a bin transfer."""
+    items = [state["human"]["holding"], state["ai"]["holding"], state["handoff"], state["buffers"]["human"],
+             *state["buffers"]["ai_raw"], *state["buffers"]["protein"].values(), *(pot["item"] for pot in state["pots"])]
+    return Counter(component for item in items if item for component in item["components"])
+
+
+def _verify_food_conservation(before, after):
+    acquired = Counter(component for event in after["events"] if event["type"] == "ingredient_taken" for component in event["item"]["components"])
+    removed = Counter(component for event in after["events"] if event["type"] in ("served", "waste") for component in event["item"]["components"])
+    if any(event["type"] == "waste" and event.get("station") != "trash" for event in after["events"]):
+        raise AssertionError("Food disposal must be an explicit trash-bin interaction")
+    if _component_inventory(before) + acquired != _component_inventory(after) + removed:
+        raise AssertionError("Food components must be conserved across each real transition")
 
 
 def step(state, human_action, decision=None):
@@ -653,11 +691,6 @@ def step(state, human_action, decision=None):
                 nxt["metrics"]["human_waits"] += 1
             elif decision.get("reason_code") == "blocked":
                 nxt["metrics"]["blocked_waits"] += 1
-        elif action == "discard":
-            item = who["holding"]
-            nxt["metrics"]["waste"] += len(item["components"])
-            who["holding"] = None
-            _event(nxt, "waste", f"{'You' if actor == 'human' else 'AI'} discarded {_name(item)}.", f"{'你' if actor == 'human' else 'AI'}丢弃了{_name(item, 'zh')}。", actor=actor, item=deepcopy(item))
         elif not conflict:
             _interact(nxt, actor, descriptors[actor], new_turn, newly_loaded)
     if conflict:
@@ -704,6 +737,7 @@ def step(state, human_action, decision=None):
         nxt["terminal"], nxt["termination_reason"] = True, "turn_budget"
     elif not future and all(o["status"] != "pending" for o in nxt["orders"]):
         nxt["terminal"], nxt["termination_reason"] = True, "all_orders_resolved"
+    _verify_food_conservation(state, nxt)
     return nxt
 
 
@@ -714,10 +748,34 @@ def score(state):
 
 def public_state(state):
     pots = [dict(deepcopy(pot), ingredient=pot["item"]["ingredient"] if pot["item"] else None,
+                 recipe_label_en=_recipe_name(pot["recipe"]) if pot["recipe"] else None,
+                 recipe_label_zh=_recipe_name(pot["recipe"], "zh") if pot["recipe"] else None,
                  burn_in=_burn_delay(pot) if pot["status"] in ("cooking", "ready") else None) for pot in state["pots"]]
+    human, ai = deepcopy(state["human"]), deepcopy(state["ai"])
+    held = state["human"]["holding"]
+    human["preparation"] = None
+    if held and held["stage"] in ("raw", "prepared"):
+        completed = min(PREPARE_TURNS, held["prepare_progress"])
+        human["preparation"] = {"item_id": held["id"], "ingredient": held["ingredient"], "completed": completed,
+                                "required": PREPARE_TURNS, "remaining": PREPARE_TURNS - completed,
+                                "ready": held["stage"] == "prepared", "at_station": (_front(human) or {}).get("id") == "prep",
+                                "label_en": "Whisk egg" if held["ingredient"] == "egg" else "Chop ingredient",
+                                "label_zh": "打散鸡蛋" if held["ingredient"] == "egg" else "切配原料"}
+    jobs = [{"pot_id": p["id"], "recipe": p["recipe"], "recipe_label_en": _recipe_name(p["recipe"]),
+             "recipe_label_zh": _recipe_name(p["recipe"], "zh"), "order_id": p["order_id"], "phase": p["phase"],
+             "status": p["status"], "remaining": p["remaining"], "ready_for_next_stage": p["status"] == "ready",
+             "location": "pan", "item_id": p["item"]["id"] if p["item"] else None}
+            for p in state["pots"] if p["recipe"] and p["phase"] != "idle"]
+    outputs = [(state["ai"]["holding"], "held"), *((it, "stored") for it in state["buffers"]["protein"].values())]
+    for food, location in outputs:
+        if food and food["stage"] == "finished":
+            jobs.append({"pot_id": food["pot_id"], "recipe": food["recipe"], "recipe_label_en": _recipe_name(food["recipe"]),
+                         "recipe_label_zh": _recipe_name(food["recipe"], "zh"), "order_id": food["order_id"], "phase": "finished",
+                         "status": location, "remaining": 0, "ready_for_next_stage": True, "location": location, "item_id": food["id"]})
+    ai["current_cooking"] = jobs
     return {"domain": DOMAIN, "version": VERSION, "task": state["task"], "turn": state["turn"], "max_turns": state["max_turns"],
             "terminal": state["terminal"], "events": deepcopy(state["events"]), "score": score(state), "width": WIDTH, "height": HEIGHT,
-            "walls": deepcopy(WALLS), "stations": deepcopy(STATIONS), "human": deepcopy(state["human"]), "ai": deepcopy(state["ai"]),
+            "walls": deepcopy(WALLS), "stations": deepcopy(STATIONS), "human": human, "ai": ai,
             "pots": pots, "handoff": deepcopy(state["handoff"]), "buffers": deepcopy(state["buffers"]),
             "orders": [dict(deepcopy(order), remaining=max(0, order["deadline"] - state["turn"])) for order in state["orders"]],
             "total_orders": state["total_orders"], "recipes": deepcopy(RECIPES),
@@ -727,11 +785,11 @@ def public_state(state):
 
 def _needed(state):
     """Allocate every existing portion once, then list missing visible ingredients."""
-    assigned = {(item["order_id"], ingredient) for item in _all_items(state) if item and item.get("order_id")
+    assigned = {(item["order_id"], ingredient) for item in _all_items(state) if item and item["stage"] != "waste" and item.get("order_id")
                 for ingredient in item.get("ingredients", [item["ingredient"]])}
     free = {ingredient: 0 for ingredient in LABELS}
     for item in _all_items(state):
-        if item and item.get("order_id") is None:
+        if item and item["stage"] != "waste" and item.get("order_id") is None:
             for ingredient in item.get("ingredients", [item["ingredient"]]):
                 free[ingredient] += 1
     needed = []
@@ -794,7 +852,7 @@ def human_advisor(state):
     output = any(item and item["stage"] == "finished" for item in (state["ai"]["holding"], *state["buffers"]["protein"].values())) or any(p["phase"] == "mix" for p in state["pots"])
     if held:
         if not _useful(state, held):
-            return "discard"
+            return _approach(state, "human", "trash")
         if held["stage"] == "plated":
             return _approach(state, "human", "serve")
         if held["stage"] == "finished":
@@ -804,7 +862,7 @@ def human_advisor(state):
         if _handoff_needs_human(state):
             # With hand, storage and handoff all occupied, one explicit discard
             # is the only legal way to free a hand; never overwrite another item.
-            return _approach(state, "human", "human_buffer") if buffer is None else "discard"
+            return _approach(state, "human", "human_buffer") if buffer is None else _approach(state, "human", "trash")
         if handoff is None and not output:
             return _approach(state, "human", "handoff")
         if buffer is None:
@@ -836,7 +894,7 @@ def human_advisor(state):
 def action_label(action, language="en"):
     pairs = {"up": ("Move or face up", "向上移动或转向"), "down": ("Move or face down", "向下移动或转向"),
              "left": ("Move or face left", "向左移动或转向"), "right": ("Move or face right", "向右移动或转向"),
-             "wait": ("Wait one turn", "等待一回合"), "interact": ("Interact in front", "与面前工位交互"), "discard": ("Discard held item", "丢弃手持物品")}
+             "wait": ("Wait one turn", "等待一回合"), "interact": ("Interact in front", "与面前工位交互")}
     return pairs[action][language == "zh"]
 
 
@@ -847,10 +905,10 @@ def rules(language="en"):
         ("The four cupboards supply egg, tomato, meat and pepper separately. Prepare each portion twice at the preparation counter: whisk egg and chop the other ingredients.", "四个独立原料柜分别提供鸡蛋、番茄、肉和辣椒。每份都要在备料台操作两次：鸡蛋打散，其余切配。"),
         ("There are two recipes: tomato and egg stir-fry, and pepper and meat stir-fry. Cook the protein first (egg: 4 turns; meat: 6), remove it onto a temporary plate and place that plate on its pan's dedicated counter. Then cook the vegetable for 4 turns, return the cooked protein to that pan, and mix for 2 turns.", "两道菜为番茄炒鸡蛋和辣椒炒肉：先炒主料（鸡蛋 4 回合、肉 6 回合），出锅到临时盘并实际放到对应锅的专用台；再炒蔬菜 4 回合，倒回已熟主料，合炒 2 回合。"),
         ("A finished dish comes from the AI in an output container. Take it to the serving-plate counter before serving. Temporary plates, output containers and final serving plates are distinct and supplied without depletion.", "AI 用出锅容器交付成品。你拿走后必须到正式装盘台转装餐盘才能上菜。临时盘、出锅容器和正式餐盘彼此不同，无限供应。"),
-        ("Each teammate holds one item. The handoff and human counter each hold one item. AI has two prepared-ingredient slots and one dedicated temporary-plate slot per pan. No swaps or overwrites occur. A held item can be discarded for one turn.", "每人只能拿一件物品；交接台和人类暂存台各一件。AI 有两个备料槽，以及每口锅一个专用临时盘位。不能交换或覆盖台面物品，手持物品可花一回合丢弃。"),
+        ("Each teammate holds one item. The handoff and human counter each hold one item. AI has two prepared-ingredient slots and one dedicated temporary-plate slot per pan. No swaps or overwrites occur. Carry a held item to the shared trash bin at (4,4), face it, and press E to dispose of it. Food cannot be discarded remotely.", "每人只能拿一件物品；交接台和人类暂存台各一件。AI 有两个备料槽，以及每口锅一个专用临时盘位。不能交换或覆盖台面物品，丢弃物品必须拿到（4,4）的共享垃圾桶前，面朝垃圾桶按 E；不能远程丢弃。"),
         ("Food ready in a pan burns after eight additional full turns. Its ready turn is not counted. Loading and combining do not count their own turn as a cooking turn. Removed food no longer burns.", "锅中食物炒好后再留满 8 回合会糊，刚炒好当回合不算。下锅或开始合炒当回合不计烹饪时间。出锅食物不再烧糊。"),
         ("If both teammates use the handoff counter in the same turn, neither transfer succeeds. Food placed this turn cannot be taken by the other teammate until a later turn.", "双方同回合使用交接台，两次交互都失败。本回合放下的食物不能被另一方同回合取走。"),
-        ("Each dish stays bound to the order it was cooked for. Score is 100 times correct, on-time orders divided by the fixed order count. Serving on an order's deadline turn is accepted before that order expires. Burnt food and waste add no hidden score penalties. Questions and replay do not use turns.", "每份菜始终绑定开工时对应的订单。得分为按时正确完成订单数除以固定订单总数再乘 100。截止回合仍可上菜，之后才过期。烧糊和浪费没有额外隐藏扣分；提问和回放不消耗回合。"),
+        ("Each dish stays bound to the order it was cooked for. Score is 100 times correct, on-time orders divided by the fixed order count. Serving on an order's deadline turn is accepted before that order expires. Order expiry never removes food. Finished dishes are preserved; burnt or unusable food must be carried to the trash. Burnt food and waste add no hidden score penalties. Questions and replay do not use turns.", "每份菜始终绑定开工时对应的订单。得分为按时正确完成订单数除以固定订单总数再乘 100。截止回合仍可上菜，之后才过期。订单过期不会让食物消失；成品仍保留，烧糊或无用食物必须实际拿到垃圾桶丢弃。烧糊和浪费没有额外隐藏扣分；提问和回放不消耗回合。"),
     ]
     return [pair[language == "zh"] for pair in pairs]
 
@@ -941,8 +999,8 @@ def facts(state, decision=None):
                      "zh": "任务已结束，无需再递交原料。" if state["terminal"] else "当前可见订单所需的原料份都已在厨房中，无需再拿新原料；请处理进行中的备料、交接、装盘或上菜。"})
     if _handoff_needs_human(state):
         handoff = state["handoff"]
-        rows.append({"id": "handoff_recovery", "en": "The handoff contains " + _name(handoff) + ". " + ("Take it back, prepare it at your station, then return the prepared portion." if handoff["stage"] == "raw" and _useful(state, handoff) else "No current order can use it in this form; take it back and clear or store it.") + " If holding something, use your empty storage counter first; if both your hand and storage are full, an explicit discard can free a hand without overwriting food.",
-                     "zh": "交接台上是" + _name(handoff, "zh") + "。" + ("请取回，到备料台备好后重新交接。" if handoff["stage"] == "raw" and _useful(state, handoff) else "当前订单无法使用这份物品，请取回清理或暂存。") + "若手中有物品，先放到空暂存台；若手和暂存台都满，可明确丢弃手持物品腾手，不覆盖其他食物。"})
+        rows.append({"id": "handoff_recovery", "en": "The handoff contains " + _name(handoff) + ". " + ("Take it back, prepare it at your station, then return the prepared portion." if handoff["stage"] == "raw" and _useful(state, handoff) else "No current order can use it in this form; take it back and clear or store it.") + " If holding something, use your empty storage counter first; if both your hand and storage are full, carry the held item to the trash bin and interact there to free a hand without overwriting other food.",
+                     "zh": "交接台上是" + _name(handoff, "zh") + "。" + ("请取回，到备料台备好后重新交接。" if handoff["stage"] == "raw" and _useful(state, handoff) else "当前订单无法使用这份物品，请取回清理或暂存。") + "若手中有物品，先放到空暂存台；若手和暂存台都满，可把手持物品拿到垃圾桶前交互丢弃，腾出手，不覆盖其他食物。"})
     for order in state["orders"]:
         rows.append({"id": order["id"], "en": f"{order['id']} needs {_recipe_name(order['recipe'])}, due on turn {order['deadline']}; status {order['status']}.",
                      "zh": f"订单 {order['id']} 需要{_recipe_name(order['recipe'], 'zh')}，截止回合 {order['deadline']}，状态为{ {'pending':'待完成','completed':'已完成','expired':'已过期'}[order['status']] }。"})

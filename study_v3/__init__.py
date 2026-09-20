@@ -1,6 +1,6 @@
 """Versioned, turn-based PolicyLens human-AI study."""
 
-RELEASE_ID = "policylens-three-domain-20260920.v3.3"
-# These interface/enrollment revisions share identical gameplay and stored state.
-# Existing records keep their original release IDs; no state migration is applied.
-SUPPORTED_RELEASE_IDS = frozenset({RELEASE_ID, "policylens-three-domain-20260920.v3.2"})
+RELEASE_ID = "policylens-three-domain-20260920.v3.4"
+# Pong schedules and kitchen interactions changed. Prior runs remain archived
+# verbatim; returning participants enroll afresh rather than migrating a state.
+SUPPORTED_RELEASE_IDS = frozenset({RELEASE_ID})

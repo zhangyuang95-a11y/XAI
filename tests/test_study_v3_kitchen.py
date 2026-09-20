@@ -55,7 +55,7 @@ def ready_pot(state, phase='protein', ingredient='egg', age=0, pot_id='pot1'):
 class FacingAndInteraction(unittest.TestCase):
     def test_exact_map_and_connected_work_areas(self):
         expected = {'egg': (1, 1), 'tomato': (3, 1), 'meat': (1, 2), 'pepper': (3, 2), 'prep': (1, 3),
-                    'human_buffer': (1, 4), 'plate': (1, 5), 'serve': (3, 5), 'handoff': (4, 3),
+                    'human_buffer': (1, 4), 'plate': (1, 5), 'serve': (3, 5), 'handoff': (4, 3), 'trash': (4, 4),
                     'pot1': (7, 1), 'protein1': (7, 2), 'ai_raw': (7, 3), 'protein2': (7, 4), 'pot2': (7, 5)}
         self.assertEqual({key: (value['x'], value['y']) for key, value in e.STATION_BY_ID.items()}, expected)
         self.assertEqual(sum(x < 4 for x, y in e.FLOOR), 7)
@@ -236,7 +236,9 @@ class RecipeStateMachine(unittest.TestCase):
         self.assertEqual(burned['metrics']['burnt'], 1)
         cleared = tick(burned, ai='interact')
         self.assertEqual(cleared['pots'][0]['phase'], 'idle')
-        self.assertEqual(cleared['metrics']['waste'], 1)
+        self.assertEqual(cleared['metrics']['waste'], 0)
+        self.assertEqual(cleared['ai']['holding']['stage'], 'waste')
+        self.assertEqual(cleared['ai']['holding']['components'], ['test-egg'])
 
     def test_removed_food_does_not_burn(self):
         state = fixture(); state['ai']['holding'] = item(stage='cooked_protein', pot='pot1')
@@ -287,8 +289,8 @@ class RecipeStateMachine(unittest.TestCase):
         self.assertEqual(tick(state)['orders'][0]['status'], 'expired')
 
     def test_discard_recovery_frees_hand_without_hidden_penalty(self):
-        state = fixture(); state['human']['holding'] = item()
-        nxt = tick(state, 'discard')
+        state = fixture(); state['human'].update(x=3, y=4, facing='right', holding=item())
+        nxt = tick(state, 'interact')
         self.assertIsNone(nxt['human']['holding']); self.assertEqual(nxt['metrics']['waste'], 1)
         self.assertEqual(e.score(nxt)['task_score'], e.score(state)['task_score'])
 
@@ -349,12 +351,13 @@ class ControllerAndEvidence(unittest.TestCase):
         state['handoff'] = item('egg', 'raw', iid='raw-blocker', order=None)
         state['buffers']['human'] = item('tomato', iid='buffered', order=None)
         before_counter = deepcopy(state['handoff'])
-        self.assertEqual(e.human_advisor(state), 'discard')
-        state = e.step(state, e.human_advisor(state))
+        self.assertEqual(e.human_advisor(state), 'down')
+        while state['human']['holding'] is not None:
+            state = e.step(state, e.human_advisor(state))
         self.assertEqual(state['handoff'], before_counter)
         self.assertEqual(state['buffers']['human']['id'], 'buffered')
-        self.assertEqual(e.human_advisor(state), 'interact')
-        state = e.step(state, 'interact')
+        while state['human']['holding'] is None:
+            state = e.step(state, e.human_advisor(state))
         self.assertIsNone(state['handoff'])
         self.assertEqual(state['human']['holding']['id'], 'raw-blocker')
         self.assertEqual(e._next_input_portion(state)['ingredient'], 'egg')
@@ -365,8 +368,10 @@ class ControllerAndEvidence(unittest.TestCase):
         state['human'].update(x=3, y=3, facing='right')
         self.assertEqual(e.human_advisor(state), 'interact')
         state = e.step(state, 'interact')
-        self.assertEqual(e.human_advisor(state), 'discard')
-        state = e.step(state, 'discard')
+        while state['human']['holding'] is not None:
+            self.assertNotEqual(e.human_advisor(state), 'discard')
+            state = e.step(state, e.human_advisor(state))
+        self.assertEqual(state['events'][0]['station'], 'trash')
         self.assertIsNone(state['human']['holding']); self.assertIsNone(state['handoff'])
 
     def test_ingredient_locations_and_pan_contents_are_container_accurate(self):
@@ -463,9 +468,165 @@ class ControllerAndEvidence(unittest.TestCase):
     def test_unusable_raw_and_expired_items_have_recovery_paths(self):
         state = fixture(); state['orders'][0]['status'] = 'expired'
         state['ai']['holding'] = item()
-        self.assertEqual(e.decide(state)['action'], 'discard')
-        state = e.step(state, 'wait')
+        self.assertEqual(e.decide(state)['goal'], 'trash')
+        while state['ai']['holding'] is not None:
+            self.assertNotEqual(e.decide(state)['action'], 'discard')
+            state = e.step(state, 'wait')
+        self.assertEqual(state['events'][0]['station'], 'trash')
         self.assertIsNone(state['ai']['holding'])
+
+
+class PhysicalDisposalAndVisibility(unittest.TestCase):
+    def test_no_remote_discard_for_either_actor(self):
+        state = fixture()
+        state['human']['holding'] = item(iid='human-food')
+        state['ai']['holding'] = item(iid='ai-food')
+        before = deepcopy(state)
+        for actor in ('human', 'ai'):
+            self.assertNotIn('discard', e.legal_actions(state, actor))
+        with self.assertRaises(ValueError): tick(state, human='discard')
+        with self.assertRaises(ValueError): tick(state, ai='discard')
+        self.assertEqual(state, before)
+
+    def test_trash_is_reachable_from_both_disjoint_work_areas(self):
+        self.assertEqual(e.STATION_BY_ID['trash']['kind'], 'trash')
+        self.assertNotIn([4, 4], e.WALLS)
+        self.assertNotIn((4, 4), e.FLOOR)
+        for actor, start in [('human', (2, 3)), ('ai', (6, 3))]:
+            route = e._route(start, 'right', 'trash')
+            x, y, facing = e._route_end(start, 'right', route)
+            self.assertEqual((x, y, facing), (3, 4, 'right') if actor == 'human' else (5, 4, 'left'))
+
+    def test_trash_requires_held_item_and_correct_facing(self):
+        for actor, x, face in [('human', 3, 'right'), ('ai', 5, 'left')]:
+            state = fixture(); state[actor].update(x=x, y=4, facing=face)
+            self.assertNotIn('interact', e.legal_actions(state, actor))
+            state[actor]['holding'] = item(iid=actor+'-food')
+            self.assertIn('interact', e.legal_actions(state, actor))
+            state[actor]['facing'] = 'up'
+            self.assertNotIn('interact', e.legal_actions(state, actor))
+
+    def test_simultaneous_trash_disposal_is_explicit_and_conserves_components(self):
+        state = fixture()
+        state['human'].update(x=3, y=4, facing='right', holding=item(iid='human-food'))
+        state['ai'].update(x=5, y=4, facing='left', holding=item(iid='ai-food'))
+        state = tick(state, 'interact', 'interact')
+        self.assertIsNone(state['human']['holding']); self.assertIsNone(state['ai']['holding'])
+        waste = [event for event in state['events'] if event['type'] == 'waste']
+        self.assertEqual(len(waste), 2)
+        self.assertEqual({event['station'] for event in waste}, {'trash'})
+        self.assertEqual(state['metrics']['waste'], 2)
+        self.assertEqual(state['metrics']['handoff_conflicts'], 0)
+
+    def test_burnt_pan_contents_move_to_hand_before_actual_bin_disposal(self):
+        state = fixture(); ready_pot(state, age=7); state['ai'].update(x=6, y=1, facing='right')
+        state = tick(state)
+        before = e._component_inventory(state)
+        state = tick(state, ai='interact')
+        self.assertEqual(e._component_inventory(state), before)
+        self.assertEqual(state['ai']['holding']['stage'], 'waste')
+        self.assertEqual(state['metrics']['waste'], 0)
+        seen_positions = []
+        while state['ai']['holding']:
+            seen_positions.append(e._pos(state['ai']))
+            decision = e.decide(state)
+            self.assertEqual(decision['goal'], 'trash')
+            state = e.step(state, 'wait')
+        self.assertGreater(len(set(seen_positions)), 1)
+        self.assertEqual(state['metrics']['waste'], 1)
+        self.assertEqual(state['events'][0]['station'], 'trash')
+        self.assertEqual(e._pos(state['ai']), (5, 4))
+
+    def test_real_cooked_dish_expiry_regression_stays_visible_and_identical(self):
+        # Previous engine: this identical legal trajectory discarded item1
+        # remotely at turn 134 after order1's turn-130 expiry.
+        state = e.initial_state(1000, 2)
+        while not (state['ai']['holding'] and state['ai']['holding']['stage'] == 'finished'):
+            state = e.step(state, e.human_advisor(state))
+        self.assertEqual(state['turn'], 65)
+        cooked = deepcopy(state['ai']['holding'])
+        self.assertEqual(cooked['id'], 'item1')
+        self.assertEqual(cooked['components'], ['item1', 'item3'])
+        for _ in range(150):
+            state = e.step(state, 'wait')
+            self.assertFalse(any(event['type'] == 'waste' and event['item']['id'] == cooked['id'] for event in state['events']))
+            self.assertEqual(e._component_inventory(state)['item1'], 1)
+            self.assertEqual(e._component_inventory(state)['item3'], 1)
+        self.assertEqual(state['orders'][0]['status'], 'expired')
+        public = e.public_state(state)
+        visible = [public['human']['holding'], public['ai']['holding'], public['handoff'], public['buffers']['human'],
+                   *public['buffers']['ai_raw'], *public['buffers']['protein'].values(), *(pan['item'] for pan in public['pots'])]
+        saved = next(food for food in visible if food and food['id'] == cooked['id'])
+        self.assertEqual(saved, cooked)
+
+    def test_expiry_during_final_mixing_preserves_complete_dish(self):
+        state = fixture(); state['orders'][0]['deadline'] = 1
+        food = dish(); food.update(stage='mixing', container=None)
+        state['pots'][0].update(phase='mix', status='cooking', remaining=2, ready_age=0,
+                               recipe='egg_tomato', order_id='order1', item=food)
+        state['ai'].update(x=6, y=1, facing='right')
+        before = e._component_inventory(state)
+        for _ in range(3): state = e.step(state, 'wait')
+        self.assertEqual(state['orders'][0]['status'], 'expired')
+        self.assertEqual(state['ai']['holding']['stage'], 'finished')
+        self.assertEqual(state['ai']['holding']['components'], ['test-egg', 'test-tomato'])
+        self.assertEqual(e._component_inventory(state), before)
+        self.assertEqual(e.decide(state)['reason_code'], 'deliver_expired_finished')
+        while state['handoff'] is None: state = e.step(state, 'wait')
+        self.assertEqual(state['handoff']['stage'], 'finished')
+        self.assertEqual(state['metrics']['waste'], 0)
+
+    def test_expired_finished_dish_stays_held_when_serving_is_rejected(self):
+        state = fixture(); state['orders'][0]['status'] = 'expired'
+        food = dish(); food.update(stage='plated', container='serving_plate')
+        state['human'].update(x=2, y=5, facing='right', holding=food)
+        before = deepcopy(food)
+        state = tick(state, 'interact')
+        self.assertEqual(state['human']['holding'], before)
+        self.assertEqual(state['metrics']['completed_orders'], 0)
+        self.assertEqual(state['events'][0]['type'], 'serve_rejected')
+
+    def test_preparation_progress_is_public_exact_and_immutable(self):
+        state = fixture(); state['human'].update(x=2, y=3, facing='left', holding=item('egg', 'raw', order=None))
+        for progress in range(3):
+            before = deepcopy(state)
+            public = e.public_state(state)
+            self.assertEqual(state, before)
+            prep = public['human']['preparation']
+            self.assertEqual((prep['completed'], prep['remaining'], prep['required']), (progress, 2-progress, 2))
+            self.assertEqual(prep['ready'], progress == 2)
+            self.assertTrue(prep['at_station'])
+            if progress < 2: state = tick(state, 'interact')
+
+    def test_preparation_progress_follows_item_through_storage(self):
+        state = fixture(); state['human'].update(x=2, y=3, facing='left', holding=item('egg', 'raw', order=None))
+        state = tick(state, 'interact')
+        state['human'].update(x=2, y=4, facing='left')
+        state = tick(state, 'interact')
+        self.assertIsNone(e.public_state(state)['human']['preparation'])
+        self.assertEqual(state['buffers']['human']['prepare_progress'], 1)
+        state = tick(state, 'interact')
+        self.assertEqual(e.public_state(state)['human']['preparation']['remaining'], 1)
+
+    def test_actual_cooking_dishes_and_held_output_are_public(self):
+        frames, _ = run(1000, 2)
+        both = next(frame for frame in frames if all(p['phase'] != 'idle' for p in frame['pots']))
+        jobs = e.public_state(both)['ai']['current_cooking']
+        self.assertEqual({job['recipe'] for job in jobs}, {'egg_tomato', 'pepper_meat'})
+        self.assertTrue(all(job['recipe_label_en'] and job['recipe_label_zh'] for job in jobs))
+        held = next(frame for frame in frames if frame['ai']['holding'] and frame['ai']['holding']['stage'] == 'finished')
+        jobs = e.public_state(held)['ai']['current_cooking']
+        output = next(job for job in jobs if job['location'] == 'held')
+        self.assertEqual(output['item_id'], held['ai']['holding']['id'])
+        self.assertEqual(output['phase'], 'finished')
+        self.assertEqual(output['remaining'], 0)
+
+    def test_conservation_guard_rejects_silent_removal_and_remote_waste_event(self):
+        before = fixture(); before['human']['holding'] = item()
+        after = deepcopy(before); after['human']['holding'] = None
+        with self.assertRaisesRegex(AssertionError, 'conserved'): e._verify_food_conservation(before, after)
+        after['events'] = [{'type':'waste','station':'serve','item':deepcopy(before['human']['holding'])}]
+        with self.assertRaisesRegex(AssertionError, 'trash-bin'): e._verify_food_conservation(before, after)
 
 
 class KitchenFeasibility(unittest.TestCase):

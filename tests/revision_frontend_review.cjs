@@ -19,6 +19,13 @@ vm.runInContext(source,context);
 const run=code=>vm.runInContext(code,context);
 run(`render=async()=>{};report=e=>errors.push(e);api=(path,payload)=>new Promise((resolve,reject)=>calls.push({path,payload,resolve,reject}));
  view={instance_id:'instance',revision:1,stage:'task2',run_id:'run2',can_ask:true,state:{turn:10,terminal:false},actions:['left','right','wait'],task_runs:[{id:'run2',turn:10}],questions:[]};`);
+// Presets describe an editable, concrete hypothetical lane; they never move.
+assert.match(run(`exampleQuestion('why')`), /this action/);
+assert.equal(run(`hypotheticalLane=8;exampleQuestion('position')`),'If I were at lane 8 now, how would you move?');
+assert.equal(run(`lang='zh';exampleQuestion('position')`),'如果我现在在第 8 道，你会怎么移动？');
+run(`lang='en';view.questionnaire={items:[],comprehension:[{id:'removed',text:'old quiz',options:['one']}]};`);
+assert(!run('surveyPage()').includes('old quiz'));
+assert(!run('surveyPage()').includes('check_removed'));
 const deferredFrame=turn=>({state:{turn,max_turns:90},can_ask:true});
 (async()=>{
  // A late historical response must not reopen replay after returning to now.

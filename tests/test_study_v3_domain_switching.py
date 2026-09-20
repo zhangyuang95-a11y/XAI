@@ -154,60 +154,51 @@ def test_domain_switching_preserves_recovery_mode_and_identity_boundaries(pilot_
     assert_assignment(pilot_store.recover_view(first.token, 'warehouse'), 'B')
 
 
-def test_previous_release_resumes_without_rewriting_records_or_assignment(pilot_store):
-    assert PREVIOUS_RELEASE in SUPPORTED_RELEASE_IDS and RELEASE_ID in SUPPORTED_RELEASE_IDS
+@pytest.mark.parametrize('old_release', [PREVIOUS_RELEASE, UNSUPPORTED_RELEASE])
+def test_old_gameplay_is_archived_and_new_enrollment_keeps_all_records(pilot_store, old_release):
+    assert old_release not in SUPPORTED_RELEASE_IDS and RELEASE_ID in SUPPORTED_RELEASE_IDS
     flow = public_flow(pilot_store)
     flow.start_task2()
     flow.step('wait')
     with pilot_store.db.transaction() as db:
         db.execute('UPDATE pl3_instances SET release_id=? WHERE id=?',
-                   (PREVIOUS_RELEASE, flow.view['instance_id']))
-        db.execute('UPDATE pl3_enrollments SET assignment_source=? WHERE instance_id=?',
-                   ('randomized_balanced', flow.view['instance_id']))
+                   (old_release, flow.view['instance_id']))
     before = pilot_store.export()
     reopened = Store(pilot_store.settings, RecordingExplainer())
     try:
-        recovered = reopened.recover_view(flow.token, 'pong')
-        assert recovered['release_id'] == PREVIOUS_RELEASE
-        assert_assignment(recovered, 'A', 'randomized_balanced')
-        token, resumed = reopened.create(enrollment(flow.name, 'pong', 'B'), flow.token)
-        assert token == flow.token and stable_view(resumed) == recovered
-        assert reopened.view(token, resumed['instance_id']) == recovered
-        prior_run = resumed['task_runs'][0]['id']
-        earlier = reopened.frame(token, resumed['instance_id'], prior_run, 0)
-        assert earlier['state']['turn'] == 0 and earlier['can_ask'] is True
-        assert reopened.export() == before
-        answer = reopened.ask(token, flow.question(target_run=prior_run, turn=0))
-        assert answer['status'] == 'answered'
-        assert reopened.view(token, resumed['instance_id'])['state'] == recovered['state']
-        flow.store = reopened
-        flow.view = reopened.view(token, resumed['instance_id'])
-        flow.step('wait')
-        assert flow.view['state']['turn'] == recovered['state']['turn'] + 1
-        assert flow.view['release_id'] == PREVIOUS_RELEASE
+        welcome = reopened.recover_view(flow.token, 'pong')
+        assert welcome == {'participant_id': flow.name, 'stage': 'welcome', 'previous_version_saved': True}
+        denied(lambda: reopened.view(flow.token, flow.view['instance_id']), 'release_changed', 409)
+        denied(lambda: reopened.ask(flow.token, flow.question()), 'release_changed', 409)
+        token, new = reopened.create(enrollment(flow.name, 'pong', 'B'), flow.token)
+        assert token == flow.token and new['instance_id'] != flow.view['instance_id']
+        assert new['release_id'] == RELEASE_ID and new['stage'] == 'demo'
+        assert_assignment(new, 'B')
+        assert reopened.recover_view(token, 'pong')['instance_id'] == new['instance_id']
+        # Every historical row remains byte-for-byte available to research export.
         after = reopened.export()
-        for table in ('participants', 'enrollments'):
-            assert after[table] == before[table]
-        assert len(after['instances']) == 1 and len(after['runs']) == 2
+        for table, records in before.items():
+            assert all(row in after[table] for row in records)
+        assert len(after['instances']) == 2 and len(after['runs']) == 2
     finally:
         reopened.db.close()
 
 
 @pytest.mark.parametrize('stage', ['demo', 'completed'])
-def test_unsupported_release_blocks_its_domain_only(pilot_store, stage):
+def test_unsupported_release_does_not_block_any_new_domain(pilot_store, stage):
     old = public_flow(pilot_store, 'pong', 'A')
     with pilot_store.db.transaction() as db:
         db.execute('UPDATE pl3_instances SET release_id=?,stage=? WHERE id=?',
                    (UNSUPPORTED_RELEASE, stage, old.view['instance_id']))
-    denied(lambda: pilot_store.create(enrollment(old.name, 'pong', 'B'), old.token), 'release_changed', 409)
     denied(lambda: pilot_store.view(old.token, old.view['instance_id']), 'release_changed', 409)
-    denied(lambda: pilot_store.recover_view(old.token, 'pong'), 'release_changed', 409)
+    assert pilot_store.recover_view(old.token, 'pong')['previous_version_saved'] is True
     other = public_flow(pilot_store, 'kitchen', 'B', old.name, old.token)
-    assert other.view['release_id'] == RELEASE_ID
+    new_pong = public_flow(pilot_store, 'pong', 'B', old.name, old.token)
+    assert other.view['release_id'] == new_pong.view['release_id'] == RELEASE_ID
     assert_assignment(other.view, 'B')
-    assert pilot_store.recover_view(old.token)['instance_id'] == other.view['instance_id']
+    assert_assignment(new_pong.view, 'B')
     instances = pilot_store.export()['instances']
-    assert len(instances) == 2
+    assert len(instances) == 3
     assert next(row for row in instances if row['id'] == old.view['instance_id'])['release_id'] == UNSUPPORTED_RELEASE
 
 

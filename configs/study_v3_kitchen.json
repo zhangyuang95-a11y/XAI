@@ -1,6 +1,6 @@
 {
-  "version": "kitchen-scenarios-v4.0.0",
-  "rules_version": "kitchen-v4.0.0",
+  "version": "kitchen-scenarios-v4.1.0",
+  "rules_version": "kitchen-v4.1.0",
   "study_mode": "pilot_pending_human_validation",
   "public_mechanics": {
     "width": 9,
@@ -20,7 +20,15 @@
     "facing_required": true,
     "blocked_direction_turns": 1,
     "same_turn_handoff_conflict": "both_fail",
-    "deadline_service": "serve_on_deadline_then_expire"
+    "deadline_service": "serve_on_deadline_then_expire",
+    "trash_position": [
+      4,
+      4
+    ],
+    "disposal": "interact while facing adjacent trash bin; no standalone discard action for either actor",
+    "burnt_pan_cleanup": "transfer contents intact to AI hand, carry to trash, dispose only at trash",
+    "expiry": "order expires but food remains; completed dishes are preserved and visible",
+    "food_conservation": "previous physical components + acquired = new physical components + served + explicit trash disposal"
   },
   "development_seeds": [
     1000,
@@ -81,16 +89,16 @@
   },
   "calibration_log": [
     {
-      "version": "kitchen-v4.0.0",
-      "change": "Replace soups with two compound recipes, four independent cupboards, facing-aware direct interactions and dedicated temporary plates.",
+      "version": "kitchen-v4.1.0",
+      "change": "Physical shared trash bin, no remote disposal, preserve cooked dishes across order expiry, per-transition food conservation, public actual-dish and preparation progress.",
       "budgets": {
         "1": 240,
         "2": 360,
         "3": 360
       },
       "budget_extension_applied": false,
-      "reason": "All development trajectories complete within the approved base budgets. Deadlines are common to all groups: [130,160,225,240] for Task 1; [130,170,245,280,345,360] for Tasks 2 and 3. No score or controller accepts group identity.",
-      "parallelism": "Both pans have overlapping active recipe stages. Simultaneously cooking pans are not claimed: moving between the opposite pans, facing, and loading needs six turns, equal to the longest cooking stage.",
+      "scenario_schedule_changed": false,
+      "reason": "All 144 actual fixed-AI + human-advisor trajectories rerun with the new conservation guard. Both pan recipe jobs overlap; simultaneous heating is not claimed.",
       "human_effect": "not_measured"
     }
   ],
@@ -6673,7 +6681,9 @@
     }
   },
   "calibration_results": {
-    "evidence_type": "simulated human-action proxy with the unchanged AI",
+    "rules_version": "kitchen-v4.1.0",
+    "scenario_version": "kitchen-scenarios-v4.1.0",
+    "evidence_type": "simulated human-action proxy with actual fixed AI; not human A/B results",
     "summary": {
       "development": {
         "1": {
@@ -11724,6 +11734,5123 @@
         ]
       }
     ],
-    "human_relative_gain": null
-  }
+    "human_relative_gain": null,
+    "cooked_dish_regression": {
+      "seed": 1000,
+      "task": 2,
+      "method": "human_advisor until first AI-held finished dish at turn65, then150 human waits",
+      "item_id": "item1",
+      "components": [
+        "item1",
+        "item3"
+      ],
+      "bound_order_deadline": 130,
+      "previous_release_remote_disposal_turn": 134,
+      "fixed_release_checked_turn": 215,
+      "same_item_preserved": true,
+      "discard_requires_physical_trash_interaction": true
+    },
+    "current_test_suite": {
+      "module": "tests.test_study_v3_kitchen",
+      "tests_passed": 59,
+      "complete_scene_subcases": 144
+    }
+  },
+  "historical_calibrations": [
+    {
+      "record_role": "prior release simulation evidence; not current validation",
+      "source_commit": "25b07c3703885f9ee597e16fe4de9c670bf9f6bf",
+      "recorded_rules_version": "kitchen-v4.0.0",
+      "recorded_scenario_version": "kitchen-scenarios-v4.0.0",
+      "public_mechanics": {
+        "width": 9,
+        "height": 7,
+        "prepare_turns": 2,
+        "protein_cooking_turns": {
+          "egg": 4,
+          "meat": 6
+        },
+        "vegetable_cooking_turns": 4,
+        "mixing_turns": 2,
+        "ready_full_turns_before_burn": 8,
+        "handoff_capacity": 1,
+        "held_capacity": 1,
+        "ai_raw_slots": 2,
+        "dedicated_temporary_plate_slots": 2,
+        "facing_required": true,
+        "blocked_direction_turns": 1,
+        "same_turn_handoff_conflict": "both_fail",
+        "deadline_service": "serve_on_deadline_then_expire"
+      },
+      "calibration_log": [
+        {
+          "version": "kitchen-v4.0.0",
+          "change": "Replace soups with two compound recipes, four independent cupboards, facing-aware direct interactions and dedicated temporary plates.",
+          "budgets": {
+            "1": 240,
+            "2": 360,
+            "3": 360
+          },
+          "budget_extension_applied": false,
+          "reason": "All development trajectories complete within the approved base budgets. Deadlines are common to all groups: [130,160,225,240] for Task 1; [130,170,245,280,345,360] for Tasks 2 and 3. No score or controller accepts group identity.",
+          "parallelism": "Both pans have overlapping active recipe stages. Simultaneously cooking pans are not claimed: moving between the opposite pans, facing, and loading needs six turns, equal to the longest cooking stage.",
+          "human_effect": "not_measured"
+        }
+      ],
+      "calibration_results": {
+        "evidence_type": "simulated human-action proxy with the unchanged AI",
+        "summary": {
+          "development": {
+            "1": {
+              "runs": 24,
+              "all_complete": true,
+              "minimum_turns": 210,
+              "maximum_turns": 221,
+              "minimum_parallel_recipe_turns": 59,
+              "burnt_total": 0
+            },
+            "2": {
+              "runs": 24,
+              "all_complete": true,
+              "minimum_turns": 313,
+              "maximum_turns": 335,
+              "minimum_parallel_recipe_turns": 86,
+              "burnt_total": 0
+            },
+            "3": {
+              "runs": 24,
+              "all_complete": true,
+              "minimum_turns": 314,
+              "maximum_turns": 336,
+              "minimum_parallel_recipe_turns": 86,
+              "burnt_total": 0
+            }
+          },
+          "held_out": {
+            "1": {
+              "runs": 24,
+              "all_complete": true,
+              "minimum_turns": 210,
+              "maximum_turns": 221,
+              "minimum_parallel_recipe_turns": 59,
+              "burnt_total": 0
+            },
+            "2": {
+              "runs": 24,
+              "all_complete": true,
+              "minimum_turns": 313,
+              "maximum_turns": 331,
+              "minimum_parallel_recipe_turns": 86,
+              "burnt_total": 0
+            },
+            "3": {
+              "runs": 24,
+              "all_complete": true,
+              "minimum_turns": 310,
+              "maximum_turns": 334,
+              "minimum_parallel_recipe_turns": 84,
+              "burnt_total": 0
+            }
+          }
+        },
+        "development_runs": [
+          {
+            "seed": 1000,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1000,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1000,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 321,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 116,
+              "order2": 105,
+              "order3": 219,
+              "order4": 208,
+              "order5": 289,
+              "order6": 321
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1001,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1001,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 96,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1001,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1002,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1002,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 96,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1002,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 322,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 113,
+              "order2": 102,
+              "order3": 216,
+              "order4": 205,
+              "order5": 290,
+              "order6": 322
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1003,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1003,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1003,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 321,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 116,
+              "order2": 105,
+              "order3": 226,
+              "order4": 215,
+              "order5": 289,
+              "order6": 321
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1004,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1004,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 324,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 292,
+              "order6": 324
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1004,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 336,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 116,
+              "order2": 105,
+              "order3": 230,
+              "order4": 219,
+              "order5": 304,
+              "order6": 336
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1005,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1005,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 229,
+              "order4": 218,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1005,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 321,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 116,
+              "order2": 105,
+              "order3": 226,
+              "order4": 215,
+              "order5": 289,
+              "order6": 321
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1006,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1006,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 313,
+            "burnt": 0,
+            "parallel_recipe_turns": 86,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 281,
+              "order6": 313
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1006,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 314,
+            "burnt": 0,
+            "parallel_recipe_turns": 86,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 116,
+              "order2": 105,
+              "order3": 219,
+              "order4": 208,
+              "order5": 282,
+              "order6": 314
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1007,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1007,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1007,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 319,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 224,
+              "order4": 213,
+              "order5": 287,
+              "order6": 319
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1008,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1008,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1008,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 314,
+            "burnt": 0,
+            "parallel_recipe_turns": 86,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 116,
+              "order2": 105,
+              "order3": 219,
+              "order4": 208,
+              "order5": 282,
+              "order6": 314
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1009,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1009,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1009,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1010,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1010,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1010,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 328,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 112,
+              "order2": 101,
+              "order3": 226,
+              "order4": 215,
+              "order5": 296,
+              "order6": 328
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1011,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1011,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 229,
+              "order4": 218,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1011,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 324,
+            "burnt": 0,
+            "parallel_recipe_turns": 94,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 112,
+              "order2": 101,
+              "order3": 222,
+              "order4": 211,
+              "order5": 292,
+              "order6": 324
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1012,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1012,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 313,
+            "burnt": 0,
+            "parallel_recipe_turns": 86,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 281,
+              "order6": 313
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1012,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 330,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 224,
+              "order4": 213,
+              "order5": 298,
+              "order6": 330
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1013,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1013,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1013,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 325,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 116,
+              "order2": 105,
+              "order3": 230,
+              "order4": 219,
+              "order5": 293,
+              "order6": 325
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1014,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1014,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1014,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 326,
+            "burnt": 0,
+            "parallel_recipe_turns": 94,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 224,
+              "order4": 213,
+              "order5": 294,
+              "order6": 326
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1015,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1015,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1015,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 328,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 116,
+              "order2": 105,
+              "order3": 226,
+              "order4": 215,
+              "order5": 296,
+              "order6": 328
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1016,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1016,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1016,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 329,
+            "burnt": 0,
+            "parallel_recipe_turns": 96,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 113,
+              "order2": 102,
+              "order3": 223,
+              "order4": 212,
+              "order5": 297,
+              "order6": 329
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1017,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1017,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 335,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 229,
+              "order4": 218,
+              "order5": 303,
+              "order6": 335
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1017,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 321,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 112,
+              "order2": 101,
+              "order3": 215,
+              "order4": 204,
+              "order5": 289,
+              "order6": 321
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1018,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1018,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 335,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 229,
+              "order4": 218,
+              "order5": 303,
+              "order6": 335
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1018,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 328,
+            "burnt": 0,
+            "parallel_recipe_turns": 96,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 112,
+              "order2": 101,
+              "order3": 222,
+              "order4": 211,
+              "order5": 296,
+              "order6": 328
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1019,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 221,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 189,
+              "order4": 221
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1019,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 335,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 229,
+              "order4": 218,
+              "order5": 303,
+              "order6": 335
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1019,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1020,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 221,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 189,
+              "order4": 221
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1020,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1020,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 318,
+            "burnt": 0,
+            "parallel_recipe_turns": 89,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 113,
+              "order2": 102,
+              "order3": 223,
+              "order4": 212,
+              "order5": 286,
+              "order6": 318
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1021,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1021,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1021,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 324,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 229,
+              "order4": 218,
+              "order5": 292,
+              "order6": 324
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1022,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 221,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 189,
+              "order4": 221
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1022,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1022,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 330,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 228,
+              "order4": 217,
+              "order5": 298,
+              "order6": 330
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1023,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 221,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 189,
+              "order4": 221
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1023,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 229,
+              "order4": 218,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 1023,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 330,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 228,
+              "order4": 217,
+              "order5": 298,
+              "order6": 330
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          }
+        ],
+        "held_out_runs": [
+          {
+            "seed": 2000,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2000,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2000,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 328,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 116,
+              "order2": 105,
+              "order3": 226,
+              "order4": 215,
+              "order5": 296,
+              "order6": 328
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2001,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2001,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2001,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 330,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 228,
+              "order4": 217,
+              "order5": 298,
+              "order6": 330
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2002,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2002,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 229,
+              "order4": 218,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2002,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 326,
+            "burnt": 0,
+            "parallel_recipe_turns": 94,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 224,
+              "order4": 213,
+              "order5": 294,
+              "order6": 326
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2003,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2003,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2003,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 317,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 112,
+              "order2": 101,
+              "order3": 215,
+              "order4": 204,
+              "order5": 285,
+              "order6": 317
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2004,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 221,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 189,
+              "order4": 221
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2004,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2004,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 323,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 228,
+              "order4": 217,
+              "order5": 291,
+              "order6": 323
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2005,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2005,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 229,
+              "order4": 218,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2005,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2006,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 221,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 189,
+              "order4": 221
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2006,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2006,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 329,
+            "burnt": 0,
+            "parallel_recipe_turns": 96,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 113,
+              "order2": 102,
+              "order3": 223,
+              "order4": 212,
+              "order5": 297,
+              "order6": 329
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2007,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 221,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 189,
+              "order4": 221
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2007,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 229,
+              "order4": 218,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2007,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 333,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 113,
+              "order2": 102,
+              "order3": 227,
+              "order4": 216,
+              "order5": 301,
+              "order6": 333
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2008,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2008,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2008,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 330,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 224,
+              "order4": 213,
+              "order5": 298,
+              "order6": 330
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2009,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2009,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2009,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 325,
+            "burnt": 0,
+            "parallel_recipe_turns": 96,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 113,
+              "order2": 102,
+              "order3": 223,
+              "order4": 212,
+              "order5": 293,
+              "order6": 325
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2010,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2010,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2010,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 318,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 113,
+              "order2": 102,
+              "order3": 223,
+              "order4": 212,
+              "order5": 286,
+              "order6": 318
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2011,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2011,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 327,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 295,
+              "order6": 327
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2011,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 318,
+            "burnt": 0,
+            "parallel_recipe_turns": 89,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 113,
+              "order2": 102,
+              "order3": 216,
+              "order4": 205,
+              "order5": 286,
+              "order6": 318
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2012,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2012,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 324,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 292,
+              "order6": 324
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2012,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 330,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 224,
+              "order4": 213,
+              "order5": 298,
+              "order6": 330
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2013,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2013,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2013,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 325,
+            "burnt": 0,
+            "parallel_recipe_turns": 96,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 113,
+              "order2": 102,
+              "order3": 223,
+              "order4": 212,
+              "order5": 293,
+              "order6": 325
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2014,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2014,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2014,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2015,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2015,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2015,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 325,
+            "burnt": 0,
+            "parallel_recipe_turns": 96,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 113,
+              "order2": 102,
+              "order3": 223,
+              "order4": 212,
+              "order5": 293,
+              "order6": 325
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2016,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2016,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 229,
+              "order4": 218,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2016,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 334,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 228,
+              "order4": 217,
+              "order5": 302,
+              "order6": 334
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2017,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2017,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2017,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 322,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 113,
+              "order2": 102,
+              "order3": 227,
+              "order4": 216,
+              "order5": 290,
+              "order6": 322
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2018,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 221,
+            "burnt": 0,
+            "parallel_recipe_turns": 66,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 189,
+              "order4": 221
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2018,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 91,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2018,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 310,
+            "burnt": 0,
+            "parallel_recipe_turns": 84,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 112,
+              "order2": 101,
+              "order3": 215,
+              "order4": 204,
+              "order5": 278,
+              "order6": 310
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2019,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2019,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 320,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 288,
+              "order6": 320
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2019,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 326,
+            "burnt": 0,
+            "parallel_recipe_turns": 94,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 224,
+              "order4": 213,
+              "order5": 294,
+              "order6": 326
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2020,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2020,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2020,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 326,
+            "burnt": 0,
+            "parallel_recipe_turns": 96,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 224,
+              "order4": 213,
+              "order5": 294,
+              "order6": 326
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2021,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 210,
+            "burnt": 0,
+            "parallel_recipe_turns": 59,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 178,
+              "order4": 210
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2021,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 324,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 292,
+              "order6": 324
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2021,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 319,
+            "burnt": 0,
+            "parallel_recipe_turns": 93,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 217,
+              "order4": 206,
+              "order5": 287,
+              "order6": 319
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2022,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2022,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 98,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2022,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 334,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 114,
+              "order2": 103,
+              "order3": 228,
+              "order4": 217,
+              "order5": 302,
+              "order6": 334
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2023,
+            "task": 1,
+            "completed": 4,
+            "assigned": 4,
+            "score": 100.0,
+            "turns": 217,
+            "burnt": 0,
+            "parallel_recipe_turns": 64,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 185,
+              "order4": 217
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2023,
+            "task": 2,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 313,
+            "burnt": 0,
+            "parallel_recipe_turns": 86,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 218,
+              "order4": 207,
+              "order5": 281,
+              "order6": 313
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          },
+          {
+            "seed": 2023,
+            "task": 3,
+            "completed": 6,
+            "assigned": 6,
+            "score": 100.0,
+            "turns": 331,
+            "burnt": 0,
+            "parallel_recipe_turns": 100,
+            "parallel_cooking_turns": 0,
+            "used_pans": [
+              "pot1",
+              "pot2"
+            ],
+            "served_turns": {
+              "order1": 115,
+              "order2": 104,
+              "order3": 225,
+              "order4": 214,
+              "order5": 299,
+              "order6": 331
+            },
+            "event_types": [
+              "components_combined",
+              "ingredient_taken",
+              "item_placed",
+              "item_taken",
+              "order_arrived",
+              "plated",
+              "pot_loaded",
+              "pot_ready",
+              "pot_removed",
+              "prepared",
+              "served"
+            ]
+          }
+        ],
+        "human_relative_gain": null
+      }
+    }
+  ]
 }

@@ -7,7 +7,6 @@ are 1–9, coordinates 0–8, and the contact line is at vertical coordinate 12.
 from __future__ import annotations
 from copy import deepcopy
 from functools import lru_cache
-from itertools import product
 import json
 from pathlib import Path
 import random
@@ -27,30 +26,38 @@ def _ball(identifier, kind, contacts, remaining):
 
 
 def _schedule(seed, task):
-    """Construct a finite fair schedule, independently of play or group.
+    """Finite seeded simultaneous arrivals, independent of group and play.
 
-    Adjacent ordinary arrivals are two lanes apart. Cooperative contacts include
-    the intermediate lane and a separate reachable partner lane. This gives a
-    purposeful moving route without fake idle-prevention movements. The latent
-    construction path is never supplied to either controller or explanation.
+    Every two turns bring two distinct ordinary contacts. Every six turns also
+    bring two incompatible team balls: each shares one of the small contacts
+    and has a different second contact. No pair of paddles can collect both
+    team balls, so a missed opportunity is not necessarily poor coordination.
     """
     rng = random.Random(int(seed) * 1009 + task * 71)
     duration = CONFIG['task_turns'][str(task)]
-    odd = {1: rng.choice((5, 7))}
-    for at in range(3, duration + 2, 2):
-        odd[at] = rng.choice([x for x in (odd[at - 2] - 2, odd[at - 2] + 2) if 0 <= x < LANES])
-    entries = []
-    for index, at in enumerate(range(1, duration, 2), 1):
-        spawn = max(0, at - 6)
-        entries.append({'spawn_turn': spawn, 'arrival_turn': at,
-                        'ball': _ball(f's{index}', 'ordinary', [odd[at]], at - spawn)})
-    human = 2
-    for index, at in enumerate(range(6, duration + 1, 6), 1):
-        own = (odd[at - 1] + odd[at + 1]) // 2
-        human = rng.choice([x for x in range(LANES) if abs(x - own) >= 3 and abs(x - human) <= 6])
-        spawn = max(0, at - 12)
-        entries.append({'spawn_turn': spawn, 'arrival_turn': at,
-                        'ball': _ball(f't{index}', 'cooperative', sorted((own, human)), at - spawn)})
+    entries, small_index, team_index = [], 0, 0
+    previous = (2, 6)
+    for at in range(2, duration + 1, 2):
+        choices = [(left, right) for left in range(LANES) for right in range(LANES)
+                   if left != right and abs(left - previous[0]) == 2 and abs(right - previous[1]) == 2
+                   and (left != previous[0] or right != previous[1])]
+        contacts = rng.choice(choices)
+        previous = contacts
+        for lane in contacts:
+            small_index += 1
+            spawn = max(0, at - 6)
+            entries.append({'spawn_turn': spawn, 'arrival_turn': at,
+                            'ball': _ball(f's{small_index}', 'ordinary', [lane], at - spawn)})
+        if at % 6 == 0:
+            alternatives = [(left, right) for left in range(LANES) for right in range(LANES)
+                            if len({*contacts, left, right}) == 4
+                            and abs(left - contacts[0]) >= 3 and abs(right - contacts[1]) >= 3]
+            other_contacts = rng.choice(alternatives)
+            for lane, other in zip(contacts, other_contacts):
+                team_index += 1
+                spawn = max(0, at - 12)
+                entries.append({'spawn_turn': spawn, 'arrival_turn': at,
+                                'ball': _ball(f't{team_index}', 'cooperative', sorted((lane, other)), at - spawn)})
     if task == 3:
         for entry in entries:
             entry['ball']['contacts'] = sorted(8 - x for x in entry['ball']['contacts'])
@@ -130,57 +137,108 @@ def _same_assignment(left, right):
     return bool(left and right and all(left.get(k) == right.get(k) for k in ('ball_id', 'ai_contact', 'human_contact')))
 
 
-def _plan(obs):
-    """Enumerate <=9 team choices and <=27 small allocations, no future data.
+# All legal simultaneous one-lane moves. This keeps planning bounded by
+# twelve time layers x 81 position pairs, not 3^(number of visible balls).
+_PAIR_MOVES = tuple(tuple((nh * LANES + na, int(nh != h) + int(na != a),
+                          (2 if na > a else 1 if na < a else 0) * 3 + (2 if nh < h else 1 if nh > h else 0))
+                         for nh in range(max(0, h - 1), min(LANES, h + 2))
+                         for na in range(max(0, a - 1), min(LANES, a + 2)))
+                    for h in range(LANES) for a in range(LANES))
 
-    This is event-time dynamic planning: between deadlines shortest monotone
-    paths suffice, so checking ordered appointments exactly covers all feasible
-    joint catch routes without enumerating every animation frame. Small-ball
-    work is preferentially assigned to the AI, after preserving team catches
-    and total points, so motion always serves a real selected catch.
+
+def _retained_commitments(obs, teams):
+    candidates = [a for a in obs['policy_memory'].get('commitments', []) if a.get('locked')]
+    old = obs['policy_memory'].get('commitment')
+    if old and not any(a['ball_id'] == old['ball_id'] for a in candidates):
+        candidates.append(old)
+    by_id = {b['id']:b for b in teams}
+    retained, hp, ap = [], [], []
+    for assignment in sorted(candidates, key=lambda a: (by_id.get(a['ball_id'], {}).get('remaining', 999), a['ball_id'])):
+        ball = by_id.get(assignment['ball_id'])
+        if not ball or {assignment['human_contact'], assignment['ai_contact']} != set(ball['contacts']):
+            continue
+        h = (ball['remaining'], assignment['human_contact'], ball['id'])
+        a = (ball['remaining'], assignment['ai_contact'], ball['id'])
+        if _route(obs['human']['x'], hp + [h]) is not None and _route(obs['ai']['x'], ap + [a]) is not None:
+            retained.append(assignment); hp.append(h); ap.append(a)
+    return retained
+
+
+def _plan(obs):
+    """Exact visible joint route under retained feasible commitments.
+
+    Rank by real catch points, then team catches, useful AI small catches,
+    shortest total movement, and a fixed tie order. Incompatible simultaneous
+    contacts are settled by the same reward table as the physical engine.
+    No future spawns or submitted human actions enter this planner.
     """
     teams = sorted((b for b in obs['balls'] if b['kind'] == 'cooperative'), key=lambda b: (b['remaining'], b['id']))
     smalls = sorted((b for b in obs['balls'] if b['kind'] == 'ordinary'), key=lambda b: (b['remaining'], b['id']))
-    previous = obs['policy_memory'].get('commitment')
-    options = []
-    for index, ball in enumerate(teams):
-        left, right = ball['contacts']
-        choices = [_commitment(ball, right, left, locked=index == 0), _commitment(ball, left, right, locked=index == 0), None]
-        if index == 0 and previous and previous.get('ball_id') == ball['id']:
-            retained = next((c for c in choices if _same_assignment(c, previous)), None)
-            if retained and abs(obs['ai']['x'] - retained['ai_contact']) <= ball['remaining'] and abs(obs['human']['x'] - retained['human_contact']) <= ball['remaining']:
-                choices = [retained]
-        options.append(choices)
-    best = None
-    for assignments in product(*options):
-        human_points, ai_points = [], []
-        selected = []
-        for ball, assignment in zip(teams, assignments):
-            if assignment:
-                selected.append(assignment)
-                human_points.append((ball['remaining'], assignment['human_contact'], ball['id']))
-                ai_points.append((ball['remaining'], assignment['ai_contact'], ball['id']))
-        if _route(obs['human']['x'], human_points) is None or _route(obs['ai']['x'], ai_points) is None:
-            continue
-        # Ignore / human / AI for each ordinary ball. A ball can score only once.
-        for owners in product((0, 1, 2), repeat=len(smalls)):
-            hp, ap = list(human_points), list(ai_points)
-            for ball, owner in zip(smalls, owners):
-                if owner:
-                    (hp if owner == 1 else ap).append((ball['remaining'], ball['contacts'][0], ball['id']))
-            hr, ar = _route(obs['human']['x'], hp), _route(obs['ai']['x'], ap)
-            if hr is None or ar is None:
-                continue
-            count = sum(owner != 0 for owner in owners)
-            # Team priority, then all visible points, then useful AI small catches.
-            # Earlier teams win when not all are feasible; right side is last tie.
-            rank = (len(selected), tuple(int(a is not None) for a in assignments),
-                    count, owners.count(2), -(hr[0] + ar[0]),
-                    tuple(a['ai_contact'] if a else -1 for a in assignments), tuple(owners))
-            if best is None or rank > best[0]:
-                best = (rank, selected, hr[1], ar[1], owners)
-    assert best is not None
-    return teams, smalls, best[1], best[2], best[3], best[4]
+    retained = _retained_commitments(obs, teams)
+    horizon = max((b['remaining'] for b in obs['balls']), default=0)
+    deadlines = {}
+    by_id = {b['id']:b for b in teams}
+    for assignment in retained:
+        deadlines[by_id[assignment['ball_id']]['remaining']] = assignment['human_contact'] * LANES + assignment['ai_contact']
+    arrivals = {}
+    for ball in obs['balls']:
+        arrivals.setdefault(ball['remaining'], []).append(ball)
+    rewards = {}
+    for at, balls in arrivals.items():
+        table = []
+        for h in range(LANES):
+            for a in range(LANES):
+                points = team_count = ai_small = 0
+                for ball in balls:
+                    if ball['kind'] == 'cooperative':
+                        caught = {h, a} == set(ball['contacts'])
+                        team_count += caught
+                    else:
+                        caught = ball['contacts'][0] in (h, a)
+                        ai_small += ball['contacts'][0] == a
+                    points += WEIGHTS[ball['kind']] if caught else 0
+                table.append((points, team_count, ai_small))
+        rewards[at] = table
+    initial = obs['human']['x'] * LANES + obs['ai']['x']
+    # Value = rank, actual position trace. No state mutation and no neural model.
+    frontier = {initial: ((0, 0, 0, 0, 0), ())}
+    zero_reward = [(0, 0, 0)] * (LANES * LANES)
+    for at in range(1, horizon + 1):
+        table, required = rewards.get(at, zero_reward), deadlines.get(at)
+        following = {}
+        for position, (rank, trace) in frontier.items():
+            for nxt, movement, tie in _PAIR_MOVES[position]:
+                if required is not None and nxt != required:
+                    continue
+                points, team_count, ai_small = table[nxt]
+                candidate = (rank[0] + points, rank[1] + team_count, rank[2] + ai_small,
+                             rank[3] - movement, rank[4] * 9 + tie)
+                previous = following.get(nxt)
+                if previous is None or candidate > previous[0]:
+                    following[nxt] = (candidate, trace + (nxt,))
+        frontier = following
+    assert frontier, 'A retained commitment must have a feasible joint route.'
+    _rank, trace = max(frontier.values(), key=lambda item:item[0])
+    selected, hp, ap, owners = [], [], [], []
+    retained_ids = {a['ball_id'] for a in retained}
+    for ball in teams:
+        h, a = divmod(trace[ball['remaining'] - 1], LANES)
+        if {h, a} == set(ball['contacts']):
+            selected.append(_commitment(ball, a, h, locked=ball['id'] in retained_ids))
+            hp.append((ball['remaining'], h, ball['id']))
+            ap.append((ball['remaining'], a, ball['id']))
+    if selected:
+        earliest = min(by_id[a['ball_id']]['remaining'] for a in selected)
+        for assignment in selected:
+            if by_id[assignment['ball_id']]['remaining'] == earliest:
+                assignment['locked'] = True
+    for ball in smalls:
+        h, a = divmod(trace[ball['remaining'] - 1], LANES)
+        owner = 2 if a == ball['contacts'][0] else 1 if h == ball['contacts'][0] else 0
+        owners.append(owner)
+        if owner:
+            (ap if owner == 2 else hp).append((ball['remaining'], ball['contacts'][0], ball['id']))
+    return teams, smalls, selected, sorted(hp), sorted(ap), owners
 
 
 def _decision_from_observation(obs):
@@ -188,7 +246,7 @@ def _decision_from_observation(obs):
     return deepcopy(_cached_decision(json.dumps(obs, sort_keys=True, separators=(',', ':'))))
 
 
-@lru_cache(maxsize=12000)
+@lru_cache(maxsize=2048)
 def _cached_decision(key):
     obs = json.loads(key)
     if obs['terminal']:
@@ -196,10 +254,12 @@ def _cached_decision(key):
                 'reason_en': 'This task has finished. There is no next action to execute.',
                 'reason_zh': '本任务已经结束，没有下一步需要执行。', 'goal': 'task_complete',
                 'memory': {}, 'alternatives': [], 'assignment_changed': False,
-                'assignment_released': False, 'target_lane': None, 'assignments': [], 'planned_catches': []}
+                'assignment_released': False, 'target_lane': None, 'assignments': [], 'planned_catches': [], 'action_alternatives': {}}
     teams, smalls, assignments, human_path, ai_path, owners = _plan(obs)
     previous = obs['policy_memory'].get('commitment')
-    first = next((a for a in assignments if teams and a['ball_id'] == teams[0]['id']), None)
+    first = next((a for a in assignments if previous and a['ball_id'] == previous.get('ball_id')), None)
+    if first is None:
+        first = next((a for a in assignments if a['locked']), None)
     released = bool(previous and any(b['id'] == previous['ball_id'] for b in teams) and not _same_assignment(previous, first))
     switched = bool(released and first and first['ball_id'] == previous['ball_id'])
     target = ai_path[0][1] if ai_path else None
@@ -212,30 +272,27 @@ def _cached_decision(key):
             else 'keep_assignment' if first and _same_assignment(first, previous) else 'assign_team_ball' if first
             else 'release_infeasible_assignment' if released else 'no_reachable_ball')
     en, zh = [], []
-    if current_small:
-        en.append(f"I will cover lane {target + 1} for {goal}, which arrives in {current_small['remaining']} turns.")
-        zh.append(f"我会到第{target + 1}道接{goal}，它将在{current_small['remaining']}回合后到达。")
-    for assignment in assignments:
-        ball = next(b for b in teams if b['id'] == assignment['ball_id'])
-        own, partner = assignment['ai_contact'] + 1, assignment['human_contact'] + 1
-        if assignment['locked']:
-            en.append(f"For {ball['id']} in {ball['remaining']} turns, I will cover lane {own}; you need to cover lane {partner}. I will keep this division while both sides remain reachable.")
-            zh.append(f"对于{ball['remaining']}回合后到达的{ball['id']}，我负责第{own}道，你需要覆盖第{partner}道。只要双方仍然可达，我就保持这个分工。")
+    goal_ball = next((b for b in obs['balls'] if b['id'] == goal), None)
+    if goal_ball:
+        if action == 'wait':
+            en.append(f"I am holding lane {target + 1} for {goal}, arriving in {goal_ball['remaining']} turns.")
+            zh.append(f"我已在第{target + 1}道，守候{goal_ball['remaining']}回合后到达的{goal}。")
         else:
-            en.append(f"After that, my current plan for {ball['id']} in {ball['remaining']} turns is lane {own}, with you at lane {partner}; this later plan may change when new balls appear.")
-            zh.append(f"之后，关于{ball['remaining']}回合后到达的{ball['id']}，当前计划是我去第{own}道、你去第{partner}道；新球出现后，这个后续计划可能调整。")
-    if current_small and assignments:
-        en.append('The selected small-ball route leaves enough moves to reach each planned team-ball contact, provided you reach your contacts too.')
-        zh.append('按当前选定的普通球路线，之后仍有足够步数到达每个计划中的合作接球点；你也需要及时到达你的接球点。')
+            en.append(f"I will move {'left' if action == 'left' else 'right'} toward lane {target + 1} for {goal}, arriving in {goal_ball['remaining']} turns.")
+            zh.append(f"我将向{'左' if action == 'left' else '右'}前往第{target + 1}道，接{goal_ball['remaining']}回合后到达的{goal}。")
+    else:
+        en.append('I have no catch to cover in the current shared plan, so I will wait here.')
+        zh.append('当前协作计划没有分配给我的接球任务，因此我会在这里等待。')
+    nearest_assignment = next((a for a in assignments if a['ball_id'] == goal), assignments[0] if assignments else None)
+    if nearest_assignment:
+        ball = next(b for b in teams if b['id'] == nearest_assignment['ball_id'])
+        own, partner = nearest_assignment['ai_contact'] + 1, nearest_assignment['human_contact'] + 1
+        prefix_en, prefix_zh = ('For', '对于') if nearest_assignment['locked'] else ('Tentatively for', '暂定对于')
+        en.append(f"{prefix_en} {ball['id']} in {ball['remaining']} turns, I cover lane {own}; you need lane {partner}.")
+        zh.append(f"{prefix_zh}{ball['remaining']}回合后到达的{ball['id']}，我负责第{own}道，你需要覆盖第{partner}道。")
     if switched:
-        en.append('The previous division is no longer reachable, so I changed sides.')
-        zh.append('原来的分工已经无法及时到达，因此我换了另一侧。')
-    if not ai_path:
-        en.append('No currently visible catching job is reachable for me, so I will stay here.')
-        zh.append('当前没有我能及时完成的可见接球任务，因此我会留在这里。')
-    elif action == 'wait':
-        en.append(f'I am already at lane {target + 1}, the next selected catch position, so I will hold it this turn.')
-        zh.append(f'我已在下一个选定接球位置第{target + 1}道，因此本回合会守住这里。')
+        en[-1] += ' Our previous sides are no longer reachable.'
+        zh[-1] += ' 原来的双方分工已经来不及。'
     tentative_changes = []
     for assignment in assignments:
         old = next((a for a in obs['policy_memory'].get('commitments', []) if a['ball_id'] == assignment['ball_id']), None)
@@ -243,29 +300,42 @@ def _cached_decision(key):
             tentative_changes.append({'ball_id': assignment['ball_id'], 'previous_ai_contact': old['ai_contact'],
                                       'previous_human_contact': old['human_contact'], 'ai_contact': assignment['ai_contact'],
                                       'human_contact': assignment['human_contact'], 'basis': 'current_visible_balls_and_positions'})
-            en.append(f"My earlier tentative division for {assignment['ball_id']} changed after reassessing the visible balls and our current positions.")
-            zh.append(f"根据当前可见的球和双方实际位置重新检查后，我调整了{assignment['ball_id']}先前的暂定分工。")
     comparisons = []
     for ball in teams:
         for own, partner in (ball['contacts'], list(reversed(ball['contacts']))):
-            ok = abs(obs['ai']['x'] - own) <= ball['remaining'] and abs(obs['human']['x'] - partner) <= ball['remaining']
-            comparisons.append({'action': _move_towards(obs['ai']['x'], own),
-                'en': f"For {ball['id']} alone, lane {own + 1} needs {abs(obs['ai']['x'] - own)} moves from me and lane {partner + 1} needs {abs(obs['human']['x'] - partner)} moves from you; {ball['remaining']} turns remain. " + ('Both contacts are individually reachable; other catches may still conflict.' if ok else 'At least one contact cannot be reached in time.'),
-                'zh': f"仅看{ball['id']}，我到第{own + 1}道需要{abs(obs['ai']['x'] - own)}步，你到第{partner + 1}道需要{abs(obs['human']['x'] - partner)}步；还剩{ball['remaining']}回合。" + ('两侧单独看都可达，但仍可能与其他接球冲突。' if ok else '至少一侧已经来不及。')})
+            own_distance, partner_distance = abs(obs['ai']['x'] - own), abs(obs['human']['x'] - partner)
+            ok = own_distance <= ball['remaining'] and partner_distance <= ball['remaining']
+            comparisons.append({'action': _move_towards(obs['ai']['x'], own), 'ball_id':ball['id'],
+                'en': f"{ball['id']}: I need {own_distance} moves to lane {own + 1}; you need {partner_distance} to lane {partner + 1}. {ball['remaining']} turns remain; " + ('both can reach, before considering other balls.' if ok else 'at least one side is too far away.'),
+                'zh': f"{ball['id']}：我到第{own + 1}道需{own_distance}步，你到第{partner + 1}道需{partner_distance}步。还剩{ball['remaining']}回合；" + ('只考虑这颗球时双方都来得及。' if ok else '至少一侧已经来不及。')})
     for ball in smalls:
         appointments = [(b['remaining'], a['ai_contact'], b['id']) for a in assignments for b in teams if a['ball_id'] == b['id']]
         appointments.append((ball['remaining'], ball['contacts'][0], ball['id']))
         safe = _route(obs['ai']['x'], appointments) is not None
-        comparisons.append({'action': _move_towards(obs['ai']['x'], ball['contacts'][0]),
-            'en': f"Catching {ball['id']} at lane {ball['contacts'][0] + 1} requires being there in {ball['remaining']} turns. " + ('There is a route from my current position through that catch and all my planned team-ball deadlines.' if safe else 'I cannot reach that catch and all my planned team-ball contacts by their deadlines.'),
-            'zh': f"接{ball['id']}需要在{ball['remaining']}回合后位于第{ball['contacts'][0] + 1}道。" + ('从我当前位置出发，存在能接它并及时到达所有计划中合作接球点的路线。' if safe else '我无法接它并按时到达所有计划中的合作接球点。')})
+        comparisons.append({'action': _move_towards(obs['ai']['x'], ball['contacts'][0]), 'ball_id':ball['id'],
+            'en': f"{ball['id']} reaches lane {ball['contacts'][0] + 1} in {ball['remaining']} turns. " + ('I can include it without missing my planned team contacts.' if safe else 'Taking it would miss at least one planned team contact or its own deadline.'),
+            'zh': f"{ball['id']}在{ball['remaining']}回合后到第{ball['contacts'][0] + 1}道。" + ('我能接它并赶上计划中的合作接球点。' if safe else '接它会错过至少一个计划中的合作接球点，或它本身就来不及。')})
+    action_alternatives = {}
+    for candidate in ('left', 'right', 'wait'):
+        position = obs['ai']['x'] + _DELTAS[candidate]
+        if not 0 <= position < LANES:
+            en_alt, zh_alt = 'That move leaves the court and is unavailable.', '这个方向会离开球场，不能执行。'
+        elif not goal_ball:
+            en_alt, zh_alt = 'There is no selected visible catch that requires this move.', '没有已选定的可见接球任务需要这样移动。'
+        else:
+            gap, time = abs(position - target), goal_ball['remaining'] - 1
+            preserves = all((lane == position if at == 1 else abs(lane - position) <= at - 1)
+                            for at, lane, _ in ai_path)
+            en_alt = f"After {candidate}, I would be in lane {position + 1}, {gap} moves from {goal}'s lane {target + 1}, with {time} turns left. " + ('This keeps the planned catch route reachable.' if preserves else 'This would miss a selected catch deadline.')
+            zh_alt = f"如果{'左移' if candidate == 'left' else '右移' if candidate == 'right' else '等待'}，我会在第{position + 1}道，离{goal}所在第{target + 1}道还需{gap}步，剩{time}回合。" + ('计划中的接球路线仍然可达。' if preserves else '这会错过已选定的接球时限。')
+        action_alternatives[candidate] = {'en':en_alt, 'zh':zh_alt}
     memory = {'commitments': deepcopy(assignments)} if assignments else {}
     if first:
         memory['commitment'] = deepcopy(first)
     return {'action': action, 'human_action': human_action, 'reason_code': code,
             'reason_en': ' '.join(en), 'reason_zh': ''.join(zh), 'goal': goal, 'memory': memory,
             'alternatives': comparisons, 'assignment_changed': switched, 'assignment_released': released,
-            'target_lane': target, 'assignments': deepcopy(assignments), 'tentative_replans': tentative_changes,
+            'target_lane': target, 'assignments': deepcopy(assignments), 'tentative_replans': tentative_changes, 'action_alternatives': action_alternatives,
             'planned_catches': [{'ball_id': b['id'], 'actor': 'human' if owner == 1 else 'ai'} for b, owner in zip(smalls, owners) if owner]}
 
 
@@ -365,14 +435,14 @@ def rules(language='en'):
           'Both paddles move together, then small balls fall two cells and team balls fall one. Balls reaching the contact line are scored immediately.',
           'A small ball earns 1 point if either paddle covers its lane. Covering it twice still earns only 1 point.',
           'A team ball earns 3 points only when the two paddles cover its two different contact lanes at the same arrival step.',
-          'Up to three small balls and two team balls are visible. New balls enter at the top after earlier balls finish. The supply ends before the task ends; every scheduled ball can arrive before the limit.',
-          'Task score is 100 times points earned divided by all scheduled ball points. Reading, questions and replay never advance the game. The teammate plans using only currently visible balls.']
+          'Up to six small balls and four team balls are visible. Several balls can arrive together; incompatible contacts force a choice. Replacements enter at the top, and the supply ends before the task limit.',
+          'Task score is 100 times earned points divided by all scheduled ball points. Some simultaneous balls cannot all be caught, so 100 may be impossible. Reading, questions and replay do not advance the game.']
     zh = ['球场有九道、高十二格。A、D分别左移和右移一道，空格等待；每次操作推进一步。双方球拍可以重叠。',
           '双方球拍同时移动，随后小球下降两格、合作球下降一格；到达接球线的球立即结算。',
           '小球由任一球拍覆盖所在道即可得1分；双方同时覆盖仍然只得1分。',
           '合作球必须在同一步由两个球拍分别覆盖两个不同的接触位置，才能得3分。',
-          '画面最多同时有三个小球、两个合作球。旧球结束后新球从顶部进入；任务结束前停止补球，所有预定球都能在步数上限前到达。',
-          '任务分数为100乘实得分除以全部预定球的分值。阅读、提问和回放不推进游戏。队友只根据当前可见的球制定计划。']
+          '画面最多同时有六个小球、四个合作球。同一回合可能有多个球到达，不兼容的接触位置必须取舍。新球从顶部补入，结束前停止补球。',
+          '任务分数为100乘实得分除以全部预定球的分值。部分同时到达的球无法全部接住，因此可能无法得到100分。阅读、提问和回放不推进游戏。']
     return zh if language.startswith('zh') else en
 
 
@@ -388,11 +458,12 @@ def facts(state, decision=None):
     for ball in state['balls']:
         lanes = ', '.join(str(x + 1) for x in ball['contacts'])
         evidence.append({'id': 'ball:' + ball['id'],
-            'en': f"{ball['id']} is a {'team' if ball['kind'] == 'cooperative' else 'small'} ball worth {WEIGHTS[ball['kind']]} points, arriving at lane(s) {lanes} in {ball['remaining']} turns; it falls {ball.get('vy', 2 if ball['kind'] == 'ordinary' else 1)} cells each step.",
+            'en': f"{ball['id']}: {'team' if ball['kind'] == 'cooperative' else 'small'}, {WEIGHTS[ball['kind']]} points, lane(s) {lanes}, {ball['remaining']} turns away; falls {ball.get('vy', 2 if ball['kind'] == 'ordinary' else 1)} cells each step.",
             'zh': f"{ball['id']}是{'合作' if ball['kind'] == 'cooperative' else '小'}球，值{WEIGHTS[ball['kind']]}分，将在{ball['remaining']}回合后到达第{lanes}道，每步下降{ball.get('vy', 2 if ball['kind'] == 'ordinary' else 1)}格。"})
     for i, assignment in enumerate(actual['assignments']):
         evidence.append({'id': f'assignment:{i}', 'en': f"For {assignment['ball_id']}, the {'committed' if assignment['locked'] else 'tentative later'} plan has me at lane {assignment['ai_contact'] + 1} and you at lane {assignment['human_contact'] + 1}.",
                          'zh': f"关于{assignment['ball_id']}，{'当前承诺的' if assignment['locked'] else '暂定后续'}分工是我在第{assignment['ai_contact'] + 1}道，你在第{assignment['human_contact'] + 1}道。"})
+    evidence.extend({'id': 'alternative_' + action, 'en': row['en'], 'zh': row['zh']} for action, row in actual.get('action_alternatives', {}).items())
     evidence.extend({'id': f'comparison:{i}', 'en': row['en'], 'zh': row['zh']} for i, row in enumerate(actual['alternatives']))
     evidence.extend({'id': f'public_rule:{i}', 'en': en, 'zh': zh} for i, (en, zh) in enumerate(zip(rules(), rules('zh'))))
     evidence.extend({'id': f'event:{i}', 'en': e['en'], 'zh': e['zh']} for i, e in enumerate(state['events']))
@@ -460,23 +531,20 @@ def global_reachable_upper_bound(state):
 
 
 def demonstration():
-    # A separate twelve-step finite scene with actual successes and a miss.
-    entries = [{'spawn_turn': 0, 'arrival_turn': at, 'ball': _ball(identifier, kind, contacts, at)} for identifier, kind, contacts, at in (
-        ('demo-small-1','ordinary',[5],1), ('demo-small-2','ordinary',[7],3), ('demo-small-3','ordinary',[5],5),
-        ('demo-team-1','cooperative',[2,6],6), ('demo-team-2','cooperative',[1,6],12))]
-    entries.append({'spawn_turn': 1, 'arrival_turn': 7, 'ball': _ball('demo-small-4','ordinary',[7],6)})
+    # Use the actual seeded concurrent schedule, truncated to a finite 12 steps.
+    entries = [e for e in _schedule(730100, 1) if e['arrival_turn'] <= 12]
     state = _new_state(entries, seed=0, task=1, human=2, ai=6)
     frames = [public_state(state)]
     while not state['terminal']:
-        action = human_advisor(state) if state['turn'] < 6 else 'wait'
-        state = step(state, action)
+        state = step(state, human_advisor(state))
         frames.append(public_state(state))
-    captions = [(0, 'Three small balls and two team balls are already on court. Their arrival times differ.', '三个小球和两个合作球已经在场上，到达时间各不相同。'),
-                (1, 'One input moved both paddles; small balls fell two cells and team balls one. A caught small ball earned 1 point and a new ball entered at the top.', '一次操作使双方球拍移动；小球下降两格，合作球下降一格。接住小球得到1分，新球从顶部进入。'),
-                (3, 'The next small ball was caught. Every ball is counted once, and the other balls keep falling.', '下一颗小球被接住了。每颗球只计分一次，其他球继续下落。'),
-                (6, 'Two paddles covered the different team-ball contacts together, earning 3 points.', '两块球拍同时覆盖合作球的两个不同接触点，得到3分。'),
-                (7, 'The replacement small ball reached the bottom after six steps from the top.', '补入的小球从顶部经过六步到达了底部。'),
-                (12, 'A later team ball was missed because one contact was uncovered. The demonstration is complete; its points do not count toward your tasks.', '之后的合作球有一个接触点未被覆盖，因此漏接。演示结束，这些分数不计入正式任务。')]
+    captions = [
+        (0, 'Six small balls and four team balls are visible. Several share an arrival time.', '场上有六个小球和四个合作球，其中多颗球会同时到达。'),
+        (1, 'One input advances one step: small balls fall two cells, team balls one. Reading does not advance them.', '一次操作推进一步：小球下降两格，合作球下降一格。阅读不会让球继续下降。'),
+        (2, 'Two small balls arrive together. Each covered contact earns 1 point; each missed contact earns 0.', '两颗小球同时到达。覆盖一颗的接触位置得1分，漏接则得0分。'),
+        (4, 'The next pair arrives while replacement balls continue down from the top.', '下一对球到达，同时补入的球继续从顶部下降。'),
+        (6, 'Two small balls and two team balls arrive together. The team balls require four distinct lanes, so two paddles must choose which team ball to catch.', '两颗小球和两颗合作球同时到达。两颗合作球需要覆盖四条不同的道，因此两块球拍必须选择接哪颗合作球。'),
+        (12, 'The finite supply has ended. Every ball was scored once; these demonstration points do not count toward your tasks.', '演示的有限供球已经结束，每颗球只计分一次。这些分数不计入正式任务。')]
     return {'frames': frames, 'captions': [{'index': index, 'en': en, 'zh': zh} for index, en, zh in captions]}
 
 

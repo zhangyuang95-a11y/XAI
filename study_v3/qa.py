@@ -15,7 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-VERSION = "study-evidence-qa.v3.2"
+VERSION = "study-evidence-qa.v3.3"
 MAX_STEPS = 12
 _ACTIONS = {
     "left": ("move left", "左移"), "right": ("move right", "右移"),
@@ -48,7 +48,9 @@ Schema:
              "purpose":"action"|"reason"|"advice"|"comparison"|"observation"|"rule",
              "evidence_ids":["provided exact fact ID"]},
             {"kind":"counterfactual","subject":"human","purpose":"comparison",
-             "evidence_ids":[],"actions":["left"],"horizon":1}]}
+             "evidence_ids":[],"actions":["left"],"horizon":1},
+            {"kind":"counterfactual","subject":"human","purpose":"comparison",
+             "evidence_ids":[],"intervention":{"human_lane":5},"actions":[],"horizon":0}]}
 
 Resolve the SPEAKER before selecting facts. In the participant's QUESTION,
 "I/me/my" means the human and "you/your" means the AI teammate being addressed.
@@ -81,8 +83,12 @@ Task/Turn and select only its matching history fact IDs. Do not ask for replay
 selection merely to restate an available recorded historical position or event.
 Ambiguous objects must be clarified rather than guessed.
 Questions can contain multiple intents: cover every supported part with separate
-intents. Usually select one to three facts per intent, only those that directly
-answer it. Do not dump the rulebook or add system:teammate unless implementation
+intents. A single focused question normally needs ONE intent and ONE or TWO
+facts. Answer only what was asked: current-action reasons do not need future
+assignments, every visible ball, unrelated rules, human advice or a whole plan.
+For "why not move left/right/wait?", use the named AI-action alternative fact
+if present, not alternatives for every ball. Do not add unrelated comparisons.
+Do not dump the rulebook or add system:teammate unless implementation
 or control authority was asked about. For "how can I help?", prefer the current
 human_available_option if provided and the current coordination condition. Give
 the participant an applicable option, not only general public instructions.
@@ -111,7 +117,21 @@ In "If I wait four turns, can you catch both balls?", the condition is a HUMAN
 action sequence, so use a human counterfactual for four waits even though the
 requested outcome concerns the AI. AI plan facts alone cannot verify the
 conditional outcome. Apply this equally to Chinese conditional questions.
-If no action can be identified, ask missing_action. Use only the provided action
+Pong POSITION hypotheticals are a separate supported intervention. For "If I
+were at lane 5, how would you move?" (or "如果我在第5道，你会怎么移动？"),
+set intervention={"human_lane":5}, subject=human, purpose=comparison,
+evidence_ids=[], actions=[], horizon=0. Lanes are the displayed ONE-BASED
+numbers, not x coordinates. The service changes only the human position in a
+copy and reruns the real fixed AI with its existing commitments. Never answer
+this by selecting the unchanged real state's AI reason or imagining the AI's
+action yourself. No movement steps are needed merely to ask its next decision.
+If subsequent human actions or a time window are explicitly requested, include
+those actions/horizon too; missing actions in an explicit window mean waiting.
+Use this only when listed in counterfactual_interventions. Never move the AI,
+change ball positions, erase commitments or alter any other state. A position
+outside the displayed court requires unsupported_question clarification.
+If no action OR supported position intervention can be identified, ask
+missing_action. Use only the provided action
 IDs. First-step unavailability will be explained without executing an illegal
 action. The server performs all physics and score calculations after this plan.
 """
@@ -185,8 +205,8 @@ def _catalog(engine, state, decision, public_history):
         if advisor_state != state or suggestion not in engine.legal_actions(state):
             raise PlanError("invalid_human_advice")
         rows.append({"id": "system:human_advice", "subject": "human", "purpose": "advice", "action": suggestion,
-            "en": "A coordination option for your next action is to " + _action_pair(engine, state, suggestion)[0] + ". This uses the current situation and your teammate's fixed plan; you still choose and perform the action. It is not a guarantee of the best eventual score.",
-            "zh": "建议你下一步" + _action_pair(engine, state, suggestion)[1] + "。这项配合建议依据当前状态和队友的固定计划；仍由你选择并执行动作，不保证最终得分最优。"})
+            "en": "A coordination option for your next action is to " + _action_pair(engine, state, suggestion)[0] + ".",
+            "zh": "建议你下一步" + _action_pair(engine, state, suggestion)[1] + "。"})
     public_score = engine.score(state)
     raw_name = "score" if state["domain"] == "warehouse" else "catch points" if state["domain"] == "pong" else "correctly completed orders"
     raw_zh = "原始得分" if state["domain"] == "warehouse" else "接球原始分" if state["domain"] == "pong" else "正确完成订单数"
@@ -233,7 +253,17 @@ def _catalog(engine, state, decision, public_history):
     return result
 
 
-def _validate_plan(plan, evidence):
+def _validate_intervention(intervention, state=None):
+    if not isinstance(intervention, dict) or set(intervention) != {"human_lane"}:
+        raise PlanError("invalid_position_intervention")
+    lane = intervention["human_lane"]
+    if type(lane) is not int or lane < 1:
+        raise PlanError("invalid_position_intervention")
+    if state is not None and (state["domain"] != "pong" or lane > state["lanes"]):
+        raise PlanError("unsupported_position_intervention")
+
+
+def _validate_plan(plan, evidence, state=None):
     if not isinstance(plan, dict) or plan.get("language") not in ("en", "zh"):
         raise PlanError("invalid_language")
     allowed = {"language", "binding", "premise", "clarification", "intents"}
@@ -256,7 +286,7 @@ def _validate_plan(plan, evidence):
     for intent in intents:
         if not isinstance(intent, dict) or intent.get("kind") not in ("facts", "counterfactual"):
             raise PlanError("invalid_intent")
-        if set(intent) - {"kind", "evidence_ids", "actions", "horizon", "subject", "purpose"}:
+        if set(intent) - {"kind", "evidence_ids", "actions", "horizon", "subject", "purpose", "intervention"}:
             raise PlanError("unexpected_intent_fields")
         subject, purpose = intent.get("subject"), intent.get("purpose")
         # Optional only for archived injected composition fixtures. New
@@ -270,6 +300,8 @@ def _validate_plan(plan, evidence):
             raise PlanError("unknown_evidence")
         if intent["kind"] == "facts" and not ids:
             raise PlanError("facts_without_evidence")
+        if intent["kind"] == "facts" and any(k in intent for k in ("intervention", "actions", "horizon")):
+            raise PlanError("simulation_fields_on_facts")
         if subject == "ai" and purpose in ("action", "reason") and "system:ai_" + purpose not in ids:
             raise PlanError("missing_subject_evidence")
         if subject == "human" and purpose == "advice" and "system:human_advice" not in ids:
@@ -280,23 +312,45 @@ def _validate_plan(plan, evidence):
         if intent["kind"] == "counterfactual":
             if subject not in (None, "human"):
                 raise PlanError("wrong_simulation_actor")
-            actions = intent.get("actions")
-            horizon = intent.get("horizon", 1)
-            if not isinstance(actions, list) or not actions or len(actions) > MAX_STEPS or any(a not in _ACTIONS for a in actions):
+            intervention = intent.get("intervention")
+            if "intervention" in intent:
+                _validate_intervention(intervention, state)
+                if ids:
+                    raise PlanError("intervention_has_actual_evidence")
+            actions = intent.get("actions", [] if intervention is not None else None)
+            horizon = intent.get("horizon", len(actions) if intervention is not None and isinstance(actions, list) else 1)
+            if not isinstance(actions, list) or (not actions and intervention is None) or len(actions) > MAX_STEPS or any(not isinstance(a, str) or a not in _ACTIONS for a in actions):
                 raise PlanError("invalid_simulation_actions")
-            if type(horizon) is not int or not 1 <= horizon <= MAX_STEPS or len(actions) > horizon:
+            minimum = 0 if intervention is not None else 1
+            if type(horizon) is not int or not minimum <= horizon <= MAX_STEPS or len(actions) > horizon:
                 raise PlanError("invalid_simulation_horizon")
     return plan
 
 
-def simulate(engine, state, decision, actions, horizon=1):
-    """Immutable branch; first step retains the actual saved AI decision."""
-    if type(horizon) is not int or not 1 <= horizon <= MAX_STEPS or not actions or len(actions) > horizon:
+def simulate(engine, state, decision, actions, horizon=1, *, intervention=None):
+    """Immutable branch; position changes require a fresh fixed-AI decision.
+
+    Ordinary action alternatives retain the recorded simultaneous first action.
+    Position interventions preserve every other field, including commitments.
+    """
+    if intervention is not None:
+        _validate_intervention(intervention, state)
+    minimum = 0 if intervention is not None else 1
+    if type(horizon) is not int or not minimum <= horizon <= MAX_STEPS or not isinstance(actions, list) or (not actions and intervention is None) or len(actions) > horizon:
         raise PlanError("invalid_simulation_horizon")
-    if any(a not in _ACTIONS for a in actions):
+    if any(not isinstance(a, str) or a not in _ACTIONS for a in actions):
         raise PlanError("invalid_simulation_actions")
     before_hash = _digest(state)
     current = deepcopy(state)
+    hypothetical = None
+    if intervention is not None:
+        current["human"]["x"] = intervention["human_lane"] - 1
+        decision = engine.decide(current)
+        hypothetical = {"human_lane": intervention["human_lane"],
+                        "actual_human_lane": state["human"]["x"] + 1,
+                        "ai_action": None if current["terminal"] else decision["action"],
+                        "reason_en": decision["reason_en"], "reason_zh": decision["reason_zh"],
+                        "input_state_hash": _digest(current)}
     assumed = horizon - len(actions)
     sequence = list(actions) + ["wait"] * assumed
     initial_public = engine.public_state(current)
@@ -331,7 +385,7 @@ def simulate(engine, state, decision, actions, horizon=1):
     if before_hash != _digest(state):
         raise RuntimeError("simulation_mutated_live_state")
     final_public = engine.public_state(current)
-    return {"requested_actions": list(actions), "executed_actions": sequence[:done],
+    result = {"requested_actions": list(actions), "executed_actions": sequence[:done],
             "horizon": horizon, "assumed_wait_turns": assumed, "steps_completed": done,
             "stopped_at_public_boundary": boundary, "illegal_action": illegal,
             "terminal": bool(current["terminal"]), "events": events,
@@ -339,9 +393,26 @@ def simulate(engine, state, decision, actions, horizon=1):
             "task_score_delta": round(engine.score(current)["task_score"] - engine.score(state)["task_score"], 6),
             "human": deepcopy(final_public["human"]), "ai": deepcopy(final_public["ai"]),
             "trace": trace, "input_state_hash": before_hash}
+    if hypothetical is not None:
+        result["intervention"] = hypothetical
+    return result
 
 
-def _simulation_text(result, language, domain):
+def _simulation_text(result, language, domain, *, include_scope=True):
+    intervention = result.get("intervention")
+    hypothetical_text = ""
+    if intervention:
+        lane = intervention["human_lane"]
+        action = intervention["ai_action"]
+        if action is None:
+            return _text((f"Even if you were in lane {lane}, this task has finished; I have no next move.",
+                          f"即使假设你在第{lane}道，本任务也已结束，我没有下一步动作。"), language)
+        hypothetical_text = _text((f"If you were in lane {lane}, I would {_ACTIONS[action][0]} next. ",
+                                   f"假设你在第{lane}道，我下一步会{_ACTIONS[action][1]}。"), language)
+        hypothetical_text += intervention["reason_" + language]
+        if result["horizon"] == 0:
+            return hypothetical_text + _text((" This is a hypothetical position; the game has not changed.",
+                                              "这是假设位置，实际游戏没有改变。"), language)
     groups = []
     for action in result["requested_actions"]:
         if groups and groups[-1][0] == action:
@@ -352,10 +423,31 @@ def _simulation_text(result, language, domain):
         _text((f"{_ACTIONS[action][0]} for {count} turns", f"连续{count}回合{_ACTIONS[action][1]}"), language)
         for action, count in groups)
     prefix = (f"If you {actions}", f"如果你依次{actions}")
+    if not groups:
+        prefix = ("From that hypothetical position", "从这个假设位置出发")
     text = _text(prefix, language)
+    if hypothetical_text:
+        text = hypothetical_text + "\n" + text
     if result["assumed_wait_turns"]:
         text += _text((f", then wait for the next {result['assumed_wait_turns']} turns as an explicit assumption", f"，并明确假设之后等待{result['assumed_wait_turns']}回合"), language)
     turn_word = "turn" if result["steps_completed"] == 1 else "turns"
+    if domain == "pong":
+        # A compact consequence; step-by-step evidence remains in the audit.
+        text += _text((f": after {result['steps_completed']} {turn_word}, you are in lane {result['human']['x'] + 1} and I am in lane {result['ai']['x'] + 1}; task score changes by {result['task_score_delta']:g} points.",
+                       f"：{result['steps_completed']}回合后你在第{result['human']['x'] + 1}道，我在第{result['ai']['x'] + 1}道；任务得分变化{result['task_score_delta']:g}分。"), language)
+        if result["illegal_action"]:
+            invalid = result["illegal_action"]
+            text += _text((f" Action {invalid['step']} ({_ACTIONS[invalid['action']][0]}) is unavailable there and was not executed.",
+                           f"第{invalid['step']}步（{_ACTIONS[invalid['action']][1]}）在该位置不可用，没有执行。"), language)
+        outcomes = [event[language] for event in result["events"] if language in event]
+        if outcomes:
+            text += " " + " ".join(outcomes)
+        if include_scope:
+            if result["stopped_at_public_boundary"]:
+                text += _text((" Stops when new balls arrive; their effects are unknown.", "新球出现时停止；不推测新球的影响。"), language)
+            elif not result["terminal"]:
+                text += _text((" Only this window is simulated.", "以上只涵盖模拟窗口。"), language)
+        return text
     text += _text((f": the simulation completed {result['steps_completed']} {turn_word}. ", f"：模拟完成了{result['steps_completed']}回合。"), language)
     if result["illegal_action"]:
         invalid = result["illegal_action"]
@@ -446,15 +538,16 @@ class Explainer:
                 "public_observation": engine.public_state(state),
                 "prior_dialogue": [{"question": str(p.get("question", ""))[:2000],
                                     "answer": str(p.get("answer", ""))[:6000]} for p in (previous_dialogue or [])[-6:]],
-                "allowed_action_ids": (["left", "right", "wait"] if state["domain"] == "pong" else ["up", "down", "left", "right", "wait", "interact", "discard"] if state["domain"] == "kitchen" else ["up", "down", "left", "right", "wait"]), "currently_legal_human_actions": engine.legal_actions(state),
+                "allowed_action_ids": (["left", "right", "wait"] if state["domain"] == "pong" else ["up", "down", "left", "right", "wait", "interact"] if state["domain"] == "kitchen" else ["up", "down", "left", "right", "wait"]), "currently_legal_human_actions": engine.legal_actions(state),
+                "counterfactual_interventions": ({"human_lane": {"minimum": 1, "maximum": state["lanes"], "numbering": "displayed_one_based", "decision_only_horizon": 0}} if state["domain"] == "pong" else {}),
                 "recommended_human_action": evidence.get("system:human_advice", {}).get("action"),
                 "evidence": list(evidence.values())}
             plan, provider_audit = self._request_plan(payload)
             audit.update(provider_audit)
             try:
-                plan = _validate_plan(plan, evidence)
+                plan = _validate_plan(plan, evidence, state)
             except PlanError as first_error:
-                if str(first_error) not in ("unknown_evidence", "missing_subject_evidence", "wrong_actor_evidence", "wrong_simulation_actor"):
+                if str(first_error) not in ("unknown_evidence", "missing_subject_evidence", "wrong_actor_evidence", "wrong_simulation_actor", "intervention_has_actual_evidence", "invalid_position_intervention", "unsupported_position_intervention", "simulation_fields_on_facts"):
                     raise
                 # Exactly one model repair for evidence IDs or role mismatches.
                 # Never heuristically substitute a guessed actor or fact.
@@ -462,11 +555,11 @@ class Explainer:
                     "original_plan": deepcopy(plan), "original_provider": deepcopy(provider_audit)}
                 repaired_payload = deepcopy(payload)
                 repaired_payload["repair_request"] = {
-                    "error": "The previous plan failed validation: " + str(first_error) + ". Recheck the question's speaker and requested purpose. Use exact provided IDs. AI action/reason requires system:ai_action/system:ai_reason; human advice requires system:human_advice; simulations control the human only. This is your only repair attempt.",
+                    "error": "The previous plan failed validation: " + str(first_error) + ". Recheck the question's speaker and requested purpose. Use exact provided IDs. AI action/reason requires system:ai_action/system:ai_reason; human advice requires system:human_advice. Simulations control the human only; a position hypothesis must use a supported intervention, empty evidence_ids and a displayed in-range lane. Never substitute the actual state's reason for a hypothetical decision. This is your only repair attempt.",
                     "previous_plan": _redact(plan, self.settings.llm_api_key)}
                 plan, provider_audit = self._request_plan(repaired_payload)
                 audit.update(provider_audit)
-                plan = _validate_plan(plan, evidence)
+                plan = _validate_plan(plan, evidence, state)
                 audit["repair_attempt"]["successful"] = True
             audit.update(plan=deepcopy(plan), understanding="semantic_provider", evidence_catalog_hash=_digest(evidence))
             selected_language = plan["language"]
@@ -485,18 +578,40 @@ class Explainer:
                 result = {"status": "clarification", "answer": _text(_CLARIFICATIONS[clarification], selected_language), "evidence_ids": []}
             else:
                 factual_parts, simulation_parts, ids = [], [], []
+                selected_ids = {identifier for intent in plan["intents"] for identifier in intent.get("evidence_ids", [])}
+                # Suppress a duplicate action sentence only when the selected
+                # authoritative reason literally includes that action label.
+                # This is fact rendering, not keyword-based question binding.
+                action_in_reason = (state["domain"] == "pong" and not state["terminal"]
+                    and bool(selected_ids & {"decision", "system:ai_reason"})
+                    and _action_pair(engine, state, decision["action"], actor="ai", decision=decision)[selected_language == "zh"].lower()
+                        in decision["reason_" + selected_language].lower())
                 for intent in plan["intents"]:
                     for identifier in intent.get("evidence_ids", []):
                         if identifier not in ids:
                             wording = evidence[identifier][selected_language]
-                            if wording not in factual_parts:
+                            redundant = action_in_reason and identifier in ("system:ai_action", "next_action")
+                            if not redundant and wording not in factual_parts:
                                 factual_parts.append(wording)
                             ids.append(identifier)
                     if intent["kind"] == "counterfactual":
-                        simulation = simulate(engine, state, decision, intent["actions"], intent.get("horizon", 1))
+                        actions = intent.get("actions", [])
+                        intervention = intent.get("intervention")
+                        horizon = intent.get("horizon", len(actions) if intervention is not None else 1)
+                        simulation = simulate(engine, state, decision, actions, horizon, intervention=intervention)
                         audit["simulations"].append(simulation)
                         simulation_parts.append(_simulation_text(simulation, selected_language, state["domain"]))
                         ids.append(f"simulation:{len(audit['simulations'])}")
+                simulations = audit["simulations"]
+                if state["domain"] == "pong" and len(simulations) == 2 and not any(s.get("intervention") for s in simulations):
+                    simulation_parts = [_simulation_text(s, selected_language, "pong", include_scope=False) for s in simulations]
+                    left, right = simulations
+                    if left["steps_completed"] == right["steps_completed"] and left["raw_score_delta"] == right["raw_score_delta"] and not any(s["illegal_action"] for s in simulations):
+                        simulation_parts.append(_text(("This window shows no score advantage for either option.", "在这个窗口内，两种选择没有得分优势之分。"), selected_language))
+                    elif not all(s["terminal"] for s in simulations):
+                        simulation_parts.append(_text(("These results cover only the simulated windows.", "这些结果只涵盖所模拟的窗口。"), selected_language))
+                    if any(s["stopped_at_public_boundary"] for s in simulations):
+                        simulation_parts.append(_text(("Simulation stops at new arrivals; their effects are unknown.", "模拟在新球出现时停止；不推测新球的影响。"), selected_language))
                 if factual_parts and simulation_parts:
                     parts = [_text(("In the selected recorded state:", "在所选的真实记录状态中："), selected_language) + "\n" + "\n\n".join(factual_parts)] + simulation_parts
                 else:

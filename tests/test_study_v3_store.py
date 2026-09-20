@@ -191,7 +191,7 @@ def test_complete_three_task_flow_and_explanation_permission_matrix(store, domai
     denied(lambda: store.ask(flow.token, flow.question()), "explanations_unavailable", 403)
     assert "answer" not in set(all_keys(flow.view["questionnaire"]))
     assert len(flow.view["questionnaire"]["items"]) == (8 if group == "A" else 5)
-    assert len(flow.view["questionnaire"]["comprehension"]) == 3
+    assert flow.view["questionnaire"]["comprehension"] == []
     submitted = flow.submit_survey()
     assert flow.view["stage"] == "completed"
     assert store.command(flow.token, "questionnaire", submitted)["stage"] == "completed"
@@ -417,13 +417,13 @@ def test_release_mismatch_never_resumes_old_session_under_new_rules(store, monke
     monkeypatch.setattr("study_v3.store.RELEASE_ID", "test-new-release")
     monkeypatch.setattr("study_v3.store.SUPPORTED_RELEASE_IDS", frozenset({"test-new-release"}))
     denied(lambda: store.view(flow.token, flow.view["instance_id"]), "release_changed", 409)
-    denied(lambda: store.recover_view(flow.token, "pong"), "release_changed", 409)
+    assert store.recover_view(flow.token, "pong")["previous_version_saved"] is True
     denied(lambda: store.ask(flow.token, question), "release_changed", 409)
     denied(lambda: store.frame(flow.token, flow.view["instance_id"], flow.view["run_id"], 0), "release_changed", 409)
 
 
 @pytest.mark.parametrize("requested_domain", ["pong", "kitchen"])
-def test_unsupported_release_only_blocks_its_own_domain(store, monkeypatch, requested_domain):
+def test_unsupported_release_can_start_fresh_without_changing_archived_rows(store, monkeypatch, requested_domain):
     flow = Flow(store, "pong")
     flow.finish_demo()
     original_records = store.export()
@@ -432,15 +432,13 @@ def test_unsupported_release_only_blocks_its_own_domain(store, monkeypatch, requ
 
     payload = {"participant_id": flow.name, "domain": requested_domain,
         "consent": True, "mode": "test"}
-    if requested_domain == "pong":
-        denied(lambda: store.create(payload, token=flow.token, admin=True), "release_changed", 409)
-        assert store.export() == original_records
-    else:
-        _, new_domain = store.create(payload, token=flow.token, admin=True)
-        assert new_domain["domain"] == "kitchen" and new_domain["release_id"] == "test-new-release"
-        after = store.export()
-        for table, records in original_records.items():
-            assert all(row in after[table] for row in records)
+    _, new_domain = store.create(payload, token=flow.token, admin=True)
+    assert new_domain["domain"] == requested_domain and new_domain["release_id"] == "test-new-release"
+    assert new_domain["stage"] == "demo"
+    after = store.export()
+    for table, records in original_records.items():
+        assert all(row in after[table] for row in records)
+
 
 
 @pytest.mark.parametrize("domain", ["warehouse", "pong", "kitchen"])

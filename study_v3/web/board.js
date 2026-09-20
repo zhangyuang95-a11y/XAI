@@ -88,7 +88,12 @@ window.StudyBoard = class StudyBoard {
       else if (pot) { ctx.strokeStyle='#5f6e82';ctx.lineWidth=4;ctx.beginPath();ctx.arc(x+c/2,y+c*.45,c*.25,0,Math.PI*2);ctx.stroke(); }
       const ingredient = station.ingredient || ({eggs:'egg',egg:'egg',tomato:'tomato',meat:'meat',pepper:'pepper'}[id]) || (id.startsWith('ingredients_') ? id.slice(12) : id.startsWith('ingredient_') ? id.slice(11) : null);
       if (ingredient) this.item(ctx,{ingredient},x+c/2,y+c*.42,c*.55);
-      const shortLabels={prep:['Prep','备料'],human_buffer:['Your counter','你的暂存台'],plate:['Serving plates','正式餐盘'],serve:['Serve','上菜'],handoff:['Handoff','交接'],protein1:['Temp. plate 1','熟料临时盘 1'],protein2:['Temp. plate 2','熟料临时盘 2'],ai_raw:['2 raw slots','原料双槽']};
+      if(id==='trash') {
+        this.rect(ctx,x+c*.34,y+c*.28,c*.32,c*.32,'#67758a',3);
+        this.rect(ctx,x+c*.29,y+c*.22,c*.42,c*.06,'#45546a',2);
+        this.label(ctx,'×',x+c*.5,y+c*.45,c*.25,'white');
+      }
+      const shortLabels={trash:['Trash · E','垃圾桶 · E'],prep:['Prep','备料'],human_buffer:['Your counter','你的暂存台'],plate:['Serving plates','正式餐盘'],serve:['Serve','上菜'],handoff:['Handoff','交接'],protein1:['Temp. plate 1','熟料临时盘 1'],protein2:['Temp. plate 2','熟料临时盘 2'],ai_raw:['2 raw slots','原料双槽']};
       const text = shortLabels[id]?.[this.lang==='zh'?1:0] || (this.lang==='zh' ? station.label_zh : station.label_en);
       if (!charger) this.label(ctx,text || id,x+c/2,y+c*.82,Math.min(11,c*.145),'#536279');
     }
@@ -129,8 +134,13 @@ window.StudyBoard = class StudyBoard {
       this.label(ctx,actor==='human'?'1':'2',x+c/2,y+c/2,c*.34,'white',900);
       if (visible.facing) {
         const [dx,dy]=({up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]})[visible.facing]||[0,1];
-        ctx.fillStyle='white';ctx.beginPath();const cx=x+c/2+dx*c*.36,cy=y+c/2+dy*c*.36;
-        ctx.moveTo(cx+dx*c*.13,cy+dy*c*.13);ctx.lineTo(cx-dy*c*.09,cy+dx*c*.09);ctx.lineTo(cx+dy*c*.09,cy-dx*c*.09);ctx.closePath();ctx.fill();
+        const cx=x+c/2,cy=y+c/2,tipx=cx+dx*c*.5,tipy=cy+dy*c*.5;
+        for(const [stroke,lineWidth] of [['#ffffff',c*.13],['#26324a',c*.065]]) {
+          ctx.strokeStyle=stroke;ctx.lineWidth=lineWidth;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();
+          ctx.moveTo(cx+dx*c*.28,cy+dy*c*.28);ctx.lineTo(tipx,tipy);
+          ctx.moveTo(tipx-dx*c*.12-dy*c*.1,tipy-dy*c*.12+dx*c*.1);ctx.lineTo(tipx,tipy);
+          ctx.lineTo(tipx-dx*c*.12+dy*c*.1,tipy-dy*c*.12-dx*c*.1);ctx.stroke();
+        }
       }
       if (visible.battery!==undefined) {
         const top=Math.max(oy+2,y-c*.12);
@@ -143,11 +153,26 @@ window.StudyBoard = class StudyBoard {
         this.label(ctx,cargo?'A'+cargo.slot:'?',cx,cy,c*.18,'white',800);
       } else if (state.domain!=='warehouse') {
         this.item(ctx,visible.holding,x+c*.86,y+c*.15,c*.43);
+        if(actor==='human'&&visible.preparation) {
+          const prep=visible.preparation;
+          const text=prep.ready?(this.lang==='zh'?'✓ 已备好':'✓ Prepared'):(this.lang==='zh'?`备料还需 ${prep.remaining} 步`:`Prep: ${prep.remaining} more`);
+          this.rect(ctx,x+c*.02,y+c*.88,c*.96,c*.21,prep.ready?'#dcf5e8':'#fff2d1',3);
+          this.label(ctx,text,x+c*.5,y+c*.985,c*.125,prep.ready?'#16704c':'#785f21',750);
+        }
+        if(actor==='ai') {
+          const recipes=[...new Map((visible.current_cooking||[]).map(job=>[job.recipe,job])).values()];
+          recipes.slice(0,2).forEach((job,i)=>{
+            const text=this.lang==='zh'?job.recipe_label_zh:job.recipe_label_en;
+            const top=Math.max(oy+1,y-c*(.23*(recipes.length-i)));
+            this.rect(ctx,x-c*.22,top,c*1.44,c*.21,'#fff5e9',3);
+            this.label(ctx,text,x+c*.5,top+c*.105,this.lang==='zh'?c*.145:c*.105,'#9b421f',750);
+          });
+        }
       }
     }
   }
   pong(ctx,before,after,p,w,h) {
-    const lane=x=>38+x*58, line=585, top=45, y=value=>top+value/12*(line-top);
+    const lane=x=>38+x*58, line=585, top=65, y=value=>top+value/12*(line-top);
     ctx.strokeStyle='#dce4ef';ctx.lineWidth=1;
     for(let col=0;col<after.lanes;col++){ctx.beginPath();ctx.moveTo(lane(col),top);ctx.lineTo(lane(col),line);ctx.stroke();this.label(ctx,col+1,lane(col),610,12,'#68758b');}
     for(let row=0;row<=12;row++){ctx.beginPath();ctx.moveTo(16,y(row));ctx.lineTo(w-16,y(row));ctx.stroke();}
@@ -156,9 +181,9 @@ window.StudyBoard = class StudyBoard {
       const target=next.get(b.id),start=b.y??12-b.remaining*(b.vy||(b.kind==='ordinary'?2:1));
       const end=target ? (target.y??12-target.remaining*(target.vy||(target.kind==='ordinary'?2:1))) : 12;
       if(!target&&p===1)continue;
-      this.ball(ctx,b,lane,y(start+(end-start)*p));
+      this.ball(ctx,p===1?target:b,lane,y(start+(end-start)*p),p===1?after.balls:before.balls);
     }
-    if(p===1)for(const b of after.balls)if(!before.balls.some(old=>old.id===b.id))this.ball(ctx,b,lane,y(b.y??12-b.remaining*(b.vy||(b.kind==='ordinary'?2:1))));
+    if(p===1)for(const b of after.balls)if(!before.balls.some(old=>old.id===b.id))this.ball(ctx,b,lane,y(b.y??12-b.remaining*(b.vy||(b.kind==='ordinary'?2:1))),after.balls);
     for(const [actor,color]of[['human','#4f6ff0'],['ai','#f56b3d']]){
       const x=before[actor].x+(after[actor].x-before[actor].x)*p;
       const overlap=Math.abs(after.human.x-after.ai.x)<.01;
@@ -167,8 +192,19 @@ window.StudyBoard = class StudyBoard {
     }
     this.label(ctx,this.lang==='zh'?'小球 2格/步 · 大球 1格/步':'Small: 2 cells / move · Team: 1 cell / move',w/2,18,13,'#68758b');
   }
-  ball(ctx,b,lane,y) {
-    if(b.contacts.length===2){const x1=lane(b.contacts[0]),x2=lane(b.contacts[1]);this.rect(ctx,x1-13,y-12,x2-x1+26,24,'#bfa047',12);for(const x of[x1,x2]){ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(x,y,6,0,Math.PI*2);ctx.fill();}this.label(ctx,b.id,(x1+x2)/2,y-22,11,'#806626');}
-    else{ctx.fillStyle='#697e9e';ctx.beginPath();ctx.arc(lane(b.contacts[0]),y,10,0,Math.PI*2);ctx.fill();this.label(ctx,b.id,lane(b.contacts[0]),y-20,10,'#536279');}
+  ball(ctx,b,lane,y,balls=[]) {
+    const label=b.id+' · '+b.remaining+(this.lang==='zh'?'步':'t');
+    if(b.contacts.length===2){
+      // Simultaneous team balls share their true height. Separate their narrow
+      // drawing bands so overlapping spans cannot hide one another.
+      const peers=balls.filter(other=>other.contacts.length===2&&other.remaining===b.remaining).sort((a,b)=>a.id.localeCompare(b.id));
+      const index=Math.max(0,peers.findIndex(other=>other.id===b.id));
+      const band=y+(peers.length>1?(index-(peers.length-1)/2)*15:0);
+      const x1=lane(b.contacts[0]),x2=lane(b.contacts[1]);
+      this.rect(ctx,x1-10,band-6,x2-x1+20,12,index%2?'#9e7929':'#c1a447',6);
+      for(const x of[x1,x2]){ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(x,band,4,0,Math.PI*2);ctx.fill();}
+      this.label(ctx,label,(x1+x2)/2,band+(peers.length>1&&index>0?15:-15),10,'#806626');
+    }
+    else{ctx.fillStyle='#697e9e';ctx.beginPath();ctx.arc(lane(b.contacts[0]),y,10,0,Math.PI*2);ctx.fill();this.label(ctx,label,lane(b.contacts[0]),y-20,10,'#536279');}
   }
 };

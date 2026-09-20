@@ -78,3 +78,20 @@ render(unknown);
 assert(labels.some(label=>label.text==='?'));
 assert(!labels.some(label=>label.text==='A99'));
 console.log('Warehouse board badges: both actors, replenishment, replay, transition consistency and battery separation passed.');
+
+// A settled Pong transition must display the newly confirmed countdown, not
+// reuse the previous-frame labels after the balls have reached their new height.
+const pongBefore={domain:'pong',task:2,turn:4,lanes:9,human:{x:2},ai:{x:6},balls:[
+  {id:'s1',kind:'ordinary',contacts:[2],y:6,vy:2,remaining:3},
+  {id:'t1',kind:'cooperative',contacts:[1,5],y:9,vy:1,remaining:3},
+  {id:'t2',kind:'cooperative',contacts:[3,7],y:9,vy:1,remaining:3}]};
+const pongAfter=structuredClone(pongBefore);pongAfter.turn++;
+for(const ball of pongAfter.balls){ball.y+=ball.vy;ball.remaining--;}
+render(pongBefore,pongAfter,.5);
+assert(labels.some(row=>row.text==='s1 · 3t'));
+render(pongBefore,pongAfter,1);
+for(const id of ['s1','t1','t2'])assert(labels.some(row=>row.text===id+' · 2t'));
+assert(!labels.some(row=>row.text.endsWith('3t')));
+board.lang='zh';render(pongBefore,pongAfter,1);
+assert(labels.some(row=>row.text==='t1 · 2步'));
+console.log('Pong settled animation countdowns match the confirmed frame in both languages.');

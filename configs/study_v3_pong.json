@@ -1,6 +1,6 @@
 {
-  "version": "pong-rolling.v4.0",
-  "scenario_version": "pong-rolling-schedule.v4.0",
+  "version": "pong-concurrent.v5.0",
+  "scenario_version": "pong-concurrent-schedule.v5.0",
   "lanes": 9,
   "weights": {
     "ordinary": 1,
@@ -58,11 +58,15 @@
     731122,
     731123
   ],
-  "calibration": "Predetermined rolling schedule. Ordinary arrivals are odd turns; cooperative arrivals are multiples of six. A visible-state cooperative planning proxy is evaluated with the unchanged group-blind AI. Simulation scores and waiting rates are not human treatment effects.",
+  "calibration": "Seeded fixed rolling pairs: two small balls every two turns and two incompatible team balls every six turns. Every sixth turn includes both kinds. Raw 1/3-point scoring retains all opportunities; some simultaneous catches are mutually exclusive, so 100 is not generally attainable. Report actual fixed-AI proxy rollouts and the separate contact-capacity upper bound; never infer a human treatment effect.",
   "height": 12,
   "task_turns": {
     "1": 60,
     "2": 90,
     "3": 90
+  },
+  "max_visible": {
+    "ordinary": 6,
+    "cooperative": 4
   }
 }

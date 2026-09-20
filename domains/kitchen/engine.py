@@ -127,6 +127,23 @@ def _name(item, language="en"):
     return descriptions[stage][zh]
 
 
+def _transfer_text(actor, item, target, slot, placed):
+    """Describe the actual slot, not the capacity label of its station."""
+    en_location = f"ingredient slot {slot + 1}" if target == "ai_raw" and type(slot) is int else STATION_BY_ID[target]["label_en"].lower()
+    zh_location = f"原料槽{slot + 1}" if target == "ai_raw" and type(slot) is int else STATION_BY_ID[target]["label_zh"]
+    return (f"{'You' if actor == 'human' else 'AI'} {'put' if placed else 'picked up'} {_name(item)} {'on' if placed else 'from'} {en_location}.",
+            f"{'你' if actor == 'human' else 'AI'}{'放下' if placed else '取回'}了{_name(item, 'zh')}（{zh_location}）。")
+
+
+def event_text(event):
+    """Read-only event wording, shared by current and saved-history evidence."""
+    if (event.get("type") in ("item_placed", "item_taken") and event.get("station") == "ai_raw"
+            and type(event.get("slot")) is int and event["slot"] in (0, 1) and event.get("item") is not None):
+        # Existing records already identify the exact slot; never rewrite them.
+        return _transfer_text(event["actor"], event["item"], "ai_raw", event["slot"], event["type"] == "item_placed")
+    return event["en"], event["zh"]
+
+
 def _event(state, kind, en, zh, **extra):
     state["events"].append({"type": kind, "en": en, "zh": zh, **extra})
 
@@ -639,8 +656,9 @@ def _interact(state, actor, descriptor, new_turn, newly_loaded):
         if old and actor == "ai":
             _assign(state, old)
         item = held if held else old
-        _event(state, "item_placed" if held else "item_taken", f"{'You' if actor == 'human' else 'AI'} {'put' if held else 'picked up'} {_name(item)} {'on' if held else 'from'} {STATION_BY_ID[target]['label_en'].lower()}.",
-               f"{'你' if actor == 'human' else 'AI'}{'放下' if held else '取回'}了{_name(item, 'zh')}（{STATION_BY_ID[target]['label_zh']}）。", actor=actor, station=target, slot=descriptor.get("slot"), item=deepcopy(item))
+        en, zh = _transfer_text(actor, item, target, descriptor.get("slot"), bool(held))
+        _event(state, "item_placed" if held else "item_taken", en, zh,
+               actor=actor, station=target, slot=descriptor.get("slot"), item=deepcopy(item))
     elif kind == "load":
         pot = _pot(state, target)
         _assign(state, held)
@@ -1112,7 +1130,8 @@ def facts(state, decision=None):
     for i, (en, zh) in enumerate(zip(rules(), rules("zh"))):
         rows.append({"id": f"public_rule{i}", "en": en, "zh": zh})
     for i, event in enumerate(state["events"]):
-        rows.append({"id": f"event{i}", "en": event["en"], "zh": event["zh"]})
+        en, zh = event_text(event)
+        rows.append({"id": f"event{i}", "en": en, "zh": zh})
     for i, alt in enumerate(decision["alternatives"]):
         rows.append({"id": f"alternative{i}", "en": alt["en"], "zh": alt["zh"]})
     return rows

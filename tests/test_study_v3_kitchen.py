@@ -700,3 +700,21 @@ class KitchenFeasibility(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+def test_ingredient_slot_event_names_actual_slot_and_old_saved_event_facts_do_not_mutate_state():
+    from domains.kitchen.build_qa_cases import vegetable_first_trace
+    state = next(s for s in vegetable_first_trace() if any(event['type']=='item_placed' and event.get('station')=='ai_raw' for event in s['events']))
+    index,event = next((i,event) for i,event in enumerate(state['events']) if event['type']=='item_placed' and event.get('station')=='ai_raw')
+    assert event['slot']==0 and state['buffers']['ai_raw'][0]['ingredient']=='tomato'
+    assert state['buffers']['ai_raw'][1] is None
+    assert 'ingredient slot 1' in event['en'] and '原料槽1' in event['zh']
+    # The deployed pre-patch record is immutable; only evidence rendering repairs
+    # its station-capacity wording using the already-recorded exact slot.
+    event['en']='AI put prepared tomato on two ingredient slots.'
+    event['zh']='AI放下了备好的番茄（双槽原料暂存台）。'
+    before=deepcopy(state)
+    fact=next(f for f in e.facts(state) if f['id']==f'event{index}')
+    assert 'ingredient slot 1' in fact['en'] and 'two ingredient slots' not in fact['en']
+    assert '原料槽1' in fact['zh']
+    assert state==before

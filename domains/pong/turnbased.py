@@ -561,6 +561,26 @@ def facts(state, decision=None):
                 {'id': 'next_action', 'en': 'This task is finished; there is no next action.' if state['terminal'] else 'The teammate\'s next action is ' + {'left':'move left','right':'move right','wait':'wait'}[actual['action']] + '.',
                  'zh': '任务已经结束，没有下一步动作。' if state['terminal'] else '队友下一步将' + {'left':'左移','right':'右移','wait':'等待'}[actual['action']] + '。'}]
     payoffs = _planned_arrival_payoffs(_observation(state),actual['assignments'],actual['planned_catches'])
+    human_arrival = next((row for row in payoffs if row['human_lane'] is not None), None)
+    if human_arrival is not None and not state['terminal']:
+        lane, remaining = human_arrival['human_lane'], human_arrival['arrival_turns']
+        selected = [catch['ball_id'] for catch in human_arrival['catches'] if catch['actor'] in ('human', 'team')]
+        distance = abs(state['human']['x'] - lane)
+        next_x = max(0, min(LANES - 1, state['human']['x'] + {'left':-1, 'right':1, 'wait':0}[actual['human_action']]))
+        advised_reachable = abs(next_x - lane) <= remaining - 1
+        wait_reachable = distance <= remaining - 1
+        en = f"Your next selected catch is {' and '.join(selected)} at lane {lane + 1}, {distance} moves away and arriving in {remaining} turns. "
+        zh = f"当前计划中你下一次接{'、'.join(selected)}，接点在第{lane + 1}道，相距{distance}步，{remaining}回合后到达。"
+        if advised_reachable and not wait_reachable:
+            en += f"Moving {'left' if actual['human_action']=='left' else 'right'} now keeps that contact reachable. Waiting now leaves only {remaining - 1} {'turn' if remaining == 2 else 'turns'} for {distance} {'move' if distance == 1 else 'moves'}, so you would miss this assigned contact."
+            zh += f"现在{'左移' if actual['human_action']=='left' else '右移'}仍来得及；若先等待，之后只剩{remaining - 1}回合却还要移动{distance}步，就赶不上这个已分配接点。"
+        else:
+            en += f"Waiting now {'still leaves enough time to reach' if wait_reachable else 'would not leave enough time to reach'} this contact; this distance check alone does not establish a score advantage."
+            zh += f"先等待后{'仍来得及' if wait_reachable else '来不及'}到这个接点；仅凭这项距离检查，不能断言得分更高。"
+        evidence.append({'id':'human_catch_deadline', 'ball_ids':selected, 'contact_lane':lane+1,
+                         'horizontal_distance':distance, 'arrival_turns':remaining,
+                         'advised_action':actual['human_action'], 'advised_reachable':advised_reachable,
+                         'wait_reachable':wait_reachable, 'en':en, 'zh':zh})
     for payoff in payoffs:
         evidence.append({'id': 'arrival_payoff:' + str(payoff['arrival_turns']),
                          'arrival_turns':payoff['arrival_turns'], 'raw_points':payoff['raw_points'],

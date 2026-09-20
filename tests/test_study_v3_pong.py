@@ -579,3 +579,18 @@ def test_payoff_evidence_preserves_visible_information_boundary_and_snapshot():
     assert pong.facts(state) == pong.facts(altered)
     assert 'unseen-secret' not in json.dumps(pong.facts(altered))
     assert state == before
+
+
+def test_human_catch_deadline_uses_actual_selected_contacts_and_does_not_claim_slack_is_urgent():
+    state = pong.initial_state(731100,2)
+    for _ in range(8):
+        state = pong.step(state,pong.human_advisor(state))
+    row = next(f for f in pong.facts(state) if f['id']=='human_catch_deadline')
+    assert row['ball_ids']==['s9'] and row['contact_lane']==1
+    assert row['horizontal_distance']==row['arrival_turns']==2
+    assert row['advised_action']=='left' and row['advised_reachable'] and not row['wait_reachable']
+    # A single ordinary selected catch with slack does not prove waiting worse.
+    slack = pong._new_state([[pong._ball('slack','ordinary',[0],4)]],seed=200,task=2,human=1,ai=8)
+    row = next(f for f in pong.facts(slack) if f['id']=='human_catch_deadline')
+    assert row['wait_reachable']
+    assert 'does not establish a score advantage' in row['en']

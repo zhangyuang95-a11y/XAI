@@ -277,7 +277,8 @@ def test_restored_warehouse_counterfactual_uses_actual_unbounded_score():
     result = explainer_for_plan(selected).answer(warehouse, state, warehouse.decide(state), "What is the net score change if I wait?", "en", [], [])
     simulation = result["audit"]["simulations"][0]
     assert result["status"] == "answered"
-    assert f"Score changes by {simulation['raw_score_delta']:g}" in result["answer"]
+    assert simulation['raw_score_delta'] == simulation['task_score_delta']
+    assert f"Task score changes by {simulation['raw_score_delta']:g} points" in result["answer"]
     assert f"Task score changes by {simulation['task_score_delta']:g}" in result["answer"]
     assert simulation['raw_score_delta'] == simulation['task_score_delta']
     assert '/100' not in result['answer']
@@ -811,3 +812,186 @@ def test_current_pong_recorded_cases_reproduce_from_their_builder():
     recorded = [c for c in json.loads((ROOT/'configs/study_v3_qa_cases.json').read_text())['cases'] if c.get('domain') == 'pong']
     assert recorded == build()
     assert len(recorded) == 80
+
+
+def kitchen_production_trajectory(target):
+    """Reproduce the production test's legal tomato-first inputs, no saved identity."""
+    kitchen = get_engine('kitchen')
+    state = kitchen.initial_state(2000, 2)
+    supplied = False
+    while state['turn'] < target:
+        held = state['human']['holding']
+        if supplied:
+            action = kitchen.human_advisor(state)
+        elif held is None:
+            action = kitchen._approach(state, 'human', 'tomato')
+        elif held['stage'] == 'raw':
+            action = kitchen._approach(state, 'human', 'prep')
+        elif state['handoff'] is None:
+            action = kitchen._approach(state, 'human', 'handoff')
+        else:
+            action = 'wait'
+        nxt = kitchen.step(state, action)
+        if held and held['ingredient'] == 'tomato' and held['stage'] == 'prepared' and nxt['human']['holding'] is None:
+            supplied = True
+        state = nxt
+    return state
+
+
+@pytest.mark.parametrize('language', ['en', 'zh'])
+def test_kitchen_counterfactual_time_penalty_is_points_not_negative_completed_orders(language):
+    kitchen = get_engine('kitchen')
+    state = kitchen_production_trajectory(168)
+    before = deepcopy(state)
+    selected = plan(state, language=language, intents=[{'kind':'counterfactual', 'subject':'human',
+        'purpose':'comparison', 'evidence_ids':[], 'actions':['wait','wait'], 'horizon':2}])
+    result = explainer_for_plan(selected).answer(kitchen, state, kitchen.decide(state), 'If I wait for the next two turns, what changes?')
+    assert result['status'] == 'answered'
+    simulation = result['audit']['simulations'][0]
+    assert simulation['raw_score_delta'] == simulation['task_score_delta'] == -2
+    assert simulation['completed_orders_delta'] == 0
+    assert ('Task score changes by -2 points' if language == 'en' else '任务分数变化-2分') in result['answer']
+    assert ('completed orders change by 0' if language == 'en' else '完成订单数变化0') in result['answer']
+    assert result['answer'].count('-2') == 1
+    assert state == before
+
+
+@pytest.mark.parametrize('wait_first,points', [(False,99),(True,98)])
+@pytest.mark.parametrize('language', ['en','zh'])
+def test_kitchen_delivery_counterfactual_counts_real_completed_orders_independently_of_net_points(wait_first, points, language):
+    from domains.kitchen.build_qa_cases import regular_trace
+    kitchen = get_engine('kitchen')
+    state = next(s for s in regular_trace() if s['human']['holding'] and s['human']['holding']['stage'] == 'plated'
+                 and (kitchen._front(s['human']) or {}).get('id') == 'serve')
+    actions = ['wait','interact'] if wait_first else ['interact']
+    selected = plan(state, language=language, intents=[{'kind':'counterfactual','subject':'human','purpose':'comparison',
+        'evidence_ids':[],'actions':actions,'horizon':len(actions)}])
+    result = explainer_for_plan(selected).answer(kitchen,state,kitchen.decide(state),'What if I serve?')
+    assert result['status'] == 'answered'
+    sim = result['audit']['simulations'][0]
+    assert sim['raw_score_delta'] == sim['task_score_delta'] == points
+    assert sim['completed_orders_delta'] == 1
+    assert sum(e['type']=='served' for e in sim['events']) == 1
+    assert (f'Task score changes by {points} points' if language=='en' else f'任务分数变化{points}分') in result['answer']
+    assert ('completed orders change by 1' if language=='en' else '完成订单数变化1') in result['answer']
+
+
+@pytest.mark.parametrize('domain,seed,task,turn',[('pong',731100,2,89),('kitchen',2000,1,10),('kitchen',2000,2,291)])
+@pytest.mark.parametrize('language',['en','zh'])
+def test_actual_wait_reason_synonyms_render_once_without_question_keyword_binding(domain,seed,task,turn,language):
+    module = get_engine(domain)
+    state = kitchen_production_trajectory(turn) if domain=='kitchen' and task==2 else module.initial_state(seed,task)
+    while state['turn'] < turn:
+        state = module.step(state,module.human_advisor(state))
+    decision = module.decide(state)
+    assert decision['action'] == 'wait'
+    selected = plan(state,language=language,ids=['system:ai_action','system:ai_reason'])
+    result = explainer_for_plan(selected).answer(module,state,decision,'What were you trying to do and why?')
+    assert result['status'] == 'answered'
+    assert result['answer'].split('\n\n',1)[1] == decision['reason_'+language]
+    assert result['evidence_ids'] == ['system:ai_action','system:ai_reason']
+
+
+def test_waiting_destination_reason_does_not_hide_actual_movement():
+    from study_v3.qa import _reason_states_action
+    kitchen = get_engine('kitchen')
+    state = kitchen.initial_state(2000,2)
+    decision = kitchen.decide(state)
+    decision.update(action='left', reason_en='I am waiting near the handoff counter.', reason_zh='我在交接台附近等待。')
+    assert not _reason_states_action(kitchen,state,decision,'en')
+    assert not _reason_states_action(kitchen,state,decision,'zh')
+
+
+@pytest.mark.parametrize('domain,turn',[('warehouse',12),('kitchen',168)])
+def test_human_advice_can_use_real_ai_reason_as_coordination_context_but_not_ai_action(domain,turn):
+    module = get_engine(domain)
+    state = kitchen_production_trajectory(turn) if domain=='kitchen' else module.initial_state(1000,2)
+    while state['turn'] < turn:
+        state = module.step(state,module.human_advisor(state))
+    selected = plan(state,language='zh',intents=[{'kind':'facts','subject':'human','purpose':'advice',
+        'evidence_ids':['system:human_advice','system:ai_reason']}])
+    result = explainer_for_plan(selected).answer(module,state,module.decide(state),'如果我现在想与你配合，下一步应该做什么？为什么？')
+    assert result['status'] == 'answered'
+    assert module.decide(state)['reason_zh'] in result['answer']
+    selected['intents'][0]['evidence_ids'].append('system:ai_action')
+    assert explainer_for_plan(selected).answer(module,state,module.decide(state),'How can I help?')['status']=='unavailable'
+
+
+@pytest.mark.parametrize('language',['en','zh'])
+def test_one_step_human_comparison_explains_visible_deadline_without_extending_window(language):
+    state = simultaneous_ball_fixture()
+    intents = [{'kind':'counterfactual','subject':'human','purpose':'comparison','evidence_ids':[],
+        'actions':[action],'horizon':1} for action in ['left','wait']]
+    intents.append({'kind':'facts','subject':'human','purpose':'observation','evidence_ids':['human_catch_deadline']})
+    result = ask(explainer_for_plan(plan(state,language=language,intents=intents)),state,question='Why is that better than waiting here?')
+    assert result['status'] == 'answered'
+    assert [s['steps_completed'] for s in result['audit']['simulations']] == [1,1]
+    assert [s['raw_score_delta'] for s in result['audit']['simulations']] == [0,0]
+    assert 's9' in result['answer']
+    assert ('only 1 turn for 2 moves' if language=='en' else '只剩1回合却还要移动2步') in result['answer']
+    assert ('This window shows no score advantage' if language=='en' else '在这个窗口内，两种选择没有得分优势') in result['answer']
+
+
+@pytest.mark.parametrize('language',['en','zh'])
+def test_old_kitchen_slot_event_uses_exact_metadata_in_historical_evidence_without_rewriting_history(language):
+    kitchen = get_engine('kitchen')
+    saved = kitchen_production_trajectory(15)
+    index,event = next((i,event) for i,event in enumerate(saved['events']) if event['type']=='item_placed' and event.get('station')=='ai_raw')
+    assert event['slot']==0
+    event.update(en='AI put prepared tomato on two ingredient slots.',zh='AI放下了备好的番茄（双槽原料暂存台）。')
+    history=[kitchen.public_state(saved)]
+    before=deepcopy(history)
+    current=kitchen.step(saved,'wait')
+    identifier=f'history:task2:turn15:event{index}'
+    historical_fact=_catalog(kitchen,current,kitchen.decide(current),history)[identifier]
+    assert historical_fact['purpose']=='observation'
+    selected=plan(current,language=language,intents=[{'kind':'facts','subject':'ai','purpose':'observation','evidence_ids':[identifier]}])
+    result=explainer_for_plan(selected).answer(kitchen,current,kitchen.decide(current),'Where did you put that tomato at turn 15?',language,[],history)
+    assert result['status']=='answered'
+    assert ('ingredient slot 1' if language=='en' else '原料槽1') in result['answer']
+    assert 'two ingredient slots' not in result['answer'] and '双槽原料暂存台' not in result['answer']
+    assert history==before and saved['events'][index]['en']=='AI put prepared tomato on two ingredient slots.'
+
+
+def test_historical_event_action_misclassification_requires_semantic_repair_not_validation_bypass():
+    kitchen=get_engine('kitchen')
+    earlier=kitchen_production_trajectory(15)
+    current=kitchen.step(earlier,'wait')
+    index=next(i for i,e in enumerate(earlier['events']) if e['type']=='item_placed' and e.get('station')=='ai_raw')
+    bad=plan(current,intents=[{'kind':'facts','subject':'ai','purpose':'action',
+        'evidence_ids':[f'history:task2:turn15:event{index}']}])
+    bad['binding']['turn']=15
+    good=deepcopy(bad);good['intents'][0]['purpose']='observation'
+    service=explainer_for_plan(good);calls=[]
+    def request(payload):
+        calls.append(deepcopy(payload))
+        return deepcopy(bad if len(calls)==1 else good),{}
+    service._request_plan=request
+    result=service.answer(kitchen,current,kitchen.decide(current),'At turn 15, where did you put the prepared tomato?',
+        'en',[],[kitchen.public_state(earlier)])
+    assert result['status']=='answered' and 'ingredient slot 1' in result['answer']
+    assert result['audit']['repair_attempt']['failure_code']=='missing_subject_evidence'
+    assert 'Historical observed events and positions use purpose=observation' in calls[1]['repair_request']['error']
+
+
+def test_provider_extra_top_level_field_requires_one_validated_model_repair():
+    state=fixture()
+    good=plan(state,intents=[{'kind':'facts','subject':'ai','purpose':'reason','evidence_ids':['system:ai_reason']}])
+    bad=dict(deepcopy(good),type='json_object')
+    service=explainer_for_plan(good);requests=[]
+    def request(payload):
+        requests.append(deepcopy(payload))
+        return deepcopy(bad if len(requests)==1 else good),{}
+    service._request_plan=request
+    result=ask(service,state,question='At this selected earlier turn, what were you trying to do and why?')
+    assert result['status']=='answered' and len(requests)==2
+    assert result['audit']['repair_attempt']['failure_code']=='unexpected_plan_fields'
+    assert result['audit']['repair_attempt']['original_plan']['type']=='json_object'
+    assert result['audit']['plan']==good
+    assert 'type' in requests[1]['repair_request']['previous_plan']
+    # No local field stripping and no second repair: repeating the invalid
+    # response remains unavailable, even if all the selected fact IDs are valid.
+    service=explainer_for_plan(bad,requests:=[])
+    rejected=ask(service,state)
+    assert rejected['status']=='unavailable' and len(requests)==2
+    assert rejected['audit']['failure_code']=='unexpected_plan_fields'

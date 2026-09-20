@@ -15,7 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-VERSION = "study-evidence-qa.v3.5"
+VERSION = "study-evidence-qa.v3.5.1"
 MAX_STEPS = 12
 _PURPOSES = ("action", "reason", "advice", "comparison", "observation", "rule", "assignment")
 _ACTIONS = {
@@ -69,12 +69,21 @@ include system:ai_reason; an AI-action intent must include system:ai_action.
 For advice to the human, include system:human_advice, which contains a concrete
 legal suggested action. Legal-action lists or an AI plan alone are NOT human
 advice. Add relevant current facts to explain the coordination condition.
+For human advice with an explicit "why", state an actual causal coordination
+condition, not just the actors' positions or the item on a counter. In Warehouse
+and Kitchen, prefer system:human_advice plus system:ai_reason when that reason
+explains the suggested coordination (for example, the AI clears the destination
+square or collects the prepared ingredient while the human waits).
 For a comparison after human advice, keep subject=human even when the previous
 answer also mentioned the AI. "that" refers to the recommended HUMAN action.
 Compare its supplied recommended_human_action with the requested alternative
 using two human counterfactual intents. AI alternative facts describe the AI,
 so cannot substitute for a human comparison. If the recommended action and the proposed alternative are the SAME action, explain the same action using its actual advice/reason facts; do not ask for clarification. If both outcomes are equal over
 the stated window, do not claim one is better or assume a longer-term benefit.
+In Pong, also select human_catch_deadline when it establishes why the recommended
+move keeps a currently selected catch reachable but waiting misses its deadline.
+This is a visible-contact distance calculation, not a longer simulation: retain
+the requested/default simulation window and its honest score result.
 
 Use the language of the current question, even if it differs from the interface.
 For a very short ambiguous-language question follow the interface language.
@@ -84,6 +93,10 @@ counterfactual lacking its full selected state needs select_frame clarification.
 Public factual observations about an earlier frame may instead bind that earlier
 Task/Turn and select only its matching history fact IDs. Do not ask for replay
 selection merely to restate an available recorded historical position or event.
+A question such as "At turn 15, where did you put the tomato?" asks an observed
+past event: use purpose=observation and its matching history event. Reserve
+purpose=action for the selected frame's recorded next-action decision, which
+requires system:ai_action; do not attach that current decision to a past event.
 Ambiguous objects must be clarified rather than guessed.
 Questions can contain multiple intents: cover every supported part with separate
 intents. A single focused question normally needs ONE intent and ONE or TWO
@@ -108,6 +121,11 @@ In Kitchen, a named ingredient or pan question should select its current
 ingredient/location/phase fact, not all stations or the entire cooking sequence.
 For a named food's CURRENT condition or location, choose only the one or two
 matching freshness, ingredient_location or recent event facts that answer it.
+For a location alone, prefer the precise ingredient_location fact; do not add
+a placement event restating the same location. For a menu/dish question alone,
+prefer ai_current_dishes rather than adding a second reason with the same dish.
+For preparation counts and GENERAL spoilage rules, select the relevant public
+rules, without adding a current freshness fact that repeats those rules.
 A recent spoilage event stating that the food remains and must be taken to the
 bin already answers why it cannot be used and whether it disappeared. Do not
 add all oxidation rules, other ingredients' clocks or preparation counts when
@@ -288,9 +306,10 @@ def _catalog(engine, state, decision, public_history):
         prefix = f"history:task{task}:turn{turn}"
         for i, event in enumerate(frame.get("events", [])):
             if all(isinstance(event.get(k), str) for k in ("en", "zh")):
-                rows.append({"id": f"{prefix}:event{i}",
-                    "en": f"Task {task}, turn {turn}: {event['en']}",
-                    "zh": f"Task {task}，回合{turn}：{event['zh']}"})
+                en, zh = engine.event_text(event) if hasattr(engine, "event_text") else (event["en"], event["zh"])
+                rows.append({"id": f"{prefix}:event{i}", "subject": "shared", "purpose": "observation",
+                    "en": f"Task {task}, turn {turn}: {en}",
+                    "zh": f"Task {task}，回合{turn}：{zh}"})
         for actor, en_name, zh_name in (("human", "You", "你"), ("ai", "Your teammate", "队友")):
             who = frame.get(actor, {})
             if "x" in who:
@@ -306,6 +325,21 @@ def _catalog(engine, state, decision, public_history):
             raise PlanError("duplicate_engine_evidence_id")
         result[row["id"]] = row
     return result
+
+
+def _reason_states_action(engine, state, decision, language):
+    """Whether the recorded reason already says the actual AI action."""
+    reason = decision["reason_" + language].lower()
+    label = _action_pair(engine, state, decision["action"], actor="ai", decision=decision)[language == "zh"].lower()
+    if label in reason:
+        return True
+    if decision["action"] != "wait":
+        return False
+    # These actor-specific synonyms occur in authoritative domain prose. An AI
+    # moving toward a waiting spot must still retain its actual movement label.
+    aliases = {"pong": {"en": ("i will hold ",), "zh": ("我会守住",)},
+               "kitchen": {"en": ("i am waiting",), "zh": ("我在交接台附近等待",)}}
+    return any(fragment in reason for fragment in aliases.get(state["domain"], {}).get(language, ()))
 
 
 def _validate_intervention(intervention, state=None):
@@ -370,7 +404,8 @@ def _validate_plan(plan, evidence, state=None):
         if subject == "human" and purpose == "advice" and "system:human_advice" not in ids:
             raise PlanError("missing_subject_evidence")
         if subject == "human" and purpose in ("action", "advice", "comparison") and any(
-                i.startswith("alternative") or i.startswith("system:ai_") for i in ids):
+                i.startswith("alternative") or (i.startswith("system:ai_")
+                    and not (i == "system:ai_reason" and purpose == "advice" and intent["kind"] == "facts")) for i in ids):
             raise PlanError("wrong_actor_evidence")
         if intent["kind"] == "counterfactual":
             if subject not in (None, "human"):
@@ -458,6 +493,12 @@ def simulate(engine, state, decision, actions, horizon=1, *, intervention=None):
             "trace": trace, "input_state_hash": before_hash}
     if hypothetical is not None:
         result["intervention"] = hypothetical
+    if state["domain"] == "kitchen":
+        # Points include time/disposal penalties; order counts are a separate
+        # physical metric and must never be inferred by converting points.
+        result["completed_orders_delta"] = (
+            engine.score(current)["metrics"]["completed_orders"]
+            - engine.score(state)["metrics"]["completed_orders"])
     return result
 
 
@@ -526,12 +567,12 @@ def _simulation_text(result, language, domain, *, include_scope=True):
         position = _text((f"You finish at column {result['human']['x']}, row {result['human']['y']}; your teammate at column {result['ai']['x']}, row {result['ai']['y']}. ",
                           f"你最终在第{result['human']['x']}列、第{result['human']['y']}行；队友在第{result['ai']['x']}列、第{result['ai']['y']}行。"), language)
     text += position
-    raw_en, raw_zh = (("Score", "原始得分") if domain == "warehouse" else
-                     ("Catch points", "接球原始分") if domain == "pong" else
-                     ("Correctly completed order count", "正确完成订单数"))
-    raw_verb = "change" if domain == "pong" else "changes"
-    text += _text((f"{raw_en} {raw_verb} by {result['raw_score_delta']:g}. ", f"{raw_zh}变化{result['raw_score_delta']:g}。"), language)
+    if result["raw_score_delta"] != result["task_score_delta"]:
+        text += _text((f"Raw points change by {result['raw_score_delta']:g}. ", f"原始得分变化{result['raw_score_delta']:g}分。"), language)
     text += _text((f"Task score changes by {result['task_score_delta']:g} points in this window.", f"该窗口内任务分数变化{result['task_score_delta']:g}分。"), language)
+    if domain == "kitchen":
+        text += _text((f" Correctly completed orders change by {result['completed_orders_delta']:g}.",
+                       f"正确完成订单数变化{result['completed_orders_delta']:g}。"), language)
     if result["stopped_at_public_boundary"]:
         text += _text((" The simulation stops at the end of the currently disclosed situation; it does not reveal future balls or orders.", " 模拟在当前已公开情境结束处停止，不会透露未来的球或订单。"), language)
     elif not result["terminal"]:
@@ -610,7 +651,7 @@ class Explainer:
             try:
                 plan = _validate_plan(plan, evidence, state)
             except PlanError as first_error:
-                if str(first_error) not in ("unknown_evidence", "missing_subject_evidence", "wrong_actor_evidence", "wrong_simulation_actor", "intervention_has_actual_evidence", "invalid_position_intervention", "unsupported_position_intervention", "simulation_fields_on_facts", "missing_ball_assignment_evidence", "isolated_reachability_is_not_assignment", "unexpected_object_binding"):
+                if str(first_error) not in ("unexpected_plan_fields", "unknown_evidence", "missing_subject_evidence", "wrong_actor_evidence", "wrong_simulation_actor", "intervention_has_actual_evidence", "invalid_position_intervention", "unsupported_position_intervention", "simulation_fields_on_facts", "missing_ball_assignment_evidence", "isolated_reachability_is_not_assignment", "unexpected_object_binding"):
                     raise
                 # Exactly one model repair for evidence IDs or role mismatches.
                 # Never heuristically substitute a guessed actor or fact.
@@ -618,7 +659,7 @@ class Explainer:
                     "original_plan": deepcopy(plan), "original_provider": deepcopy(provider_audit)}
                 repaired_payload = deepcopy(payload)
                 repaired_payload["repair_request"] = {
-                    "error": "The previous plan failed validation: " + str(first_error) + ". Recheck the question's speaker and requested purpose. Use exact provided IDs. AI action/reason requires system:ai_action/system:ai_reason; human advice requires system:human_advice. Actual named-ball assignments require purpose=assignment, object_id and that ball's ball_plan fact, never isolated comparison:N reachability. Simulations control the human only; a position hypothesis must use a supported intervention, empty evidence_ids and a displayed in-range lane. Never substitute the actual state's reason for a hypothetical decision. This is your only repair attempt.",
+                    "error": "The previous plan failed validation: " + str(first_error) + ". Recheck the question's speaker and requested purpose. Use exact provided IDs. AI action/reason requires system:ai_action/system:ai_reason; human advice requires system:human_advice. Historical observed events and positions use purpose=observation with history evidence, not purpose=action or a current next-action fact. Actual named-ball assignments require purpose=assignment, object_id and that ball's ball_plan fact, never isolated comparison:N reachability. Simulations control the human only; a position hypothesis must use a supported intervention, empty evidence_ids and a displayed in-range lane. Never substitute the actual state's reason for a hypothetical decision. This is your only repair attempt.",
                     "previous_plan": _redact(plan, self.settings.llm_api_key)}
                 plan, provider_audit = self._request_plan(repaired_payload)
                 audit.update(provider_audit)
@@ -642,13 +683,11 @@ class Explainer:
             else:
                 factual_parts, simulation_parts, ids = [], [], []
                 selected_ids = {identifier for intent in plan["intents"] for identifier in intent.get("evidence_ids", [])}
-                # Suppress a duplicate action sentence only when the selected
-                # authoritative reason literally includes that action label.
-                # This is fact rendering, not keyword-based question binding.
+                # Use authoritative action semantics and domain reason phrases,
+                # never question keywords, to suppress duplicate action wording.
                 action_in_reason = (not state["terminal"]
                     and bool(selected_ids & {"decision", "system:ai_reason"})
-                    and _action_pair(engine, state, decision["action"], actor="ai", decision=decision)[selected_language == "zh"].lower()
-                        in decision["reason_" + selected_language].lower())
+                    and _reason_states_action(engine, state, decision, selected_language))
                 selected_reason = (decision["reason_" + selected_language]
                     if selected_ids & {"decision", "system:ai_reason"} else "")
                 for intent in plan["intents"]:

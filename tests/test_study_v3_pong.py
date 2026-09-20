@@ -413,15 +413,16 @@ def production_t3_assignment_snapshot():
     return state
 
 
-def test_production_unselected_t3_names_actual_t4_plan_without_changing_saved_decision():
+def test_production_unselected_t3_names_actual_t4_plan_without_changing_control_decision():
     import hashlib
     digest = lambda value: hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     state = production_t3_assignment_snapshot()
     before = deepcopy(state)
     decision = pong.decide(state)
-    # Exported v3.4 production state and AI decision; this is a facts-only fix.
+    # The v3.4 production state and all non-prose decision fields remain fixed.
     assert digest(state) == '30e01cf53a40a9b0847fdbf62b33a7dcbbae934172dafe206cbb846608a3591d'
-    assert digest(decision) == 'b1812370f7f01dab4734192afd07bd6f454e1f60945dbf0eecc4f630373f244b'
+    control = {key:value for key,value in decision.items() if key not in ('reason_en','reason_zh','action_alternatives')}
+    assert digest(control) == '719fd880c54fac0ef8a6b7741262db6271561d9de0bf5ce5a6c2231c0e9626a2'
     facts = {row['id']:row for row in pong.facts(state,decision)}
     t3,t4,t5 = (facts['ball_plan:'+name] for name in ('t3','t4','t5'))
     assert t3['plan_status'] == 'not_selected'
@@ -483,3 +484,98 @@ def test_unselected_ball_without_selected_same_arrival_does_not_invent_a_competi
     finalfacts={row['id']:row for row in pong.facts(finished)}
     assert 'no visible balls' in finalfacts['human_nearest_ball']['en']
     assert 'no visible balls' in finalfacts['ai_nearest_ball']['en']
+
+
+
+def test_real_turn76_explains_right_contact_when_moving_left_and_actual_four_points():
+    state = pong.initial_state(731100,2)
+    for _ in range(76):
+        state = pong.step(state,pong.human_advisor(state))
+    decision = pong.decide(state)
+    facts = {row['id']:row for row in pong.facts(state,decision)}
+    payoff = facts['arrival_payoff:2']
+    assert decision['action'] == 'left'
+    assert "t26's right contact (lane 5)" in decision['reason_en']
+    assert 't26的右接点（第5道）' in decision['reason_zh']
+    assert 'If I reach lane 5 and you reach lane 2 in 2 turns' in decision['reason_en']
+    assert 'my s78(1) + our t26(3) = 4 points' in decision['reason_en']
+    assert '我接s78（1分）＋合作接t26（3分），合计4分' in decision['reason_zh']
+    assert payoff['raw_points'] == payoff['maximum_at_arrival'] == 4
+    assert {row['ball_id'] for row in payoff['catches']} == {'s78','t26'}
+    assert 'ball_payoff:t25' not in facts  # A reachable but unselected ball is not an actual payoff.
+    assert facts['ball_plan:t25']['plan_status'] == 'not_selected'
+    assert 'cannot keep our earlier' in facts['alternative_wait']['en']
+    initial_points = state['raw_score']
+    for _ in range(2):
+        state = pong.step(state,pong.human_advisor(state))
+    assert state['raw_score'] - initial_points == 4
+    assert {e['ball_id']:e['points'] for e in state['events'] if e['type'] == 'caught'} == {'s78':1,'t26':3}
+
+
+def test_payoff_counts_both_actors_small_balls_and_team_once_each():
+    balls = [pong._ball('team','cooperative',[2,6],1),
+             pong._ball('small-ai','ordinary',[6],1),pong._ball('small-human','ordinary',[2],1)]
+    state = pong._new_state([balls],seed=1,task=2,human=2,ai=6)
+    facts = {row['id']:row for row in pong.facts(state)}
+    payoff = facts['arrival_payoff:1']
+    assert payoff['raw_points'] == payoff['maximum_at_arrival'] == 5
+    assert {row['ball_id']:row['actor'] for row in payoff['catches']} == {'team':'team','small-ai':'ai','small-human':'human'}
+    assert 'my small-ai(1) + your small-human(1) + our team(3) = 5 points' in payoff['en']
+    assert '你接small-human（1分）' in payoff['zh']
+    assert pong.step(state,'wait')['raw_score'] == payoff['raw_points']
+    assert facts['ball_payoff:team']['en'] == facts['ball_payoff:small-ai']['en'] == payoff['en']
+
+
+def test_payoff_maximum_respects_prior_feasible_commitment_not_global_points():
+    balls = [pong._ball('prior','cooperative',[2,6],2)] + [
+        pong._ball(f'rich{i}','ordinary',[4],2) for i in range(4)]
+    state = pong._new_state([balls],seed=1,task=2,human=2,ai=6)
+    state['policy_memory'] = {'commitment':{'ball_id':'prior','ai_contact':6,'human_contact':2}}
+    payoff = next(row for row in pong.facts(state) if row['id'] == 'arrival_payoff:2')
+    assert payoff['raw_points'] == payoff['maximum_at_arrival'] == 3
+    assert 'for this arrival while keeping earlier assignments that remain reachable' in payoff['en']
+    assert payoff['scope'] == 'currently_visible_balls_at_this_arrival_preserving_prior_feasible_commitments'
+    unconstrained = deepcopy(state)
+    unconstrained['policy_memory'] = {}
+    assert pong._arrival_capacity_with_commitments(pong._observation(unconstrained),2) == 4
+    assert play(state)['raw_score'] == 3
+    assert play(unconstrained)['raw_score'] == 4
+
+
+def test_selected_payoff_below_single_arrival_bound_never_claims_highest():
+    state = pong.initial_state(730101,2)
+    for _ in range(16):
+        state = pong.step(state,pong.human_advisor(state))
+    payoff = next(row for row in pong.facts(state) if row['id'] == 'arrival_payoff:6')
+    assert payoff['raw_points'] == 1 < payoff['maximum_at_arrival'] == 2
+    assert 'highest' not in payoff['en'] and '最高' not in payoff['zh']
+    assert 'If I reach lane 5' in payoff['en']
+
+
+def test_why_not_reports_conditional_single_arrival_bound_not_guaranteed_reward():
+    state = scenario(human=1,ai=7,turns=1,ordinary=6)
+    facts = {row['id']:row for row in pong.facts(state)}
+    assert 'at most 4 points' in facts['alternative_left']['en']
+    assert 'at most 0 points' in facts['alternative_wait']['en']
+    assert 'visible balls arriving in 1 turn only' in facts['alternative_left']['en']
+    # A saved commitment is a constraint; failure to preserve it is not proof of zero possible points.
+    state['policy_memory'] = {'commitment':{'ball_id':'fixture-team','ai_contact':6,'human_contact':2}}
+    facts = {row['id']:row for row in pong.facts(state)}
+    assert 'cannot keep our earlier team-ball assignments' in facts['alternative_wait']['en']
+    assert 'at most 0 points' not in facts['alternative_wait']['en']
+
+
+def test_payoff_evidence_preserves_visible_information_boundary_and_snapshot():
+    state = pong.initial_state(731100,2)
+    for _ in range(76):
+        state = pong.step(state,pong.human_advisor(state))
+    before = deepcopy(state)
+    altered = deepcopy(state)
+    for entry in altered['_schedule']:
+        if entry['spawn_turn'] > state['turn']:
+            entry['ball']['id'] = 'unseen-secret'
+            entry['ball']['contacts'] = [0] if entry['ball']['kind'] == 'ordinary' else [0,8]
+    assert pong.decide(state) == pong.decide(altered)
+    assert pong.facts(state) == pong.facts(altered)
+    assert 'unseen-secret' not in json.dumps(pong.facts(altered))
+    assert state == before

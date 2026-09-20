@@ -47,12 +47,13 @@ def test_unseen_pong_contacts_cannot_change_decision_evidence_or_branch_output(s
     assert not any(identifier in repr(two) for identifier in unseen_ids)
 
 
-def test_frontend_network_races_and_key_edges_in_javascript_runtime():
+@pytest.mark.parametrize('script', ['revision_frontend_review.cjs','continuous_demo_review.cjs','collision_animation_review.cjs'])
+def test_frontend_network_races_and_key_edges_in_javascript_runtime(script):
     bundled = Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
     node = os.environ.get("STUDY_TEST_NODE") or shutil.which("node") or (str(bundled) if bundled.exists() else None)
     if not node:
         pytest.skip("Node.js is required for the controlled-network frontend regression test")
-    result = subprocess.run([node, str(ROOT / "tests/revision_frontend_review.cjs")], cwd=ROOT, text=True,
+    result = subprocess.run([node, str(ROOT / "tests" / script)], cwd=ROOT, text=True,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
     assert result.returncode == 0, result.stdout
     assert "checks passed" in result.stdout

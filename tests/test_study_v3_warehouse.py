@@ -192,7 +192,7 @@ def test_demonstration_runs_real_transitions_and_six_neutral_captions():
     demo = w.demonstration()
     assert len(demo["captions"]) == 6
     assert [f["turn"] for f in demo["frames"]] == list(range(len(demo["frames"])))
-    assert {"charge", "pickup", "delivery", "collision", "complete"} <= {e["type"] for f in demo["frames"] for e in f["events"]}
+    assert {"charge", "pickup", "delivery", "coordination", "complete"} <= {e["type"] for f in demo["frames"] for e in f["events"]}
     assert demo["frames"][-1]["terminal"]
     assert demo["frames"][-1]["score"]["metrics"]["deliveries"] > 0
     assert not any("neural" in c["en"].lower() or "policy" in c["en"].lower() for c in demo["captions"])

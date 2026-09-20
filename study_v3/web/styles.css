@@ -32,3 +32,12 @@ main{max-width:1480px;padding-top:24px}.panel{border-radius:20px;box-shadow:0 16
 .domain-navigation{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 18px}.domain-navigation a{padding:7px 13px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--muted);font-size:12px;text-decoration:none}.domain-navigation a[aria-current=page]{background:#eeecff;border-color:#c9c3ff;color:#6558e8;font-weight:650}
 .compact-rules{padding-left:19px;margin:0;line-height:1.75;font-size:14px}.compact-rules li+li{margin-top:7px}.demo-sidebar .demo-caption{border-top:1px solid var(--line)}.demo-sidebar .button-row{display:flex;flex-wrap:wrap;gap:8px}.demo-sidebar .button{padding:10px 14px}.recipe-goal{font-size:12px;color:var(--muted);margin:12px 0 0}
 .hypothetical-lane{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0;color:var(--muted,#68758b);font-size:13px}.hypothetical-lane select{width:auto;min-width:88px;padding:7px;border:1px solid #d9def0;border-radius:9px;background:white;color:#26324a}.hypothetical-lane .example{margin:0}
+
+/* Keep the current answer easy to read beside the board. */
+.chat-log{max-height:none;overflow:visible}.chat-message{font-size:17px;padding:12px 0}
+.chat-question{font-size:16px;color:#111827;font-weight:750}.chat-answer{font-size:18px;color:#111827;line-height:1.75;font-weight:550}.chat-meta{font-size:12px}
+.demo-scorebar{grid-template-columns:1fr 1fr}.demo-sidebar .button-row{gap:10px}
+.kitchen-menu ol{list-style:none;padding:0;margin:0}.kitchen-menu li{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--line);font-size:14px}.kitchen-menu li b{font-size:12px;white-space:nowrap;color:#68758b}.kitchen-menu .menu-completed{color:#16704c}.kitchen-menu .menu-completed b{color:#16704c}.kitchen-menu .menu-expired{color:#a63342}
+.score-penalty{display:inline-block;margin-left:9px;color:#c81932;font-size:24px;line-height:1;font-weight:850;animation:penalty-pop .45s ease-out}.kitchen-menu .hint{font-size:12px;color:#485775}
+@keyframes penalty-pop{from{transform:translateY(7px) scale(.85)}to{transform:translateY(0) scale(1)}}
+@media(prefers-reduced-motion:reduce){.score-penalty{animation:none}}

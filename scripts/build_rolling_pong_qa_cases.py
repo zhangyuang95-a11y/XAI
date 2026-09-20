@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuild 64 bilingual composition fixtures; not a language-model evaluation."""
+"""Rebuild current bilingual composition fixtures; not a language-model evaluation."""
 from __future__ import annotations
 from copy import deepcopy
 import json
@@ -28,13 +28,24 @@ def build():
     no_job = fixture(human=0,ai=8,contacts=(3,5),turns=1)
     boundary = fixture(human=0)
     one = fixture(human=1,ai=7,turns=1)
-    after = pong.step(rolling,pong.human_advisor(rolling))
-    history = [pong.public_state(rolling),pong.public_state(after)]
+    first = pong.step(rolling,pong.human_advisor(rolling))
+    after = pong.step(first,pong.human_advisor(first))
+    history = [pong.public_state(s) for s in (rolling,first,after)]
+    snapshots = {}
+    state = pong.initial_state(731100,2)
+    for turn in range(77):
+        if turn in (8,76):
+            snapshots[turn] = deepcopy(state)
+        if turn < 76:
+            state = pong.step(state,pong.human_advisor(state))
+    five = pong._new_state([[pong._ball("team","cooperative",[2,6],1),pong._ball("mine","ordinary",[6],1),pong._ball("yours","ordinary",[2],1)]],seed=1,task=2,human=2,ai=6)
     cases = []
-    def add(name, state, en, zh, ids=(), claims=(), *, subject='shared', purpose='observation', premise='supported', actions=None, horizon=1, clarification=None, public_history=None, dialogue=None):
+    def add(name, state, en, zh, ids=(), claims=(), *, subject='shared', purpose='observation', premise='supported', actions=None, horizon=1, clarification=None, public_history=None, dialogue=None, object_id=None):
         for lang,question in [('en',en),('zh',zh)]:
             kind = 'clarification' if clarification else 'counterfactual' if actions else 'facts'
             intents = [] if clarification else [{'kind':kind,'subject':'human' if actions else subject,'purpose':'comparison' if actions else purpose,'evidence_ids':list(ids)}]
+            if object_id:
+                intents[0]['object_id'] = object_id
             if actions:
                 intents[0].update(actions=actions,horizon=horizon)
             case = {'case_id':f'pong-rolling-{name}-{lang}','domain':'pong','question':question,'language':lang,'state':deepcopy(state),
@@ -48,7 +59,7 @@ def build():
     add('geometry',rolling,'How tall is this court, and how many lanes does it have?','这个球场有多高、一共有几道？',['public_rule:0'],[{'path':'height','equals':12},{'path':'lanes','equals':9}],purpose='rule')
     add('small-speed',rolling,'How far does a small ball fall after each action?','每操作一次，小球会下降几格？',['ball:s1'],[{'path':'balls.0.vy','equals':2}])
     add('team-speed',rolling,'Do the team balls move as fast as the small balls?','合作球和小球下落得一样快吗？',['public_rule:1'],purpose='rule')
-    add('five-balls',rolling,'How many small and team balls can be on screen together?','屏幕上最多会同时有几个小球和合作球？',['public_rule:4'],purpose='rule')
+    add('ten-balls',rolling,'How many small and team balls can be on screen together?','屏幕上最多会同时有几个小球和合作球？',['public_rule:4'],purpose='rule')
     add('small-points',rolling,'What earns one point for a small ball?','怎样接小球才能得到一分？',['public_rule:2'],purpose='rule')
     add('team-points',rolling,'What must both of us do to earn three points from a team ball?','我们两个人怎样配合才能从合作球得到三分？',['public_rule:3'],purpose='rule')
     add('duplicate-small',rolling,'If both paddles cover the same small ball, do we earn two points?','如果两块球拍一起接同一个小球，会得两分吗？',['public_rule:2'],premise='contradicted',purpose='rule')
@@ -68,16 +79,24 @@ def build():
     add('left-edge',boundary,'I am at the left edge. Which movement choices are available?','我已经在最左边了，现在有哪些合法移动选择？',['system:available_actions','position'])
     add('wrong-wait-premise',approach,'You are about to wait rather than move left, correct?','你接下来会等待而不是左移，对吧？',['system:ai_action'],[{'decision_path':'action','equals':'left'}],subject='ai',purpose='action',premise='contradicted')
     add('current-catch',after,'What happened to the first small ball on the previous move?','刚才那一步，第一颗小球发生了什么？',['event:0'],[{'path':'events.0.type','equals':'caught'},{'path':'events.0.points','equals':1}])
-    add('history-position',after,'Where was I before that first step?','在第一步发生之前，我在哪里？',['history:task2:turn0:human_position'],public_history=history)
-    add('history-event',after,'How many points did the catch at Task 2 turn 1 earn?','Task 2 第1回合的那次接球获得了几分？',['history:task2:turn1:event0'],public_history=history)
+    add('history-position',after,'Where was I before either of those two steps?','在这两步发生之前，我在哪里？',['history:task2:turn0:human_position'],public_history=history)
+    add('history-event',after,'How many points did the catch at Task 2 turn 2 earn?','Task 2 第2回合的那次接球获得了几分？',['history:task2:turn2:event0'],public_history=history)
     add('followup-other-side',multi,'For that earlier-ball plan, which contact do I need to cover?','沿用刚才先到球的那个计划，我需要覆盖哪个接触点？',['assignment:0'],dialogue={'en':[{'question':'Which ball are you handling first?','answer':'I am first handling early.'}],'zh':[{'question':'你先处理哪颗球？','answer':'我先处理 early。'}]})
-    add('new-spawn-boundary',rolling,'If I wait for four steps, how far can you verify without using unseen balls?','如果我连续等待四步，在不使用尚未出现的球的情况下能验证到哪里？',claims=[{'simulation_path':'steps_completed','equals':1},{'simulation_path':'stopped_at_public_boundary','equals':True}],actions=['wait'],horizon=4)
+    add('new-spawn-boundary',rolling,'If I wait for four steps, how far can you verify without using unseen balls?','如果我连续等待四步，在不使用尚未出现的球的情况下能验证到哪里？',claims=[{'simulation_path':'steps_completed','equals':2},{'simulation_path':'stopped_at_public_boundary','equals':True}],actions=['wait'],horizon=4)
     add('catch-once',one,'If I move right now, do we cover both contacts and gain three points?','如果我现在右移，我们能覆盖两侧并得到三分吗？',claims=[{'simulation_path':'raw_score_delta','equals':3}],actions=['right'])
     add('miss-human-side',one,'If I wait here instead, does the arriving team ball score?','如果我留在这里等待，到达的合作球会得分吗？',claims=[{'simulation_path':'raw_score_delta','equals':0}],actions=['wait'])
     add('four-step-safe',safe,'If I keep waiting for four steps, can you catch the small ball and our team ball?','如果我连续等待四步，你能接住小球并和我接住合作球吗？',claims=[{'simulation_path':'raw_score_delta','equals':4},{'simulation_path':'steps_completed','equals':4}],actions=['wait'],horizon=4)
     add('ambiguous-object',multi,'Why did you ignore that one?','你为什么忽略那一个？',clarification='ambiguous_object')
     add('unseen-turn',rolling,'Why did you switch sides on the turn I have not played yet?','在我还没玩到的那个回合，你为什么换边？',clarification='select_frame')
-    assert len(cases) == 64 and len({c['question'] for c in cases}) == 64
+    add('real-turn76-why',snapshots[76],'Why are you moving left, which contact are you covering, and how many points can we get together at that arrival?','为什么你往左走，具体去哪个接点，同回合我们配合能得几分？',['system:ai_reason'],[{'decision_path':'action','equals':'left'}],subject='ai',purpose='reason')
+    add('real-turn76-why-not-right',snapshots[76],'Why not move right on your next step?','你下一步为什么不右移？',['alternative_right'],subject='ai',purpose='comparison')
+    add('real-turn76-arrival-payoff',snapshots[76],'What is the selected plan’s total for the balls arriving in two turns?','当前所选计划中，两回合后这一批球一共能得几分？',['arrival_payoff:2'])
+    add('real-turn76-team-contact',snapshots[76],'For t26, which lane should I cover and which will you cover?','对于t26，我该覆盖哪一道，你会覆盖哪一道？',['ball_plan:t26'],purpose='assignment',object_id='t26')
+    add('real-turn8-skipped-team',snapshots[8],'For t3, which lane should I cover and which will you cover?','对于t3，我该覆盖哪一道，你会覆盖哪一道？',['ball_plan:t3'],purpose='assignment',object_id='t3')
+    add('real-turn8-nearest',snapshots[8],'Which ball am I closest to, how many turns until it arrives, and how can I coordinate with you?','我离哪个球最近，还剩几回合，我怎样配合你？',['human_nearest_ball','system:human_advice'],subject='human',purpose='advice')
+    add('five-point-both-smalls',five,'If we cover both team contacts, how are my small ball, your small ball, and the team ball counted?','我们覆盖合作球两侧时，我的小球、你的小球、合作球分别计几分？',['arrival_payoff:1'])
+    add('five-point-physical-cf',five,'If I wait for this one arrival, can our two small balls plus the team ball really give five points?','如果我等待这一次到达，我们两个小球加合作球真的能得五分吗？',claims=[{'simulation_path':'raw_score_delta','equals':5}],actions=['wait'])
+    assert len(cases) == 80 and len({c['question'] for c in cases}) == 80
     return cases
 
 
@@ -87,4 +106,4 @@ if __name__ == '__main__':
     existing['cases'] = [c for c in existing['cases'] if c.get('domain',c['state']['domain']) != 'pong'] + build()
     existing['evaluation_status'] = 'Injected composition fixtures only; they do not establish real-provider question understanding.'
     path.write_text(json.dumps(existing,ensure_ascii=False,indent=2)+'\n')
-    print('Rebuilt 64 rolling Pong composition fixtures; external domain case files retained.')
+    print('Rebuilt 80 current Pong composition fixtures; external domain case files retained.')

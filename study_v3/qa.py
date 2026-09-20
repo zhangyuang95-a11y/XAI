@@ -15,7 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-VERSION = "study-evidence-qa.v3.4"
+VERSION = "study-evidence-qa.v3.5"
 MAX_STEPS = 12
 _PURPOSES = ("action", "reason", "advice", "comparison", "observation", "rule", "assignment")
 _ACTIONS = {
@@ -91,6 +91,11 @@ facts. Answer only what was asked: current-action reasons do not need future
 assignments, every visible ball, unrelated rules, human advice or a whole plan.
 For "why not move left/right/wait?", use the named AI-action alternative fact
 if present, not alternatives for every ball. Do not add unrelated comparisons.
+In Warehouse, if system:ai_reason already names the requested alternative AI
+move, the specific conflicting human command and the collision location or kind,
+that reason alone answers why not: do not repeat the same collision using an
+alternative fact. Add the alternative only when the user asks for a further
+detail absent from the reason, such as the route distance after that alternative.
 Do not dump the rulebook or add system:teammate unless implementation
 or control authority was asked about. For "how can I help?", prefer the current
 human_available_option if provided and the current coordination condition. Give
@@ -101,6 +106,20 @@ the same action using front_interaction/human_available_option as well, add
 multiple positions, or attach a full recipe/rulebook as a separate reason.
 In Kitchen, a named ingredient or pan question should select its current
 ingredient/location/phase fact, not all stations or the entire cooking sequence.
+For a named food's CURRENT condition or location, choose only the one or two
+matching freshness, ingredient_location or recent event facts that answer it.
+A recent spoilage event stating that the food remains and must be taken to the
+bin already answers why it cannot be used and whether it disappeared. Do not
+add all oxidation rules, other ingredients' clocks or preparation counts when
+the current event answers the question. A full recipe sequence is appropriate
+only when the cooking sequence was actually requested.
+For why I am disposing of a finished dish and its cost, system:ai_reason already
+states the blocked handoff and 10-point bin penalty: select that reason alone
+unless another requested detail is genuinely absent. Do not repeat it using
+kitchen_score or the complete scoring/disposal rules. For a specific deduction
+that JUST happened, prefer the recent item-disposal event and its point-deduction
+event; do not append the menu, order deadlines, serving rewards or whole score
+rule. Explain general rules only when those general rules were requested.
 
 For a named Pong ball's ACTUAL contact assignment ("For t3, which lane should
 I cover and which will you cover?" / "t3我该站哪道，你负责哪道？"), use a facts
@@ -114,6 +133,10 @@ is not selected, clearly use that fact instead of promising contact lanes for
 it. Add a ball's contact/arrival fact only when that detail was also asked.
 An ambiguous unnamed ball still needs clarification. object_id is required
 only for assignment intents. Position hypotheses remain counterfactual intents.
+For "why this action?", system:ai_reason already names the intended contact,
+arrival time and simultaneous catch points when relevant. Use that one reason;
+do not repeat it through ball_plan or arrival_payoff/ball_payoff. Select those
+additional facts only for a separate requested detail absent from the reason.
 For "Which ball am I closest to, how many turns until it arrives, and how can
 I coordinate with you?", select human_nearest_ball for distance AND arrival,
 then system:human_advice plus the current selected coordination condition.
@@ -447,8 +470,8 @@ def _simulation_text(result, language, domain, *, include_scope=True):
         if action is None:
             return _text((f"Even if you were in lane {lane}, this task has finished; I have no next move.",
                           f"即使假设你在第{lane}道，本任务也已结束，我没有下一步动作。"), language)
-        hypothetical_text = _text((f"If you were in lane {lane}, I would {_ACTIONS[action][0]} next. ",
-                                   f"假设你在第{lane}道，我下一步会{_ACTIONS[action][1]}。"), language)
+        hypothetical_text = _text((f"If you were in lane {lane}: ",
+                                   f"假设你在第{lane}道："), language)
         hypothetical_text += intervention["reason_" + language]
         if result["horizon"] == 0:
             return hypothetical_text + _text((" This is a hypothetical position; the game has not changed.",
@@ -622,15 +645,21 @@ class Explainer:
                 # Suppress a duplicate action sentence only when the selected
                 # authoritative reason literally includes that action label.
                 # This is fact rendering, not keyword-based question binding.
-                action_in_reason = (state["domain"] == "pong" and not state["terminal"]
+                action_in_reason = (not state["terminal"]
                     and bool(selected_ids & {"decision", "system:ai_reason"})
                     and _action_pair(engine, state, decision["action"], actor="ai", decision=decision)[selected_language == "zh"].lower()
                         in decision["reason_" + selected_language].lower())
+                selected_reason = (decision["reason_" + selected_language]
+                    if selected_ids & {"decision", "system:ai_reason"} else "")
                 for intent in plan["intents"]:
                     for identifier in intent.get("evidence_ids", []):
                         if identifier not in ids:
                             wording = evidence[identifier][selected_language]
                             redundant = action_in_reason and identifier in ("system:ai_action", "next_action")
+                            # Identical factual wording may be selectable under
+                            # several IDs; retain every audit ID, show it once.
+                            redundant = redundant or (identifier not in ("decision", "system:ai_reason")
+                                and bool(selected_reason) and wording in selected_reason)
                             if not redundant and wording not in factual_parts:
                                 factual_parts.append(wording)
                             ids.append(identifier)

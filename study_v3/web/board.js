@@ -53,7 +53,7 @@ window.StudyBoard = class StudyBoard {
     if (!item) return;
     const name = typeof item === 'string' ? item : ['mixing','finished','plated'].includes(item.stage) ? item.recipe : item.ingredient || item.recipe || '';
     const colors = {egg:'#edc64c',tomato:'#db594d',meat:'#b97672',pepper:'#429d63',egg_tomato:'#e99442',pepper_meat:'#748c4d'};
-    const stage = item.stage || '', color = colors[name] || '#b79f00';
+    const stage = item.stage || '', color = stage==='spoiled'?'#817570':colors[name] || '#b79f00';
     if (item.container && item.container !== 'output_container') {
       ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#8d9cb2'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.ellipse(x, y + size * .2, size * .68, size * .4, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -63,6 +63,22 @@ window.StudyBoard = class StudyBoard {
     this.label(ctx, symbol, x, y, size * .43, '#ffffff', 800);
     if (item.container === 'output_container') { ctx.strokeStyle='#8d9cb2';ctx.lineWidth=2;ctx.strokeRect(x-size*.6,y-size*.5,size*1.2,size*.95); }
     if (item.container === 'serving_plate') this.label(ctx, '✓', x + size * .5, y - size * .35, size * .5, '#31b883', 900);
+    if (stage === 'spoiled') this.label(ctx, '×', x + size * .4, y - size * .35, size * .65, '#c81932', 900);
+  }
+  actorPosition(before, after, actor, p) {
+    const a=after[actor],b=before[actor]||a;
+    const collision=after.domain==='warehouse'&&after.collision_animation;
+    const attempted=collision&&collision[actor];
+    if(attempted&&p>0&&p<1) {
+      // The server has already rejected this joint move. Show its attempted
+      // contact, then return to the confirmed cell; never advance the game.
+      const reach=collision.kind==='swap'?.48:collision.kind==='same_target'?.68:.72;
+      const pulse=Math.sin(Math.PI*p)*reach;
+      return [attempted.from[0]+(attempted.attempted[0]-attempted.from[0])*pulse,
+              attempted.from[1]+(attempted.attempted[1]-attempted.from[1])*pulse];
+    }
+    const eased=.5-Math.cos(Math.PI*p)/2;
+    return [b.x+(a.x-b.x)*eased,b.y+(a.y-b.y)*eased];
   }
   grid(ctx, state, before, after, p, width, height) {
     const c = Math.min((width - 36) / state.width, (height - 36) / state.height);
@@ -125,13 +141,18 @@ window.StudyBoard = class StudyBoard {
     }
     for (const [actor,color] of [['human','#4f6ff0'],['ai','#f56b3d']]) {
       const a=after[actor],b=before[actor]||a;if(!a)continue;
-      const eased=.5-Math.cos(Math.PI*p)/2,xpos=b.x+(a.x-b.x)*eased,ypos=b.y+(a.y-b.y)*eased;
+      const [xpos,ypos]=this.actorPosition(before,after,actor,p);
       // Warehouse facts and A/B slot numbers switch with the displayed map,
       // so a replenished job cannot relabel cargo halfway through a move.
       const [x,y]=at(xpos,ypos),visible=state.domain==='warehouse'?state[actor]:(p<.5?b:a);
       this.canvas.dataset[actor+'X']=xpos.toFixed(3);this.canvas.dataset[actor+'Y']=ypos.toFixed(3);
       this.rect(ctx,x+c*.14,y+c*.14,c*.72,c*.72,a.active===false?'#d9485f':color,c*.15);
       this.label(ctx,actor==='human'?'1':'2',x+c/2,y+c/2,c*.34,'white',900);
+      if(after.domain==='warehouse'&&after.collision_animation&&p>.2&&p<.85) {
+        ctx.strokeStyle='#d82c43';ctx.lineWidth=3;
+        ctx.strokeRect(x+c*.1,y+c*.1,c*.8,c*.8);
+        this.label(ctx,this.lang==='zh'?'碰撞':'Collision',x+c/2,y+c*.94,c*.14,'#b4233b',850);
+      }
       if (visible.facing) {
         const [dx,dy]=({up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]})[visible.facing]||[0,1];
         const cx=x+c/2,cy=y+c/2,tipx=cx+dx*c*.5,tipy=cy+dy*c*.5;
@@ -158,6 +179,10 @@ window.StudyBoard = class StudyBoard {
           const text=prep.ready?(this.lang==='zh'?'✓ 已备好':'✓ Prepared'):(this.lang==='zh'?`备料还需 ${prep.remaining} 步`:`Prep: ${prep.remaining} more`);
           this.rect(ctx,x+c*.02,y+c*.88,c*.96,c*.21,prep.ready?'#dcf5e8':'#fff2d1',3);
           this.label(ctx,text,x+c*.5,y+c*.985,c*.125,prep.ready?'#16704c':'#785f21',750);
+        }
+        if(visible.holding?.stage==='spoiled') {
+          this.rect(ctx,x+c*.02,y+c*.88,c*.96,c*.21,'#ffe3e6',3);
+          this.label(ctx,this.lang==='zh'?'已变质':'Spoiled',x+c*.5,y+c*.985,c*.15,'#c81932',800);
         }
         if(actor==='ai') {
           const recipes=[...new Map((visible.current_cooking||[]).map(job=>[job.recipe,job])).values()];

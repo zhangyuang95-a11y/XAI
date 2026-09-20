@@ -241,6 +241,89 @@ def _plan(obs):
     return teams, smalls, selected, sorted(hp), sorted(ap), owners
 
 
+def _visible_arrival_score(balls, human_lane, ai_lane):
+    """Score one simultaneous visible arrival, exactly as physical settlement."""
+    return sum(WEIGHTS[ball['kind']] for ball in balls
+               if ({human_lane, ai_lane} == set(ball['contacts']) if ball['kind'] == 'cooperative'
+                   else ball['contacts'][0] in (human_lane, ai_lane)))
+
+
+def _arrival_capacity_with_commitments(obs, arrival, ai_first_action=None):
+    """Single-arrival reachable bound, not a whole-task optimum or forecast.
+
+    Only already visible balls and previously retained feasible commitments are
+    considered. Forcing the next AI move is an explanation-only comparison.
+    """
+    teams = [ball for ball in obs['balls'] if ball['kind'] == 'cooperative']
+    by_id = {ball['id']:ball for ball in teams}
+    retained = _retained_commitments(obs, teams)
+    human_deadlines = [(by_id[a['ball_id']]['remaining'], a['human_contact'], a['ball_id']) for a in retained]
+    ai_deadlines = [(by_id[a['ball_id']]['remaining'], a['ai_contact'], a['ball_id']) for a in retained]
+    if ai_first_action is not None:
+        next_lane = obs['ai']['x'] + _DELTAS[ai_first_action]
+        if not 0 <= next_lane < LANES:
+            return None
+        ai_deadlines.append((1, next_lane, 'next-action'))
+    arriving = [ball for ball in obs['balls'] if ball['remaining'] == arrival]
+    feasible_human = [lane for lane in range(LANES)
+                      if _route(obs['human']['x'], human_deadlines + [(arrival,lane,'arrival')]) is not None]
+    feasible_ai = [lane for lane in range(LANES)
+                   if _route(obs['ai']['x'], ai_deadlines + [(arrival,lane,'arrival')]) is not None]
+    if not feasible_human or not feasible_ai:
+        return None
+    return max(_visible_arrival_score(arriving,human,ai) for human in feasible_human for ai in feasible_ai)
+
+
+def _planned_arrival_payoffs(obs, assignments, planned_catches):
+    """Conditional scores for the actual selected plan; never read _schedule."""
+    by_id = {ball['id']:ball for ball in obs['balls']}
+    selected = {}
+    for assignment in assignments:
+        ball = by_id[assignment['ball_id']]
+        row = selected.setdefault(ball['remaining'], {'arrival_turns':ball['remaining'], 'human_lane':None,
+                                  'ai_lane':None, 'catches':[], 'team_assignments':[]})
+        row['human_lane'],row['ai_lane'] = assignment['human_contact'],assignment['ai_contact']
+        row['team_assignments'].append(deepcopy(assignment))
+        row['catches'].append({'ball_id':ball['id'], 'kind':'cooperative', 'actor':'team', 'points':WEIGHTS['cooperative']})
+    for catch in planned_catches:
+        ball = by_id[catch['ball_id']]
+        row = selected.setdefault(ball['remaining'], {'arrival_turns':ball['remaining'], 'human_lane':None,
+                                  'ai_lane':None, 'catches':[], 'team_assignments':[]})
+        row[catch['actor'] + '_lane'] = ball['contacts'][0]
+        row['catches'].append({'ball_id':ball['id'], 'kind':'ordinary', 'actor':catch['actor'], 'points':WEIGHTS['ordinary']})
+    rows = []
+    for arrival,row in sorted(selected.items()):
+        row['catches'].sort(key=lambda catch:(catch['kind']=='cooperative',catch['actor']!='ai',catch['ball_id']))
+        row['raw_points'] = sum(catch['points'] for catch in row['catches'])
+        row['maximum_at_arrival'] = _arrival_capacity_with_commitments(obs,arrival)
+        row['is_highest_at_arrival'] = row['maximum_at_arrival'] == row['raw_points']
+        row['scope'] = 'currently_visible_balls_at_this_arrival_preserving_prior_feasible_commitments'
+        rows.append(row)
+    return rows
+
+
+def _payoff_text(row, language='en', include_maximum=True):
+    """A short conditional statement: placement, individually counted balls, sum."""
+    en_parts,zh_parts = [],[]
+    for actor in ('ai','human'):
+        lane = row[actor+'_lane']
+        if lane is not None:
+            en_parts.append(f"{'I' if actor=='ai' else 'you'} reach lane {lane+1}")
+            zh_parts.append(f"{'我' if actor=='ai' else '你'}到第{lane+1}道")
+    owners_en = {'ai':'my', 'human':'your', 'team':'our'}
+    owners_zh = {'ai':'我接', 'human':'你接', 'team':'合作接'}
+    items_en = ' + '.join(f"{owners_en[catch['actor']]} {catch['ball_id']}({catch['points']})" for catch in row['catches'])
+    items_zh = '＋'.join(f"{owners_zh[catch['actor']]}{catch['ball_id']}（{catch['points']}分）" for catch in row['catches'])
+    # The actor's point is explicit even when the partner's small ball contributes.
+    unit = 'turn' if row['arrival_turns'] == 1 else 'turns'
+    en = f"If {' and '.join(en_parts)} in {row['arrival_turns']} {unit}, these visible catches give {items_en} = {row['raw_points']} points."
+    zh = f"{row['arrival_turns']}回合后若{'、'.join(zh_parts)}，当前可见来球可同时得{items_zh}，合计{row['raw_points']}分。"
+    if include_maximum and row['is_highest_at_arrival']:
+        en += ' This is the highest reachable total for this arrival while keeping earlier assignments that remain reachable.'
+        zh += '这是保留仍可达的原有承诺时，这一到达时刻双方可得的最高分。'
+    return zh if language.startswith('zh') else en
+
+
 def _decision_from_observation(obs):
     # Cache immutable serialized observations, returning isolated results.
     return deepcopy(_cached_decision(json.dumps(obs, sort_keys=True, separators=(',', ':'))))
@@ -271,25 +354,38 @@ def _cached_decision(key):
             else 'catch_ordinary' if current_small else 'switch_unreachable_assignment' if switched
             else 'keep_assignment' if first and _same_assignment(first, previous) else 'assign_team_ball' if first
             else 'release_infeasible_assignment' if released else 'no_reachable_ball')
+    planned_catches = [{'ball_id': b['id'], 'actor': 'human' if owner == 1 else 'ai'} for b, owner in zip(smalls, owners) if owner]
+    payoffs = _planned_arrival_payoffs(obs,assignments,planned_catches)
     en, zh = [], []
     goal_ball = next((b for b in obs['balls'] if b['id'] == goal), None)
+    focused_payoff = next((row for row in payoffs if goal_ball and row['arrival_turns'] == goal_ball['remaining']),None)
+    same_arrival_team = next((a for a in assignments if goal_ball and
+                             next(b['remaining'] for b in teams if b['id']==a['ball_id']) == goal_ball['remaining']),None)
     if goal_ball:
+        target_en,target_zh = f"lane {target+1} for {goal}",f"{goal}的第{target+1}道"
+        if same_arrival_team:
+            team = next(b for b in teams if b['id']==same_arrival_team['ball_id'])
+            side = 'left' if target == min(team['contacts']) else 'right'
+            target_en = f"{team['id']}'s {side} contact (lane {target+1})"
+            target_zh = f"{team['id']}的{'左' if side=='left' else '右'}接点（第{target+1}道）"
         if action == 'wait':
-            en.append(f"I am holding lane {target + 1} for {goal}, arriving in {goal_ball['remaining']} turns.")
-            zh.append(f"我已在第{target + 1}道，守候{goal_ball['remaining']}回合后到达的{goal}。")
+            en.append(f"I will hold {target_en}.")
+            zh.append(f"我会守住{target_zh}。")
         else:
-            en.append(f"I will move {'left' if action == 'left' else 'right'} toward lane {target + 1} for {goal}, arriving in {goal_ball['remaining']} turns.")
-            zh.append(f"我将向{'左' if action == 'left' else '右'}前往第{target + 1}道，接{goal_ball['remaining']}回合后到达的{goal}。")
+            en.append(f"I will move {'left' if action=='left' else 'right'} toward {target_en}.")
+            zh.append(f"我将{'左移' if action=='left' else '右移'}，前往{target_zh}。")
     else:
         en.append('I have no catch to cover in the current shared plan, so I will wait here.')
         zh.append('当前协作计划没有分配给我的接球任务，因此我会在这里等待。')
+    if focused_payoff:
+        en.append(_payoff_text(focused_payoff))
+        zh.append(_payoff_text(focused_payoff,'zh'))
     nearest_assignment = next((a for a in assignments if a['ball_id'] == goal), assignments[0] if assignments else None)
-    if nearest_assignment:
+    if nearest_assignment and not same_arrival_team:
         ball = next(b for b in teams if b['id'] == nearest_assignment['ball_id'])
-        own, partner = nearest_assignment['ai_contact'] + 1, nearest_assignment['human_contact'] + 1
-        prefix_en, prefix_zh = ('For', '对于') if nearest_assignment['locked'] else ('Tentatively for', '暂定对于')
-        en.append(f"{prefix_en} {ball['id']} in {ball['remaining']} turns, I cover lane {own}; you need lane {partner}.")
-        zh.append(f"{prefix_zh}{ball['remaining']}回合后到达的{ball['id']}，我负责第{own}道，你需要覆盖第{partner}道。")
+        own, partner = nearest_assignment['ai_contact']+1,nearest_assignment['human_contact']+1
+        en.append(f"For {ball['id']} in {ball['remaining']} turns, {'my side is' if nearest_assignment['locked'] else 'my tentative side is'} lane {own}; you need lane {partner}.")
+        zh.append(f"对于{ball['remaining']}回合后的{ball['id']}，我{'负责' if nearest_assignment['locked'] else '暂定去'}第{own}道，你需要第{partner}道。")
     if switched:
         en[-1] += ' Our previous sides are no longer reachable.'
         zh[-1] += ' 原来的双方分工已经来不及。'
@@ -328,6 +424,15 @@ def _cached_decision(key):
                             for at, lane, _ in ai_path)
             en_alt = f"After {candidate}, I would be in lane {position + 1}, {gap} moves from {goal}'s lane {target + 1}, with {time} turns left. " + ('This keeps the planned catch route reachable.' if preserves else 'This would miss a selected catch deadline.')
             zh_alt = f"如果{'左移' if candidate == 'left' else '右移' if candidate == 'right' else '等待'}，我会在第{position + 1}道，离{goal}所在第{target + 1}道还需{gap}步，剩{time}回合。" + ('计划中的接球路线仍然可达。' if preserves else '这会错过已选定的接球时限。')
+        if focused_payoff and 0 <= position < LANES:
+            possible = _arrival_capacity_with_commitments(obs,focused_payoff['arrival_turns'],candidate)
+            if possible is None:
+                en_alt += ' This first move cannot keep our earlier team-ball assignments.'
+                zh_alt += '这样走第一步无法保持先前的合作球承诺。'
+            else:
+                unit = 'turn' if focused_payoff['arrival_turns'] == 1 else 'turns'
+                en_alt += f" For the visible balls arriving in {focused_payoff['arrival_turns']} {unit} only, this first move allows at most {possible} points while keeping earlier assignments."
+                zh_alt += f"只看{focused_payoff['arrival_turns']}回合后这批可见来球，先这样走且保持原承诺，最多可得{possible}分。"
         action_alternatives[candidate] = {'en':en_alt, 'zh':zh_alt}
     memory = {'commitments': deepcopy(assignments)} if assignments else {}
     if first:
@@ -336,7 +441,7 @@ def _cached_decision(key):
             'reason_en': ' '.join(en), 'reason_zh': ''.join(zh), 'goal': goal, 'memory': memory,
             'alternatives': comparisons, 'assignment_changed': switched, 'assignment_released': released,
             'target_lane': target, 'assignments': deepcopy(assignments), 'tentative_replans': tentative_changes, 'action_alternatives': action_alternatives,
-            'planned_catches': [{'ball_id': b['id'], 'actor': 'human' if owner == 1 else 'ai'} for b, owner in zip(smalls, owners) if owner]}
+            'planned_catches': planned_catches}
 
 
 def decide(state):
@@ -455,6 +560,18 @@ def facts(state, decision=None):
                 {'id': 'decision', 'en': actual['reason_en'], 'zh': actual['reason_zh']},
                 {'id': 'next_action', 'en': 'This task is finished; there is no next action.' if state['terminal'] else 'The teammate\'s next action is ' + {'left':'move left','right':'move right','wait':'wait'}[actual['action']] + '.',
                  'zh': '任务已经结束，没有下一步动作。' if state['terminal'] else '队友下一步将' + {'left':'左移','right':'右移','wait':'等待'}[actual['action']] + '。'}]
+    payoffs = _planned_arrival_payoffs(_observation(state),actual['assignments'],actual['planned_catches'])
+    for payoff in payoffs:
+        evidence.append({'id': 'arrival_payoff:' + str(payoff['arrival_turns']),
+                         'arrival_turns':payoff['arrival_turns'], 'raw_points':payoff['raw_points'],
+                         'maximum_at_arrival':payoff['maximum_at_arrival'], 'is_highest_at_arrival':payoff['is_highest_at_arrival'],
+                         'human_contact_lane':None if payoff['human_lane'] is None else payoff['human_lane']+1,
+                         'ai_contact_lane':None if payoff['ai_lane'] is None else payoff['ai_lane']+1, 'scope':payoff['scope'],
+                         'catches':deepcopy(payoff['catches']), 'en':_payoff_text(payoff), 'zh':_payoff_text(payoff,'zh')})
+        for catch in payoff['catches']:
+            evidence.append({'id':'ball_payoff:'+catch['ball_id'], 'ball_id':catch['ball_id'],
+                             'arrival_turns':payoff['arrival_turns'], 'raw_points':payoff['raw_points'],
+                             'en':_payoff_text(payoff), 'zh':_payoff_text(payoff,'zh')})
     balls_by_id = {ball['id']: ball for ball in state['balls']}
     assignments = {item['ball_id']: item for item in actual['assignments']}
     ordinary_owners = {item['ball_id']: item['actor'] for item in actual['planned_catches']}

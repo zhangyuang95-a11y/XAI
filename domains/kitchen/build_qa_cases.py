@@ -1,4 +1,4 @@
-"""Build bilingual questions from actual v4 fixed-AI trajectories.
+"""Build bilingual questions from actual v5 fixed-AI trajectories.
 
 Plans below are hand-specified test oracles, not responses from a language model.
 Explicit mechanism claims are independent expectations and the shared QA test
@@ -22,7 +22,7 @@ def regular_trace():
 def vegetable_first_trace():
     state = e.initial_state(1000, 2)
     frames = [state]
-    for target, count in [('tomato', 1), ('prep', 2), ('handoff', 1)]:
+    for target, count in [('tomato', 1), ('prep', e.PREPARE_TURNS['tomato']), ('handoff', 1)]:
         for _ in range(count):
             while e._front(state['human']) is None or e._front(state['human'])['id'] != target:
                 state = e.step(state, e._approach(state, 'human', target)); frames.append(state)
@@ -44,6 +44,24 @@ def raw_handoff_state():
             state = e.step(state, e._approach(state, 'human', target))
         state = e.step(state, 'interact')
     return state
+
+
+def occupied_output_trace(frames):
+    # A reproducible participant mistake, executed from the original trajectory:
+    # at turn 42 both pans await vegetables and the human has an empty hand.
+    # Bringing an unnecessary raw egg blocks an upcoming completed dish.
+    state=deepcopy(frames[42]); result=[state]
+    assert state['human']['holding'] is None
+    assert all(p['phase']=='await_vegetable' for p in state['pots'])
+    for target in ('egg','handoff'):
+        while (e._front(state['human']) or {}).get('id') != target:
+            state=e.step(state,e._approach(state,'human',target)); result.append(state)
+        state=e.step(state,'interact'); result.append(state)
+    while not state['terminal']:
+        if state['metrics']['discarded_dishes']: break
+        state=e.step(state,'wait'); result.append(state)
+    assert state['metrics']['discarded_dishes']==1
+    return result
 
 
 def build():
@@ -77,6 +95,13 @@ def build():
         'early_stored': early_first(lambda s: any(s['buffers']['ai_raw'])),
         'conflict': early_first(lambda s: any(ev['type'] == 'handoff_conflict' for ev in s['events'])),
     }
+    state=deepcopy(states['early_stored'])
+    while not any(it and it['stage']=='spoiled' for it in state['buffers']['ai_raw']):
+        state=e.step(state,'wait')
+    states['spoiled_tomato']=state
+    blocked=occupied_output_trace(frames)
+    states['blocked_output']=next(s for s in blocked if e.decide(s)['reason_code']=='discard_blocked_output')
+    states['output_discarded']=blocked[-1]
     # At least thirty distinct bilingual prompts, rather than repeated variants
     # of the same start-state request. State claims use fixed mechanical values.
     specs = [
@@ -117,9 +142,9 @@ def build():
         ('early_vegetable', 'early_held', 'I gave you tomato first. Why are you putting it aside?', '我先给了番茄，你为什么把它放到一边？', ['system:ai_reason','ai_holding'], [{'decision_path':'reason_code','equals':'store_early_vegetable'},{'path':'ai.holding.ingredient','equals':'tomato'}], 'ai', 'reason'),
         ('stored_vegetable', 'early_stored', 'Where did the prepared tomato go?', '备好的番茄被放到哪里了？', ['raw_slot1'], [{'path':'buffers.ai_raw.0.ingredient','equals':'tomato'}], 'shared', 'observation'),
         ('early_not_waste', 'early_stored', 'Did giving the vegetable first cause it to disappear or lose points immediately?', '先交蔬菜会让原料消失，或者立刻扣分吗？', ['raw_slot1','public_rule8'], [{'path':'metrics.waste','equals':0},{'path':'metrics.completed_orders','equals':0}], 'shared', 'observation'),
-        ('conflict', 'conflict', 'We both reached for the counter. Why did neither transfer happen?', '双方都去拿交接台的东西，为什么交接没有发生？', ['public_rule7','event0'], [{'path':'metrics.handoff_conflicts','equals':1}], 'shared', 'rule'),
+        ('conflict', 'conflict', 'We both reached for the counter. Why did neither transfer happen?', '双方都去拿交接台的东西，为什么交接没有发生？', ['public_rule7','event1'], [{'path':'metrics.handoff_conflicts','equals':1}], 'shared', 'rule'),
         ('bound_order', 'start', 'If two orders request the same recipe, which order does a cooked dish complete?', '如果两张订单要同一道菜，一份做好的菜完成哪张订单？', ['public_rule8'], [], 'shared', 'rule'),
-        ('deadline', 'start', 'An order is due on turn 130. May it be served during turn 130?', '订单截止第 130 回合，在第 130 回合上菜还来得及吗？', ['public_rule8','order1'], [{'path':'orders.0.deadline','equals':130}], 'shared', 'rule'),
+        ('deadline', 'start', 'An order is due on turn 100. May it be served during turn 100?', '订单截止第 100 回合，在第 100 回合上菜还来得及吗？', ['public_rule8','order1'], [{'path':'orders.0.deadline','equals':100}], 'shared', 'rule'),
         ('discard', 'egg_prepared', 'Can I discard my held item if I need to free my hand, and is there a hidden penalty?', '需要腾出手时能丢弃手中物品吗，有隐藏扣分吗？', ['public_rule5','public_rule8'], [], 'shared', 'rule'),
         ('safe_off_heat', 'egg_removed', 'Will the egg still burn while it is in your temporary plate?', '鸡蛋已经在你的临时盘里，还会继续烧糊吗？', ['ai_holding','public_rule6'], [{'path':'ai.holding.stage','equals':'cooked_protein'}], 'shared', 'rule'),
         ('false_cooked', 'ai_input', 'Why are you already holding the finished stir-fry?', '你为什么已经拿着最终成品了？', ['ai_holding'], [{'path':'ai.holding.stage','equals':'prepared'}], 'ai', 'observation'),
@@ -133,6 +158,20 @@ def build():
         ('raw_blocker_reason', 'raw_handoff', 'I gave you an egg. Why are you not taking it to the stove?', '我已经给了鸡蛋，你为什么不拿去下锅？', ['system:ai_reason','handoff_recovery'], [{'path':'handoff.stage','equals':'raw'},{'decision_path':'reason_code','equals':'await_preparation'}], 'ai', 'reason'),
         ('raw_blocker_recovery', 'raw_handoff', 'How can I recover after placing an unprepared egg on the handoff counter?', '把没备好的鸡蛋放到交接台以后，怎么恢复？', ['handoff_recovery','next_input_ingredient','system:human_advice'], [{'path':'handoff.ingredient','equals':'egg'},{'path':'handoff.prepare_progress','equals':0}], 'human', 'advice'),
     ])
+    specs.extend([
+        ('waiting_dish','start','Which dish are you going to cook while waiting for my first ingredient?','你现在等我给原料，准备做什么菜？',['ai_current_dishes','next_input_ingredient'],[{'path':'orders.0.recipe','equals':'egg_tomato'}],'ai','observation'),
+        ('full_menu','start','How many dishes are in the menu, and can I see the full list now?','这次菜单一共几道菜，现在能看到全部吗？',['public_rule8','order1','order2','order3','order4','order5'],[{'path':'total_orders','equals':5}],'shared','rule'),
+        ('protein_first','start','Why must egg and meat be cooked before tomato and pepper?','为什么鸡蛋和肉必须在番茄和辣椒之前炒？',['recipe_sequence_egg_tomato','recipe_sequence_pepper_meat'],[],'ai','rule'),
+        ('prep_counts','start','How many preparation interactions do egg, meat, tomato and pepper each require?','鸡蛋、肉、番茄和辣椒分别需要备料几次？',['public_rule2'],[],'shared','rule'),
+        ('prepared_freshness','egg_prepared','When did this egg oxidation clock start, and how long does it last?','这份鸡蛋的氧化计时从何时开始，可以保鲜多久？',['freshness_egg','public_rule9'],[{'path':'human.holding.freshness_basis','equals':'prepared'}],'shared','rule'),
+        ('early_oxidation','early_stored','Will the tomato oxidize while it waits on your ingredient counter?','番茄在你的原料台等待时会氧化吗？',['freshness_tomato','public_rule9','recipe_sequence_egg_tomato'],[{'path':'buffers.ai_raw.0.stage','equals':'prepared'}],'shared','rule'),
+        ('spoiled_tomato','spoiled_tomato','Why can this tomato no longer be cooked, and did it disappear?','为什么这份番茄不能再下锅，它消失了吗？',['freshness_tomato','raw_slot1','ingredient_location_tomato','public_rule9'],[{'path':'buffers.ai_raw.0.stage','equals':'spoiled'},{'path':'metrics.discard_penalty','equals':0}],'shared','observation'),
+        ('blocked_finished','blocked_output','Why are you taking this finished dish to the trash, and how many points will that lose?','为什么你要把这份成品拿去垃圾桶，会扣几分？',['system:ai_reason','ai_holding','handoff','public_rule10','kitchen_score'],[{'decision_path':'reason_code','equals':'discard_blocked_output'},{'path':'ai.holding.stage','equals':'finished'},{'path':'metrics.discarded_dishes','equals':0}],'ai','reason'),
+        ('cannot_cancel_disposal','blocked_output','If I clear the handoff now, will you cancel the disposal trip?','我现在清空交接台，你会取消这次丢弃吗？',['system:ai_reason','public_rule10'],[{'decision_path':'reason_code','equals':'discard_blocked_output'}],'ai','rule'),
+        ('dish_discarded_penalty','output_discarded','What exactly caused the 10-point deduction just now?','刚才扣掉的10分具体是什么原因？',['kitchen_score','public_rule10'],[{'path':'metrics.discarded_dishes','equals':1},{'path':'metrics.discard_penalty','equals':10}],'shared','observation'),
+        ('every_step_cost','start','Does waiting or turning against a counter cost any points?','等待或者朝柜子原地转向会扣分吗？',['kitchen_score','public_rule1'],[{'path':'raw_score','equals':0}],'shared','rule'),
+        ('finished_head_label','output','Which completed dish are you actually holding now?','你现在手里实际拿着哪道成品？',['ai_current_dishes','ai_holding'],[{'path':'ai.holding.recipe','equals':'egg_tomato'},{'path':'ai.holding.stage','equals':'finished'}],'ai','observation'),
+    ])
     cases = []
     for name, state_key, en, zh, identifiers, claims, subject, purpose in specs:
         state = states[state_key]
@@ -141,16 +180,16 @@ def build():
         for language, question in [('en', en), ('zh', zh)]:
             plan = {'language':language, 'binding':{'task':state['task'],'turn':state['turn']}, 'premise':'contradicted' if name == 'false_cooked' else 'supported',
                     'clarification':None, 'intents':[{'kind':'facts','subject':subject,'purpose':purpose,'evidence_ids':identifiers}]}
-            cases.append({'case_id':f'kitchen_v4_{name}_{language}', 'domain':'kitchen', 'question':question, 'language':language, 'state':deepcopy(state),
+            cases.append({'case_id':f'kitchen_v5_{name}_{language}', 'domain':'kitchen', 'question':question, 'language':language, 'state':deepcopy(state),
                           'expected_fact_ids':identifiers, 'expected_claims':deepcopy(claims), 'expected_kind':'facts', 'expected_plan':plan})
     for name, state_key, en, zh, actions, claims in [
-        ('wait_cf','egg_load','If I wait one step, will that step alone earn a completed-order point?','如果我等待一步，仅这一步会获得完成订单分吗？',['wait'],[{'simulation_path':'raw_score_delta','equals':0}]),
-        ('movement_cf','start','If I press W now, how many game steps advance?','如果我现在按 W，游戏会推进几步？',['up'],[{'simulation_path':'steps_completed','equals':1},{'simulation_path':'raw_score_delta','equals':0}]),
+        ('wait_cf','egg_load','If I wait one step, will that step alone earn a completed-order point?','如果我等待一步，仅这一步会获得完成订单分吗？',['wait'],[{'simulation_path':'raw_score_delta','equals':-1}]),
+        ('movement_cf','start','If I press W now, how many game steps advance?','如果我现在按 W，游戏会推进几步？',['up'],[{'simulation_path':'steps_completed','equals':1},{'simulation_path':'raw_score_delta','equals':-1}]),
         ('unavailable_e_cf','start','What if I press E now while facing no work station?','如果我现在没有面朝工位却按 E，会怎么样？',['interact'],[{'simulation_path':'steps_completed','equals':0}]),
     ]:
         state = states[state_key]
         for language, question in [('en',en),('zh',zh)]:
-            cases.append({'case_id':f'kitchen_v4_{name}_{language}','domain':'kitchen','question':question,'language':language,'state':deepcopy(state),
+            cases.append({'case_id':f'kitchen_v5_{name}_{language}','domain':'kitchen','question':question,'language':language,'state':deepcopy(state),
                 'expected_fact_ids':[],'expected_claims':claims,'expected_kind':'counterfactual',
                 'expected_plan':{'language':language,'binding':{'task':state['task'],'turn':state['turn']},'premise':'supported','clarification':None,
                     'intents':[{'kind':'counterfactual','subject':'human','purpose':'comparison','actions':actions,'horizon':1,'evidence_ids':[]}]}})
@@ -160,12 +199,12 @@ def build():
         ('outside','unsupported_question','Who won the last World Cup?','上一届世界杯谁夺冠了？')]:
         state = states['start']
         for language, question in [('en',en),('zh',zh)]:
-            cases.append({'case_id':f'kitchen_v4_{name}_{language}','domain':'kitchen','question':question,'language':language,'state':deepcopy(state),
+            cases.append({'case_id':f'kitchen_v5_{name}_{language}','domain':'kitchen','question':question,'language':language,'state':deepcopy(state),
                 'expected_fact_ids':[],'expected_claims':[],'expected_kind':'clarification',
                 'expected_plan':{'language':language,'binding':{'task':state['task'],'turn':state['turn']},'premise':'unclear','clarification':reason,'intents':[]}})
     for language, question, previous in [('en','And the other pan?','What is stove 1 doing?'),('zh','那另一口锅呢？','炉灶 1 正在做什么？')]:
         state = states['both_recipes']
-        cases.append({'case_id':f'kitchen_v4_followup_{language}','domain':'kitchen','question':question,'language':language,'state':deepcopy(state),
+        cases.append({'case_id':f'kitchen_v5_followup_{language}','domain':'kitchen','question':question,'language':language,'state':deepcopy(state),
             'previous_dialogue':[{'question':previous,'answer':next(f[language] for f in e.facts(state) if f['id']=='pot1')}],
             'expected_fact_ids':['pot2'],'expected_claims':[{'path':'pots.1.phase','equals':'protein'}],'expected_kind':'facts',
             'expected_plan':{'language':language,'binding':{'task':state['task'],'turn':state['turn']},'premise':'supported','clarification':None,
@@ -174,7 +213,7 @@ def build():
     state = states['egg_load']
     for language, question in [('en','Where was I at turn 0?'),('zh','第 0 回合我在哪里？')]:
         identifier = 'history:task2:turn0:human_position'
-        cases.append({'case_id':f'kitchen_v4_bound_history_{language}','domain':'kitchen','question':question,'language':language,'state':deepcopy(state),
+        cases.append({'case_id':f'kitchen_v5_bound_history_{language}','domain':'kitchen','question':question,'language':language,'state':deepcopy(state),
             'public_history':[e.public_state(past)],'expected_fact_ids':[identifier],'expected_claims':[],'expected_kind':'facts',
             'expected_plan':{'language':language,'binding':{'task':2,'turn':0},'premise':'supported','clarification':None,
                 'intents':[{'kind':'facts','subject':'human','purpose':'observation','evidence_ids':[identifier]}]}})
@@ -184,4 +223,4 @@ def build():
 if __name__ == '__main__':
     cases = build()
     Path(__file__).with_name('qa_cases.json').write_text(json.dumps(cases, ensure_ascii=False, separators=(',', ':')) + '\n')
-    print(f'Wrote {len(cases)} bilingual v4 Kitchen cases from executed fixed-controller trajectories; not a semantic-model evaluation.')
+    print(f'Wrote {len(cases)} bilingual v5 Kitchen cases from executed fixed-controller trajectories; not a semantic-model evaluation.')

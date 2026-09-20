@@ -203,6 +203,14 @@ class Store:
                 if instance['stage']!='demo': raise StudyError('wrong_stage',409)
                 end=len(demonstration(instance['domain'])['captions'])
                 db.execute('UPDATE pl3_instances SET demo_index=? WHERE id=?',(min(instance['demo_index']+1,end),instance['id']))
+            elif kind in ('demo_finish','demo_skip'):
+                if instance['stage']!='demo': raise StudyError('wrong_stage',409)
+                end=len(demonstration(instance['domain'])['captions'])
+                db.execute('UPDATE pl3_instances SET demo_index=? WHERE id=?',(end,instance['id']))
+                if kind=='demo_skip':
+                    # Skip is an explicit participant choice, recorded as its
+                    # own idempotent command, never a simulated task action.
+                    self._next(db,{**instance,'demo_index':end})
             elif kind=='next': self._next(db,instance)
             elif kind=='action': self._action(db,instance,payload)
             elif kind=='language':

@@ -12,7 +12,7 @@ import pytest
 from study_v3 import RELEASE_ID, SUPPORTED_RELEASE_IDS
 from study_v3.config import Settings
 from study_v3.server import make_server
-from study_v3.store import Store
+from study_v3.store import Store, StudyError
 from tests.test_study_v3_http import Client, ORIGIN
 from tests.test_study_v3_store import Flow, RecordingExplainer, assert_public, denied
 
@@ -264,20 +264,44 @@ def test_public_http_cookie_switches_domains_and_resumes_locked_group(pilot_stor
         worker.join(5)
 
 @pytest.mark.parametrize('domain', ['warehouse','pong','kitchen'])
-def test_v34_explanation_only_patch_resumes_exact_gameplay(pilot_store, domain):
+def test_v35_archives_previous_gameplay_without_rewriting_records(pilot_store, domain):
     old_release='policylens-three-domain-20260920.v3.4'
-    assert old_release in SUPPORTED_RELEASE_IDS
+    assert old_release not in SUPPORTED_RELEASE_IDS
     flow=public_flow(pilot_store,domain,'A')
-    flow.start_task2();flow.step('wait')
+    flow.command('demo_skip');flow.step('wait')
+    old_id=flow.view['instance_id']
     with pilot_store.db.transaction() as db:
-        db.execute('UPDATE pl3_instances SET release_id=? WHERE id=?',(old_release,flow.view['instance_id']))
-    before=pilot_store.export()
+        db.execute('UPDATE pl3_instances SET release_id=? WHERE id=?',(old_release,old_id))
+    before=pilot_store.export(release_id=old_release)
     restored=pilot_store.recover_view(flow.token,domain)
-    assert restored['release_id']==old_release and restored['state']==flow.view['state']
-    assert restored['can_ask'] and restored['group']=='A'
-    _,same=pilot_store.create(enrollment(flow.name,domain,'B'),flow.token)
-    assert same['instance_id']==restored['instance_id'] and same['group']=='A'
-    assert pilot_store.export()==before
-    flow.view=restored;flow.step('wait')
-    assert flow.view['state']['turn']==restored['state']['turn']+1
-    assert flow.view['release_id']==old_release
+    assert restored['stage']=='welcome' and restored['previous_version_saved']
+    _,fresh=pilot_store.create(enrollment(flow.name,domain,'B'),flow.token)
+    assert fresh['instance_id']!=old_id and fresh['group']=='B' and fresh['stage']=='demo'
+    assert pilot_store.export(release_id=old_release)==before
+
+
+@pytest.mark.parametrize('domain', ['warehouse','pong','kitchen'])
+def test_demo_skip_is_atomic_idempotent_and_cannot_skip_a_task(pilot_store, domain):
+    flow=public_flow(pilot_store,domain,'A')
+    payload=flow.command('demo_skip')
+    first=flow.view
+    assert first['stage']=='task1' and first['state']['turn']==0
+    assert not first['can_ask'] and first['questions']==[]
+    retried=pilot_store.command(flow.token,'demo_skip',payload)
+    assert retried==first and len(retried['task_runs'])==1
+    with pytest.raises(StudyError) as error:
+        flow.command('demo_skip')
+    assert error.value.code=='wrong_stage'
+    flow.step('wait')
+    assert flow.view['state']['turn']==1
+
+
+@pytest.mark.parametrize('domain', ['warehouse','pong','kitchen'])
+def test_continuous_demo_completion_does_not_start_game_clock(pilot_store, domain):
+    flow=public_flow(pilot_store,domain,'B')
+    flow.command('demo_finish')
+    assert flow.view['stage']=='demo' and flow.view['state'] is None
+    assert flow.view['demo']['index']==len(flow.view['demo']['captions'])
+    assert flow.view['task_runs']==[]
+    flow.command('next')
+    assert flow.view['stage']=='task1' and flow.view['state']['turn']==0

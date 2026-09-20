@@ -164,44 +164,121 @@ def _selection(env, seed):
     return action, trace, proposed, distributions
 
 
+def _goal_detail(env):
+    """Name the same committed target using the board's current A/B slots."""
+    ai = env.state.by_id("robot_2")
+    goal = historical._committed_goal(env, env.state, ai)
+    mission = frozen_training_missions(env, env.state).get("robot_2")
+    slot = next((i + 1 for i, t in enumerate(env.state.tasks)
+                 if mission and mission.task and t.task_id == mission.task.task_id), None)
+    if mission and mission.goal_kind == "charge":
+        label, en, zh = "charger", "reach the charger", "前往充电位置"
+    elif mission and slot and mission.goal_kind in {"pickup", "delivery"}:
+        pickup = mission.goal_kind == "pickup"
+        label = ("A" if pickup else "B") + str(slot)
+        en = ("pick up the parcel at " if pickup else "deliver the parcel to ") + label
+        zh = ("去" + label + "取货") if pickup else ("把包裹送到" + label)
+    else:
+        label = f"column {goal[1]}, row {goal[0]}"
+        en, zh = "reach " + label, f"前往第{goal[1]}列、第{goal[0]}行"
+    return {"label": label, "en": en, "zh": zh, "position": list(reversed(goal))}
+
+
+def _collision_cases(env, ai_action):
+    """Check every accepted human command through the unchanged motion rules."""
+    result = []
+    for human in ACTIONS:
+        targets, _, _, collision, kind, attempted = env._resolve_motion(
+            env.state, {"robot_1": human, "robot_2": ai_action.upper()})
+        if collision:
+            result.append({"human_action": human.lower(), "ai_action": ai_action.lower(), "kind": kind,
+                **{actor: {"from": list(reversed(env.state.by_id(key).position)),
+                           "attempted": list(reversed(attempted[key])), "to": list(reversed(targets[key]))}
+                   for actor, key in _ACTORS.items()}})
+    return result
+
+
+def _collision_clause(case):
+    ai, human = case["ai_action"], case["human_action"]
+    a_en = "waited" if ai == "wait" else "moved " + ai
+    h_en = "waited" if human == "wait" else "moved " + human
+    prefix = f"If I {a_en} and you {h_en}, "
+    zhprefix = f"如果我{MOVE_NAMES[ai][1]}、你{MOVE_NAMES[human][1]}，"
+    if case["kind"] == "swap":
+        return (prefix + "we would try to swap squares, causing a collision and cancelling both movements.",
+                zhprefix + "双方会尝试交换位置，发生碰撞并取消双方移动。")
+    x, y = case["human"]["attempted"]
+    return (prefix + f"we would both occupy column {x}, row {y}, causing a collision and cancelling both movements.",
+            zhprefix + f"双方会占据第{x}列、第{y}行同一格，发生碰撞并取消双方移动。")
+
+
+def _safe_clause(cases):
+    if cases:
+        return _collision_clause(cases[0])
+    return ("For this step, none of your five commands would cause a robot collision with my chosen action.",
+            "本步你选择五种指令中的任一种，都不会与我的这个动作发生机器人碰撞。")
+
+
+def _route_clause(goal, candidate, conditional=False):
+    before, after = candidate["distance_before"], candidate["distance_after"]
+    prefix = "If my movement completes, " if conditional else ""
+    zhprefix = "如果移动成功，" if conditional else ""
+    return (f"{prefix}{'my' if prefix else 'My'} route to {goal['label']} changes from {before} to {after} moves.",
+            f"{zhprefix}到{goal['label'] if goal['label'] != 'charger' else '充电位置'}的路线距离为{before}→{after}步。")
+
+
 def _reason(env, action, trace):
     ai = env.state.by_id("robot_2")
     selected = trace["selected_ai_action"]
     candidates = trace["ai_action_candidates"]
     safer_than = [c for c in candidates if len(c["collision_counterfactuals"]) > len(selected["collision_counterfactuals"])]
-    verb, zhverb = MOVE_NAMES[action.lower()]
-    en, zh = f"I will {verb if action == 'WAIT' else 'move ' + verb}. ", f"我会{zhverb}。"
+    goal = _goal_detail(env)
+    selected_cases = _collision_cases(env, action)
+    route_en, route_zh = _route_clause(goal, selected, bool(selected_cases))
+    if action == "WAIT":
+        en, zh = "I will wait. ", "我会等待。"
+    elif selected["satisfies_planned_clearance"]:
+        en = f"I will move {action.lower()} to clear space for you; my route target remains {goal['label']}. "
+        zh = f"我会{MOVE_NAMES[action.lower()][1]}为你腾出空间；路线目标仍为{goal['label'] if goal['label'] != 'charger' else '充电位置'}。"
+    else:
+        en, zh = f"I will move {action.lower()}; my current goal is to {goal['en']}. ", f"我会{MOVE_NAMES[action.lower()][1]}；当前目标是{goal['zh']}。"
     if action == "WAIT" and ai.position == env.layout.charger_position and ai.battery < 100:
         threshold = charge_release_evidence(env, env.state, ai)["release_threshold"]
         code = "charging"
-        en += f"Waiting here restores up to 10 battery. I have {ai.battery:g}; the current departure threshold is {threshold:g}."
-        zh += f"在这里等待最多恢复10点电量。我目前有{ai.battery:g}点，当前离开充电位置的电量门槛为{threshold:g}点。"
+        en += f"Waiting here restores up to 10 battery; I have {ai.battery:g}, and the current departure threshold is {threshold:g}. "
+        zh += f"在这里等待最多恢复10点电量；目前{ai.battery:g}点，当前离开门槛为{threshold:g}点。"
     elif safer_than:
-        c = min(safer_than, key=lambda x: x["distance_after"])
-        n, chosen_n = len(c["collision_counterfactuals"]), len(selected["collision_counterfactuals"])
         code = "reduce_possible_collision"
-        alternative_label = "Waiting" if c["action"] == "WAIT" else "Moving " + c["action"].lower()
-        en += f"{alternative_label} could conflict with {n} of your currently possible moves; my chosen action conflicts with {chosen_n}. I choose before knowing your next command."
-        if selected["satisfies_planned_clearance"]:
-            en += " This also carries out the current plan to clear a space for your route."
-            zh += "这也执行了当前为你的路线腾出空间的计划。"
-        zh += f"{MOVE_NAMES[c['action'].lower()][1]}可能与你当前可选动作中的{n}种发生冲突；所选动作对应{chosen_n}种。我选择时还不知道你下一步的指令。"
+        candidate = min(safer_than, key=lambda c: c["distance_after"])
+        cases = _collision_cases(env, candidate["action"])
+        if cases:
+            example_en, example_zh = _collision_clause(cases[0])
+            en += example_en + " "
+            zh += example_zh
+        if action == "WAIT":
+            en += f"My current goal is to {goal['en']}. "
+            zh += f"当前目标是{goal['zh']}。"
     elif trace["ai_is_planned_waiter"] and action == "WAIT":
         code = "hold_clearance"
-        en += "The current shared-route plan has me hold this space while you pass. I will check the situation again after the joint move."
-        zh += "当前通道配合计划要求我暂时保持这个位置，让你通过。双方完成行动后，我会重新检查局面。"
+        en += f"The current route handoff has me hold this space while you pass; my target remains {goal['label']}. "
+        zh += f"当前通道交接需要我暂时保持这个位置，让你通过；目标仍为{goal['label']}。"
     elif selected["satisfies_planned_clearance"] or (trace["physical_clearance_required"] and action != "WAIT"):
         code = "clear_shared_route"
-        en += "This step creates space for the current shared-route handoff. It may move me away from my delivery destination temporarily."
-        zh += "这一步为当前的通道交接腾出空间，可能暂时远离我的配送目标。"
+        en += "This step clears space for the current route handoff. "
+        zh += "这一步为当前通道交接腾出空间。"
     elif selected["distance_after"] < selected["distance_before"]:
         code = "mission_progress"
-        en += f"Among the safer available choices, this reduces my current route from {selected['distance_before']} to {selected['distance_after']} moves."
-        zh += f"在优先考虑安全的可选动作中，这一步把当前路线从{selected['distance_before']}步缩短到{selected['distance_after']}步。"
     else:
         code = "conservative_selection"
-        en += f"I first compare possible conflicts, then battery safety and the current handoff plan, before route progress. This choice leaves {selected['distance_after']} moves to the current target."
-        zh += f"我先比较可能的冲突，再考虑电量安全和当前交接计划，最后考虑路线推进。所选动作执行后，到当前目标还有{selected['distance_after']}步。"
+        if action == "WAIT":
+            en += f"I am holding position while checking the shared route; my target remains {goal['label']}. "
+            zh += f"我暂时保持位置，等待通道配合；目标仍为{goal['label']}。"
+    if action != "WAIT":
+        en += route_en + " "
+        zh += route_zh
+    safe_en, safe_zh = _safe_clause(selected_cases)
+    en += safe_en
+    zh += safe_zh
     return code, en, zh
 
 
@@ -213,18 +290,27 @@ def decide(state):
     action, trace, _, _ = _selection(env, state["scenario_seed"])
     code, en, zh = _reason(env, action, trace)
     goal = historical._committed_goal(env, env.state, env.state.by_id("robot_2"))
+    goal_detail = _goal_detail(env)
     alternatives = []
     for c in trace["ai_action_candidates"]:
         if c["action"] == action:
             continue
-        n = len(c["collision_counterfactuals"])
-        alternatives.append({"action": c["action"].lower(),
-            "en": f"If I choose {c['action'].lower()}, my target would be column {c['target'][1]}, row {c['target'][0]}; the route would have {c['distance_after']} moves left, and {n} of your possible moves could conflict. This is a possibility, not a prediction of your choice.",
-            "zh": f"如果我选择{MOVE_NAMES[c['action'].lower()][1]}，目标为第{c['target'][1]}列、第{c['target'][0]}行；路线还剩{c['distance_after']}步，你的可选动作中有{n}种可能发生冲突。这表示可能性，不是预测你的选择。"})
+        cases = _collision_cases(env, c["action"])
+        route_en, route_zh = _route_clause(goal_detail, c, bool(cases))
+        if cases:
+            en_alt, zh_alt = _collision_clause(cases[0])
+        else:
+            en_alt = f"If I chose {c['action'].lower()}, none of your five commands would cause a robot collision in this step."
+            zh_alt = f"如果我选择{MOVE_NAMES[c['action'].lower()][1]}，本步你的五种指令均不会与我发生机器人碰撞。"
+        alternatives.append({"action": c["action"].lower(), "en": en_alt + " " + route_en,
+                             "zh": zh_alt + route_zh, "collision_cases": cases})
     return {"action": action.lower(), "reason_code": code, "reason_en": en, "reason_zh": zh,
-            "goal": f"column {goal[1]}, row {goal[0]}", "memory": {}, "alternatives": alternatives,
-            "facts": [{"id": "ai_goal_distance", "en": f"My current route target is column {goal[1]}, row {goal[0]}; {trace['selected_ai_action']['distance_before']} moves away before this turn.",
-                       "zh": f"我当前路线目标为第{goal[1]}列、第{goal[0]}行；本回合行动前相距{trace['selected_ai_action']['distance_before']}步。"}],
+            "goal": f"column {goal[1]}, row {goal[0]}", "goal_details": goal_detail,
+            "memory": {}, "alternatives": alternatives,
+            "collision_checks": {"human_commands_checked": [a.lower() for a in ACTIONS],
+                                 "cases": _collision_cases(env, action)},
+            "facts": [{"id": "ai_goal_distance", "en": f"My current goal is to {goal_detail['en']} at column {goal[1]}, row {goal[0]}; {trace['selected_ai_action']['distance_before']} moves away before this turn.",
+                       "zh": f"我当前目标是{goal_detail['zh']}，位于第{goal[1]}列、第{goal[0]}行；本回合行动前相距{trace['selected_ai_action']['distance_before']}步。"}],
             "controller_trace": _plain(trace), "snapshot_sha256": sha256(json.dumps(state["snapshot"], sort_keys=True).encode()).hexdigest()}
 
 
@@ -233,7 +319,13 @@ def _events(before, after, info):
     def add(kind, en, zh, **more):
         rows.append({"type": kind, "en": en, "zh": zh, **more})
     if info.get("robot_collision_event") or after.robot_collision_events > before.robot_collision_events:
-        add("collision", "A robot collision cancelled the conflicting movement and cost 10 points.", "机器人碰撞取消了冲突移动，并扣除10分。")
+        animation = {"kind": info.get("robot_collision_kind") or after.last_robot_collision_kind}
+        for actor, key in _ACTORS.items():
+            animation[actor] = {"from": list(reversed(before.by_id(key).position)),
+                                "attempted": list(reversed(info["intended_targets"][key])),
+                                "to": list(reversed(after.by_id(key).position))}
+        add("collision", "A robot collision cancelled the conflicting movement and cost 10 points.",
+            "机器人碰撞取消了冲突移动，并扣除10分。", collision_animation=animation)
     for actor, key in _ACTORS.items():
         a, b = before.by_id(key), after.by_id(key)
         who, whozh = ("You", "你") if actor == "human" else ("The AI", "AI")
@@ -304,6 +396,9 @@ def public_state(state):
     public.update(width=WIDTH, height=HEIGHT, walls=[list(p) for p in sorted(WALLS)], orders=_orders(env),
         chargers=[list(CHARGER)], stations=[{"id": "charger", "x": CHARGER[0], "y": CHARGER[1], "kind": "charger", "label_en": "Shared charger", "label_zh": "共享充电位置"}],
         score=score(state), map_id=STUDY_MAP_LAYOUT.layout_id)
+    collision = next((e for e in state["events"] if e["type"] == "collision"), None)
+    if collision and "collision_animation" in collision:
+        public["collision_animation"] = deepcopy(collision["collision_animation"])
     return public
 
 
@@ -412,47 +507,13 @@ def human_advisor(state):
 
 
 def demonstration():
-    # Full real trajectory on the original neutral demo seed; captions are
-    # selected from confirmed outcomes, never an explanation of hidden plans.
-    state = initial_state(CONFIG["demo_seed"], 1)
-    env = WarehouseMultiAgentEnv(participant_study_config())
-    env.reset(seed=CONFIG["demo_seed"])
-    original = env.get_state(); original.participant_controlled_agent_id = "robot_1"; env.set_state(original)
-    state = _state(env, 1, CONFIG["demo_seed"]); state["scenario_seed"] = CONFIG["demo_seed"]
-    frames = [public_state(state)]
-    captions = [{"index": 0, "en": "You control the blue robot. The orange robot is your AI teammate. Two shared A-to-B jobs are available.", "zh": "你控制蓝色机器人，橙色机器人是AI队友。双方共用两个A到B订单。"}]
-    seen = set()
-    demonstrated_collision = False
-    for _ in range(120):
-        if state["terminal"]: break
-        action = _human_advisor(state, proactive=False)
-        if not demonstrated_collision and state["turn"] >= 65:
-            trial = _restore(state)
-            ai_action = decide(state)["action"].upper()
-            colliding = [a for a in historical.causal_participant_actions(trial)
-                         if trial._resolve_motion(trial.state, {"robot_1": a, "robot_2": ai_action})[3]]
-            if colliding:
-                action = colliding[0].lower()
-                demonstrated_collision = True
-            else:
-                # A short deliberately poor approach supplies a real public
-                # collision example; only the demonstration's human commands
-                # change. The historical AI remains untouched.
-                human = trial.state.by_id("robot_1")
-                partner = trial.state.by_id("robot_2")
-                action = min(historical.causal_participant_actions(trial), key=lambda a: (
-                    shortest_path_distance(tuple(reversed(_target(_actor_view(human), a.lower()))),
-                                           partner.position, trial.config.map_layout_id), a == "WAIT")).lower()
-        state = step(state, action); frames.append(public_state(state))
-        for event in state["events"]:
-            if event["type"] in {"pickup", "delivery", "charge", "collision"} and event["type"] not in seen:
-                captions.append({"index": len(frames)-1, "en": event["en"], "zh": event["zh"]}); seen.add(event["type"])
-    captions.extend([
-        {"index": len(frames)-1, "en": "A task ends at 120 steps or a battery shutdown. Questions and replay do not spend steps. Raw score can be negative.", "zh": "任务在120步或电量耗尽时结束。提问和回放不消耗步数。原始分可能为负。"}])
-    while len(captions) < 6:
-        i = min(len(frames)-1, 2 + len(captions))
-        captions.insert(-1, {"index": i, "en": "A successful move uses 2 battery; waiting at the charger restores up to 10. Plan a return before the battery runs out.", "zh": "成功移动消耗2点电量，在充电格等待最多恢复10点。请在电量耗尽前安排返回充电位置。"})
-    return {"frames": frames, "captions": sorted(captions, key=lambda c: c["index"])}
+    # A frozen replay of the original historical Render demonstration. It is
+    # deliberately not re-simulated through the newer scored-task adapter.
+    path = ROOT / CONFIG["historical_demo"]["path"]
+    data = path.read_bytes()
+    if sha256(data).hexdigest() != CONFIG["historical_demo"]["sha256"]:
+        raise RuntimeError("Warehouse historical demonstration hash mismatch")
+    return json.loads(data)
 
 
 def comprehension(language="en"):

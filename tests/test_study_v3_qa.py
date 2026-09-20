@@ -113,7 +113,7 @@ def test_bilingual_question_language_overrides_interface():
     state = fixture()
     result = ask(explainer_for_plan(plan(state, language="zh")), state, question="为什么这样做？", language="en")
     assert result["status"] == "answered"
-    assert "我负责" in result["answer"]
+    assert pong.decide(state)["reason_zh"] in result["answer"]
     assert result["language"] == "zh"
 
 
@@ -255,15 +255,19 @@ def test_pong_forward_simulation_stops_before_exposing_hidden_next_wave():
     assert "wave_started" not in json.dumps(result)
 
 
-def test_kitchen_forward_simulation_hides_unannounced_order_contents():
+def test_kitchen_public_menu_is_fully_known_without_an_artificial_future_order_boundary():
     kitchen = get_engine("kitchen")
     state = kitchen.initial_state(730100, 3)
-    state["_future_orders"] = [{"id": "SECRET-ORDER", "recipe": "egg_tomato", "arrival": 1, "deadline": 200, "status": "pending"}]
+    before = deepcopy(state)
+    public = kitchen.public_state(state)
+    assert state["_future_orders"] == []
+    assert len(public["orders"]) == 5
+    assert {order["id"] for order in public["orders"]} == {order["id"] for order in state["orders"]}
     result = simulate(kitchen, state, kitchen.decide(state), ["wait"], 4)
-    assert result["steps_completed"] == 1
-    assert result["stopped_at_public_boundary"]
-    assert "SECRET-ORDER" not in json.dumps(result)
-    assert "order_arrived" not in json.dumps(result)
+    assert result["steps_completed"] == 4
+    assert not result["stopped_at_public_boundary"]
+    assert "_future_orders" not in json.dumps(result)
+    assert state == before
 
 
 def test_restored_warehouse_counterfactual_uses_actual_unbounded_score():
@@ -373,6 +377,7 @@ def test_recorded_question_case_independent_expectations_and_composition(case):
     instance = explainer_for_plan(selected)
     result = instance.answer(engine, state, decision, case["question"], case["language"], case.get("previous_dialogue", []), case.get("public_history", []))
     assert result["status"] == ("clarification" if selected.get("clarification") else "answered")
+    assert set(case["expected_fact_ids"]) <= set(result["evidence_ids"])
     for claim in case.get("expected_claims", []):
         if isinstance(claim, str):
             assert claim in result["answer"]
@@ -518,10 +523,12 @@ def test_position_hypothesis_recomputes_actual_controller_without_advancing_game
     assert capture[0]['public_observation']['human']['x'] == 0
     assert capture[0]['counterfactual_interventions']['human_lane']['maximum'] == 9
     if language == 'en':
-        assert 'If you were in lane 9, I would move left next.' in result['answer']
+        assert 'If you were in lane 9: ' in result['answer']
+        assert result['answer'].count('move left') == 1
         assert 'hypothetical position' in result['answer'] and 'game has not changed' in result['answer']
     else:
-        assert '假设你在第9道，我下一步会左移' in result['answer']
+        assert '假设你在第9道：' in result['answer']
+        assert result['answer'].count('左移') == 1
         assert '实际游戏没有改变' in result['answer']
 
 
@@ -782,3 +789,25 @@ def test_nearest_ball_preset_answers_distance_arrival_and_actual_coordination_se
     assert 'arriving in 4 turns' in result['answer']
     assert 'not selected' in result['answer']
     assert 'move left' in result['answer'] and 't4' in result['answer']
+
+
+@pytest.mark.parametrize('language',('en','zh'))
+@pytest.mark.parametrize('order',(('system:ai_reason','arrival_payoff:2'),('arrival_payoff:2','system:ai_reason')))
+def test_pong_exact_payoff_already_in_authoritative_reason_is_rendered_once(language,order):
+    state = pong.initial_state(731100,2)
+    for _ in range(76):
+        state = pong.step(state,pong.human_advisor(state))
+    decision = pong.decide(state)
+    selected = plan(state,language=language,ids=order)
+    result = ask(explainer_for_plan(selected),state,question='为什么这样接球？' if language=='zh' else 'Why choose this catch?')
+    assert result['status'] == 'answered'
+    assert result['answer'].split('\n\n',1)[1] == decision['reason_'+language]
+    assert result['evidence_ids'] == list(order)
+    assert result['answer'].count('合计4分' if language=='zh' else '= 4 points') == 1
+
+
+def test_current_pong_recorded_cases_reproduce_from_their_builder():
+    from scripts.build_rolling_pong_qa_cases import build
+    recorded = [c for c in json.loads((ROOT/'configs/study_v3_qa_cases.json').read_text())['cases'] if c.get('domain') == 'pong']
+    assert recorded == build()
+    assert len(recorded) == 80

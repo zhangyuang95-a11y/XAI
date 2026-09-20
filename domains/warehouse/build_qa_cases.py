@@ -61,6 +61,18 @@ def build():
          ["system:ai_action"], [{"decision_path":"action","equals":"up"}], purpose="action", subject="ai")
     pair("initial_reason", initial, ("Why did you choose that next move?", "为什么选择这个下一步动作？"),
          ["system:ai_reason"], [{"decision_path":"reason_code","equals":"reduce_possible_collision"}], purpose="reason", subject="ai")
+    pair("named_pickup_distance", initial, ("Which A point are you moving toward, and how does up change the distance?", "你朝哪个A点走，向上后距离如何变化？"),
+         ["system:ai_reason", "ai_goal_distance"], [{"fact_id":"ai_goal_distance", "contains_pair":["parcel at A1", "去A1取货"]},
+         {"fact_id":"actual_decision", "contains_pair":["from 8 to 7 moves", "8→7步"]}], purpose="reason", subject="ai")
+    pair("concrete_left_risk", initial, ("Which of my moves could collide with you if you went left?", "如果你向左，我做哪个动作会与你碰撞？"),
+         ["alternative_left"], [{"fact_id":"alternative_left", "contains_pair":["you moved right", "你向右"]},
+         {"fact_id":"alternative_left", "contains_pair":["column 3, row 5", "第3列、第5行"]}], purpose="comparison", subject="ai")
+    pair("concrete_wait_reason", after_up, ("Why wait here instead of moving left toward A1?", "为什么在这里等待，而不向左朝A1走？"),
+         ["system:ai_reason"], [{"decision_path":"action", "equals":"wait"},
+         {"fact_id":"actual_decision", "contains_pair":["If I moved left and you moved right", "如果我向左、你向右"]},
+         {"fact_id":"actual_decision", "contains_pair":["column 3, row 4", "第3列、第4行"]}], purpose="reason", subject="ai")
+    pair("checked_wait_safety", after_up, ("Could any of my five commands collide with you while you wait here?", "你在这里等待时，我的五种指令中有会撞到你的吗？"),
+         ["system:ai_reason"], [{"fact_id":"actual_decision", "contains_pair":["none of your five commands", "五种指令中的任一种"]}], purpose="reason", subject="ai")
     pair("human_location", initial, ("Where am I starting?", "我从哪里开始？"), ["human_state"], [{"path":"human.x","equals":2},{"path":"human.y","equals":5}], subject="human")
     pair("ai_location", initial, ("Where are you now?", "你现在在哪里？"), ["ai_state"], [{"path":"ai.x","equals":4},{"path":"ai.y","equals":5}], subject="ai")
     pair("human_energy", initial, ("Do I have enough battery for one move to the charger?", "我的电量够走一步到充电站吗？"), ["human_state","human_charger_distance"], [{"path":"human.battery","equals":100},{"fact_id":"human_charger_distance","contains_pair":["1 moves, costing 2", "1步，耗电2"]}], subject="human")
@@ -87,7 +99,7 @@ def build():
     pair("charging_calculation", charge, ("Where does your departure battery threshold come from?", "你的离开充电站电量门槛如何计算？"), ["ai_charge_shortfall","ai_charge_calculation"], [{"fact_id":"ai_charge_shortfall","contains_pair":["threshold is 56", "门槛为56"]},{"fact_id":"ai_charge_calculation","contains_pair":["6 reserve moves", "6步安全余量"]}], subject="ai")
     pair("handoff_action", handoff, ("Which way will you leave the charger?", "你会朝哪个方向离开充电站？"), ["system:ai_action"], [{"decision_path":"action","equals":"left"}], purpose="action", subject="ai")
     pair("handoff_reason", handoff, ("Why make room instead of remaining on the charger?", "为什么要让开而不是继续占着充电站？"), ["system:ai_reason","alternative_wait"], [{"decision_path":"controller_trace.ai_is_planned_clearer","equals":True}], purpose="reason", subject="ai")
-    pair("handoff_alternative", handoff, ("What if you waited there instead of moving left?", "如果你不左移而是继续在那里等待，会怎样？"), ["alternative_wait"], [{"fact_id":"alternative_wait","contains_pair":["1 of your possible moves could conflict", "有1种可能发生冲突"]}], purpose="comparison", subject="ai")
+    pair("handoff_alternative", handoff, ("What if you waited there instead of moving left?", "如果你不左移而是继续在那里等待，会怎样？"), ["alternative_wait"], [{"fact_id":"alternative_wait","contains_pair":["If I waited and you moved left", "如果我等待、你向左"]}], purpose="comparison", subject="ai")
     pair("handoff_followup", handoff, ("For that handoff, which cell will you clear?", "这次交接你会腾出哪一个格子？"), ["ai_state","system:ai_action"], [{"path":"ai.x","equals":3},{"path":"ai.y","equals":5},{"decision_path":"action","equals":"left"}], previous=[{"question":"What will you do next?","answer":"I will move left from the shared charger to make space."}], subject="ai")
     for key, question, actions, score, x, y, battery in [
         ("simulate_wait", ("If I wait one step now, what changes?", "如果我现在等待一步，会怎样？"), ["wait"], -3, 2, 5, 100),

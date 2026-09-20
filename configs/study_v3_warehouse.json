@@ -81,5 +81,10 @@
     "backend/adapters/warehouse_explanations.py": "9721fa22b45f166a3c8b7a95e111a9a586901b0349aad89414b70bce06b174de",
     "output/deployment/warehouse_mappo_v68_6x7_actor.npz": "96762a46f59abd24a10b1abedf8dc325d72c85f3af39424c33e2dcba4ef5ffd3"
   },
-  "calibration": "Exact old 6x7 map, shared replenishing jobs, old physics and raw score; historical September 2 controller and v68 actor. Participant enrollment seed does not change the fixed old task seeds. Date is a source reference, not a verified historical deployment receipt. No human effect is claimed."
+  "calibration": "Exact old 6x7 map, shared replenishing jobs, old physics and raw score; historical September 2 controller and v68 actor. Participant enrollment seed does not change the fixed old task seeds. Date is a source reference, not a verified historical deployment receipt. No human effect is claimed.",
+  "historical_demo": {
+    "path": "configs/study_v3_warehouse_legacy_demo.json",
+    "sha256": "c3c5577793f982bc16e5cd565cb01b9cf689157377e868a833c50f347b7b9377",
+    "source_commit": "de16551d3d6b99c7ab426dfed1db2871159e6b5c"
+  }
 }

@@ -1,5 +1,7 @@
 # Three-domain release v3.7
 
+Latest compatible presentation patch: [v3.7.1 — English-first entry](three_domain_deployment_v3_7_1.md). The v3.7 gameplay and acceptance record below remains the baseline.
+
 Release: `policylens-three-domain-20260920.v3.7`
 Site: https://policylens-warehouse-study.onrender.com/
 

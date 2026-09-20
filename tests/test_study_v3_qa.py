@@ -533,7 +533,7 @@ def test_position_hypothesis_recomputes_actual_controller_without_advancing_game
         assert '实际游戏没有改变' in result['answer']
 
 
-def test_position_hypothesis_preserves_existing_commitment_until_unreachable():
+def test_position_hypothesis_keeps_ai_commitment_even_when_human_can_no_longer_reach():
     state = fixture(human=0, ai=4, turns=4)
     state['policy_memory'] = deepcopy(pong.decide(state)['memory'])
     original = deepcopy(state)
@@ -546,8 +546,10 @@ def test_position_hypothesis_preserves_existing_commitment_until_unreachable():
     changed = simulate(pong, no_commitment, pong.decide(no_commitment), [], 0,
                        intervention={'human_lane': 7})
     assert changed['intervention']['ai_action'] == 'left'
-    released = simulate(pong, state, pong.decide(state), [], 0, intervention={'human_lane': 9})
-    assert released['intervention']['ai_action'] == 'left'
+    maintained_after_deviation = simulate(pong, state, pong.decide(state), [], 0, intervention={'human_lane': 9})
+    assert maintained_after_deviation['intervention']['ai_action'] == 'right'
+    assert maintained_after_deviation['intervention']['target_unchanged']
+    assert 'no longer reach' in maintained_after_deviation['intervention']['reason_en']
     assert state == original
 
 
@@ -708,12 +710,13 @@ def test_kitchen_catalog_uses_facing_station_labels_and_offers_no_remote_discard
 
 
 def simultaneous_ball_fixture():
-    # Exact production acceptance scenario, reconstructed without production
-    # identity/session data. At turn 8, t3 and t4 have incompatible deadlines.
-    state = pong.initial_state(731100, 2)
-    for _ in range(8):
-        state = pong.step(state, pong.human_advisor(state))
-    return state
+    # Both large balls are individually reachable, but only t4 shares the AI's
+    # small-ball lane. Four different large contacts cannot all be covered.
+    return pong._new_state([[pong._ball('t3', 'cooperative', [2, 8], 4),
+                            pong._ball('t4', 'cooperative', [0, 6], 4),
+                            pong._ball('s11', 'ordinary', [0], 4),
+                            pong._ball('s12', 'ordinary', [6], 4)]],
+                           seed=99, task=2, human=0, ai=6)
 
 
 @pytest.mark.parametrize('language', ['en', 'zh'])
@@ -788,23 +791,22 @@ def test_nearest_ball_preset_answers_distance_arrival_and_actual_coordination_se
     assert result['status'] == 'answered'
     assert 's11' in result['answer'] and '0 moves away' in result['answer']
     assert 'arriving in 4 turns' in result['answer']
-    assert 'not selected' in result['answer']
-    assert 'move left' in result['answer'] and 't4' in result['answer']
+    assert 'assigns it to you' in result['answer']
+    assert 'wait' in result['answer'] and 't4' in result['answer']
 
 
 @pytest.mark.parametrize('language',('en','zh'))
-@pytest.mark.parametrize('order',(('system:ai_reason','arrival_payoff:2'),('arrival_payoff:2','system:ai_reason')))
-def test_pong_exact_payoff_already_in_authoritative_reason_is_rendered_once(language,order):
-    state = pong.initial_state(731100,2)
-    for _ in range(76):
-        state = pong.step(state,pong.human_advisor(state))
+@pytest.mark.parametrize('order',(('system:ai_reason','arrival_payoff:4'),('arrival_payoff:4','system:ai_reason')))
+def test_pong_payoff_is_separate_from_short_reason_when_explicitly_requested(language,order):
+    state = simultaneous_ball_fixture()
     decision = pong.decide(state)
     selected = plan(state,language=language,ids=order)
-    result = ask(explainer_for_plan(selected),state,question='为什么这样接球？' if language=='zh' else 'Why choose this catch?')
+    result = ask(explainer_for_plan(selected),state,question='为什么这样接球，一共能得几分？' if language=='zh' else 'Why choose this catch, and how many points can it earn?')
     assert result['status'] == 'answered'
-    assert result['answer'].split('\n\n',1)[1] == decision['reason_'+language]
+    assert decision['reason_'+language] in result['answer']
     assert result['evidence_ids'] == list(order)
-    assert result['answer'].count('合计4分' if language=='zh' else '= 4 points') == 1
+    assert result['answer'].count('合计5分' if language=='zh' else '= 5 points') == 1
+    assert ('合计' if language=='zh' else 'points') not in decision['reason_'+language]
 
 
 def test_current_pong_recorded_cases_reproduce_from_their_builder():
@@ -876,11 +878,13 @@ def test_kitchen_delivery_counterfactual_counts_real_completed_orders_independen
     assert ('completed orders change by 1' if language=='en' else '完成订单数变化1') in result['answer']
 
 
-@pytest.mark.parametrize('domain,seed,task,turn',[('pong',731100,2,89),('kitchen',2000,1,10),('kitchen',2000,2,291)])
+@pytest.mark.parametrize('domain,seed,task,turn',[('pong',731100,2,0),('kitchen',2000,1,10),('kitchen',2000,2,291)])
 @pytest.mark.parametrize('language',['en','zh'])
 def test_actual_wait_reason_synonyms_render_once_without_question_keyword_binding(domain,seed,task,turn,language):
     module = get_engine(domain)
     state = kitchen_production_trajectory(turn) if domain=='kitchen' and task==2 else module.initial_state(seed,task)
+    if domain == 'pong':
+        state = fixture(human=2, ai=6, turns=4)
     while state['turn'] < turn:
         state = module.step(state,module.human_advisor(state))
     decision = module.decide(state)
@@ -919,7 +923,10 @@ def test_human_advice_can_use_real_ai_reason_as_coordination_context_but_not_ai_
 
 @pytest.mark.parametrize('language',['en','zh'])
 def test_one_step_human_comparison_explains_visible_deadline_without_extending_window(language):
-    state = simultaneous_ball_fixture()
+    state = pong._new_state([[pong._ball('team', 'cooperative', [0, 6], 2),
+                             pong._ball('s9', 'ordinary', [0], 2),
+                             pong._ball('mine', 'ordinary', [6], 2)]],
+                            seed=123, task=2, human=2, ai=6)
     intents = [{'kind':'counterfactual','subject':'human','purpose':'comparison','evidence_ids':[],
         'actions':[action],'horizon':1} for action in ['left','wait']]
     intents.append({'kind':'facts','subject':'human','purpose':'observation','evidence_ids':['human_catch_deadline']})
@@ -928,7 +935,7 @@ def test_one_step_human_comparison_explains_visible_deadline_without_extending_w
     assert [s['steps_completed'] for s in result['audit']['simulations']] == [1,1]
     assert [s['raw_score_delta'] for s in result['audit']['simulations']] == [0,0]
     assert 's9' in result['answer']
-    assert ('only 1 turn for 2 moves' if language=='en' else '只剩1回合却还要移动2步') in result['answer']
+    assert ('waiting now would miss' if language=='en' else '如果先等待，就会错过') in result['answer']
     assert ('This window shows no score advantage' if language=='en' else '在这个窗口内，两种选择没有得分优势') in result['answer']
 
 

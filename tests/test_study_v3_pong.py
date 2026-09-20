@@ -129,18 +129,18 @@ def test_two_team_deadlines_are_jointly_reachable_and_later_is_tentative():
     assert abs(later['ai_contact']-first['ai_contact']) <= 2
     assert abs(later['human_contact']-first['human_contact']) <= 2
     assert len(decision['reason_en']) < 300
-    assert 'tentative later' in next(f['en'] for f in pong.facts(state) if f['id'] == 'assignment:1')
+    assert 'possible later' in next(f['en'] for f in pong.facts(state) if f['id'] == 'assignment:1')
     result = play(state)
     assert result['raw_score'] == 7
 
 
-def test_unreachable_old_assignment_changes_only_when_needed():
+def test_unreachable_partner_does_not_change_already_selected_ai_side():
     state = scenario(human=6,ai=4,contacts=(3,6),turns=2)
     state['policy_memory'] = {'commitment':{'ball_id':'fixture-team','ai_contact':6,'human_contact':3}}
     decision = pong.decide(state)
-    assert decision['assignment_changed']
-    assert decision['memory']['commitment']['ai_contact'] == 3
-    assert play(state,lambda _:'wait')['raw_score'] == 3
+    assert not decision['assignment_changed']
+    assert decision['memory']['commitment']['ai_contact'] == 6
+    assert play(state,lambda _:'wait')['raw_score'] == 0
 
 
 def test_ordinary_detour_is_rejected_if_return_cannot_meet_deadline():
@@ -399,45 +399,39 @@ def test_why_not_direction_facts_are_short_and_grounded_in_current_deadline():
     decision = pong.decide(state)
     facts = {f['id']:f for f in pong.facts(state)}
     assert 'alternative_left' in facts and 'alternative_right' in facts and 'alternative_wait' in facts
-    assert 'would miss' in facts['alternative_wait']['en']
-    assert 'reachable' in facts['alternative_left']['en']
+    assert 'too far to catch' in facts['alternative_wait']['en']
+    assert 'still leaves time' in facts['alternative_left']['en']
     assert len(decision['reason_en']) < 300
     assert 'lane 7' in decision['reason_en']
 
 
 def production_t3_assignment_snapshot():
-    """Reproduce the exported production QA snapshot, not a guessed fixture."""
+    """Fixed-seed v6 rollout; v5 exported snapshots remain historical evidence."""
     state = pong.initial_state(731100,2)
     for _ in range(8):
         state = pong.step(state,pong.human_advisor(state))
     return state
 
 
-def test_production_unselected_t3_names_actual_t4_plan_without_changing_control_decision():
-    import hashlib
-    digest = lambda value: hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+def test_fixed_seed_unselected_ball_names_actual_selected_competitor():
     state = production_t3_assignment_snapshot()
     before = deepcopy(state)
     decision = pong.decide(state)
-    # The v3.4 production state and all non-prose decision fields remain fixed.
-    assert digest(state) == '30e01cf53a40a9b0847fdbf62b33a7dcbbae934172dafe206cbb846608a3591d'
-    control = {key:value for key,value in decision.items() if key not in ('reason_en','reason_zh','action_alternatives')}
-    assert digest(control) == '719fd880c54fac0ef8a6b7741262db6271561d9de0bf5ce5a6c2231c0e9626a2'
     facts = {row['id']:row for row in pong.facts(state,decision)}
-    t3,t4,t5 = (facts['ball_plan:'+name] for name in ('t3','t4','t5'))
-    assert t3['plan_status'] == 'not_selected'
-    assert 't3 is not selected' in t3['en']
-    assert 'taking t4 at the same arrival' in t3['en']
-    assert 'I cover lane 7; you cover lane 1' in t3['en']
-    assert 'cannot catch both' in t3['en']
-    assert '当前接球计划没有选择t3' in t3['zh']
-    assert '我覆盖第7道，你覆盖第1道' in t3['zh']
-    assert t4['plan_status'] == 'committed'
-    assert t5['plan_status'] == 'tentative' and 'later plan can change' in t5['en']
+    t3,t4,t6 = (facts['ball_plan:'+name] for name in ('t3','t4','t6'))
+    assert t4['plan_status'] == 'not_selected'
+    assert 't4 is not selected' in t4['en']
+    assert 'taking t3 at the same arrival' in t4['en']
+    assert 'I cover lane 3; you cover lane 9' in t4['en']
+    assert 'cannot catch both' in t4['en']
+    assert '当前接球计划没有选择t4' in t4['zh']
+    assert '我覆盖第3道，你覆盖第9道' in t4['zh']
+    assert t3['plan_status'] == 'committed'
+    assert t6['plan_status'] == 'tentative' and 'later plan can change' in t6['en']
     for index,row in enumerate(decision['alternatives']):
-        if row.get('ball_id') == 't3':
+        if row.get('ball_id') == 't4':
             checked=facts[f'comparison:{index}']
-            assert checked['en'].startswith('t3 is not selected;')
+            assert checked['en'].startswith('t4 is not selected;')
             assert 'not our current plan' in checked['en']
             assert '不是当前分工' in checked['zh']
     assert state == before
@@ -448,11 +442,11 @@ def test_production_nearest_contact_is_not_mistaken_for_the_chosen_ball():
     state = production_t3_assignment_snapshot()
     facts = {row['id']:row for row in pong.facts(state)}
     human,ai = facts['human_nearest_ball'],facts['ai_nearest_ball']
-    # s11 and t3 both have the human's lane at four turns; ID breaks the tie.
-    assert (human['ball_id'],human['contact_lane'],human['horizontal_distance'],human['arrival_turns']) == ('s11',3,0,4)
+    # The v6 AI now chooses the overlapping small/team side on the left.
+    assert (human['ball_id'],human['contact_lane'],human['horizontal_distance'],human['arrival_turns']) == ('s12',7,0,4)
     assert human['plan_status'] == 'not_selected'
     assert 'not selected' in human['en'] and '横向道距离' in human['zh']
-    assert (ai['ball_id'],ai['contact_lane'],ai['horizontal_distance'],ai['arrival_turns']) == ('s12',7,0,4)
+    assert (ai['ball_id'],ai['contact_lane'],ai['horizontal_distance'],ai['arrival_turns']) == ('s11',3,0,4)
     assert ai['plan_status'] == 'selected' and 'assigns it to me' in ai['en']
     assert set(facts) >= {'ball_plan:'+b['id'] for b in state['balls']}
 
@@ -495,16 +489,15 @@ def test_real_turn76_explains_right_contact_when_moving_left_and_actual_four_poi
     facts = {row['id']:row for row in pong.facts(state,decision)}
     payoff = facts['arrival_payoff:2']
     assert decision['action'] == 'left'
-    assert "t26's right contact (lane 5)" in decision['reason_en']
-    assert 't26的右接点（第5道）' in decision['reason_zh']
-    assert 'If I reach lane 5 and you reach lane 2 in 2 turns' in decision['reason_en']
-    assert 'my s78(1) + our t26(3) = 4 points' in decision['reason_en']
-    assert '我接s78（1分）＋合作接t26（3分），合计4分' in decision['reason_zh']
+    assert 'lane 5 to cover small ball s78 and my end of team ball t26 together in 2 turns' in decision['reason_en']
+    assert '同时接2回合后的小球s78和大球t26的一端' in decision['reason_zh']
+    assert 'You need lane 2' in decision['reason_en']
+    assert 'points' not in decision['reason_en'] and '最高' not in decision['reason_zh']
     assert payoff['raw_points'] == payoff['maximum_at_arrival'] == 4
     assert {row['ball_id'] for row in payoff['catches']} == {'s78','t26'}
     assert 'ball_payoff:t25' not in facts  # A reachable but unselected ball is not an actual payoff.
     assert facts['ball_plan:t25']['plan_status'] == 'not_selected'
-    assert 'cannot keep our earlier' in facts['alternative_wait']['en']
+    assert 'too far to catch' in facts['alternative_wait']['en']
     initial_points = state['raw_score']
     for _ in range(2):
         state = pong.step(state,pong.human_advisor(state))
@@ -533,8 +526,8 @@ def test_payoff_maximum_respects_prior_feasible_commitment_not_global_points():
     state['policy_memory'] = {'commitment':{'ball_id':'prior','ai_contact':6,'human_contact':2}}
     payoff = next(row for row in pong.facts(state) if row['id'] == 'arrival_payoff:2')
     assert payoff['raw_points'] == payoff['maximum_at_arrival'] == 3
-    assert 'for this arrival while keeping earlier assignments that remain reachable' in payoff['en']
-    assert payoff['scope'] == 'currently_visible_balls_at_this_arrival_preserving_prior_feasible_commitments'
+    assert 'highest' not in payoff['en']
+    assert payoff['scope'] == 'currently_visible_balls_at_this_arrival_preserving_selected_ai_route'
     unconstrained = deepcopy(state)
     unconstrained['policy_memory'] = {}
     assert pong._arrival_capacity_with_commitments(pong._observation(unconstrained),2) == 4
@@ -555,13 +548,13 @@ def test_selected_payoff_below_single_arrival_bound_never_claims_highest():
 def test_why_not_reports_conditional_single_arrival_bound_not_guaranteed_reward():
     state = scenario(human=1,ai=7,turns=1,ordinary=6)
     facts = {row['id']:row for row in pong.facts(state)}
-    assert 'at most 4 points' in facts['alternative_left']['en']
-    assert 'at most 0 points' in facts['alternative_wait']['en']
-    assert 'visible balls arriving in 1 turn only' in facts['alternative_left']['en']
+    assert 'still leaves time' in facts['alternative_left']['en']
+    assert 'too far to catch' in facts['alternative_wait']['en']
+    assert 'points' not in facts['alternative_left']['en']
     # A saved commitment is a constraint; failure to preserve it is not proof of zero possible points.
     state['policy_memory'] = {'commitment':{'ball_id':'fixture-team','ai_contact':6,'human_contact':2}}
     facts = {row['id']:row for row in pong.facts(state)}
-    assert 'cannot keep our earlier team-ball assignments' in facts['alternative_wait']['en']
+    assert 'too far to catch' in facts['alternative_wait']['en']
     assert 'at most 0 points' not in facts['alternative_wait']['en']
 
 
@@ -586,11 +579,12 @@ def test_human_catch_deadline_uses_actual_selected_contacts_and_does_not_claim_s
     for _ in range(8):
         state = pong.step(state,pong.human_advisor(state))
     row = next(f for f in pong.facts(state) if f['id']=='human_catch_deadline')
-    assert row['ball_ids']==['s9'] and row['contact_lane']==1
+    assert row['ball_ids']==['s10'] and row['contact_lane']==9
     assert row['horizontal_distance']==row['arrival_turns']==2
-    assert row['advised_action']=='left' and row['advised_reachable'] and not row['wait_reachable']
+    assert row['advised_action']=='right' and row['advised_reachable'] and not row['wait_reachable']
     # A single ordinary selected catch with slack does not prove waiting worse.
     slack = pong._new_state([[pong._ball('slack','ordinary',[0],4)]],seed=200,task=2,human=1,ai=8)
     row = next(f for f in pong.facts(slack) if f['id']=='human_catch_deadline')
     assert row['wait_reachable']
-    assert 'does not establish a score advantage' in row['en']
+    assert 'score' not in row['en']
+    assert 'Go to lane 1' in row['en']

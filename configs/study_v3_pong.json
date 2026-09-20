@@ -1,5 +1,5 @@
 {
-  "version": "pong-concurrent.v5.0",
+  "version": "pong-concurrent.v6.0",
   "scenario_version": "pong-concurrent-schedule.v5.0",
   "lanes": 9,
   "weights": {
@@ -68,5 +68,6 @@
   "max_visible": {
     "ordinary": 6,
     "cooperative": 4
-  }
+  },
+  "controller_policy": "AI-led small/team simultaneous overlap preference; initial joint reachability; freeze the selected near-term AI route through its target arrival even if the human leaves the assigned contact. No unseen future balls."
 }

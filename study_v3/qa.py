@@ -16,7 +16,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-VERSION = "study-evidence-qa.v3.6"
+VERSION = "study-evidence-qa.v3.7"
 MAX_STEPS = 12
 _PURPOSES = ("action", "reason", "advice", "comparison", "observation", "rule", "assignment")
 _ACTIONS = {
@@ -53,7 +53,8 @@ Schema:
             {"kind":"facts","subject":"shared","purpose":"assignment",
              "object_id":"t3","evidence_ids":["ball_plan:t3"]},
             {"kind":"counterfactual","subject":"human","purpose":"comparison",
-             "evidence_ids":[],"actions":["left"],"horizon":1},
+             "evidence_ids":[],"actions":["left"],"horizon":1,
+             "answer_focus":"ai_action"},
             {"kind":"counterfactual","subject":"human","purpose":"comparison",
              "evidence_ids":[],"intervention":{"human_lane":5},"actions":[],"horizon":0}]}
 
@@ -129,6 +130,9 @@ facts. Answer only what was asked: current-action reasons do not need future
 assignments, every visible ball, unrelated rules, human advice or a whole plan.
 For "why not move left/right/wait?", use the named AI-action alternative fact
 if present, not alternatives for every ball. Do not add unrelated comparisons.
+In Pong, this is ONE comparison intent containing ONLY the requested
+alternative fact; do not also add a reason intent, system:ai_reason, scores or
+other targets unless the question separately asks for them.
 In Warehouse, if system:ai_reason already names the requested alternative AI
 move, the specific conflicting human command and the collision location or kind,
 that reason alone answers why not: do not repeat the same collision using an
@@ -176,10 +180,19 @@ is not selected, clearly use that fact instead of promising contact lanes for
 it. Add a ball's contact/arrival fact only when that detail was also asked.
 An ambiguous unnamed ball still needs clarification. object_id is required
 only for assignment intents. Position hypotheses remain counterfactual intents.
-For "why this action?", system:ai_reason already names the intended contact,
-arrival time and simultaneous catch points when relevant. Use that one reason;
-do not repeat it through ball_plan or arrival_payoff/ball_payoff. Select those
-additional facts only for a separate requested detail absent from the reason.
+For Pong "why this action?", select ONLY system:ai_reason (performed: prefixed
+when applicable). Its two-sentence answer already names the actual target lane,
+the relevant small and large balls and their arrival time, plus the human's
+other contact when needed. Do not add score arithmetic, positions, secondary
+targets, optimality claims, ball_plan or arrival_payoff/ball_payoff. A separate
+explicit question about points or another ball may select the matching fact in
+a separate intent. The fixed AI chooses a reachable small/large-ball combination
+and keeps its selected target; the participant coordinates with that plan.
+Do not say the AI changes its goal to accommodate a human's deviation unless
+the real decision/simulation evidence actually establishes a target change.
+Performed Pong reason facts already use the displayed frame's remaining time
+or say that the balls arrived in this recorded turn. Do not add a second
+before-action time statement or turn that recorded outcome into a future plan.
 For "Which ball am I closest to, how many turns until it arrives, and how can
 I coordinate with you?", select human_nearest_ball for distance AND arrival,
 then system:human_advice plus the current selected coordination condition.
@@ -212,6 +225,12 @@ In "If I wait four turns, can you catch both balls?", the condition is a HUMAN
 action sequence, so use a human counterfactual for four waits even though the
 requested outcome concerns the AI. AI plan facts alone cannot verify the
 conditional outcome. Apply this equally to Chinese conditional questions.
+For Pong action counterfactuals, include answer_focus="ai_action" when the
+question asks what the AI would do, how it would move or where it would go
+(including "如果我等待，你会怎么做"). This renders only the real simulated AI
+actions/positions and outcomes for its selected targets, not all balls or score
+arithmetic. Use answer_focus="summary" for general "what happens" questions or
+questions about catches/scores. Other domains must omit answer_focus.
 Pong POSITION hypotheticals are a separate supported intervention. For "If I
 were at lane 5, how would you move?" (or "如果我在第5道，你会怎么移动？"),
 set intervention={"human_lane":5}, subject=human, purpose=comparison,
@@ -411,6 +430,14 @@ def _performed_catalog(engine, state, context):
             reason[lang] = ("My reasoning before this turn's action was: " if lang == "en" else "本步行动前的判断是：") + text
         else:
             reason[lang] = actual[lang] + (" At the time: " if lang == "en" else "当时：") + text
+    if state["domain"] == "pong" and hasattr(engine, "performed_reason"):
+        # Pong's structured saved target can express the incoming action in
+        # two sentences while counting arrivals from the displayed result.
+        # Never re-plan here: later decisions may have a different target.
+        concise = engine.performed_reason(before, recorded, state)
+        if not isinstance(concise, dict) or any(not isinstance(concise.get(lang), str) for lang in ("en", "zh")):
+            raise PlanError("malformed_performed_reason")
+        reason = {lang: concise[lang] for lang in ("en", "zh")}
     # A stored decision is a simultaneous pre-action commitment, not proof
     # that its intended interaction succeeded. Kitchen can legitimately cancel
     # a bin interaction when the human clears the counter in that same turn.
@@ -489,8 +516,11 @@ def _validate_plan(plan, evidence, state=None, *, temporal_context=False):
     for intent in intents:
         if not isinstance(intent, dict) or intent.get("kind") not in ("facts", "counterfactual"):
             raise PlanError("invalid_intent")
-        if set(intent) - {"kind", "evidence_ids", "actions", "horizon", "subject", "purpose", "intervention", "object_id", "temporal_scope"}:
+        if set(intent) - {"kind", "evidence_ids", "actions", "horizon", "subject", "purpose", "intervention", "object_id", "temporal_scope", "answer_focus"}:
             raise PlanError("unexpected_intent_fields")
+        if "answer_focus" in intent and (intent['kind'] != 'counterfactual' or state is None or state['domain'] != 'pong'
+                                          or intent['answer_focus'] not in ('ai_action', 'summary')):
+            raise PlanError("invalid_answer_focus")
         scope = intent.get("temporal_scope")
         if (temporal_context and scope not in ("current", "performed")) or (scope is not None and scope not in ("current", "performed")):
             raise PlanError("missing_temporal_scope")
@@ -565,6 +595,7 @@ def simulate(engine, state, decision, actions, horizon=1, *, intervention=None):
     current = deepcopy(state)
     hypothetical = None
     if intervention is not None:
+        actual_decision = decision
         current["human"]["x"] = intervention["human_lane"] - 1
         decision = engine.decide(current)
         hypothetical = {"human_lane": intervention["human_lane"],
@@ -572,12 +603,18 @@ def simulate(engine, state, decision, actions, horizon=1, *, intervention=None):
                         "ai_action": None if current["terminal"] else decision["action"],
                         "reason_en": decision["reason_en"], "reason_zh": decision["reason_zh"],
                         "input_state_hash": _digest(current)}
+        if state["domain"] == "pong" and hasattr(engine, "target_identity"):
+            # The hypothetical reruns the real controller with its existing
+            # commitments. Equal targets may have different human reachability.
+            hypothetical["target_unchanged"] = bool(
+                decision.get("explanation_target")
+                and engine.target_identity(actual_decision) == engine.target_identity(decision))
     assumed = horizon - len(actions)
     sequence = list(actions) + ["wait"] * assumed
     initial_public = engine.public_state(current)
     known_orders = {o["id"] for o in initial_public.get("orders", [])}
     known_balls = {b["id"] for b in initial_public.get("balls", [])}
-    events, trace = [], []
+    events, trace, focus_ball_ids = [], [], set()
     boundary, illegal, done = False, None, 0
     for index, action in enumerate(sequence):
         if current["terminal"]:
@@ -586,6 +623,9 @@ def simulate(engine, state, decision, actions, horizon=1, *, intervention=None):
             illegal = {"action": action, "step": index + 1}
             break
         actual_decision = deepcopy(decision) if index == 0 else engine.decide(current)
+        if current['domain'] == 'pong':
+            target = actual_decision.get('explanation_target') or {}
+            focus_ball_ids.update(target.get('small_ids', []) + target.get('team_ids', []))
         nxt = engine.step(current, action, actual_decision)
         view = engine.public_state(nxt)
         boundary = (bool({o["id"] for o in view.get("orders", [])} - known_orders) or
@@ -616,6 +656,8 @@ def simulate(engine, state, decision, actions, horizon=1, *, intervention=None):
             "trace": trace, "input_state_hash": before_hash}
     if hypothetical is not None:
         result["intervention"] = hypothetical
+    if state['domain'] == 'pong':
+        result['focus_ball_ids'] = sorted(focus_ball_ids)
     if state["domain"] == "kitchen":
         # Points include time/disposal penalties; order counts are a separate
         # physical metric and must never be inferred by converting points.
@@ -625,7 +667,7 @@ def simulate(engine, state, decision, actions, horizon=1, *, intervention=None):
     return result
 
 
-def _simulation_text(result, language, domain, *, include_scope=True):
+def _simulation_text(result, language, domain, *, include_scope=True, answer_focus="summary"):
     intervention = result.get("intervention")
     hypothetical_text = ""
     if intervention:
@@ -634,8 +676,12 @@ def _simulation_text(result, language, domain, *, include_scope=True):
         if action is None:
             return _text((f"Even if you were in lane {lane}, this task has finished; I have no next move.",
                           f"即使假设你在第{lane}道，本任务也已结束，我没有下一步动作。"), language)
-        hypothetical_text = _text((f"If you were in lane {lane}: ",
-                                   f"假设你在第{lane}道："), language)
+        if intervention.get("target_unchanged"):
+            hypothetical_text = _text((f"If you were in lane {lane}, I would keep the same target: ",
+                                       f"假设你在第{lane}道，我仍保持原目标："), language)
+        else:
+            hypothetical_text = _text((f"If you were in lane {lane}: ",
+                                       f"假设你在第{lane}道："), language)
         hypothetical_text += intervention["reason_" + language]
         if result["horizon"] == 0:
             return hypothetical_text + _text((" This is a hypothetical position; the game has not changed.",
@@ -658,6 +704,39 @@ def _simulation_text(result, language, domain, *, include_scope=True):
     if result["assumed_wait_turns"]:
         text += _text((f", then wait for the next {result['assumed_wait_turns']} turns as an explicit assumption", f"，并明确假设之后等待{result['assumed_wait_turns']}回合"), language)
     turn_word = "turn" if result["steps_completed"] == 1 else "turns"
+    if domain == 'pong' and answer_focus == 'ai_action' and result['trace']:
+        moves = []
+        for row in result['trace']:
+            action = row['ai_action']
+            if moves and moves[-1][0] == action:
+                moves[-1][1] += 1
+            else:
+                moves.append([action, 1])
+        actions_en = ', then '.join(_ACTIONS[action][0] + (f' for {count} turns' if count > 1 else '') for action, count in moves)
+        actions_zh = '，再'.join((f'连续{count}回合' if count > 1 else '') + _ACTIONS[action][1] for action, count in moves)
+        text += _text((f": I would {actions_en}, ending in lane {result['ai']['x'] + 1}.",
+                       f"：我会{actions_zh}，最后到第{result['ai']['x'] + 1}道。"), language)
+        focused = set(result.get('focus_ball_ids', []))
+        relevant = [event for event in result['events'] if event.get('ball_id') in focused]
+        caught = [event['ball_id'] for event in relevant if event['type'] == 'caught']
+        missed = [event['ball_id'] for event in relevant if event['type'] == 'missed']
+        outcomes_en, outcomes_zh = [], []
+        if caught:
+            outcomes_en.append('catch ' + ' and '.join(caught))
+            outcomes_zh.append('接住' + '、'.join(caught))
+        if missed:
+            outcomes_en.append('miss ' + ' and '.join(missed))
+            outcomes_zh.append('漏接' + '、'.join(missed))
+        if outcomes_en:
+            text += _text((' We would ' + ', but '.join(outcomes_en) + '.',
+                           '我们会' + '，但会'.join(outcomes_zh) + '。'), language)
+        if result['illegal_action']:
+            invalid = result['illegal_action']
+            text += _text((f" Your action {invalid['step']} was unavailable and was not executed.",
+                           f"你的第{invalid['step']}步在该位置不可用，没有执行。"), language)
+        if include_scope and result['stopped_at_public_boundary']:
+            text += _text((" Simulation stops when new balls appear.", "模拟在新球出现时停止。"), language)
+        return text
     if domain == "pong":
         # A compact consequence; step-by-step evidence remains in the audit.
         text += _text((f": after {result['steps_completed']} {turn_word}, you are in lane {result['human']['x'] + 1} and I am in lane {result['ai']['x'] + 1}; task score changes by {result['task_score_delta']:g} points.",
@@ -855,11 +934,14 @@ class Explainer:
                         intervention = intent.get("intervention")
                         horizon = intent.get("horizon", len(actions) if intervention is not None else 1)
                         simulation = simulate(engine, state, decision, actions, horizon, intervention=intervention)
+                        if state['domain'] == 'pong':
+                            simulation['answer_focus'] = intent.get('answer_focus', 'summary')
                         audit["simulations"].append(simulation)
-                        simulation_parts.append(_simulation_text(simulation, selected_language, state["domain"]))
+                        simulation_parts.append(_simulation_text(simulation, selected_language, state["domain"],
+                            answer_focus=intent.get('answer_focus', 'summary')))
                         ids.append(f"simulation:{len(audit['simulations'])}")
                 simulations = audit["simulations"]
-                if state["domain"] == "pong" and len(simulations) == 2 and not any(s.get("intervention") for s in simulations):
+                if state["domain"] == "pong" and len(simulations) == 2 and not any(s.get("intervention") or s.get('answer_focus') == 'ai_action' for s in simulations):
                     simulation_parts = [_simulation_text(s, selected_language, "pong", include_scope=False) for s in simulations]
                     left, right = simulations
                     if left["steps_completed"] == right["steps_completed"] and left["raw_score_delta"] == right["raw_score_delta"] and not any(s["illegal_action"] for s in simulations):

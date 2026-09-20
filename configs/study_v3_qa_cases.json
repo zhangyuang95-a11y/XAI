@@ -1,5 +1,5 @@
 {
-  "version": "three-domain-qa-cases.v3.2",
+  "version": "three-domain-qa-cases.v3.7",
   "evaluation_status": "Injected composition fixtures only; they do not establish real-provider question understanding.",
   "external_case_files": [
     "domains/kitchen/qa_cases.json",
@@ -13,7 +13,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -2036,7 +2036,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -4059,7 +4059,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -6078,7 +6078,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -8097,7 +8097,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -10111,7 +10111,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -12125,7 +12125,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -14139,7 +14139,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -16153,7 +16153,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -18167,7 +18167,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -20181,7 +20181,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -22195,7 +22195,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -24209,7 +24209,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -26223,7 +26223,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -28237,7 +28237,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -28335,7 +28335,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -28433,7 +28433,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -30447,7 +30447,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -32461,7 +32461,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -34475,7 +34475,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -36489,7 +36489,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -38503,7 +38503,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -40517,7 +40517,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -40622,7 +40622,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -40727,7 +40727,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -40830,7 +40830,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -40929,11 +40929,11 @@
     {
       "case_id": "pong-rolling-first-commitment-en",
       "domain": "pong",
-      "question": "Which side have you committed to for the earlier team ball?",
+      "question": "Which side have you selected for the earlier team ball?",
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -41086,11 +41086,11 @@
     {
       "case_id": "pong-rolling-first-commitment-zh",
       "domain": "pong",
-      "question": "对于先到的大球，你已经承诺接哪一侧？",
+      "question": "对于先到的大球，你已经选定接哪一侧？",
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -41247,7 +41247,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -41404,7 +41404,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -41561,7 +41561,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -41717,7 +41717,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -41873,7 +41873,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -42004,7 +42004,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -42135,7 +42135,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -42266,7 +42266,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -42397,7 +42397,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -42528,7 +42528,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -42659,7 +42659,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -42762,7 +42762,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -42865,7 +42865,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -42965,7 +42965,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -43065,7 +43065,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -43168,7 +43168,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -43271,7 +43271,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 2,
@@ -43319,8 +43319,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t2",
               "ai_contact": 8,
+              "ball_id": "t2",
               "human_contact": 3,
               "locked": true
             },
@@ -43332,11 +43332,17 @@
             }
           ],
           "commitment": {
-            "ball_id": "t2",
             "ai_contact": 8,
+            "ball_id": "t2",
             "human_contact": 3,
             "locked": true
-          }
+          },
+          "ai_route": [
+            7,
+            6,
+            7,
+            8
+          ]
         },
         "seed": 730100,
         "human": {
@@ -45351,7 +45357,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 2,
@@ -45399,8 +45405,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t2",
               "ai_contact": 8,
+              "ball_id": "t2",
               "human_contact": 3,
               "locked": true
             },
@@ -45412,11 +45418,17 @@
             }
           ],
           "commitment": {
-            "ball_id": "t2",
             "ai_contact": 8,
+            "ball_id": "t2",
             "human_contact": 3,
             "locked": true
-          }
+          },
+          "ai_route": [
+            7,
+            6,
+            7,
+            8
+          ]
         },
         "seed": 730100,
         "human": {
@@ -47431,7 +47443,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 2,
@@ -47479,8 +47491,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t2",
               "ai_contact": 8,
+              "ball_id": "t2",
               "human_contact": 3,
               "locked": true
             },
@@ -47492,11 +47504,17 @@
             }
           ],
           "commitment": {
-            "ball_id": "t2",
             "ai_contact": 8,
+            "ball_id": "t2",
             "human_contact": 3,
             "locked": true
-          }
+          },
+          "ai_route": [
+            7,
+            6,
+            7,
+            8
+          ]
         },
         "seed": 730100,
         "human": {
@@ -49497,7 +49515,7 @@
       "public_history": [
         {
           "domain": "pong",
-          "version": "pong-concurrent.v5.0",
+          "version": "pong-concurrent.v6.0",
           "task": 2,
           "turn": 0,
           "max_turns": 90,
@@ -49649,7 +49667,7 @@
         },
         {
           "domain": "pong",
-          "version": "pong-concurrent.v5.0",
+          "version": "pong-concurrent.v6.0",
           "task": 2,
           "turn": 1,
           "max_turns": 90,
@@ -49801,7 +49819,7 @@
         },
         {
           "domain": "pong",
-          "version": "pong-concurrent.v5.0",
+          "version": "pong-concurrent.v6.0",
           "task": 2,
           "turn": 2,
           "max_turns": 90,
@@ -49996,7 +50014,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 2,
@@ -50044,8 +50062,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t2",
               "ai_contact": 8,
+              "ball_id": "t2",
               "human_contact": 3,
               "locked": true
             },
@@ -50057,11 +50075,17 @@
             }
           ],
           "commitment": {
-            "ball_id": "t2",
             "ai_contact": 8,
+            "ball_id": "t2",
             "human_contact": 3,
             "locked": true
-          }
+          },
+          "ai_route": [
+            7,
+            6,
+            7,
+            8
+          ]
         },
         "seed": 730100,
         "human": {
@@ -52062,7 +52086,7 @@
       "public_history": [
         {
           "domain": "pong",
-          "version": "pong-concurrent.v5.0",
+          "version": "pong-concurrent.v6.0",
           "task": 2,
           "turn": 0,
           "max_turns": 90,
@@ -52214,7 +52238,7 @@
         },
         {
           "domain": "pong",
-          "version": "pong-concurrent.v5.0",
+          "version": "pong-concurrent.v6.0",
           "task": 2,
           "turn": 1,
           "max_turns": 90,
@@ -52366,7 +52390,7 @@
         },
         {
           "domain": "pong",
-          "version": "pong-concurrent.v5.0",
+          "version": "pong-concurrent.v6.0",
           "task": 2,
           "turn": 2,
           "max_turns": 90,
@@ -52561,7 +52585,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 2,
@@ -52609,8 +52633,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t2",
               "ai_contact": 8,
+              "ball_id": "t2",
               "human_contact": 3,
               "locked": true
             },
@@ -52622,11 +52646,17 @@
             }
           ],
           "commitment": {
-            "ball_id": "t2",
             "ai_contact": 8,
+            "ball_id": "t2",
             "human_contact": 3,
             "locked": true
-          }
+          },
+          "ai_route": [
+            7,
+            6,
+            7,
+            8
+          ]
         },
         "seed": 730100,
         "human": {
@@ -54627,7 +54657,7 @@
       "public_history": [
         {
           "domain": "pong",
-          "version": "pong-concurrent.v5.0",
+          "version": "pong-concurrent.v6.0",
           "task": 2,
           "turn": 0,
           "max_turns": 90,
@@ -54779,7 +54809,7 @@
         },
         {
           "domain": "pong",
-          "version": "pong-concurrent.v5.0",
+          "version": "pong-concurrent.v6.0",
           "task": 2,
           "turn": 1,
           "max_turns": 90,
@@ -54931,7 +54961,7 @@
         },
         {
           "domain": "pong",
-          "version": "pong-concurrent.v5.0",
+          "version": "pong-concurrent.v6.0",
           "task": 2,
           "turn": 2,
           "max_turns": 90,
@@ -55126,7 +55156,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 2,
@@ -55174,8 +55204,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t2",
               "ai_contact": 8,
+              "ball_id": "t2",
               "human_contact": 3,
               "locked": true
             },
@@ -55187,11 +55217,17 @@
             }
           ],
           "commitment": {
-            "ball_id": "t2",
             "ai_contact": 8,
+            "ball_id": "t2",
             "human_contact": 3,
             "locked": true
-          }
+          },
+          "ai_route": [
+            7,
+            6,
+            7,
+            8
+          ]
         },
         "seed": 730100,
         "human": {
@@ -57192,7 +57228,7 @@
       "public_history": [
         {
           "domain": "pong",
-          "version": "pong-concurrent.v5.0",
+          "version": "pong-concurrent.v6.0",
           "task": 2,
           "turn": 0,
           "max_turns": 90,
@@ -57344,7 +57380,7 @@
         },
         {
           "domain": "pong",
-          "version": "pong-concurrent.v5.0",
+          "version": "pong-concurrent.v6.0",
           "task": 2,
           "turn": 1,
           "max_turns": 90,
@@ -57496,7 +57532,7 @@
         },
         {
           "domain": "pong",
-          "version": "pong-concurrent.v5.0",
+          "version": "pong-concurrent.v6.0",
           "task": 2,
           "turn": 2,
           "max_turns": 90,
@@ -57691,7 +57727,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -57849,7 +57885,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -58007,7 +58043,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -60030,7 +60066,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -62053,7 +62089,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -62156,7 +62192,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -62259,7 +62295,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -62362,7 +62398,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -62465,7 +62501,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -62598,7 +62634,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -62731,7 +62767,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -62872,7 +62908,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -63013,7 +63049,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -65016,7 +65052,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -67015,11 +67051,11 @@
     {
       "case_id": "pong-rolling-real-turn76-why-en",
       "domain": "pong",
-      "question": "Why are you moving left, which contact are you covering, and how many points can we get together at that arrival?",
+      "question": "Why will you move left next, and which small and team balls does that target cover together?",
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 76,
@@ -67067,8 +67103,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t26",
               "ai_contact": 4,
+              "ball_id": "t26",
               "human_contact": 1,
               "locked": true
             },
@@ -67080,11 +67116,15 @@
             }
           ],
           "commitment": {
-            "ball_id": "t26",
             "ai_contact": 4,
+            "ball_id": "t26",
             "human_contact": 1,
             "locked": true
-          }
+          },
+          "ai_route": [
+            5,
+            4
+          ]
         },
         "seed": 731100,
         "human": {
@@ -69043,18 +69083,18 @@
             }
           }
         ],
-        "raw_score": 95,
+        "raw_score": 92,
         "total_possible_points": 180,
         "metrics": {
           "cooperative_caught": 12,
-          "ordinary_caught": 59,
+          "ordinary_caught": 56,
           "cooperative_total": 30,
           "ordinary_total": 90,
-          "misses": 29,
+          "misses": 32,
           "assignment_switches": 0,
           "assignment_releases": 0,
-          "waiting_turns": 4,
-          "holding_turns": 4,
+          "waiting_turns": 0,
+          "holding_turns": 0,
           "no_job_waiting_turns": 0
         }
       },
@@ -69091,11 +69131,11 @@
     {
       "case_id": "pong-rolling-real-turn76-why-zh",
       "domain": "pong",
-      "question": "为什么你往左走，具体去哪个接点，同回合我们配合能得几分？",
+      "question": "你下一步为什么左移，这个目标能同时接哪一个小球和大球？",
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 76,
@@ -69143,8 +69183,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t26",
               "ai_contact": 4,
+              "ball_id": "t26",
               "human_contact": 1,
               "locked": true
             },
@@ -69156,11 +69196,15 @@
             }
           ],
           "commitment": {
-            "ball_id": "t26",
             "ai_contact": 4,
+            "ball_id": "t26",
             "human_contact": 1,
             "locked": true
-          }
+          },
+          "ai_route": [
+            5,
+            4
+          ]
         },
         "seed": 731100,
         "human": {
@@ -71119,18 +71163,18 @@
             }
           }
         ],
-        "raw_score": 95,
+        "raw_score": 92,
         "total_possible_points": 180,
         "metrics": {
           "cooperative_caught": 12,
-          "ordinary_caught": 59,
+          "ordinary_caught": 56,
           "cooperative_total": 30,
           "ordinary_total": 90,
-          "misses": 29,
+          "misses": 32,
           "assignment_switches": 0,
           "assignment_releases": 0,
-          "waiting_turns": 4,
-          "holding_turns": 4,
+          "waiting_turns": 0,
+          "holding_turns": 0,
           "no_job_waiting_turns": 0
         }
       },
@@ -71171,7 +71215,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 76,
@@ -71219,8 +71263,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t26",
               "ai_contact": 4,
+              "ball_id": "t26",
               "human_contact": 1,
               "locked": true
             },
@@ -71232,11 +71276,15 @@
             }
           ],
           "commitment": {
-            "ball_id": "t26",
             "ai_contact": 4,
+            "ball_id": "t26",
             "human_contact": 1,
             "locked": true
-          }
+          },
+          "ai_route": [
+            5,
+            4
+          ]
         },
         "seed": 731100,
         "human": {
@@ -73195,18 +73243,18 @@
             }
           }
         ],
-        "raw_score": 95,
+        "raw_score": 92,
         "total_possible_points": 180,
         "metrics": {
           "cooperative_caught": 12,
-          "ordinary_caught": 59,
+          "ordinary_caught": 56,
           "cooperative_total": 30,
           "ordinary_total": 90,
-          "misses": 29,
+          "misses": 32,
           "assignment_switches": 0,
           "assignment_releases": 0,
-          "waiting_turns": 4,
-          "holding_turns": 4,
+          "waiting_turns": 0,
+          "holding_turns": 0,
           "no_job_waiting_turns": 0
         }
       },
@@ -73242,7 +73290,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 76,
@@ -73290,8 +73338,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t26",
               "ai_contact": 4,
+              "ball_id": "t26",
               "human_contact": 1,
               "locked": true
             },
@@ -73303,11 +73351,15 @@
             }
           ],
           "commitment": {
-            "ball_id": "t26",
             "ai_contact": 4,
+            "ball_id": "t26",
             "human_contact": 1,
             "locked": true
-          }
+          },
+          "ai_route": [
+            5,
+            4
+          ]
         },
         "seed": 731100,
         "human": {
@@ -75266,18 +75318,18 @@
             }
           }
         ],
-        "raw_score": 95,
+        "raw_score": 92,
         "total_possible_points": 180,
         "metrics": {
           "cooperative_caught": 12,
-          "ordinary_caught": 59,
+          "ordinary_caught": 56,
           "cooperative_total": 30,
           "ordinary_total": 90,
-          "misses": 29,
+          "misses": 32,
           "assignment_switches": 0,
           "assignment_releases": 0,
-          "waiting_turns": 4,
-          "holding_turns": 4,
+          "waiting_turns": 0,
+          "holding_turns": 0,
           "no_job_waiting_turns": 0
         }
       },
@@ -75313,7 +75365,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 76,
@@ -75361,8 +75413,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t26",
               "ai_contact": 4,
+              "ball_id": "t26",
               "human_contact": 1,
               "locked": true
             },
@@ -75374,11 +75426,15 @@
             }
           ],
           "commitment": {
-            "ball_id": "t26",
             "ai_contact": 4,
+            "ball_id": "t26",
             "human_contact": 1,
             "locked": true
-          }
+          },
+          "ai_route": [
+            5,
+            4
+          ]
         },
         "seed": 731100,
         "human": {
@@ -77337,18 +77393,18 @@
             }
           }
         ],
-        "raw_score": 95,
+        "raw_score": 92,
         "total_possible_points": 180,
         "metrics": {
           "cooperative_caught": 12,
-          "ordinary_caught": 59,
+          "ordinary_caught": 56,
           "cooperative_total": 30,
           "ordinary_total": 90,
-          "misses": 29,
+          "misses": 32,
           "assignment_switches": 0,
           "assignment_releases": 0,
-          "waiting_turns": 4,
-          "holding_turns": 4,
+          "waiting_turns": 0,
+          "holding_turns": 0,
           "no_job_waiting_turns": 0
         }
       },
@@ -77384,7 +77440,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 76,
@@ -77432,8 +77488,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t26",
               "ai_contact": 4,
+              "ball_id": "t26",
               "human_contact": 1,
               "locked": true
             },
@@ -77445,11 +77501,15 @@
             }
           ],
           "commitment": {
-            "ball_id": "t26",
             "ai_contact": 4,
+            "ball_id": "t26",
             "human_contact": 1,
             "locked": true
-          }
+          },
+          "ai_route": [
+            5,
+            4
+          ]
         },
         "seed": 731100,
         "human": {
@@ -79408,18 +79468,18 @@
             }
           }
         ],
-        "raw_score": 95,
+        "raw_score": 92,
         "total_possible_points": 180,
         "metrics": {
           "cooperative_caught": 12,
-          "ordinary_caught": 59,
+          "ordinary_caught": 56,
           "cooperative_total": 30,
           "ordinary_total": 90,
-          "misses": 29,
+          "misses": 32,
           "assignment_switches": 0,
           "assignment_releases": 0,
-          "waiting_turns": 4,
-          "holding_turns": 4,
+          "waiting_turns": 0,
+          "holding_turns": 0,
           "no_job_waiting_turns": 0
         }
       },
@@ -79455,7 +79515,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 76,
@@ -79503,8 +79563,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t26",
               "ai_contact": 4,
+              "ball_id": "t26",
               "human_contact": 1,
               "locked": true
             },
@@ -79516,11 +79576,15 @@
             }
           ],
           "commitment": {
-            "ball_id": "t26",
             "ai_contact": 4,
+            "ball_id": "t26",
             "human_contact": 1,
             "locked": true
-          }
+          },
+          "ai_route": [
+            5,
+            4
+          ]
         },
         "seed": 731100,
         "human": {
@@ -81479,18 +81543,18 @@
             }
           }
         ],
-        "raw_score": 95,
+        "raw_score": 92,
         "total_possible_points": 180,
         "metrics": {
           "cooperative_caught": 12,
-          "ordinary_caught": 59,
+          "ordinary_caught": 56,
           "cooperative_total": 30,
           "ordinary_total": 90,
-          "misses": 29,
+          "misses": 32,
           "assignment_switches": 0,
           "assignment_releases": 0,
-          "waiting_turns": 4,
-          "holding_turns": 4,
+          "waiting_turns": 0,
+          "holding_turns": 0,
           "no_job_waiting_turns": 0
         }
       },
@@ -81527,7 +81591,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 76,
@@ -81575,8 +81639,8 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t26",
               "ai_contact": 4,
+              "ball_id": "t26",
               "human_contact": 1,
               "locked": true
             },
@@ -81588,11 +81652,15 @@
             }
           ],
           "commitment": {
-            "ball_id": "t26",
             "ai_contact": 4,
+            "ball_id": "t26",
             "human_contact": 1,
             "locked": true
-          }
+          },
+          "ai_route": [
+            5,
+            4
+          ]
         },
         "seed": 731100,
         "human": {
@@ -83551,18 +83619,18 @@
             }
           }
         ],
-        "raw_score": 95,
+        "raw_score": 92,
         "total_possible_points": 180,
         "metrics": {
           "cooperative_caught": 12,
-          "ordinary_caught": 59,
+          "ordinary_caught": 56,
           "cooperative_total": 30,
           "ordinary_total": 90,
-          "misses": 29,
+          "misses": 32,
           "assignment_switches": 0,
           "assignment_releases": 0,
-          "waiting_turns": 4,
-          "holding_turns": 4,
+          "waiting_turns": 0,
+          "holding_turns": 0,
           "no_job_waiting_turns": 0
         }
       },
@@ -83595,11 +83663,11 @@
     {
       "case_id": "pong-rolling-real-turn8-skipped-team-en",
       "domain": "pong",
-      "question": "For t3, which lane should I cover and which will you cover?",
+      "question": "For t4, which lane should I cover and which will you cover?",
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 8,
@@ -83618,8 +83686,8 @@
             "contacts": [
               2
             ],
-            "human_x": 2,
-            "ai_x": 6
+            "human_x": 6,
+            "ai_x": 2
           },
           {
             "type": "caught",
@@ -83631,8 +83699,8 @@
             "contacts": [
               6
             ],
-            "human_x": 2,
-            "ai_x": 6
+            "human_x": 6,
+            "ai_x": 2
           },
           {
             "type": "balls_spawned",
@@ -83647,31 +83715,37 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t4",
-              "ai_contact": 6,
-              "human_contact": 0,
+              "ai_contact": 2,
+              "ball_id": "t3",
+              "human_contact": 8,
               "locked": true
             },
             {
-              "ball_id": "t5",
-              "ai_contact": 4,
-              "human_contact": 0,
+              "ball_id": "t6",
+              "ai_contact": 3,
+              "human_contact": 8,
               "locked": false
             }
           ],
           "commitment": {
-            "ball_id": "t4",
-            "ai_contact": 6,
-            "human_contact": 0,
+            "ai_contact": 2,
+            "ball_id": "t3",
+            "human_contact": 8,
             "locked": true
-          }
+          },
+          "ai_route": [
+            1,
+            0,
+            1,
+            2
+          ]
         },
         "seed": 731100,
         "human": {
-          "x": 2
+          "x": 6
         },
         "ai": {
-          "x": 6
+          "x": 2
         },
         "wave": 2,
         "wave_count": 15,
@@ -85623,24 +85697,24 @@
             }
           }
         ],
-        "raw_score": 10,
+        "raw_score": 9,
         "total_possible_points": 180,
         "metrics": {
           "cooperative_caught": 1,
-          "ordinary_caught": 7,
+          "ordinary_caught": 6,
           "cooperative_total": 30,
           "ordinary_total": 90,
-          "misses": 2,
+          "misses": 3,
           "assignment_switches": 0,
           "assignment_releases": 0,
-          "waiting_turns": 2,
-          "holding_turns": 2,
+          "waiting_turns": 0,
+          "holding_turns": 0,
           "no_job_waiting_turns": 0
         }
       },
       "expected_kind": "facts",
       "expected_fact_ids": [
-        "ball_plan:t3"
+        "ball_plan:t4"
       ],
       "expected_claims": [],
       "expected_plan": {
@@ -85657,9 +85731,9 @@
             "subject": "shared",
             "purpose": "assignment",
             "evidence_ids": [
-              "ball_plan:t3"
+              "ball_plan:t4"
             ],
-            "object_id": "t3"
+            "object_id": "t4"
           }
         ]
       }
@@ -85667,11 +85741,11 @@
     {
       "case_id": "pong-rolling-real-turn8-skipped-team-zh",
       "domain": "pong",
-      "question": "对于t3，我该覆盖哪一道，你会覆盖哪一道？",
+      "question": "对于t4，我该覆盖哪一道，你会覆盖哪一道？",
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 8,
@@ -85690,8 +85764,8 @@
             "contacts": [
               2
             ],
-            "human_x": 2,
-            "ai_x": 6
+            "human_x": 6,
+            "ai_x": 2
           },
           {
             "type": "caught",
@@ -85703,8 +85777,8 @@
             "contacts": [
               6
             ],
-            "human_x": 2,
-            "ai_x": 6
+            "human_x": 6,
+            "ai_x": 2
           },
           {
             "type": "balls_spawned",
@@ -85719,31 +85793,37 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t4",
-              "ai_contact": 6,
-              "human_contact": 0,
+              "ai_contact": 2,
+              "ball_id": "t3",
+              "human_contact": 8,
               "locked": true
             },
             {
-              "ball_id": "t5",
-              "ai_contact": 4,
-              "human_contact": 0,
+              "ball_id": "t6",
+              "ai_contact": 3,
+              "human_contact": 8,
               "locked": false
             }
           ],
           "commitment": {
-            "ball_id": "t4",
-            "ai_contact": 6,
-            "human_contact": 0,
+            "ai_contact": 2,
+            "ball_id": "t3",
+            "human_contact": 8,
             "locked": true
-          }
+          },
+          "ai_route": [
+            1,
+            0,
+            1,
+            2
+          ]
         },
         "seed": 731100,
         "human": {
-          "x": 2
+          "x": 6
         },
         "ai": {
-          "x": 6
+          "x": 2
         },
         "wave": 2,
         "wave_count": 15,
@@ -87695,24 +87775,24 @@
             }
           }
         ],
-        "raw_score": 10,
+        "raw_score": 9,
         "total_possible_points": 180,
         "metrics": {
           "cooperative_caught": 1,
-          "ordinary_caught": 7,
+          "ordinary_caught": 6,
           "cooperative_total": 30,
           "ordinary_total": 90,
-          "misses": 2,
+          "misses": 3,
           "assignment_switches": 0,
           "assignment_releases": 0,
-          "waiting_turns": 2,
-          "holding_turns": 2,
+          "waiting_turns": 0,
+          "holding_turns": 0,
           "no_job_waiting_turns": 0
         }
       },
       "expected_kind": "facts",
       "expected_fact_ids": [
-        "ball_plan:t3"
+        "ball_plan:t4"
       ],
       "expected_claims": [],
       "expected_plan": {
@@ -87729,9 +87809,9 @@
             "subject": "shared",
             "purpose": "assignment",
             "evidence_ids": [
-              "ball_plan:t3"
+              "ball_plan:t4"
             ],
-            "object_id": "t3"
+            "object_id": "t4"
           }
         ]
       }
@@ -87743,7 +87823,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 8,
@@ -87762,8 +87842,8 @@
             "contacts": [
               2
             ],
-            "human_x": 2,
-            "ai_x": 6
+            "human_x": 6,
+            "ai_x": 2
           },
           {
             "type": "caught",
@@ -87775,8 +87855,8 @@
             "contacts": [
               6
             ],
-            "human_x": 2,
-            "ai_x": 6
+            "human_x": 6,
+            "ai_x": 2
           },
           {
             "type": "balls_spawned",
@@ -87791,31 +87871,37 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t4",
-              "ai_contact": 6,
-              "human_contact": 0,
+              "ai_contact": 2,
+              "ball_id": "t3",
+              "human_contact": 8,
               "locked": true
             },
             {
-              "ball_id": "t5",
-              "ai_contact": 4,
-              "human_contact": 0,
+              "ball_id": "t6",
+              "ai_contact": 3,
+              "human_contact": 8,
               "locked": false
             }
           ],
           "commitment": {
-            "ball_id": "t4",
-            "ai_contact": 6,
-            "human_contact": 0,
+            "ai_contact": 2,
+            "ball_id": "t3",
+            "human_contact": 8,
             "locked": true
-          }
+          },
+          "ai_route": [
+            1,
+            0,
+            1,
+            2
+          ]
         },
         "seed": 731100,
         "human": {
-          "x": 2
+          "x": 6
         },
         "ai": {
-          "x": 6
+          "x": 2
         },
         "wave": 2,
         "wave_count": 15,
@@ -89767,18 +89853,18 @@
             }
           }
         ],
-        "raw_score": 10,
+        "raw_score": 9,
         "total_possible_points": 180,
         "metrics": {
           "cooperative_caught": 1,
-          "ordinary_caught": 7,
+          "ordinary_caught": 6,
           "cooperative_total": 30,
           "ordinary_total": 90,
-          "misses": 2,
+          "misses": 3,
           "assignment_switches": 0,
           "assignment_releases": 0,
-          "waiting_turns": 2,
-          "holding_turns": 2,
+          "waiting_turns": 0,
+          "holding_turns": 0,
           "no_job_waiting_turns": 0
         }
       },
@@ -89816,7 +89902,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 8,
@@ -89835,8 +89921,8 @@
             "contacts": [
               2
             ],
-            "human_x": 2,
-            "ai_x": 6
+            "human_x": 6,
+            "ai_x": 2
           },
           {
             "type": "caught",
@@ -89848,8 +89934,8 @@
             "contacts": [
               6
             ],
-            "human_x": 2,
-            "ai_x": 6
+            "human_x": 6,
+            "ai_x": 2
           },
           {
             "type": "balls_spawned",
@@ -89864,31 +89950,37 @@
         "policy_memory": {
           "commitments": [
             {
-              "ball_id": "t4",
-              "ai_contact": 6,
-              "human_contact": 0,
+              "ai_contact": 2,
+              "ball_id": "t3",
+              "human_contact": 8,
               "locked": true
             },
             {
-              "ball_id": "t5",
-              "ai_contact": 4,
-              "human_contact": 0,
+              "ball_id": "t6",
+              "ai_contact": 3,
+              "human_contact": 8,
               "locked": false
             }
           ],
           "commitment": {
-            "ball_id": "t4",
-            "ai_contact": 6,
-            "human_contact": 0,
+            "ai_contact": 2,
+            "ball_id": "t3",
+            "human_contact": 8,
             "locked": true
-          }
+          },
+          "ai_route": [
+            1,
+            0,
+            1,
+            2
+          ]
         },
         "seed": 731100,
         "human": {
-          "x": 2
+          "x": 6
         },
         "ai": {
-          "x": 6
+          "x": 2
         },
         "wave": 2,
         "wave_count": 15,
@@ -91840,18 +91932,18 @@
             }
           }
         ],
-        "raw_score": 10,
+        "raw_score": 9,
         "total_possible_points": 180,
         "metrics": {
           "cooperative_caught": 1,
-          "ordinary_caught": 7,
+          "ordinary_caught": 6,
           "cooperative_total": 30,
           "ordinary_total": 90,
-          "misses": 2,
+          "misses": 3,
           "assignment_switches": 0,
           "assignment_releases": 0,
-          "waiting_turns": 2,
-          "holding_turns": 2,
+          "waiting_turns": 0,
+          "holding_turns": 0,
           "no_job_waiting_turns": 0
         }
       },
@@ -91889,7 +91981,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -92039,7 +92131,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -92189,7 +92281,7 @@
       "language": "en",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,
@@ -92344,7 +92436,7 @@
       "language": "zh",
       "state": {
         "domain": "pong",
-        "version": "pong-concurrent.v5.0",
+        "version": "pong-concurrent.v6.0",
         "scenario_version": "pong-concurrent-schedule.v5.0",
         "task": 2,
         "turn": 0,

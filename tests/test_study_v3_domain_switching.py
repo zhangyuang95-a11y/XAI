@@ -285,8 +285,9 @@ def test_v35_archives_previous_gameplay_without_rewriting_records(pilot_store, d
     'policylens-three-domain-20260920.v3.5',
     'policylens-three-domain-20260920.v3.5.1',
     'policylens-three-domain-20260920.v3.5.2',
+    'policylens-three-domain-20260920.v3.6',
 ])
-def test_v36_archives_old_rules_without_rewriting_saved_records(pilot_store, domain, old_release):
+def test_current_release_archives_old_rules_without_rewriting_saved_records(pilot_store, domain, old_release):
     assert old_release not in SUPPORTED_RELEASE_IDS
     flow=public_flow(pilot_store,domain,'A')
     flow.command('demo_skip');flow.step('wait')

@@ -3,7 +3,9 @@
 Release: `policylens-three-domain-20260920.v3.6`
 Site: https://policylens-warehouse-study.onrender.com/
 
-Status at this commit: implementation complete; production deployment and acceptance pending. The currently verified deployment is v3.5.2 (`acf29da0a8b6c2ddcb49185077112b2e0cd384f4`), including recovery of the entry button after a transient question-service outage. Final production evidence is recorded after the release, not inferred from local tests.
+Deployed to the original Render service: `dep-danrghuk1f9s739muij0`, triggered 2026-09-20 18:41:14 +08:00 and verified live at 18:42:45. Runtime commit: `11071b54c631ae9da3c4d5bb1533d8dc8ad1d4f0`. Runtime source SHA-256: `5fada514c11f5e4f01bf3294317eff50dfd55451d8083a2639fe8928771a7af1`. The public manifest matches both. All three entrances and health return 200; persistent storage and actual question-service readiness are true. The entry-readiness recovery from v3.5.2 is included.
+
+Production HTTP acceptance completed all six A/B flows, including 18 task runs and six questionnaires. Live behavior and saved records were checked separately from the local tests below.
 
 ## Changes
 
@@ -25,7 +27,19 @@ Evidence directory: `../analysis/three_domain_revision_20260920_v36/`; credentia
 - Explanation: 417 QA tests and 28 temporal tests passed; Store tests passed separately. Real configured language-service checks verified 27 current/past/next/counterfactual questions, six bilingual selected-history questions and two cancelled-disposal questions, including evidence IDs and actual stored actions. Finite examples do not guarantee every free-form answer.
 - Independent review found no blocking temporal or permission defect and checked all three domains' historical terminal frames without advancing the active task.
 - Local Chrome: Pong continuous demo completed and entered Task 1; actual board shows ball IDs without arrival counters. Renderer checks cover both languages. The entry form remains gated by real service readiness for pilot users; local preview uses an isolated SQLite database.
-- Database/export regression: 28 passed. A real read-only production baseline covers 52,390 rows across old and current tables. Compare it after deployment to distinguish preserved records, legitimate active progress updates and new test records.
+- Database/export regression: 28 passed. A real read-only production baseline covers 52,390 rows across old and current tables; post-deployment comparisons are reported below.
+
+## Production acceptance
+
+- Six synthetic `test` flows completed on the deployed server: Warehouse A/B, Pong A/B and Kitchen A/B. Across 18 task runs, 2,610 gameplay transitions were compared against expected public states and scores. All six questionnaires and contiguous saved frames were verified in the authenticated export.
+- The 25 main real-service questions passed content and provenance review against saved states, decisions and simulation results. They cover English/Chinese, performed versus next action, follow-ups, selected historical frames, counterfactuals, hypothetical Pong positions and Kitchen storage/handoff rules. Two additional Pong `preview` answers passed a separate content check. This finite check is not a guarantee for every possible free-form question. The review records two remaining readability issues in factually correct answers: occasional Warehouse internal parcel/status labels and Pong normalized score decimals.
+- Permissions were checked in each stage: only A in active Task 2 can ask/view answers, with immediate revocation at Task 2 completion. Questions do not advance gameplay. Command retries do not duplicate actions; cross-identity access is denied, and language and progress survive a fresh session-state read.
+- The first test-harness preflight incorrectly compared mixed-case requested test identities with the server's normalized lowercase identities. Its three assertion failures remain in the log. Correcting only the harness comparison allowed the same identities to complete all flows; no production source change was needed. See `production_harness_identity_note.md` in the evidence directory.
+- Both read-only database comparisons preserved all **52,390 baseline rows**, with no missing rows or unexpected changes. The final comparison was at 2026-09-20 10:54:26 UTC. Legitimate existing active-progress updates and newly added synthetic records are itemized separately. The six completed flows and six questionnaires are all `test`; an additional Pong session is `preview`. No v3.6 `pilot` participant existed at that audit time.
+- An owned Warehouse test session was recovered with identical Task 1 turn 3, revision 10, run, group and full state. Deployment launched the new runtime while retaining the existing database. No separate manual restart was performed; the recovery check is not represented as a restart test.
+- The production homepage was observed in Chrome with default English and all three domain links. The three deployed frontend assets match the locally verified files byte-for-byte. The task canvas was visually checked locally; a separate production canvas browser check was not completed because browser access timed out.
+
+Evidence includes `production_deployment_receipt.json`, `production_final_health_v3_6.json`, `production_http_acceptance_v3_6_summary.json`, `production_answer_review_v3_6.md`, `production_frontend_assets_verified.json`, `production_database_preservation_after_v36.json`, `production_session_recovery_after_v36.json` and `production_data_mode_audit_after_v36.json`. Private exports and session credentials remain outside Git.
 
 ## Compatibility and data
 

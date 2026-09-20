@@ -346,17 +346,27 @@ class Store:
             previous=[{'question':h['question'],'answer':json.loads(h['result_json']).get('answer','')} for h in reversed(history)]
             db.execute('INSERT INTO pl3_questions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                 (qid,instance['id'],instance['current_run'],target,turn,question,language,'{}','pending',time.time(),None,None))
-            # Keep only public history and exact selected state for the explainer.
+            # A displayed frame is an AFTER-action snapshot. Its own stored
+            # decision predicts the next transition; the previous row contains
+            # the actual simultaneous actions that produced the displayed one.
             earlier=db.all('SELECT public_json FROM pl3_frames WHERE run_id=? AND turn<=? ORDER BY turn DESC LIMIT 16',(target,turn))
             state=json.loads(row['state_json']);decision=json.loads(row['decision_json'])
+            incoming=db.one('SELECT state_json,decision_json,human_action FROM pl3_frames WHERE run_id=? AND turn=?',
+                (target,turn-1)) if turn>0 else None
+            action_context={'state':json.loads(incoming['state_json']) if incoming else None,
+                'decision':json.loads(incoming['decision_json']) if incoming else None,
+                'human_action':incoming['human_action'] if incoming else None}
         try:
             if not self.explainer:raise RuntimeError('model_unavailable')
-            answer=self.explainer.answer(engine(instance['domain']),state,decision,question,language,previous,[json.loads(f['public_json']) for f in reversed(earlier)])
+            answer=self.explainer.answer(engine(instance['domain']),state,decision,question,language,previous,
+                [json.loads(f['public_json']) for f in reversed(earlier)],action_context=action_context)
             status=answer.get('status','answered')
             if status not in ('answered','clarification','unavailable'):status='unavailable'
         except Exception:
             status='unavailable';answer={'status':status,'answer':'问答暂时不可用，请稍后重试。' if language=='zh' else 'Questions are temporarily unavailable. Please try again.','evidence_ids':[]}
-        answer.setdefault('audit',{}).update(context_question_ids=[h['id'] for h in reversed(history)],context_sha256=digest(encode(previous)),authorized_run=instance['current_run'],target_run=target,target_turn=turn,authorization_at_request=True)
+        answer.setdefault('audit',{}).update(context_question_ids=[h['id'] for h in reversed(history)],context_sha256=digest(encode(previous)),authorized_run=instance['current_run'],target_run=target,target_turn=turn,target_display_turn=turn,
+            performed_decision_turn=turn-1 if incoming else None,
+            incoming_transition_sha256=digest(encode(action_context)),authorization_at_request=True)
         self.qa_healthy = status in ('answered','clarification')
         with self.db.transaction(scope=payload.get('instance_id')) as db:
             current=self._instance(db,token,instance['id'])

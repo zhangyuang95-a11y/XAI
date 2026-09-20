@@ -281,9 +281,13 @@ def test_v35_archives_previous_gameplay_without_rewriting_records(pilot_store, d
 
 
 @pytest.mark.parametrize('domain', ['warehouse','pong','kitchen'])
-def test_v351_resumes_v35_without_rewriting_saved_release_or_frames(pilot_store, domain):
-    old_release='policylens-three-domain-20260920.v3.5'
-    assert old_release in SUPPORTED_RELEASE_IDS
+@pytest.mark.parametrize('old_release', [
+    'policylens-three-domain-20260920.v3.5',
+    'policylens-three-domain-20260920.v3.5.1',
+    'policylens-three-domain-20260920.v3.5.2',
+])
+def test_v36_archives_old_rules_without_rewriting_saved_records(pilot_store, domain, old_release):
+    assert old_release not in SUPPORTED_RELEASE_IDS
     flow=public_flow(pilot_store,domain,'A')
     flow.command('demo_skip');flow.step('wait')
     old_id=flow.view['instance_id']
@@ -291,25 +295,11 @@ def test_v351_resumes_v35_without_rewriting_saved_release_or_frames(pilot_store,
         db.execute('UPDATE pl3_instances SET release_id=? WHERE id=?',(old_release,old_id))
     before=pilot_store.export(release_id=old_release)
     restored=pilot_store.recover_view(flow.token,domain)
-    assert restored['instance_id']==old_id and restored['release_id']==old_release
-    assert restored['state']==flow.view['state'] and restored['stage']=='task1'
-    _,resumed=pilot_store.create(enrollment(flow.name,domain,'B'),flow.token)
-    assert resumed['group']=='A' and resumed['instance_id']==old_id
+    assert restored['stage']=='welcome' and restored['previous_version_saved']
+    _,fresh=pilot_store.create(enrollment(flow.name,domain,'B'),flow.token)
+    assert fresh['instance_id']!=old_id and fresh['release_id']==RELEASE_ID
+    assert fresh['group']=='B' and fresh['stage']=='demo'
     assert pilot_store.export(release_id=old_release)==before
-    flow.view=resumed;flow.step('wait')
-    after=pilot_store.export(release_id=old_release)
-    assert flow.view['state']['turn']==2 and flow.view['release_id']==old_release
-    assert len(after['instances'])==1 and len(after['runs'])==1
-    old_frames={ (f['run_id'],f['turn']):f for f in before['frames'] }
-    new_frames={ (f['run_id'],f['turn']):f for f in after['frames'] }
-    for key, previous in old_frames.items():
-        expected=dict(previous)
-        # The current pre-action frame records the newly submitted action.
-        # Resuming must preserve every saved state, decision and earlier action.
-        if previous['turn']==1:
-            assert previous['human_action'] is None
-            expected['human_action']='wait'
-        assert new_frames[key]==expected
 
 
 @pytest.mark.parametrize('domain', ['warehouse','pong','kitchen'])

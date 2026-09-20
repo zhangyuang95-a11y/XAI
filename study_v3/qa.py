@@ -10,12 +10,13 @@ from copy import deepcopy
 import argparse
 import hashlib
 import json
+import re
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-VERSION = "study-evidence-qa.v3.5.1"
+VERSION = "study-evidence-qa.v3.6"
 MAX_STEPS = 12
 _PURPOSES = ("action", "reason", "advice", "comparison", "observation", "rule", "assignment")
 _ACTIONS = {
@@ -47,6 +48,7 @@ Schema:
  "clarification":null|"ambiguous_object"|"select_frame"|"unsupported_question"|"missing_action",
  "intents":[{"kind":"facts","subject":"ai"|"human"|"shared",
              "purpose":"action"|"reason"|"advice"|"comparison"|"observation"|"rule"|"assignment",
+             "temporal_scope":"performed"|"current",
              "evidence_ids":["provided exact fact ID"]},
             {"kind":"facts","subject":"shared","purpose":"assignment",
              "object_id":"t3","evidence_ids":["ball_plan:t3"]},
@@ -60,12 +62,35 @@ Resolve the SPEAKER before selecting facts. In the participant's QUESTION,
 In earlier ASSISTANT ANSWERS and decision evidence, "I/my" means the AI and
 "you/your" means the human. Do not confuse these opposite perspectives.
 "What were you trying to do and why?" asks the AI's recorded decision, NOT a
-human position/event simply because its evidence says "you". selected_frame is
-already the complete state for the selected turn, including when it is earlier
-than the active task. Its system:ai_reason and system:ai_action describe that
-exact frame. Use them for the AI's intention and next action, respectively.
+human position/event simply because its evidence says "you".
+
+TIME BINDING IS ESSENTIAL. selected_frame is the displayed AFTER-action state.
+When performed_action is supplied, every intent MUST have temporal_scope.
+"Why this action?", "Why did you do that this turn?", "Why are you doing this?",
+"你现在为什么这么做", "你这一回合为什么这么做", and an unqualified AI
+"why not left/right/wait?" refer to the action that PRODUCED the displayed frame.
+Use temporal_scope=performed and performed:system:ai_reason/action or the
+performed:alternative... evidence. Its source state is one turn earlier and
+its saved decision is the action actually executed. Do NOT explain the next
+decision instead. The binding turn remains selected_frame.turn (the displayed
+result), never the earlier decision turn. This applies equally to replay.
+At turn 0 no action has happened: use performed:system:ai_reason/action, which
+explicitly states that; never invent a previous action or silently predict one.
+Use temporal_scope=current for explicit NEXT-action/next-reason questions,
+current positions/items/conditions, general rules, advice, assignments and ALL
+human counterfactuals. Their unprefixed facts and simulations use selected_frame
+itself. "What should I do now, and why?" is CURRENT advice, not past reasoning.
+A mixed question such as "Why did you do that, and what next?" needs separate
+performed and current intents. Do not mix their evidence in a single intent.
+Past observed events/positions from history keep temporal_scope=current and
+their exact history binding; an unselected historical reason still requires
+select_frame clarification. Never use performed facts as current positions.
+When performed_action is not supplied (standalone decision probes only), use
+current scope and the unprefixed decision evidence.
 Every intent must state its subject and purpose. An AI-reason intent must
-include system:ai_reason; an AI-action intent must include system:ai_action.
+include system:ai_reason; an AI-action intent must include system:ai_action
+(with the performed: prefix for performed scope). All subsequent instructions
+about decision/alternative fact IDs use that prefix in performed scope.
 For advice to the human, include system:human_advice, which contains a concrete
 legal suggested action. Legal-action lists or an AI plan alone are NOT human
 advice. Add relevant current facts to explain the coordination condition.
@@ -95,8 +120,8 @@ Task/Turn and select only its matching history fact IDs. Do not ask for replay
 selection merely to restate an available recorded historical position or event.
 A question such as "At turn 15, where did you put the tomato?" asks an observed
 past event: use purpose=observation and its matching history event. Reserve
-purpose=action for the selected frame's recorded next-action decision, which
-requires system:ai_action; do not attach that current decision to a past event.
+purpose=action for an AI decision, with the matching temporal scope and its
+system:ai_action evidence; do not attach a current decision to a past event.
 Ambiguous objects must be clarified rather than guessed.
 Questions can contain multiple intents: cover every supported part with separate
 intents. A single focused question normally needs ONE intent and ONE or TWO
@@ -333,13 +358,102 @@ def _reason_states_action(engine, state, decision, language):
     label = _action_pair(engine, state, decision["action"], actor="ai", decision=decision)[language == "zh"].lower()
     if label in reason:
         return True
+    if language == "zh" and decision["action"] in ("up", "down", "left", "right"):
+        direction = {"up": "向上", "down": "向下", "left": "向左", "right": "向右"}[decision["action"]]
+        if reason.startswith(tuple(prefix + direction for prefix in ("我会", "我将", "我选择"))):
+            return True
     if decision["action"] != "wait":
         return False
+    if language == "zh" and re.search(r"我[^。；，！？]{0,24}等待", reason):
+        return True
     # These actor-specific synonyms occur in authoritative domain prose. An AI
     # moving toward a waiting spot must still retain its actual movement label.
     aliases = {"pong": {"en": ("i will hold ",), "zh": ("我会守住",)},
                "kitchen": {"en": ("i am waiting",), "zh": ("我在交接台附近等待",)}}
     return any(fragment in reason for fragment in aliases.get(state["domain"], {}).get(language, ()))
+
+
+def _performed_catalog(engine, state, context):
+    """Saved incoming transition; never decide from the displayed result frame.
+
+    A namespace keeps before-action evidence separate from current observations.
+    No free-form model prose is used to rewrite facts. The short tense changes
+    below only anchor the domain's own recorded first-person action statement.
+    """
+    before, recorded = context.get("state"), context.get("decision")
+    if state["turn"] == 0:
+        if before is not None or recorded is not None or context.get("human_action") is not None:
+            raise PlanError("invalid_performed_context")
+        en = "No action has happened in this task yet; this is the initial frame."
+        zh = "这是本任务的初始画面，还没有执行过动作。"
+        return {"performed:system:ai_" + purpose: {
+            "id": "performed:system:ai_" + purpose, "subject": "ai", "purpose": purpose,
+            "temporal_scope": "performed", "en": en, "zh": zh}
+            for purpose in ("action", "reason")}
+    if (not isinstance(before, dict) or not isinstance(recorded, dict)
+            or before.get("turn") != state["turn"] - 1 or before.get("task") != state["task"]
+            or before.get("domain") != state["domain"] or before.get("terminal")
+            or context.get("human_action") not in engine.legal_actions(before)):
+        raise PlanError("invalid_performed_context")
+    action_en, action_zh = _action_pair(engine, before, recorded["action"], actor="ai", decision=recorded)
+    actual = {"en": "For this turn, I chose to " + action_en + ".",
+              "zh": "本步我选择" + action_zh + "。"}
+    reason = {}
+    for lang in ("en", "zh"):
+        text = recorded["reason_" + lang]
+        if lang == "en":
+            text = text.replace("I will ", "I chose to ").replace("I am waiting", "I waited")
+        else:
+            text = text.replace("我会", "我选择").replace("我将", "我选择")
+        # The original reason may describe only a waiting ingredient, not the
+        # actual direction taken. Always retain the saved action in that case.
+        if _reason_states_action(engine, before, recorded, lang):
+            reason[lang] = ("My reasoning before this turn's action was: " if lang == "en" else "本步行动前的判断是：") + text
+        else:
+            reason[lang] = actual[lang] + (" At the time: " if lang == "en" else "当时：") + text
+    # A stored decision is a simultaneous pre-action commitment, not proof
+    # that its intended interaction succeeded. Kitchen can legitimately cancel
+    # a bin interaction when the human clears the counter in that same turn.
+    # Use only the authoritative result event, never infer success from a plan.
+    cancellations = [event for event in state.get("events", [])
+        if state["domain"] == "kitchen" and recorded.get("reason_code") == "discard_blocked_output"
+        and recorded.get("action") == "interact" and event.get("type") == "delivery_resumed"
+        and event.get("actor") == "ai" and event.get("planned_action") == "interact"
+        and event.get("outcome") == "cancelled"
+        and event.get("reason") == "handoff_cleared_before_disposal"
+        and all(isinstance(event.get(lang), str) for lang in ("en", "zh"))]
+    if cancellations:
+        outcome = cancellations[-1]
+        for lang in ("en", "zh"):
+            actual[lang] = outcome[lang]
+            reason[lang] = (("My plan before this turn's action: " if lang == "en" else "本步行动前的计划：")
+                + recorded["reason_" + lang]
+                + (" What actually happened this turn: " if lang == "en" else "本步实际结果：") + outcome[lang])
+    result = {}
+    for row in engine.facts(before, recorded):
+        identifier = row["id"]
+        # Rules, old score, prior-step events and next-action aliases cannot
+        # explain this incoming action; retain decision comparisons/conditions.
+        if ("rule" in identifier or identifier.startswith(("score", "last_event", "event"))
+                or identifier in ("time", "current_turn", "next_action", "ai_next_action", "kitchen_score")):
+            continue
+        entry = deepcopy(row)
+        entry.update(id="performed:" + identifier, temporal_scope="performed")
+        for lang in ("en", "zh"):
+            entry[lang] = ("Before this turn's action: " if lang == "en" else "本步行动前：") + row[lang]
+        if identifier in ("decision", "actual_decision", "ai_reason"):
+            entry.update(reason)
+        result[entry["id"]] = entry
+    for purpose, wording in (("action", actual), ("reason", reason)):
+        identifier = "performed:system:ai_" + purpose
+        result[identifier] = {"id": identifier, "subject": "ai", "purpose": purpose,
+                              "temporal_scope": "performed", **wording}
+    human_en, human_zh = _action_pair(engine, before, context["human_action"])
+    identifier = "performed:system:joint_action"
+    result[identifier] = {"id": identifier, "temporal_scope": "performed",
+        "en": f"In this recorded turn, your command was to {human_en}; my command was to {action_en}. Our decisions used the same state before either command was executed.",
+        "zh": f"本步记录中，你的指令是{human_zh}，我的指令是{action_zh}；双方从同一个行动前状态同时执行。"}
+    return result
 
 
 def _validate_intervention(intervention, state=None):
@@ -352,7 +466,7 @@ def _validate_intervention(intervention, state=None):
         raise PlanError("unsupported_position_intervention")
 
 
-def _validate_plan(plan, evidence, state=None):
+def _validate_plan(plan, evidence, state=None, *, temporal_context=False):
     if not isinstance(plan, dict) or plan.get("language") not in ("en", "zh"):
         raise PlanError("invalid_language")
     allowed = {"language", "binding", "premise", "clarification", "intents"}
@@ -375,8 +489,11 @@ def _validate_plan(plan, evidence, state=None):
     for intent in intents:
         if not isinstance(intent, dict) or intent.get("kind") not in ("facts", "counterfactual"):
             raise PlanError("invalid_intent")
-        if set(intent) - {"kind", "evidence_ids", "actions", "horizon", "subject", "purpose", "intervention", "object_id"}:
+        if set(intent) - {"kind", "evidence_ids", "actions", "horizon", "subject", "purpose", "intervention", "object_id", "temporal_scope"}:
             raise PlanError("unexpected_intent_fields")
+        scope = intent.get("temporal_scope")
+        if (temporal_context and scope not in ("current", "performed")) or (scope is not None and scope not in ("current", "performed")):
+            raise PlanError("missing_temporal_scope")
         subject, purpose = intent.get("subject"), intent.get("purpose")
         # Optional only for archived injected composition fixtures. New
         # provider plans are explicitly required to resolve these semantics.
@@ -387,6 +504,12 @@ def _validate_plan(plan, evidence, state=None):
         ids = intent.get("evidence_ids", [])
         if not isinstance(ids, list) or len(ids) > 8 or any(not isinstance(i, str) or i not in evidence for i in ids):
             raise PlanError("unknown_evidence")
+        performed = scope == "performed"
+        if any(identifier.startswith("performed:") != performed for identifier in ids):
+            raise PlanError("wrong_temporal_evidence")
+        if performed and (intent["kind"] != "facts" or purpose in ("advice", "assignment", "rule")):
+            raise PlanError("wrong_temporal_evidence")
+        normalized_ids = [i.removeprefix("performed:") for i in ids]
         if intent["kind"] == "facts" and not ids:
             raise PlanError("facts_without_evidence")
         if intent["kind"] == "facts" and any(k in intent for k in ("intervention", "actions", "horizon")):
@@ -399,13 +522,13 @@ def _validate_plan(plan, evidence, state=None):
                 raise PlanError("isolated_reachability_is_not_assignment")
         elif "object_id" in intent:
             raise PlanError("unexpected_object_binding")
-        if subject == "ai" and purpose in ("action", "reason") and "system:ai_" + purpose not in ids:
+        if subject == "ai" and purpose in ("action", "reason") and "system:ai_" + purpose not in normalized_ids:
             raise PlanError("missing_subject_evidence")
         if subject == "human" and purpose == "advice" and "system:human_advice" not in ids:
             raise PlanError("missing_subject_evidence")
         if subject == "human" and purpose in ("action", "advice", "comparison") and any(
                 i.startswith("alternative") or (i.startswith("system:ai_")
-                    and not (i == "system:ai_reason" and purpose == "advice" and intent["kind"] == "facts")) for i in ids):
+                    and not (i == "system:ai_reason" and purpose == "advice" and intent["kind"] == "facts")) for i in normalized_ids):
             raise PlanError("wrong_actor_evidence")
         if intent["kind"] == "counterfactual":
             if subject not in (None, "human"):
@@ -625,16 +748,26 @@ class Explainer:
         except (KeyError, IndexError, TypeError, json.JSONDecodeError):
             raise ProviderError("invalid_provider_json") from None
 
-    def answer(self, engine, state, decision, question, language="en", previous_dialogue=None, public_history=None):
+    def answer(self, engine, state, decision, question, language="en", previous_dialogue=None, public_history=None, *, action_context=None):
         started = time.time()
         fallback_language = _language_hint(question, language)
         audit = {"version": VERSION, "requested_at": started,
             "provider": urlsplit(self.settings.llm_base_url).hostname or "unconfigured",
             "model": self.settings.llm_model or None, "task": state["task"], "turn": state["turn"],
-            "state_hash": _digest(state), "simulations": [], "understanding": "semantic_provider_required"}
+            "state_hash": _digest(state), "simulations": [], "understanding": "semantic_provider_required",
+            "target_display_turn": state["turn"], "decision_turn": None}
         try:
             decision = decision or engine.decide(state)
             evidence = _catalog(engine, state, decision, public_history or [])
+            if action_context is not None:
+                evidence.update(_performed_catalog(engine, state, action_context))
+                before, recorded = action_context.get("state"), action_context.get("decision")
+                audit["performed_action"] = {"decision_turn": before["turn"] if before else None,
+                    "result_turn": state["turn"], "state_hash": _digest(before) if before else None,
+                    "decision_hash": _digest(recorded) if recorded else None,
+                    "human_action": action_context.get("human_action"),
+                    "ai_action": recorded.get("action") if recorded else None,
+                    "source": "saved_incoming_transition" if before else "initial_frame_no_action"}
             payload = {"question": str(question), "interface_language": language,
                 "selected_frame": {"task": state["task"], "turn": state["turn"], "domain": state["domain"]},
                 "speaker_roles": {"participant_question_I": "human", "participant_question_you": "ai",
@@ -646,12 +779,15 @@ class Explainer:
                 "counterfactual_interventions": ({"human_lane": {"minimum": 1, "maximum": state["lanes"], "numbering": "displayed_one_based", "decision_only_horizon": 0}} if state["domain"] == "pong" else {}),
                 "recommended_human_action": evidence.get("system:human_advice", {}).get("action"),
                 "evidence": list(evidence.values())}
+            if action_context is not None:
+                payload["performed_action"] = {key: audit["performed_action"][key]
+                    for key in ("decision_turn", "result_turn", "human_action", "ai_action", "source")}
             plan, provider_audit = self._request_plan(payload)
             audit.update(provider_audit)
             try:
-                plan = _validate_plan(plan, evidence, state)
+                plan = _validate_plan(plan, evidence, state, temporal_context=action_context is not None)
             except PlanError as first_error:
-                if str(first_error) not in ("unexpected_plan_fields", "unknown_evidence", "missing_subject_evidence", "wrong_actor_evidence", "wrong_simulation_actor", "intervention_has_actual_evidence", "invalid_position_intervention", "unsupported_position_intervention", "simulation_fields_on_facts", "missing_ball_assignment_evidence", "isolated_reachability_is_not_assignment", "unexpected_object_binding"):
+                if str(first_error) not in ("unexpected_plan_fields", "unknown_evidence", "missing_subject_evidence", "wrong_actor_evidence", "wrong_simulation_actor", "intervention_has_actual_evidence", "invalid_position_intervention", "unsupported_position_intervention", "simulation_fields_on_facts", "missing_ball_assignment_evidence", "isolated_reachability_is_not_assignment", "unexpected_object_binding", "missing_temporal_scope", "wrong_temporal_evidence"):
                     raise
                 # Exactly one model repair for evidence IDs or role mismatches.
                 # Never heuristically substitute a guessed actor or fact.
@@ -659,13 +795,22 @@ class Explainer:
                     "original_plan": deepcopy(plan), "original_provider": deepcopy(provider_audit)}
                 repaired_payload = deepcopy(payload)
                 repaired_payload["repair_request"] = {
-                    "error": "The previous plan failed validation: " + str(first_error) + ". Recheck the question's speaker and requested purpose. Use exact provided IDs. AI action/reason requires system:ai_action/system:ai_reason; human advice requires system:human_advice. Historical observed events and positions use purpose=observation with history evidence, not purpose=action or a current next-action fact. Actual named-ball assignments require purpose=assignment, object_id and that ball's ball_plan fact, never isolated comparison:N reachability. Simulations control the human only; a position hypothesis must use a supported intervention, empty evidence_ids and a displayed in-range lane. Never substitute the actual state's reason for a hypothetical decision. This is your only repair attempt.",
+                    "error": "The previous plan failed validation: " + str(first_error) + ". Recheck the question's speaker, requested purpose and time. When performed_action is supplied, every intent needs temporal_scope. Unqualified why-this-action/why-not asks for performed scope and performed: evidence from the saved incoming action. Explicit next decisions, current observations, advice and counterfactuals need current scope with unprefixed evidence. Never mix them. Use exact provided IDs. AI action/reason requires the matching system:ai_action/system:ai_reason; human advice requires system:human_advice. Historical observed events and positions use purpose=observation with history evidence. Actual named-ball assignments require purpose=assignment, object_id and that ball's ball_plan fact, never isolated comparison:N reachability. Simulations control the human only; a position hypothesis must use a supported intervention, empty evidence_ids and a displayed in-range lane. Never substitute the actual state's reason for a hypothetical decision. This is your only repair attempt.",
                     "previous_plan": _redact(plan, self.settings.llm_api_key)}
                 plan, provider_audit = self._request_plan(repaired_payload)
                 audit.update(provider_audit)
-                plan = _validate_plan(plan, evidence, state)
+                plan = _validate_plan(plan, evidence, state, temporal_context=action_context is not None)
                 audit["repair_attempt"]["successful"] = True
             audit.update(plan=deepcopy(plan), understanding="semantic_provider", evidence_catalog_hash=_digest(evidence))
+            selected_turns = set()
+            for intent in plan["intents"]:
+                if intent.get("temporal_scope") == "performed":
+                    if state["turn"]:
+                        selected_turns.add(state["turn"] - 1)
+                elif intent["kind"] == "counterfactual" or intent.get("purpose") in ("action", "reason", "advice", "comparison", "assignment"):
+                    selected_turns.add(state["turn"])
+            audit["selected_decision_turns"] = sorted(selected_turns)
+            audit["decision_turn"] = next(iter(selected_turns)) if len(selected_turns) == 1 else None
             selected_language = plan["language"]
             clarification = plan.get("clarification")
             # Public historical observations can be answered from their exact
@@ -690,11 +835,14 @@ class Explainer:
                     and _reason_states_action(engine, state, decision, selected_language))
                 selected_reason = (decision["reason_" + selected_language]
                     if selected_ids & {"decision", "system:ai_reason"} else "")
+                performed_reason = (evidence["performed:system:ai_reason"][selected_language]
+                    if "performed:system:ai_reason" in selected_ids else "")
                 for intent in plan["intents"]:
                     for identifier in intent.get("evidence_ids", []):
                         if identifier not in ids:
                             wording = evidence[identifier][selected_language]
                             redundant = action_in_reason and identifier in ("system:ai_action", "next_action")
+                            redundant = redundant or (bool(performed_reason) and identifier == "performed:system:ai_action")
                             # Identical factual wording may be selectable under
                             # several IDs; retain every audit ID, show it once.
                             redundant = redundant or (identifier not in ("decision", "system:ai_reason")

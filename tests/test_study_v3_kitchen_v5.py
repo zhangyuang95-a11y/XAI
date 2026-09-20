@@ -73,28 +73,19 @@ class KitchenV5Mechanisms(unittest.TestCase):
         self.assertEqual(state['metrics']['completed_orders'],1)
         self.assertEqual(sum(ev['delta'] for ev in state['events'] if ev['type']=='score_delta'),99)
 
-    def test_occupied_output_commits_even_if_human_clears_same_turn(self):
+    def test_occupied_output_can_be_cancelled_before_reaching_handoff(self):
         state=fixture(); output=dish()
         state['ai'].update(x=6,y=1,facing='right',holding=output)
         state['human'].update(x=3,y=3,facing='right')
         state['handoff']=item('meat',iid='blocking-meat',order='order2')
-        self.assertEqual(e.decide(state)['reason_code'],'discard_blocked_output')
+        self.assertEqual(e.decide(state)['reason_code'],'approach_blocked_output')
         state=e.step(state,'interact')
         self.assertIsNone(state['handoff'])
-        self.assertEqual(state['policy_memory']['discard_output_id'],output['id'])
+        self.assertEqual(e.decide(state)['reason_code'],'deliver')
         self.assertEqual(state['metrics']['discarded_dishes'],0)
-        turns=1
-        while state['ai']['holding']:
-            self.assertEqual(e.decide(state)['reason_code'],'discard_blocked_output')
-            self.assertEqual(state['ai']['holding']['components'],output['components'])
-            state=e.step(state,'wait'); turns+=1
-            self.assertLess(turns,12)
-        waste=next(ev for ev in state['events'] if ev['type']=='waste')
-        self.assertEqual(waste['station'],'trash')
-        self.assertEqual(e._front(state['ai'])['id'],'trash')
-        self.assertEqual(waste['item']['components'],output['components'])
-        self.assertEqual(state['raw_score'],-turns-10)
-        self.assertEqual(state['metrics']['discarded_dishes'],1)
+        while not state['handoff']: state=e.step(state,'wait')
+        self.assertEqual(state['handoff']['components'],output['components'])
+        self.assertEqual(state['metrics']['discarded_dishes'],0)
 
     def test_after_delivery_collects_next_finished_and_never_retrieves_own_output(self):
         state=fixture(); first=dish(); second=dish(order='order3',pot='pot2')
@@ -147,7 +138,8 @@ class KitchenV5Mechanisms(unittest.TestCase):
                 self.assertTrue(e.public_state(state)['human']['preparation']['ready'])
                 while (e._front(state['human']) or {}).get('id')!='human_buffer': state=tick(state,e._approach(state,'human','human_buffer'))
                 state=tick(state,'interact')
-                while state['turn']<prepared_at+lifetime-1: state=tick(state)
+                stored_at=state['turn']
+                while state['turn']<stored_at+10: state=tick(state)
                 self.assertEqual(state['buffers']['human']['stage'],'prepared')
                 self.assertEqual(e.public_state(state)['food_freshness'][0]['remaining'],1)
                 state=tick(state)
@@ -173,7 +165,8 @@ class KitchenV5Mechanisms(unittest.TestCase):
             if state['buffers']['ai_raw'][0]: break
             state=e.step(state,'wait')
         self.assertEqual(state['buffers']['ai_raw'][0]['id'],original['id'])
-        while state['turn']<original['fresh_until']: state=e.step(state,'wait')
+        stored_at=state['buffers']['ai_raw'][0]['storage_since_turn']
+        while state['turn']<stored_at+11: state=e.step(state,'wait')
         self.assertEqual(state['buffers']['ai_raw'][0]['stage'],'spoiled')
         self.assertEqual(state['metrics']['discard_penalty'],0)
         for _ in range(15):

@@ -1,7 +1,7 @@
 {
-  "version": "kitchen-scenarios-v5.0.0",
-  "scenario_version": "kitchen-scenarios-v5.0.0",
-  "rules_version": "kitchen-v5.0.0",
+  "version": "kitchen-scenarios-v6.0.0",
+  "scenario_version": "kitchen-scenarios-v6.0.0",
+  "rules_version": "kitchen-v6.0.0",
   "study_mode": "pilot_pending_human_validation",
   "development_seeds": [
     1000,
@@ -6421,9 +6421,15 @@
       },
       "spoilage": "after actions on the expiry turn; item remains visible and unusable",
       "pan_clock": "cooking/burning replaces oxidation",
-      "cooked_and_finished_oxidation": false
+      "cooked_and_finished_oxidation": false,
+      "raw_prepared_storage_limit": 10,
+      "storage_locations": [
+        "ai_raw",
+        "human_buffer"
+      ],
+      "storage_spoilage": "after more than 10 consecutive turns untouched; picking up spoiled food never restores freshness"
     },
-    "blocked_output": "occupied handoff commits a held finished dish to physical bin disposal; clearing later does not cancel",
+    "blocked_output": "arrive facing handoff, wait two full turns while blocked; third still-blocked turn starts physical disposal route; clearing before bin interaction cancels disposal",
     "output_priority": "empty AI hand collects ready finished food before new ingredients; never takes delivered output back",
     "conservation": "previous components + acquired = current components + served + explicit bin disposal"
   },
@@ -6541,6 +6547,23 @@
         }
       }
     },
+    "human_relative_gain": null,
+    "historical_version": "kitchen-v5.0.0",
+    "applies_to_current_version": false
+  },
+  "validation_results": {
+    "engine_version": "kitchen-v6.0.0",
+    "evidence_type": "actual fixed AI with deterministic human-action proxy; not human participants",
+    "budgets_changed": false,
+    "menus_or_scoring_changed": false,
+    "runs": 144,
+    "all_five_dishes_completed": true,
+    "maximum_turns": 283,
+    "minimum_parallel_recipe_turns": 48,
+    "parallel_heating_claim": false,
+    "burnt": 0,
+    "spoiled": 0,
+    "waste": 0,
     "human_relative_gain": null
   }
 }

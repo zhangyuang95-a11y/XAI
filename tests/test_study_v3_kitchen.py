@@ -323,7 +323,8 @@ class ControllerAndEvidence(unittest.TestCase):
         self.assertEqual(state['metrics']['wrong_order_buffered'], 1)
         while not state['terminal']:
             state = e.step(state, e.human_advisor(state)); events.extend(state['events'])
-        self.assertTrue(any(event['type'] == 'served' and original_id in event['item']['components'] for event in events))
+        self.assertTrue(any(event['type'] == 'waste' and original_id in event['item']['components'] and event['station'] == 'trash' for event in events))
+        self.assertTrue(any(event['type'] == 'ingredient_spoiled' and event['item']['id'] == original_id for event in events))
         self.assertEqual(state['metrics']['completed_orders'], 5)
 
     def test_raw_delivery_recovery_for_all_four_ingredients_from_initial_state(self):
@@ -345,7 +346,7 @@ class ControllerAndEvidence(unittest.TestCase):
                     state = e.step(state, e.human_advisor(state)); events.extend(state['events'])
                 self.assertEqual(state['metrics']['completed_orders'], 5)
                 self.assertTrue(any(event['type'] in ('served','waste') and wrong_id in event['item']['components'] for event in events))
-                if ingredient != 'pepper': self.assertEqual(state['metrics']['waste'],0)
+                self.assertEqual(state['metrics']['waste'], sum(len(event['item']['components']) for event in events if event['type'] == 'waste'))
 
     def test_invalid_handoff_recovery_with_full_human_hand_and_storage(self):
         state = fixture()
@@ -641,6 +642,8 @@ class KitchenFeasibility(unittest.TestCase):
                     final = frames[-1]
                     self.assertEqual(final['metrics']['completed_orders'],5)
                     self.assertEqual(e.score(final)['task_score'],500-final['turn'])
+                    self.assertEqual(final['metrics']['spoiled'],0)
+                    self.assertEqual(final['metrics']['waste'],0)
                     self.assertLessEqual(final['turn'],cfg['task_budgets'][str(task)])
                     self.assertEqual(final['metrics']['burnt'], 0)
                     self.assertGreater(final['metrics']['parallel_recipe_turns'], 0)

@@ -118,10 +118,10 @@ function actionLabel(a){return view?.action_labels?.[a]||actionLabels[a]?.[lang=
 let hypotheticalLane=5;
 function questionExamples(){
  const zh=lang==='zh';
- if(domain!=='pong')return [{id:'why',label:zh?'为什么做这个动作？':'Why this action?',text:zh?'你现在为什么要做这个动作？':'Why are you choosing this action now?'},{id:'help',label:tr('help'),text:tr('help')},{id:'whatif',label:tr('whatif'),text:tr('whatif')}];
+ if(domain!=='pong')return [{id:'why',label:zh?'为什么做这个动作？':'Why this action?',text:zh?'你这一回合为什么这么做？':'Why did you take this action this turn?'},{id:'help',label:tr('help'),text:tr('help')},{id:'whatif',label:tr('whatif'),text:tr('whatif')}];
  return [
-  {id:'why',label:zh?'为什么做这个动作？':'Why this action?',text:zh?'你现在为什么要做这个动作？':'Why are you choosing this action now?'},
-  {id:'alternative',label:zh?'为什么不左移？':'Why not move left?',text:zh?'你为什么不向左移动？':'Why do you not move left?'},
+  {id:'why',label:zh?'为什么做这个动作？':'Why this action?',text:zh?'你这一回合为什么这么做？':'Why did you take this action this turn?'},
+  {id:'alternative',label:zh?'为什么不左移？':'Why not move left?',text:zh?'你这一回合为什么没有向左移动？':'Why did you not move left this turn?'},
   {id:'whatif',label:zh?'如果我右移呢？':'What if I move right?',text:zh?'如果我向右移动一步，你会怎么移动？':'If I move one lane right, how will you move?'},
   {id:'help',label:zh?'我应该接哪个球？':'Which ball should I catch?',text:zh?'我离哪个球最近，还剩几回合？我怎样配合你？':'Which ball am I closest to, how many turns until it arrives, and how can I coordinate with you?'}
  ];

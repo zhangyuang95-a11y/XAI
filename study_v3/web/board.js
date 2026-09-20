@@ -218,7 +218,7 @@ window.StudyBoard = class StudyBoard {
     this.label(ctx,this.lang==='zh'?'小球 2格/步 · 大球 1格/步':'Small: 2 cells / move · Team: 1 cell / move',w/2,18,13,'#68758b');
   }
   ball(ctx,b,lane,y,balls=[]) {
-    const label=b.id+' · '+b.remaining+(this.lang==='zh'?'步':'t');
+    const label=b.id;
     if(b.contacts.length===2){
       // Simultaneous team balls share their true height. Separate their narrow
       // drawing bands so overlapping spans cannot hide one another.

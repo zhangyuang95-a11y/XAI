@@ -20,10 +20,10 @@ class RecordingExplainer:
     def __init__(self):
         self.calls = []
 
-    def answer(self, eng, state, decision, question, language, previous_dialogue, public_history):
+    def answer(self, eng, state, decision, question, language, previous_dialogue, public_history, *, action_context=None):
         self.calls.append(json.loads(encode({"domain": eng.DOMAIN, "state": state,
             "decision": decision, "question": question, "language": language,
-            "previous": previous_dialogue, "history": public_history})))
+            "previous": previous_dialogue, "history": public_history, "action_context": action_context})))
         return {"status": "answered", "answer": "A test-only verified answer.",
             "evidence_ids": ["test-evidence"], "language": language,
             "audit": {"secret_trace": "must-stay-server-side"},

@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import time
 from http import HTTPStatus
 from http.cookies import SimpleCookie
@@ -78,8 +79,81 @@ def manifest(settings):
         'semantic_qa_configured':settings.llm_configured,'deployment_validation_complete':settings.verified,'study_ready':settings.ready,
         'human_effect_status':'not_measured','target_task2_relative_gain':0.5}
 
+class QAReadinessMonitor:
+    """Retry failed real QA checks without holding HTTP or database locks.
+
+    Only one background probe runs at a time, at most once per interval. The
+    provider has its normal bounded request timeout. Closing the server cancels
+    future probes and discards an in-flight result without waiting for its I/O.
+    """
+    def __init__(self, store, probe, *, interval=30.0, clock=time.monotonic):
+        if interval <= 0:
+            raise ValueError('positive_qa_probe_interval_required')
+        self.store, self.probe, self.interval, self.clock = store, probe, interval, clock
+        self._lock = threading.Lock()
+        self._stopped = threading.Event()
+        self._thread = None
+        self._busy = False
+        self._last_attempt = None
+
+    def check(self):
+        with self._lock:
+            if self._stopped.is_set() or self._busy or not self.store.settings.ready:
+                return False
+            healthy, version = self.store.qa_health_snapshot()
+            now = self.clock()
+            if healthy or (self._last_attempt is not None and now - self._last_attempt < self.interval):
+                return False
+            self._busy, self._last_attempt = True, now
+        try:
+            result = self.probe()
+            healthy = isinstance(result, dict) and result.get('status') in ('answered', 'clarification')
+            outcome = 'validated' if healthy else 'unavailable_or_invalid_result'
+        except Exception:
+            healthy, outcome = False, 'probe_exception'
+        with self._lock:
+            self._busy = False
+            if self._stopped.is_set():
+                return False
+            updated = self.store.set_qa_health(healthy, expected_version=version)
+        if updated and healthy:
+            logging.info('QA readiness probe validated; study admission available')
+        elif updated:
+            # Fixed outcome labels only: never log provider responses, URLs,
+            # questions, credentials or exception text.
+            logging.warning('QA readiness probe %s; retry in %.0f seconds', outcome, self.interval)
+        return updated and healthy
+
+    def _run(self):
+        while not self._stopped.is_set():
+            self.check()
+            if self._stopped.wait(self.interval):
+                break
+
+    def start(self):
+        with self._lock:
+            if self._thread is not None or self._stopped.is_set() or not self.store.settings.ready:
+                return
+            self._thread = threading.Thread(target=self._run, name='study-qa-readiness', daemon=True)
+            self._thread.start()
+
+    def stop(self):
+        with self._lock:
+            self._stopped.set()
+            worker = self._thread
+        if worker is not None and worker is not threading.current_thread():
+            worker.join(timeout=0.1)
+
+
 class StudyHTTPServer(ThreadingHTTPServer):
+    def shutdown(self):
+        if hasattr(self, 'qa_monitor'):
+            self.qa_monitor.stop()
+        super().shutdown()
+
     def server_close(self):
+        if hasattr(self, 'qa_monitor'):
+            self.qa_monitor.stop()
         super().server_close()
         if hasattr(self,'store'):self.store.db.close()
 
@@ -95,13 +169,14 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
             explainer=Explainer(settings)
         except ImportError: pass
     store=Store(settings,explainer)
-    if settings.ready:
-        try:
-            probe_engine=engine('pong');probe_state=probe_engine.initial_state(26092000,2)
-            probe=explainer.answer(probe_engine,probe_state,probe_engine.decide(probe_state),
-                'What is your next action?', 'en', [], [probe_engine.public_state(probe_state)])
-            store.qa_healthy=probe.get('status') in ('answered','clarification')
-        except Exception:store.qa_healthy=False
+    # A configured service is not ready until a real, validated answer succeeds.
+    # Run this check after opening the HTTP server so a transient model failure
+    # cannot permanently lock enrollment or delay liveness requests.
+    store.qa_healthy=False
+    def qa_probe():
+        probe_engine=engine('pong');probe_state=probe_engine.initial_state(26092000,2)
+        return explainer.answer(probe_engine,probe_state,probe_engine.decide(probe_state),
+            'What is your next action?', 'en', [], [probe_engine.public_state(probe_state)])
     release=manifest(settings)
     release['study_ready']=store.ready
     with store.db.transaction() as db:
@@ -230,13 +305,15 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
     server.daemon_threads=True
     server.store=store
     server.release=release
+    server.qa_monitor=QAReadinessMonitor(store, qa_probe)
+    server.qa_monitor.start()
     return server
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--host',default='0.0.0.0');parser.add_argument('--port',type=int,default=int(os.environ.get('PORT','8010')))
     args=parser.parse_args();logging.basicConfig(level=logging.INFO,format='%(levelname)s %(message)s')
     server=make_server(Settings.from_env(),args.host,args.port)
-    logging.info('PolicyLens %s ready on port %s; study_ready=%s',RELEASE_ID,server.server_port,server.release['study_ready'])
+    logging.info('PolicyLens %s ready on port %s; study_ready=%s',RELEASE_ID,server.server_port,server.store.ready)
     try:server.serve_forever()
     except KeyboardInterrupt:pass
     finally:server.server_close()

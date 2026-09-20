@@ -5,6 +5,7 @@ import json
 from contextlib import closing
 import re
 import secrets
+import threading
 import time
 import uuid
 
@@ -42,7 +43,30 @@ EXPORT_TABLES = ('participants','enrollments','instances','runs','frames',
 class Store:
     def __init__(self, settings, explainer=None):
         self.settings, self.db, self.explainer = settings, Database(settings.database), explainer
-        self.qa_healthy = settings.verified
+        self._qa_health_lock = threading.Lock()
+        self._qa_healthy, self._qa_health_version = settings.verified, 0
+
+    @property
+    def qa_healthy(self):
+        with self._qa_health_lock:
+            return self._qa_healthy
+
+    @qa_healthy.setter
+    def qa_healthy(self, healthy):
+        self.set_qa_health(healthy)
+
+    def qa_health_snapshot(self):
+        with self._qa_health_lock:
+            return self._qa_healthy, self._qa_health_version
+
+    def set_qa_health(self, healthy, *, expected_version=None):
+        """An older probe cannot overwrite a newer participant QA result."""
+        with self._qa_health_lock:
+            if expected_version is not None and expected_version != self._qa_health_version:
+                return False
+            self._qa_healthy = bool(healthy)
+            self._qa_health_version += 1
+            return True
 
     @property
     def ready(self):

@@ -17,7 +17,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
 
-from . import RELEASE_ID
+from . import RELEASE_ID, SUPPORTED_RELEASE_IDS
 from .config import Settings
 from .registry import MODULES, engine, demonstration
 from .store import Store, StudyError, encode
@@ -69,6 +69,9 @@ def manifest(settings):
     for path in sorted(set(paths)):
         if path.is_file():source.update(str(path.relative_to(ROOT)).encode()+b'\0'+path.read_bytes())
     return {'release_id':RELEASE_ID,'commit':commit,'source_sha256':source.hexdigest(),
+        'enrollment':{'group_selection':'participant_choice_at_new_domain',
+            'resume_preserves_group':True,'parallel_domains':True,
+            'compatible_session_releases':sorted(SUPPORTED_RELEASE_IDS)},
         'domains':{k:{'url':'/'+k+'/','version':engine(k).VERSION} for k in MODULES},
         'explanations':{'group':'A','task':2,'active_only':True},
         'default_language':'en','mode':settings.mode,'storage_persistent':settings.persistent,

@@ -270,8 +270,12 @@ def test_participant_instance_domain_and_run_boundaries(store):
     denied(lambda: store.view("invalid-session", owner.view["instance_id"]), "session_required", 401)
     denied(lambda: store.create({"participant_id": owner.name, "domain": "pong", "consent": True,
         "mode": "test", "group": "B"}, admin=True), "participant_exists_use_recovery", 409)
-    denied(lambda: store.create({"participant_id": owner.name, "domain": "kitchen", "consent": True,
-        "mode": "test", "group": "B"}, token=owner.token, admin=True), "another_domain_active", 409)
+    preserved = store.view(owner.token, owner.view["instance_id"])
+    same_token, second_domain = store.create({"participant_id": owner.name, "domain": "kitchen", "consent": True,
+        "mode": "test", "group": "B"}, token=owner.token, admin=True)
+    assert same_token == owner.token and second_domain["group"] == "B"
+    assert second_domain["stage"] == "demo"
+    assert store.view(owner.token, owner.view["instance_id"]) == preserved
 
 
 @pytest.mark.parametrize("advance_to_task3", [False, True])
@@ -331,7 +335,7 @@ def test_storage_restart_recovery_and_separate_domain_instance(tmp_path):
     flow.finish_task(); flow.command("next"); flow.finish_task(); flow.command("next"); flow.submit_survey()
     token, next_domain = restarted.create({"participant_id": flow.name, "domain": "warehouse",
         "mode": "test", "group": "B", "consent": True}, token=flow.token, admin=True)
-    assert token == flow.token and next_domain["group"] == "A"
+    assert token == flow.token and next_domain["group"] == "B"
     assert next_domain["instance_id"] != flow.view["instance_id"]
     assert restarted.recover_view(token)["domain"] == "warehouse"
     assert restarted.recover_view(token, "pong")["stage"] == "completed"
@@ -411,6 +415,7 @@ def test_release_mismatch_never_resumes_old_session_under_new_rules(store, monke
     question = flow.question()
     store.ask(flow.token, question)
     monkeypatch.setattr("study_v3.store.RELEASE_ID", "test-new-release")
+    monkeypatch.setattr("study_v3.store.SUPPORTED_RELEASE_IDS", frozenset({"test-new-release"}))
     denied(lambda: store.view(flow.token, flow.view["instance_id"]), "release_changed", 409)
     denied(lambda: store.recover_view(flow.token, "pong"), "release_changed", 409)
     denied(lambda: store.ask(flow.token, question), "release_changed", 409)
@@ -418,16 +423,24 @@ def test_release_mismatch_never_resumes_old_session_under_new_rules(store, monke
 
 
 @pytest.mark.parametrize("requested_domain", ["pong", "kitchen"])
-def test_unfinished_old_release_prevents_new_instance_in_any_domain(store, monkeypatch, requested_domain):
+def test_unsupported_release_only_blocks_its_own_domain(store, monkeypatch, requested_domain):
     flow = Flow(store, "pong")
     flow.finish_demo()
     original_records = store.export()
     monkeypatch.setattr("study_v3.store.RELEASE_ID", "test-new-release")
+    monkeypatch.setattr("study_v3.store.SUPPORTED_RELEASE_IDS", frozenset({"test-new-release"}))
 
-    denied(lambda: store.create({"participant_id": flow.name, "domain": requested_domain,
-        "consent": True, "mode": "test"}, token=flow.token, admin=True), "release_changed", 409)
-
-    assert store.export() == original_records
+    payload = {"participant_id": flow.name, "domain": requested_domain,
+        "consent": True, "mode": "test"}
+    if requested_domain == "pong":
+        denied(lambda: store.create(payload, token=flow.token, admin=True), "release_changed", 409)
+        assert store.export() == original_records
+    else:
+        _, new_domain = store.create(payload, token=flow.token, admin=True)
+        assert new_domain["domain"] == "kitchen" and new_domain["release_id"] == "test-new-release"
+        after = store.export()
+        for table, records in original_records.items():
+            assert all(row in after[table] for row in records)
 
 
 @pytest.mark.parametrize("domain", ["warehouse", "pong", "kitchen"])
@@ -503,4 +516,5 @@ def test_interrupted_question_lease_recovers_after_restart(store):
     assert answer['status']=='answered'
     rows=restored.export()['questions']
     assert len(rows)==2
-    assert json.loads(rows[-1]['result_json'])['audit']['authorization_at_completion'] is True
+    completed = next(row for row in rows if row['id'] == answer['id'])
+    assert json.loads(completed['result_json'])['audit']['authorization_at_completion'] is True

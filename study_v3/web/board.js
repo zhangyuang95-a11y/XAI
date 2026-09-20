@@ -68,6 +68,11 @@ window.StudyBoard = class StudyBoard {
     const c = Math.min((width - 36) / state.width, (height - 36) / state.height);
     const ox = (width - c * state.width) / 2, oy = (height - c * state.height) / 2;
     const at = (x, y) => [ox + x * c, oy + y * c];
+    const warehousePalette=['#009E73','#CC79A7','#B79F00','#7A5AF8','#5D6B7A'];
+    const warehouseOrders = new Map((state.orders || []).map((order,index) => [order.id, {
+      slot:index+1,
+      color:warehousePalette[Math.max(0,(Number(String(order.id).match(/\d+$/)?.[0])||index+1)-1)%warehousePalette.length],
+    }]));
     ctx.strokeStyle = '#dce4ef'; ctx.lineWidth = 1;
     for (let x = 0; x <= state.width; x++) { ctx.beginPath(); ctx.moveTo(ox + x*c, oy); ctx.lineTo(ox + x*c, oy + state.height*c); ctx.stroke(); }
     for (let y = 0; y <= state.height; y++) { ctx.beginPath(); ctx.moveTo(ox, oy + y*c); ctx.lineTo(ox + state.width*c, oy + y*c); ctx.stroke(); }
@@ -92,14 +97,13 @@ window.StudyBoard = class StudyBoard {
         const [x,y] = at(Array.isArray(charger)?charger[0]:charger.x,Array.isArray(charger)?charger[1]:charger.y);
         this.rect(ctx,x+4,y+4,c-8,c-8,'#6558e8',2); this.label(ctx,'⚡',x+c/2,y+c/2,c*.46,'white');
       }
-      const palette=['#009E73','#CC79A7','#B79F00','#7A5AF8','#5D6B7A'];
-      (state.orders || []).forEach((order,i) => {
-        const color=palette[Math.max(0,(Number(String(order.id).match(/\d+$/)?.[0])||i+1)-1)%palette.length];
+      (state.orders || []).forEach(order => {
+        const {slot,color}=warehouseOrders.get(order.id);
         for (const [key,letter] of [['pickup','A'],['dropoff','B']]) {
           const pos=order[key]; if(!pos || (key==='pickup' && order.status!=='available' && order.status!=='waiting')) continue;
           const [x,y]=at(Array.isArray(pos)?pos[0]:pos.x,Array.isArray(pos)?pos[1]:pos.y);
           ctx.fillStyle=color;ctx.beginPath();ctx.arc(x+c/2,y+c/2,c*.31,0,Math.PI*2);ctx.fill();
-          this.label(ctx,letter+(i+1),x+c/2,y+c/2,c*.27,'white',800);
+          this.label(ctx,letter+slot,x+c/2,y+c/2,c*.27,'white',800);
         }
       });
     } else {
@@ -117,7 +121,9 @@ window.StudyBoard = class StudyBoard {
     for (const [actor,color] of [['human','#4f6ff0'],['ai','#f56b3d']]) {
       const a=after[actor],b=before[actor]||a;if(!a)continue;
       const eased=.5-Math.cos(Math.PI*p)/2,xpos=b.x+(a.x-b.x)*eased,ypos=b.y+(a.y-b.y)*eased;
-      const [x,y]=at(xpos,ypos),visible=p<.5?b:a;
+      // Warehouse facts and A/B slot numbers switch with the displayed map,
+      // so a replenished job cannot relabel cargo halfway through a move.
+      const [x,y]=at(xpos,ypos),visible=state.domain==='warehouse'?state[actor]:(p<.5?b:a);
       this.canvas.dataset[actor+'X']=xpos.toFixed(3);this.canvas.dataset[actor+'Y']=ypos.toFixed(3);
       this.rect(ctx,x+c*.14,y+c*.14,c*.72,c*.72,a.active===false?'#d9485f':color,c*.15);
       this.label(ctx,actor==='human'?'1':'2',x+c/2,y+c/2,c*.34,'white',900);
@@ -127,10 +133,17 @@ window.StudyBoard = class StudyBoard {
         ctx.moveTo(cx+dx*c*.13,cy+dy*c*.13);ctx.lineTo(cx-dy*c*.09,cy+dx*c*.09);ctx.lineTo(cx+dy*c*.09,cy-dx*c*.09);ctx.closePath();ctx.fill();
       }
       if (visible.battery!==undefined) {
-        this.rect(ctx,x+c*.15,Math.max(oy+2,y-c*.12),c*.7,c*.24,'#fff',8);
-        this.label(ctx,Math.round(visible.battery)+'%',x+c/2,Math.max(oy+c*.14,y),c*.18,visible.battery<=20?'#b4233b':'#26324a',800);
+        const top=Math.max(oy+2,y-c*.12);
+        this.rect(ctx,x+c*.14,top,c*.49,c*.22,'#fff',8);
+        this.label(ctx,Math.round(visible.battery)+'%',x+c*.385,top+c*.11,c*.16,visible.battery<=20?'#b4233b':'#26324a',800);
       }
-      this.item(ctx,visible.holding||visible.carrying,x+c*.86,y+c*.15,c*.43);
+      if (state.domain==='warehouse' && visible.carrying) {
+        const cargo=warehouseOrders.get(visible.carrying),cx=x+c*.85,cy=y+c*.15;
+        ctx.fillStyle=cargo?.color||'#b79f00';ctx.beginPath();ctx.arc(cx,cy,c*.17,0,Math.PI*2);ctx.fill();
+        this.label(ctx,cargo?'A'+cargo.slot:'?',cx,cy,c*.18,'white',800);
+      } else if (state.domain!=='warehouse') {
+        this.item(ctx,visible.holding,x+c*.86,y+c*.15,c*.43);
+      }
     }
   }
   pong(ctx,before,after,p,w,h) {

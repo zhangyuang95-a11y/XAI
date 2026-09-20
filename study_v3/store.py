@@ -8,7 +8,7 @@ import secrets
 import time
 import uuid
 
-from . import RELEASE_ID
+from . import RELEASE_ID, SUPPORTED_RELEASE_IDS
 from .database import Database
 from .registry import engine, demonstration, MODULES, scenario_config
 
@@ -58,7 +58,7 @@ class Store:
         participant=self._participant(db,token)
         row=db.one('SELECT * FROM pl3_instances WHERE id=? AND participant_id=?',(instance_id,participant['id']))
         if row is None: raise StudyError('study_not_found',404)
-        if row['release_id'] != RELEASE_ID: raise StudyError('release_changed',409)
+        if row['release_id'] not in SUPPORTED_RELEASE_IDS: raise StudyError('release_changed',409)
         return row
 
     def _ask_allowed(self, db, instance):
@@ -76,6 +76,9 @@ class Store:
         if mode not in ('pilot','preview','test'): raise StudyError('invalid_mode')
         if mode!='pilot' and not admin: raise StudyError('researcher_access_required',403)
         if mode=='pilot' and not self.ready: raise StudyError('study_not_ready',503)
+        requested_group=payload.get('group')
+        if requested_group is not None and requested_group not in ('A','B'):
+            raise StudyError('invalid_group')
         language='zh' if payload.get('language')=='zh' else 'en'
         recovery=None
         with self.db.transaction() as db:
@@ -90,20 +93,24 @@ class Store:
                     raise StudyError('participant_exists_use_recovery',409)
                 if db.one('SELECT id FROM pl3_instances WHERE participant_id=? AND mode!=?',(name,mode)):
                     raise StudyError('participant_mode_conflict',409)
-                group=existing['group_code']
+                # The participant row retains its original assignment. A new
+                # domain may have a different explicit, per-instance choice.
+                group=requested_group or existing['group_code']
             else:
                 counts={x['group_code']:x['n'] for x in db.all('SELECT group_code,COUNT(*) AS n FROM pl3_instances WHERE domain=? AND mode=? AND release_id=? GROUP BY group_code',(domain,mode,RELEASE_ID))}
                 group=secrets.choice(['A','B']) if counts.get('A',0)==counts.get('B',0) else min(['A','B'],key=lambda g:counts.get(g,0))
-                if admin and mode!='pilot' and payload.get('group') in ('A','B'): group=payload['group']
+                if requested_group: group=requested_group
                 recovery=secrets.token_urlsafe(18)
                 db.execute('INSERT INTO pl3_participants VALUES(?,?,?,?)',(name,group,digest(recovery),time.time()))
             if not authenticated or authenticated['id']!=name:
                 token=secrets.token_urlsafe(32)
                 db.execute('INSERT INTO pl3_sessions VALUES(?,?,?)',(digest(token),name,time.time()))
-            active=db.all("SELECT * FROM pl3_instances WHERE participant_id=? AND stage!='completed' ORDER BY created DESC",(name,))
-            if any(row['release_id']!=RELEASE_ID for row in active): raise StudyError('release_changed',409)
-            if any(row['domain']!=domain for row in active): raise StudyError('another_domain_active',409)
-            instance=db.one('SELECT * FROM pl3_instances WHERE participant_id=? AND domain=? AND release_id=?',(name,domain,RELEASE_ID))
+            # Switching domains never rewrites or finishes another instance.
+            # Resume the requested domain across explicitly compatible UI-only
+            # releases; unsupported rules block only that domain, not its peers.
+            instance=db.one('SELECT * FROM pl3_instances WHERE participant_id=? AND domain=? ORDER BY created DESC,id DESC LIMIT 1',(name,domain))
+            if instance and instance['release_id'] not in SUPPORTED_RELEASE_IDS:
+                raise StudyError('release_changed',409)
             if not instance:
                 iid=uid()
                 config=scenario_config(domain)
@@ -114,7 +121,10 @@ class Store:
                 seed=min(seeds,key=lambda candidate:(usage.get((candidate,group),0),-usage.get((candidate,opposite),0),seeds.index(candidate)))
                 db.execute('INSERT INTO pl3_instances VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (iid,name,domain,RELEASE_ID,group,mode,'demo',0,None,0,language,seed,time.time(),None))
-                assignment='existing_participant' if existing else 'researcher_override' if admin and mode!='pilot' and payload.get('group') in ('A','B') else 'randomized_balanced'
+                if requested_group:
+                    assignment='researcher_override' if admin and mode!='pilot' else 'participant_choice'
+                else:
+                    assignment='existing_participant' if existing else 'randomized_balanced'
                 db.execute('INSERT INTO pl3_enrollments VALUES(?,?,?,?,?,?)',(iid,1,language,assignment,config.get('scenario_version',config['version']),time.time()))
                 instance=db.one('SELECT * FROM pl3_instances WHERE id=?',(iid,))
             result=self._view(db,instance)
@@ -124,10 +134,14 @@ class Store:
     def recover_view(self, token, domain=None):
         with self.db.transaction(read_only=True) as db:
             p=self._participant(db,token)
-            rows=db.all('SELECT * FROM pl3_instances WHERE participant_id=? ORDER BY created DESC',(p['id'],))
-            instance=next((r for r in rows if r['domain']==domain),None) if domain else next((r for r in rows if r['stage']!='completed'),rows[0] if rows else None)
+            rows=db.all('SELECT * FROM pl3_instances WHERE participant_id=? ORDER BY created DESC,id DESC',(p['id'],))
+            if domain:
+                instance=next((r for r in rows if r['domain']==domain),None)
+            else:
+                compatible=[r for r in rows if r['release_id'] in SUPPORTED_RELEASE_IDS]
+                instance=next((r for r in compatible if r['stage']!='completed'),compatible[0] if compatible else rows[0] if rows else None)
             if not instance: return {'participant_id':p['id'],'stage':'welcome'}
-            if instance['release_id']!=RELEASE_ID: raise StudyError('release_changed',409)
+            if instance['release_id'] not in SUPPORTED_RELEASE_IDS: raise StudyError('release_changed',409)
             return self._view(db,instance)
 
     def view(self, token, instance_id):
@@ -136,12 +150,14 @@ class Store:
     def _view(self,db,instance):
         eng=engine(instance['domain'])
         language=instance['language']
+        enrollment=db.one('SELECT assignment_source FROM pl3_enrollments WHERE instance_id=?',(instance['id'],))
         result={k:instance[k] for k in ('id','domain','stage','revision','language','mode','release_id')}
         result.update(instance_id=instance['id'],participant_id=instance['participant_id'],
             can_ask=self._ask_allowed(db,instance),rules=eng.rules(language),
             task2_explanation_notice=instance['stage']=='task2' and instance['group_code']=='A' and not self._ask_allowed(db,instance),
             task_runs=[],questions=[],state=None,run_id=instance['current_run'],
-            group=instance['group_code'] if instance['mode']!='pilot' else None)
+            group=instance['group_code'],group_selection_locked=True,
+            group_assignment_source=enrollment['assignment_source'] if enrollment else None)
         runs=db.all('SELECT id,task,status,score_json,state_json FROM pl3_runs WHERE instance_id=? ORDER BY task',(instance['id'],))
         result['task_runs']=[{'id':r['id'],'task':r['task'],'status':r['status'],'score':eng.public_state(json.loads(r['state_json']))['score'],'turn':json.loads(r['state_json'])['turn']} for r in runs]
         if instance['stage']=='demo':

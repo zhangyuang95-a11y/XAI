@@ -27,3 +27,7 @@ main{max-width:1480px;padding-top:24px}.panel{border-radius:20px;box-shadow:0 16
 @media(max-width:800px){.workspace{grid-template-columns:1fr}.masthead{height:88px}.header-context{position:absolute;left:25px;bottom:7px;margin:0}.counter-items{grid-template-columns:1fr 1fr}}
 
 .point-total{margin:0 22px 12px;color:var(--muted);font-size:13px}
+
+/* Compact shared instructions and persistent cross-domain navigation. */
+.domain-navigation{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 18px}.domain-navigation a{padding:7px 13px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--muted);font-size:12px;text-decoration:none}.domain-navigation a[aria-current=page]{background:#eeecff;border-color:#c9c3ff;color:#6558e8;font-weight:650}
+.compact-rules{padding-left:19px;margin:0;line-height:1.75;font-size:14px}.compact-rules li+li{margin-top:7px}.demo-sidebar .demo-caption{border-top:1px solid var(--line)}.demo-sidebar .button-row{display:flex;flex-wrap:wrap;gap:8px}.demo-sidebar .button{padding:10px 14px}.recipe-goal{font-size:12px;color:var(--muted);margin:12px 0 0}

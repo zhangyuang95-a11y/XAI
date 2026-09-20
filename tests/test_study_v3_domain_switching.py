@@ -262,3 +262,22 @@ def test_public_http_cookie_switches_domains_and_resumes_locked_group(pilot_stor
         server.shutdown()
         server.server_close()
         worker.join(5)
+
+@pytest.mark.parametrize('domain', ['warehouse','pong','kitchen'])
+def test_v34_explanation_only_patch_resumes_exact_gameplay(pilot_store, domain):
+    old_release='policylens-three-domain-20260920.v3.4'
+    assert old_release in SUPPORTED_RELEASE_IDS
+    flow=public_flow(pilot_store,domain,'A')
+    flow.start_task2();flow.step('wait')
+    with pilot_store.db.transaction() as db:
+        db.execute('UPDATE pl3_instances SET release_id=? WHERE id=?',(old_release,flow.view['instance_id']))
+    before=pilot_store.export()
+    restored=pilot_store.recover_view(flow.token,domain)
+    assert restored['release_id']==old_release and restored['state']==flow.view['state']
+    assert restored['can_ask'] and restored['group']=='A'
+    _,same=pilot_store.create(enrollment(flow.name,domain,'B'),flow.token)
+    assert same['instance_id']==restored['instance_id'] and same['group']=='A'
+    assert pilot_store.export()==before
+    flow.view=restored;flow.step('wait')
+    assert flow.view['state']['turn']==restored['state']['turn']+1
+    assert flow.view['release_id']==old_release

@@ -15,8 +15,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-VERSION = "study-evidence-qa.v3.3"
+VERSION = "study-evidence-qa.v3.4"
 MAX_STEPS = 12
+_PURPOSES = ("action", "reason", "advice", "comparison", "observation", "rule", "assignment")
 _ACTIONS = {
     "left": ("move left", "左移"), "right": ("move right", "右移"),
     "up": ("move up", "上移"), "down": ("move down", "下移"), "wait": ("wait", "等待"),
@@ -45,8 +46,10 @@ Schema:
  "premise":"supported"|"contradicted"|"unclear",
  "clarification":null|"ambiguous_object"|"select_frame"|"unsupported_question"|"missing_action",
  "intents":[{"kind":"facts","subject":"ai"|"human"|"shared",
-             "purpose":"action"|"reason"|"advice"|"comparison"|"observation"|"rule",
+             "purpose":"action"|"reason"|"advice"|"comparison"|"observation"|"rule"|"assignment",
              "evidence_ids":["provided exact fact ID"]},
+            {"kind":"facts","subject":"shared","purpose":"assignment",
+             "object_id":"t3","evidence_ids":["ball_plan:t3"]},
             {"kind":"counterfactual","subject":"human","purpose":"comparison",
              "evidence_ids":[],"actions":["left"],"horizon":1},
             {"kind":"counterfactual","subject":"human","purpose":"comparison",
@@ -92,6 +95,32 @@ Do not dump the rulebook or add system:teammate unless implementation
 or control authority was asked about. For "how can I help?", prefer the current
 human_available_option if provided and the current coordination condition. Give
 the participant an applicable option, not only general public instructions.
+"How can I help now, and why?" is normally ONE advice intent: select
+system:human_advice plus ONE directly relevant current condition. Do not repeat
+the same action using front_interaction/human_available_option as well, add
+multiple positions, or attach a full recipe/rulebook as a separate reason.
+In Kitchen, a named ingredient or pan question should select its current
+ingredient/location/phase fact, not all stations or the entire cooking sequence.
+
+For a named Pong ball's ACTUAL contact assignment ("For t3, which lane should
+I cover and which will you cover?" / "t3我该站哪道，你负责哪道？"), use a facts
+intent with purpose=assignment, subject=shared, object_id="t3" and the exact
+ball_plan:t3 evidence. ball_plan is authoritative about whether this ball was
+selected at all, including selected competing balls at the same arrival time.
+Do not substitute a general human-advice action or comparison:N reachability.
+Being able to reach a ball considered alone does NOT mean the AI plans to catch
+it: simultaneous incompatible balls can force a choice. If ball_plan says it
+is not selected, clearly use that fact instead of promising contact lanes for
+it. Add a ball's contact/arrival fact only when that detail was also asked.
+An ambiguous unnamed ball still needs clarification. object_id is required
+only for assignment intents. Position hypotheses remain counterfactual intents.
+For "Which ball am I closest to, how many turns until it arrives, and how can
+I coordinate with you?", select human_nearest_ball for distance AND arrival,
+then system:human_advice plus the current selected coordination condition.
+For "closest to you", use ai_nearest_ball: the participant addresses the AI.
+These facts define closest by horizontal distance to a visible contact, then
+arrival time and ball ID to break ties. Closest is not the same as selected:
+never silently replace the nearest ball with the currently preferred catch.
 A wrong premise should select the correcting facts and mark contradicted; never
 repeat an invented event. A hypothetical alternative is not a false premise
 merely because it differs from the AI's chosen action. After advice about the
@@ -190,6 +219,9 @@ def _action_pair(engine, state, action, *, actor="human", decision=None):
 
 def _catalog(engine, state, decision, public_history):
     rows = deepcopy(engine.facts(state, decision))
+    for row in rows:
+        if row.get("id", "").startswith("ball_plan:"):
+            row.update(subject="shared", purpose="assignment", object_id=row["id"].split(":", 1)[1])
     rows.extend([
         {"id": "system:ai_action", "subject": "ai", "purpose": "action",
          "en": "The task has finished; there is no next action." if state["terminal"] else "My next action is to " + _action_pair(engine, state, decision["action"], actor="ai", decision=decision)[0] + ".",
@@ -286,14 +318,14 @@ def _validate_plan(plan, evidence, state=None):
     for intent in intents:
         if not isinstance(intent, dict) or intent.get("kind") not in ("facts", "counterfactual"):
             raise PlanError("invalid_intent")
-        if set(intent) - {"kind", "evidence_ids", "actions", "horizon", "subject", "purpose", "intervention"}:
+        if set(intent) - {"kind", "evidence_ids", "actions", "horizon", "subject", "purpose", "intervention", "object_id"}:
             raise PlanError("unexpected_intent_fields")
         subject, purpose = intent.get("subject"), intent.get("purpose")
         # Optional only for archived injected composition fixtures. New
         # provider plans are explicitly required to resolve these semantics.
         if subject is not None and subject not in ("ai", "human", "shared"):
             raise PlanError("invalid_subject")
-        if purpose is not None and purpose not in ("action", "reason", "advice", "comparison", "observation", "rule"):
+        if purpose is not None and purpose not in _PURPOSES:
             raise PlanError("invalid_purpose")
         ids = intent.get("evidence_ids", [])
         if not isinstance(ids, list) or len(ids) > 8 or any(not isinstance(i, str) or i not in evidence for i in ids):
@@ -302,6 +334,14 @@ def _validate_plan(plan, evidence, state=None):
             raise PlanError("facts_without_evidence")
         if intent["kind"] == "facts" and any(k in intent for k in ("intervention", "actions", "horizon")):
             raise PlanError("simulation_fields_on_facts")
+        if purpose == "assignment":
+            object_id = intent.get("object_id")
+            if intent["kind"] != "facts" or not isinstance(object_id, str) or not object_id or "ball_plan:" + object_id not in ids:
+                raise PlanError("missing_ball_assignment_evidence")
+            if any(identifier.startswith("comparison:") for identifier in ids):
+                raise PlanError("isolated_reachability_is_not_assignment")
+        elif "object_id" in intent:
+            raise PlanError("unexpected_object_binding")
         if subject == "ai" and purpose in ("action", "reason") and "system:ai_" + purpose not in ids:
             raise PlanError("missing_subject_evidence")
         if subject == "human" and purpose == "advice" and "system:human_advice" not in ids:
@@ -508,7 +548,7 @@ class Explainer:
             if isinstance(plan, dict) and isinstance(plan.get("intents"), list) and any(
                     isinstance(intent, dict) and (
                         intent.get("subject") not in ("ai", "human", "shared") or
-                        intent.get("purpose") not in ("action", "reason", "advice", "comparison", "observation", "rule"))
+                        intent.get("purpose") not in _PURPOSES)
                     for intent in plan["intents"]):
                 raise ProviderError("missing_provider_semantics")
             return plan, {"provider_response_id": str(document.get("id", ""))[:120],
@@ -547,7 +587,7 @@ class Explainer:
             try:
                 plan = _validate_plan(plan, evidence, state)
             except PlanError as first_error:
-                if str(first_error) not in ("unknown_evidence", "missing_subject_evidence", "wrong_actor_evidence", "wrong_simulation_actor", "intervention_has_actual_evidence", "invalid_position_intervention", "unsupported_position_intervention", "simulation_fields_on_facts"):
+                if str(first_error) not in ("unknown_evidence", "missing_subject_evidence", "wrong_actor_evidence", "wrong_simulation_actor", "intervention_has_actual_evidence", "invalid_position_intervention", "unsupported_position_intervention", "simulation_fields_on_facts", "missing_ball_assignment_evidence", "isolated_reachability_is_not_assignment", "unexpected_object_binding"):
                     raise
                 # Exactly one model repair for evidence IDs or role mismatches.
                 # Never heuristically substitute a guessed actor or fact.
@@ -555,7 +595,7 @@ class Explainer:
                     "original_plan": deepcopy(plan), "original_provider": deepcopy(provider_audit)}
                 repaired_payload = deepcopy(payload)
                 repaired_payload["repair_request"] = {
-                    "error": "The previous plan failed validation: " + str(first_error) + ". Recheck the question's speaker and requested purpose. Use exact provided IDs. AI action/reason requires system:ai_action/system:ai_reason; human advice requires system:human_advice. Simulations control the human only; a position hypothesis must use a supported intervention, empty evidence_ids and a displayed in-range lane. Never substitute the actual state's reason for a hypothetical decision. This is your only repair attempt.",
+                    "error": "The previous plan failed validation: " + str(first_error) + ". Recheck the question's speaker and requested purpose. Use exact provided IDs. AI action/reason requires system:ai_action/system:ai_reason; human advice requires system:human_advice. Actual named-ball assignments require purpose=assignment, object_id and that ball's ball_plan fact, never isolated comparison:N reachability. Simulations control the human only; a position hypothesis must use a supported intervention, empty evidence_ids and a displayed in-range lane. Never substitute the actual state's reason for a hypothetical decision. This is your only repair attempt.",
                     "previous_plan": _redact(plan, self.settings.llm_api_key)}
                 plan, provider_audit = self._request_plan(repaired_payload)
                 audit.update(provider_audit)

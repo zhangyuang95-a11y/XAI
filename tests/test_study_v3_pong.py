@@ -403,3 +403,83 @@ def test_why_not_direction_facts_are_short_and_grounded_in_current_deadline():
     assert 'reachable' in facts['alternative_left']['en']
     assert len(decision['reason_en']) < 300
     assert 'lane 7' in decision['reason_en']
+
+
+def production_t3_assignment_snapshot():
+    """Reproduce the exported production QA snapshot, not a guessed fixture."""
+    state = pong.initial_state(731100,2)
+    for _ in range(8):
+        state = pong.step(state,pong.human_advisor(state))
+    return state
+
+
+def test_production_unselected_t3_names_actual_t4_plan_without_changing_saved_decision():
+    import hashlib
+    digest = lambda value: hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    state = production_t3_assignment_snapshot()
+    before = deepcopy(state)
+    decision = pong.decide(state)
+    # Exported v3.4 production state and AI decision; this is a facts-only fix.
+    assert digest(state) == '30e01cf53a40a9b0847fdbf62b33a7dcbbae934172dafe206cbb846608a3591d'
+    assert digest(decision) == 'b1812370f7f01dab4734192afd07bd6f454e1f60945dbf0eecc4f630373f244b'
+    facts = {row['id']:row for row in pong.facts(state,decision)}
+    t3,t4,t5 = (facts['ball_plan:'+name] for name in ('t3','t4','t5'))
+    assert t3['plan_status'] == 'not_selected'
+    assert 't3 is not selected' in t3['en']
+    assert 'taking t4 at the same arrival' in t3['en']
+    assert 'I cover lane 7; you cover lane 1' in t3['en']
+    assert 'cannot catch both' in t3['en']
+    assert '当前接球计划没有选择t3' in t3['zh']
+    assert '我覆盖第7道，你覆盖第1道' in t3['zh']
+    assert t4['plan_status'] == 'committed'
+    assert t5['plan_status'] == 'tentative' and 'later plan can change' in t5['en']
+    for index,row in enumerate(decision['alternatives']):
+        if row.get('ball_id') == 't3':
+            checked=facts[f'comparison:{index}']
+            assert checked['en'].startswith('t3 is not selected;')
+            assert 'not our current plan' in checked['en']
+            assert '不是当前分工' in checked['zh']
+    assert state == before
+    assert pong.decide(state) == decision
+
+
+def test_production_nearest_contact_is_not_mistaken_for_the_chosen_ball():
+    state = production_t3_assignment_snapshot()
+    facts = {row['id']:row for row in pong.facts(state)}
+    human,ai = facts['human_nearest_ball'],facts['ai_nearest_ball']
+    # s11 and t3 both have the human's lane at four turns; ID breaks the tie.
+    assert (human['ball_id'],human['contact_lane'],human['horizontal_distance'],human['arrival_turns']) == ('s11',3,0,4)
+    assert human['plan_status'] == 'not_selected'
+    assert 'not selected' in human['en'] and '横向道距离' in human['zh']
+    assert (ai['ball_id'],ai['contact_lane'],ai['horizontal_distance'],ai['arrival_turns']) == ('s12',7,0,4)
+    assert ai['plan_status'] == 'selected' and 'assigns it to me' in ai['en']
+    assert set(facts) >= {'ball_plan:'+b['id'] for b in state['balls']}
+
+
+def test_nearest_uses_horizontal_distance_then_arrival_then_id_not_ai_assignment():
+    balls=[pong._ball('far-soon','ordinary',[0],1),pong._ball('near-later','ordinary',[4],3),
+           pong._ball('z-near-earlier','ordinary',[4],2),pong._ball('a-near-earlier','ordinary',[4],2)]
+    state=pong._new_state([balls],seed=1,task=2,human=4,ai=8)
+    nearest=next(row for row in pong.facts(state) if row['id']=='human_nearest_ball')
+    assert nearest['ball_id']=='a-near-earlier'
+    assert nearest['contact_lane']==5 and nearest['horizontal_distance']==0 and nearest['arrival_turns']==2
+    team=scenario(human=2,ai=2,turns=6)
+    decision=pong.decide(team)
+    nearest=next(row for row in pong.facts(team) if row['id']=='ai_nearest_ball')
+    assert nearest['contact_lane']==3 and nearest['horizontal_distance']==0
+    assert decision['assignments'][0]['ai_contact']==6
+    assert 'me at lane 7, you at lane 3' in nearest['en']
+    assert 'both contacts are needed' in nearest['en']
+
+
+def test_unselected_ball_without_selected_same_arrival_does_not_invent_a_competitor():
+    state=scenario(human=0,ai=0,turns=1,contacts=(7,8))
+    facts={row['id']:row for row in pong.facts(state)}
+    plan=facts['ball_plan:fixture-team']
+    assert plan['plan_status']=='not_selected'
+    assert plan['en']=='fixture-team is not selected in the current catch plan.'
+    assert 'same arrival' not in plan['en']
+    finished=pong.step(state,'wait')
+    finalfacts={row['id']:row for row in pong.facts(finished)}
+    assert 'no visible balls' in finalfacts['human_nearest_ball']['en']
+    assert 'no visible balls' in finalfacts['ai_nearest_ball']['en']

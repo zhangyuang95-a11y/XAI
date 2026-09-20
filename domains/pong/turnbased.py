@@ -455,16 +455,93 @@ def facts(state, decision=None):
                 {'id': 'decision', 'en': actual['reason_en'], 'zh': actual['reason_zh']},
                 {'id': 'next_action', 'en': 'This task is finished; there is no next action.' if state['terminal'] else 'The teammate\'s next action is ' + {'left':'move left','right':'move right','wait':'wait'}[actual['action']] + '.',
                  'zh': '任务已经结束，没有下一步动作。' if state['terminal'] else '队友下一步将' + {'left':'左移','right':'右移','wait':'等待'}[actual['action']] + '。'}]
+    balls_by_id = {ball['id']: ball for ball in state['balls']}
+    assignments = {item['ball_id']: item for item in actual['assignments']}
+    ordinary_owners = {item['ball_id']: item['actor'] for item in actual['planned_catches']}
+    plan_rows = {}
     for ball in state['balls']:
         lanes = ', '.join(str(x + 1) for x in ball['contacts'])
         evidence.append({'id': 'ball:' + ball['id'],
             'en': f"{ball['id']}: {'team' if ball['kind'] == 'cooperative' else 'small'}, {WEIGHTS[ball['kind']]} points, lane(s) {lanes}, {ball['remaining']} turns away; falls {ball.get('vy', 2 if ball['kind'] == 'ordinary' else 1)} cells each step.",
             'zh': f"{ball['id']}是{'合作' if ball['kind'] == 'cooperative' else '小'}球，值{WEIGHTS[ball['kind']]}分，将在{ball['remaining']}回合后到达第{lanes}道，每步下降{ball.get('vy', 2 if ball['kind'] == 'ordinary' else 1)}格。"})
+        assignment = assignments.get(ball['id'])
+        owner = ordinary_owners.get(ball['id'])
+        if assignment:
+            status = 'committed' if assignment['locked'] else 'tentative'
+            en_plan = f"{ball['id']} is selected: I cover lane {assignment['ai_contact'] + 1}; you cover lane {assignment['human_contact'] + 1}, in {ball['remaining']} turns. "
+            zh_plan = f"当前选择接{ball['id']}：{ball['remaining']}回合后，我覆盖第{assignment['ai_contact'] + 1}道，你覆盖第{assignment['human_contact'] + 1}道。"
+            en_plan += 'These sides stay the same while both remain reachable.' if assignment['locked'] else 'This later plan can change.'
+            zh_plan += '只要双方仍然来得及，这个分工就保持不变。' if assignment['locked'] else '这个后续计划可能调整。'
+        elif owner:
+            status = 'selected'
+            en_plan = f"{ball['id']} is selected for {'me' if owner == 'ai' else 'you'} to catch at lane {ball['contacts'][0] + 1} in {ball['remaining']} turns."
+            zh_plan = f"当前选择由{'我' if owner == 'ai' else '你'}在{ball['remaining']}回合后，于第{ball['contacts'][0] + 1}道接{ball['id']}。"
+        else:
+            status = 'not_selected'
+            en_plan = f"{ball['id']} is not selected in the current catch plan."
+            zh_plan = f"当前接球计划没有选择{ball['id']}。"
+            competitors = [item for item in actual['assignments']
+                           if balls_by_id[item['ball_id']]['remaining'] == ball['remaining']
+                           and set(balls_by_id[item['ball_id']]['contacts']) != set(ball['contacts'])]
+            if competitors:
+                competing = competitors[0]
+                other = balls_by_id[competing['ball_id']]
+                qualifier_en = 'We are taking' if competing['locked'] else 'We currently plan to take'
+                qualifier_zh = '我们选择接' if competing['locked'] else '我们暂定接'
+                en_plan += f" {qualifier_en} {other['id']} at the same arrival: I cover lane {competing['ai_contact'] + 1}; you cover lane {competing['human_contact'] + 1}."
+                zh_plan += f"同一时刻，{qualifier_zh}{other['id']}：我覆盖第{competing['ai_contact'] + 1}道，你覆盖第{competing['human_contact'] + 1}道。"
+                if len(set(other['contacts']) | set(ball['contacts'])) > 2:
+                    en_plan += ' We cannot catch both with two paddles.'
+                    zh_plan += '两块球拍无法同时接住这两颗球。'
+                if not competing['locked']:
+                    en_plan += ' This later plan can change.'
+                    zh_plan += '这个后续计划可能调整。'
+        plan_row = {'id': 'ball_plan:' + ball['id'], 'ball_id': ball['id'],
+                    'plan_status': status, 'en': en_plan, 'zh': zh_plan}
+        plan_rows[ball['id']] = plan_row
+        evidence.append(plan_row)
+    for actor in ('human', 'ai'):
+        identifier = actor + '_nearest_ball'
+        if not state['balls']:
+            evidence.append({'id': identifier, 'en': 'There are no visible balls to compare.', 'zh': '当前没有可见的球可供比较。'})
+            continue
+        position = state[actor]['x']
+        candidates = [(min(abs(position - lane) for lane in ball['contacts']), ball['remaining'], ball['id'], ball)
+                      for ball in state['balls']]
+        distance, remaining, _, nearest = min(candidates, key=lambda item: item[:3])
+        lane = min(nearest['contacts'], key=lambda contact: (abs(position - contact), contact))
+        plan_status = plan_rows[nearest['id']]['plan_status']
+        en_nearest = f"By horizontal lane distance, {'your' if actor == 'human' else 'my'} closest visible contact is {nearest['id']} at lane {lane + 1}: {distance} moves away, arriving in {remaining} turns. "
+        zh_nearest = f"按横向道距离，离{'你' if actor == 'human' else '我'}最近的可见接触点是{nearest['id']}的第{lane + 1}道，相距{distance}步，{remaining}回合后到达。"
+        if plan_status == 'not_selected':
+            en_nearest += 'This ball is not selected in the current catch plan.'
+            zh_nearest += '当前接球计划没有选择这颗球。'
+        elif nearest['kind'] == 'ordinary':
+            owner = ordinary_owners[nearest['id']]
+            en_nearest += f"The current plan assigns it to {'me' if owner == 'ai' else 'you'}."
+            zh_nearest += f"当前计划由{'我' if owner == 'ai' else '你'}接这颗球。"
+        else:
+            assigned = assignments[nearest['id']]
+            en_nearest += f"Our {'committed' if assigned['locked'] else 'tentative'} sides are me at lane {assigned['ai_contact'] + 1}, you at lane {assigned['human_contact'] + 1}; both contacts are needed."
+            zh_nearest += f"{'已承诺' if assigned['locked'] else '暂定'}分工是我在第{assigned['ai_contact'] + 1}道、你在第{assigned['human_contact'] + 1}道；双方都需要到位。"
+        evidence.append({'id': identifier, 'ball_id': nearest['id'], 'contact_lane': lane + 1,
+                         'horizontal_distance': distance, 'arrival_turns': remaining, 'plan_status': plan_status,
+                         'en': en_nearest, 'zh': zh_nearest})
     for i, assignment in enumerate(actual['assignments']):
         evidence.append({'id': f'assignment:{i}', 'en': f"For {assignment['ball_id']}, the {'committed' if assignment['locked'] else 'tentative later'} plan has me at lane {assignment['ai_contact'] + 1} and you at lane {assignment['human_contact'] + 1}.",
                          'zh': f"关于{assignment['ball_id']}，{'当前承诺的' if assignment['locked'] else '暂定后续'}分工是我在第{assignment['ai_contact'] + 1}道，你在第{assignment['human_contact'] + 1}道。"})
     evidence.extend({'id': 'alternative_' + action, 'en': row['en'], 'zh': row['zh']} for action, row in actual.get('action_alternatives', {}).items())
-    evidence.extend({'id': f'comparison:{i}', 'en': row['en'], 'zh': row['zh']} for i, row in enumerate(actual['alternatives']))
+    for i, row in enumerate(actual['alternatives']):
+        plan_row = plan_rows.get(row.get('ball_id'))
+        en_comparison, zh_comparison = row['en'], row['zh']
+        if plan_row and plan_row['plan_status'] == 'not_selected':
+            en_comparison = f"{row['ball_id']} is not selected; the following checks reachability only, not our current plan. " + en_comparison
+            zh_comparison = f"当前没有选择{row['ball_id']}；下面只检查是否来得及，不是当前分工。" + zh_comparison
+        elif plan_row and row.get('ball_id') in assignments:
+            assigned = assignments[row['ball_id']]
+            en_comparison = f"Our {'committed' if assigned['locked'] else 'tentative'} plan for {row['ball_id']} is me at lane {assigned['ai_contact'] + 1}, you at lane {assigned['human_contact'] + 1}. This checks one possible division: " + en_comparison
+            zh_comparison = f"对于{row['ball_id']}，{'已承诺' if assigned['locked'] else '暂定'}分工是我在第{assigned['ai_contact'] + 1}道、你在第{assigned['human_contact'] + 1}道。下面检查一种可能分工：" + zh_comparison
+        evidence.append({'id': f'comparison:{i}', 'en': en_comparison, 'zh': zh_comparison})
     evidence.extend({'id': f'public_rule:{i}', 'en': en, 'zh': zh} for i, (en, zh) in enumerate(zip(rules(), rules('zh'))))
     evidence.extend({'id': f'event:{i}', 'en': e['en'], 'zh': e['zh']} for i, e in enumerate(state['events']))
     return evidence

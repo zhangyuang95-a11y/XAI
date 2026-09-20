@@ -697,3 +697,88 @@ def test_kitchen_catalog_uses_facing_station_labels_and_offers_no_remote_discard
     result = explainer_for_plan(selected, captured).answer(kitchen, state, kitchen.decide(state), 'What can I do?')
     assert result['status'] == 'answered'
     assert 'discard' not in captured[0]['allowed_action_ids']
+
+
+def simultaneous_ball_fixture():
+    # Exact production acceptance scenario, reconstructed without production
+    # identity/session data. At turn 8, t3 and t4 have incompatible deadlines.
+    state = pong.initial_state(731100, 2)
+    for _ in range(8):
+        state = pong.step(state, pong.human_advisor(state))
+    return state
+
+
+@pytest.mark.parametrize('language', ['en', 'zh'])
+@pytest.mark.parametrize('ball,selected', [('t3', False), ('t4', True)])
+def test_named_ball_assignment_distinguishes_actual_plan_from_individual_reachability(language, ball, selected):
+    state = simultaneous_ball_fixture()
+    original = deepcopy(state)
+    actual = {assignment['ball_id']: assignment for assignment in pong.decide(state)['assignments']}
+    assert ('t3' in actual) is False
+    assert actual['t4']['ai_contact'] == 6 and actual['t4']['human_contact'] == 0
+    chosen = plan(state, language=language, intents=[{'kind': 'facts', 'subject': 'shared',
+        'purpose': 'assignment', 'object_id': ball, 'evidence_ids': ['ball_plan:' + ball]}])
+    captured = []
+    result = ask(explainer_for_plan(chosen, captured), state,
+                 question=f'For {ball}, which lane should I cover, and which will you cover?')
+    assert result['status'] == 'answered'
+    assert result['evidence_ids'] == ['ball_plan:' + ball]
+    fact = next(row for row in captured[0]['evidence'] if row['id'] == 'ball_plan:' + ball)
+    assert fact['subject'] == 'shared' and fact['purpose'] == 'assignment' and fact['object_id'] == ball
+    assert (fact['plan_status'] != 'not_selected') is selected
+    if language == 'en':
+        assert 'I cover lane 7; you cover lane 1' in result['answer']
+        assert 'I cover lane 9' not in result['answer']
+        if not selected:
+            assert 'not selected' in result['answer'] and 'cannot catch both' in result['answer']
+    elif not selected:
+        assert '没有选择t3' in result['answer'] and '选择接t4' in result['answer']
+    assert state == original
+
+
+@pytest.mark.parametrize('object_id,ids,error', [
+    ('t3', ['ball:t3', 'comparison:1'], 'missing_ball_assignment_evidence'),
+    ('t3', ['ball_plan:t4'], 'missing_ball_assignment_evidence'),
+    (None, ['ball_plan:t3'], 'missing_ball_assignment_evidence'),
+    ('t3', ['ball_plan:t3', 'comparison:1'], 'isolated_reachability_is_not_assignment'),
+])
+def test_assignment_intents_require_the_named_balls_actual_plan_fact(object_id, ids, error):
+    state = simultaneous_ball_fixture()
+    selected = plan(state, intents=[{'kind': 'facts', 'subject': 'shared',
+        'purpose': 'assignment', 'object_id': object_id, 'evidence_ids': ids}])
+    result = ask(explainer_for_plan(selected), state)
+    assert result['status'] == 'unavailable'
+    assert result['audit']['failure_code'] == error
+    assert result['audit']['repair_attempt']['failure_code'] == error
+
+
+def test_invalid_assignment_plan_gets_one_semantic_repair_with_exact_plan_evidence():
+    state = simultaneous_ball_fixture()
+    bad = plan(state, intents=[{'kind': 'facts', 'subject': 'shared', 'purpose': 'assignment',
+        'object_id': 't3', 'evidence_ids': ['comparison:1']}])
+    good = deepcopy(bad)
+    good['intents'][0]['evidence_ids'] = ['ball_plan:t3']
+    instance = explainer_for_plan(good)
+    requests = []
+    def request(payload):
+        requests.append(deepcopy(payload))
+        return deepcopy(bad if len(requests) == 1 else good), {}
+    instance._request_plan = request
+    result = ask(instance, state)
+    assert result['status'] == 'answered'
+    assert len(requests) == 2 and result['audit']['repair_attempt']['successful']
+    assert 'not selected' in result['answer']
+
+
+def test_nearest_ball_preset_answers_distance_arrival_and_actual_coordination_separately():
+    state = simultaneous_ball_fixture()
+    selected = plan(state, intents=[{'kind': 'facts', 'subject': 'human', 'purpose': 'observation',
+        'evidence_ids': ['human_nearest_ball']}, {'kind': 'facts', 'subject': 'human', 'purpose': 'advice',
+        'evidence_ids': ['system:human_advice', 'assignment:0']}])
+    result = ask(explainer_for_plan(selected), state,
+                 question='Which ball am I closest to, how many turns until it arrives, and how can I coordinate with you?')
+    assert result['status'] == 'answered'
+    assert 's11' in result['answer'] and '0 moves away' in result['answer']
+    assert 'arriving in 4 turns' in result['answer']
+    assert 'not selected' in result['answer']
+    assert 'move left' in result['answer'] and 't4' in result['answer']

@@ -5,9 +5,9 @@ let source=fs.readFileSync(path.join(__dirname,'../study_v3/web/app.js'),'utf8')
 source=source.slice(0,source.lastIndexOf('(async()=>{languageUI();'));
 function fixture(preview=false){
  let now=0,nextTimer=1;const timers=new Map(),calls=[],handlers={},stored=[];
- const ids=['englishButton','chineseButton','app','startForm','startButton','entryStatus','entryStatusMessage','entryRetryButton','participantInput','recoveryInput','groupInput','consentInput',...(preview?['adminInput']:[])];
+ const ids=['englishButton','chineseButton','app','startForm','startButton','entryStatus','entryStatusMessage','entryRetryButton','participantInput','groupInput','consentInput',...(preview?['adminInput']:[])];
  const elements=Object.fromEntries(ids.map(id=>[id,{id,disabled:false,hidden:false,value:'',checked:false,textContent:'',classList:{toggle(){}}}]));
- Object.assign(elements.participantInput,{value:'anonymous-draft'});elements.recoveryInput.value='private-recovery-fixture';elements.groupInput.value='B';elements.consentInput.checked=true;if(preview)elements.adminInput.value='private-key-fixture';
+ Object.assign(elements.participantInput,{value:'anonymous-draft'});elements.groupInput.value='B';elements.consentInput.checked=true;if(preview)elements.adminInput.value='private-key-fixture';
  const context=vm.createContext({console,URLSearchParams,AbortController,crypto:require('node:crypto').webcrypto,performance:{now:()=>now},
   setTimeout(fn,delay){const id=nextTimer++;timers.set(id,{fn,at:now+delay});return id},clearTimeout(id){timers.delete(id)},setInterval(){},
   localStorage:{getItem(){return null},setItem(...args){stored.push(args)}},sessionStorage:{getItem(){return null},setItem(...args){stored.push(args)},removeItem(){}},
@@ -28,7 +28,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
  f.resolve(0,true);await recovering;assert.equal(f.elements.startButton.disabled,false);assert.equal(f.elements.entryStatus.hidden,true);assert.equal(f.timers.size,0);assert.equal(JSON.stringify(f.run('captureEntryDraft()')),draft);
  assert.equal(f.calls[0].url,'/api/release');assert.equal(f.calls[0].options.body,undefined);
  // Refresh/language rendering retains all current form fields without storing them.
- f.run(`reconcileChildren=()=>{for(const id of ['participantInput','recoveryInput','groupInput'])elements[id].value='';elements.consentInput.checked=false;};`);
+ f.run(`reconcileChildren=()=>{for(const id of ['participantInput','groupInput'])elements[id].value='';elements.consentInput.checked=false;};`);
  await f.run('render()');assert.equal(JSON.stringify(f.run('captureEntryDraft()')),draft);assert.deepEqual(f.stored,[]);
  // Failed checks and a hung request keep entry closed, recover later, and never spin.
  const g=fixture();g.run('entryFailed=true;bind()');assert.match(g.elements.entryStatusMessage.textContent,/could not reach/);
@@ -43,7 +43,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
  const prior=JSON.stringify(h.run('captureEntryDraft()'));await h.elements.startForm.onsubmit({preventDefault(){}});assert.equal(h.elements.startButton.disabled,true);assert.equal(JSON.stringify(h.run('captureEntryDraft()')),prior);assert.equal(h.calls.length,0);h.fire();assert.equal(h.calls.length,1);h.resolve(0,true);await tick();assert.equal(h.elements.startButton.disabled,false);
  // Preview remains usable, does not poll, and never persists its private key.
  const p=fixture(true);p.run('bind()');assert.equal(p.elements.startButton.disabled,false);assert.equal(p.timers.size,0);
- const privateDraft=JSON.stringify(p.run('captureEntryDraft()'));p.run(`reconcileChildren=()=>{for(const id of ['participantInput','recoveryInput','groupInput','adminInput'])elements[id].value='';elements.consentInput.checked=false;};`);await p.run('render()');assert.equal(JSON.stringify(p.run('captureEntryDraft()')),privateDraft);assert.deepEqual(p.stored,[]);
+ const privateDraft=JSON.stringify(p.run('captureEntryDraft()'));p.run(`reconcileChildren=()=>{for(const id of ['participantInput','groupInput','adminInput'])elements[id].value='';elements.consentInput.checked=false;};`);await p.run('render()');assert.equal(JSON.stringify(p.run('captureEntryDraft()')),privateDraft);assert.deepEqual(p.stored,[]);
  // No poll, render, or gameplay change once an existing task is active.
  const a=fixture();a.advance(3000);const outstanding=a.run('checkEntryReadiness()');a.run(`view={instance_id:'active',stage:'task1',state:{turn:7}};delete elements.startForm;delete elements.startButton;delete elements.entryStatus;delete elements.entryStatusMessage;delete elements.entryRetryButton;`);a.resolve(0,true);await outstanding;assert.equal(a.run('view.state.turn'),7);assert.equal(a.timers.size,0);await a.run('checkEntryReadiness()');assert.equal(a.calls.length,1);
  console.log('Entry recovery checks passed: automatic/manual retry, timeout/rate limit, visibility, unchanged drafts, preview privacy, session race, and active-task isolation.');

@@ -65,6 +65,24 @@ window.StudyBoard = class StudyBoard {
     if (item.container === 'serving_plate') this.label(ctx, '✓', x + size * .5, y - size * .35, size * .5, '#31b883', 900);
     if (stage === 'spoiled') this.label(ctx, '×', x + size * .4, y - size * .35, size * .65, '#c81932', 900);
   }
+  freshnessLabel(item, state, compact=false) {
+    if (!item || !['prepared','spoiled'].includes(item.stage) || item.freshness_basis==='in_pan') return null;
+    const fact=(state.food_freshness||[]).find(row=>row.item_id===item.id);
+    const spoiled=item.stage==='spoiled'||fact?.status==='spoiled';
+    if(spoiled)return {text:this.lang==='zh'?'已变质':'Spoiled',color:'#b4233b',background:'#ffe3e6',status:'spoiled'};
+    // Use the saved frame's authoritative expiry. Moving or redrawing never
+    // creates a new clock, and cooked food is excluded above.
+    const expiry=fact?.expires_turn??item.expires_turn??item.fresh_until;
+    const remaining=fact?.remaining??(Number.isFinite(expiry)?Math.max(0,expiry-state.turn):null);
+    if(!Number.isFinite(remaining))return null;
+    const warning=remaining<=5;
+    return {text:compact?(this.lang==='zh'?`${remaining}回合`:`${remaining}t`):(this.lang==='zh'?`已备好 · ${remaining}回合`:`Prepared · ${remaining}t`),color:warning?'#a34400':'#16664d',background:warning?'#ffead2':'#dcf5e8',status:warning?'warning':'fresh'};
+  }
+  freshnessBadge(ctx,item,state,x,y,width,height,compact=false) {
+    const badge=this.freshnessLabel(item,state,compact);if(!badge)return;
+    this.rect(ctx,x-width/2,y-height/2,width,height,badge.background,3);
+    this.label(ctx,badge.text,x,y,Math.min(height*.62,width/(compact?4.5:10.5)),badge.color,800);
+  }
   actorPosition(before, after, actor, p) {
     const a=after[actor],b=before[actor]||a;
     const collision=after.domain==='warehouse'&&after.collision_animation;
@@ -96,10 +114,15 @@ window.StudyBoard = class StudyBoard {
     for (let y = 0; y < state.height; y++) this.label(ctx,y,8,oy+(y+.5)*c,10,'#68758b');
     for (const wall of state.walls || []) { const [x,y] = at(wall[0],wall[1]); ctx.fillStyle = '#9aa8ba'; ctx.fillRect(x+2,y+2,c-4,c-4); }
     const stations = state.stations || [];
+    const highlighted=new Set(state.tutorial_highlights||[]);
     for (const station of stations) {
       const [x,y] = at(station.x, station.y), id = station.id || station.kind;
       const pot = /pot|stove/.test(id), charger = /charger/.test(id);
       this.rect(ctx,x+4,y+4,c-8,c-8,charger?'#6558e8':pot?'#d3dce8':'#e4e9f1',5);
+      if(state.domain==='kitchen'&&highlighted.has(id)) {
+        this.rect(ctx,x+3,y+3,c-6,c-6,'#fff0b8',5);
+        ctx.strokeStyle='#b36b00';ctx.lineWidth=3;ctx.strokeRect(x+3,y+3,c-6,c-6);
+      }
       if (charger) this.label(ctx,'⚡',x+c/2,y+c/2,c*.45,'white');
       else if (pot) { ctx.strokeStyle='#5f6e82';ctx.lineWidth=4;ctx.beginPath();ctx.arc(x+c/2,y+c*.45,c*.25,0,Math.PI*2);ctx.stroke(); }
       const ingredient = station.ingredient || ({eggs:'egg',egg:'egg',tomato:'tomato',meat:'meat',pepper:'pepper'}[id]) || (id.startsWith('ingredients_') ? id.slice(12) : id.startsWith('ingredient_') ? id.slice(11) : null);
@@ -132,9 +155,9 @@ window.StudyBoard = class StudyBoard {
         const [x,y]=at(pot.x,pot.y);
         if (pot.status !== 'empty') { this.item(ctx,pot.item || {ingredient:pot.ingredient,recipe:pot.recipe,stage:pot.phase},x+c/2,y+c*.38,c*.52); this.label(ctx,pot.status==='burnt'?'×':pot.status==='cooking'?pot.remaining:'✓',x+c/2,y+c*.64,c*.19,pot.status==='burnt'?'#d9485f':'#26324a'); }
       }
-      if (state.handoff) { const station=stations.find(s=>s.id==='handoff'); if(station){const [x,y]=at(station.x,station.y);this.item(ctx,state.handoff,x+c/2,y+c*.38,c*.52);} }
+      if (state.handoff) { const station=stations.find(s=>s.id==='handoff'); if(station){const [x,y]=at(station.x,station.y);this.item(ctx,state.handoff,x+c/2,y+c*.38,c*.52);this.freshnessBadge(ctx,state.handoff,state,x+c/2,y+c*.64,c*.86,c*.19,true);} }
       const buffers=state.buffers||{};
-      const place=(id,item,dx=0)=>{const st=stations.find(s=>s.id===id);if(st&&item){const [x,y]=at(st.x,st.y);this.item(ctx,item,x+c/2+dx*c,y+c*.37,c*.43);}};
+      const place=(id,item,dx=0)=>{const st=stations.find(s=>s.id===id);if(st&&item){const [x,y]=at(st.x,st.y);this.item(ctx,item,x+c/2+dx*c,y+c*.37,c*.43);this.freshnessBadge(ctx,item,state,x+c/2+dx*c,y+c*.64,c*(id==='ai_raw'?.43:.86),c*.19,true);}};
       place('human_buffer',buffers.human);
       (buffers.ai_raw||[]).forEach((item,i)=>place('ai_raw',item,i? .22:-.22));
       for(const [pot,item] of Object.entries(buffers.protein||{})) { const st=stations.find(s=>s.kind==='protein_buffer'&&s.pot_id===pot);if(st&&item){const [x,y]=at(st.x,st.y);this.item(ctx,item,x+c/2,y+c*.38,c*.5);} }
@@ -174,16 +197,14 @@ window.StudyBoard = class StudyBoard {
         this.label(ctx,cargo?'A'+cargo.slot:'?',cx,cy,c*.18,'white',800);
       } else if (state.domain!=='warehouse') {
         this.item(ctx,visible.holding,x+c*.86,y+c*.15,c*.43);
-        if(actor==='human'&&visible.preparation) {
+        if(actor==='human'&&visible.preparation&&!this.freshnessLabel(visible.holding,p<.5?before:after)) {
           const prep=visible.preparation;
-          const text=prep.ready?(this.lang==='zh'?'✓ 已备好':'✓ Prepared'):(this.lang==='zh'?`备料还需 ${prep.remaining} 步`:`Prep: ${prep.remaining} more`);
+          const verb=prep.ingredient==='egg'?(this.lang==='zh'?'打散':'Whisk'):(this.lang==='zh'?'切配':'Chop');
+          const text=prep.ready?(this.lang==='zh'?'✓ 已备好':'✓ Prepared'):(this.lang==='zh'?`${verb}还需 ${prep.remaining} 次`:`${verb}: ${prep.remaining} more`);
           this.rect(ctx,x+c*.02,y+c*.88,c*.96,c*.21,prep.ready?'#dcf5e8':'#fff2d1',3);
           this.label(ctx,text,x+c*.5,y+c*.985,c*.125,prep.ready?'#16704c':'#785f21',750);
         }
-        if(visible.holding?.stage==='spoiled') {
-          this.rect(ctx,x+c*.02,y+c*.88,c*.96,c*.21,'#ffe3e6',3);
-          this.label(ctx,this.lang==='zh'?'已变质':'Spoiled',x+c*.5,y+c*.985,c*.15,'#c81932',800);
-        }
+        this.freshnessBadge(ctx,visible.holding,p<.5?before:after,x+c*.5,y+c*.985,c*.96,c*.21);
         if(actor==='ai') {
           const recipes=[...new Map((visible.current_cooking||[]).map(job=>[job.recipe,job])).values()];
           recipes.slice(0,2).forEach((job,i)=>{

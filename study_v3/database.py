@@ -61,6 +61,15 @@ CREATE TABLE IF NOT EXISTS pl3_timings (
 CREATE TABLE IF NOT EXISTS pl3_releases (
  id TEXT PRIMARY KEY, manifest_json TEXT NOT NULL, created DOUBLE PRECISION NOT NULL
 );
+CREATE TABLE IF NOT EXISTS pl3_tutorials (
+ instance_id TEXT PRIMARY KEY, version TEXT NOT NULL, state_json TEXT NOT NULL,
+ created DOUBLE PRECISION NOT NULL, updated DOUBLE PRECISION NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pl3_tutorial_events (
+ id TEXT PRIMARY KEY, instance_id TEXT NOT NULL, version TEXT NOT NULL,
+ command TEXT NOT NULL, payload_json TEXT NOT NULL, before_json TEXT NOT NULL,
+ after_json TEXT NOT NULL, recorded DOUBLE PRECISION NOT NULL
+);
 CREATE INDEX IF NOT EXISTS pl3_active ON pl3_instances(participant_id, stage);
 CREATE INDEX IF NOT EXISTS pl3_question_run ON pl3_questions(authorized_run, requested);
 '''
@@ -118,6 +127,8 @@ FLOAT_COLUMNS = {
     'pl3_commands': ('created',),
     'pl3_timings': ('seconds', 'recorded'),
     'pl3_releases': ('created',),
+    'pl3_tutorials': ('created','updated'),
+    'pl3_tutorial_events': ('recorded',),
 }
 GLOBAL_ADVISORY_LOCK = 76320920
 TRANSACTION_TIMEOUTS = (

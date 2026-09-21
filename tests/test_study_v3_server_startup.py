@@ -23,7 +23,7 @@ def test_cold_demonstrations_finish_before_database_transactions(tmp_path, monke
     @contextmanager
     def tracked_transaction(self, *args, **kwargs):
         nonlocal transaction_depth
-        assert set(cold_calls) == set(MODULES), "Database opened before demos finished"
+        assert set(cold_calls) == set(MODULES)-{'kitchen'}, "Database opened before demos finished"
         transaction_depth += 1
         try:
             with original_transaction(self, *args, **kwargs) as connection:
@@ -50,8 +50,10 @@ def test_cold_demonstrations_finish_before_database_transactions(tmp_path, monke
         for domain in MODULES:
             _, view = server.store.create({'participant_id': 'startup-test-' + domain,
                 'domain': domain, 'group': 'A', 'mode': 'test', 'consent': True}, admin=True)
-            assert view['stage'] == 'demo' and view['demo']['frames']
-        assert cold_calls == list(MODULES), "Enrollment recomputed a cold demo"
+            assert view['stage'] == 'demo'
+            if domain=='kitchen':assert view['tutorial']['state'] and 'demo' not in view
+            else:assert view['demo']['frames']
+        assert cold_calls == [d for d in MODULES if d!='kitchen'], "Enrollment recomputed a cold demo"
     finally:
         if server:
             server.server_close()

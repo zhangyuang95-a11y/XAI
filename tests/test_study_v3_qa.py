@@ -701,7 +701,8 @@ def test_kitchen_catalog_uses_facing_station_labels_and_offers_no_remote_discard
             assert interaction['label_zh'] in evidence['system:human_advice']['zh']
             interactions.append(interaction['station'])
         state = kitchen.step(state, suggestion, decision)
-    assert {'egg', 'prep', 'handoff'} <= set(interactions)
+    first_protein = kitchen.RECIPES[state['orders'][0]['recipe']]['protein']
+    assert {first_protein, 'prep', 'handoff'} <= set(interactions)
     captured = []
     selected = plan(state, ids=('system:human_advice',))
     result = explainer_for_plan(selected, captured).answer(kitchen, state, kitchen.decide(state), 'What can I do?')
@@ -858,7 +859,7 @@ def test_kitchen_counterfactual_time_penalty_is_points_not_negative_completed_or
     assert state == before
 
 
-@pytest.mark.parametrize('wait_first,points', [(False,99),(True,98)])
+@pytest.mark.parametrize('wait_first,points', [(False,29),(True,28)])
 @pytest.mark.parametrize('language', ['en','zh'])
 def test_kitchen_delivery_counterfactual_counts_real_completed_orders_independently_of_net_points(wait_first, points, language):
     from domains.kitchen.build_qa_cases import regular_trace
@@ -878,11 +879,20 @@ def test_kitchen_delivery_counterfactual_counts_real_completed_orders_independen
     assert ('completed orders change by 1' if language=='en' else '完成订单数变化1') in result['answer']
 
 
-@pytest.mark.parametrize('domain,seed,task,turn',[('pong',731100,2,0),('kitchen',2000,1,10),('kitchen',2000,2,291)])
+@pytest.mark.parametrize('domain,seed,task,turn',[('pong',731100,2,0),('kitchen',2000,1,10),('kitchen',2000,2,None)])
 @pytest.mark.parametrize('language',['en','zh'])
 def test_actual_wait_reason_synonyms_render_once_without_question_keyword_binding(domain,seed,task,turn,language):
     module = get_engine(domain)
-    state = kitchen_production_trajectory(turn) if domain=='kitchen' and task==2 else module.initial_state(seed,task)
+    state = module.initial_state(seed,task)
+    if turn is None:
+        # Select the late-task waiting situation by behavior rather than an
+        # old cooking-speed-dependent frame number.
+        while not state['terminal']:
+            if state['metrics']['completed_orders'] == 4 and module.decide(state)['action'] == 'wait':
+                break
+            state = module.step(state, module.human_advisor(state))
+        assert not state['terminal']
+        turn = state['turn']
     if domain == 'pong':
         state = fixture(human=2, ai=6, turns=4)
     while state['turn'] < turn:

@@ -206,10 +206,18 @@ def test_all_domain_group_flows_through_http(http_service, domain, group):
     status, view, _ = client.create(domain, group)
     assert status == 200 and view["language"] == "en"
     iid = view["instance_id"]
-    for _ in range(len(view["demo"]["captions"])):
-        status, view, _ = client.command("demo_next", view)
-        assert status == 200
-    status, view, _ = client.command("next", view)
+    if domain=='kitchen':
+        assert view['tutorial']['state']['turn']==0
+        status,view,_=client.command('tutorial',view,command='start')
+        assert status==200
+        status,view,_=client.command('tutorial',view,command='action',action='wait')
+        assert status==200 and view['state']['turn']==1 and not view['task_runs']
+        status,view,_=client.command('demo_skip',view)
+    else:
+        for _ in range(len(view["demo"]["captions"])):
+            status, view, _ = client.command("demo_next", view)
+            assert status == 200
+        status, view, _ = client.command("next", view)
     assert status == 200
     scores = []
     for task in (1, 2, 3):

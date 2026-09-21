@@ -7,27 +7,45 @@ from __future__ import annotations
 from collections import Counter, deque
 from copy import deepcopy
 from functools import lru_cache
+from itertools import product
 import json
 from pathlib import Path
 import random
 
 DOMAIN = "kitchen"
-VERSION = "kitchen-v6.0.0"
-SCENARIO_VERSION = "kitchen-scenarios-v6.0.0"
+VERSION = "kitchen-v6.2.0"
+SCENARIO_VERSION = "kitchen-scenarios-v6.2.0"
+MENU_VERSION = "kitchen-menu-v2"
 WIDTH, HEIGHT = 9, 7
 PREPARE_TURNS = {"tomato": 3, "pepper": 3, "egg": 4, "meat": 5}
 STORAGE_FRESH_TURNS = 10
 HANDOFF_GRACE_TURNS = 2
 RAW_FRESH_TURNS = 120
-PREPARED_FRESH_TURNS = {"tomato": 60, "pepper": 60, "egg": 80, "meat": 80}
-SERVE_POINTS, STEP_COST, INGREDIENT_DISCARD_COST, DISH_DISCARD_COST = 100, 1, 3, 10
-COOK_TURNS = {"egg": 4, "meat": 6, "tomato": 4, "pepper": 4}
+PREPARED_FRESH_TURNS = dict.fromkeys(PREPARE_TURNS, 20)
+SERVE_POINTS, STEP_COST, INGREDIENT_DISCARD_COST, DISH_DISCARD_COST = 30, 1, 3, 10
+ORDER_DEADLINES = (100, 140, 240, 280, 360)
+COOK_TURNS = {"egg": 8, "meat": 10, "tomato": 6, "pepper": 8}
 MIX_TURNS, BURN_TURNS = 2, 8
 MOVES = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
 LABELS = {"egg": ("egg", "鸡蛋"), "tomato": ("tomato", "番茄"), "meat": ("meat", "肉"), "pepper": ("pepper", "辣椒")}
 RECIPES = {"egg_tomato": {"protein": "egg", "vegetable": "tomato", "en": "tomato and egg stir-fry", "zh": "番茄炒鸡蛋"},
            "pepper_meat": {"protein": "meat", "vegetable": "pepper", "en": "pepper and meat stir-fry", "zh": "辣椒炒肉"}}
 INGREDIENT_RECIPE = {ingredient: recipe for recipe, spec in RECIPES.items() for ingredient in (spec["protein"], spec["vegetable"])}
+
+
+def rule_metadata():
+    """One versioned parameter contract for public help, UI, records and QA."""
+    return {"engine_version": VERSION, "scenario_version": SCENARIO_VERSION, "menu_version": MENU_VERSION,
+            "score": {"served": SERVE_POINTS, "step": -STEP_COST,
+                      "single_component_discard": -INGREDIENT_DISCARD_COST, "combined_dish_discard": -DISH_DISCARD_COST},
+            "orders_per_task": 5, "max_turns": 360, "order_deadlines": list(ORDER_DEADLINES),
+            "max_consecutive_same_recipe": 2, "prepared_fresh_turns": 20,
+            "raw_fresh_turns": RAW_FRESH_TURNS, "raw_storage_limit": STORAGE_FRESH_TURNS,
+            "prep_interactions": deepcopy(PREPARE_TURNS), "handoff_grace_turns": HANDOFF_GRACE_TURNS,
+            "burn_ready_turns": BURN_TURNS,
+            "heating": {recipe: {"protein": COOK_TURNS[spec["protein"]], "vegetable": COOK_TURNS[spec["vegetable"]],
+                                  "mix": MIX_TURNS, "total": COOK_TURNS[spec["protein"]] + COOK_TURNS[spec["vegetable"]] + MIX_TURNS}
+                        for recipe, spec in RECIPES.items()}}
 STATIONS = [
     {"id": "egg", "x": 1, "y": 1, "kind": "ingredient", "ingredient": "egg", "label_en": "Eggs", "label_zh": "鸡蛋柜"},
     {"id": "tomato", "x": 3, "y": 1, "kind": "ingredient", "ingredient": "tomato", "label_en": "Tomatoes", "label_zh": "番茄柜"},
@@ -158,11 +176,15 @@ def _change_score(state, delta, reason, en, zh, **extra):
 def _freshness(item, turn):
     if not item or item["stage"] not in ("raw", "prepared", "spoiled") or item.get("freshness_basis") == "in_pan":
         return None
-    expires = item.get("fresh_until")
+    prepared = item["stage"] == "prepared" or item.get("previous_stage") == "prepared"
+    expires = (item["prepared_turn"] + PREPARED_FRESH_TURNS[item["ingredient"]]
+               if prepared and item.get("prepared_turn") is not None else item.get("fresh_until"))
     stored = item.get("storage_since_turn")
-    storage_expiry = stored + STORAGE_FRESH_TURNS + 1 if stored is not None else None
+    storage_expiry = stored + STORAGE_FRESH_TURNS + 1 if stored is not None and not prepared else None
     effective = min(value for value in (expires, storage_expiry) if value is not None) if expires is not None or storage_expiry is not None else None
+    remaining = max(0, effective - turn) if effective is not None else None
     return {"status": "spoiled" if item["stage"] == "spoiled" else "fresh", "started_turn": item.get("freshness_started_turn"),
+            "prepared_turn": item.get("prepared_turn"), "warning": item["stage"] != "spoiled" and remaining is not None and remaining <= 5,
             "expires_turn": effective, "remaining": max(0, effective - turn) if effective is not None else None,
             "basis": "storage" if storage_expiry is not None and effective == storage_expiry else item.get("freshness_basis", "fixture_without_clock"),
             "storage_since_turn": stored, "storage_station": item.get("storage_station"),
@@ -182,17 +204,17 @@ def _spoil_portion(state, item, new_turn, storage=False):
 
 
 def _age_ingredients(state, new_turn):
-    # Raw/prepared ingredients on these storage counters have a separate clock.
-    # A cooked protein's temporary plate is a recipe step, not raw storage.
+    # Prepared portions carry one immutable completion-based clock everywhere.
+    # Only unprepared raw portions retain the older short storage rule.
     items = [state["human"]["holding"], state["ai"]["holding"], state["handoff"], state["buffers"]["human"],
              *state["buffers"]["ai_raw"], *state["buffers"]["protein"].values()]
     for item in items:
         if not item or item["stage"] not in ("raw", "prepared"):
             continue
         stored = item.get("storage_since_turn")
-        if stored is not None and new_turn - stored > STORAGE_FRESH_TURNS:
+        if item["stage"] == "raw" and stored is not None and new_turn - stored > STORAGE_FRESH_TURNS:
             _spoil_portion(state, item, new_turn, storage=True)
-        elif item.get("fresh_until") is not None and item["fresh_until"] <= new_turn:
+        elif _freshness(item, new_turn)["expires_turn"] is not None and _freshness(item, new_turn)["expires_turn"] <= new_turn:
             _spoil_portion(state, item, new_turn)
 
 
@@ -240,18 +262,22 @@ def _configuration():
 def _scenario(seed, task):
     config = _configuration()
     saved = config.get("scenarios", {}).get(str(seed), {}).get(str(task)) if config.get("rules_version") == VERSION else None
-    if saved:
+    if saved and saved.get("menu_version") == MENU_VERSION:
         return deepcopy(saved)
     rng = random.Random(seed * 71 + task * 10007)
-    count, budget = 5, 1000
+    count, budget = 5, 360
     if config.get("rules_version") == VERSION:
         budget = config.get("task_budgets", {}).get(str(task), budget)
     egg_count = 1 + (int(seed) + task - 1) % 4
-    recipes = ["egg_tomato"] * egg_count + ["pepper_meat"] * (count - egg_count)
-    rng.shuffle(recipes)
+    # Choose from the complete legal set, rather than repair a shuffled menu.
+    # Distinct per-task counts guarantee distinct Task 1/2/3 menus per seed.
+    legal_menus = [menu for menu in product(RECIPES, repeat=count)
+                   if menu.count("egg_tomato") == egg_count
+                   and all(not (menu[i] == menu[i + 1] == menu[i + 2]) for i in range(count - 2))]
+    recipes = rng.choice(legal_menus)
     arrivals = [0] * count
-    deadlines = config.get("order_deadlines", {}).get(str(task), [budget] * count) if config.get("rules_version") == VERSION else [budget] * count
-    return {"max_turns": budget, "human_start": [2, 3] if task != 3 else list(rng.choice([(2, 3), (2, 2), (2, 4)])),
+    deadlines = config.get("order_deadlines", {}).get(str(task), list(ORDER_DEADLINES)) if config.get("rules_version") == VERSION else list(ORDER_DEADLINES)
+    return {"menu_version": MENU_VERSION, "max_turns": budget, "human_start": [2, 3] if task != 3 else list(rng.choice([(2, 3), (2, 2), (2, 4)])),
             "ai_start": [6, 3], "orders": [{"id": f"order{i + 1}", "recipe": recipe, "arrival": arrivals[i], "deadline": deadlines[i]}
                                             for i, recipe in enumerate(recipes)]}
 
@@ -260,7 +286,8 @@ def initial_state(seed: int, task: int):
     if task not in (1, 2, 3):
         raise ValueError("Task must be 1, 2, or 3")
     scene = _scenario(int(seed), task)
-    return {"domain": DOMAIN, "version": VERSION, "scenario_version": SCENARIO_VERSION, "seed": int(seed), "task": task,
+    return {"domain": DOMAIN, "version": VERSION, "scenario_version": SCENARIO_VERSION, "menu_version": MENU_VERSION,
+            "rule_metadata": rule_metadata(), "seed": int(seed), "task": task,
             "turn": 0, "max_turns": scene["max_turns"], "terminal": False, "termination_reason": None, "events": [], "policy_memory": {},
             "human": {"x": scene["human_start"][0], "y": scene["human_start"][1], "facing": "right", "holding": None},
             "ai": {"x": scene["ai_start"][0], "y": scene["ai_start"][1], "facing": "right", "holding": None},
@@ -281,6 +308,10 @@ def _pot(state, pot_id):
 def _loadable(state, item):
     if not item or item["stage"] != "prepared" or not _useful(state, item):
         return []
+    # A command commits the next turn: age 19 is still fresh in the saved
+    # frame, but loading on age 20 must not defeat end-of-turn spoilage.
+    if not _fresh_through(item, state["turn"] + 1):
+        return []
     order = _choose_order(state, item)
     result = []
     spec = RECIPES[item["recipe"]]
@@ -293,6 +324,29 @@ def _loadable(state, item):
         elif item["ingredient"] == spec["vegetable"] and pot["phase"] == "await_vegetable" and pot["order_id"] == order["id"]:
             result.append(pot)
     return sorted(result, key=lambda pot: (_distance(state, "ai", pot["id"]), pot["id"]))
+
+
+def _fresh_through(item, load_turn):
+    fresh = _freshness(item, load_turn)
+    return (item["stage"] != "spoiled" and (fresh is None or fresh["expires_turn"] is None
+                                            or load_turn < fresh["expires_turn"]))
+
+
+def _arrival_turn(state, stations):
+    """Earliest actual interaction turn including movement, facing and E."""
+    pos, face, elapsed = _pos(state["ai"]), state["ai"]["facing"], 0
+    for target in stations:
+        route = _route(pos, face, target)
+        x, y, face = _route_end(pos, face, route)
+        pos, elapsed = (x, y), elapsed + len(route) + 1
+    return state["turn"] + elapsed
+
+
+def _pickup_loadable(state, item, source):
+    """Pan choice at the actual pickup endpoint, with its loading deadline."""
+    return sorted((pot for pot in _loadable(state, item)
+                   if _fresh_through(item, _arrival_turn(state, [source, pot["id"]]))),
+                  key=lambda pot: (_arrival_turn(state, [source, pot["id"]]), pot["id"]))
 
 
 def _descriptor(state, actor="human", slot=None):
@@ -432,6 +486,59 @@ def _wait(en, zh, reason="waiting"):
     return {"action": "wait", "goal": "wait", "reason_code": reason, "reason_en": en, "reason_zh": zh, "slot": None}
 
 
+def _rescue_after_work(state, stations, loaded_pot, ingredient):
+    """Check a real pickup/load route, then time to take other pans off heat.
+
+    Each station visit includes facing and one interaction. This uses only
+    visible pans and their current timers, never a predicted human command.
+    """
+    pos, facing, elapsed = _pos(state["ai"]), state["ai"]["facing"], 0
+    for target in stations:
+        route = _route(pos, facing, target)
+        x, y, facing = _route_end(pos, facing, route)
+        pos, elapsed = (x, y), elapsed + len(route) + 1
+    for pot in state["pots"]:
+        if pot["id"] == loaded_pot or pot["status"] not in ("cooking", "ready"):
+            continue
+        rescue_pos, rescue_face, rescue_time = pos, facing, elapsed
+        targets = [pot["id"]]
+        if pot["phase"] == "vegetable":
+            if state["buffers"]["protein"][pot["id"]] is None:
+                continue
+            targets.insert(0, "protein" + pot["id"][-1])
+        for target in targets:
+            route = _route(rescue_pos, rescue_face, target)
+            x, y, rescue_face = _route_end(rescue_pos, rescue_face, route)
+            rescue_pos = (x, y)
+            rescue_time += len(route) + 1
+        rescue_time = max(rescue_time, (pot["remaining"] if pot["status"] == "cooking" else 0) + 1)
+        if rescue_time > _burn_delay(pot):
+            return pot
+        # If the other pan becomes ready first, taking it off the heat can
+        # leave a held component. Include its required physical storage and
+        # the return to the newly loaded pan, not just the first rescue.
+        new_ready = elapsed + COOK_TURNS[ingredient]
+        other_ready = pot["remaining"] if pot["status"] == "cooking" else 0
+        if other_ready <= new_ready:
+            followup = []
+            if pot["phase"] == "protein":
+                followup.append("protein" + pot["id"][-1])
+            elif pot["phase"] == "mix":
+                followup.append("handoff")
+            loaded = _pot(state, loaded_pot)
+            if loaded["phase"] == "await_vegetable":
+                followup.append("protein" + loaded_pot[-1])
+            followup.append(loaded_pot)
+            for target in followup:
+                route = _route(rescue_pos, rescue_face, target)
+                x, y, rescue_face = _route_end(rescue_pos, rescue_face, route)
+                rescue_pos = (x, y)
+                rescue_time += len(route) + 1
+            if rescue_time > new_ready + BURN_TURNS:
+                return pot
+    return None
+
+
 def _holding_plan(state):
     item = state["ai"]["holding"]
     if item["stage"] != "finished" and not _useful(state, item):
@@ -472,7 +579,11 @@ def _holding_plan(state):
                      f"我拿着成品，已经到达被占用的交接台前。这是允许等待的第 {waited + 1}/2 回合，请腾出台面，我就能交付。", "wait_blocked_output")
     loads = _loadable(state, item)
     if loads:
-        pot = loads[0]
+        reachable = [pot for pot in loads if _fresh_through(item, _arrival_turn(state, [pot["id"]]))]
+        if not reachable:
+            return _plan(state, "trash", "This portion will reach its recorded freshness deadline before I can walk, face and load it into an available pan. I am carrying it to the trash; moving it cannot restart its lifetime.",
+                         "按实际走路、转向和下锅所需时间，这份原料会先到保鲜期限。我把它拿到垃圾桶，移动位置不能重新开始保鲜。", "dispose_expiring_input")
+        pot = reachable[0]
         return _plan(state, pot["id"], f"I am taking the prepared {LABELS[item['ingredient']][0]} to stove {pot['id'][-1]} for the next required cooking stage.",
                      f"我要把备好的{LABELS[item['ingredient']][1]}放进炉灶 {pot['id'][-1]}，进行这道菜的下一道烹饪工序。", "load")
     empty = [i for i, value in enumerate(state["buffers"]["ai_raw"]) if value is None]
@@ -529,7 +640,7 @@ def _empty_plan(state):
             if pot["remaining"] <= return_time:
                 return _plan(state, target, f"Stove {pot['id'][-1]}'s vegetable needs {pot['remaining']} more cooking turns. I am fetching its stored cooked protein so I can combine them when ready.",
                              f"炉灶 {pot['id'][-1]} 的蔬菜还需 {pot['remaining']} 回合，我先取回暂存的熟主料，以便炒好后合炒。", "fetch_protein")
-    candidates = []
+    candidates, deferred_rescue = [], None
     for source, slot, item in [("handoff", None, state["handoff"]), *(("ai_raw", i, it) for i, it in enumerate(state["buffers"]["ai_raw"]))]:
         if not item:
             continue
@@ -537,8 +648,12 @@ def _empty_plan(state):
             return _plan(state, source, "I am clearing an ingredient that cannot fill a current order.", "我先清理不能完成当前订单的原料。", "clear_ingredient", slot=slot)
         if item["stage"] != "prepared" or not _useful(state, item):
             continue
-        loads = _loadable(state, item)
+        loads = _pickup_loadable(state, item, source)
         if loads:
+            danger = _rescue_after_work(state, [source, loads[0]["id"]], loads[0]["id"], item["ingredient"])
+            if danger:
+                deferred_rescue = danger
+                continue
             order = _choose_order(state, item)
             # Start a second real order on an idle pan instead of always
             # finishing the first pan's vegetable stage first. Short-lived
@@ -554,7 +669,7 @@ def _empty_plan(state):
         if row[0] != 0:
             continue
         _, _, source, _, portion = row
-        chosen_pan = _loadable(state, portion)[0]
+        chosen_pan = _pickup_loadable(state, portion, source)[0]
         first_route = _route(_pos(state["ai"]), state["ai"]["facing"], source)
         x, y, face = _route_end(_pos(state["ai"]), state["ai"]["facing"], first_route)
         pan_route = _route((x, y), face, chosen_pan["id"])
@@ -564,18 +679,28 @@ def _empty_plan(state):
             if other is row or other[2] != "ai_raw":
                 continue
             fresh = _freshness(other[4], state["turn"])
-            take_turn = finish_turn + len(_route((x, y), face, "ai_raw")) + 1
-            if fresh and fresh["expires_turn"] is not None and take_turn >= fresh["expires_turn"]:
+            pickup_route = _route((x, y), face, "ai_raw")
+            ox, oy, oface = _route_end((x, y), face, pickup_route)
+            other_pans = _loadable(state, other[4])
+            # Pickup never refreshes a prepared portion. Include its later
+            # walk, facing and actual pan interaction when checking expiry.
+            load_turn = finish_turn + len(pickup_route) + 1 + min(
+                (len(_route((ox, oy), oface, p["id"])) + 1 for p in other_pans), default=100000)
+            if fresh and fresh["expires_turn"] is not None and load_turn >= fresh["expires_turn"]:
                 candidates[index] = (2, *row[1:])
                 break
     if candidates:
         _, _, source, slot, item = min(candidates, key=lambda row: row[:3])
-        loads = _loadable(state, item)
+        loads = _pickup_loadable(state, item, source)
         if loads[0]["phase"] == "idle" and any(p["phase"] != "idle" and p["order_id"] != _choose_order(state, item)["id"] for p in state["pots"]):
             return _plan(state, source, f"One pan is already working on a dish. The other pan can start {_recipe_name(item['recipe'])}, so I am collecting its prepared {LABELS[item['ingredient']][0]} without waiting for the first dish to finish.",
                          f"一口锅已经在做菜，另一口锅可以开始{_recipe_name(item['recipe'], 'zh')}。我去取备好的{LABELS[item['ingredient']][1]}，不必等第一道菜完成。", "start_parallel_recipe", slot=slot)
         return _plan(state, source, f"I am collecting the prepared {LABELS[item['ingredient']][0]} because a matching pan can use it for its next cooking stage.",
                      f"有对应的锅可以开始下一道工序，我去取备好的{LABELS[item['ingredient']][1]}。", "accept_ingredient", slot=slot)
+    if deferred_rescue:
+        pot = deferred_rescue
+        return _plan(state, pot["id"], f"Starting another cooking stage now would leave too little time to attend to both pans before food burns. I am keeping my hand free and attending to stove {pot['id'][-1]} first.",
+                     f"现在去取料并开始另一道工序，会来不及兼顾两口锅的出锅时间。我先空手照看炉灶 {pot['id'][-1]}。", "reserve_rescue_window", at_target="wait")
     item = state["handoff"]
     if item and item["stage"] == "prepared" and _useful(state, item) and None in state["buffers"]["ai_raw"]:
         return _plan(state, "handoff", "I am accepting this prepared ingredient. If its cooking stage cannot start yet, I will put it in a free ingredient slot.", "我先接收这份备料；如果还没轮到它下锅，就放入空原料槽暂存。", "accept_early")
@@ -633,7 +758,9 @@ def decide(state):
         commitment = state.get("policy_memory", {}).get("rescue_pot")
         ready.sort(key=lambda p: (p["id"] != commitment, _burn_delay(p), p["id"]))
         held = state["ai"]["holding"]
-        if ready and held and _useful(state, held) and held["stage"] in ("prepared", "cooked_protein"):
+        direct_load_safe = (held and held["stage"] == "prepared" and plan["reason_code"] == "load"
+                            and _rescue_after_work(state, [plan["goal"]], plan["goal"], held["ingredient"]) is None)
+        if ready and held and _useful(state, held) and held["stage"] in ("prepared", "cooked_protein") and not direct_load_safe:
             pot = ready[0]
             target = "ai_raw" if held["stage"] == "prepared" else "protein" + held["pot_id"][-1]
             empty = [i for i, value in enumerate(state["buffers"]["ai_raw"]) if value is None] if target == "ai_raw" else []
@@ -693,7 +820,8 @@ def _interact(state, actor, descriptor, new_turn, newly_loaded):
         state["next_item_id"] += 1
         who["holding"] = {"id": iid, "ingredient": ingredient, "ingredients": [ingredient], "recipe": INGREDIENT_RECIPE[ingredient], "stage": "raw",
                           "prepare_progress": 0, "components": [iid], "order_id": None, "pot_id": None, "container": None, "was_buffered": False,
-                          "acquired_turn": new_turn, "freshness_started_turn": new_turn, "fresh_until": new_turn + RAW_FRESH_TURNS, "freshness_basis": "acquired"}
+                          "acquired_turn": new_turn, "freshness_started_turn": new_turn, "fresh_until": new_turn + RAW_FRESH_TURNS,
+                          "expires_turn": new_turn + RAW_FRESH_TURNS, "freshness_basis": "acquired"}
         _event(state, "ingredient_taken", f"You took one {ingredient} portion.", f"你取了一份{LABELS[ingredient][1]}。", actor=actor, item=deepcopy(who["holding"]))
     elif kind == "prepare":
         held["prepare_progress"] += 1
@@ -701,7 +829,8 @@ def _interact(state, actor, descriptor, new_turn, newly_loaded):
         if held["prepare_progress"] >= required:
             held["stage"] = "prepared"
             held.update(prepared_turn=new_turn, freshness_started_turn=new_turn,
-                        fresh_until=new_turn + PREPARED_FRESH_TURNS[held["ingredient"]], freshness_basis="prepared")
+                        fresh_until=new_turn + PREPARED_FRESH_TURNS[held["ingredient"]],
+                        expires_turn=new_turn + PREPARED_FRESH_TURNS[held["ingredient"]], freshness_basis="prepared")
         verb = "Whisking" if held["ingredient"] == "egg" else "Chopping"
         _event(state, "prepared", f"{verb}: {held['prepare_progress']} of {required} preparation turns.",
                f"{'打散' if held['ingredient'] == 'egg' else '切配'}进度：{held['prepare_progress']}/{required}。", actor=actor, item=deepcopy(held))
@@ -732,7 +861,7 @@ def _interact(state, actor, descriptor, new_turn, newly_loaded):
             if old:
                 stored = old.get("storage_since_turn")
                 # A pickup on the first overdue turn cannot rescue spoiled food.
-                if stored is not None and new_turn - stored > STORAGE_FRESH_TURNS:
+                if old["stage"] == "raw" and stored is not None and new_turn - stored > STORAGE_FRESH_TURNS:
                     _spoil_portion(state, old, new_turn, storage=True)
                 old.pop("storage_since_turn", None)
                 old.pop("storage_station", None)
@@ -744,13 +873,15 @@ def _interact(state, actor, descriptor, new_turn, newly_loaded):
         _event(state, "item_placed" if held else "item_taken", en, zh,
                actor=actor, station=target, slot=descriptor.get("slot"), item=deepcopy(item))
     elif kind == "load":
+        if not _fresh_through(held, new_turn):
+            raise ValueError("The prepared portion expires before this loading action can complete")
         pot = _pot(state, target)
         _assign(state, held)
         protein = held["ingredient"] == RECIPES[held["recipe"]]["protein"]
         pot.update(status="cooking", phase="protein" if protein else "vegetable", recipe=held["recipe"], order_id=held["order_id"], item=held,
                    remaining=COOK_TURNS[held["ingredient"]], ready_age=0)
         held["pot_id"] = pot["id"]
-        held.update(fresh_until=None, freshness_basis="in_pan")
+        held.update(fresh_until=None, freshness_basis="in_pan", loaded_turn=new_turn)
         who["holding"] = None
         newly_loaded.add(pot["id"])
         _event(state, "pot_loaded", f"AI started cooking {held['ingredient']} on stove {pot['id'][-1]}; {pot['remaining']} full cooking turns are required.",
@@ -956,14 +1087,17 @@ def public_state(state):
                          "phase":"waiting_for_ingredient","status":"waiting_for_ingredient","remaining":0,
                          "ready_for_next_stage":False,"location":"plan","item_id":held_input["id"] if selected_input is held_input else None})
     ai["current_cooking"] = jobs
-    return {"domain": DOMAIN, "version": VERSION, "task": state["task"], "turn": state["turn"], "max_turns": state["max_turns"],
+    return {"domain": DOMAIN, "version": state["version"], "scenario_version": state["scenario_version"],
+            "menu_version": state.get("menu_version", MENU_VERSION), "rule_metadata": deepcopy(state.get("rule_metadata", rule_metadata())),
+            "task": state["task"], "turn": state["turn"], "max_turns": state["max_turns"],
             "terminal": state["terminal"], "events": deepcopy(state["events"]), "score": score(state), "width": WIDTH, "height": HEIGHT,
             "walls": deepcopy(WALLS), "stations": deepcopy(STATIONS), "human": human, "ai": ai,
             "pots": pots, "handoff": deepcopy(state["handoff"]), "buffers": deepcopy(state["buffers"]),
             "orders": [dict(deepcopy(order), ordinal=i+1, recipe_label_en=_recipe_name(order["recipe"]), recipe_label_zh=_recipe_name(order["recipe"], "zh"), remaining=max(0, order["deadline"] - state["turn"])) for i,order in enumerate(state["orders"])],
             "menu": [dict(deepcopy(order), ordinal=i+1, recipe_label_en=_recipe_name(order["recipe"]), recipe_label_zh=_recipe_name(order["recipe"], "zh")) for i,order in enumerate(state["orders"])],
             "freshness_rules": {"raw": RAW_FRESH_TURNS, "prepared": deepcopy(PREPARED_FRESH_TURNS),
-                                "ingredient_storage": STORAGE_FRESH_TURNS, "storage_spoils_after_limit": True,
+                                "ingredient_storage": STORAGE_FRESH_TURNS, "storage_applies_to": ["raw"], "storage_spoils_after_limit": True,
+                                "prepared_formula": "expires_turn = prepared_turn + 20", "location_changes_reset": False,
                                 "storage_stations": ["ai_raw", "human_buffer"]},
             "handoff_grace": {"allowed_wait_turns": HANDOFF_GRACE_TURNS,
                               "waited_turns": state.get("policy_memory", {}).get("handoff_wait_turns", 0)},
@@ -1038,61 +1172,111 @@ def _next_input_portion(state):
     return None
 
 
-def human_advisor(state):
-    """Developer partner chooses human actions only; no undisclosed order access."""
-    if state["terminal"]:
-        return "wait"
-    held, handoff, buffer = state["human"]["holding"], state["handoff"], state["buffers"]["human"]
-    ai = decide(state)
-    output = any(item and item["stage"] == "finished" for item in (state["ai"]["holding"], *state["buffers"]["protein"].values())) or any(p["phase"] in ("vegetable", "mix") for p in state["pots"])
-    # Once the next vegetable is already being delivered to its active pan,
-    # keep a free human hand for the approaching dish rather than preparing a
-    # later vegetable and leaving it untouched on storage past its short limit.
-    output = output or any(food and food["stage"] == "prepared" and food["ingredient"] == RECIPES[food["recipe"]]["vegetable"]
-                              and e_loads and e_loads[0]["phase"] == "await_vegetable"
-                              for food in (state["ai"]["holding"], handoff)
-                              for e_loads in [_loadable(state, food)])
+def _proxy_output_available(s):
+    return any((i and i['stage'] == 'finished' for i in (s['ai']['holding'], *s['buffers']['protein'].values()))) or bool(s['handoff'] and s['handoff']['stage'] in ('finished', 'plated'))
+
+def _proxy_supply_step(s, ingredient):
+    held = s['human']['holding']
+    if held is None:
+        return _approach(s, 'human', ingredient)
+    if held['stage'] == 'raw':
+        return _approach(s, 'human', 'prep')
+    if held['stage'] == 'prepared':
+        if s['handoff'] is None:
+            return _approach(s, 'human', 'handoff')
+        return _approach(s, 'human', 'handoff', 'wait')
+    return 'wait'
+
+def _proxy_can_supply(s, ingredient):
+    """Can this actual input be acquired, prepared and handed over before output?
+
+        Simulate only this one supply journey using current visible orders/food.
+        No spawn, path shortcuts, prep shortcuts, future ingredients or hidden data.
+        """
+    trial = deepcopy(s)
+    # Query evidence and proxy rollouts may use only currently revealed orders.
+    # Never let a hypothetical supply trip reveal hidden future arrivals.
+    trial['_future_orders'] = []
+    baseline = tuple((s['metrics'].get(k, 0) for k in ('burnt', 'discarded_dishes')))
+    portion = None
+    for _ in range(45):
+        if _proxy_output_available(trial):
+            return False
+        trial = step(trial, 'wait' if portion and trial['human']['holding'] is None else _proxy_supply_step(trial, ingredient))
+        now = tuple((trial['metrics'].get(k, 0) for k in ('burnt', 'discarded_dishes')))
+        if now != baseline:
+            return False
+        held = trial['human']['holding']
+        if held and portion is None:
+            portion = held['id']
+        if portion and any((i and i['id'] == portion and (i['stage'] == 'spoiled') for i in _all_items(trial))):
+            return False
+        if portion and any((i and i['id'] == portion and (i.get('freshness_basis') == 'in_pan') for i in _all_items(trial))):
+            return True
+        if trial['terminal']:
+            return False
+    return False
+
+def human_advisor(s, *, discard_later_raw=False):
+    """Visible-state action advice; never replaces participant input.
+
+    Evaluate a bounded supply trip against the actual fixed AI, so longer
+    cooking windows can be used for a second dish without guessing futures.
+    """
+    if s['terminal']:
+        return 'wait'
+    held, handoff, buffer = (s['human']['holding'], s['handoff'], s['buffers']['human'])
+    ai = decide(s)
+    actual_output = s['ai']['holding'] and s['ai']['holding']['stage'] == 'finished'
     if held:
-        if not _useful(state, held):
-            return _approach(state, "human", "trash")
-        if held["stage"] == "plated":
-            return _approach(state, "human", "serve")
-        if held["stage"] == "finished":
-            return _approach(state, "human", "plate")
-        if held["stage"] == "raw":
-            return _approach(state, "human", "prep")
-        if _handoff_needs_human(state):
-            # With hand, storage and handoff all occupied, one explicit discard
-            # is the only legal way to free a hand; never overwrite another item.
-            return _approach(state, "human", "human_buffer") if buffer is None else _approach(state, "human", "trash")
-        if handoff is None and not output:
-            return _approach(state, "human", "handoff")
-        if buffer is None:
-            return _approach(state, "human", "human_buffer")
+        if not _useful(s, held):
+            return _approach(s, 'human', 'trash')
+        if held['stage'] == 'plated':
+            return _approach(s, 'human', 'serve')
+        if held['stage'] == 'finished':
+            return _approach(s, 'human', 'plate')
+        if held['stage'] == 'raw':
+            # Test-partner recovery for a mistaken later-menu ingredient:
+            # physically discard it rather than block an earlier pair's pan.
+            # This is a human proxy action, never an automatic player action.
+            first_pending = min(int(order['id'][5:]) for order in _pending(s))
+            batch_end = ((first_pending - 1) // 2 + 1) * 2
+            bound = _choose_order(s, held)
+            if discard_later_raw and bound and int(bound['id'][5:]) > batch_end:
+                return _approach(s, 'human', 'trash')
+            return _approach(s, 'human', 'prep')
+        if _handoff_needs_human(s):
+            return _approach(s, 'human', 'human_buffer' if buffer is None else 'trash')
+        if handoff is None and (not actual_output):
+            return _approach(s, 'human', 'handoff')
+        if actual_output and buffer is None:
+            return _approach(s, 'human', 'human_buffer')
         if handoff is None:
-            return _approach(state, "human", "handoff")
-        return "wait"
-    if _handoff_needs_human(state):
-        return _approach(state, "human", "handoff")
-    if handoff and handoff["stage"] in ("finished", "plated"):
-        return _approach(state, "human", "handoff")
-    if buffer and buffer["stage"] in ("finished", "plated"):
-        return _approach(state, "human", "human_buffer")
-    if output:
-        # Recover a blocking input only when the AI is not simultaneously taking
-        # it; place it on the human counter, then collect the finished output.
-        if handoff and ai["action"] != "interact" and buffer is None:
-            return _approach(state, "human", "handoff")
-        return _approach(state, "human", "handoff", "wait")
+            return _approach(s, 'human', 'handoff')
+        return _approach(s, 'human', 'handoff', 'wait')
+    if _handoff_needs_human(s):
+        return _approach(s, 'human', 'handoff')
+    if handoff and handoff['stage'] in ('finished', 'plated'):
+        return _approach(s, 'human', 'handoff')
+    if buffer and buffer['stage'] in ('finished', 'plated'):
+        return _approach(s, 'human', 'human_buffer')
+    if actual_output:
+        if handoff and ai['action'] != 'interact' and (buffer is None):
+            return _approach(s, 'human', 'handoff')
+        return _approach(s, 'human', 'handoff', 'wait')
     if buffer and handoff is None:
-        return _approach(state, "human", "human_buffer")
-    if handoff is not None:
-        return _approach(state, "human", "handoff", "wait")
-    needed = _next_missing_input(state)
+        return _approach(s, 'human', 'human_buffer')
+    needed = _next_missing_input(s)
     if needed and buffer is None:
-        _, ingredient, _, _ = needed
-        return _approach(state, "human", ingredient)
-    return _approach(state, "human", "handoff", "wait")
+        ingredient = needed[1]
+        if _proxy_can_supply(s, ingredient):
+            return _approach(s, 'human', ingredient)
+    return _approach(s, 'human', 'handoff', 'wait')
+
+
+def simulation_partner(state):
+    """Test-only recovery policy; never supplied as participant Q&A advice."""
+    return human_advisor(state, discard_later_raw=True)
 
 
 def action_label(action, language="en"):
@@ -1107,15 +1291,15 @@ def rules(language="en"):
         ("You collect and prepare ingredients, transfer finished food to a serving plate, and serve. Your AI teammate operates the pans. Neither role can finish an order alone.", "你取料、备料、将成品转装正式餐盘并上菜；AI 操作炉灶。任何一方都不能独立完成订单。"),
         ("WASD moves one square and changes facing. A blocked move turns in place and still uses one turn. E interacts only with the station directly in front; Space waits one turn. Both teammates act together. No key press means no game time passes.", "WASD 移动一格并改变朝向；方向被挡时原地转向，仍消耗一回合。E 只操作正前方工位，空格等待一回合。双方同步行动；不操作就不推进游戏时间。"),
         ("The four cupboards supply egg, tomato, meat and pepper separately. At the preparation counter press E 3 times for tomato or pepper, 4 times to whisk egg, and 5 times to chop meat. Partial progress stays with the portion.", "四个独立原料柜分别提供鸡蛋、番茄、肉和辣椒。在备料台，番茄和辣椒按 E 3 次，鸡蛋打散 4 次，肉切配 5 次；部分进度随实物保留。"),
-        ("There are two recipes: tomato and egg stir-fry, and pepper and meat stir-fry. Cook the protein first (egg: 4 turns; meat: 6), remove it onto a temporary plate and place that plate on its pan's dedicated counter. Then cook the vegetable for 4 turns, return the cooked protein to that pan, and mix for 2 turns.", "两道菜为番茄炒鸡蛋和辣椒炒肉：先炒主料（鸡蛋 4 回合、肉 6 回合），出锅到临时盘并实际放到对应锅的专用台；再炒蔬菜 4 回合，倒回已熟主料，合炒 2 回合。"),
+        (f"There are two recipes: tomato and egg stir-fry ({COOK_TURNS['egg'] + COOK_TURNS['tomato'] + MIX_TURNS} heating turns), and pepper and meat stir-fry ({COOK_TURNS['meat'] + COOK_TURNS['pepper'] + MIX_TURNS} heating turns). Cook the protein first (egg: {COOK_TURNS['egg']} turns; meat: {COOK_TURNS['meat']}), remove it onto a temporary plate and place that plate on its pan's dedicated counter. Then cook the vegetable (tomato: {COOK_TURNS['tomato']} turns; pepper: {COOK_TURNS['pepper']}), return the cooked protein to that pan, and mix for {MIX_TURNS} turns. Preparation, walking and transfers take additional turns.", f"两道菜为番茄炒鸡蛋（纯炒制 {COOK_TURNS['egg'] + COOK_TURNS['tomato'] + MIX_TURNS} 回合）和辣椒炒肉（纯炒制 {COOK_TURNS['meat'] + COOK_TURNS['pepper'] + MIX_TURNS} 回合）：先炒主料（鸡蛋 {COOK_TURNS['egg']} 回合、肉 {COOK_TURNS['meat']} 回合），出锅到临时盘并实际放到对应锅的专用台；再炒蔬菜（番茄 {COOK_TURNS['tomato']} 回合、辣椒 {COOK_TURNS['pepper']} 回合），倒回已熟主料，合炒 {MIX_TURNS} 回合。备料、走路和取放另计回合。"),
         ("A finished dish comes from the AI in an output container. Take it to the serving-plate counter before serving. Temporary plates, output containers and final serving plates are distinct and supplied without depletion.", "AI 用出锅容器交付成品。你拿走后必须到正式装盘台转装餐盘才能上菜。临时盘、出锅容器和正式餐盘彼此不同，无限供应。"),
         ("Each teammate holds one item. The handoff and human counter each hold one item. AI has two prepared-ingredient slots and one dedicated temporary-plate slot per pan. No swaps or overwrites occur. Carry a held item to the shared trash bin at (4,4), face it, and press E to dispose of it. Food cannot be discarded remotely.", "每人只能拿一件物品；交接台和人类暂存台各一件。AI 有两个备料槽，以及每口锅一个专用临时盘位。不能交换或覆盖台面物品，丢弃物品必须拿到（4,4）的共享垃圾桶前，面朝垃圾桶按 E；不能远程丢弃。"),
         ("Food ready in a pan burns after eight additional full turns. Its ready turn is not counted. Loading and combining do not count their own turn as a cooking turn. Removed food no longer burns.", "锅中食物炒好后再留满 8 回合会糊，刚炒好当回合不算。下锅或开始合炒当回合不计烹饪时间。出锅食物不再烧糊。"),
         ("If both teammates use the handoff counter in the same turn, neither transfer succeeds. Food placed this turn cannot be taken by the other teammate until a later turn.", "双方同回合使用交接台，两次交互都失败。本回合放下的食物不能被另一方同回合取走。"),
-        ("All five menu dishes are visible from the start. Their quantities and sequence are fixed before play. Every on-time correct dish adds 100 points; every game step costs 1. Trash disposal costs 3 for a single ingredient/component or 10 for a combined dish. Scores can be negative. Serving on the deadline turn is accepted; expiry alone never removes food. Questions and replay cost no turns or points.", "五道菜单从开始就全部公开，数量和顺序在游戏前固定。每正确按时上菜加 100 分，每推进一步扣 1 分。垃圾桶丢弃单份原料或配料扣 3 分，合成菜品扣 10 分。得分可为负；截止回合仍可上菜，过期本身不会移除食物。提问和回看不消耗步数或分数。"),
-        ("A raw portion stays fresh for 120 turns after acquisition. Completing preparation starts a new oxidation clock: egg/meat 80 turns, tomato/pepper 60. At that boundary uncooked food spoils in hands or on counters, stays visible, and cannot be prepared or cooked. Loading an unspoiled portion into a pan ends its oxidation clock; the pan can still burn. Cooked components and finished dishes do not oxidize in this task.", "生料从取出后保鲜 120 回合。完成备料时重新开始氧化计时：鸡蛋和肉 80 回合，番茄和辣椒 60 回合。达到期限，手中或台面的未下锅食物会变质，实物保留但不能继续备料或烹饪。未变质份料下锅后不再按氧化计时，但锅中仍可能烧糊。本任务中熟配料和成品不氧化。"),
+        ("All five menu dishes are visible from the start. Their quantities and sequence are fixed before play, with at most two consecutive dishes of the same recipe. Matching bound orders may be served in any order. Every on-time correct dish adds 30 points; every game step costs 1. The serving action itself therefore adds 29 net points; waiting once then serving adds 28 across the two turns. Trash disposal costs 3 for a single ingredient/component or 10 for a combined dish. Scores can be negative. Serving on the deadline turn is accepted; expiry alone never removes food. Questions and replay cost no turns or points.", "五道菜单从开始就全部公开，数量和顺序在游戏前固定；同菜最多连续两道。可按任意顺序完成对应绑定订单。每正确按时上菜加 30 分，每推进一步扣 1 分；上菜动作本身净增 29 分，先等待一步再上菜共净增 28 分。垃圾桶丢弃单份原料或配料扣 3 分，合成菜品扣 10 分。得分可为负；截止回合仍可上菜，过期本身不会移除食物。提问和回看不消耗步数或分数。"),
+        ("A raw portion stays fresh for 120 turns after acquisition. All four prepared ingredients expire exactly 20 turns after preparation completes. Prepared on turn 50 means usable on turn 69 but spoiled on turn 70; the actual loading turn must be before expiry. Changing hands or counters never resets this clock. At that boundary uncooked food spoils in hands or on counters, stays visible, and cannot be prepared or cooked. Loading an unspoiled portion into a pan ends its oxidation clock; the pan can still burn. Cooked components and finished dishes do not oxidize in this task.", "生料从取出后保鲜 120 回合。四种原料都在完成备料的 20 回合后过期：第 50 回合备好，第 69 回合仍可用，第 70 回合已变质；实际下锅动作回合必须早于期限。拿起、放下或换台面都不重置计时。达到期限，手中或台面的未下锅食物会变质，实物保留但不能继续备料或烹饪。未变质份料下锅后不再按氧化计时，但锅中仍可能烧糊。本任务中熟配料和成品不氧化。"),
         ("When I arrive facing an occupied handoff counter while holding a finished dish, I wait two full turns. On the third still-blocked turn I start carrying it to the trash. If the counter clears before disposal, I return to deliver the dish. Only an actual bin interaction costs 10 points. I collect another finished dish after delivery, without retrieving my own delivered output.", "我拿成品到达交接台前后，若台面被占用，会等完整两回合。第三回合仍被占用才拿向垃圾桶；真正丢弃前若交接台腾空，就恢复交付。只有实际在桶前丢弃才扣 10 分。交完一份后会去取下一份已做好菜，不会拿回自己已交付的菜。"),
-        ("Raw or prepared ingredients spoil after staying untouched for more than 10 turns in either AI ingredient slot or your storage counter. Exactly 10 elapsed turns are allowed. Spoiled food stays visible and must be carried to the bin; picking it up never makes it fresh again. Cooked-protein temporary plates are recipe workstations, not ingredient storage.", "生料或备好的原料在 AI 原料槽或你的暂存台连续存放超过 10 回合就会变质，刚好 10 回合仍可用。变质后实物保留，必须拿到垃圾桶；拿起来不会恢复新鲜。熟主料临时盘属于菜谱工序，不是原料暂存位置。"),
+        ("Unprepared raw ingredients spoil after staying untouched for more than 10 turns in either AI ingredient slot or your storage counter. Exactly 10 elapsed turns are allowed. Spoiled food stays visible and must be carried to the bin; picking it up never makes it fresh again. Prepared ingredients use only their 20-turn completion-based lifetime, with no extra storage limit. Cooked components and dishes have no ingredient freshness clock.", "尚未备好的生料在 AI 原料槽或你的暂存台连续存放超过 10 回合就会变质，刚好 10 回合仍可用。变质后实物保留，必须拿到垃圾桶；拿起来不会恢复新鲜。备好原料只用完成备料起的 20 回合寿命，没有额外暂存期限；熟配料和成品不按原料保鲜计时。"),
     ]
     return [pair[language == "zh"] for pair in pairs]
 
@@ -1217,15 +1401,29 @@ def facts(state, decision=None):
     for ingredient, (en_name, zh_name) in LABELS.items():
         portions = [(it, _freshness(it,state["turn"])) for it, _, _ in locations if it["ingredient"] == ingredient]
         current = [(it,fresh) for it,fresh in portions if fresh]
-        descriptions_en = [f"{_name(it)}: " + ("already spoiled" if fresh["status"] == "spoiled" else f"{fresh['remaining']} turns until spoilage" if fresh["remaining"] is not None else "no recorded clock") for it,fresh in current]
-        descriptions_zh = [f"{_name(it,'zh')}：" + ("已经变质" if fresh["status"] == "spoiled" else f"再过 {fresh['remaining']} 回合变质" if fresh["remaining"] is not None else "未记录计时") for it,fresh in current]
-        rows.append({"id": "freshness_" + ingredient, "en": f"{en_name.capitalize()} needs {PREPARE_TURNS[ingredient]} preparation interactions. " + ("; ".join(descriptions_en) if descriptions_en else "No uncooked portion is currently out of the cupboard.") + f" Raw lifetime: 120 turns after acquisition; prepared lifetime: {PREPARED_FRESH_TURNS[ingredient]} turns after preparation completes. Cooking ends this oxidation clock. In an AI ingredient slot or your storage counter, more than 10 untouched turns spoils the portion sooner.",
-                     "zh": f"{zh_name}需要备料 {PREPARE_TURNS[ingredient]} 次。" + ("；".join(descriptions_zh) if descriptions_zh else "当前没有取出后尚未下锅的这类食材。") + f"生料取出后保鲜 120 回合；完成备料后保鲜 {PREPARED_FRESH_TURNS[ingredient]} 回合。下锅后停止这项氧化计时；但在原料槽或你的暂存台连续超过 10 回合会提前变质。"})
+        descriptions_en, descriptions_zh = [], []
+        for it, fresh in current:
+            location = next((en, zh) for food, en, zh in locations if food["id"] == it["id"])
+            clock_en = (f"prepared on turn {fresh['prepared_turn']}; " if fresh['prepared_turn'] is not None else "")
+            clock_zh = (f"第 {fresh['prepared_turn']} 回合备好；" if fresh['prepared_turn'] is not None else "")
+            expiry_en = f"expires on turn {fresh['expires_turn']}; {fresh['remaining']} turns remain" if fresh['expires_turn'] is not None else "no recorded clock"
+            expiry_zh = f"第 {fresh['expires_turn']} 回合过期；剩余 {fresh['remaining']} 回合" if fresh['expires_turn'] is not None else "未记录计时"
+            descriptions_en.append(f"{_name(it)} in/on {location[0]}: {clock_en}{expiry_en}" + ("; already spoiled" if fresh['status'] == 'spoiled' else ""))
+            descriptions_zh.append(f"{location[1]}的{_name(it, 'zh')}：{clock_zh}{expiry_zh}" + ("；已经变质" if fresh['status'] == 'spoiled' else ""))
+        rows.append({"id": "freshness_" + ingredient,
+                     "en": "; ".join(descriptions_en) + "." if descriptions_en else f"No uncooked {en_name} portion is currently out of the cupboard.",
+                     "zh": "；".join(descriptions_zh) + "。" if descriptions_zh else f"当前没有取出后尚未下锅的{zh_name}。"})
     for recipe,spec in RECIPES.items():
         rows.append({"id": "recipe_sequence_" + recipe, "en": f"For {spec['en']}, I cook {LABELS[spec['protein']][0]} first, remove it onto a temporary plate, and physically store it. Only then can that pan cook {LABELS[spec['vegetable']][0]}; I return the cooked first component and mix them. A vegetable supplied first has to wait in a free ingredient slot and its oxidation clock keeps running.",
                      "zh": f"制作{spec['zh']}时，我先炒熟{LABELS[spec['protein']][1]}，出锅并实际放到临时盘位；同一口锅才能继续炒{LABELS[spec['vegetable']][1]}，然后倒回已熟主料合炒。先递蔬菜时，只能先放空原料槽等待，其氧化计时会继续。"})
-    rows.append({"id":"kitchen_score", "en":f"Current score: {state['raw_score']}. Each correct dish adds 100; every game step costs 1; trash disposal costs 3 for a single component or 10 for a combined dish. Disposals occur only at the bin; spoilage or burning itself has no extra score penalty.",
-                 "zh":f"当前得分 {state['raw_score']}。每正确上菜加 100，每步扣 1；垃圾桶丢弃单份配料扣 3、合成菜品扣 10。仅在桶前真正丢弃时扣分；变质或烧糊本身不额外扣分。"})
+    rows.append({"id":"kitchen_score", "en":f"Current score: {state['raw_score']}. Each on-time correct dish adds {SERVE_POINTS}; every game step costs {STEP_COST}; trash disposal costs 3 for a single component or 10 for a combined dish. Disposals occur only at the bin; spoilage or burning itself has no extra score penalty.",
+                 "zh":f"当前得分 {state['raw_score']}。每正确按时上菜加 {SERVE_POINTS}，每步扣 {STEP_COST}；垃圾桶丢弃单份配料扣 3、合成菜品扣 10。仅在桶前真正丢弃时扣分；变质或烧糊本身不额外扣分。"})
+    rows.append({"id": "serving_score_rule",
+                 "en": f"An on-time successful serve earns +{SERVE_POINTS}, and the same action costs {STEP_COST} turn point: net +{SERVE_POINTS - STEP_COST}. Waiting one turn and then serving changes the score by +{SERVE_POINTS - 2 * STEP_COST} across those two turns. Burning, spoilage and order expiry do not add a penalty; actual disposal does.",
+                 "zh": f"按时成功上菜奖励 +{SERVE_POINTS}，但这次操作同样扣 {STEP_COST} 回合分，因此净增 {SERVE_POINTS - STEP_COST}；先等一回合再上菜，两回合共净增 {SERVE_POINTS - 2 * STEP_COST}。烧糊、变质和订单过期不额外扣分，实际丢弃才扣分。"})
+    rows.append({"id": "prepared_freshness_rule",
+                 "en": f"Every prepared ingredient expires {PREPARED_FRESH_TURNS['egg']} turns after preparation finishes. Changing hands, handoff counters or storage slots never resets that deadline. The actual pan-loading action must finish before the expiry turn.",
+                 "zh": f"四种备好原料都在完成备料的 {PREPARED_FRESH_TURNS['egg']} 回合后变质。拿起、交接或换暂存位置都不重置期限；实际下锅动作必须在过期回合之前完成。"})
     if not state["terminal"]:
         suggestion = human_advisor(state)
         rows.append({"id": "human_available_option", "en": "One available next action is: " + action_label(suggestion).lower() + ". It is a suggestion, not a guarantee of the final score.", "zh": "你下一步可选择" + action_label(suggestion, "zh") + "。这是一项建议，不保证最终分数。"})

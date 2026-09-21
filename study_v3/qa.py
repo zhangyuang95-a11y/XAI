@@ -155,6 +155,19 @@ a placement event restating the same location. For a menu/dish question alone,
 prefer ai_current_dishes rather than adding a second reason with the same dish.
 For preparation counts and GENERAL spoilage rules, select the relevant public
 rules, without adding a current freshness fact that repeats those rules.
+For "when was this prepared/how long remains?", use only that portion's
+freshness fact. Moving, handoffs and storage do not restart the prepared clock.
+Read the duration and expiry boundary from the current version's evidence;
+never substitute a remembered ingredient-specific or storage lifetime.
+For "why reward +30 but score +29?", prefer serving_score_rule when available:
+the serving reward and its one-turn cost are different score components.
+For a completed-dish count, select system:completed_orders, not system:score;
+the raw score includes elapsed-turn and disposal penalties.
+For "are both pans cooking?", inspect both pan status facts. Two bound orders
+alone do not establish simultaneous heating. To explain THIS executed action,
+select performed:system:ai_reason with its saved pre-action evidence, never
+the displayed frame's next-action plan. Public advice must remain the catalog's
+human_advisor action; never replace it with a test-partner recovery policy.
 A recent spoilage event stating that the food remains and must be taken to the
 bin already answers why it cannot be used and whether it disappeared. Do not
 add all oxidation rules, other ingredients' clocks or preparation counts when
@@ -325,6 +338,11 @@ def _catalog(engine, state, decision, public_history):
             "en": "A coordination option for your next action is to " + _action_pair(engine, state, suggestion)[0] + ".",
             "zh": "建议你下一步" + _action_pair(engine, state, suggestion)[1] + "。"})
     public_score = engine.score(state)
+    if state['domain'] == 'kitchen':
+        completed = public_score['metrics']['completed_orders']
+        rows.append({'id': 'system:completed_orders', 'subject': 'shared', 'purpose': 'observation',
+                     'en': f'We have completed {completed} of {state["total_orders"]} orders.',
+                     'zh': f'已完成 {completed} 道，共 {state["total_orders"]} 道订单。'})
     raw_name = "score" if state["domain"] == "warehouse" else "catch points" if state["domain"] == "pong" else "correctly completed orders"
     raw_zh = "原始得分" if state["domain"] == "warehouse" else "接球原始分" if state["domain"] == "pong" else "正确完成订单数"
     raw_scale = public_score.get("score_max", 100) is None or public_score.get("score_scale") == "raw"
@@ -664,6 +682,11 @@ def simulate(engine, state, decision, actions, horizon=1, *, intervention=None):
         result["completed_orders_delta"] = (
             engine.score(current)["metrics"]["completed_orders"]
             - engine.score(state)["metrics"]["completed_orders"])
+        # Preserve the actual branch's visible clocks for question audits.
+        # These come from the engine after the submitted sequence, never from
+        # a projected recipe schedule or a test-partner action.
+        result["pots"] = deepcopy(final_public["pots"])
+        result["food_freshness"] = deepcopy(final_public["food_freshness"])
     return result
 
 

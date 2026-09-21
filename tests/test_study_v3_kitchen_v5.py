@@ -69,9 +69,9 @@ class KitchenV5Mechanisms(unittest.TestCase):
         state=fixture(); food=dish(); food.update(stage='plated',container='serving_plate')
         state['human'].update(x=2,y=5,facing='right',holding=food)
         state=tick(state,'interact')
-        self.assertEqual(state['raw_score'],99)
+        self.assertEqual(state['raw_score'],29)
         self.assertEqual(state['metrics']['completed_orders'],1)
-        self.assertEqual(sum(ev['delta'] for ev in state['events'] if ev['type']=='score_delta'),99)
+        self.assertEqual(sum(ev['delta'] for ev in state['events'] if ev['type']=='score_delta'),29)
 
     def test_occupied_output_can_be_cancelled_before_reaching_handoff(self):
         state=fixture(); output=dish()
@@ -125,7 +125,7 @@ class KitchenV5Mechanisms(unittest.TestCase):
         self.assertEqual(state['metrics']['discard_penalty'],3)
 
     def test_preparation_clock_starts_only_at_completion_and_has_real_boundaries(self):
-        for ingredient,required,lifetime in [('tomato',3,60),('pepper',3,60),('egg',4,80),('meat',5,80)]:
+        for ingredient,required,lifetime in [('tomato',3,20),('pepper',3,20),('egg',4,20),('meat',5,20)]:
             with self.subTest(ingredient=ingredient):
                 state=collect(fixture(),ingredient); raw_expiry=state['human']['holding']['fresh_until']
                 while (e._front(state['human']) or {}).get('id')!='prep': state=tick(state,e._approach(state,'human','prep'))
@@ -138,8 +138,7 @@ class KitchenV5Mechanisms(unittest.TestCase):
                 self.assertTrue(e.public_state(state)['human']['preparation']['ready'])
                 while (e._front(state['human']) or {}).get('id')!='human_buffer': state=tick(state,e._approach(state,'human','human_buffer'))
                 state=tick(state,'interact')
-                stored_at=state['turn']
-                while state['turn']<stored_at+10: state=tick(state)
+                while state['turn']<prepared_at+19: state=tick(state)
                 self.assertEqual(state['buffers']['human']['stage'],'prepared')
                 self.assertEqual(e.public_state(state)['food_freshness'][0]['remaining'],1)
                 state=tick(state)
@@ -149,11 +148,11 @@ class KitchenV5Mechanisms(unittest.TestCase):
 
     def test_last_fresh_turn_loading_ends_oxidation_but_does_not_prevent_burning(self):
         state=prepare(collect(fixture(),'egg')); food=state['human']['holding']; state['human']['holding']=None
-        food['fresh_until']=state['turn']+1
+        state['turn']=food['prepared_turn']+18  # Commit the load at age 19, not age 20.
         state['ai'].update(x=6,y=1,facing='right',holding=food)
         state=tick(state,ai='interact')
         self.assertIsNone(state['pots'][0]['item']['fresh_until'])
-        for _ in range(12): state=tick(state)
+        for _ in range(e.COOK_TURNS['egg'] + e.BURN_TURNS): state=tick(state)
         self.assertEqual(state['metrics']['spoiled'],0)
         self.assertEqual(state['pots'][0]['status'],'burnt')
         self.assertEqual(state['pots'][0]['item']['id'],food['id'])
@@ -165,8 +164,7 @@ class KitchenV5Mechanisms(unittest.TestCase):
             if state['buffers']['ai_raw'][0]: break
             state=e.step(state,'wait')
         self.assertEqual(state['buffers']['ai_raw'][0]['id'],original['id'])
-        stored_at=state['buffers']['ai_raw'][0]['storage_since_turn']
-        while state['turn']<stored_at+11: state=e.step(state,'wait')
+        while state['turn']<original['prepared_turn']+20: state=e.step(state,'wait')
         self.assertEqual(state['buffers']['ai_raw'][0]['stage'],'spoiled')
         self.assertEqual(state['metrics']['discard_penalty'],0)
         for _ in range(15):
@@ -193,8 +191,8 @@ class KitchenV5Mechanisms(unittest.TestCase):
         from domains.kitchen.build_qa_cases import build
         recorded=json.loads((Path(e.__file__).parent/'qa_cases.json').read_text())
         self.assertEqual(build(),recorded)
-        self.assertEqual(len(recorded),140)
-        self.assertEqual(len({case['question'] for case in recorded}),140)
+        self.assertEqual(len(recorded),156)
+        self.assertEqual(len({case['question'] for case in recorded}),156)
 
 
 if __name__=='__main__': unittest.main()

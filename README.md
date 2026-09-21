@@ -1,3 +1,5 @@
+> Current three-domain release work: [Kitchen v3.8 rules, tutorial, persistence and deployment status](docs/three_domain_deployment_v3_8.md). The sections below describe an earlier study version; use the versioned release documents for current behavior.
+
 # Warehouse 与 Pong 三任务试玩
 
 这个应用包含协作配送（Warehouse）和合作接球（Pong）。参与者控制机器人 1，机器人 2 使用各环境现有的冻结 NN 与规则辅助控制器。两组在同一任务中使用相同种子、机器人控制器和计分规则；解释仅改变 A 组在 Task 2 能看到和询问的信息。

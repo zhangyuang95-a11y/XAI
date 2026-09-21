@@ -12,6 +12,7 @@ import uuid
 from . import RELEASE_ID, SUPPORTED_RELEASE_IDS
 from .database import Database
 from .registry import engine, demonstration, MODULES, scenario_config
+from . import kitchen_tutorial
 
 def encode(value): return json.dumps(value, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
 def digest(value): return hashlib.sha256(value.encode()).hexdigest()
@@ -38,7 +39,7 @@ EXPLANATION_ITEMS = [
 ]
 
 EXPORT_TABLES = ('participants','enrollments','instances','runs','frames',
-                 'questions','questionnaires','timings','releases')
+                 'questions','questionnaires','timings','releases','tutorials','tutorial_events')
 
 class Store:
     def __init__(self, settings, explainer=None):
@@ -150,6 +151,10 @@ class Store:
                     assignment='existing_participant' if existing else 'randomized_balanced'
                 db.execute('INSERT INTO pl3_enrollments VALUES(?,?,?,?,?,?)',(iid,1,language,assignment,config.get('scenario_version',config['version']),time.time()))
                 instance=db.one('SELECT * FROM pl3_instances WHERE id=?',(iid,))
+                if domain=='kitchen':
+                    now=time.time()
+                    db.execute('INSERT INTO pl3_tutorials VALUES(?,?,?,?,?)',
+                        (iid,kitchen_tutorial.VERSION,encode(kitchen_tutorial.initial()),now,now))
             result=self._view(db,instance)
             result['recovery_code']=recovery
         return token,result
@@ -185,8 +190,19 @@ class Store:
         runs=db.all('SELECT id,task,status,score_json,state_json FROM pl3_runs WHERE instance_id=? ORDER BY task',(instance['id'],))
         result['task_runs']=[{'id':r['id'],'task':r['task'],'status':r['status'],'score':eng.public_state(json.loads(r['state_json']))['score'],'turn':json.loads(r['state_json'])['turn']} for r in runs]
         if instance['stage']=='demo':
-            demo=demonstration(instance['domain'])
-            result['demo']={'index':instance['demo_index'],'captions':demo['captions'],'frames':demo['frames']}
+            if instance['domain']=='kitchen':
+                row=db.one('SELECT state_json FROM pl3_tutorials WHERE instance_id=?',(instance['id'],))
+                practice=json.loads(row['state_json'])
+                result['tutorial']=kitchen_tutorial.view(practice)
+                result['state']=result['tutorial']['state']
+                result['actions']=eng.legal_actions(practice['state'])
+            else:
+                demo=demonstration(instance['domain'])
+                result['demo']={'index':instance['demo_index'],'captions':demo['captions'],'frames':demo['frames']}
+        if instance['domain']=='kitchen':
+            result['public_help']=kitchen_tutorial.public_help()
+            result['rule_metadata']=eng.rule_metadata()
+            result['rules']=[row[language] for row in result['public_help']]
         if instance['current_run']:
             run=db.one('SELECT * FROM pl3_runs WHERE id=?',(instance['current_run'],))
             state=json.loads(run['state_json'])
@@ -225,17 +241,25 @@ class Store:
                 db.execute('INSERT INTO pl3_timings VALUES(?,?,?,?,?,?)',(uid(),instance['id'],task,time_kind,seconds,time.time()))
             if kind=='demo_next':
                 if instance['stage']!='demo': raise StudyError('wrong_stage',409)
+                if instance['domain']=='kitchen':raise StudyError('interactive_tutorial_required',409)
                 end=len(demonstration(instance['domain'])['captions'])
                 db.execute('UPDATE pl3_instances SET demo_index=? WHERE id=?',(min(instance['demo_index']+1,end),instance['id']))
             elif kind in ('demo_finish','demo_skip'):
                 if instance['stage']!='demo': raise StudyError('wrong_stage',409)
-                end=len(demonstration(instance['domain'])['captions'])
+                if instance['domain']=='kitchen':
+                    if kind=='demo_skip':self._tutorial(db,instance,{'command':'skip'})
+                    else:
+                        row=db.one('SELECT state_json FROM pl3_tutorials WHERE instance_id=?',(instance['id'],))
+                        if not json.loads(row['state_json'])['completed']:raise StudyError('finish_demo',409)
+                    end=kitchen_tutorial.COUNT
+                else:end=len(demonstration(instance['domain'])['captions'])
                 db.execute('UPDATE pl3_instances SET demo_index=? WHERE id=?',(end,instance['id']))
                 if kind=='demo_skip':
                     # Skip is an explicit participant choice, recorded as its
                     # own idempotent command, never a simulated task action.
                     self._next(db,{**instance,'demo_index':end})
             elif kind=='next': self._next(db,instance)
+            elif kind=='tutorial': self._tutorial(db,instance,payload)
             elif kind=='action': self._action(db,instance,payload)
             elif kind=='language':
                 if payload.get('language') not in ('en','zh'): raise StudyError('invalid_language')
@@ -254,10 +278,27 @@ class Store:
             db.execute('INSERT INTO pl3_commands VALUES(?,?,?,?,?)',(digest(token),command_id,fingerprint,'{}',time.time()))
             return self._view(db,updated)
 
+    def _tutorial(self,db,instance,payload):
+        if instance['domain']!='kitchen' or instance['stage']!='demo':raise StudyError('wrong_stage',409)
+        row=db.one('SELECT state_json FROM pl3_tutorials WHERE instance_id=?',(instance['id'],))
+        before=json.loads(row['state_json'])
+        try:after=kitchen_tutorial.apply(before,payload.get('command'),payload.get('action'))
+        except ValueError as exc:raise StudyError(str(exc)) from exc
+        now=time.time()
+        db.execute('UPDATE pl3_tutorials SET state_json=?,updated=? WHERE instance_id=?',(encode(after),now,instance['id']))
+        db.execute('INSERT INTO pl3_tutorial_events VALUES(?,?,?,?,?,?,?,?)',
+            (uid(),instance['id'],kitchen_tutorial.VERSION,payload.get('command'),
+             encode({'action':payload.get('action'),'language':instance['language']}),encode(before),encode(after),now))
+        if after['completed'] or after['skipped']:
+            db.execute('UPDATE pl3_instances SET demo_index=? WHERE id=?',(kitchen_tutorial.COUNT,instance['id']))
+        else:
+            db.execute('UPDATE pl3_instances SET demo_index=? WHERE id=?',(after['index'],instance['id']))
+
     def _next(self,db,instance):
         stage=instance['stage']
         if stage=='demo':
-            if instance['demo_index']<len(demonstration(instance['domain'])['captions']): raise StudyError('finish_demo',409)
+            end=kitchen_tutorial.COUNT if instance['domain']=='kitchen' else len(demonstration(instance['domain'])['captions'])
+            if instance['demo_index']<end: raise StudyError('finish_demo',409)
             task=1
         elif stage in ('task1','task2','task3'):
             run=db.one('SELECT * FROM pl3_runs WHERE id=?',(instance['current_run'],))
@@ -408,10 +449,13 @@ class Store:
             'questionnaires': 'i.id=r.instance_id',
             'timings': 'i.id=r.instance_id',
             'releases': 'i.release_id=r.id',
+            'tutorials': 'i.id=r.instance_id',
+            'tutorial_events': 'i.id=r.instance_id',
         }
         ordering = {'participants':'r.id','enrollments':'r.instance_id','instances':'r.id',
                     'runs':'r.id','frames':'r.run_id,r.turn','questions':'r.id',
-                    'questionnaires':'r.instance_id','timings':'r.id','releases':'r.id'}
+                    'questionnaires':'r.instance_id','timings':'r.id','releases':'r.id',
+                    'tutorials':'r.instance_id','tutorial_events':'r.id'}
         with self.db.transaction(read_only=True) as db:
             for name in EXPORT_TABLES:
                 # Recovery/session hashes never enter the export cursor.

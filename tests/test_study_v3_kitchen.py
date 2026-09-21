@@ -164,7 +164,7 @@ class FacingAndInteraction(unittest.TestCase):
 
 class RecipeStateMachine(unittest.TestCase):
     def test_exact_protein_cooking_times_loading_excluded(self):
-        for ingredient, order, duration in [('egg', 'order1', 4), ('meat', 'order2', 6)]:
+        for ingredient, order, duration in [('egg', 'order1', 8), ('meat', 'order2', 10)]:
             state = fixture(); state['ai'].update(x=6, y=1, facing='right', holding=item(ingredient, order=order))
             state = tick(state, ai='interact')
             self.assertEqual(state['pots'][0]['remaining'], duration)
@@ -343,7 +343,7 @@ class ControllerAndEvidence(unittest.TestCase):
                 self.assertIn('Take it back', evidence['handoff_recovery']['en'])
                 self.assertIn(ingredient, evidence['next_input_ingredient']['en'])
                 while not state['terminal']:
-                    state = e.step(state, e.human_advisor(state)); events.extend(state['events'])
+                    state = e.step(state, e.simulation_partner(state)); events.extend(state['events'])
                 self.assertEqual(state['metrics']['completed_orders'], 5)
                 self.assertTrue(any(event['type'] in ('served','waste') and wrong_id in event['item']['components'] for event in events))
                 self.assertEqual(state['metrics']['waste'], sum(len(event['item']['components']) for event in events if event['type'] == 'waste'))
@@ -378,28 +378,30 @@ class ControllerAndEvidence(unittest.TestCase):
         self.assertIsNone(state['human']['holding']); self.assertIsNone(state['handoff'])
 
     def test_ingredient_locations_and_pan_contents_are_container_accurate(self):
-        frames, _ = run(1000, 2)
-        ready = next(frame for frame in frames if frame['pots'][0]['status'] == 'ready' and frame['pots'][0]['phase'] == 'protein')
-        rows = {row['id']: row for row in e.facts(ready)}
-        self.assertIn("stove 1's pan", rows['ingredient_location_egg']['en'])
-        self.assertNotIn('temporary plate', rows['pot1_contents']['en'])
-        self.assertIn('tomato and egg stir-fry', rows['pot1_contents']['en'])
-        self.assertIn('original portions: 1', rows['pot1_contents']['en'])
-        stored = next(frame for frame in frames if frame['buffers']['protein']['pot1'])
-        rows = {row['id']: row for row in e.facts(stored)}
-        self.assertIn('temporary plate counter', rows['ingredient_location_egg']['en'])
-        mixed = next(frame for frame in frames if frame['pots'][0]['phase'] == 'mix')
-        rows = {row['id']: row for row in e.facts(mixed)}
-        self.assertIn('ingredients: egg, tomato', rows['pot1_contents']['en'])
-        self.assertIn("stove 1's pan", rows['ingredient_location_egg']['en'])
-        self.assertIn("stove 1's pan", rows['ingredient_location_tomato']['en'])
+        for seed, protein, vegetable, recipe_name in ((1002, 'egg', 'tomato', 'tomato and egg stir-fry'),
+                                                      (1000, 'meat', 'pepper', 'pepper and meat stir-fry')):
+            frames, _ = run(seed, 2)
+            ready = next(frame for frame in frames if frame['pots'][0]['status'] == 'ready' and frame['pots'][0]['phase'] == 'protein')
+            rows = {row['id']: row for row in e.facts(ready)}
+            self.assertIn("stove 1's pan", rows['ingredient_location_' + protein]['en'])
+            self.assertNotIn('temporary plate', rows['pot1_contents']['en'])
+            self.assertIn(recipe_name, rows['pot1_contents']['en'])
+            self.assertIn('original portions: 1', rows['pot1_contents']['en'])
+            stored = next(frame for frame in frames if frame['buffers']['protein']['pot1'])
+            rows = {row['id']: row for row in e.facts(stored)}
+            self.assertIn('temporary plate counter', rows['ingredient_location_' + protein]['en'])
+            mixed = next(frame for frame in frames if frame['pots'][0]['phase'] == 'mix')
+            rows = {row['id']: row for row in e.facts(mixed)}
+            self.assertIn('ingredients: ' + protein + ', ' + vegetable, rows['pot1_contents']['en'])
+            self.assertIn("stove 1's pan", rows['ingredient_location_' + protein]['en'])
+            self.assertIn("stove 1's pan", rows['ingredient_location_' + vegetable]['en'])
 
     def test_ingredient_goal_is_distinct_from_next_movement_and_ignores_future(self):
         state = e.initial_state(1000, 3)
         before = deepcopy(state)
         rows = {row['id']: row for row in e.facts(state)}
         self.assertIn('next input', rows['next_input_ingredient']['en'])
-        self.assertIn('tomato and egg stir-fry', rows['next_input_ingredient']['en'])
+        self.assertIn(e.RECIPES[state['orders'][0]['recipe']]['en'], rows['next_input_ingredient']['en'])
         self.assertNotIn('order3', rows['missing_ingredients']['en'])
         self.assertNotEqual(e.human_advisor(state), 'interact')
         self.assertEqual(before, state)
@@ -641,13 +643,16 @@ class KitchenFeasibility(unittest.TestCase):
                     frames, events = run(seed, task)
                     final = frames[-1]
                     self.assertEqual(final['metrics']['completed_orders'],5)
-                    self.assertEqual(e.score(final)['task_score'],500-final['turn'])
+                    self.assertEqual(e.score(final)['task_score'],150-final['turn'])
                     self.assertEqual(final['metrics']['spoiled'],0)
                     self.assertEqual(final['metrics']['waste'],0)
                     self.assertLessEqual(final['turn'],cfg['task_budgets'][str(task)])
                     self.assertEqual(final['metrics']['burnt'], 0)
                     self.assertGreater(final['metrics']['parallel_recipe_turns'], 0)
-                    self.assertEqual(final['metrics']['parallel_cooking_turns'], 0)
+                    simultaneous = [s for s in frames[1:] if all(p['status'] == 'cooking' for p in s['pots'])]
+                    self.assertEqual(final['metrics']['parallel_cooking_turns'], len(simultaneous))
+                    for frame in simultaneous:
+                        self.assertNotEqual(frame['pots'][0]['order_id'], frame['pots'][1]['order_id'])
                     self.assertEqual({event['pot'] for event in events if event['type'] == 'pot_loaded'}, {'pot1', 'pot2'})
                     served = [event['item'] for event in events if event['type'] == 'served']
                     component_ids = [identifier for food in served for identifier in food['components']]
@@ -680,14 +685,14 @@ class KitchenFeasibility(unittest.TestCase):
                 ids = [component for item_ in e._all_items(state) if item_ for component in item_['components']]
                 self.assertEqual(len(ids), len(set(ids)))
 
-    def test_demo_has_six_real_captions_and_complete_recipe(self):
+    def test_legacy_internal_recipe_fixture_has_six_real_captions_and_raw_score(self):
         demo = e.demonstration()
         self.assertEqual(len(demo['captions']), 6)
         self.assertEqual([frame['turn'] for frame in demo['frames']], list(range(len(demo['frames']))))
         types = {event['type'] for frame in demo['frames'] for event in frame['events']}
         self.assertTrue({'prepared', 'components_combined', 'plated', 'served'} <= types)
         self.assertTrue(any(event['type'] == 'item_placed' and event.get('station', '').startswith('protein') for frame in demo['frames'] for event in frame['events']))
-        self.assertGreater(demo['frames'][-1]['score']['raw_score'], 0)
+        self.assertEqual(demo['frames'][-1]['score']['raw_score'], 30 - demo['frames'][-1]['turn'])
 
     def test_comprehension_choices_match_independent_mechanisms(self):
         en, zh = e.comprehension(), e.comprehension('zh')

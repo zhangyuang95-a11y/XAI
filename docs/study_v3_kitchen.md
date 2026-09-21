@@ -1,6 +1,12 @@
 # Cooperative Kitchen: two compound recipes
 
-Current engine: `kitchen-v4.0.0`. Frozen scenes: `kitchen-scenarios-v4.0.0`.
+Current implementation: `kitchen-v6.2.0`, with prepared20 freshness, +30 serving, constrained menus and16/20 heating turns. See
+[current verification and publication status](kitchen_16_20_verification.md).
+
+The sections below are the historical **v4** specification and evidence. Their
+timers, budgets and validation claims do not describe the current release.
+
+Historical engine: `kitchen-v4.0.0`. Frozen scenes: `kitchen-scenarios-v4.0.0`.
 This is a deterministic, Overcooked-inspired custom cooperative task. Human input
 advances one authoritative simultaneous turn. Rendering interpolates between
 saved turns; idle wall-clock time, questions and replay never advance cooking.

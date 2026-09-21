@@ -21,6 +21,7 @@ from urllib.parse import urlsplit, parse_qs
 from . import RELEASE_ID, SUPPORTED_RELEASE_IDS
 from .config import Settings
 from .registry import MODULES, engine, demonstration
+from .kitchen_tutorial import VERSION as KITCHEN_TUTORIAL_VERSION
 from .store import Store, StudyError, encode
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -70,6 +71,8 @@ def manifest(settings):
     for path in sorted(set(paths)):
         if path.is_file():source.update(str(path.relative_to(ROOT)).encode()+b'\0'+path.read_bytes())
     return {'release_id':RELEASE_ID,'commit':commit,'source_sha256':source.hexdigest(),
+        'kitchen_rules':engine('kitchen').rule_metadata(),
+        'kitchen_tutorial_version':KITCHEN_TUTORIAL_VERSION,
         'enrollment':{'group_selection':'participant_choice_at_new_domain',
             'resume_preserves_group':True,'parallel_domains':True,
             'compatible_session_releases':sorted(SUPPORTED_RELEASE_IDS)},
@@ -162,7 +165,7 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
     # before opening the database or accepting requests so enrollment/recovery
     # only read the cache and never hold a transaction while doing this work.
     for domain in MODULES:
-        demonstration(domain)
+        if domain!='kitchen':demonstration(domain)
     if explainer is None:
         try:
             from .qa import Explainer

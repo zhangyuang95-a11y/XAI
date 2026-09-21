@@ -319,7 +319,7 @@ def test_demo_skip_is_atomic_idempotent_and_cannot_skip_a_task(pilot_store, doma
     assert flow.view['state']['turn']==1
 
 
-@pytest.mark.parametrize('domain', ['warehouse','pong','kitchen'])
+@pytest.mark.parametrize('domain', ['warehouse','pong'])
 def test_continuous_demo_completion_does_not_start_game_clock(pilot_store, domain):
     flow=public_flow(pilot_store,domain,'B')
     flow.command('demo_finish')

@@ -15,10 +15,10 @@ class StorageClock(unittest.TestCase):
         state = tick(state, 'interact' if actor == 'human' else 'wait', 'interact' if actor == 'ai' else 'wait')
         return state, actor
 
-    def test_four_ingredients_both_preparation_stages_both_storage_places(self):
+    def test_four_raw_ingredients_retain_both_storage_place_limits(self):
         for station in ('ai_raw', 'human_buffer'):
             for ingredient in e.LABELS:
-                for stage in ('raw', 'prepared'):
+                for stage in ('raw',):
                     with self.subTest(station=station, ingredient=ingredient, stage=stage):
                         state, actor = self.stored(station, ingredient, stage)
                         at = state['turn']
@@ -42,7 +42,7 @@ class StorageClock(unittest.TestCase):
                         self.assertEqual(state['metrics']['discard_penalty'], 3)
 
     def test_pickup_on_first_overdue_turn_cannot_restore_freshness(self):
-        state, actor = self.stored('human_buffer', 'tomato', 'prepared')
+        state, actor = self.stored('human_buffer', 'tomato', 'raw')
         for _ in range(10): state = tick(state)
         state = tick(state, 'interact')
         self.assertEqual(state['human']['holding']['stage'], 'spoiled')
@@ -50,13 +50,16 @@ class StorageClock(unittest.TestCase):
 
     def test_timely_pickup_stops_storage_clock_but_keeps_original_oxidation(self):
         state, _ = self.stored('human_buffer', 'egg', 'prepared')
-        food = state['buffers']['human']; food.update(fresh_until=80, freshness_basis='prepared')
+        food = state['buffers']['human']; food.update(prepared_turn=0, expires_turn=20, fresh_until=20, freshness_basis='prepared')
         for _ in range(9): state = tick(state)
         state = tick(state, 'interact')
         self.assertEqual(state['human']['holding']['stage'], 'prepared')
-        self.assertEqual(state['human']['holding']['fresh_until'], 80)
-        for _ in range(15): state = tick(state)
+        self.assertEqual(state['human']['holding']['fresh_until'], 20)
+        while state['turn'] < 19: state = tick(state)
         self.assertEqual(state['human']['holding']['stage'], 'prepared')
+        state = tick(state)
+        self.assertEqual(state['human']['holding']['stage'], 'spoiled')
+        self.assertEqual(state['human']['holding']['spoilage_reason'], 'oxidation')
 
     def test_cooked_temporary_plate_is_recipe_stage_not_raw_storage(self):
         state = fixture(); food=item(stage='cooked_protein',pot='pot1')
@@ -126,7 +129,8 @@ class RealParallelTraces(unittest.TestCase):
         state['buffers']['protein']['pot1']=protein
         state['buffers']['ai_raw']=[item('tomato',iid='first-tomato',order='order1'),item('meat',iid='second-meat',order='order2')]
         for food in state['buffers']['ai_raw']:
-            food.update(storage_since_turn=stored_at,storage_station='ai_raw',fresh_until=80)
+            food.update(storage_since_turn=stored_at,storage_station='ai_raw',prepared_turn=stored_at,
+                        fresh_until=stored_at+20,expires_turn=stored_at+20,freshness_basis='prepared')
         return state
 
     def test_controller_starts_second_pan_before_first_vegetable_when_safe(self):
@@ -141,9 +145,9 @@ class RealParallelTraces(unittest.TestCase):
         self.assertEqual(state['metrics']['spoiled'],0)
 
     def test_second_pan_detour_yields_to_first_ingredient_expiry(self):
-        state=self.two_available_inputs(stored_at=-3)
-        # Loading the second pan then fetching slot 1 would take nine actual
-        # steps. With only eight fresh steps left, collect the vegetable first.
+        state=self.two_available_inputs(stored_at=-10)
+        # Loading the second pan, fetching slot 1, and walking/loading its pan
+        # cannot complete within the ten turns left. Pickup does not refresh it.
         self.assertEqual(e.decide(state)['reason_code'],'accept_ingredient')
         self.assertEqual(e.decide(state)['slot'],0)
 

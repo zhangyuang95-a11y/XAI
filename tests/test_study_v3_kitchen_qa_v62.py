@@ -95,6 +95,51 @@ def test_counterfactual_prepared_expiry_uses_the_executed_wait_boundary():
     assert state == before
 
 
+@pytest.mark.parametrize('language', ('en', 'zh'))
+@pytest.mark.parametrize('age', (0, 18))
+def test_wait_answer_states_held_food_outcome_from_final_simulated_facts(language, age):
+    state = prepared_portion('meat')
+    for _ in range(age):
+        state = e.step(state, 'wait')
+    before = deepcopy(state)
+    selected = plan(state, language=language, intents=[{'kind': 'counterfactual',
+        'subject': 'human', 'purpose': 'comparison', 'temporal_scope': 'current',
+        'evidence_ids': [], 'actions': ['wait', 'wait'], 'horizon': 2}])
+    question = ('If I wait for the next two turns, what changes to my food, score and completed orders?'
+                if language == 'en' else '如果接下来等待两回合，我的食物、得分和完成订单数会怎样变化？')
+    result = explainer_for_plan(selected).answer(e, state, e.decide(state), question, language)
+    expected = e.step(e.step(state, 'wait'), 'wait')
+    fact = next(row for row in e.facts(expected) if row['id'] == 'freshness_meat')
+    simulation = result['audit']['simulations'][0]
+    assert result['status'] == 'answered'
+    assert simulation['final_kitchen_facts'] == [fact]
+    assert fact[language] in result['answer']
+    assert ('After these simulated turns:' if language == 'en' else '在这些模拟回合之后：') in result['answer']
+    assert expected['human']['holding']['id'] == state['human']['holding']['id']
+    assert expected['human']['holding']['stage'] == ('prepared' if age == 0 else 'spoiled')
+    remaining = 18 if age == 0 else 0
+    assert (f'{remaining} turns remain' if language == 'en' else f'剩余 {remaining} 回合') in result['answer']
+    assert simulation['raw_score_delta'] == -2 and simulation['completed_orders_delta'] == 0
+    assert state == before
+
+
+@pytest.mark.parametrize('language', ('en', 'zh'))
+def test_serve_answer_uses_empty_final_hand_not_old_food_clock(language):
+    state = next(s for s in regular_trace() if s['human']['holding']
+                 and s['human']['holding']['stage'] == 'plated'
+                 and (e._front(s['human']) or {}).get('id') == 'serve')
+    selected = plan(state, language=language, intents=[{'kind': 'counterfactual',
+        'subject': 'human', 'purpose': 'comparison', 'evidence_ids': [],
+        'actions': ['interact'], 'horizon': 1}])
+    result = explainer_for_plan(selected).answer(e, state, e.decide(state), 'What if I serve?', language)
+    expected = e.step(state, 'interact')
+    final_fact = next(row for row in e.facts(expected) if row['id'] == 'human_holding')
+    simulation = result['audit']['simulations'][0]
+    assert simulation['final_kitchen_facts'] == [final_fact]
+    assert final_fact[language] in result['answer']
+    assert simulation['human']['holding'] is None and simulation['raw_score_delta'] == 29
+
+
 def test_question_catalog_never_calls_test_partner_recovery(monkeypatch):
     state = prepared_portion('meat')
     expected = e.human_advisor(state)

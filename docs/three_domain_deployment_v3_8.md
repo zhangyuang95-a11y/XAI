@@ -1,10 +1,11 @@
 # Kitchen operations tutorial and rules v3.8
 
-Release: `policylens-three-domain-20260922.v3.8`.
+Release family: `policylens-three-domain-20260922.v3.8` / `v3.8.1`.
 Engine/scenario: `kitchen-v6.2.0` / `kitchen-scenarios-v6.2.0`.
 Menu: `kitchen-menu-v2`. Tutorial: `kitchen-operations-tutorial.v1`.
 Target: https://policylens-warehouse-study.onrender.com/ (existing Render service).
-Publication status: local implementation and validation; deployment receipt pending.
+Publication status: v3.8 deployed; v3.8.1 answer-completeness patch and final
+post-deployment persistence verification in progress. See the receipt below.
 
 ## Participant behavior
 
@@ -43,11 +44,24 @@ seeded menus, ingredient identities/timestamps, before/after actions, scores,
 events, questions/counterfactual evidence and questionnaires. Export includes the
 new tables with release/mode filtering and credential omission.
 
-A new release ID prevents old Kitchen states from resuming under changed rules.
-No old row or +100-era score is recomputed. Deployment preparation exported the
+A new release ID prevents pre-v3.8 Kitchen states from resuming under changed
+rules. The v3.8.1 QA-only patch can resume v3.8 snapshots without converting them:
+physical rules, menus, tutorial and scoring are identical, and each existing
+record keeps its original release ID. No old row or +100-era score is recomputed.
+New question audits record both the session release and actual answer-runtime
+release, so a v3.8 session resumed under v3.8.1 remains attributable without
+rewriting an earlier answer or mixing the two formatter versions silently.
+Deployment preparation exported the
 existing study data consistently (23,264 frames among75 participants/99 instances,
 230 runs; private backup outside the repository). No credentials enter the commit.
-All automated online enrollments must use test mode; browser QA uses preview mode.
+Automated online enrollments use test mode; local interactive browser QA uses
+preview mode. Production browser entry/language checks create no participant.
+
+Read-only PostgreSQL comparison after the first deployment found all 189
+previously completed runs and their 22,191 frames unchanged. It compared saved
+run state/score and frame state/public state/decision/action values against the
+consistent pre-deployment export. Active sessions are excluded from the
+unchanged-content claim because participants could legitimately continue them.
 
 ## Verification
 
@@ -55,5 +69,35 @@ See `kitchen_16_20_verification.md` for current, separately reported development
 regression and predeclared new validation evidence. These are simulated partners,
 not human study results or evidence of a50% explanation benefit.
 
-The final deployment receipt will record the exact commit, source digest,
-readiness, online flow/QA/export checks and persistence across another deployment.
+## Deployment receipt
+
+The first production deployment is Render `dep-daombfqjnfac73erdurg`, commit
+`42c9c28f46f84116fdd1ed2d61c33ea1f015de48`. It reached Live on
+2026-09-21 at 17:15 UTC (2026-09-22 in Australia/Melbourne).
+The public release endpoint reported v3.8 and source SHA-256
+`125f2e19a5f9a3a1fd483f0d5345b4571f21d667da9fbc59faa9e61db1134964`, with
+durable storage, configured QA and study readiness all true.
+
+The complete local regression suite passed 839 tests plus 176 subtests for v3.8,
+then 846 tests plus 176 subtests after the QA patch. An additional question
+version-provenance regression passed separately after that run was collected.
+Seven
+frontend checks passed. Interactive browser testing completed all seven tutorial
+sections, preparation/freshness markers, pause/refresh recovery and Task 1 entry.
+Production browser checks confirmed English on entry and after refresh, Chinese
+switching, all three domain links, and no recovery-code input.
+
+Fourteen real-provider bilingual spot checks passed factual/temporal review.
+These are a bounded seven-scenario check, not unrestricted semantic coverage.
+Subsequent production acceptance found a correct but incomplete answer to a
+compound counterfactual question: score and completed orders were answered, but
+the requested food freshness change was omitted. The v3.8.1 patch supplies that
+fact from the actual simulated final state. Original v3.8 answers are retained.
+Real-provider English and Chinese replays both returned the correct final
+holding/freshness fact after the patch. One English attempt first returned an
+unavailable result for an invalid provider plan; a subsequent explicit retry
+succeeded with the usual schema repair. This failed-closed response is retained
+in the audit and is not counted as a successful answer.
+
+Final live A/B flow, independent online-answer review, export and repeated-deploy
+persistence results will be recorded here after their completion.

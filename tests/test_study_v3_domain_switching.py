@@ -4,6 +4,7 @@ All identities/databases are test fixtures. Pilot configuration here exercises
 admission rules only; it does not create real participants or use a model API.
 """
 from dataclasses import replace
+import json
 import threading
 import uuid
 
@@ -11,8 +12,9 @@ import pytest
 
 from study_v3 import RELEASE_ID, SUPPORTED_RELEASE_IDS
 from study_v3.config import Settings
+from study_v3.registry import engine
 from study_v3.server import make_server
-from study_v3.store import Store, StudyError
+from study_v3.store import Store, StudyError, encode
 from tests.test_study_v3_http import Client, ORIGIN
 from tests.test_study_v3_store import Flow, RecordingExplainer, assert_public, denied
 
@@ -182,6 +184,91 @@ def test_old_gameplay_is_archived_and_new_enrollment_keeps_all_records(pilot_sto
         assert len(after['instances']) == 2 and len(after['runs']) == 2
     finally:
         reopened.db.close()
+
+
+def test_v381_qa_patch_resumes_v38_snapshots_but_preserves_v371_archive(pilot_store):
+    compatible = 'policylens-three-domain-20260922.v3.8'
+    archived = 'policylens-three-domain-20260920.v3.7.1'
+    assert RELEASE_ID == 'policylens-three-domain-20260922.v3.8.1'
+    assert compatible in SUPPORTED_RELEASE_IDS and archived not in SUPPORTED_RELEASE_IDS
+    flow = public_flow(pilot_store, 'kitchen', 'A')
+    flow.finish_demo()
+    kitchen = engine('kitchen')
+    # Create an actual saved portion: timestamps and negative score come from
+    # physical actions, not a fabricated state that merely matches the formula.
+    for station in ('egg', 'prep'):
+        state = flow.internal_state()
+        for action in kitchen._route(kitchen._pos(state['human']), state['human']['facing'], station):
+            flow.step(action)
+        for _ in range(kitchen.PREPARE_TURNS['egg'] if station == 'prep' else 1):
+            flow.step('interact')
+    flow.step('wait')
+    saved_state = flow.view['state']
+    food = saved_state['human']['holding']
+    assert food['stage'] == 'prepared' and food['prepared_turn'] < saved_state['turn']
+    assert food['expires_turn'] == food['prepared_turn'] + 20
+    assert saved_state['score']['raw_score'] == -saved_state['turn'] < 0
+    old = public_flow(pilot_store, 'kitchen', 'B')
+    old.finish_demo(); old.step('wait')
+    with pilot_store.db.transaction() as db:
+        db.execute('UPDATE pl3_instances SET release_id=? WHERE id=?', (compatible, flow.view['instance_id']))
+        db.execute('UPDATE pl3_instances SET release_id=? WHERE id=?', (archived, old.view['instance_id']))
+        # An old release has a different source fingerprint. A QA patch gets a
+        # new manifest rather than overwriting it or rejecting its sessions.
+        db.execute('INSERT INTO pl3_releases VALUES(?,?,?)',
+                   (compatible, encode({'release_id': compatible, 'source_sha256': 'saved-v38-source'}), 1.0))
+    before = {release: pilot_store.export(release_id=release) for release in (compatible, archived)}
+    server = make_server(pilot_store.settings, port=0, explainer=RecordingExplainer())
+    try:
+        restored = server.store.recover_view(flow.token, 'kitchen')
+        assert restored['instance_id'] == flow.view['instance_id']
+        assert restored['run_id'] == flow.view['run_id'] and restored['release_id'] == compatible
+        assert restored['state'] == saved_state  # menu, expiry, turn and raw score
+        assert server.store.frame(flow.token, restored['instance_id'], restored['run_id'], saved_state['turn'])['state'] == saved_state
+        assert server.release['release_id'] == RELEASE_ID
+        assert server.release['source_sha256'] != 'saved-v38-source'
+        denied(lambda: server.store.view(old.token, old.view['instance_id']), 'release_changed', 409)
+        assert server.store.recover_view(old.token, 'kitchen')['previous_version_saved'] is True
+        _, fresh = server.store.create(enrollment('qa-patch-new-test', 'kitchen', 'B', mode='test'), admin=True)
+        assert fresh['release_id'] == RELEASE_ID and fresh['stage'] == 'demo'
+        assert fresh['tutorial']['state']['rule_metadata'] == saved_state['rule_metadata']
+        for release, records in before.items():
+            assert server.store.export(release_id=release) == records
+    finally:
+        server.server_close()
+
+
+def test_compatible_session_answers_keep_session_and_formatter_release_provenance(pilot_store, monkeypatch):
+    compatible = 'policylens-three-domain-20260922.v3.8'
+    flow = public_flow(pilot_store, 'kitchen', 'A')
+    flow.start_task2()
+    with pilot_store.db.transaction() as db:
+        db.execute('UPDATE pl3_instances SET release_id=? WHERE id=?', (compatible, flow.view['instance_id']))
+    flow.view = pilot_store.recover_view(flow.token, 'kitchen')
+    saved_state = flow.view['state']
+    assert flow.view['stage'] == 'task2' and flow.view['can_ask']
+    # Simulate an answer produced before the QA-only patch, with unchanged
+    # physical rules; the scoped release value never affects the live service.
+    with monkeypatch.context() as previous_process:
+        previous_process.setattr('study_v3.store.RELEASE_ID', compatible)
+        earlier = pilot_store.ask(flow.token, flow.question(question='What am I holding?'))
+    earlier_row = pilot_store.export(release_id=compatible)['questions'][0]
+    earlier_audit = json.loads(earlier_row['result_json'])['audit']
+    assert earlier_audit['session_release_id'] == earlier_audit['answer_release_id'] == compatible
+    payload = flow.question(question='What happens if I wait two turns?')
+    current = pilot_store.ask(flow.token, payload)
+    assert current['status'] == 'answered'
+    rows = pilot_store.export(release_id=compatible)['questions']
+    assert next(row for row in rows if row['id'] == earlier['id']) == earlier_row
+    current_row = next(row for row in rows if row['id'] == current['id'])
+    audit = json.loads(current_row['result_json'])['audit']
+    assert audit['session_release_id'] == compatible and audit['answer_release_id'] == RELEASE_ID
+    assert 'audit' not in current['result']
+    assert 'session_release_id' not in current['result'] and 'answer_release_id' not in current['result']
+    pilot_store.ask(flow.token, payload)
+    assert pilot_store.export(release_id=compatible)['questions'] == rows
+    assert pilot_store.export(release_id=RELEASE_ID)['questions'] == []
+    assert pilot_store.recover_view(flow.token, 'kitchen')['state'] == saved_state
 
 
 @pytest.mark.parametrize('stage', ['demo', 'completed'])

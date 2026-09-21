@@ -406,6 +406,7 @@ class Store:
         except Exception:
             status='unavailable';answer={'status':status,'answer':'问答暂时不可用，请稍后重试。' if language=='zh' else 'Questions are temporarily unavailable. Please try again.','evidence_ids':[]}
         answer.setdefault('audit',{}).update(context_question_ids=[h['id'] for h in reversed(history)],context_sha256=digest(encode(previous)),authorized_run=instance['current_run'],target_run=target,target_turn=turn,target_display_turn=turn,
+            session_release_id=instance['release_id'],answer_release_id=RELEASE_ID,
             performed_decision_turn=turn-1 if incoming else None,
             incoming_transition_sha256=digest(encode(action_context)),authorization_at_request=True)
         self.qa_healthy = status in ('answered','clarification')

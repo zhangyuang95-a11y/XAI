@@ -687,6 +687,17 @@ def simulate(engine, state, decision, actions, horizon=1, *, intervention=None):
         # a projected recipe schedule or a test-partner action.
         result["pots"] = deepcopy(final_public["pots"])
         result["food_freshness"] = deepcopy(final_public["food_freshness"])
+        # A held portion can keep its stage/location while its remaining
+        # freshness changes. That outcome emits no event, so retain the real
+        # final-state fact instead of treating the event list as exhaustive.
+        held = final_public['human'].get('holding')
+        result['final_kitchen_facts'] = []
+        if held is not None or state['human'].get('holding') is not None:
+            has_clock = held is not None and any(
+                row['item_id'] == held['id'] for row in result['food_freshness'])
+            fact_id = 'freshness_' + held['ingredient'] if has_clock else 'human_holding'
+            result['final_kitchen_facts'] = [deepcopy(row) for row in engine.facts(current)
+                                             if row['id'] == fact_id]
     return result
 
 
@@ -792,6 +803,9 @@ def _simulation_text(result, language, domain, *, include_scope=True, answer_foc
         position = _text((f"You finish at column {result['human']['x']}, row {result['human']['y']}; your teammate at column {result['ai']['x']}, row {result['ai']['y']}. ",
                           f"你最终在第{result['human']['x']}列、第{result['human']['y']}行；队友在第{result['ai']['x']}列、第{result['ai']['y']}行。"), language)
     text += position
+    if domain == 'kitchen' and result.get('final_kitchen_facts'):
+        text += _text(('After these simulated turns: ', '在这些模拟回合之后：'), language)
+        text += ' '.join(row[language] for row in result['final_kitchen_facts']) + ' '
     if result["raw_score_delta"] != result["task_score_delta"]:
         text += _text((f"Raw points change by {result['raw_score_delta']:g}. ", f"原始得分变化{result['raw_score_delta']:g}分。"), language)
     text += _text((f"Task score changes by {result['task_score_delta']:g} points in this window.", f"该窗口内任务分数变化{result['task_score_delta']:g}分。"), language)

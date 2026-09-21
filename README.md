@@ -1,4 +1,4 @@
-> Current three-domain release work: [Kitchen v3.8 rules, tutorial, persistence and deployment status](docs/three_domain_deployment_v3_8.md). The sections below describe an earlier study version; use the versioned release documents for current behavior.
+> Current three-domain release: [Kitchen v3.8.1 rules, tutorial, persistence and deployment status](docs/three_domain_deployment_v3_8.md). The sections below describe an earlier study version; use the versioned release documents for current behavior.
 
 # Warehouse 与 Pong 三任务试玩
 

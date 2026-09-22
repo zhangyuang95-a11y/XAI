@@ -18,11 +18,12 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
 
-from . import RELEASE_ID, SUPPORTED_RELEASE_IDS
+from . import RELEASE_ID, SUPPORTED_RELEASE_IDS, KITCHEN_SUPPORTED_RELEASE_IDS
 from .config import Settings
 from .registry import MODULES, engine, demonstration
 from .kitchen_tutorial import VERSION as KITCHEN_TUTORIAL_VERSION
 from .store import Store, StudyError, encode
+from . import prolific
 
 ROOT=Path(__file__).resolve().parents[1]
 WEB=ROOT/'study_v3/web'
@@ -68,6 +69,7 @@ def manifest(settings):
             ROOT/'output/deployment/warehouse_mappo_v68_6x7_actor.npz']
     paths+=list((ROOT/'configs').glob('study_v3_*.json'))
     paths+=[ROOT/'ui/domain_hub_server.py',ROOT/'requirements-render.txt',ROOT/'.python-version']
+    paths+=[ROOT/'docs/consent_review_content.json']
     for path in sorted(set(paths)):
         if path.is_file():source.update(str(path.relative_to(ROOT)).encode()+b'\0'+path.read_bytes())
     return {'release_id':RELEASE_ID,'commit':commit,'source_sha256':source.hexdigest(),
@@ -77,11 +79,13 @@ def manifest(settings):
             'resume_preserves_group':True,'parallel_domains':True,
             'compatible_session_releases':[RELEASE_ID],
             'compatible_session_releases_by_domain':{
-                domain:sorted({RELEASE_ID} if domain=='kitchen' else SUPPORTED_RELEASE_IDS)
+                domain:sorted(KITCHEN_SUPPORTED_RELEASE_IDS if domain=='kitchen' else SUPPORTED_RELEASE_IDS)
                 for domain in MODULES}},
         'domains':{k:{'url':'/'+k+'/','version':engine(k).VERSION} for k in MODULES},
         'explanations':{'group':'A','task':2,'active_only':True},
         'default_language':'en','mode':settings.mode,'storage_persistent':settings.persistent,
+        'prolific':{'entry_path':'/prolific/','assignment':'randomized_block_6',
+            'one_game_per_participant':True,'consent_version':prolific.CONSENT_VERSION},
         'semantic_qa_configured':settings.llm_configured,'deployment_validation_complete':settings.verified,'study_ready':settings.ready,
         'human_effect_status':'not_measured','target_task2_relative_gain':0.5}
 
@@ -260,11 +264,12 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
                 parts=urlsplit(self.path);path=parts.path;q=parse_qs(parts.query)
                 if path.startswith(('/warehouse/api/','/pong/api/')) or path in ('/api/view','/api/study/reference-trajectory'):
                     self.reply(410,{'error':'release_changed','message_en':'This earlier study version cannot continue here. Please contact the researcher before beginning a new task.','message_zh':'旧版本任务无法在此继续，请先联系研究者，再开始新任务。'});return
-                if path in ('/','/warehouse/','/pong/','/kitchen/'):
+                if path in ('/','/warehouse/','/pong/','/kitchen/','/prolific/'):
                     self.reply(200,(WEB/'index.html').read_bytes(),'text/html; charset=utf-8');return
                 if path in ('/warehouse','/pong','/kitchen'):
                     self.send_response(308);self.send_header('Location',path+'/');self.send_header('Content-Length','0');self.end_headers();return
                 assets={'/study-assets/app.js':('app.js','text/javascript; charset=utf-8'),
+                    '/study-assets/prolific.js':('prolific.js','text/javascript; charset=utf-8'),
                     '/study-assets/board.js':('board.js','text/javascript; charset=utf-8'),
                     '/study-assets/styles.css':('styles.css','text/css; charset=utf-8'),
                     '/study-assets/favicon.svg':('favicon.svg','image/svg+xml')}
@@ -276,6 +281,17 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
                         'release_id':RELEASE_ID,'study_ready':store.ready,
                         'domains':{d:'/'+d+'/' for d in MODULES}});return
                 if path=='/api/release':self.reply(200,{**release,'study_ready':store.ready});return
+                if path=='/api/prolific/info':
+                    consent=json.loads((ROOT/'docs/consent_review_content.json').read_text())
+                    if settings.prolific_launch_confirmed:
+                        consent['paragraphs'][8]='This project has been reviewed and approved by the NTU Institutional Review Board (NTU-IRB). Questions about your rights as a participant may be directed to <a href="mailto:IRB@ntu.edu.sg">IRB@ntu.edu.sg</a> or +65 6592 2495.'
+                    self.reply(200,{'ready':prolific.ready(store),'consent':consent,
+                        'consent_version':prolific.CONSENT_VERSION});return
+                if path=='/api/prolific/session':
+                    self.reply(200,prolific.resume(store,self.token(),{k:v[0] for k,v in q.items()} if q else None));return
+                if path=='/api/prolific/admin/payments':
+                    if not self.admin():raise StudyError('researcher_access_required',403)
+                    self.reply(200,{'records':prolific.payment_records(store)});return
                 if path=='/api/study/view':
                     iid=q.get('instance_id',[None])[0]
                     result=store.view(self.token(),iid) if iid else store.recover_view(self.token(),q.get('domain',[None])[0])
@@ -300,6 +316,8 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
                     self.reply(410,{'error':'release_changed','message_en':'This earlier study version cannot continue here. Please contact the researcher.','message_zh':'旧版本任务无法在此继续，请联系研究者。'});return
                 if path=='/api/study/session':
                     token,result=store.create(payload,self.token(),self.admin());self.reply(200,result,token=token);return
+                if path=='/api/prolific/enrol':
+                    token,result=prolific.enrol(store,payload,self.token());self.reply(200,result,token=token);return
                 if path=='/api/study/ask':self.reply(200,store.ask(self.token(),payload));return
                 if path=='/api/study/answer-displayed':
                     self.reply(200,store.acknowledge_answer(self.token(),payload.get('instance_id'),payload.get('question_id')));return

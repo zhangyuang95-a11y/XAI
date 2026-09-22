@@ -2,14 +2,14 @@
 import hashlib
 import hmac
 import json
-from contextlib import closing
+from contextlib import closing, nullcontext
 import re
 import secrets
 import threading
 import time
 import uuid
 
-from . import RELEASE_ID, SUPPORTED_RELEASE_IDS
+from . import RELEASE_ID, SUPPORTED_RELEASE_IDS, KITCHEN_SUPPORTED_RELEASE_IDS
 from .database import Database
 from .registry import engine, demonstration, MODULES, scenario_config
 from . import kitchen_tutorial
@@ -19,7 +19,7 @@ def digest(value): return hashlib.sha256(value.encode()).hexdigest()
 def uid(): return uuid.uuid4().hex
 def compatible_instance(row):
     return (row["release_id"] in SUPPORTED_RELEASE_IDS
-            and (row["domain"] != "kitchen" or row["release_id"] == RELEASE_ID))
+            and (row["domain"] != "kitchen" or row["release_id"] in KITCHEN_SUPPORTED_RELEASE_IDS))
 
 def public_answer(answer):
     return {k:answer[k] for k in ('status','answer','evidence_ids','language') if k in answer}
@@ -95,7 +95,7 @@ class Store:
         row=db.one('SELECT status FROM pl3_runs WHERE id=?',(instance['current_run'],))
         return bool(row and row['status']=='active')
 
-    def create(self, payload, token=None, admin=False):
+    def create(self, payload, token=None, admin=False, *, _db=None, _prolific=False):
         if payload.get('consent') is not True: raise StudyError('consent_required')
         domain=payload.get('domain')
         if domain not in MODULES: raise StudyError('unknown_domain')
@@ -105,12 +105,19 @@ class Store:
         if mode not in ('pilot','preview','test'): raise StudyError('invalid_mode')
         if mode!='pilot' and not admin: raise StudyError('researcher_access_required',403)
         if mode=='pilot' and not self.ready: raise StudyError('study_not_ready',503)
+        if mode=='pilot' and self.settings.prolific_study_id and not _prolific:
+            raise StudyError('use_prolific_entry',403)
         requested_group=payload.get('group')
         if requested_group is not None and requested_group not in ('A','B'):
             raise StudyError('invalid_group')
         language='zh' if payload.get('language')=='zh' else 'en'
         recovery=None
-        with self.db.transaction() as db:
+        with (nullcontext(_db) if _db is not None else self.db.transaction()) as db:
+            if not _prolific:
+                linked=db.one('SELECT participant_id FROM pl3_prolific_links WHERE participant_id=?',(name,))
+                if token:
+                    linked=linked or db.one('SELECT l.participant_id FROM pl3_prolific_links l JOIN pl3_sessions s ON s.participant_id=l.participant_id WHERE s.token_hash=?',(digest(token),))
+                if linked: raise StudyError('prolific_assignment_locked',409)
             existing=db.one('SELECT * FROM pl3_participants WHERE id=?',(name,))
             authenticated=None
             if token:
@@ -221,6 +228,15 @@ class Store:
             items=COMMON_ITEMS+(EXPLANATION_ITEMS if instance['group_code']=='A' else [])
             result['questionnaire']={'items':[{'id':i[0],'text':i[2 if language=='zh' else 1],'allow_na':i in EXPLANATION_ITEMS} for i in items],
                 'comprehension':[]}
+        link=db.one('SELECT study_id FROM pl3_prolific_links WHERE instance_id=?',(instance['id'],))
+        if link:
+            result['prolific']=True
+            result['questionnaire_optional']=True
+            if instance['stage']=='completed' and link['study_id']==self.settings.prolific_study_id:
+                code=self.settings.prolific_completion_code
+                if re.fullmatch(r'[A-Za-z0-9]{4,64}',code):
+                    result['completion_code']=code
+                    result['completion_url']='https://app.prolific.com/submissions/complete?cc='+code
         return result
 
     def command(self,token,kind,payload):
@@ -349,8 +365,12 @@ class Store:
         if instance['stage']!='questionnaire':raise StudyError('wrong_stage',409)
         answers=payload.get('answers',{})
         if not isinstance(answers,dict):raise StudyError('invalid_questionnaire')
+        optional=bool(db.one('SELECT instance_id FROM pl3_prolific_links WHERE instance_id=?',(instance['id'],)))
         for q in COMMON_ITEMS+(EXPLANATION_ITEMS if instance['group_code']=='A' else []):
             value=answers.get(q[0])
+            if optional and value is None:
+                answers[q[0]]=None
+                continue
             if q in EXPLANATION_ITEMS and value=='na':continue
             if type(value) is not int or not 1<=value<=7:raise StudyError('incomplete_questionnaire')
         graded=[]

@@ -14,6 +14,10 @@ class Settings:
     llm_model: str = ''
     llm_api_key: str = ''
     verified: bool = False
+    prolific_study_id: str = ''
+    prolific_completion_code: str = ''
+    prolific_places: int = 12
+    prolific_launch_confirmed: bool = False
 
     @property
     def llm_configured(self):
@@ -38,4 +42,8 @@ class Settings:
             llm_base_url=os.environ.get('POLICYLENS_LLM_BASE_URL','').rstrip('/'),
             llm_model=os.environ.get('POLICYLENS_LLM_MODEL',''),
             llm_api_key=os.environ.get('POLICYLENS_LLM_API_KEY',''),
-            verified=os.environ.get('POLICYLENS_STUDY_VERIFIED')=='1')
+            verified=os.environ.get('POLICYLENS_STUDY_VERIFIED')=='1',
+            prolific_study_id=os.environ.get('POLICYLENS_PROLIFIC_STUDY_ID',''),
+            prolific_completion_code=os.environ.get('POLICYLENS_PROLIFIC_COMPLETION_CODE',''),
+            prolific_places=int(os.environ.get('POLICYLENS_PROLIFIC_PLACES','12')),
+            prolific_launch_confirmed=os.environ.get('POLICYLENS_PROLIFIC_LAUNCH_CONFIRMED')=='1')

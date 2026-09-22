@@ -250,7 +250,7 @@ class Store:
                     if kind=='demo_skip':self._tutorial(db,instance,{'command':'skip'})
                     else:
                         row=db.one('SELECT state_json FROM pl3_tutorials WHERE instance_id=?',(instance['id'],))
-                        if not json.loads(row['state_json'])['completed']:raise StudyError('finish_demo',409)
+                        if not kitchen_tutorial.normalize(json.loads(row['state_json']))['completed']:raise StudyError('finish_demo',409)
                     end=kitchen_tutorial.COUNT
                 else:end=len(demonstration(instance['domain'])['captions'])
                 db.execute('UPDATE pl3_instances SET demo_index=? WHERE id=?',(end,instance['id']))
@@ -285,7 +285,7 @@ class Store:
         try:after=kitchen_tutorial.apply(before,payload.get('command'),payload.get('action'))
         except ValueError as exc:raise StudyError(str(exc)) from exc
         now=time.time()
-        db.execute('UPDATE pl3_tutorials SET state_json=?,updated=? WHERE instance_id=?',(encode(after),now,instance['id']))
+        db.execute('UPDATE pl3_tutorials SET version=?,state_json=?,updated=? WHERE instance_id=?',(after['version'],encode(after),now,instance['id']))
         db.execute('INSERT INTO pl3_tutorial_events VALUES(?,?,?,?,?,?,?,?)',
             (uid(),instance['id'],kitchen_tutorial.VERSION,payload.get('command'),
              encode({'action':payload.get('action'),'language':instance['language']}),encode(before),encode(after),now))
@@ -297,8 +297,12 @@ class Store:
     def _next(self,db,instance):
         stage=instance['stage']
         if stage=='demo':
-            end=kitchen_tutorial.COUNT if instance['domain']=='kitchen' else len(demonstration(instance['domain'])['captions'])
-            if instance['demo_index']<end: raise StudyError('finish_demo',409)
+            if instance['domain']=='kitchen':
+                row=db.one('SELECT state_json FROM pl3_tutorials WHERE instance_id=?',(instance['id'],))
+                before=json.loads(row['state_json']);practice=kitchen_tutorial.normalize(before)
+                if not (practice['completed'] or practice['skipped']):raise StudyError('finish_demo',409)
+                if practice!=before:self._tutorial(db,instance,{'command':'finish'})
+            elif instance['demo_index']<len(demonstration(instance['domain'])['captions']):raise StudyError('finish_demo',409)
             task=1
         elif stage in ('task1','task2','task3'):
             run=db.one('SELECT * FROM pl3_runs WHERE id=?',(instance['current_run'],))

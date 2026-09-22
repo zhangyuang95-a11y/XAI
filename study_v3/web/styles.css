@@ -43,5 +43,20 @@ main{max-width:1480px;padding-top:24px}.panel{border-radius:20px;box-shadow:0 16
 @media(prefers-reduced-motion:reduce){.score-penalty{animation:none}}
 
 /* The Kitchen tutorial shares the live map, with one actionable goal at a time. */
-.tutorial-scorebar{grid-template-columns:1fr;padding:11px 22px}.tutorial-scorebar .metric b{font-size:20px}.tutorial-goal{border-color:#c7d4eb}.tutorial-goal h2{font-size:21px;margin:16px 0 10px}.tutorial-goal-text{font-size:17px;line-height:1.65;color:#172541;white-space:pre-line}.tutorial-segments{display:flex;gap:5px;margin-top:10px}.tutorial-segments span{height:5px;flex:1;border-radius:3px;background:#e4e9f1}.tutorial-segments .done{background:#3d9c80}.tutorial-segments .current{background:#4f6ff0}.tutorial-feedback{padding:10px 12px;border-left:3px solid #b36b00;background:#fff5d9;color:#714700;font-size:14px;white-space:pre-line}.tutorial-paused{font-size:13px;color:#536279;background:#f2f5fa;border-radius:8px;padding:10px 12px}.tutorial-skip{display:block;margin:17px 0 0;padding:3px 0;border:0;background:transparent;text-align:left;color:#485775;font-size:13px;text-decoration:underline;text-underline-offset:3px}.kitchen-tutorial .button-row .button{font-size:12px;padding:9px 12px}.kitchen-menu li small{display:block;font-size:11px;color:#68758b;font-weight:400}.kitchen-tutorial details{margin-top:0;border-top:0;padding-top:0}.board-toolbar .legend .swatch{background:#4f6ff0}.board-toolbar .legend .swatch.ai{background:#f56b3d}
-.tutorial-checks{list-style:none;display:flex;gap:6px 12px;flex-wrap:wrap;margin:12px 0;padding:0;font-size:12px;color:#68758b}.tutorial-checks .done{color:#16704c;font-weight:700}.tutorial-context{border-top:1px solid var(--line);padding-top:13px;margin:14px 0;font-size:13px;color:#485775;line-height:1.65}.tutorial-context p:last-child{margin-bottom:0}
+.tutorial-scorebar{grid-template-columns:1fr;padding:11px 22px}.tutorial-scorebar .metric b{font-size:20px}
+.kitchen-tutorial .side-stack{min-width:0}.tutorial-goal{border-color:#b8c8e5;background:#fcfdff}
+.kitchen-tutorial .number-label{display:inline-block;padding:3px 10px;border-radius:6px;background:#eaf0ff;color:#244c9c;font-size:14px;font-weight:750;letter-spacing:.4px}
+.tutorial-goal h2{font-size:23px;color:#172541;margin:17px 0 12px}
+.tutorial-goal-text{font-size:20px;font-weight:650;line-height:1.65;color:#172541;white-space:pre-line;overflow-wrap:break-word}
+.tutorial-segments{display:flex;gap:5px;margin-top:12px}.tutorial-segments span{height:5px;flex:1;border-radius:3px;background:#e4e9f1}.tutorial-segments .done{background:#3d9c80}.tutorial-segments .current{background:#4f6ff0}
+.tutorial-feedback{padding:12px 14px;border-left:3px solid #b36b00;background:#fff5d9;color:#603b00;font-size:16px;font-weight:600;line-height:1.65;white-space:pre-line}
+.tutorial-paused{font-size:15px;font-weight:500;color:#34445f;background:#f2f5fa;border-radius:8px;padding:11px 13px}
+.tutorial-skip{display:block;margin:17px 0 0;padding:3px 0;border:0;background:transparent;text-align:left;color:#34445f;font-size:14px;text-decoration:underline;text-underline-offset:3px}
+.kitchen-tutorial .button-row .button{font-size:14px;padding:9px 12px}.kitchen-menu li small{display:block;font-size:11px;color:#68758b;font-weight:400}
+.kitchen-tutorial details{margin-top:0;border-top:0;padding-top:0}.kitchen-tutorial summary{font-size:16px;font-weight:700;color:#26324a}
+.kitchen-tutorial .compact-rules{font-size:16px;line-height:1.75;color:#34445f}.kitchen-tutorial .control-keys,.kitchen-tutorial .interaction-hint{font-size:15px;color:#26324a}.kitchen-tutorial .hint{font-size:14px;color:#34445f}
+.board-toolbar .legend .swatch{background:#4f6ff0}.board-toolbar .legend .swatch.ai{background:#f56b3d}
+.tutorial-checks{list-style:none;display:flex;gap:8px 14px;flex-wrap:wrap;margin:14px 0;padding:0;font-size:14px;color:#34445f}.tutorial-checks .done{color:#16704c;font-weight:700}
+.tutorial-preparation{font-size:16px;font-weight:650;color:#244c9c;line-height:1.65}
+.tutorial-context{border-top:1px solid var(--line);padding-top:15px;margin:16px 0;font-size:16px;font-weight:500;color:#34445f;line-height:1.7;overflow-wrap:break-word}.tutorial-context p:last-child{margin-bottom:0}
+@media(max-width:800px){.tutorial-goal h2{font-size:22px}.tutorial-goal-text{font-size:19px}.kitchen-tutorial .button-row{gap:8px}}

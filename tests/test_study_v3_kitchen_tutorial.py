@@ -35,14 +35,13 @@ def complete_practice(command):
         elif i==4:
             held=state['human']['holding'];target='handoff' if held is None else 'plate' if held['stage']=='finished' else 'serve'
         elif i==5:target='trash'
-        elif i==6:command('action','wait');continue
         else:raise AssertionError(t)
         route=k._route(k._pos(state['human']),state['human']['facing'],target)
         command('action',route[0] if route else 'interact')
     pytest.fail('Tutorial did not finish')
 
 
-def test_all_seven_sections_are_actual_user_interactions_without_cooking():
+def test_all_six_sections_end_on_actual_disposal_without_cooking():
     t=tut.initial();seen=[]
     def command(kind,action=None):
         nonlocal t
@@ -52,9 +51,10 @@ def test_all_seven_sections_are_actual_user_interactions_without_cooking():
         if t['index']!=old:seen.append(old)
         return t
     complete_practice(command)
-    assert seen==list(range(6))
+    assert seen==list(range(5))
     assert t['completed'] and not t['playing']
-    assert t['last_transition']['after']['turn']==1
+    assert t['index']==5 and tut.view(t)['total_segments']==6
+    assert any(e['type']=='waste' for e in t['last_transition']['after']['events'])
 
 
 def test_pause_invalid_interact_and_retry_are_not_formal_actions():
@@ -118,3 +118,39 @@ def test_group_does_not_change_tutorial_and_cannot_bypass_with_old_playback(tmp_
     with pytest.raises(StudyError,match='finish_demo'):a.command('demo_finish')
     with pytest.raises(StudyError,match='finish_demo'):a.command('next')
     store.db.close()
+
+
+def test_retired_seventh_segment_resumes_as_complete_without_rewriting_read_history(tmp_path):
+    store=Store(Settings(database=str(tmp_path/'old_tutorial.db')));f=Flow(store,'kitchen')
+    old=tut.initial();old.update(version='kitchen-operations-tutorial.v1',index=6,playing=True)
+    with store.db.transaction() as db:
+        db.execute('UPDATE pl3_tutorials SET version=?,state_json=? WHERE instance_id=?',
+                   (old['version'],json.dumps(old),f.view['instance_id']))
+        db.execute('UPDATE pl3_instances SET demo_index=6 WHERE id=?',(f.view['instance_id'],))
+    before=store.export()
+    f.view=store.recover_view(f.token,'kitchen')
+    assert f.view['tutorial']['completed'] and not f.view['tutorial']['playing']
+    assert f.view['tutorial']['index']==5 and f.view['tutorial']['total_segments']==6
+    assert f.view['tutorial']['version']==tut.VERSION
+    assert store.export()==before  # Read-only refresh never rewrites earlier records.
+    f.command('next')
+    assert f.view['stage']=='task1' and f.view['state']['turn']==0
+    assert f.view['state']['score']['raw_score']==0
+    records=store.export();event=records['tutorial_events'][-1]
+    assert event['command']=='finish' and json.loads(event['before_json'])==old
+    after=json.loads(event['after_json'])
+    assert after['state']==old['state'] and after['completed']
+    assert records['tutorials'][0]['version']==after['version']==tut.VERSION
+    store.db.close()
+
+
+def test_existing_earlier_practice_keeps_progress_and_cannot_finish_early():
+    old=tut.initial();old.update(version='kitchen-operations-tutorial.v1',index=2,playing=True,
+                                state=tut._scene(2,'egg'))
+    old=tut.apply(old,'action','left')
+    old['version']='kitchen-operations-tutorial.v1'
+    before=deepcopy(old);public=tut.view(old)
+    assert not public['completed'] and public['index']==2
+    assert old==before and tut.normalize(old)['state']==before['state']
+    assert public['state']['human']==k.public_state(before['state'])['human']
+    with pytest.raises(ValueError,match='tutorial_incomplete'):tut.apply(old,'finish')

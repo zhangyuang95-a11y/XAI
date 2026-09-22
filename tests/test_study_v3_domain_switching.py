@@ -189,7 +189,7 @@ def test_old_gameplay_is_archived_and_new_enrollment_keeps_all_records(pilot_sto
 def test_v381_qa_patch_resumes_v38_snapshots_but_preserves_v371_archive(pilot_store):
     compatible = 'policylens-three-domain-20260922.v3.8'
     archived = 'policylens-three-domain-20260920.v3.7.1'
-    assert RELEASE_ID == 'policylens-three-domain-20260922.v3.8.1'
+    assert RELEASE_ID == 'policylens-three-domain-20260922.v3.8.2'
     assert compatible in SUPPORTED_RELEASE_IDS and archived not in SUPPORTED_RELEASE_IDS
     flow = public_flow(pilot_store, 'kitchen', 'A')
     flow.finish_demo()

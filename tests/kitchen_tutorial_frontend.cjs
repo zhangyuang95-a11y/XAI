@@ -39,7 +39,7 @@ const response=(mutate=()=>{})=>{const result=JSON.parse(run('JSON.stringify(vie
  // Public help and menu numbers are provided by the saved rules, never +100.
  const menu=run('kitchenMenu(view.state)');assert(menu.includes('Serve on time +30'));assert(menu.includes('Due 100'));assert(!menu.includes('+100'));assert(menu.includes('Menu · 5 dishes'));
  const prep=run(`tutorialPreparation({human:{preparation:{label_en:'Whisk egg',label_zh:'打散鸡蛋',completed:1,required:4,remaining:3,ready:false}}})`);assert(prep.includes('Whisk egg'));assert(prep.includes('1 / 4'));assert(prep.includes('3 more interactions'));
- run(`view.tutorial.index=6`);const last=run('demoPage()');assert(last.includes('deadlines 100, 140'));assert(last.includes('Serve +30'));
+ run(`view.tutorial.index=5;view.tutorial.total_segments=6`);const last=run('demoPage()');assert(last.includes('Step 6 / 6'));assert(!last.includes('class="panel kitchen-menu"'));assert(last.includes('deadlines 100, 140'));assert(last.includes('Serve +30'));
  run(`lang='zh'`);assert(run('demoPage()').includes('截止回合'));assert(run('conciseRules(view.state)').includes('前方工位'));
  run(`view.tutorial.completed=true;view.tutorial.playing=false`);assert(run('demoPage()').includes('开始 Task 1'));assert.equal(run('canMove()'),false);
  assert(!run('demoPage()').includes('tutorialSkipButton'));

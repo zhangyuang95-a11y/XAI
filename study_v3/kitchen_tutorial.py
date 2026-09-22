@@ -6,8 +6,8 @@ Independent fixtures are explicitly labelled and never enter formal task runs.
 from copy import deepcopy
 from domains.kitchen import engine as k
 
-VERSION = 'kitchen-operations-tutorial.v1'
-COUNT = 7
+VERSION = 'kitchen-operations-tutorial.v2'
+COUNT = 6
 
 def public_help():
     r = k.rule_metadata()
@@ -55,8 +55,22 @@ def initial():
     return {'version':VERSION,'index':0,'playing':False,'completed':False,'skipped':False,
             'progress':{},'ingredient':'tomato','state':_scene(0),'feedback':None}
 
+def normalize(tutorial):
+    """Retire v1's reading-only seventh segment without touching game state.
+
+    Reads adapt a copy. The next participant command records the old and new
+    tutorial snapshots, preserving the original practice history.
+    """
+    t=deepcopy(tutorial)
+    if t['version']=='kitchen-operations-tutorial.v1':
+        t['version']=VERSION
+        if t['index']==COUNT:
+            t.update(index=COUNT-1,completed=True,playing=False,feedback=None)
+            t['retired_segment']='menu_and_scoring'
+    return t
+
 def _goal(index):
-    r=k.rule_metadata();fresh=r['prepared_fresh_turns'];s=r['score']
+    fresh=k.rule_metadata()['prepared_fresh_turns']
     goals=[
         ('Move with WASD, face a counter by pressing toward it, then press Space to wait. E interacts only in front of your arrow.', '用 WASD 移动，再朝工位按方向键完成转向，然后按空格等待。E 只操作箭头前方。'),
         ('Find any of the four ingredient cupboards. Face it and press E to take one portion. No ingredient order is prescribed in this practice.', '找到任意一个原料柜，面向它按 E 取一份原料。本练习不规定原料顺序。'),
@@ -64,25 +78,28 @@ def _goal(index):
         ('Practise placing and taking back an item on both the central handoff and your counter. The AI ingredient counter has two slots; your counter and the handoff hold one each.', '分别在中央交接台和你的暂存台练习放下、取回。AI 原料台有两槽；交接台和你的暂存台各放一件。'),
         ('Independent example: this finished dish already exists. Take it from the handoff, use Serving plates, then the Serving hatch. Its cooking process is not shown.', '独立操作示例：成品已放在交接台，不展示制作过程。取走成品，到正式装盘台装盘，再到上菜口上菜。'),
         (f'Independent example: this prepared tomato is already {fresh-2} turns old. Move or wait to see it spoil at age {fresh}, then face the trash bin and press E. Transfers never reset its age.', f'独立示例：这份备好的番茄已过 {fresh-2} 回合。移动或等待观察其在第 {fresh} 回合变质，然后面向垃圾桶按 E 丢弃。转移不重置寿命。'),
-        (f"Read the menu, deadlines and scoring help below. {r['orders_per_task']} dishes, {r['max_turns']} turns; on-time serving +{s['served']}, each turn {s['step']}, ingredient disposal {s['single_component_discard']}, dish disposal {s['combined_dish_discard']}. Press Space to finish practice.", f"阅读下方菜单、截止时间与计分说明。每轮 {r['orders_per_task']} 道菜，{r['max_turns']} 回合；按时上菜 +{s['served']}，每步 {s['step']}，丢原料 {s['single_component_discard']}，丢合成菜 {s['combined_dish_discard']}。按空格完成教程。"),
     ]
     en,zh=goals[index]
     return {'en':en,'zh':zh}
 
-HIGHLIGHTS=[['prep'],['egg','tomato','meat','pepper'],['prep'],['handoff','human_buffer','ai_raw'],['handoff','plate','serve'],['trash'],['serve']]
+HIGHLIGHTS=[['prep'],['egg','tomato','meat','pepper'],['prep'],['handoff','human_buffer','ai_raw'],['handoff','plate','serve'],['trash']]
 
 def view(tutorial):
+    tutorial=normalize(tutorial)
     out={key:deepcopy(tutorial[key]) for key in ('version','index','playing','completed','skipped','progress','feedback')}
     state=k.public_state(tutorial['state'])
     state['ai']['current_cooking']=[]
     state['tutorial']=True
-    out.update(state=state,goal=_goal(tutorial['index']),highlights=HIGHLIGHTS[tutorial['index']])
+    out.update(state=state,total_segments=COUNT,goal=_goal(tutorial['index']),highlights=HIGHLIGHTS[tutorial['index']])
     return out
 
 def apply(tutorial,command,action=None):
-    t=deepcopy(tutorial)
+    t=normalize(tutorial)
     t['feedback']=None
     t.pop('last_transition',None)
+    if command=='finish':
+        if not (t['completed'] or t['skipped']):raise ValueError('tutorial_incomplete')
+        return t
     if command=='start':
         if not t['completed']:t['playing']=True
         return t
@@ -123,7 +140,7 @@ def apply(tutorial,command,action=None):
         done=all(p.get(station+'_'+event) for station in ('handoff','human_buffer') for event in ('item_placed','item_taken'))
     elif i==4:done=any(e['type']=='served' for e in nxt['events'])
     elif i==5:done=any(e['type']=='waste' and e['item']['stage']=='spoiled' for e in nxt['events'])
-    else:done=action=='wait'
+    else:raise ValueError('invalid_tutorial_segment')
     t['state']=nxt
     t['last_transition']={'before':state,'after':nxt,'human_action':action,'ai_action':'wait'}
     if done:

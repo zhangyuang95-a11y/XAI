@@ -104,7 +104,8 @@ def test_complete_practice_advances_to_fresh_task_only_on_start(tmp_path):
     complete_practice(command)
     assert f.view['stage']=='demo' and not f.view['task_runs']
     f.command('next');assert f.view['stage']=='task1' and f.view['state']['turn']==0
-    assert f.view['state']['rule_metadata']['score']['served']==30
+    assert f.view['state']['rule_metadata']['score']=={
+        'served':100,'step':-1,'single_component_discard':-5,'combined_dish_discard':-20}
     with pytest.raises(StudyError,match='wrong_stage'):f.command('tutorial',command='start')
     store.db.close()
 

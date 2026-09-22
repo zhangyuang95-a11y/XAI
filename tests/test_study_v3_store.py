@@ -190,8 +190,8 @@ def test_complete_three_task_flow_and_explanation_permission_matrix(store, domai
             assert flow.view["state"]["score"]["score_scale"] == "raw"
             assert metrics["completed_orders"] == metrics["total_orders"] == 5
             assert metrics["step_penalty"] == flow.view["state"]["turn"]
-            assert metrics["discard_penalty"] == 3 * metrics["discarded_ingredients"] + 10 * metrics["discarded_dishes"]
-            assert score == 30 * metrics["completed_orders"] - metrics["step_penalty"] - metrics["discard_penalty"]
+            assert metrics["discard_penalty"] == 5 * metrics["discarded_ingredients"] + 20 * metrics["discarded_dishes"]
+            assert score == 100 * metrics["completed_orders"] - metrics["step_penalty"] - metrics["discard_penalty"]
             assert metrics["burnt"] == metrics["spoiled"] == metrics["waste"] == 0
         if domain == "pong":
             assert score >= 50, f"{domain} task {task} cooperation fixture became infeasible"

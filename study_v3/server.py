@@ -75,7 +75,10 @@ def manifest(settings):
         'kitchen_tutorial_version':KITCHEN_TUTORIAL_VERSION,
         'enrollment':{'group_selection':'participant_choice_at_new_domain',
             'resume_preserves_group':True,'parallel_domains':True,
-            'compatible_session_releases':sorted(SUPPORTED_RELEASE_IDS)},
+            'compatible_session_releases':[RELEASE_ID],
+            'compatible_session_releases_by_domain':{
+                domain:sorted({RELEASE_ID} if domain=='kitchen' else SUPPORTED_RELEASE_IDS)
+                for domain in MODULES}},
         'domains':{k:{'url':'/'+k+'/','version':engine(k).VERSION} for k in MODULES},
         'explanations':{'group':'A','task':2,'active_only':True},
         'default_language':'en','mode':settings.mode,'storage_persistent':settings.persistent,

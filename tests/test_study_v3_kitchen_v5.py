@@ -58,7 +58,7 @@ class KitchenV5Mechanisms(unittest.TestCase):
         self.assertEqual([(v['delta'],v['reason']) for v in state['events'] if v['type']=='score_delta'],[(-1,'turn')])
 
     def test_serve_and_both_bin_penalties_are_separate_from_step_cost(self):
-        for food,penalty in ((item(),3),(dish(),10)):
+        for food,penalty in ((item(),5),(dish(),20)):
             state=fixture(); state['human'].update(x=3,y=4,facing='right',holding=food)
             state=tick(state,'interact')
             self.assertEqual(state['raw_score'],-1-penalty)
@@ -69,9 +69,9 @@ class KitchenV5Mechanisms(unittest.TestCase):
         state=fixture(); food=dish(); food.update(stage='plated',container='serving_plate')
         state['human'].update(x=2,y=5,facing='right',holding=food)
         state=tick(state,'interact')
-        self.assertEqual(state['raw_score'],29)
+        self.assertEqual(state['raw_score'],99)
         self.assertEqual(state['metrics']['completed_orders'],1)
-        self.assertEqual(sum(ev['delta'] for ev in state['events'] if ev['type']=='score_delta'),29)
+        self.assertEqual(sum(ev['delta'] for ev in state['events'] if ev['type']=='score_delta'),99)
 
     def test_occupied_output_can_be_cancelled_before_reaching_handoff(self):
         state=fixture(); output=dish()
@@ -122,7 +122,7 @@ class KitchenV5Mechanisms(unittest.TestCase):
             state=tick(state,e._approach(state,'human','trash'))
         state=tick(state,'interact')
         self.assertIsNone(state['human']['holding'])
-        self.assertEqual(state['metrics']['discard_penalty'],3)
+        self.assertEqual(state['metrics']['discard_penalty'],5)
 
     def test_preparation_clock_starts_only_at_completion_and_has_real_boundaries(self):
         for ingredient,required,lifetime in [('tomato',3,20),('pepper',3,20),('egg',4,20),('meat',5,20)]:
@@ -173,7 +173,7 @@ class KitchenV5Mechanisms(unittest.TestCase):
         waste=next(ev for ev in state['events'] if ev['type']=='waste')
         self.assertEqual(waste['item']['id'],original['id'])
         self.assertEqual(waste['station'],'trash')
-        self.assertEqual(state['metrics']['discard_penalty'],3)
+        self.assertEqual(state['metrics']['discard_penalty'],5)
 
     def test_observation_is_pure_and_human_facing_explanations_use_recipe_names(self):
         frames,events=run(1000,2)

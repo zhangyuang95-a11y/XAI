@@ -1,7 +1,7 @@
 {
-  "version": "kitchen-scenarios-v6.2.0",
-  "scenario_version": "kitchen-scenarios-v6.2.0",
-  "rules_version": "kitchen-v6.2.0",
+  "version": "kitchen-scenarios-v6.3.0",
+  "scenario_version": "kitchen-scenarios-v6.3.0",
+  "rules_version": "kitchen-v6.3.0",
   "study_mode": "pilot_pending_human_validation",
   "development_seeds": [
     1000,
@@ -6548,10 +6548,10 @@
     "facing_required": true,
     "same_turn_handoff_conflict": "both_fail",
     "score": {
-      "served": 30,
+      "served": 100,
       "step": -1,
-      "single_component_discard": -3,
-      "combined_dish_discard": -10,
+      "single_component_discard": -5,
+      "combined_dish_discard": -20,
       "scale": "raw",
       "negative_allowed": true
     },
@@ -6710,139 +6710,49 @@
     "applies_to_current_version": false
   },
   "validation_results": {
-    "engine_version": "kitchen-v6.2.0",
-    "scenario_version": "kitchen-scenarios-v6.2.0",
+    "engine_version": "kitchen-v6.3.0",
+    "scenario_version": "kitchen-scenarios-v6.3.0",
     "menu_version": "kitchen-menu-v2",
-    "evidence_type": "actual fixed AI with deterministic simulation partner; no human participants",
+    "evidence_type": "Fixed known-scene synthetic regression; no human participants or new held-out evaluation",
     "applies_to_current_version": true,
-    "runs": 288,
-    "all_five_dishes_completed": true,
-    "budgets_changed": false,
-    "deadlines_changed": false,
-    "served_points": 30,
-    "prepared_fresh_turns": 20,
-    "recipe_heating_totals": {
-      "egg_tomato": 16,
-      "pepper_meat": 20
+    "status": "passed_known_scene_regression",
+    "score": {
+      "served": 100,
+      "step": -1,
+      "single_component_discard": -5,
+      "combined_dish_discard": -20
     },
-    "runs_with_actual_joint_decrements": 114,
-    "actual_joint_decrements_per_positive_run": 1,
-    "maximum_turns": 308,
+    "physics_ai_menus_timing_changed": false,
+    "human_relative_gain": null,
+    "runs": 6,
+    "seeds": [
+      1000,
+      1001
+    ],
+    "tasks": [
+      1,
+      2,
+      3
+    ],
+    "all_five_dishes_completed": true,
+    "turn_range": [
+      299,
+      306
+    ],
+    "raw_score_range": [
+      194,
+      201
+    ],
+    "non_score_transitions_matched": 1812,
+    "previous_engine_comparison": "kitchen-v6.2.0",
+    "ai_actions_and_memory_identical": true,
+    "all_frozen_scenarios_identical": true,
     "burnt": 0,
     "spoiled": 0,
     "waste": 0,
     "expired": 0,
-    "human_relative_gain": null,
-    "parallel_heating_guaranteed_every_run": false,
-    "summaries": {
-      "development": {
-        "development": {
-          "runs": 72,
-          "passed_runs": 72,
-          "all_five_completed_runs": 72,
-          "completed_orders": 360,
-          "assigned_orders": 360,
-          "turn_range": [
-            297,
-            307
-          ],
-          "raw_score_range": [
-            -157,
-            -147
-          ],
-          "runs_with_joint_timer_decrements": 28,
-          "joint_timer_decrement_steps": 28,
-          "joint_timer_decrement_step_range": [
-            0,
-            1
-          ],
-          "heating_snapshot_turn_range": [
-            0,
-            2
-          ],
-          "burnt": 0,
-          "spoiled": 0,
-          "waste": 0,
-          "expired": 0,
-          "discarded_ingredients": 0,
-          "discarded_dishes": 0,
-          "discard_penalty": 0,
-          "failed_scenes": []
-        }
-      },
-      "existing_regression": {
-        "existing_regression": {
-          "runs": 144,
-          "passed_runs": 144,
-          "all_five_completed_runs": 144,
-          "completed_orders": 720,
-          "assigned_orders": 720,
-          "turn_range": [
-            297,
-            308
-          ],
-          "raw_score_range": [
-            -158,
-            -147
-          ],
-          "runs_with_joint_timer_decrements": 59,
-          "joint_timer_decrement_steps": 59,
-          "joint_timer_decrement_step_range": [
-            0,
-            1
-          ],
-          "heating_snapshot_turn_range": [
-            0,
-            2
-          ],
-          "burnt": 0,
-          "spoiled": 0,
-          "waste": 0,
-          "expired": 0,
-          "discarded_ingredients": 0,
-          "discarded_dishes": 0,
-          "discard_penalty": 0,
-          "failed_scenes": []
-        }
-      },
-      "untouched_validation": {
-        "untouched_validation": {
-          "runs": 72,
-          "passed_runs": 72,
-          "all_five_completed_runs": 72,
-          "completed_orders": 360,
-          "assigned_orders": 360,
-          "turn_range": [
-            297,
-            307
-          ],
-          "raw_score_range": [
-            -157,
-            -147
-          ],
-          "runs_with_joint_timer_decrements": 27,
-          "joint_timer_decrement_steps": 27,
-          "joint_timer_decrement_step_range": [
-            0,
-            1
-          ],
-          "heating_snapshot_turn_range": [
-            0,
-            2
-          ],
-          "burnt": 0,
-          "spoiled": 0,
-          "waste": 0,
-          "expired": 0,
-          "discarded_ingredients": 0,
-          "discarded_dishes": 0,
-          "discard_penalty": 0,
-          "failed_scenes": []
-        }
-      }
-    },
-    "evidence_directory": "analysis/kitchen_v62_20260922",
-    "note": "Development1000–1023; existing regression2000–2023 and3000–3023; newly predeclared validation4000–4023. Each uses all three Tasks. Validation reports pin the pre-report config digest; only this result metadata was added afterwards."
+    "evidence_path": "analysis/kitchen_v63_20260922/known_scene_regression.json",
+    "note": "This paired old/new trajectory report contains six known scenes. Existing engine tests separately rerun established scenarios. Prior v6.2 validation remains historical in validation_history; original scores and stored records were not recalculated. No human effect or new held-out claim."
   },
   "validation_history": [
     {
@@ -6882,18 +6792,154 @@
       "applies_to_current_version": false,
       "verification_command": "python3 scripts/validate_kitchen_16_20.py --output <path>",
       "seed_note": "2000/2001 were inspected during early allocation exploration; the existing held-out list is reported as regression, not blind validation. 3000–3023 were selected before final verification."
+    },
+    {
+      "engine_version": "kitchen-v6.2.0",
+      "scenario_version": "kitchen-scenarios-v6.2.0",
+      "menu_version": "kitchen-menu-v2",
+      "evidence_type": "actual fixed AI with deterministic simulation partner; no human participants",
+      "applies_to_current_version": false,
+      "runs": 288,
+      "all_five_dishes_completed": true,
+      "budgets_changed": false,
+      "deadlines_changed": false,
+      "served_points": 30,
+      "prepared_fresh_turns": 20,
+      "recipe_heating_totals": {
+        "egg_tomato": 16,
+        "pepper_meat": 20
+      },
+      "runs_with_actual_joint_decrements": 114,
+      "actual_joint_decrements_per_positive_run": 1,
+      "maximum_turns": 308,
+      "burnt": 0,
+      "spoiled": 0,
+      "waste": 0,
+      "expired": 0,
+      "human_relative_gain": null,
+      "parallel_heating_guaranteed_every_run": false,
+      "summaries": {
+        "development": {
+          "development": {
+            "runs": 72,
+            "passed_runs": 72,
+            "all_five_completed_runs": 72,
+            "completed_orders": 360,
+            "assigned_orders": 360,
+            "turn_range": [
+              297,
+              307
+            ],
+            "raw_score_range": [
+              -157,
+              -147
+            ],
+            "runs_with_joint_timer_decrements": 28,
+            "joint_timer_decrement_steps": 28,
+            "joint_timer_decrement_step_range": [
+              0,
+              1
+            ],
+            "heating_snapshot_turn_range": [
+              0,
+              2
+            ],
+            "burnt": 0,
+            "spoiled": 0,
+            "waste": 0,
+            "expired": 0,
+            "discarded_ingredients": 0,
+            "discarded_dishes": 0,
+            "discard_penalty": 0,
+            "failed_scenes": []
+          }
+        },
+        "existing_regression": {
+          "existing_regression": {
+            "runs": 144,
+            "passed_runs": 144,
+            "all_five_completed_runs": 144,
+            "completed_orders": 720,
+            "assigned_orders": 720,
+            "turn_range": [
+              297,
+              308
+            ],
+            "raw_score_range": [
+              -158,
+              -147
+            ],
+            "runs_with_joint_timer_decrements": 59,
+            "joint_timer_decrement_steps": 59,
+            "joint_timer_decrement_step_range": [
+              0,
+              1
+            ],
+            "heating_snapshot_turn_range": [
+              0,
+              2
+            ],
+            "burnt": 0,
+            "spoiled": 0,
+            "waste": 0,
+            "expired": 0,
+            "discarded_ingredients": 0,
+            "discarded_dishes": 0,
+            "discard_penalty": 0,
+            "failed_scenes": []
+          }
+        },
+        "untouched_validation": {
+          "untouched_validation": {
+            "runs": 72,
+            "passed_runs": 72,
+            "all_five_completed_runs": 72,
+            "completed_orders": 360,
+            "assigned_orders": 360,
+            "turn_range": [
+              297,
+              307
+            ],
+            "raw_score_range": [
+              -157,
+              -147
+            ],
+            "runs_with_joint_timer_decrements": 27,
+            "joint_timer_decrement_steps": 27,
+            "joint_timer_decrement_step_range": [
+              0,
+              1
+            ],
+            "heating_snapshot_turn_range": [
+              0,
+              2
+            ],
+            "burnt": 0,
+            "spoiled": 0,
+            "waste": 0,
+            "expired": 0,
+            "discarded_ingredients": 0,
+            "discarded_dishes": 0,
+            "discard_penalty": 0,
+            "failed_scenes": []
+          }
+        }
+      },
+      "evidence_directory": "analysis/kitchen_v62_20260922",
+      "note": "Development1000–1023; existing regression2000–2023 and3000–3023; newly predeclared validation4000–4023. Each uses all three Tasks. Validation reports pin the pre-report config digest; only this result metadata was added afterwards.",
+      "historical_note": "Preserved v6.2.0 validation under +30/-3/-10 scoring; these saved results were not recalculated for v6.3.0."
     }
   ],
   "menu_version": "kitchen-menu-v2",
   "rule_metadata": {
-    "engine_version": "kitchen-v6.2.0",
-    "scenario_version": "kitchen-scenarios-v6.2.0",
+    "engine_version": "kitchen-v6.3.0",
+    "scenario_version": "kitchen-scenarios-v6.3.0",
     "menu_version": "kitchen-menu-v2",
     "score": {
-      "served": 30,
+      "served": 100,
       "step": -1,
-      "single_component_discard": -3,
-      "combined_dish_discard": -10
+      "single_component_discard": -5,
+      "combined_dish_discard": -20
     },
     "orders_per_task": 5,
     "max_turns": 360,

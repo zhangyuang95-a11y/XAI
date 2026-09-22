@@ -17,6 +17,10 @@ from . import kitchen_tutorial
 def encode(value): return json.dumps(value, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
 def digest(value): return hashlib.sha256(value.encode()).hexdigest()
 def uid(): return uuid.uuid4().hex
+def compatible_instance(row):
+    return (row["release_id"] in SUPPORTED_RELEASE_IDS
+            and (row["domain"] != "kitchen" or row["release_id"] == RELEASE_ID))
+
 def public_answer(answer):
     return {k:answer[k] for k in ('status','answer','evidence_ids','language') if k in answer}
 
@@ -83,7 +87,7 @@ class Store:
         participant=self._participant(db,token)
         row=db.one('SELECT * FROM pl3_instances WHERE id=? AND participant_id=?',(instance_id,participant['id']))
         if row is None: raise StudyError('study_not_found',404)
-        if row['release_id'] not in SUPPORTED_RELEASE_IDS: raise StudyError('release_changed',409)
+        if not compatible_instance(row): raise StudyError('release_changed',409)
         return row
 
     def _ask_allowed(self, db, instance):
@@ -134,7 +138,7 @@ class Store:
             # A rules revision starts a separate enrollment. Old runs, frames,
             # answers and questionnaires remain intact under their release ID.
             candidates=db.all('SELECT * FROM pl3_instances WHERE participant_id=? AND domain=? ORDER BY created DESC,id DESC',(name,domain))
-            instance=next((r for r in candidates if r['release_id'] in SUPPORTED_RELEASE_IDS),None)
+            instance=next((r for r in candidates if compatible_instance(r)),None)
             if not instance:
                 iid=uid()
                 config=scenario_config(domain)
@@ -164,13 +168,13 @@ class Store:
             p=self._participant(db,token)
             rows=db.all('SELECT * FROM pl3_instances WHERE participant_id=? ORDER BY created DESC,id DESC',(p['id'],))
             if domain:
-                instance=next((r for r in rows if r['domain']==domain and r['release_id'] in SUPPORTED_RELEASE_IDS),None)
+                instance=next((r for r in rows if r['domain']==domain and compatible_instance(r)),None)
             else:
-                compatible=[r for r in rows if r['release_id'] in SUPPORTED_RELEASE_IDS]
+                compatible=[r for r in rows if compatible_instance(r)]
                 instance=next((r for r in compatible if r['stage']!='completed'),compatible[0] if compatible else None)
             if not instance: return {'participant_id':p['id'],'stage':'welcome',
-                'previous_version_saved':any(r['release_id'] not in SUPPORTED_RELEASE_IDS and (not domain or r['domain']==domain) for r in rows)}
-            if instance['release_id'] not in SUPPORTED_RELEASE_IDS: raise StudyError('release_changed',409)
+                'previous_version_saved':any(not compatible_instance(r) and (not domain or r['domain']==domain) for r in rows)}
+            if not compatible_instance(instance): raise StudyError('release_changed',409)
             return self._view(db,instance)
 
     def view(self, token, instance_id):

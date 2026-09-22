@@ -1,4 +1,4 @@
-"""Independent v6.2 rule boundaries; synthetic states are not human evidence."""
+"""Independent freshness and current scoring boundaries; synthetic states are not human evidence."""
 from copy import deepcopy
 import json
 
@@ -143,7 +143,7 @@ def test_load_at_age_19_ends_freshness_but_exact_eight_ready_turn_burns(ingredie
 
 
 def test_score_net_effects_deadline_inclusive_and_no_ordering_requirement():
-    for waits, expected in ((0, 29), (1, 28)):
+    for waits, expected in ((0, 99), (1, 98)):
         state = fixture()
         food = dish(order='order3')
         food.update(stage='plated', container='serving_plate')
@@ -158,12 +158,85 @@ def test_score_net_effects_deadline_inclusive_and_no_ordering_requirement():
         assert state['orders'][2]['status'] == 'completed'
         assert state['orders'][0]['status'] == 'pending'  # order3 may finish first.
         assert sum(ev['delta'] for ev in events if ev['type'] == 'score_delta') == expected
-        assert next(ev for ev in events if ev['type'] == 'served')['score_delta'] == 30
-    for food, net in ((item(), -4), (dish(), -11)):
+        assert next(ev for ev in events if ev['type'] == 'served')['score_delta'] == 100
+    for food, net in ((item(), -6), (dish(), -21)):
         state = fixture()
         state['human'].update(x=3, y=4, facing='right', holding=food)
         state = tick(state, 'interact')
         assert state['raw_score'] == net and state['human']['holding'] is None
+
+
+@pytest.mark.parametrize('actor', ['human', 'ai'])
+@pytest.mark.parametrize('stage,combined,cost', [
+    ('raw', False, 5), ('prepared', False, 5), ('cooked_protein', False, 5),
+    ('spoiled', False, 5), ('waste', False, 5),
+    ('finished', True, 20), ('plated', True, 20),
+    ('mixing', True, 20), ('waste', True, 20),
+])
+def test_physical_bin_classifies_both_actors_by_real_food_components(actor, stage, combined, cost):
+    state = fixture()
+    food = dish() if combined else item()
+    food['stage'] = stage
+    if stage == 'waste':
+        food.update(waste_reason='burnt', previous_stage='mixing' if combined else 'cooked_protein')
+    state[actor].update(x=3 if actor == 'human' else 5, y=4,
+                        facing='right' if actor == 'human' else 'left', holding=food)
+    before = deepcopy(state)
+    state = tick(state, 'interact' if actor == 'human' else 'wait',
+                 'interact' if actor == 'ai' else 'wait')
+    assert before[actor]['holding'] == food  # Engine transitions do not mutate the input.
+    assert state[actor]['holding'] is None
+    assert state['raw_score'] == -1 - cost
+    assert state['metrics']['discard_penalty'] == cost
+    assert state['metrics']['discarded_dishes'] == int(combined)
+    assert state['metrics']['discarded_ingredients'] == int(not combined)
+    waste = next(ev for ev in state['events'] if ev['type'] == 'waste')
+    assert waste['actor'] == actor and waste['station'] == 'trash'
+    assert waste['item']['components'] == food['components']
+    assert waste['penalty'] == cost and waste['score_delta'] == -cost
+    assert sum(ev['delta'] for ev in state['events'] if ev['type'] == 'score_delta') == -1 - cost
+    e._verify_food_conservation(before, state)
+
+
+def test_successful_serving_cannot_credit_twice_and_expired_dish_stays_visible():
+    state = fixture()
+    food = dish(); food.update(stage='plated', container='serving_plate')
+    state['human'].update(x=2, y=5, facing='right', holding=food)
+    state = tick(state, 'interact')
+    assert state['raw_score'] == 99 and state['metrics']['completed_orders'] == 1
+    saved = deepcopy(state)
+    with pytest.raises(ValueError):
+        tick(state, 'interact')
+    assert state == saved  # Empty hands cannot resubmit the served dish.
+
+    late = fixture(); late['orders'][0]['deadline'] = 0
+    late['human'].update(x=2, y=5, facing='right', holding=food)
+    late = tick(late, 'interact')
+    assert late['raw_score'] == -1 and late['metrics']['completed_orders'] == 0
+    assert late['human']['holding']['components'] == food['components']
+    assert any(ev['type'] == 'serve_rejected' for ev in late['events'])
+    assert not any(ev['type'] == 'served' for ev in late['events'])
+
+
+def test_score_explanations_derive_from_constants_in_both_languages(monkeypatch):
+    monkeypatch.setattr(e, 'SERVE_POINTS', 107)
+    monkeypatch.setattr(e, 'INGREDIENT_DISCARD_COST', 7)
+    monkeypatch.setattr(e, 'DISH_DISCARD_COST', 23)
+    state = fixture()
+    facts = {fact['id']: fact for fact in e.facts(state)}
+    for language in ('en', 'zh'):
+        score = facts['kitchen_score'][language]
+        assert all(str(value) in score for value in (107, 7, 23))
+        serve = facts['serving_score_rule'][language]
+        assert all(str(value) in serve for value in (107, 106, 105))
+        assert all(str(value) in e.rules(language)[8] for value in (107, 106, 105, 7, 23))
+        assert '23' in e.rules(language)[10]
+    state['ai'].update(x=5, y=3, facing='left', holding=dish())
+    state['handoff'] = item('meat', iid='blocking-meat', order='order2')
+    state['policy_memory'].update(handoff_output_id=state['ai']['holding']['id'], handoff_wait_turns=2)
+    decision = e.decide(state)
+    assert decision['reason_code'] == 'discard_blocked_output'
+    assert '23' in decision['reason_en'] and '23' in decision['reason_zh']
 
 
 def test_seeded_menus_frozen_distinct_across_tasks_no_triples_and_group_independent():
@@ -194,9 +267,9 @@ def test_versioned_metadata_matches_new_physics_and_public_state_is_pure():
     view = e.public_state(state)
     meta = view['rule_metadata']
     assert meta == state['rule_metadata'] == e.rule_metadata()
-    assert meta['engine_version'] == 'kitchen-v6.2.0'
+    assert meta['engine_version'] == 'kitchen-v6.3.0'
     assert meta['menu_version'] == 'kitchen-menu-v2'
-    assert meta['score'] == {'served': 30, 'step': -1, 'single_component_discard': -3, 'combined_dish_discard': -10}
+    assert meta['score'] == {'served': 100, 'step': -1, 'single_component_discard': -5, 'combined_dish_discard': -20}
     assert meta['prepared_fresh_turns'] == 20 and meta['max_consecutive_same_recipe'] == 2
     assert meta['heating']['egg_tomato']['total'] == 16 and meta['heating']['pepper_meat']['total'] == 20
     assert state == original

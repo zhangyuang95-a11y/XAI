@@ -55,17 +55,18 @@ def test_current_portion_evidence_matches_prepared_twenty_turn_clock(ingredient,
 def test_general_freshness_and_serving_arithmetic_are_short_current_facts(language):
     state = e.initial_state(1000, 2)
     fresh = answer(state, ['prepared_freshness_rule'], 'Does moving it reset freshness?', language)
-    points = answer(state, ['serving_score_rule'], 'Why +30 reward but only +29 net?', language)
+    question = 'Why +100 reward but only +99 net?' if language == 'en' else '上菜奖励100分，为什么净增99分？'
+    points = answer(state, ['serving_score_rule'], question, language)
     assert fresh['status'] == points['status'] == 'answered'
     assert '20' in fresh['answer']
-    assert all(str(n) in points['answer'] for n in (30, 29, 28))
+    assert all(str(n) in points['answer'] for n in (100, 99, 98))
     if language == 'en':
         assert 'reset' in fresh['answer'] and len(fresh['answer'].split()) < 80
         assert len(points['answer'].split()) < 85
     else:
         assert '重置' in fresh['answer'] and len(fresh['answer']) < 180
         assert len(points['answer']) < 180
-    assert '+100' not in points['answer'] and '500' not in points['answer']
+    assert '+30' not in points['answer'] and '500' not in points['answer']
 
 
 def test_counterfactual_preserves_actual_both_pan_decrements_without_live_mutation():
@@ -137,7 +138,34 @@ def test_serve_answer_uses_empty_final_hand_not_old_food_clock(language):
     simulation = result['audit']['simulations'][0]
     assert simulation['final_kitchen_facts'] == [final_fact]
     assert final_fact[language] in result['answer']
-    assert simulation['human']['holding'] is None and simulation['raw_score_delta'] == 29
+    assert simulation['human']['holding'] is None and simulation['raw_score_delta'] == 99
+
+
+@pytest.mark.parametrize('language', ('en', 'zh'))
+@pytest.mark.parametrize('combined,penalty,net', ((False, 5, -6), (True, 20, -21)))
+def test_disposal_answer_separates_item_penalty_from_action_cost(language, combined, penalty, net):
+    state = (next(s for s in regular_trace() if s['human']['holding']
+                  and s['human']['holding']['stage'] == 'finished')
+             if combined else prepared_portion('egg'))
+    while (e._front(state['human']) or {}).get('id') != 'trash':
+        assert not state['terminal']
+        state = e.step(state, e._approach(state, 'human', 'trash'))
+    before = deepcopy(state)
+    selected = plan(state, language=language, intents=[{'kind': 'counterfactual',
+        'subject': 'human', 'purpose': 'comparison', 'temporal_scope': 'current',
+        'evidence_ids': [], 'actions': ['interact'], 'horizon': 1}])
+    question = ('If I put this in the bin now, what penalty and total score change will I get?'
+                if language == 'en' else '现在把手里的东西丢进垃圾桶，丢弃罚分和总分变化各是多少？')
+    result = explainer_for_plan(selected).answer(e, state, e.decide(state), question, language)
+    assert result['status'] == 'answered'
+    simulation = result['audit']['simulations'][0]
+    discarded = [event for event in simulation['events'] if event['type'] == 'waste']
+    assert len(discarded) == 1 and discarded[0]['penalty'] == penalty
+    assert simulation['raw_score_delta'] == simulation['task_score_delta'] == net
+    assert simulation['completed_orders_delta'] == 0 and simulation['human']['holding'] is None
+    assert (f'Trash disposal: −{penalty} points.' if language == 'en' else f'垃圾桶丢弃：扣 {penalty} 分。') in result['answer']
+    assert (f'Task score changes by {net} points' if language == 'en' else f'任务分数变化{net}分') in result['answer']
+    assert state == before
 
 
 def test_question_catalog_never_calls_test_partner_recovery(monkeypatch):
@@ -156,6 +184,9 @@ def test_question_catalog_never_calls_test_partner_recovery(monkeypatch):
 @pytest.mark.parametrize('language', ('en', 'zh'))
 def test_completed_order_question_uses_count_even_when_score_is_negative(language):
     state = next(s for s in regular_trace() if s['metrics']['completed_orders'] == 1)
+    while state['raw_score'] >= 0:
+        assert not state['terminal']
+        state = e.step(state, 'wait')
     assert state['raw_score'] < 0
     result = answer(state, ['system:completed_orders'], 'How many dishes have we completed?', language)
     assert result['status'] == 'answered'

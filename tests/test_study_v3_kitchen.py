@@ -294,7 +294,7 @@ class RecipeStateMachine(unittest.TestCase):
         state = fixture(); state['human'].update(x=3, y=4, facing='right', holding=item())
         nxt = tick(state, 'interact')
         self.assertIsNone(nxt['human']['holding']); self.assertEqual(nxt['metrics']['waste'], 1)
-        self.assertEqual(e.score(nxt)['task_score'], e.score(state)['task_score'] - 4)
+        self.assertEqual(e.score(nxt)['task_score'], e.score(state)['task_score'] - 6)
 
     def test_clearing_burnt_vegetable_keeps_stored_protein_and_job(self):
         state = fixture(); ready_pot(state, 'vegetable', 'tomato', age=7)
@@ -643,7 +643,7 @@ class KitchenFeasibility(unittest.TestCase):
                     frames, events = run(seed, task)
                     final = frames[-1]
                     self.assertEqual(final['metrics']['completed_orders'],5)
-                    self.assertEqual(e.score(final)['task_score'],150-final['turn'])
+                    self.assertEqual(e.score(final)['task_score'],500-final['turn'])
                     self.assertEqual(final['metrics']['spoiled'],0)
                     self.assertEqual(final['metrics']['waste'],0)
                     self.assertLessEqual(final['turn'],cfg['task_budgets'][str(task)])
@@ -692,7 +692,7 @@ class KitchenFeasibility(unittest.TestCase):
         types = {event['type'] for frame in demo['frames'] for event in frame['events']}
         self.assertTrue({'prepared', 'components_combined', 'plated', 'served'} <= types)
         self.assertTrue(any(event['type'] == 'item_placed' and event.get('station', '').startswith('protein') for frame in demo['frames'] for event in frame['events']))
-        self.assertEqual(demo['frames'][-1]['score']['raw_score'], 30 - demo['frames'][-1]['turn'])
+        self.assertEqual(demo['frames'][-1]['score']['raw_score'], 100 - demo['frames'][-1]['turn'])
 
     def test_comprehension_choices_match_independent_mechanisms(self):
         en, zh = e.comprehension(), e.comprehension('zh')

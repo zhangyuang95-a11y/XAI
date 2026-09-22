@@ -859,7 +859,7 @@ def test_kitchen_counterfactual_time_penalty_is_points_not_negative_completed_or
     assert state == before
 
 
-@pytest.mark.parametrize('wait_first,points', [(False,29),(True,28)])
+@pytest.mark.parametrize('wait_first,points', [(False,99),(True,98)])
 @pytest.mark.parametrize('language', ['en','zh'])
 def test_kitchen_delivery_counterfactual_counts_real_completed_orders_independently_of_net_points(wait_first, points, language):
     from domains.kitchen.build_qa_cases import regular_trace

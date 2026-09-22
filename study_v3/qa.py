@@ -159,8 +159,9 @@ For "when was this prepared/how long remains?", use only that portion's
 freshness fact. Moving, handoffs and storage do not restart the prepared clock.
 Read the duration and expiry boundary from the current version's evidence;
 never substitute a remembered ingredient-specific or storage lifetime.
-For "why reward +30 but score +29?", prefer serving_score_rule when available:
-the serving reward and its one-turn cost are different score components.
+For a serving reward versus net score question, prefer serving_score_rule when
+available: use the current evidence's reward and action cost, never remembered
+point values. The reward and its one-turn cost are different score components.
 For a completed-dish count, select system:completed_orders, not system:score;
 the raw score includes elapsed-turn and disposal penalties.
 For "are both pans cooking?", inspect both pan status facts. Two bound orders
@@ -174,7 +175,7 @@ add all oxidation rules, other ingredients' clocks or preparation counts when
 the current event answers the question. A full recipe sequence is appropriate
 only when the cooking sequence was actually requested.
 For why I am disposing of a finished dish and its cost, system:ai_reason already
-states the blocked handoff and 10-point bin penalty: select that reason alone
+states the blocked handoff and current bin penalty: select that reason alone
 unless another requested detail is genuinely absent. Do not repeat it using
 kitchen_score or the complete scoring/disposal rules. For a specific deduction
 that JUST happened, prefer the recent item-disposal event and its point-deduction

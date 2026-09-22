@@ -39,7 +39,7 @@ class StorageClock(unittest.TestCase):
                             state = tick(state, move if actor == 'human' else 'wait', move if actor == 'ai' else 'wait')
                         state = tick(state, 'interact' if actor == 'human' else 'wait', 'interact' if actor == 'ai' else 'wait')
                         self.assertIsNone(state[actor]['holding'])
-                        self.assertEqual(state['metrics']['discard_penalty'], 3)
+                        self.assertEqual(state['metrics']['discard_penalty'], 5)
 
     def test_pickup_on_first_overdue_turn_cannot_restore_freshness(self):
         state, actor = self.stored('human_buffer', 'tomato', 'raw')
@@ -94,7 +94,7 @@ class DeliveryGrace(unittest.TestCase):
         self.assertEqual(e.decide(state)['reason_code'],'discard_blocked_output')
         while not state['metrics']['discarded_dishes']: state=e.step(state,'wait')
         self.assertEqual(e._front(state['ai'])['id'],'trash')
-        self.assertEqual(state['metrics']['discard_penalty'],10)
+        self.assertEqual(state['metrics']['discard_penalty'],20)
 
     def test_cleared_during_either_wait_or_walk_resumes_delivery(self):
         for delay in (0,1,2,3):

@@ -16,6 +16,13 @@ CREATE TABLE IF NOT EXISTS pl3_participants (
 CREATE TABLE IF NOT EXISTS pl3_sessions (
  token_hash TEXT PRIMARY KEY, participant_id TEXT NOT NULL, created DOUBLE PRECISION NOT NULL
 );
+CREATE TABLE IF NOT EXISTS pl3_prolific_links (
+ prolific_pid TEXT PRIMARY KEY, study_id TEXT NOT NULL,
+ submission_id TEXT NOT NULL UNIQUE, participant_id TEXT NOT NULL UNIQUE,
+ instance_id TEXT NOT NULL UNIQUE, allocation_index INTEGER NOT NULL,
+ consent_version TEXT NOT NULL, consented DOUBLE PRECISION NOT NULL,
+ UNIQUE(study_id, allocation_index)
+);
 CREATE TABLE IF NOT EXISTS pl3_instances (
  id TEXT PRIMARY KEY, participant_id TEXT NOT NULL, domain TEXT NOT NULL,
  release_id TEXT NOT NULL, group_code TEXT NOT NULL, mode TEXT NOT NULL,
@@ -116,6 +123,7 @@ class Connection:
 
 # Prefix-specific migration: never inspect or change legacy study tables.
 FLOAT_COLUMNS = {
+    'pl3_prolific_links': ('consented',),
     'pl3_participants': ('created',),
     'pl3_sessions': ('created',),
     'pl3_instances': ('created', 'completed'),

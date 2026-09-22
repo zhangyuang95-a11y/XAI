@@ -3,7 +3,7 @@
 Release: `policylens-three-domain-20260922.v3.8.2`.
 Tutorial: `kitchen-operations-tutorial.v2`.
 Target: https://policylens-warehouse-study.onrender.com/.
-Status: local implementation verified; production receipt pending.
+Status: Live; local and production acceptance complete.
 
 The Kitchen tutorial now has six sections. Disposal of the spoiled practice
 portion completes the final section; the removed seventh menu/scoring reading
@@ -31,4 +31,26 @@ Python cases passed (92 unique cases across the main run and corrected focused
 rerun), as did three existing frontend regression checks. Gameplay simulations
 were not repeated because the engine and rule configuration are unchanged.
 
-Production verification and exact source will be recorded after deployment.
+## Production receipt
+
+Render deployment: `dep-daouug942hec7389itug` (Live, 1m31s).
+Commit: `62d6818f191a63475dbfc4c14f01ed6aa17e63ca`.
+Source SHA-256: `f2d802e396c5f41c873a4291058f57098916e0b0f4940d4959e1645707ce4cda`.
+The public release endpoint confirms v3.8.2, tutorial v2, durable storage and
+study readiness. Deployed JavaScript and CSS match the verified files exactly
+and are served with `no-store, private` cache control.
+
+One synthetic test session physically reached the old seventh section before
+deployment. After deployment it restored as completed 6/6 with identical game
+state and revision, then entered Task 1 at turn 0 and score 0. All 31 earlier
+practice events remained unchanged; the old seventh-section snapshot was
+retained in the recorded v2 transition. A fresh test session completed exactly
+six sections, ending with an actual spoiled-food disposal, and entered Task 1
+at turn 0 and score 0. Both correctly had no Task 1 Q&A permission. Export
+confirmed one initial formal frame per run and zero questions. There were 79
+successful HTTP requests across the before/after checks. No test data was
+classified as human-study participation.
+
+Receipts are under `analysis/kitchen_v382_20260922/` in the parent workspace,
+including `live_release.json`, `live_assets.json` and
+`production_acceptance/tutorial_acceptance_summary.json`.

@@ -283,8 +283,6 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
                 if path=='/api/release':self.reply(200,{**release,'study_ready':store.ready});return
                 if path=='/api/prolific/info':
                     consent=json.loads((ROOT/'docs/consent_review_content.json').read_text())
-                    if settings.prolific_launch_confirmed:
-                        consent['paragraphs'][8]='This project has been reviewed and approved by the NTU Institutional Review Board (NTU-IRB). Questions about your rights as a participant may be directed to <a href="mailto:IRB@ntu.edu.sg">IRB@ntu.edu.sg</a> or +65 6592 2495.'
                     self.reply(200,{'ready':prolific.ready(store),'consent':consent,
                         'consent_version':prolific.CONSENT_VERSION});return
                 if path=='/api/prolific/session':

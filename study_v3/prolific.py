@@ -8,7 +8,7 @@ import secrets
 import time
 from .store import StudyError, uid
 
-CONSENT_VERSION='policylens-prolific-consent-20260922.v1'
+CONSENT_VERSION='policylens-prolific-consent-20260922.v2'
 CELLS=tuple((domain,group) for domain in ('warehouse','pong','kitchen') for group in ('A','B'))
 
 def ready(store):

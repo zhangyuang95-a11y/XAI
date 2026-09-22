@@ -5,8 +5,8 @@ approximately 10 minutes, and GBP 3.00 fixed payment per valid completion.
 There is no performance bonus. Prolific draft settings show GBP 36.00 rewards
 and GBP 12.00 platform fees, totaling GBP 48.00 (VAT GBP 0.00).
 
-The study is still a draft. The new `/prolific/` path is not deployed at the
-production destination; it returned 404 during the publication check. Do not
+The study is still a draft. The v3.10-prolific `/prolific/` entry was verified live after PR #4
+was merged; recruitment readiness remained false at that check. Do not
 publish the Prolific draft before the end-to-end flow is verified live.
 
 ## Configure the deployment
@@ -24,12 +24,18 @@ Set these environment values on the service:
 - `POLICYLENS_PROLIFIC_PLACES=12`.
 - `POLICYLENS_PROLIFIC_LAUNCH_CONFIRMED=0` while reviewing and configuring.
 
-The entry is ready only when the existing persistence/provider/deployment
-checks pass and launch confirmation is explicitly enabled. Before setting
-`POLICYLENS_PROLIFIC_LAUNCH_CONFIRMED=1`, confirm IRB-2025-996 applies to this
-experiment and verify the stated Neon region and DeepSeek provider against the
-actual deployment. This is the concrete outstanding consent-text check supplied
-by the researcher, not a requirement to obtain a new generic approval.
+The researcher explicitly confirmed on 22 September 2026 that IRB-2025-996
+applies to this experiment. Consent version v2 now contains the approved-study
+statement independently of whether recruitment is enabled. This is recorded
+researcher confirmation, not an independent inspection of the approval file.
+
+The entry is ready only when persistence/provider/deployment checks pass and
+launch confirmation is enabled. Verify the stated Neon region and DeepSeek
+provider against the deployment, then enable
+`POLICYLENS_PROLIFIC_LAUNCH_CONFIRMED=1` when recruitment setup is complete.
+Existing v3.9 and v3.10-prolific sessions remain compatible with v3.11-consent;
+the new consent version applies to new enrollments and does not rewrite prior
+consent records.
 
 The saved study ID and completion code are in the task's ignored local
 `output/prolific_draft_settings.json`. Copy the values from the Prolific UI if

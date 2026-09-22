@@ -1,10 +1,10 @@
-# Research team review draft - not for participant distribution
+# Participant information and consent — review copy
 
-The IRB reference is reproduced from the supplied template; its applicability to this experiment remains to be confirmed. The Prolific integration must be deployed and verified before participant recruitment.
+The researcher confirmed on 22 September 2026 that IRB-2025-996 applies to this experiment. This static review copy does not enroll participants; recruitment remains subject to the configured study entry.
 
 **Project Title:** Understanding Human Communication and Collaboration with AI Systems
 
-**NTU-IRB Ref No.:** IRB-2025-996 (template reference)
+**NTU-IRB Ref No.:** IRB-2025-996
 
 You are invited to participate in a research study on **how people communicate and collaborate when solving tasks with an AI teammate**. This study is conducted by **Dr. Yewen Pu** at Nanyang Technological University, together with research team members Yuang Zhang and Hanxuan Ju.
 
@@ -22,7 +22,7 @@ You will receive a **fixed payment of £3.00** for completing this study, accord
 
 If you have questions about this project, please contact Hanxuan Ju or Yuang Zhang via the research team at [JUHA0001@e.ntu.edu.sg](mailto:JUHA0001@e.ntu.edu.sg), or **Dr. Yewen Pu** at [yewen.pu@ntu.edu.sg](mailto:yewen.pu@ntu.edu.sg).
 
-**Research team review note:** The supplied consent-form template states that this project has been reviewed and approved by the NTU Institutional Review Board (NTU-IRB), under reference IRB-2025-996. Confirm that this approval covers the present experiment before restoring the participant-facing approval statement. Questions about your rights as a participant may be directed to [IRB@ntu.edu.sg](mailto:IRB@ntu.edu.sg) or +65 6592 2495.
+This project has been reviewed and approved by the NTU Institutional Review Board (NTU-IRB). Questions about your rights as a participant may be directed to [IRB@ntu.edu.sg](mailto:IRB@ntu.edu.sg) or call +65 6592 2495.
 
 Please print or save a copy of this consent form for your records if desired.
 

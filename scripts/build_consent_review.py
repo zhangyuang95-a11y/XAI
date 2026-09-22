@@ -30,7 +30,7 @@ note = ParagraphStyle('Note', parent=body, fontSize=9, leading=11.6, textColor=c
 
 story = [Paragraph(escape(content['status']), note),
          Paragraph('<b>Project Title:</b> <i>' + escape(content['title']) + '</i>', meta),
-         Paragraph('<b>NTU-IRB Ref No.:</b> <i>' + escape(content['irb_reference']) + '</i> (template reference)', meta),
+         Paragraph('<b>NTU-IRB Ref No.:</b> <i>' + escape(content['irb_reference']) + '</i>', meta),
          Spacer(1, 8)]
 for i, paragraph in enumerate(content['paragraphs']):
     if i == 5:
@@ -41,7 +41,7 @@ story += [Paragraph('[  ] ' + escape(content['agreement']), body), Paragraph('[ 
 def footer(canvas, doc):
     canvas.setFont('Consent', 8)
     canvas.setFillColor(colors.HexColor('#656565'))
-    canvas.drawString(54, 26, 'PolicyLens | Research team review draft | 22 September 2026')
+    canvas.drawString(54, 26, 'PolicyLens | Consent review copy | 22 September 2026')
     canvas.drawRightString(558, 26, str(doc.page))
 
 pdf_path = output / 'policylens_consent_review.pdf'
@@ -68,13 +68,13 @@ button:disabled{color:#666;cursor:not-allowed}.note{font-size:14px;color:#555;ma
 '''
 html += f'<aside class="review"><b>{escape(content["status"])}</b><p>{escape(content["review_notice"])}</p></aside>'
 html += f'<p class="metadata"><b>Project Title:</b> <i>{escape(content["title"])}</i></p>'
-html += f'<p class="metadata"><b>NTU-IRB Ref No.:</b> <i>{escape(content["irb_reference"])}</i> (template reference)</p><br>'
+html += f'<p class="metadata"><b>NTU-IRB Ref No.:</b> <i>{escape(content["irb_reference"])}</i></p><br>'
 html += paragraphs
 html += f'<fieldset><legend>Your decision</legend><label><input type="radio" name="consent" value="yes">{escape(content["agreement"])}</label><label><input type="radio" name="consent" value="no">{escape(content["decline"])}</label></fieldset>'
 html += '<div class="actions"><button disabled>Consent and Continue</button><button disabled>I do not wish to participate</button><button onclick="window.print()">Print / Save a copy</button></div><p class="note">Review preview only. These controls do not enrol you or collect a consent record.</p></main></body></html>'
 (output / 'policylens_acknowledgement_review.html').write_text(html)
 
-plain = f'# {content["status"]}\n\n{content["review_notice"]}\n\n**Project Title:** {content["title"]}\n\n**NTU-IRB Ref No.:** {content["irb_reference"]} (template reference)\n\n'
+plain = f'# {content["status"]}\n\n{content["review_notice"]}\n\n**Project Title:** {content["title"]}\n\n**NTU-IRB Ref No.:** {content["irb_reference"]}\n\n'
 for paragraph in content['paragraphs']:
     paragraph = re.sub(r'<a href="([^"]+)">([^<]+)</a>', r'[\2](\1)', paragraph)
     paragraph = paragraph.replace('<b>', '**').replace('</b>', '**')

@@ -1,7 +1,7 @@
 # Prolific recruitment draft
 
 Status: Prolific draft saved; no paid recruitment has been published and no
-website changes have been deployed.
+further consent update has yet been verified live.
 
 Draft: https://app.prolific.com/researcher/workspaces/studies/6ab28fdbed0497449f769b86
 Project: https://app.prolific.com/researcher/workspaces/projects/6ab28ea45207f93275ae6163
@@ -10,10 +10,13 @@ Confirmed draft settings: 12 places, 10 minutes, desktop only, age 21-100,
 English fluent, no country restriction, one submission per person, URL ID
 parameters, manual approval, no automatic fast-submission rejection.
 
-Deployment access: the current local GitHub account can read but cannot push
-to zhangyuang95-a11y/XAI. A maintainer must merge the change or provide access.
-The researcher's confirmation that IRB-2025-996 covers this experiment remains
-pending; the new recruitment entry stays closed until launch is confirmed.
+Deployment access: GitHub write access was verified after accepting the owner's
+invitation on 22 September 2026. Render project access is still held by the
+website owner. PR #4 is merged and v3.10-prolific was verified live.
+
+IRB-2025-996 applicability to this experiment was explicitly confirmed by the
+researcher on 22 September 2026 (user statement: “IRB是确认的”). This records
+the researcher's confirmation, not an independent review of the approval file.
 
 ## Confirmed design
 
@@ -55,12 +58,10 @@ Before starting, you will see the participant information and acknowledgement
 page. Please read it before deciding whether to take part.
 
 The user supplied the consent template and study-specific wording, a 10-minute
-estimate, researcher contacts, and a fixed GBP 3.00 payment. Confirm approval
-applicability before publication.
+estimate, researcher contacts, and a fixed GBP 3.00 payment. The researcher has confirmed approval applicability.
 
 ## Remaining launch checks
 
-- Confirm the supplied IRB reference covers this experiment.
 - Verify the deployed Neon region and DeepSeek configuration.
 - Merge/deploy and validate the entry and completion flow on Render.
 - Use the smoke-test timings to revise the current 10-minute estimate if needed.
@@ -74,8 +75,8 @@ Consent material received on 22 September: `consent_form.pdf` and the user's
 study-specific text. Review outputs are generated from
 `docs/consent_review_content.json` by `scripts/build_consent_review.py`.
 The source PDF supplies the paragraph layout, project title, and template
-reference IRB-2025-996; its applicability to this experiment is pending the
-researcher's confirmation. The local PDF/HTML outputs are review drafts only.
+reference IRB-2025-996; its applicability to this experiment was confirmed by
+the researcher on 22 September 2026. The local PDF/HTML outputs are review drafts only.
 
 - Preserve age 21+ and separate consent/decline choices; no enrolment on decline.
 - Record the final consent version and timestamp when enrolment is committed.

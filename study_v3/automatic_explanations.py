@@ -6,8 +6,9 @@ future schedule, or group-dependent controller action is introduced.
 
 import json
 
-GUIDED_VERSION = 'first-node-question-guide-v4'
-GUIDED_VERSIONS = frozenset({'guided-question-choice-v3', GUIDED_VERSION})
+GUIDED_VERSION = 'sidebar-early-question-guide-v5'
+FIRST_NODE_VERSIONS = frozenset({'first-node-question-guide-v4', GUIDED_VERSION})
+GUIDED_VERSIONS = frozenset({'guided-question-choice-v3', *FIRST_NODE_VERSIONS})
 VERSION = GUIDED_VERSION
 CONFIRM_VERSIONS = frozenset({'event-nodes-confirm-v2', *GUIDED_VERSIONS})
 SUPPORTED_VERSIONS = frozenset({'event-nodes-v1', *CONFIRM_VERSIONS})
@@ -28,7 +29,7 @@ def charge_phase(decision):
     return None
 
 
-def candidate(domain, state, decision, previous=None):
+def candidate(domain, state, decision, previous=None, *, early_collision=False):
     """One card for the displayed state; reasons describe its NEXT decision.
 
     A collision refers explicitly to the incoming transition instead. Previous
@@ -40,6 +41,8 @@ def candidate(domain, state, decision, previous=None):
     previous = previous or {}
     triggers, keys, facts = [], [], []
     if domain == 'warehouse':
+        if early_collision and (decision.get('collision_checks', {}).get('cases') or decision.get('reason_code') == 'reduce_possible_collision'):
+            triggers.append('collision_risk')
         collision = next((e for e in state.get('events', []) if e['type'] == 'collision'), None)
         if collision:
             triggers.append('collision')
@@ -81,7 +84,7 @@ def public_card(row, language):
             'displayed': row['displayed'] is not None,
             'requires_confirmation': content.get('version') in CONFIRM_VERSIONS,
             'confirmed': row['confirmed'] is not None,
-            'in_question_panel': content.get('version') == GUIDED_VERSION,
+            'in_question_panel': content.get('version') in FIRST_NODE_VERSIONS,
             'guided': guided, 'onboarding': bool(content.get('onboarding')),
             'requested': requested, 'question': QUESTION[language] if guided else '',
             'response': content.get('response')}

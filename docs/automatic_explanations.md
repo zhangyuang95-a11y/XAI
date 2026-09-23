@@ -145,3 +145,29 @@ Confirmation revision verification: 57 backend tests passed, both frontend
 regression scripts passed, and all three real Chromium game previews passed.
 Screenshots were inspected for speech-bubble placement and readable reasons.
 The active production deployment and Prolific cohort were not changed.
+
+
+## Sidebar checks and earlier Warehouse onboarding (v3.21)
+
+New enrollments use `sidebar-early-question-guide-v5`. All explanation choices,
+answers, and 20% understanding ratings use inline right-sidebar cards without
+modal dialogs, backdrops or forced scrolling. The game is paused until a response
+is given; the board remains visible and the AI question-mark button stays usable.
+On small screens, cards flow beneath the board instead of overlapping it.
+
+At the first explanation node, the question mark above the AI is highlighted.
+Clicking it sends the required predefined “Why are you making this decision?”
+question directly; the existing example-and-send route remains available.
+Responses appear on the right, with confirmation required before resuming.
+Later nodes offer “I understand — continue” and “Not yet — show me why”.
+Question-mark requests record `question_source=ai_question_button` in the existing
+explanation record; other requests record `question_panel`.
+
+Warehouse now detects the first *potential* collision node from the already
+computed next decision's collision counterfactuals or `reduce_possible_collision`
+reason. This does not claim a collision is certain, change the controller, or
+wait for an actual collision/charging event. The initial held-out configuration
+already qualifies, so onboarding can occur at Task 2 turn zero. The new risk
+trigger occurs once per run; other event triggers and first-charge-only behavior
+remain unchanged. Previously enrolled v4 sessions keep their original trigger
+protocol. Task 1/3 and control-group explanation access remain unchanged.

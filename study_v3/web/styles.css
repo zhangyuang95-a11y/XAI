@@ -134,3 +134,13 @@ main{max-width:1480px;padding-top:24px}.panel{border-radius:20px;box-shadow:0 16
 @media(max-width:480px){.understanding-dialog{padding:20px 14px}.understanding-scale{gap:5px}.understanding-scale label{font-size:11px}.understanding-dialog h2{font-size:20px}}
 
 .reward-notice{border:1px solid var(--line,#d8e3e5);border-radius:12px;padding:14px 18px;margin:0 0 20px;background:#f5faf8;font-size:13px;line-height:1.5;color:#23443f}.reward-notice p{margin:6px 0 0}.reward-notice .reward-earned{border-top:1px solid #d8e3e5;padding-top:8px}
+/* Inline checks leave the board visible and the question-mark target clickable. */
+.side-check.automatic-dialog,.side-check.understanding-dialog{position:static;inset:auto;margin:0 0 16px;width:100%;max-width:100%;max-height:none;overflow:visible;padding:18px;box-shadow:none;border:2px solid #ef9c70;background:#fffdfb;border-radius:16px}
+.side-check.automatic-dialog::after{display:none}
+.side-check.understanding-dialog{border-color:#a69aff;background:#fbfaff}
+.side-check h2{font-size:19px;line-height:1.4}
+.side-check .understanding-scale{gap:5px}
+.side-check .understanding-scale label{padding:8px 3px;font-size:11px}
+.side-check .automatic-body{font-size:15px;line-height:1.6;max-height:none}
+.question-guide-target{outline:4px solid #ffd375;outline-offset:4px;box-shadow:0 0 0 9px #ffd37540}
+.question-guide-label{position:absolute;bottom:calc(100% + 12px);left:50%;transform:translateX(-50%);white-space:nowrap;background:#fff7df;color:#573400;border:1px solid #e2ba61;border-radius:8px;font-size:12px;line-height:1.4;padding:5px 8px;pointer-events:none}

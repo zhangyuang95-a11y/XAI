@@ -425,7 +425,7 @@ class Store:
         if instance['group_code']!='A':return
         config=db.one('SELECT version FROM pl3_auto_explanation_settings WHERE instance_id=?',(instance['id'],))
         if not config or config['version'] not in automatic_explanations.SUPPORTED_VERSIONS:return
-        card=automatic_explanations.candidate(instance['domain'],state,decision,previous)
+        card=automatic_explanations.candidate(instance['domain'],state,decision,previous,early_collision=config['version']==automatic_explanations.GUIDED_VERSION)
         if config['version']=='guided-question-choice-v3' and state['turn']==0 and not state['terminal']:
             card=card or {'trigger_key':'turn:0','trigger_types':[], 'turn':0,
                          'body':{'en':decision['reason_en'],'zh':decision['reason_zh']},
@@ -433,8 +433,13 @@ class Store:
             card['onboarding']=True
             card['trigger_types'].append('guided_question')
         if not card:return
-        if config['version']==automatic_explanations.GUIDED_VERSION:
+        if config['version'] in automatic_explanations.FIRST_NODE_VERSIONS:
             card['onboarding']=not bool(db.one('SELECT id FROM pl3_auto_explanations WHERE run_id=?',(run_id,)))
+        if 'collision_risk' in card['trigger_types']:
+            prior=db.all('SELECT content_json FROM pl3_auto_explanations WHERE run_id=?',(run_id,))
+            if any('collision_risk' in json.loads(r['content_json'])['trigger_types'] for r in prior):
+                card['trigger_types'].remove('collision_risk')
+                if not card['trigger_types']:return
         if instance['domain']=='warehouse' and any(t.startswith('charge_') for t in card['trigger_types']):
             prior=db.all('SELECT content_json FROM pl3_auto_explanations WHERE run_id=?',(run_id,))
             charge_seen=any(any(t.startswith('charge_') for t in json.loads(r['content_json'])['trigger_types']) for r in prior)
@@ -468,6 +473,7 @@ class Store:
         if content.get('requested_at') is None:
             language=instance['language']
             content.update(requested_at=time.time(),question_id='why',
+                           question_source='ai_question_button' if payload.get('source')=='ai_question_button' else 'question_panel',
                            question=automatic_explanations.QUESTION[language],question_language=language)
             db.execute('UPDATE pl3_auto_explanations SET content_json=? WHERE id=?',(encode(content),row['id']))
 

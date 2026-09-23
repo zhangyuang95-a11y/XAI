@@ -13,14 +13,14 @@ for(const checkpoint of [20,40,60,80,100]){
   }else if(!view.state.terminal)await command('action',{run_id:view.run_id,turn:view.state.turn,action:'wait'});
   else throw Error('Reached end without required rating');
  }});
- await p.waitForFunction(()=>document.querySelector('#understandingDialog')?.open&&!busy);
+ await p.waitForFunction(()=>!!document.querySelector('#understandingDialog')&&!busy);
  assert.equal(await p.evaluate(()=>pendingUnderstanding().checkpoint),checkpoint);
  const turn=await p.evaluate(()=>view.state.turn);assert.equal(turn,checkpoint*90/100);
  assert.equal(await p.locator('#understandingForm input:checked').count(),0);assert(await p.locator('#submitUnderstanding').isDisabled());
  await p.keyboard.press('Escape');await p.keyboard.press('Space');await p.keyboard.press('a');
- assert.equal(await p.evaluate(()=>view.state.turn),turn);assert(await p.locator('#understandingDialog').evaluate(el=>el.open));
+ assert.equal(await p.evaluate(()=>view.state.turn),turn);assert(await p.locator('#understandingDialog').isVisible());assert.equal(await p.locator('dialog[open]').count(),0);
  if(checkpoint===20){
-  await p.reload();await p.waitForFunction(()=>document.querySelector('#understandingDialog')?.open&&!busy);
+  await p.reload();await p.waitForFunction(()=>!!document.querySelector('#understandingDialog')&&!busy);
   assert.equal(await p.evaluate(()=>view.state.turn),turn);
   await p.screenshot({path:'output/understanding-ratings/pong-en.png'});
   await p.evaluate(()=>{lang='zh';return command('language',{language:'zh'})});

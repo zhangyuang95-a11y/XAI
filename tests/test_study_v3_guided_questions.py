@@ -76,3 +76,30 @@ def test_later_nodes_allow_understood_without_exposure_or_requested_answer(tmp_p
     a.command('next');assert not a.view['automatic_explanations']
     with pytest.raises(StudyError):a.command('request_explanation',explanation_id=c['id'],question_id='why')
     store.db.close()
+
+
+def test_warehouse_pre_collision_guide_and_legacy_protocol(tmp_path,monkeypatch):
+    from study_v3 import automatic_explanations as auto
+    settings=Settings(database=str(tmp_path/'early.db'),automatic_explanations=True)
+    store=Store(settings)
+    with monkeypatch.context() as m:
+        m.setattr(auto,'VERSION','first-node-question-guide-v4')
+        old=Flow(store,'warehouse','A');task2(old)
+    new=Flow(store,'warehouse','A');task2(new)
+    # The initial warehouse state already has a controller-verified collision
+    # counterfactual. Teach asking before any risky participant move is accepted.
+    assert not old.view['automatic_explanations']
+    c=new.view['automatic_explanations'][0]
+    assert c['turn']==0 and c['onboarding'] and c['trigger_types']==['collision_risk']
+    assert not any(e['type']=='collision' for e in new.view['state']['events'])
+    new.command('request_explanation',explanation_id=c['id'],question_id='why',source='ai_question_button')
+    new.command('confirm_explanation',explanation_id=c['id'],choice='explanation')
+    for _ in range(15):
+        pending=next((c for c in new.view['automatic_explanations'] if not c['confirmed']),None)
+        if pending:new.command('confirm_explanation',explanation_id=pending['id'],choice='understood')
+        new.step('wait')
+    assert sum('collision_risk' in c['trigger_types'] for c in new.view['automatic_explanations'])==1
+    with store.db.transaction() as db:
+        row=db.one('SELECT content_json FROM pl3_auto_explanations WHERE id=?',(c['id'],))
+        assert json.loads(row['content_json'])['question_source']=='ai_question_button'
+    store.db.close()

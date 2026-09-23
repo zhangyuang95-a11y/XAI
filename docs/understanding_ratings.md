@@ -20,9 +20,9 @@ Progress uses the fixed turn budget, with checkpoints rounded up:
 An early terminal state triggers one end (100%) rating at the actual ending turn;
 unreached intermediate checkpoints are not backfilled. A terminal-state rating
 must be submitted before entering the next task or displaying demo completion
-without its modal. When a rating and explanation share a turn, the rating comes
+without its pending rating. When a rating and explanation share a turn, the rating comes
 first. Actions, next-task navigation, and requesting explanations are blocked by
-the server until the rating is submitted. Escape cannot bypass the modal.
+the server until the rating is submitted. The rating is an inline right-sidebar card; Escape cannot bypass the response gate. The game board remains visible, including at the final checkpoint.
 
 `pl3_understanding_settings` persists protocol version and task/group eligibility
 at enrollment. Existing sessions without this row remain unchanged. The runtime
@@ -35,7 +35,7 @@ run, task, checkpoint percentage, actual turn, turn budget, protocol, creation a
 submission timestamps, rating, and response language. Join instances for domain,
 group, mode, and release. Both new tables are included in authenticated JSONL/CSV
 research exports with the existing release/mode filters. Pending prompts survive
-reconnects; exact command retries cannot duplicate a response. Rating-modal time
+reconnects; exact command retries cannot duplicate a response. Rating-card time
 uses the separate `understanding_rating` timing category, not `active` gameplay.
 
 Validation includes both groups across all three domains, Task 1/3 exclusion,

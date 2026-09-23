@@ -90,7 +90,7 @@ def make_preview_server(*, host='127.0.0.1', port=9131, origin=None, database=No
                 except Exception as exc:
                     self.failure(exc)
                 return
-            allowed={'ask','answer-displayed','action','request_explanation','confirm_explanation','automatic-explanation-displayed','language','timing','understanding_rating','skip_prompts'}
+            allowed={'open_question_guide','ask','answer-displayed','action','request_explanation','confirm_explanation','automatic-explanation-displayed','language','timing','understanding_rating','skip_prompts'}
             if not path.startswith('/api/study/') or path.removeprefix('/api/study/') not in allowed:
                 return self.failure(StudyError('preview_only',403))
             super().do_POST()

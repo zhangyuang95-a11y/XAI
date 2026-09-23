@@ -6,11 +6,14 @@ const p=await b.newPage();const errors=[];p.on('pageerror',e=>errors.push(e.mess
 await p.goto('http://127.0.0.1:9155/try/'+domain);await p.getByRole('button',{name:'Try '+label,exact:true}).click();
 await p.waitForFunction(()=>typeof view!=='undefined'&&!!view?.state&&!busy);
 assert(await p.evaluate(()=>view.optional_prompts));
-await p.evaluate(async()=>{while(!pendingAutomatic()&&!view.state.terminal)await command('action',{run_id:view.run_id,turn:view.state.turn,action:'wait'})});
+await p.evaluate(async()=>{while(!pendingAutomatic()&&!pendingUnderstanding()&&!view.state.terminal)await command('action',{run_id:view.run_id,turn:view.state.turn,action:'wait'})});
+await p.evaluate(async()=>{const g=questionGuide();if(g?.four_step){await command('request_explanation',{explanation_id:g.id,question_id:'why'});await command('confirm_explanation',{explanation_id:g.id,choice:'explanation'});while(!pendingAutomatic()&&!pendingUnderstanding()&&!view.state.terminal)await command('action',{run_id:view.run_id,turn:view.state.turn,action:'wait'})}});
 let turn=await p.evaluate(()=>view.state.turn);
+if(await p.evaluate(()=>!!pendingAutomatic()&&!pendingUnderstanding())){
 assert(await p.locator('[data-action="wait"]').isEnabled());
 await p.locator('[data-action="wait"]').click();await p.waitForFunction(t=>view.state.turn===t+1&&!busy,turn);
 assert((await p.evaluate(()=>view.automatic_explanations)).some(c=>c.skipped&&!c.confirmed));
+}
 await p.evaluate(async()=>{while(!pendingUnderstanding()&&!view.state.terminal)await command('action',{run_id:view.run_id,turn:view.state.turn,action:'wait'})});
 assert(await p.locator('#understandingDialog').isVisible());turn=await p.evaluate(()=>view.state.turn);
 assert(await p.locator('[data-action="wait"]').isDisabled());

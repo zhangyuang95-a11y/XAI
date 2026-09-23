@@ -205,3 +205,16 @@ modal is introduced. `pl3_prompt_settings` for new enrollments records
 `optional-explanations-required-ratings-v2`. Existing skipped historical ratings
 are preserved as missing; no data is rewritten. All pending/future ratings in
 resumed compatible sessions follow the corrected required-rating gate.
+
+
+## v3.24: one required four-step question walkthrough
+
+New treatment enrollments use `four-step-question-guide-v6`. At the first natural
+explanation node, the sidebar shows numbered steps: click the AI question mark,
+choose a question, confirm/send and read the answer, then Confirm and continue.
+Only this first guide blocks gameplay and cannot be skipped. Opening the guide,
+requesting an answer and confirming it are persisted separately; refreshing does
+not bypass the final confirmation. The selected question and controller-grounded
+answer are recorded. Later explanation nodes remain optional. Task 2 ratings
+remain mandatory in both groups; control users receive no question walkthrough.
+Earlier enrollments retain their recorded explanation protocol.

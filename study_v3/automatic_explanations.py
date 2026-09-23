@@ -6,14 +6,15 @@ future schedule, or group-dependent controller action is introduced.
 
 import json
 
-GUIDED_VERSION = 'sidebar-early-question-guide-v5'
-FIRST_NODE_VERSIONS = frozenset({'first-node-question-guide-v4', GUIDED_VERSION})
+GUIDED_VERSION = 'four-step-question-guide-v6'
+FIRST_NODE_VERSIONS = frozenset({'first-node-question-guide-v4', 'sidebar-early-question-guide-v5', GUIDED_VERSION})
 GUIDED_VERSIONS = frozenset({'guided-question-choice-v3', *FIRST_NODE_VERSIONS})
 VERSION = GUIDED_VERSION
 CONFIRM_VERSIONS = frozenset({'event-nodes-confirm-v2', *GUIDED_VERSIONS})
 SUPPORTED_VERSIONS = frozenset({'event-nodes-v1', *CONFIRM_VERSIONS})
 QUESTION = {'en': 'Why are you making this decision?', 'zh': '你为什么做这个决定？'}
 
+QUESTIONS = {'why': QUESTION, 'next': {'en': 'What will you do next, and why?', 'zh': '你下一步会怎么做，为什么？'}}
 
 def detouring(decision):
     selected = decision.get('controller_trace', {}).get('selected_ai_action', {})
@@ -79,7 +80,7 @@ def public_card(row, language):
     guided = content.get('version') in GUIDED_VERSIONS
     requested = content.get('requested_at') is not None
     return {'id': row['id'], 'turn': row['turn'],
-            'body': content['body'][language] if not guided or requested else '',
+            'body': ((content.get('next_body', content['body']) if content.get('question_id')=='next' else content['body'])[language]) if not guided or requested else '',
             'trigger_types': content['trigger_types'],
             'displayed': row['displayed'] is not None,
             'requires_confirmation': content.get('version') in CONFIRM_VERSIONS,
@@ -87,5 +88,8 @@ def public_card(row, language):
             'skipped': row.get('skipped') is not None,
             'in_question_panel': content.get('version') in FIRST_NODE_VERSIONS,
             'guided': guided, 'onboarding': bool(content.get('onboarding')),
-            'requested': requested, 'question': QUESTION[language] if guided else '',
+            'four_step': content.get('version')==GUIDED_VERSION and bool(content.get('onboarding')),
+            'guide_opened': content.get('guide_opened_at') is not None,
+            'question_options': [{'id': k, 'text': v[language]} for k,v in QUESTIONS.items()],
+            'requested': requested, 'question': QUESTIONS.get(content.get('question_id'), QUESTION)[language] if guided else '',
             'response': content.get('response')}

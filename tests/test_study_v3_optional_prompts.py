@@ -12,6 +12,7 @@ def test_explanations_optional_but_all_ratings_required(tmp_path,domain,group):
     store=Store(settings);f=Flow(store,domain,group);task2(f)
     assert f.view['optional_prompts']
     seen=[]
+    first_id=None
     while not f.view['state']['terminal']:
         if f.view['understanding_rating']:
             r=f.view['understanding_rating'];seen.append(r['id'])
@@ -22,6 +23,17 @@ def test_explanations_optional_but_all_ratings_required(tmp_path,domain,group):
                 with pytest.raises(StudyError,match='understanding_rating_required'):f.command(name)
             with pytest.raises(StudyError,match='understanding_rating_required'):f.step('wait')
             f.command('understanding_rating',rating_id=r['id'],rating=3)
+        guide=next((c for c in f.view['automatic_explanations'] if c.get('four_step') and not c['confirmed']),None)
+        if guide:
+            first_id=guide['id']
+            for name in ['skip_prompts','next']:
+                with pytest.raises(StudyError,match='explanation_confirmation_required'):f.command(name)
+            with pytest.raises(StudyError,match='explanation_confirmation_required'):f.step('wait')
+            f.command('open_question_guide',explanation_id=first_id)
+            assert f.view['automatic_explanations'][0]['guide_opened']
+            f.command('request_explanation',explanation_id=first_id,question_id='next')
+            with pytest.raises(StudyError,match='explanation_confirmation_required'):f.step('wait')
+            f.command('confirm_explanation',explanation_id=first_id,choice='explanation')
         f.step('wait')
     last=f.view['understanding_rating'];assert last['checkpoint']==100
     with pytest.raises(StudyError,match='understanding_rating_required'):f.command('next')
@@ -32,8 +44,8 @@ def test_explanations_optional_but_all_ratings_required(tmp_path,domain,group):
     assert all(r['rating']==3 and r['submitted'] is not None for r in ratings)
     skipped={r['prompt_id'] for r in exported['prompt_skips']}
     assert not (set(seen+[last['id']])&skipped)
-    assert not exported['auto_explanation_confirmations']
-    if group=='A':assert all(c['id'] in skipped for c in exported['auto_explanations'])
+    assert len(exported['auto_explanation_confirmations'])==(1 if group=='A' else 0)
+    if group=='A':assert all(c['id'] in skipped or c['id']==first_id for c in exported['auto_explanations'])
     store.db.close()
 
 def test_optional_answers_remain_available_and_skips_persist(tmp_path):
@@ -41,8 +53,10 @@ def test_optional_answers_remain_available_and_skips_persist(tmp_path):
     store=Store(settings);f=Flow(store,'warehouse','A');task2(f)
     c=f.view['automatic_explanations'][0]
     f.command('request_explanation',explanation_id=c['id'],question_id='why',source='ai_question_button')
+    with pytest.raises(StudyError,match='explanation_confirmation_required'):f.step('wait')
+    f.command('confirm_explanation',explanation_id=c['id'],choice='explanation')
     f.step('wait')
-    c=f.view['automatic_explanations'][0];assert c['skipped'] and not c['confirmed'] and c['response'] is None and c['requested']
+    c=f.view['automatic_explanations'][0];assert c['confirmed'] and not c['skipped'] and c['requested']
     while not f.view['understanding_rating']:f.step('wait')
     r=f.view['understanding_rating'];f.command('understanding_rating',rating_id=r['id'],rating=4)
     while not f.view['understanding_rating']:f.step('wait')

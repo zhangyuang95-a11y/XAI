@@ -1,3 +1,5 @@
+> Historical first-pilot configuration (£3.00 flat). For new enrollments, see [performance rewards](performance_rewards.md): £2.80 base plus up to £0.60.
+
 # Prolific recruitment draft
 
 Status: Prolific draft saved; no paid recruitment has been published and no

@@ -1,3 +1,5 @@
+> Historical first-pilot configuration (£3.00 flat). For new enrollments, see [performance rewards](performance_rewards.md): £2.80 base plus up to £0.60.
+
 # Prolific smoke-test deployment
 
 This change is prepared for 12 people, two assigned to each of six cells,

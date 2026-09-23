@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS pl3_enrollments (
  instance_id TEXT PRIMARY KEY, consent INTEGER NOT NULL, initial_language TEXT NOT NULL,
  assignment_source TEXT NOT NULL, scenario_version TEXT NOT NULL, created DOUBLE PRECISION NOT NULL
 );
+CREATE TABLE IF NOT EXISTS pl3_reward_settings (
+ instance_id TEXT PRIMARY KEY, policy_json TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS pl3_runs (
  id TEXT PRIMARY KEY, instance_id TEXT NOT NULL, task INTEGER NOT NULL,
  seed INTEGER NOT NULL, state_json TEXT NOT NULL, status TEXT NOT NULL,

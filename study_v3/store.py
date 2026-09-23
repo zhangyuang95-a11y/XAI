@@ -12,7 +12,7 @@ import uuid
 from . import RELEASE_ID, SUPPORTED_RELEASE_IDS, KITCHEN_SUPPORTED_RELEASE_IDS
 from .database import Database
 from .registry import engine, demonstration, MODULES, scenario_config
-from . import kitchen_tutorial, automatic_explanations, understanding
+from . import kitchen_tutorial, automatic_explanations, understanding, rewards
 
 def encode(value): return json.dumps(value, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
 def digest(value): return hashlib.sha256(value.encode()).hexdigest()
@@ -45,7 +45,7 @@ EXPLANATION_ITEMS = [
 EXPORT_TABLES = ('participants','enrollments','instances','runs','frames',
                  'questions','questionnaires','timings','releases','tutorials','tutorial_events',
                  'auto_explanation_settings','auto_explanations','auto_explanation_confirmations',
-                 'understanding_settings','understanding_ratings')
+                 'understanding_settings','understanding_ratings','reward_settings')
 
 class Store:
     def __init__(self, settings, explainer=None):
@@ -165,6 +165,7 @@ class Store:
                 else:
                     assignment='existing_participant' if existing else 'randomized_balanced'
                 db.execute('INSERT INTO pl3_enrollments VALUES(?,?,?,?,?,?)',(iid,1,language,assignment,config.get('scenario_version',config['version']),time.time()))
+                db.execute('INSERT INTO pl3_reward_settings VALUES(?,?)',(iid,encode(rewards.policy(domain))))
                 if self.settings.automatic_explanations:
                     db.execute('INSERT INTO pl3_auto_explanation_settings VALUES(?,?,?)',
                         (iid,automatic_explanations.VERSION,time.time()))
@@ -211,6 +212,7 @@ class Store:
             group_assignment_source=enrollment['assignment_source'] if enrollment else None)
         runs=db.all('SELECT id,task,status,score_json,state_json FROM pl3_runs WHERE instance_id=? ORDER BY task',(instance['id'],))
         result['task_runs']=[{'id':r['id'],'task':r['task'],'status':r['status'],'score':eng.public_state(json.loads(r['state_json']))['score'],'turn':json.loads(r['state_json'])['turn']} for r in runs]
+        result['rewards']=rewards.summary(db,instance['id'])
         if instance['stage']=='demo':
             if instance['domain']=='kitchen':
                 row=db.one('SELECT state_json FROM pl3_tutorials WHERE instance_id=?',(instance['id'],))
@@ -630,10 +632,11 @@ class Store:
             'auto_explanation_settings': 'i.id=r.instance_id',
             'auto_explanations': 'i.id=r.instance_id',
             'auto_explanation_confirmations': 'i.id=r.instance_id',
+            'reward_settings': 'i.id=r.instance_id',
             'understanding_settings': 'i.id=r.instance_id',
             'understanding_ratings': 'i.id=r.instance_id',
         }
-        ordering = {'participants':'r.id','enrollments':'r.instance_id','instances':'r.id',
+        ordering = {'reward_settings':'r.instance_id','participants':'r.id','enrollments':'r.instance_id','instances':'r.id',
                     'runs':'r.id','frames':'r.run_id,r.turn','questions':'r.id',
                     'questionnaires':'r.instance_id','timings':'r.id','releases':'r.id',
                     'tutorials':'r.instance_id','tutorial_events':'r.id',

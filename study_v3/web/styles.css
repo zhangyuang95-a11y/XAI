@@ -132,3 +132,5 @@ main{max-width:1480px;padding-top:24px}.panel{border-radius:20px;box-shadow:0 16
 .rating-number{font-size:22px;font-weight:700}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 @media(max-width:480px){.understanding-dialog{padding:20px 14px}.understanding-scale{gap:5px}.understanding-scale label{font-size:11px}.understanding-dialog h2{font-size:20px}}
+
+.reward-notice{border:1px solid var(--line,#d8e3e5);border-radius:12px;padding:14px 18px;margin:0 0 20px;background:#f5faf8;font-size:13px;line-height:1.5;color:#23443f}.reward-notice p{margin:6px 0 0}.reward-notice .reward-earned{border-top:1px solid #d8e3e5;padding-top:8px}

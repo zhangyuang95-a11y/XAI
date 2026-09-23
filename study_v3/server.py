@@ -23,7 +23,7 @@ from .config import Settings
 from .registry import MODULES, engine, demonstration
 from .kitchen_tutorial import VERSION as KITCHEN_TUTORIAL_VERSION
 from .store import Store, StudyError, encode
-from . import prolific, automatic_explanations, understanding
+from . import prolific, automatic_explanations, understanding, rewards
 
 ROOT=Path(__file__).resolve().parents[1]
 WEB=ROOT/'study_v3/web'
@@ -88,6 +88,7 @@ def manifest(settings):
             'version':understanding.VERSION,'tasks':list(understanding.TASKS),'groups':list(understanding.GROUPS),
             'checkpoints':list(understanding.CHECKPOINTS),'scale':[1,5],
             'progress_basis':'turn_budget_with_end_rating_on_early_completion'},
+        'rewards':{domain:rewards.policy(domain) for domain in MODULES},
         'default_language':'en','mode':settings.mode,'storage_persistent':settings.persistent,
         'prolific':{'entry_path':'/prolific/','assignment':'randomized_block_6',
             'one_game_per_participant':True,'consent_version':prolific.CONSENT_VERSION},

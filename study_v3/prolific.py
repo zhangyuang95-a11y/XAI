@@ -6,9 +6,10 @@ which serializes across processes on PostgreSQL and writers on SQLite.
 import re
 import secrets
 import time
+from . import rewards
 from .store import StudyError, uid
 
-CONSENT_VERSION='policylens-prolific-consent-20260922.v2'
+CONSENT_VERSION='policylens-prolific-consent-20260923.v3-rewards'
 CELLS=tuple((domain,group) for domain in ('warehouse','pong','kitchen') for group in ('A','B'))
 
 def ready(store):
@@ -89,6 +90,8 @@ def payment_records(store):
         records=db.all('SELECT l.*,i.domain,i.group_code,i.stage,i.completed,r.submission_status,r.reason AS release_reason,r.released FROM pl3_prolific_links l JOIN pl3_instances i ON i.id=l.instance_id LEFT JOIN pl3_prolific_releases r ON r.instance_id=i.id WHERE l.study_id=? ORDER BY l.allocation_index',(store.settings.prolific_study_id,))
         for record in records:
             record['scores']=[{'task':r['task'],'score_json':r['score_json']} for r in db.all('SELECT task,score_json FROM pl3_runs WHERE instance_id=? AND status=? ORDER BY task',(record['instance_id'],'completed'))]
+            reward=rewards.summary(db,record['instance_id'])
+            if reward is not None:record['rewards']=reward
         return records
 
 def release_slot(store,payload):

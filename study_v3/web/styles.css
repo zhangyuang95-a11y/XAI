@@ -113,3 +113,10 @@ main{max-width:1480px;padding-top:24px}.panel{border-radius:20px;box-shadow:0 16
 .question-guide{background:#fff4e8;padding:14px;border-radius:12px;margin-bottom:14px}
 .question-guide h4{margin:0 0 8px}.question-guide p{margin:0;line-height:1.6}
 .guided-example{display:block;width:100%;margin:8px 0 12px;padding:12px;border:1px solid #c74b24}
+
+/* Ask from the AI itself; the canvas renderer keeps this bubble above its actor. */
+#boardDrawing{position:relative}
+.ai-question-button{position:absolute;z-index:2;transform:translate(-50%,-50%);width:32px;height:32px;padding:0;display:grid;place-items:center;border:2px solid #fff;border-radius:50%;background:#bf431e;color:#fff;font-size:22px;font-weight:800;line-height:1;box-shadow:0 2px 7px #172c4140}
+.ai-question-button::after{content:"";position:absolute;left:11px;bottom:-6px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid #bf431e}
+.ai-question-button:hover{background:#963315}
+.ai-question-button:focus-visible{outline:3px solid #4f6ff0;outline-offset:3px}

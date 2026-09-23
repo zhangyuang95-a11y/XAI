@@ -1,6 +1,8 @@
 # Guided questions and optional explanations
 
-Current preview release: `policylens-three-domain-20260923.v3.17-first-node-guide`.
+Current release: `policylens-three-domain-20260923.v3.18-ai-question-button`.
+
+During explanation-enabled Task 2, a keyboard-accessible question-mark button follows the AI actor in all three games. It focuses the question panel (or the first-node guided question) without advancing the game. It is absent when questions are unavailable. The first-node protocol remains unchanged.
 New automatic-explanation enrollments use `first-node-question-guide-v4`.
 
 Only Group A receives this guide. Task 2 starts normally at turn 0. No extra

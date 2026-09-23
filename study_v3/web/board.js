@@ -41,6 +41,15 @@ window.StudyBoard = class StudyBoard {
     ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, 0, w, h);
     if (after.domain === 'pong') this.pong(ctx, before, after, p, w, h);
     else this.grid(ctx, state, before, after, p, w, h);
+    // A real button follows the animated actor while remaining keyboard accessible.
+    const question = canvas.parentElement?.querySelector('#aiQuestionButton');
+    if (question) {
+      const x = Number(canvas.dataset.aiAnchorX) * canvas.clientWidth;
+      const y = Number(canvas.dataset.aiAnchorY) * canvas.clientHeight;
+      const head = after.domain === 'pong' ? 10 * canvas.clientHeight / h : .72 * canvas.clientWidth / after.width;
+      question.style.left = (canvas.offsetLeft + Math.max(18, Math.min(canvas.clientWidth - 18, x))) + 'px';
+      question.style.top = (canvas.offsetTop + Math.max(18, y - head - 21)) + 'px';
+    }
   }
   label(ctx, text, x, y, size = 14, color = '#26324a', weight = 650) {
     ctx.fillStyle = color; ctx.font = `${weight} ${size}px Inter, system-ui, sans-serif`;

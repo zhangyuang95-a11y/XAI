@@ -121,7 +121,7 @@ function board(s,isDemo=false){
  const practice=isDemo&&domain==='kitchen';
  return `<section class="panel board-panel"><div class="board-toolbar"><span>${isDemo?tr(practice?'tutorialNote':'demoNote'):tr('publicInfo')}</span><div class="legend"><span><i class="swatch"></i>${tr('you')}</span><span><i class="swatch ai"></i>${tr('ai')}</span></div></div>
  <div class="scorebar ${isDemo?'demo-scorebar':''} ${practice?'tutorial-scorebar':''}">${isDemo?'':`<div class="metric"><span>${tr('score')}</span><b>${Number(score.task_score||0).toFixed(0)}</b>${scoreSuffix(score)}${scoreFeedback(s)}</div>`}<div class="metric"><span>${tr(practice?'practiceTurn':'turn')}</span><b>${s.turn}</b>${practice?'':`<small> / ${s.max_turns}</small>`}</div>${practice?'':`<div class="metric"><span>${tr('remaining')}</span><b>${Math.max(0,s.max_turns-s.turn)}</b></div>`}</div>
- <div id="boardDrawing" class="board ${s.domain==='pong'?'pong-board':''}"><canvas id="studyCanvas" role="img" aria-label="${esc(title())}" tabindex="0"></canvas></div></section>`;
+ <div id="boardDrawing" class="board ${s.domain==='pong'?'pong-board':''}"><canvas id="studyCanvas" role="img" aria-label="${esc(title())}" tabindex="0"></canvas>${!isDemo&&view?.can_ask?`<button id="aiQuestionButton" class="ai-question-button" type="button" aria-controls="chatPanel" aria-label="${lang==='zh'?'向 AI 队友提问':'Ask your AI teammate a question'}" title="${lang==='zh'?'点击向 AI 队友提问':'Click to ask your AI teammate'}">?</button>`:''}</div></section>`;
 }
 function scoreFeedback(s){const penalties=(s.events||[]).filter(e=>e.type==='waste'&&Number(e.score_delta)<0);return penalties.map(e=>`<strong class="score-penalty" role="status">${Number(e.score_delta)}</strong>`).join('');}
 function kitchenMenu(s){
@@ -324,6 +324,18 @@ async function render({animate=false,displayState=null}={}){
  syncAutomaticDialog();observeAutomatic();
 }
 function bind(){if(prolificEntry&&!view?.instance_id)window.ProlificEntry.bind(async next=>{view=next;domain=next.domain;participantId=next.participant_id;await render();},render);if($('startForm'))$('startForm').onsubmit=async e=>{e.preventDefault();if(busy||(!preview&&!release?.study_ready))return;busy=true;updateEntryStatus();adminKey=$('adminInput')?.value||'';try{view=await api('/api/study/session',{domain,participant_id:$('participantInput').value,language:lang,consent:$('consentInput').checked,mode:preview?'preview':'pilot',group:$('groupInput').value},adminKey?{Authorization:'Bearer '+adminKey}:{});participantId=view.participant_id;adminKey='';render();}catch(err){if(err.code==='study_not_ready'){release={...release,study_ready:false};entryFailed=false;entryCheckedAt=-Infinity;}report(err);}finally{busy=false;updateEntryStatus();scheduleEntryCheck();}};
+ if($('aiQuestionButton')){
+  $('aiQuestionButton').onfocus=stopHeld;
+  $('aiQuestionButton').onkeydown=e=>{if(e.key===' '||e.key==='Enter')e.stopPropagation();};
+ }
+ if($('aiQuestionButton'))$('aiQuestionButton').onclick=()=>{
+  stopHeld();if(!view?.can_ask)return;
+  const panel=$('chatPanel');if(!panel)return;
+  panel.scrollIntoView({block:'center',behavior:'instant'});
+  const target=questionGuide()?($('guidedQuestionExample')||$('confirmExplanationButton')):$('questionInput');
+  if(target&&!target.disabled)target.focus({preventScroll:true});
+  else {panel.tabIndex=-1;panel.focus({preventScroll:true});}
+ };
  if($('entryRetryButton'))$('entryRetryButton').onclick=checkEntryReadiness;updateEntryStatus();scheduleEntryCheck();
  document.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>{stopHeld();submitAction(b.dataset.action);});
  document.querySelectorAll('.domain-navigation a').forEach(link=>link.onclick=stopHeld);

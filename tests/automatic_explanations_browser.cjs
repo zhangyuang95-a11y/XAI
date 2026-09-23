@@ -13,6 +13,24 @@ const base=process.env.STUDY_SMOKE_URL||'http://127.0.0.1:9130';
    await page.goto(base+'/auto-preview/'+domain);
    await page.waitForFunction(()=>document.querySelector('#automaticDialog')?.open&&!busy&&!animationPending);
    const before=await page.evaluate(()=>({turn:view.state.turn,cards:view.automatic_explanations.length,id:pendingAutomatic().id}));
+   if(domain==='pong'){
+    for(const viewport of [{width:1440,height:1000},{width:800,height:825},{width:390,height:844}]){
+     await page.setViewportSize(viewport);
+     await page.reload();await page.waitForFunction(()=>document.querySelector('#automaticDialog')?.open&&!busy&&!animationPending);
+     const bounds=await page.evaluate(()=>{
+      const rect=id=>{const r=document.querySelector(id).getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right}};
+      return {dialog:rect('#automaticDialog'),court:rect('#studyCanvas'),dock:rect('#pongExplanationDock'),replay:rect('.replay-panel'),height:innerHeight,width:innerWidth};
+     });
+     assert(bounds.dialog.top>bounds.court.bottom,'Pong explanation stays below court');
+     assert(bounds.dialog.bottom<=bounds.dock.bottom,'Dock reserves full explanation height');
+     assert(bounds.dialog.bottom<bounds.replay.top,'Replay is not covered');
+     assert(bounds.dialog.left>=0&&bounds.dialog.right<=bounds.width,'Bubble fits viewport width');
+     assert(bounds.dialog.top>=0&&bounds.dialog.bottom<=bounds.height,'Confirmation is visible');
+     await page.screenshot({path:`output/automatic-preview/pong-docked-${viewport.width}.png`});
+    }
+    await page.setViewportSize({width:1440,height:1000});
+    await page.reload();await page.waitForFunction(()=>document.querySelector('#automaticDialog')?.open&&!busy&&!animationPending);
+   }
    assert.match(await page.locator('#automaticDialog').innerText(),/game is paused/i);
    assert.equal(await page.locator('[data-action]').first().isDisabled(),true);
    await page.keyboard.press('ArrowRight');await page.keyboard.press('Escape');

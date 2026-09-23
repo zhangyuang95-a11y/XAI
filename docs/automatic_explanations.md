@@ -35,8 +35,9 @@ selections remain separate from voluntary `questions` records.
 
 Existing v1/v2/v3 enrollments keep their persisted protocol. Task 1, Task 3, and
 Group B do not receive guided questions. Game rules and scores are unchanged.
-Only the independent friend-demo service is being updated; the current formal
-Prolific cohort remains on its original deployment.
+The formal study and independent friend-demo services use the current release.
+The previous Prolific cohort remains archived under its original release IDs;
+new formal enrollment is disabled until the next recruitment round is configured.
 
 Validation: backend tests cover all three domains, first-node action/skip blocking,
 ownership, answer withholding, idempotent requests, reconnects, bilingual

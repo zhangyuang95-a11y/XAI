@@ -6,9 +6,10 @@ future schedule, or group-dependent controller action is introduced.
 
 import json
 
-GUIDED_VERSION = 'guided-question-choice-v3'
+GUIDED_VERSION = 'first-node-question-guide-v4'
+GUIDED_VERSIONS = frozenset({'guided-question-choice-v3', GUIDED_VERSION})
 VERSION = GUIDED_VERSION
-CONFIRM_VERSIONS = frozenset({'event-nodes-confirm-v2', GUIDED_VERSION})
+CONFIRM_VERSIONS = frozenset({'event-nodes-confirm-v2', *GUIDED_VERSIONS})
 SUPPORTED_VERSIONS = frozenset({'event-nodes-v1', *CONFIRM_VERSIONS})
 QUESTION = {'en': 'Why are you making this decision?', 'zh': '你为什么做这个决定？'}
 
@@ -72,7 +73,7 @@ def candidate(domain, state, decision, previous=None):
 
 def public_card(row, language):
     content = json.loads(row['content_json'])
-    guided = content.get('version') == GUIDED_VERSION
+    guided = content.get('version') in GUIDED_VERSIONS
     requested = content.get('requested_at') is not None
     return {'id': row['id'], 'turn': row['turn'],
             'body': content['body'][language] if not guided or requested else '',
@@ -80,6 +81,7 @@ def public_card(row, language):
             'displayed': row['displayed'] is not None,
             'requires_confirmation': content.get('version') in CONFIRM_VERSIONS,
             'confirmed': row['confirmed'] is not None,
+            'in_question_panel': content.get('version') == GUIDED_VERSION,
             'guided': guided, 'onboarding': bool(content.get('onboarding')),
             'requested': requested, 'question': QUESTION[language] if guided else '',
             'response': content.get('response')}

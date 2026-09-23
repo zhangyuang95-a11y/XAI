@@ -1,22 +1,26 @@
 # Guided questions and optional explanations
 
-Current preview release: `policylens-three-domain-20260923.v3.16-guided-question`.
-New automatic-explanation enrollments use `guided-question-choice-v3`.
+Current preview release: `policylens-three-domain-20260923.v3.17-first-node-guide`.
+New automatic-explanation enrollments use `first-node-question-guide-v4`.
 
-In Group A, Task 2 starts at turn 0 with one required guided question:
-“Why are you making this decision?” / “你为什么做这个决定？”
-The participant selects the question to request the existing controller-grounded
-answer, then confirms to continue. There is no skip button for this initial
-question. Selecting, reading, and confirming do not advance a game turn.
+Only Group A receives this guide. Task 2 starts normally at turn 0. No extra
+start-of-task explanation is generated: the first existing warehouse event,
+Pong team-ball event, or kitchen five-step event becomes the guided node.
+The ordinary right-hand question panel is highlighted and game actions pause.
+The participant selects the example “Why are you making this decision?”, then
+presses **Send question**, reads the controller-grounded answer in that panel,
+and confirms to continue. This happens once per Task 2 run. It teaches the
+question-panel interaction, without adding an artificial trigger or game step.
 
-Later warehouse, Pong, and kitchen nodes follow the trigger rules below, but
-initially show a choice instead of an answer: **I understand — continue** or
-**Show me why**. The first choice resumes directly; the second requests an
-answer that must be confirmed before resuming. No hidden answer is sent in the
-participant view until requested. The first question is a predefined selection,
-not a free-text question or an LLM-generated answer. The normal study retains
-its free-text follow-up interface; the isolated friend demo has no provider key
-and continues to disable free-text questions.
+Later nodes offer **I understand — continue** or **Show me why**. The first
+choice resumes directly; the second requests an answer that must be confirmed.
+The guide uses a predefined question with a deterministic factual answer, kept
+separate from free-text question records. Both normal study and friend-demo
+pages retain the right-hand question form. The demo enables free-text questions
+only when its own `POLICYLENS_LLM_API_KEY` is supplied (optional base URL/model
+overrides; defaults are DeepSeek/deepseek-chat). Without that configuration,
+free-text input is visibly unavailable while guided questions remain usable.
+The demo still ignores production database, Prolific, and administrator settings.
 
 The server enforces the first-question requirement and later response gates.
 Requests, responses, and confirmation survive reconnects. The existing
@@ -27,12 +31,12 @@ of the displayed answer) from `self_reported_understood`. Neither establishes
 actual comprehension. Skipping never marks an answer as displayed. Guided
 selections remain separate from voluntary `questions` records.
 
-Existing v1/v2 enrollments keep their persisted protocol. Task 1, Task 3, and
+Existing v1/v2/v3 enrollments keep their persisted protocol. Task 1, Task 3, and
 Group B do not receive guided questions. Game rules and scores are unchanged.
 Only the independent friend-demo service is being updated; the current formal
 Prolific cohort remains on its original deployment.
 
-Validation: backend tests cover all three domains, initial-action/skip blocking,
+Validation: backend tests cover all three domains, first-node action/skip blocking,
 ownership, answer withholding, idempotent requests, reconnects, bilingual
 answers, later skip/request choices, separate exposure records, exports, and
 Task 3 isolation. The original v2 suite is explicitly pinned to its protocol.

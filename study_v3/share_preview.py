@@ -1,4 +1,4 @@
-"""Isolated, disposable Task 2 demo; never loads production settings or secrets."""
+"""Isolated, disposable Task 2 demo; never loads production database or Prolific settings."""
 import json
 import os
 import secrets
@@ -13,11 +13,14 @@ from .store import StudyError
 
 
 def make_preview_server(*, host='127.0.0.1', port=9131, origin=None, database=None):
-    # Intentionally ignore DATABASE_URL, Prolific and LLM environment variables.
+    # Ignore production storage/Prolific settings. Only explicitly configured LLM settings are used.
     path=Path(database or '/tmp/policylens-task2-preview/preview.sqlite3')
     path.parent.mkdir(parents=True, exist_ok=True)
     settings=Settings(database=str(path), mode='preview', automatic_explanations=True,
                       admin_token=secrets.token_urlsafe(32),
+                      llm_api_key=os.environ.get('POLICYLENS_LLM_API_KEY',''),
+                      llm_base_url=(os.environ.get('POLICYLENS_LLM_BASE_URL','https://api.deepseek.com') if os.environ.get('POLICYLENS_LLM_API_KEY') else ''),
+                      llm_model=os.environ.get('POLICYLENS_LLM_MODEL','deepseek-chat'),
                       origin=origin or f'http://127.0.0.1:{port}')
     server=make_server(settings, host=host, port=port)
     store=server.store
@@ -49,21 +52,14 @@ def make_preview_server(*, host='127.0.0.1', port=9131, origin=None, database=No
         with store.db.transaction() as db:
             db.execute("UPDATE pl3_runs SET status='completed' WHERE id=?", (view['run_id'],))
         command('next')
-        # Show a real first explanation immediately, without requiring a tutorial.
-        for _ in range(100):
-            if view['automatic_explanations'] or view['state']['terminal']:
-                break
-            with store.db.transaction(read_only=True) as db:
-                state=json.loads(db.one('SELECT state_json FROM pl3_runs WHERE id=?', (view['run_id'],))['state_json'])
-            action='wait' if domain=='kitchen' else engine(domain).human_advisor(state)
-            command('action', run_id=view['run_id'], turn=state['turn'], action=action)
+        # Begin at Task 2 turn zero; the participant reaches the first natural node.
         return token
 
     original=server.RequestHandlerClass
     class ShareHandler(original):
         def reply(self, status, payload, content_type='application/json; charset=utf-8', token=None):
             if isinstance(payload, dict) and ('release_id' in payload or 'instance_id' in payload):
-                payload={**payload, 'share_preview':True}
+                payload={**payload, 'share_preview':True, 'share_qa_available':settings.llm_configured}
                 if 'task_runs' in payload:
                     payload['task_runs']=[r for r in payload['task_runs'] if r['task']==2]
             return super().reply(status, payload, content_type, token)
@@ -94,7 +90,7 @@ def make_preview_server(*, host='127.0.0.1', port=9131, origin=None, database=No
                 except Exception as exc:
                     self.failure(exc)
                 return
-            allowed={'action','request_explanation','confirm_explanation','automatic-explanation-displayed','language','timing'}
+            allowed={'ask','answer-displayed','action','request_explanation','confirm_explanation','automatic-explanation-displayed','language','timing'}
             if not path.startswith('/api/study/') or path.removeprefix('/api/study/') not in allowed:
                 return self.failure(StudyError('preview_only',403))
             super().do_POST()

@@ -14,8 +14,14 @@ def test_first_question_is_required_once_and_persists(tmp_path,domain):
     assert not a.view['automatic_explanations']
     task2(a);task2(b)
     assert not b.view['automatic_explanations']
+    assert a.view['state']['turn']==0
+    for _ in range(100):
+        if a.view['automatic_explanations']:break
+        a.step(None if domain=='warehouse' else 'wait')
+    node_turn=a.view['state']['turn']
+    if domain=='kitchen':assert node_turn==5
     c=a.view['automatic_explanations'][0];identifier=c['id']
-    assert c['guided'] and c['onboarding'] and c['turn']==0
+    assert c['guided'] and c['onboarding'] and c['turn']==node_turn
     assert not c['body'] and not c['displayed'] and not c['requested']
     with pytest.raises(StudyError,match='guided_question_required'):
         a.command('confirm_explanation',explanation_id=identifier,choice='understood')
@@ -27,7 +33,7 @@ def test_first_question_is_required_once_and_persists(tmp_path,domain):
     payload=a.command('request_explanation',explanation_id=identifier,question_id='why')
     store.command(a.token,'request_explanation',payload)
     c=a.view['automatic_explanations'][0]
-    assert c['requested'] and c['body'] and not c['confirmed'] and a.view['state']['turn']==0
+    assert c['requested'] and c['body'] and not c['confirmed'] and a.view['state']['turn']==node_turn
     with pytest.raises(StudyError,match='explanation_confirmation_required'):a.step('wait')
     resumed=Store(settings)
     assert resumed.view(a.token,a.view['instance_id'])['automatic_explanations'][0]==c
@@ -35,9 +41,9 @@ def test_first_question_is_required_once_and_persists(tmp_path,domain):
     a.command('language',language='zh');assert '你为什么' in a.view['automatic_explanations'][0]['question']
     store.acknowledge_automatic(a.token,a.view['instance_id'],identifier)
     a.command('confirm_explanation',explanation_id=identifier,choice='explanation')
-    assert a.view['state']['turn']==0
+    assert a.view['state']['turn']==node_turn
     assert a.view['automatic_explanations'][0]['response']=='read_explanation'
-    a.step('wait');assert a.view['state']['turn']==1
+    a.step('wait');assert a.view['state']['turn']==node_turn+1
     assert sum(c['onboarding'] for c in a.view['automatic_explanations'])==1
     store.db.close()
 
@@ -45,12 +51,14 @@ def test_first_question_is_required_once_and_persists(tmp_path,domain):
 def test_later_nodes_allow_understood_without_exposure_or_requested_answer(tmp_path):
     store=Store(Settings(database=str(tmp_path/'choices.db'),automatic_explanations=True))
     a=Flow(store,'kitchen','A');task2(a)
+    assert not a.view['automatic_explanations']
+    for _ in range(5):a.step('wait')
     first=a.view['automatic_explanations'][0]['id']
     a.command('request_explanation',explanation_id=first,question_id='why')
     a.command('confirm_explanation',explanation_id=first,choice='explanation')
     for _ in range(5):a.step('wait')
     c=a.view['automatic_explanations'][-1]
-    assert c['turn']==5 and not c['onboarding'] and not c['body']
+    assert c['turn']==10 and not c['onboarding'] and not c['body']
     a.command('confirm_explanation',explanation_id=c['id'],choice='understood')
     c=a.view['automatic_explanations'][-1]
     assert c['confirmed'] and not c['displayed'] and not c['requested'] and not c['body']

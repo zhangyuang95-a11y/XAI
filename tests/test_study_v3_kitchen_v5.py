@@ -30,13 +30,13 @@ class KitchenV5Mechanisms(unittest.TestCase):
         for task in (1,2,3):
             state = e.initial_state(1000,task)
             view = e.public_state(state)
-            self.assertEqual(len(view['menu']),5)
-            self.assertEqual([o['ordinal'] for o in view['menu']],[1,2,3,4,5])
+            self.assertEqual(len(view['menu']),4)
+            self.assertEqual([o['ordinal'] for o in view['menu']],[1,2,3,4])
             self.assertTrue(all(o['status']=='pending' for o in view['menu']))
             self.assertEqual(state['_future_orders'],[])
             self.assertEqual(state,e.initial_state(1000,task))
-            self.assertEqual(view['max_turns'],360)
-            self.assertEqual([o['deadline'] for o in view['menu']],[100,140,240,280,360])
+            self.assertEqual(view['max_turns'],280)
+            self.assertEqual([o['deadline'] for o in view['menu']],[100,140,240,280])
             menus.append(tuple(o['recipe'] for o in view['menu']))
             counts.append(menus[-1].count('egg_tomato'))
             job=view['ai']['current_cooking'][0]
@@ -185,7 +185,7 @@ class KitchenV5Mechanisms(unittest.TestCase):
             texts=[f[lang] for f in facts for lang in ('en','zh')]
             texts.extend([decision['reason_en'],decision['reason_zh']])
             self.assertFalse(any(re.search(r'\border\d+\b',text) for text in texts))
-        self.assertEqual(frames[-1]['metrics']['completed_orders'],5)
+        self.assertEqual(frames[-1]['metrics']['completed_orders'],4)
 
     def test_frozen_bilingual_cases_rebuild_from_the_current_real_trajectories(self):
         from domains.kitchen.build_qa_cases import build

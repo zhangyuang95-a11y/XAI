@@ -13,9 +13,9 @@ from pathlib import Path
 import random
 
 DOMAIN = "kitchen"
-VERSION = "kitchen-v6.3.0"
-SCENARIO_VERSION = "kitchen-scenarios-v6.3.0"
-MENU_VERSION = "kitchen-menu-v2"
+VERSION = "kitchen-v6.4.0"
+SCENARIO_VERSION = "kitchen-scenarios-v6.4.0"
+MENU_VERSION = "kitchen-menu-v3-four-dishes"
 WIDTH, HEIGHT = 9, 7
 PREPARE_TURNS = {"tomato": 3, "pepper": 3, "egg": 4, "meat": 5}
 STORAGE_FRESH_TURNS = 10
@@ -23,7 +23,7 @@ HANDOFF_GRACE_TURNS = 2
 RAW_FRESH_TURNS = 120
 PREPARED_FRESH_TURNS = dict.fromkeys(PREPARE_TURNS, 20)
 SERVE_POINTS, STEP_COST, INGREDIENT_DISCARD_COST, DISH_DISCARD_COST = 100, 1, 5, 20
-ORDER_DEADLINES = (100, 140, 240, 280, 360)
+ORDER_DEADLINES = (100, 140, 240, 280)
 COOK_TURNS = {"egg": 8, "meat": 10, "tomato": 6, "pepper": 8}
 MIX_TURNS, BURN_TURNS = 2, 8
 MOVES = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
@@ -38,7 +38,7 @@ def rule_metadata():
     return {"engine_version": VERSION, "scenario_version": SCENARIO_VERSION, "menu_version": MENU_VERSION,
             "score": {"served": SERVE_POINTS, "step": -STEP_COST,
                       "single_component_discard": -INGREDIENT_DISCARD_COST, "combined_dish_discard": -DISH_DISCARD_COST},
-            "orders_per_task": 5, "max_turns": 360, "order_deadlines": list(ORDER_DEADLINES),
+            "orders_per_task": len(ORDER_DEADLINES), "max_turns": ORDER_DEADLINES[-1], "order_deadlines": list(ORDER_DEADLINES),
             "max_consecutive_same_recipe": 2, "prepared_fresh_turns": 20,
             "raw_fresh_turns": RAW_FRESH_TURNS, "raw_storage_limit": STORAGE_FRESH_TURNS,
             "prep_interactions": deepcopy(PREPARE_TURNS), "handoff_grace_turns": HANDOFF_GRACE_TURNS,
@@ -265,10 +265,10 @@ def _scenario(seed, task):
     if saved and saved.get("menu_version") == MENU_VERSION:
         return deepcopy(saved)
     rng = random.Random(seed * 71 + task * 10007)
-    count, budget = 5, 360
+    count, budget = len(ORDER_DEADLINES), ORDER_DEADLINES[-1]
     if config.get("rules_version") == VERSION:
         budget = config.get("task_budgets", {}).get(str(task), budget)
-    egg_count = 1 + (int(seed) + task - 1) % 4
+    egg_count = 1 + (int(seed) + task - 1) % (count - 1)
     # Choose from the complete legal set, rather than repair a shuffled menu.
     # Distinct per-task counts guarantee distinct Task 1/2/3 menus per seed.
     legal_menus = [menu for menu in product(RECIPES, repeat=count)
@@ -1296,7 +1296,7 @@ def rules(language="en"):
         ("Each teammate holds one item. The handoff and human counter each hold one item. AI has two prepared-ingredient slots and one dedicated temporary-plate slot per pan. No swaps or overwrites occur. Carry a held item to the shared trash bin at (4,4), face it, and press E to dispose of it. Food cannot be discarded remotely.", "每人只能拿一件物品；交接台和人类暂存台各一件。AI 有两个备料槽，以及每口锅一个专用临时盘位。不能交换或覆盖台面物品，丢弃物品必须拿到（4,4）的共享垃圾桶前，面朝垃圾桶按 E；不能远程丢弃。"),
         ("Food ready in a pan burns after eight additional full turns. Its ready turn is not counted. Loading and combining do not count their own turn as a cooking turn. Removed food no longer burns.", "锅中食物炒好后再留满 8 回合会糊，刚炒好当回合不算。下锅或开始合炒当回合不计烹饪时间。出锅食物不再烧糊。"),
         ("If both teammates use the handoff counter in the same turn, neither transfer succeeds. Food placed this turn cannot be taken by the other teammate until a later turn.", "双方同回合使用交接台，两次交互都失败。本回合放下的食物不能被另一方同回合取走。"),
-        (f"All five menu dishes are visible from the start. Their quantities and sequence are fixed before play, with at most two consecutive dishes of the same recipe. Matching bound orders may be served in any order. Every on-time correct dish adds {SERVE_POINTS} points; every game step costs {STEP_COST}. The serving action itself therefore adds {SERVE_POINTS - STEP_COST} net points; waiting once then serving adds {SERVE_POINTS - 2 * STEP_COST} across the two turns. Trash disposal costs {INGREDIENT_DISCARD_COST} for a single ingredient/component or {DISH_DISCARD_COST} for a combined dish. Scores can be negative. Serving on the deadline turn is accepted; expiry alone never removes food. Questions and replay cost no turns or points.", f"五道菜单从开始就全部公开，数量和顺序在游戏前固定；同菜最多连续两道。可按任意顺序完成对应绑定订单。每正确按时上菜加 {SERVE_POINTS} 分，每推进一步扣 {STEP_COST} 分；上菜动作本身净增 {SERVE_POINTS - STEP_COST} 分，先等待一步再上菜共净增 {SERVE_POINTS - 2 * STEP_COST} 分。垃圾桶丢弃单份原料或配料扣 {INGREDIENT_DISCARD_COST} 分，合成菜品扣 {DISH_DISCARD_COST} 分。得分可为负；截止回合仍可上菜，过期本身不会移除食物。提问和回看不消耗步数或分数。"),
+        (f"All four menu dishes are visible from the start. Their quantities and sequence are fixed before play, with at most two consecutive dishes of the same recipe. Matching bound orders may be served in any order. Every on-time correct dish adds {SERVE_POINTS} points; every game step costs {STEP_COST}. The serving action itself therefore adds {SERVE_POINTS - STEP_COST} net points; waiting once then serving adds {SERVE_POINTS - 2 * STEP_COST} across the two turns. Trash disposal costs {INGREDIENT_DISCARD_COST} for a single ingredient/component or {DISH_DISCARD_COST} for a combined dish. Scores can be negative. Serving on the deadline turn is accepted; expiry alone never removes food. Questions and replay cost no turns or points.", f"四道菜单从开始就全部公开，数量和顺序在游戏前固定；同菜最多连续两道。可按任意顺序完成对应绑定订单。每正确按时上菜加 {SERVE_POINTS} 分，每推进一步扣 {STEP_COST} 分；上菜动作本身净增 {SERVE_POINTS - STEP_COST} 分，先等待一步再上菜共净增 {SERVE_POINTS - 2 * STEP_COST} 分。垃圾桶丢弃单份原料或配料扣 {INGREDIENT_DISCARD_COST} 分，合成菜品扣 {DISH_DISCARD_COST} 分。得分可为负；截止回合仍可上菜，过期本身不会移除食物。提问和回看不消耗步数或分数。"),
         ("A raw portion stays fresh for 120 turns after acquisition. All four prepared ingredients expire exactly 20 turns after preparation completes. Prepared on turn 50 means usable on turn 69 but spoiled on turn 70; the actual loading turn must be before expiry. Changing hands or counters never resets this clock. At that boundary uncooked food spoils in hands or on counters, stays visible, and cannot be prepared or cooked. Loading an unspoiled portion into a pan ends its oxidation clock; the pan can still burn. Cooked components and finished dishes do not oxidize in this task.", "生料从取出后保鲜 120 回合。四种原料都在完成备料的 20 回合后过期：第 50 回合备好，第 69 回合仍可用，第 70 回合已变质；实际下锅动作回合必须早于期限。拿起、放下或换台面都不重置计时。达到期限，手中或台面的未下锅食物会变质，实物保留但不能继续备料或烹饪。未变质份料下锅后不再按氧化计时，但锅中仍可能烧糊。本任务中熟配料和成品不氧化。"),
         (f"When I arrive facing an occupied handoff counter while holding a finished dish, I wait two full turns. On the third still-blocked turn I start carrying it to the trash. If the counter clears before disposal, I return to deliver the dish. Only an actual bin interaction costs {DISH_DISCARD_COST} points. I collect another finished dish after delivery, without retrieving my own delivered output.", f"我拿成品到达交接台前后，若台面被占用，会等完整两回合。第三回合仍被占用才拿向垃圾桶；真正丢弃前若交接台腾空，就恢复交付。只有实际在桶前丢弃才扣 {DISH_DISCARD_COST} 分。交完一份后会去取下一份已做好菜，不会拿回自己已交付的菜。"),
         ("Unprepared raw ingredients spoil after staying untouched for more than 10 turns in either AI ingredient slot or your storage counter. Exactly 10 elapsed turns are allowed. Spoiled food stays visible and must be carried to the bin; picking it up never makes it fresh again. Prepared ingredients use only their 20-turn completion-based lifetime, with no extra storage limit. Cooked components and dishes have no ingredient freshness clock.", "尚未备好的生料在 AI 原料槽或你的暂存台连续存放超过 10 回合就会变质，刚好 10 回合仍可用。变质后实物保留，必须拿到垃圾桶；拿起来不会恢复新鲜。备好原料只用完成备料起的 20 回合寿命，没有额外暂存期限；熟配料和成品不按原料保鲜计时。"),

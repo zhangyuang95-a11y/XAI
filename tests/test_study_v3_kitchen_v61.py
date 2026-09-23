@@ -83,7 +83,7 @@ def test_second_pan_safety_includes_storage_then_return_to_new_vegetable():
 
 
 def test_public_advice_does_not_discard_valid_later_menu_ingredient():
-    state = e.initial_state(1002, 2)  # menu-v2 starts with two egg dishes here.
+    state = e.initial_state(1003, 2)  # This four-dish menu starts with two egg dishes.
     for target in ('meat', 'handoff'):
         while (e._front(state['human']) or {}).get('id') != target:
             state = e.step(state, e._approach(state, 'human', target))

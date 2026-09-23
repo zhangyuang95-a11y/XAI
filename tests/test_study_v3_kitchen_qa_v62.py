@@ -4,7 +4,7 @@ from copy import deepcopy
 import pytest
 
 from domains.kitchen import engine as e
-from domains.kitchen.build_qa_cases import regular_trace
+from domains.kitchen.build_qa_cases import regular_trace, HEATING_SEED
 from study_v3.qa import _catalog, _digest, simulate
 from tests.test_study_v3_qa import explainer_for_plan, plan
 
@@ -70,7 +70,7 @@ def test_general_freshness_and_serving_arithmetic_are_short_current_facts(langua
 
 
 def test_counterfactual_preserves_actual_both_pan_decrements_without_live_mutation():
-    frames = regular_trace(1000)
+    frames = regular_trace(HEATING_SEED)
     state = next(state for state in frames if all(p['status'] == 'cooking' and p['remaining'] > 1 for p in state['pots']))
     before = deepcopy(state)
     result = simulate(e, state, e.decide(state), ['wait'], 1)
@@ -190,7 +190,7 @@ def test_completed_order_question_uses_count_even_when_score_is_negative(languag
     assert state['raw_score'] < 0
     result = answer(state, ['system:completed_orders'], 'How many dishes have we completed?', language)
     assert result['status'] == 'answered'
-    assert ('completed 1 of 5 orders' if language == 'en' else '已完成 1 道，共 5 道订单') in result['answer']
+    assert ('completed 1 of 4 orders' if language == 'en' else '已完成 1 道，共 4 道订单') in result['answer']
     assert str(state['raw_score']) not in result['answer']
 
 

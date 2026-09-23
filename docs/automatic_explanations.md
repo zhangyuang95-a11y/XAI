@@ -171,3 +171,24 @@ already qualifies, so onboarding can occur at Task 2 turn zero. The new risk
 trigger occurs once per run; other event triggers and first-charge-only behavior
 remain unchanged. Previously enrolled v4 sessions keep their original trigger
 protocol. Task 1/3 and control-group explanation access remain unchanged.
+
+## Optional prompts (v3.22)
+
+New enrollments store `optional-sidebar-prompts-v1` in `pl3_prompt_settings`.
+Side prompts, including the initial guided question, no longer gate gameplay.
+The participant may still ask, rate or acknowledge, or simply use the game controls.
+On the next valid action, pending prompts are recorded in `pl3_prompt_skips`
+with reason `continued_playing`. A dedicated “Continue without answering” button
+also dismisses pending prompts; it does not take a game step. Next-task navigation
+can skip an unanswered final rating. The demo permits the same skip command.
+
+Skipped explanations retain `confirmed=false` and their original exposure and
+request records; skipped ratings retain `rating=NULL` and `submitted=NULL`.
+No self-reported understanding or rating is inferred. Skip records and settings
+are included in research exports. Invalid actions and stale commands do not
+create skips, and retries cannot create duplicate skips.
+
+`POLICYLENS_OPTIONAL_PROMPTS` defaults to 1 for environment-based deployment;
+legacy instances without the persisted setting keep their original protocol.
+Programmatic Settings defaults to false for legacy regression tests. The public
+Task 2 demo explicitly enables optional prompts. Rewards and game rules are unchanged.

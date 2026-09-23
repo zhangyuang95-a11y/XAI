@@ -84,6 +84,7 @@ def public_card(row, language):
             'displayed': row['displayed'] is not None,
             'requires_confirmation': content.get('version') in CONFIRM_VERSIONS,
             'confirmed': row['confirmed'] is not None,
+            'skipped': row.get('skipped') is not None,
             'in_question_panel': content.get('version') in FIRST_NODE_VERSIONS,
             'guided': guided, 'onboarding': bool(content.get('onboarding')),
             'requested': requested, 'question': QUESTION[language] if guided else '',

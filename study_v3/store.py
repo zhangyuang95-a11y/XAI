@@ -45,7 +45,7 @@ EXPLANATION_ITEMS = [
 EXPORT_TABLES = ('participants','enrollments','instances','runs','frames',
                  'questions','questionnaires','timings','releases','tutorials','tutorial_events',
                  'auto_explanation_settings','auto_explanations','auto_explanation_confirmations',
-                 'understanding_settings','understanding_ratings','reward_settings')
+                 'understanding_settings','understanding_ratings','reward_settings','prompt_settings','prompt_skips')
 
 class Store:
     def __init__(self, settings, explainer=None):
@@ -166,6 +166,8 @@ class Store:
                     assignment='existing_participant' if existing else 'randomized_balanced'
                 db.execute('INSERT INTO pl3_enrollments VALUES(?,?,?,?,?,?)',(iid,1,language,assignment,config.get('scenario_version',config['version']),time.time()))
                 db.execute('INSERT INTO pl3_reward_settings VALUES(?,?)',(iid,encode(rewards.policy(domain))))
+                if self.settings.optional_prompts:
+                    db.execute('INSERT INTO pl3_prompt_settings VALUES(?,?)',(iid,'optional-sidebar-prompts-v1'))
                 if self.settings.automatic_explanations:
                     db.execute('INSERT INTO pl3_auto_explanation_settings VALUES(?,?,?)',
                         (iid,automatic_explanations.VERSION,time.time()))
@@ -212,6 +214,7 @@ class Store:
             group_assignment_source=enrollment['assignment_source'] if enrollment else None)
         runs=db.all('SELECT id,task,status,score_json,state_json FROM pl3_runs WHERE instance_id=? ORDER BY task',(instance['id'],))
         result['task_runs']=[{'id':r['id'],'task':r['task'],'status':r['status'],'score':eng.public_state(json.loads(r['state_json']))['score'],'turn':json.loads(r['state_json'])['turn']} for r in runs]
+        result['optional_prompts']=self._optional_prompts(db,instance)
         result['rewards']=rewards.summary(db,instance['id'])
         if instance['stage']=='demo':
             if instance['domain']=='kitchen':
@@ -242,7 +245,7 @@ class Store:
         result['understanding_rating']=understanding.public(self._pending_understanding(db,instance),language)
         if result['can_ask']:
             result['automatic_explanations']=[automatic_explanations.public_card(r,language)
-                for r in db.all('SELECT a.*,c.confirmed FROM pl3_auto_explanations a LEFT JOIN pl3_auto_explanation_confirmations c ON c.explanation_id=a.id WHERE a.run_id=? ORDER BY a.turn,a.id',(instance['current_run'],))]
+                for r in db.all('SELECT a.*,c.confirmed,s.skipped FROM pl3_auto_explanations a LEFT JOIN pl3_auto_explanation_confirmations c ON c.explanation_id=a.id LEFT JOIN pl3_prompt_skips s ON s.prompt_id=a.id WHERE a.run_id=? ORDER BY a.turn,a.id',(instance['current_run'],))]
             result['questions']=[{'id':q['id'],'question':q['question'],'language':q['language'],
                 'result':public_answer(json.loads(q['result_json'])),'status':q['status'],'target_turn':q['target_turn'],'target_run':q['target_run']}
                 for q in db.all("SELECT * FROM pl3_questions WHERE authorized_run=? AND status IN ('answered','clarification','unavailable') ORDER BY requested",(instance['current_run'],))]
@@ -278,7 +281,7 @@ class Store:
                 # Never return a cached response containing now-revoked answers.
                 return self._view(db,instance)
             if payload.get('revision')!=instance['revision']: raise StudyError('stale_state',409)
-            if self._pending_understanding(db,instance) and kind not in ('understanding_rating','language','timing'):
+            if self._pending_understanding(db,instance) and not self._optional_prompts(db,instance) and kind not in ('understanding_rating','language','timing'):
                 raise StudyError('understanding_rating_required',409)
             timings=payload.get('timings',[])
             if not isinstance(timings,list) or len(timings)>4:raise StudyError('invalid_timing')
@@ -307,7 +310,12 @@ class Store:
                     # Skip is an explicit participant choice, recorded as its
                     # own idempotent command, never a simulated task action.
                     self._next(db,{**instance,'demo_index':end})
-            elif kind=='next': self._next(db,instance)
+            elif kind=='next':
+                if self._optional_prompts(db,instance):self._skip_prompts(db,instance,'next_task')
+                self._next(db,instance)
+            elif kind=='skip_prompts':
+                if not self._optional_prompts(db,instance):raise StudyError('wrong_stage',409)
+                self._skip_prompts(db,instance,'skip_button')
             elif kind=='tutorial': self._tutorial(db,instance,payload)
             elif kind=='action': self._action(db,instance,payload)
             elif kind=='understanding_rating': self._submit_understanding(db,instance,payload)
@@ -379,11 +387,12 @@ class Store:
         if payload.get('run_id')!=instance['current_run']:raise StudyError('wrong_run',409)
         run=db.one('SELECT * FROM pl3_runs WHERE id=?',(instance['current_run'],))
         if run['status']!='active':raise StudyError('task_finished',409)
-        if self._pending_automatic(db,instance):raise StudyError('explanation_confirmation_required',409)
+        if self._pending_automatic(db,instance) and not self._optional_prompts(db,instance):raise StudyError('explanation_confirmation_required',409)
         state=json.loads(run['state_json']); eng=engine(instance['domain'])
         if payload.get('turn')!=state['turn']:raise StudyError('stale_state',409)
         action=payload.get('action')
         if action not in eng.legal_actions(state):raise StudyError('illegal_action')
+        if self._optional_prompts(db,instance):self._skip_prompts(db,instance,'continued_playing')
         decision=eng.decide(state)
         nxt=eng.step(state,action,decision)
         db.execute('UPDATE pl3_frames SET human_action=?,decision_json=? WHERE run_id=? AND turn=?',
@@ -399,8 +408,19 @@ class Store:
         if terminal:
             db.execute("UPDATE pl3_questions SET status='revoked' WHERE authorized_run=? AND status='pending'",(run['id'],))
 
+    def _optional_prompts(self,db,instance):
+        return bool(db.one('SELECT instance_id FROM pl3_prompt_settings WHERE instance_id=?',(instance['id'],)))
+
+    def _skip_prompts(self,db,instance,reason):
+        # Missing responses remain missing. Never insert a confirmation or rating.
+        for kind,row in [('understanding',self._pending_understanding(db,instance)),
+                         ('explanation',self._pending_automatic(db,instance))]:
+            if row:
+                db.execute('INSERT INTO pl3_prompt_skips VALUES(?,?,?,?,?,?)',
+                    (row['id'],instance['id'],instance['current_run'],kind,reason,time.time()))
+
     def _pending_understanding(self,db,instance):
-        return db.one('SELECT * FROM pl3_understanding_ratings WHERE instance_id=? AND run_id=? AND submitted IS NULL ORDER BY checkpoint LIMIT 1',
+        return db.one('SELECT r.* FROM pl3_understanding_ratings r WHERE instance_id=? AND run_id=? AND submitted IS NULL AND NOT EXISTS (SELECT 1 FROM pl3_prompt_skips s WHERE s.prompt_id=r.id) ORDER BY checkpoint LIMIT 1',
             (instance['id'],instance['current_run']))
 
     def _record_understanding(self,db,instance,run,state):
@@ -461,7 +481,7 @@ class Store:
         if not self._ask_allowed(db,instance):return None
         config=db.one('SELECT version FROM pl3_auto_explanation_settings WHERE instance_id=?',(instance['id'],))
         if not config or config['version'] not in automatic_explanations.CONFIRM_VERSIONS:return None
-        return db.one('SELECT a.* FROM pl3_auto_explanations a LEFT JOIN pl3_auto_explanation_confirmations c ON c.explanation_id=a.id WHERE a.run_id=? AND c.explanation_id IS NULL ORDER BY a.turn,a.id LIMIT 1',(instance['current_run'],))
+        return db.one('SELECT a.* FROM pl3_auto_explanations a LEFT JOIN pl3_auto_explanation_confirmations c ON c.explanation_id=a.id WHERE a.run_id=? AND c.explanation_id IS NULL AND NOT EXISTS (SELECT 1 FROM pl3_prompt_skips s WHERE s.prompt_id=a.id) ORDER BY a.turn,a.id LIMIT 1',(instance['current_run'],))
 
     def _request_automatic(self,db,instance,payload):
         if not self._ask_allowed(db,instance):raise StudyError('explanations_unavailable',403)
@@ -546,7 +566,7 @@ class Store:
         if not isinstance(qid,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{8,100}',qid):raise StudyError('invalid_question_id')
         with self.db.transaction(scope=payload.get('instance_id')) as db:
             instance=self._instance(db,token,payload.get('instance_id'))
-            if self._pending_understanding(db,instance):raise StudyError('understanding_rating_required',409)
+            if self._pending_understanding(db,instance) and not self._optional_prompts(db,instance):raise StudyError('understanding_rating_required',409)
             if not self._ask_allowed(db,instance):raise StudyError('explanations_unavailable',403)
             if payload.get('authorized_run')!=instance['current_run']:raise StudyError('wrong_run',403)
             target=payload.get('target_run',instance['current_run']);turn=payload.get('turn')
@@ -638,11 +658,13 @@ class Store:
             'auto_explanation_settings': 'i.id=r.instance_id',
             'auto_explanations': 'i.id=r.instance_id',
             'auto_explanation_confirmations': 'i.id=r.instance_id',
+            'prompt_settings': 'i.id=r.instance_id',
+            'prompt_skips': 'i.id=r.instance_id',
             'reward_settings': 'i.id=r.instance_id',
             'understanding_settings': 'i.id=r.instance_id',
             'understanding_ratings': 'i.id=r.instance_id',
         }
-        ordering = {'reward_settings':'r.instance_id','participants':'r.id','enrollments':'r.instance_id','instances':'r.id',
+        ordering = {'prompt_settings':'r.instance_id','prompt_skips':'r.prompt_id','reward_settings':'r.instance_id','participants':'r.id','enrollments':'r.instance_id','instances':'r.id',
                     'runs':'r.id','frames':'r.run_id,r.turn','questions':'r.id',
                     'questionnaires':'r.instance_id','timings':'r.id','releases':'r.id',
                     'tutorials':'r.instance_id','tutorial_events':'r.id',

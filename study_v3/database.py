@@ -88,6 +88,13 @@ CREATE TABLE IF NOT EXISTS pl3_understanding_ratings (
  rating INTEGER CHECK(rating BETWEEN 1 AND 5), language TEXT,
  submitted DOUBLE PRECISION, UNIQUE(run_id, checkpoint)
 );
+CREATE TABLE IF NOT EXISTS pl3_prompt_settings (
+ instance_id TEXT PRIMARY KEY, version TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pl3_prompt_skips (
+ prompt_id TEXT PRIMARY KEY, instance_id TEXT NOT NULL, run_id TEXT NOT NULL,
+ kind TEXT NOT NULL, reason TEXT NOT NULL, skipped DOUBLE PRECISION NOT NULL
+);
 CREATE TABLE IF NOT EXISTS pl3_commands (
  session_hash TEXT NOT NULL, command_id TEXT NOT NULL, request_hash TEXT NOT NULL,
  result_json TEXT NOT NULL, created DOUBLE PRECISION NOT NULL,
@@ -170,6 +177,7 @@ FLOAT_COLUMNS = {
     'pl3_questionnaires': ('submitted',),
     'pl3_understanding_settings': ('created',),
     'pl3_understanding_ratings': ('created','submitted'),
+    'pl3_prompt_skips': ('skipped',),
     'pl3_commands': ('created',),
     'pl3_timings': ('seconds', 'recorded'),
     'pl3_releases': ('created',),

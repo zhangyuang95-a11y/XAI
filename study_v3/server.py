@@ -88,6 +88,7 @@ def manifest(settings):
             'version':understanding.VERSION,'tasks':list(understanding.TASKS),'groups':list(understanding.GROUPS),
             'checkpoints':list(understanding.CHECKPOINTS),'scale':[1,5],
             'progress_basis':'turn_budget_with_end_rating_on_early_completion'},
+        'optional_prompts_for_new_enrollments':settings.optional_prompts,
         'rewards':{domain:rewards.policy(domain) for domain in MODULES},
         'default_language':'en','mode':settings.mode,'storage_persistent':settings.persistent,
         'prolific':{'entry_path':'/prolific/','assignment':'randomized_block_6',

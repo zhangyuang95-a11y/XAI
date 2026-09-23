@@ -43,3 +43,8 @@ legacy session preservation, response validation, ownership, duplicate retries,
 refresh persistence, export, early-ending schedule, and explanation ordering.
 The browser smoke walks all five Pong checkpoints, checks keyboard blocking,
 refresh, unselected choices, bilingual/mobile presentation, and final completion.
+
+As of v3.22, new sessions with `pl3_prompt_settings` may skip ratings and continue
+playing. The schedule and 1–5 scale stay the same. Skips are in `pl3_prompt_skips`;
+they must be treated as missing responses, not low ratings. Legacy sessions keep
+the previously required-response protocol described above.

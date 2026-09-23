@@ -7,7 +7,7 @@ from tests.test_study_v3_automatic_explanations import task2
 
 @pytest.mark.parametrize('domain',['warehouse','pong','kitchen'])
 @pytest.mark.parametrize('group',['A','B'])
-def test_actions_skip_pending_prompts_and_final_rating_does_not_gate_next(tmp_path,domain,group):
+def test_explanations_optional_but_all_ratings_required(tmp_path,domain,group):
     settings=Settings(database=str(tmp_path/'optional.db'),automatic_explanations=True,understanding_ratings=True,optional_prompts=True)
     store=Store(settings);f=Flow(store,domain,group);task2(f)
     assert f.view['optional_prompts']
@@ -18,14 +18,20 @@ def test_actions_skip_pending_prompts_and_final_rating_does_not_gate_next(tmp_pa
             # An invalid action must not mark anything skipped.
             with pytest.raises(StudyError):f.step('invalid')
             assert store.view(f.token,f.view['instance_id'])['understanding_rating']['id']==r['id']
+            for name in ['skip_prompts','next']:
+                with pytest.raises(StudyError,match='understanding_rating_required'):f.command(name)
+            with pytest.raises(StudyError,match='understanding_rating_required'):f.step('wait')
+            f.command('understanding_rating',rating_id=r['id'],rating=3)
         f.step('wait')
     last=f.view['understanding_rating'];assert last['checkpoint']==100
+    with pytest.raises(StudyError,match='understanding_rating_required'):f.command('next')
+    f.command('understanding_rating',rating_id=last['id'],rating=3)
     f.command('next');assert f.view['stage']=='task3'
     exported=store.export()
     ratings=exported['understanding_ratings'];assert len(ratings)==5
-    assert all(r['rating'] is None and r['submitted'] is None for r in ratings)
+    assert all(r['rating']==3 and r['submitted'] is not None for r in ratings)
     skipped={r['prompt_id'] for r in exported['prompt_skips']}
-    assert set(seen+[last['id']])<=skipped
+    assert not (set(seen+[last['id']])&skipped)
     assert not exported['auto_explanation_confirmations']
     if group=='A':assert all(c['id'] in skipped for c in exported['auto_explanations'])
     store.db.close()
@@ -40,7 +46,9 @@ def test_optional_answers_remain_available_and_skips_persist(tmp_path):
     while not f.view['understanding_rating']:f.step('wait')
     r=f.view['understanding_rating'];f.command('understanding_rating',rating_id=r['id'],rating=4)
     while not f.view['understanding_rating']:f.step('wait')
-    turn=f.view['state']['turn'];payload=f.command('skip_prompts');store.command(f.token,'skip_prompts',payload)
+    turn=f.view['state']['turn']
+    with pytest.raises(StudyError,match='understanding_rating_required'):f.command('skip_prompts')
+    r=f.view['understanding_rating'];payload=f.command('understanding_rating',rating_id=r['id'],rating=2);store.command(f.token,'understanding_rating',payload)
     assert f.view['state']['turn']==turn and not f.view['understanding_rating']
     store.db.close();store=Store(settings)
     assert store.view(f.token,f.view['instance_id'])['optional_prompts']

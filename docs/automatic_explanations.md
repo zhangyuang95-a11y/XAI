@@ -192,3 +192,16 @@ create skips, and retries cannot create duplicate skips.
 legacy instances without the persisted setting keep their original protocol.
 Programmatic Settings defaults to false for legacy regression tests. The public
 Task 2 demo explicitly enables optional prompts. Rewards and game rules are unchanged.
+
+
+## Required ratings correction (v3.23, 24 September 2026)
+
+This supersedes the v3.22 option to skip understanding ratings. Explanation
+prompts (including onboarding) remain optional. Task 2 1–5 understanding ratings
+are mandatory for both groups in all three games at 20/40/60/80/100% checkpoints.
+Pending ratings block gameplay, skip requests, next-task navigation and asking
+until submitted, including after refresh. They remain inline on the right; no
+modal is introduced. `pl3_prompt_settings` for new enrollments records
+`optional-explanations-required-ratings-v2`. Existing skipped historical ratings
+are preserved as missing; no data is rewritten. All pending/future ratings in
+resumed compatible sessions follow the corrected required-rating gate.

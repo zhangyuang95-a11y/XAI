@@ -167,7 +167,7 @@ class Store:
                 db.execute('INSERT INTO pl3_enrollments VALUES(?,?,?,?,?,?)',(iid,1,language,assignment,config.get('scenario_version',config['version']),time.time()))
                 db.execute('INSERT INTO pl3_reward_settings VALUES(?,?)',(iid,encode(rewards.policy(domain))))
                 if self.settings.optional_prompts:
-                    db.execute('INSERT INTO pl3_prompt_settings VALUES(?,?)',(iid,'optional-sidebar-prompts-v1'))
+                    db.execute('INSERT INTO pl3_prompt_settings VALUES(?,?)',(iid,'optional-explanations-required-ratings-v2'))
                 if self.settings.automatic_explanations:
                     db.execute('INSERT INTO pl3_auto_explanation_settings VALUES(?,?,?)',
                         (iid,automatic_explanations.VERSION,time.time()))
@@ -281,7 +281,7 @@ class Store:
                 # Never return a cached response containing now-revoked answers.
                 return self._view(db,instance)
             if payload.get('revision')!=instance['revision']: raise StudyError('stale_state',409)
-            if self._pending_understanding(db,instance) and not self._optional_prompts(db,instance) and kind not in ('understanding_rating','language','timing'):
+            if self._pending_understanding(db,instance) and kind not in ('understanding_rating','language','timing'):
                 raise StudyError('understanding_rating_required',409)
             timings=payload.get('timings',[])
             if not isinstance(timings,list) or len(timings)>4:raise StudyError('invalid_timing')
@@ -413,8 +413,7 @@ class Store:
 
     def _skip_prompts(self,db,instance,reason):
         # Missing responses remain missing. Never insert a confirmation or rating.
-        for kind,row in [('understanding',self._pending_understanding(db,instance)),
-                         ('explanation',self._pending_automatic(db,instance))]:
+        for kind,row in [('explanation',self._pending_automatic(db,instance))]:
             if row:
                 db.execute('INSERT INTO pl3_prompt_skips VALUES(?,?,?,?,?,?)',
                     (row['id'],instance['id'],instance['current_run'],kind,reason,time.time()))
@@ -566,7 +565,7 @@ class Store:
         if not isinstance(qid,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{8,100}',qid):raise StudyError('invalid_question_id')
         with self.db.transaction(scope=payload.get('instance_id')) as db:
             instance=self._instance(db,token,payload.get('instance_id'))
-            if self._pending_understanding(db,instance) and not self._optional_prompts(db,instance):raise StudyError('understanding_rating_required',409)
+            if self._pending_understanding(db,instance):raise StudyError('understanding_rating_required',409)
             if not self._ask_allowed(db,instance):raise StudyError('explanations_unavailable',403)
             if payload.get('authorized_run')!=instance['current_run']:raise StudyError('wrong_run',403)
             target=payload.get('target_run',instance['current_run']);turn=payload.get('turn')

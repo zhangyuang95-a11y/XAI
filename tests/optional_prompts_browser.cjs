@@ -13,14 +13,13 @@ await p.locator('[data-action="wait"]').click();await p.waitForFunction(t=>view.
 assert((await p.evaluate(()=>view.automatic_explanations)).some(c=>c.skipped&&!c.confirmed));
 await p.evaluate(async()=>{while(!pendingUnderstanding()&&!view.state.terminal)await command('action',{run_id:view.run_id,turn:view.state.turn,action:'wait'})});
 assert(await p.locator('#understandingDialog').isVisible());turn=await p.evaluate(()=>view.state.turn);
-await p.locator('#studyCanvas').focus();await p.keyboard.press('Space');await p.waitForFunction(t=>view.state.turn===t+1&&!busy,turn);
-assert.equal(await p.locator('#understandingDialog').count(),0);
-await p.reload();await p.waitForFunction(()=>typeof view!=='undefined'&&!!view?.state&&!busy);assert.equal(await p.evaluate(()=>view.state.turn),turn+1);
-if(domain==='pong'){
- await p.evaluate(async()=>{while(!view.state.terminal)await command('action',{run_id:view.run_id,turn:view.state.turn,action:'wait'})});
- assert(await p.locator('#understandingDialog').isVisible());
- await p.locator('[data-skip-prompts]').first().click();await p.waitForFunction(()=>!pendingUnderstanding()&&!busy);
- await p.getByRole('heading',{name:'Task 2 demo complete',exact:true}).waitFor();
-}
-assert.deepEqual(errors,[]);console.log(domain,'unconfirmed prompt: button and keyboard movement, refresh and skip verified');await p.close();
+assert(await p.locator('[data-action="wait"]').isDisabled());
+assert.equal(await p.locator('[data-skip-prompts]').count(),0);
+await p.locator('#studyCanvas').focus();await p.keyboard.press('Space');assert.equal(await p.evaluate(()=>view.state.turn),turn);
+await p.reload();await p.waitForFunction(()=>typeof view!=='undefined'&&!!view?.state&&!busy);assert.equal(await p.evaluate(()=>view.state.turn),turn);
+assert(await p.locator('#understandingDialog').isVisible());assert(await p.locator('#submitUnderstanding').isDisabled());
+await p.locator('#understandingForm input[value="3"]').check();await p.locator('#submitUnderstanding').click();await p.waitForFunction(()=>!pendingUnderstanding()&&!busy);
+assert(await p.locator('[data-action="wait"]').isEnabled());
+await p.locator('[data-action="wait"]').click();await p.waitForFunction(t=>view.state.turn===t+1&&!busy,turn);
+assert.deepEqual(errors,[]);console.log(domain,'optional explanation and mandatory rating verified, including refresh and resume');await p.close();
 }}finally{await b.close()}})().catch(e=>{console.error(e);process.exit(1)});

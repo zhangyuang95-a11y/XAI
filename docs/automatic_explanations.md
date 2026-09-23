@@ -75,7 +75,7 @@ protocol enrollments refers to explanations, not just answers to questions.
 
 Run `python -m tests.automatic_explanations_preview_server`, then open
 `http://127.0.0.1:9130/auto-preview/kitchen` (or `pong` / `warehouse`). This
-localhost-only helper creates a fresh synthetic researcher-preview session on each link visit in a
+localhost-only helper creates synthetic researcher-preview sessions under one browser identity so all three game tabs can remain open together in a
 separate SQLite database, bypasses the baseline for quick UI inspection, and
 never contacts Prolific or a language provider. It must not be used for research
 data collection. The normal full study flow remains available in the app.

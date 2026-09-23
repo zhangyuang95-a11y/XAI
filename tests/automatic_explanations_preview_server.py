@@ -5,16 +5,25 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from study_v3.server import make_server,COOKIE
 from study_v3.config import Settings
 from study_v3.registry import engine
-from study_v3.store import encode
+from study_v3.store import StudyError
 
 ROOT=Path(__file__).resolve().parents[1]
 settings=Settings(database=str(ROOT/'output/automatic-explanations-preview.sqlite3'),
     automatic_explanations=True,admin_token='local-automatic-preview-only',origin='http://127.0.0.1:9130',mode='preview')
 server=make_server(settings,port=9130)
 store=server.store
-def prepare(domain):
-    token,view=store.create({'participant_id':'auto-preview-'+domain+'-'+uuid.uuid4().hex[:8],
-        'mode':'preview','domain':domain,'group':'A','language':'en','consent':True},admin=True)
+def prepare(domain, existing_token=None):
+    name='auto-preview-'+uuid.uuid4().hex[:8]
+    if existing_token:
+        try:
+            with store.db.transaction(read_only=True) as db:
+                participant=store._participant(db,existing_token)
+            if participant['id'].startswith('auto-preview-'):name=participant['id']
+            else:existing_token=None
+        except StudyError:existing_token=None
+    token,view=store.create({'participant_id':name,
+        'mode':'preview','domain':domain,'group':'A','language':'en','consent':True},token=existing_token,admin=True)
+    if view['stage']!='demo':return token
     def command(kind,**fields):
         nonlocal view
         view=store.command(token,kind,{'instance_id':view['instance_id'],'revision':view['revision'],'command_id':uuid.uuid4().hex,**fields})
@@ -36,7 +45,7 @@ class PreviewHandler(original):
     def do_GET(self):
         domain=self.path.removeprefix('/auto-preview/').strip('/')
         if self.path.startswith('/auto-preview/') and domain in ('kitchen','pong','warehouse'):
-            token=prepare(domain)
+            token=prepare(domain,self.token())
             self.send_response(302)
             self.send_header('Location','/'+domain+'/')
             self.send_header('Set-Cookie',f'{COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax')

@@ -310,6 +310,9 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
         def do_POST(self):
             try:
                 path=urlsplit(self.path).path;payload=self.body()
+                if path=='/api/prolific/admin/release-slot':
+                    if not self.admin():raise StudyError('researcher_access_required',403)
+                    self.reply(200,prolific.release_slot(store,payload));return
                 if path.startswith(('/warehouse/api/','/pong/api/')) or path=='/api/study/command':
                     self.reply(410,{'error':'release_changed','message_en':'This earlier study version cannot continue here. Please contact the researcher.','message_zh':'旧版本任务无法在此继续，请联系研究者。'});return
                 if path=='/api/study/session':

@@ -119,3 +119,80 @@ def test_http_entry_ids_recovery_and_restricted_payment_export(store):
         assert stranger.request('POST','/api/prolific/enrol',payload(1))[0]==401
     finally:
         server.shutdown();server.server_close();worker.join(5)
+
+def release_payload(record, status='RETURNED'):
+    return {'instance_id':record['instance_id'],'submission_id':record['submission_id'],
+        'submission_status':status,'reason':'Verified terminal status in Prolific study submissions.'}
+
+def test_replacements_fill_only_released_cells_without_rewriting_history(store):
+    sessions=[prolific.enrol(store,payload(n)) for n in range(1,13)]
+    before=prolific.payment_records(store)
+    missing={('warehouse','B'),('kitchen','A'),('kitchen','B')}
+    released=[]
+    for cell in sorted(missing):
+        record=next(r for r in before if (r['domain'],r['group_code'])==cell)
+        first=prolific.release_slot(store,release_payload(record))
+        assert prolific.release_slot(store,release_payload(record))==first
+        released.append(record)
+    # Three parallel arrivals fill each vacant cell exactly once.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        replacements=list(pool.map(lambda n:prolific.enrol(store,payload(n)),range(13,16)))
+    assert {(v['domain'],v['group']) for _,v in replacements}==missing
+    with pytest.raises(StudyError,match='prolific_full'):prolific.enrol(store,payload(16))
+    after=prolific.payment_records(store)
+    assert len(after)==15 and [r['allocation_index'] for r in after]==list(range(1,16))
+    assert Counter((r['domain'],r['group_code']) for r in after if not r['released'])==Counter({cell:2 for cell in prolific.CELLS})
+    for old,new in zip(before,after):
+        for key in ('prolific_pid','consented','instance_id','participant_id','allocation_index','stage'):
+            assert old[key]==new[key]
+    for record in released:
+        token,view=sessions[record['allocation_index']-1]
+        with pytest.raises(StudyError,match='prolific_submission_closed'):prolific.resume(store,token)
+        with pytest.raises(StudyError,match='prolific_submission_closed'):store.recover_view(token)
+        with pytest.raises(StudyError,match='prolific_submission_closed'):
+            store.command(token,'demo_skip',{'instance_id':view['id'],'revision':view['revision'],'command_id':'closed-attempt'})
+    assert 'release_reason' not in json.dumps(store.export())
+    reopened=Store(store.settings,RecordingExplainer())
+    try:assert sum(bool(r['released']) for r in prolific.payment_records(reopened))==3
+    finally:reopened.db.close()
+
+def test_release_rejects_wrong_submission_active_status_and_completed(store):
+    token,view=prolific.enrol(store,payload(1))
+    record=prolific.payment_records(store)[0]
+    with pytest.raises(StudyError,match='invalid_slot_release'):
+        prolific.release_slot(store,release_payload(record,'ACTIVE'))
+    with pytest.raises(StudyError,match='prolific_submission_not_found'):
+        prolific.release_slot(store,{**release_payload(record),'submission_id':'f'*24})
+    flow=object.__new__(Flow)
+    flow.store,flow.token,flow.view,flow.domain=store,token,view,view['domain']
+    flow.finish_demo()
+    for _ in range(3):
+        flow.finish_task();flow.command('next')
+    flow.command('questionnaire',answers={},feedback='')
+    with pytest.raises(StudyError,match='completed_slot_cannot_be_released'):
+        prolific.release_slot(store,release_payload(record))
+    assert not prolific.payment_records(store)[0]['released']
+    assert prolific.resume(store,token)['stage']=='completed'
+
+def test_http_release_requires_researcher_and_is_idempotent(store):
+    from study_v3.server import make_server
+    from tests.test_study_v3_http import Client, ORIGIN
+    server=make_server(replace(store.settings,origin=ORIGIN),port=0,explainer=RecordingExplainer())
+    server.store.qa_healthy=True
+    worker=threading.Thread(target=server.serve_forever,daemon=True);worker.start()
+    client=Client(server.server_port)
+    try:
+        assert client.request('POST','/api/prolific/enrol',payload(1))[0]==200
+        record=prolific.payment_records(server.store)[0]
+        body=release_payload(record)
+        path='/api/prolific/admin/release-slot'
+        assert client.request('POST',path,body)[0]==403
+        assert not prolific.payment_records(server.store)[0]['released']
+        auth={'Authorization':'Bearer test-only'}
+        first=client.request('POST',path,body,headers=auth)
+        assert first[0]==200
+        assert client.request('POST',path,body,headers=auth)[1]==first[1]
+        assert client.request('GET','/api/prolific/session')[0]==409
+        assert client.request('POST',path,release_payload(record,'TIMED_OUT'),headers=auth)[0]==409
+    finally:
+        server.shutdown();server.server_close();worker.join(5)

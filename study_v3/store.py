@@ -88,6 +88,8 @@ class Store:
         row=db.one('SELECT * FROM pl3_instances WHERE id=? AND participant_id=?',(instance_id,participant['id']))
         if row is None: raise StudyError('study_not_found',404)
         if not compatible_instance(row): raise StudyError('release_changed',409)
+        if db.one('SELECT instance_id FROM pl3_prolific_releases WHERE instance_id=?',(row['id'],)):
+            raise StudyError('prolific_submission_closed',409)
         return row
 
     def _ask_allowed(self, db, instance):
@@ -182,7 +184,7 @@ class Store:
             if not instance: return {'participant_id':p['id'],'stage':'welcome',
                 'previous_version_saved':any(not compatible_instance(r) and (not domain or r['domain']==domain) for r in rows)}
             if not compatible_instance(instance): raise StudyError('release_changed',409)
-            return self._view(db,instance)
+            return self._view(db,self._instance(db,token,instance['id']))
 
     def view(self, token, instance_id):
         with self.db.transaction(read_only=True) as db: return self._view(db,self._instance(db,token,instance_id))

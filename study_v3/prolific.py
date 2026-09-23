@@ -52,19 +52,23 @@ def enrol(store,payload,token=None):
                 raise StudyError('prolific_already_participated',409)
         if db.one('SELECT submission_id FROM pl3_prolific_links WHERE submission_id=?',(submission,)):
             raise StudyError('invalid_prolific_link',409)
-        rows=db.all('SELECT i.domain,i.group_code,COUNT(*) AS n FROM pl3_prolific_links l JOIN pl3_instances i ON i.id=l.instance_id WHERE l.study_id=? GROUP BY i.domain,i.group_code',(study,))
+        rows=db.all('SELECT i.domain,i.group_code,COUNT(*) AS n FROM pl3_prolific_links l JOIN pl3_instances i ON i.id=l.instance_id LEFT JOIN pl3_prolific_releases r ON r.instance_id=i.id WHERE l.study_id=? AND r.instance_id IS NULL GROUP BY i.domain,i.group_code',(study,))
         counts={(r['domain'],r['group_code']):r['n'] for r in rows}
         allocated=sum(counts.values())
         if allocated>=store.settings.prolific_places:raise StudyError('prolific_full',409)
         least=min(counts.get(cell,0) for cell in CELLS)
         domain,group=secrets.choice([cell for cell in CELLS if counts.get(cell,0)==least])
+        # Keep the original allocation history unique after a returned slot is
+        # released. Releases affect capacity, never IDs or earlier consent.
+        allocation_index=db.one('SELECT COALESCE(MAX(allocation_index),0)+1 AS next_index FROM pl3_prolific_links WHERE study_id=?',(study,))['next_index']
         # Only internal IDs enter game data or the semantic provider context.
         name='pl-'+uid()
         new_token,view=store.create({'domain':domain,'group':group,'participant_id':name,
             'mode':'pilot','consent':True,'language':'en'},token=None,_db=db,_prolific=True)
         db.execute('INSERT INTO pl3_prolific_links VALUES(?,?,?,?,?,?,?,?)',
-            (pid,study,submission,name,view['instance_id'],allocated+1,CONSENT_VERSION,time.time()))
-        db.execute("UPDATE pl3_enrollments SET assignment_source='prolific_randomized_block_6' WHERE instance_id=?",(view['instance_id'],))
+            (pid,study,submission,name,view['instance_id'],allocation_index,CONSENT_VERSION,time.time()))
+        source='prolific_randomized_vacancy' if allocation_index>allocated+1 else 'prolific_randomized_block_6'
+        db.execute('UPDATE pl3_enrollments SET assignment_source=? WHERE instance_id=?',(source,view['instance_id']))
         instance=store._instance(db,new_token,view['instance_id'])
         return new_token,store._view(db,instance)
 
@@ -82,7 +86,37 @@ def resume(store,token,expected=None):
 def payment_records(store):
     """Restricted operational view. Never included in the ordinary research export."""
     with store.db.transaction(read_only=True) as db:
-        records=db.all('SELECT l.*,i.domain,i.group_code,i.stage,i.completed FROM pl3_prolific_links l JOIN pl3_instances i ON i.id=l.instance_id WHERE l.study_id=? ORDER BY l.allocation_index',(store.settings.prolific_study_id,))
+        records=db.all('SELECT l.*,i.domain,i.group_code,i.stage,i.completed,r.submission_status,r.reason AS release_reason,r.released FROM pl3_prolific_links l JOIN pl3_instances i ON i.id=l.instance_id LEFT JOIN pl3_prolific_releases r ON r.instance_id=i.id WHERE l.study_id=? ORDER BY l.allocation_index',(store.settings.prolific_study_id,))
         for record in records:
             record['scores']=[{'task':r['task'],'score_json':r['score_json']} for r in db.all('SELECT task,score_json FROM pl3_runs WHERE instance_id=? AND status=? ORDER BY task',(record['instance_id'],'completed'))]
         return records
+
+def release_slot(store,payload):
+    """Researcher-confirmed terminal submission; never infer from inactivity.
+
+    The instance lock also protects gameplay/completion. Enrollment is globally
+    serialized and only counts committed releases. No research rows are removed.
+    This does not change the submission or payment status on Prolific.
+    """
+    iid=payload.get('instance_id','')
+    submission=payload.get('submission_id','')
+    status=payload.get('submission_status')
+    reason=payload.get('reason','')
+    if (not isinstance(iid,str) or not re.fullmatch(r'[0-9a-f]{32}',iid)
+        or not isinstance(submission,str) or not re.fullmatch(r'[0-9a-f]{24}',submission)
+        or status not in ('RETURNED','TIMED_OUT')
+        or not isinstance(reason,str) or not 1<=len(reason.strip())<=1000):
+        raise StudyError('invalid_slot_release')
+    with store.db.transaction(scope=iid) as db:
+        linked=db.one('SELECT l.instance_id,i.completed,i.stage FROM pl3_prolific_links l JOIN pl3_instances i ON i.id=l.instance_id WHERE l.instance_id=? AND l.submission_id=? AND l.study_id=?',
+            (iid,submission,store.settings.prolific_study_id))
+        if not linked:raise StudyError('prolific_submission_not_found',404)
+        if linked['completed'] is not None or linked['stage']=='completed':
+            raise StudyError('completed_slot_cannot_be_released',409)
+        prior=db.one('SELECT * FROM pl3_prolific_releases WHERE instance_id=?',(iid,))
+        if prior:
+            if prior['submission_status']!=status:raise StudyError('slot_release_conflict',409)
+            return prior
+        released=time.time()
+        db.execute('INSERT INTO pl3_prolific_releases VALUES(?,?,?,?)',(iid,status,reason.strip(),released))
+        return {'instance_id':iid,'submission_status':status,'reason':reason.strip(),'released':released}

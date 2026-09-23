@@ -81,7 +81,7 @@ main{max-width:1480px;padding-top:24px}.panel{border-radius:20px;box-shadow:0 16
 .automatic-dialog .button{background:#c74b24}
 .automatic-dialog .hint{margin-bottom:14px}
 
-/* Reserve space below the Pong court so explanations never cover a ball. */
+/* Dock Pong explanations in the sidebar and route the connector outside the court. */
 .pong-explanation-dock{height:310px;position:relative}
 .automatic-dialog[data-domain="pong"]{padding:20px;background:#fffdfb;box-shadow:0 8px 28px #24334c18}
 .automatic-dialog[data-domain="pong"]::backdrop{background:transparent}
@@ -91,3 +91,14 @@ main{max-width:1480px;padding-top:24px}.panel{border-radius:20px;box-shadow:0 16
 .automatic-connector{position:absolute;left:0;top:0;width:100%;height:1px;overflow:visible;pointer-events:none}
 .automatic-connector path{fill:none;stroke:#f56b3d;stroke-width:2;stroke-linecap:round}
 .automatic-connector circle{fill:#f56b3d}
+
+.automatic-dialog[data-domain="pong"].beside-ai::after{top:var(--tail-y,50%);left:-10px;bottom:auto;transform:rotate(135deg)}
+@media(min-width:700px){
+ .pong-workspace{grid-template-columns:minmax(0,1.35fr) minmax(270px,1fr);gap:24px}
+ .pong-workspace .pong-board canvas{width:min(100%,540px,calc((100dvh - 300px)*.85714))}
+ .pong-workspace .board-toolbar{padding:12px;gap:8px;flex-wrap:wrap}
+ .pong-workspace .legend{gap:10px}
+ .pong-workspace .side-stack{gap:16px}
+ .automatic-dialog[data-domain="pong"]{padding:18px}
+ .automatic-dialog[data-domain="pong"] .automatic-speaker h2{font-size:18px}
+}

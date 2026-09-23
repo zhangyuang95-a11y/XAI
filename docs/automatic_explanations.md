@@ -25,9 +25,10 @@ scenarios, scores and task transitions are unchanged.
   closed immediately when the task ends.
 
 For new enrollments, the explanation appears in a speech-bubble dialog anchored
-to AI teammate 2. In Pong, space between the court and replay panel expands to
-contain the explanation, with a connector pointing to the AI paddle. The bubble
-stays below the court and keeps the balls unobscured. The game cannot advance until the
+to AI teammate 2. In Pong, the explanation occupies the right sidebar below the controls, with a
+connector routed around the court to the AI paddle. The court and player legend
+remain visible beside the explanation. Narrow phone screens stack the sidebar
+below the court. The game cannot advance until the
 participant selects **Confirm and continue**. Keyboard movement, held movement,
 outside clicks and Escape cannot bypass the dialog. Native modal focus trapping
 keeps background controls inaccessible. Confirmation closes the dialog without

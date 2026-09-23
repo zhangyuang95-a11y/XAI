@@ -19,14 +19,18 @@ const base=process.env.STUDY_SMOKE_URL||'http://127.0.0.1:9130';
      await page.reload();await page.waitForFunction(()=>document.querySelector('#automaticDialog')?.open&&!busy&&!animationPending);
      const bounds=await page.evaluate(()=>{
       const rect=id=>{const r=document.querySelector(id).getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right}};
-      return {dialog:rect('#automaticDialog'),court:rect('#studyCanvas'),dock:rect('#pongExplanationDock'),replay:rect('.replay-panel'),height:innerHeight,width:innerWidth};
+      return {dialog:rect('#automaticDialog'),court:rect('#studyCanvas'),dock:rect('#pongExplanationDock'),replay:rect('.replay-panel'),legend:rect('.board-toolbar'),height:innerHeight,width:innerWidth};
      });
-     assert(bounds.dialog.top>bounds.court.bottom,'Pong explanation stays below court');
-     assert(bounds.dialog.bottom<=bounds.dock.bottom,'Dock reserves full explanation height');
-     assert(bounds.dialog.bottom<bounds.replay.top,'Replay is not covered');
+     if(viewport.width>=700){
+      assert(bounds.dialog.left>bounds.court.right,'Pong explanation stays to the right of court');
+      assert(bounds.court.top>=88&&bounds.court.bottom<=bounds.height,'Whole court remains visible');
+      assert(bounds.legend.top>=88,'Player identity legend remains visible');
+     }else assert(bounds.dialog.top>bounds.court.bottom,'Narrow screens stack explanation below court');
+     assert(bounds.dialog.bottom<=bounds.dock.bottom+1,'Dock reserves full explanation height: '+JSON.stringify(bounds));
+
      assert(bounds.dialog.left>=0&&bounds.dialog.right<=bounds.width,'Bubble fits viewport width');
      assert(bounds.dialog.top>=0&&bounds.dialog.bottom<=bounds.height,'Confirmation is visible');
-     await page.screenshot({path:`output/automatic-preview/pong-docked-${viewport.width}.png`});
+     await page.screenshot({path:`output/automatic-preview/pong-sidebar-${viewport.width}.png`});
     }
     await page.setViewportSize({width:1440,height:1000});
     await page.reload();await page.waitForFunction(()=>document.querySelector('#automaticDialog')?.open&&!busy&&!animationPending);

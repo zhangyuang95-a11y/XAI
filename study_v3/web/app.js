@@ -179,16 +179,25 @@ function positionAutomaticDialog(){
  const dialog=$('automaticDialog'),anchor=automaticAnchor();if(!dialog?.open||!anchor)return;
  if(domain==='pong'){
   const dock=$('pongExplanationDock');if(!dock)return;
-  const rect=dock.getBoundingClientRect();
-  dialog.style.width=Math.min(600,rect.width-24)+'px';
-  const w=dialog.offsetWidth,h=dialog.offsetHeight,left=rect.left+(rect.width-w)/2,top=rect.top+30;
-  dock.style.height=(h+44)+'px';
+  const rect=dock.getBoundingClientRect(),court=$('studyCanvas').getBoundingClientRect();
+  const beside=rect.left>=court.right;
+  dialog.style.width=rect.width+'px';
+  const w=dialog.offsetWidth,h=dialog.offsetHeight,left=rect.left,top=rect.top;
+  dock.style.height=h+'px';
   dialog.style.left=left+'px';dialog.style.top=top+'px';
-  const tail=Math.max(24,Math.min(w-40,anchor.x-left));
-  dialog.style.setProperty('--tail-x',tail+'px');dialog.classList.add('below-ai');
-  const x=anchor.x-left-2,y=anchor.y-top+12,join=tail+8;
+  dialog.classList.toggle('beside-ai',beside);dialog.classList.toggle('below-ai',!beside);
+  const x=anchor.x-left-2,y=anchor.y-top+12;
   const connector=dialog.querySelector('.automatic-connector');
-  connector.querySelector('path').setAttribute('d',`M ${x} ${y} C ${x} ${y+20}, ${join} -35, ${join} -12`);
+  if(beside){
+   const tail=Math.max(32,Math.min(h-40,anchor.y-top));
+   const bottom=court.bottom-top+4,gutter=-14;
+   dialog.style.setProperty('--tail-y',tail+'px');
+   connector.querySelector('path').setAttribute('d',`M ${x} ${y} L ${x} ${bottom} L ${gutter} ${bottom} L ${gutter} ${tail+8} L -10 ${tail+8}`);
+  }else{
+   const tail=Math.max(24,Math.min(w-40,anchor.x-left));
+   dialog.style.setProperty('--tail-x',tail+'px');
+   connector.querySelector('path').setAttribute('d',`M ${x} ${y} C ${x} ${y+20}, ${tail+8} -35, ${tail+8} -12`);
+  }
   connector.querySelector('circle').setAttribute('cx',x);connector.querySelector('circle').setAttribute('cy',y);
   return;
  }
@@ -210,6 +219,8 @@ function syncAutomaticDialog(){
   dialog.showModal();
   if(domain==='pong'){
    positionAutomaticDialog();
+   const boardTop=document.querySelector('.board-panel').getBoundingClientRect().top;
+   if(dialog.classList.contains('beside-ai')){window.scrollBy({top:boardTop-104,behavior:'instant'});positionAutomaticDialog();}
    const rect=dialog.getBoundingClientRect();
    if(rect.bottom>innerHeight-20)window.scrollBy({top:rect.bottom-innerHeight+20,behavior:'instant'});
    else if(rect.top<100)window.scrollBy({top:rect.top-100,behavior:'instant'});
@@ -237,7 +248,7 @@ function observeAutomatic(){
 }
 function questionPanel(){if(!view.can_ask)return `<section class="panel locked-panel"><h3>${tr('closed')}</h3>${view.stage==='task3'?tr('transfer'):view.stage==='task1'?tr('baseline'):tr('control')}</section>`;return `<section id="chatPanel" class="panel chat-panel"><h3>${tr('ask')}</h3><p class="hint">${task2Introduction()}</p><div id="chatLog" class="chat-log">${(view.questions||[]).slice(-1).map(q=>`<div class="chat-message"><div class="chat-question">${esc(q.question)}</div><div class="chat-answer">${esc(q.result?.answer||'')}</div><div class="chat-meta">${tr('turn')} ${q.target_turn}</div></div>`).join('')}</div><textarea id="questionInput" maxlength="2000" placeholder="${tr('questionPlaceholder')}" ${asking?'disabled':''}>${esc(draftQuestion)}</textarea><div class="examples">${questionExamples().map(q=>`<button class="example" data-example="${q.id}">${esc(q.label)}</button>`).join('')}</div>${domain==='pong'?`<label class="hypothetical-lane"><span>${lang==='zh'?'假设我的位置':'Imagine my position'}</span><select id="hypotheticalLane" aria-label="${lang==='zh'?'假设球道':'Hypothetical lane'}">${Array.from({length:9},(_,i)=>i+1).map(n=>`<option value="${n}" ${n===hypotheticalLane?'selected':''}>${lang==='zh'?'第 '+n+' 道':'Lane '+n}</option>`).join('')}</select><button class="example" data-example="position">${lang==='zh'?'你会怎么移动？':'How would you move?'}</button></label>`:''}<button id="askButton" class="button teal full" ${asking?'disabled':''}>${asking?tr('asking'):tr('send')} ↗</button></section>`;}
 function replayPanel(s){return `<section class="panel replay-panel"><div class="replay-controls"><span class="replay-label">${tr('replay')}</span><select id="replayTask">${view.task_runs.map(r=>`<option value="${r.id}" ${r.id===(replay?.run_id||view.run_id)?'selected':''}>Task ${r.task}</option>`).join('')}</select><input id="replaySlider" aria-label="${tr('turn')}" type="range" min="0" max="${replay?.max_turn??view.state.turn}" value="${s.turn}"><span class="replay-label">${s.turn}</span><button id="currentButton" class="button secondary small">${tr('current')}</button></div><ul class="event-list">${(s.events||[]).length?s.events.map(e=>`<li>${esc(e[lang]||e.en||e.type)}</li>`).join(''):`<li>${tr('noEvents')}</li>`}</ul></section>`;}
-function taskPage(){const s=replay?.state||view.state;if(view.run_status==='completed'&&!replay)return `${heading()}<section class="panel result-panel"><div class="eyebrow">${tr('finishTitle')}</div><div class="result-score">${Number(s.score.task_score).toFixed(0)}${scoreSuffix(s.score)}</div><p class="muted">${tr('finishSub')}</p>${view.stage==='task2'?`<p class="hint">${view.task2_explanation_notice?tr('closed')+'. '+tr('transfer'):tr('control')}</p>`:''}<button id="nextButton" class="button">${view.stage==='task3'?tr('toSurvey'):tr('nextTask')+' '+(Number(view.stage.slice(-1))+1)} →</button></section>${replayPanel(s)}`;return `${heading()}<div class="workspace"><div>${automaticPanel()}${board(s)}${pongExplanationDock()}${replayPanel(s)}</div><aside class="side-stack"><section class="panel"><h3>${tr('actions')}</h3>${replay?`<div class="notice">${tr('readOnly')}</div>`:''}<div class="action-grid">${view.actions.map(a=>`<button class="action-button ${selectedAction===a?'selected':''}" data-action="${a}" ${replay?'disabled':''}>${esc(actionLabel(a))}</button>`).join('')}</div><p class="control-keys">${controlsText()}</p>${domain==='kitchen'?`<p class="interaction-hint">${(typeof s.interaction==='object'&&s.interaction?.available)?'E: ':''}${esc(typeof s.interaction==='string'?s.interaction:(lang==='zh'?s.interaction?.label_zh:s.interaction?.label_en)||'')}</p>`:''}<p class="hint">${tr('controls')}</p></section>${domain==='kitchen'?kitchenMenu(s):''}${questionPanel()}<section class="panel"><details><summary>${domain==='kitchen'?tr('operationHelp'):tr('rules')}</summary>${conciseRules(s)}</details></section></aside></div>${automaticDialog()}`;}
+function taskPage(){const s=replay?.state||view.state;if(view.run_status==='completed'&&!replay)return `${heading()}<section class="panel result-panel"><div class="eyebrow">${tr('finishTitle')}</div><div class="result-score">${Number(s.score.task_score).toFixed(0)}${scoreSuffix(s.score)}</div><p class="muted">${tr('finishSub')}</p>${view.stage==='task2'?`<p class="hint">${view.task2_explanation_notice?tr('closed')+'. '+tr('transfer'):tr('control')}</p>`:''}<button id="nextButton" class="button">${view.stage==='task3'?tr('toSurvey'):tr('nextTask')+' '+(Number(view.stage.slice(-1))+1)} →</button></section>${replayPanel(s)}`;return `${heading()}<div class="workspace ${domain==='pong'?'pong-workspace':''}"><div>${automaticPanel()}${board(s)}${replayPanel(s)}</div><aside class="side-stack"><section class="panel"><h3>${tr('actions')}</h3>${replay?`<div class="notice">${tr('readOnly')}</div>`:''}<div class="action-grid">${view.actions.map(a=>`<button class="action-button ${selectedAction===a?'selected':''}" data-action="${a}" ${replay?'disabled':''}>${esc(actionLabel(a))}</button>`).join('')}</div><p class="control-keys">${controlsText()}</p>${domain==='kitchen'?`<p class="interaction-hint">${(typeof s.interaction==='object'&&s.interaction?.available)?'E: ':''}${esc(typeof s.interaction==='string'?s.interaction:(lang==='zh'?s.interaction?.label_zh:s.interaction?.label_en)||'')}</p>`:''}<p class="hint">${tr('controls')}</p></section>${pongExplanationDock()}${domain==='kitchen'?kitchenMenu(s):''}${questionPanel()}<section class="panel"><details><summary>${domain==='kitchen'?tr('operationHelp'):tr('rules')}</summary>${conciseRules(s)}</details></section></aside></div>${automaticDialog()}`;}
 function demoCaption(text,state){return domain==='warehouse'?String(text).replace(/\btask_\d+\b/g,id=>{const index=(state.orders||[]).findIndex(order=>order.id===id);return index<0?id:'A'+(index+1);}):text;}
 function demoStorageKey(){return view?.instance_id?'policylens.demo.'+view.release_id+'.'+view.instance_id:null;}
 function demoFrame(){

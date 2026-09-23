@@ -10,10 +10,11 @@ scenarios, scores and task transitions are unchanged.
 ## Node rules
 
 - Warehouse: an actual collision after the completed step; the start of a
-  non-progressing AI movement relative to its current path goal (a detour); a
-  change into travelling to the charger or charging on the charger. Consecutive
-  detour movements toward the same goal and a continuing charging phase do not
-  repeat the card. Waiting alone is not labelled a detour. A new collision still
+  non-progressing AI movement relative to its current path goal (a detour); the
+  first decision to travel to or use the charger in Task 2. Later arrivals,
+  charging phases and repeat charging trips do not produce another charge prompt. Consecutive
+  detour movements toward the same goal do not repeat the card. The first-charge
+  limit is stored with the run and survives refresh and restart. Waiting alone is not labelled a detour. A new collision still
   produces a new card, even if it occurs in a continuing detour/charging episode.
 - Pong: when the current selected catch is a team/large ball, show the AI's
   chosen contact and the human's other contact. Deduplicate by ball IDs and

@@ -392,6 +392,14 @@ class Store:
         if not config or config['version'] not in automatic_explanations.SUPPORTED_VERSIONS:return
         card=automatic_explanations.candidate(instance['domain'],state,decision,previous)
         if not card:return
+        if instance['domain']=='warehouse' and any(t.startswith('charge_') for t in card['trigger_types']):
+            prior=db.all('SELECT content_json FROM pl3_auto_explanations WHERE run_id=?',(run_id,))
+            charge_seen=any(any(t.startswith('charge_') for t in json.loads(r['content_json'])['trigger_types']) for r in prior)
+            if charge_seen:
+                # One charging explanation per Task 2, persisted across reloads.
+                # A simultaneous collision or detour remains an independent node.
+                card['trigger_types']=[t for t in card['trigger_types'] if not t.startswith('charge_')]
+                if not card['trigger_types']:return
         if db.one('SELECT id FROM pl3_auto_explanations WHERE run_id=? AND trigger_key=?',(run_id,card['trigger_key'])):return
         # Stored with the same transaction as the action: retries cannot duplicate
         # a node, and refreshing never creates an explanation or advances play.

@@ -139,3 +139,33 @@ def test_legacy_automatic_protocol_stays_nonblocking(tmp_path):
     assert flow.view['automatic_explanations'][0]['requires_confirmation'] is False
     assert flow.view['state']['turn']==6
     store.db.close()
+
+
+def test_only_first_charging_node_survives_restart_and_keeps_other_events(tmp_path):
+    """Synthetic node records exercise persistence without playing a real cohort."""
+    from study_v3.automatic_explanations import VERSION
+    settings=Settings(database=str(tmp_path/'charge-once.db'),automatic_explanations=True)
+    store=Store(settings)
+    instance={'id':'synthetic-warehouse','domain':'warehouse','group_code':'A'}
+    with store.db.transaction() as db:
+        db.execute('INSERT INTO pl3_auto_explanation_settings VALUES(?,?,?)',(instance['id'],VERSION,0))
+        going=decision(goal_details={'label':'charger'})
+        store._record_automatic(db,instance,'run-1',state(5),going)
+    store.db.close()
+    store=Store(settings)
+    charging=decision(action='wait',reason_code='charging',goal_details={'label':'charger'})
+    with store.db.transaction() as db:
+        # Arriving at the charger and a later new trip must not show again.
+        store._record_automatic(db,instance,'run-1',state(6),charging,going)
+        store._record_automatic(db,instance,'run-1',state(30),going,decision())
+        collision=state(31,events=[{'type':'collision','en':'A collision occurred.','zh':'发生碰撞。'}])
+        store._record_automatic(db,instance,'run-1',collision,charging,going)
+        detour=decision(goal_details={'label':'charger'},controller_trace={'selected_ai_action':{'distance_before':3,'distance_after':4}})
+        store._record_automatic(db,instance,'run-1',state(32),detour,decision())
+        cards=[json.loads(r['content_json']) for r in db.all('SELECT content_json FROM pl3_auto_explanations WHERE run_id=? ORDER BY turn',('run-1',))]
+        assert [c['trigger_types'] for c in cards]==[['charge_travel'],['collision'],['detour']]
+        # A separate run has its own first charge prompt, even if it starts on the charger.
+        store._record_automatic(db,instance,'run-2',state(1),charging)
+        first=json.loads(db.one('SELECT content_json FROM pl3_auto_explanations WHERE run_id=?',('run-2',))['content_json'])
+        assert first['trigger_types']==['charge_charging']
+    store.db.close()

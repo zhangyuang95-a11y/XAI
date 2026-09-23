@@ -56,6 +56,16 @@ CREATE TABLE IF NOT EXISTS pl3_questions (
  language TEXT NOT NULL, result_json TEXT NOT NULL, status TEXT NOT NULL,
  requested DOUBLE PRECISION NOT NULL, finished DOUBLE PRECISION, displayed DOUBLE PRECISION
 );
+CREATE TABLE IF NOT EXISTS pl3_auto_explanation_settings (
+ instance_id TEXT PRIMARY KEY, version TEXT NOT NULL, created DOUBLE PRECISION NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pl3_auto_explanations (
+ id TEXT PRIMARY KEY, instance_id TEXT NOT NULL, run_id TEXT NOT NULL,
+ turn INTEGER NOT NULL, trigger_key TEXT NOT NULL, content_json TEXT NOT NULL,
+ created DOUBLE PRECISION NOT NULL, displayed DOUBLE PRECISION,
+ UNIQUE(run_id, trigger_key)
+);
+CREATE INDEX IF NOT EXISTS pl3_auto_explanation_run ON pl3_auto_explanations(run_id, turn);
 CREATE TABLE IF NOT EXISTS pl3_questionnaires (
  instance_id TEXT PRIMARY KEY, answers_json TEXT NOT NULL,
  comprehension_json TEXT NOT NULL, submitted DOUBLE PRECISION NOT NULL
@@ -136,6 +146,8 @@ FLOAT_COLUMNS = {
     'pl3_runs': ('started', 'ended'),
     'pl3_frames': ('created',),
     'pl3_questions': ('requested', 'finished', 'displayed'),
+    'pl3_auto_explanation_settings': ('created',),
+    'pl3_auto_explanations': ('created','displayed'),
     'pl3_questionnaires': ('submitted',),
     'pl3_commands': ('created',),
     'pl3_timings': ('seconds', 'recorded'),

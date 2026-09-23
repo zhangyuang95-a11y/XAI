@@ -63,3 +63,8 @@ main{max-width:1480px;padding-top:24px}.panel{border-radius:20px;box-shadow:0 16
 
 /* Consent follows the supplied paragraph-based PDF layout. */
 .consent-document{max-width:850px;margin:24px auto;font:17px/1.6 Arial,sans-serif;padding:40px 48px;color:#171717}.consent-document p{margin:0 0 22px}.consent-document .check-field{align-items:flex-start;margin:20px 0}.consent-document a{color:#145ba8}.consent-document .button{color:inherit}@media(max-width:600px){.consent-document{padding:24px 20px;font-size:16px}}@media print{.masthead,footer,.button-row{display:none}.consent-document{box-shadow:none;border:0;padding:0;font-size:11pt} .consent-document p{break-inside:avoid}}
+
+/* Automatic explanations remain visible above the board during active Task 2. */
+.automatic-explanation{position:sticky;top:96px;z-index:4;border-left:4px solid #087f8c;background:#f0fbfa;margin-bottom:16px;padding:16px 20px}
+.automatic-explanation p{white-space:pre-line;line-height:1.55;margin:8px 0 10px;color:#123b42}
+.automatic-explanation .eyebrow{color:#076773}

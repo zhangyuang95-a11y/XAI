@@ -6,6 +6,7 @@ admission rules only; it does not create real participants or use a model API.
 from dataclasses import replace
 import json
 import threading
+import time
 import uuid
 
 import pytest
@@ -310,6 +311,11 @@ def test_public_http_cookie_switches_domains_and_resumes_locked_group(pilot_stor
     worker.start()
     client = Client(server.server_port)
     try:
+        # Readiness is established asynchronously by the injected probe.
+        deadline = time.monotonic() + 10
+        while not server.store.ready and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert server.store.ready
         name = 'public-http-switch'
         status, pong, headers = client.request('POST', '/api/study/session', enrollment(name, 'pong', 'A'))
         assert status == 200 and 'HttpOnly' in headers['Set-Cookie']

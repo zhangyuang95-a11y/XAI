@@ -12,7 +12,7 @@ import uuid
 from . import RELEASE_ID, SUPPORTED_RELEASE_IDS, KITCHEN_SUPPORTED_RELEASE_IDS
 from .database import Database
 from .registry import engine, demonstration, MODULES, scenario_config
-from . import kitchen_tutorial
+from . import kitchen_tutorial, automatic_explanations
 
 def encode(value): return json.dumps(value, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
 def digest(value): return hashlib.sha256(value.encode()).hexdigest()
@@ -43,7 +43,8 @@ EXPLANATION_ITEMS = [
 ]
 
 EXPORT_TABLES = ('participants','enrollments','instances','runs','frames',
-                 'questions','questionnaires','timings','releases','tutorials','tutorial_events')
+                 'questions','questionnaires','timings','releases','tutorials','tutorial_events',
+                 'auto_explanation_settings','auto_explanations')
 
 class Store:
     def __init__(self, settings, explainer=None):
@@ -163,6 +164,9 @@ class Store:
                 else:
                     assignment='existing_participant' if existing else 'randomized_balanced'
                 db.execute('INSERT INTO pl3_enrollments VALUES(?,?,?,?,?,?)',(iid,1,language,assignment,config.get('scenario_version',config['version']),time.time()))
+                if self.settings.automatic_explanations:
+                    db.execute('INSERT INTO pl3_auto_explanation_settings VALUES(?,?,?)',
+                        (iid,automatic_explanations.VERSION,time.time()))
                 instance=db.one('SELECT * FROM pl3_instances WHERE id=?',(iid,))
                 if domain=='kitchen':
                     now=time.time()
@@ -197,7 +201,8 @@ class Store:
         result.update(instance_id=instance['id'],participant_id=instance['participant_id'],
             can_ask=self._ask_allowed(db,instance),rules=eng.rules(language),
             task2_explanation_notice=instance['stage']=='task2' and instance['group_code']=='A' and not self._ask_allowed(db,instance),
-            task_runs=[],questions=[],state=None,run_id=instance['current_run'],
+            task_runs=[],questions=[],automatic_explanations=[],state=None,run_id=instance['current_run'],
+            automatic_explanations_enabled=bool(db.one('SELECT instance_id FROM pl3_auto_explanation_settings WHERE instance_id=?',(instance['id'],))),
             group=instance['group_code'],group_selection_locked=True,
             group_assignment_source=enrollment['assignment_source'] if enrollment else None)
         runs=db.all('SELECT id,task,status,score_json,state_json FROM pl3_runs WHERE instance_id=? ORDER BY task',(instance['id'],))
@@ -223,12 +228,22 @@ class Store:
             if hasattr(eng,'action_label'):
                 result['action_labels']={a:eng.action_label(a,language) for a in result['actions']}
         if result['can_ask']:
+            result['automatic_explanations']=[{'id':r['id'],'turn':r['turn'],
+                'body':json.loads(r['content_json'])['body'][language],
+                'trigger_types':json.loads(r['content_json'])['trigger_types'],
+                'displayed':r['displayed'] is not None}
+                for r in db.all('SELECT * FROM pl3_auto_explanations WHERE run_id=? ORDER BY turn,id',(instance['current_run'],))]
             result['questions']=[{'id':q['id'],'question':q['question'],'language':q['language'],
                 'result':public_answer(json.loads(q['result_json'])),'status':q['status'],'target_turn':q['target_turn'],'target_run':q['target_run']}
                 for q in db.all("SELECT * FROM pl3_questions WHERE authorized_run=? AND status IN ('answered','clarification','unavailable') ORDER BY requested",(instance['current_run'],))]
         if instance['stage']=='questionnaire':
             items=COMMON_ITEMS+(EXPLANATION_ITEMS if instance['group_code']=='A' else [])
-            result['questionnaire']={'items':[{'id':i[0],'text':i[2 if language=='zh' else 1],'allow_na':i in EXPLANATION_ITEMS} for i in items],
+            if result['automatic_explanations_enabled'] and instance['group_code']=='A':
+                items=COMMON_ITEMS+[
+                    ('relevant','The Task 2 explanations were relevant to the situation.','Task 2 的解释与当时的情境相关。'),
+                    ('clear','The Task 2 explanations were easy to understand.','Task 2 的解释容易理解。'),
+                    ('helpful','The Task 2 explanations helped me choose my next action.','Task 2 的解释帮助我选择下一步动作。')]
+            result['questionnaire']={'items':[{'id':i[0],'text':i[2 if language=='zh' else 1],'allow_na':i[0] in {q[0] for q in EXPLANATION_ITEMS}} for i in items],
                 'comprehension':[]}
         link=db.one('SELECT study_id FROM pl3_prolific_links WHERE instance_id=?',(instance['id'],))
         if link:
@@ -338,8 +353,10 @@ class Store:
         rid=uid(); now=time.time()
         db.execute('INSERT INTO pl3_runs VALUES(?,?,?,?,?,?,?,?,?)',
             (rid,instance['id'],task,instance['scenario_seed'],encode(state),'active',encode(eng.score(state)),now,None))
+        decision=eng.decide(state)
         db.execute('INSERT INTO pl3_frames VALUES(?,?,?,?,?,?,?)',
-            (rid,0,encode(state),encode(eng.public_state(state)),encode(eng.decide(state)),None,now))
+            (rid,0,encode(state),encode(eng.public_state(state)),encode(decision),None,now))
+        if task==2:self._record_automatic(db,instance,rid,state,decision)
         db.execute('UPDATE pl3_instances SET stage=?,current_run=? WHERE id=?',('task'+str(task),rid,instance['id']))
 
     def _action(self,db,instance,payload):
@@ -358,10 +375,36 @@ class Store:
         now=time.time(); terminal=nxt['terminal']
         db.execute('UPDATE pl3_runs SET state_json=?,status=?,score_json=?,ended=? WHERE id=?',
             (encode(nxt),'completed' if terminal else 'active',encode(eng.score(nxt)),now if terminal else None,run['id']))
+        next_decision=eng.decide(nxt) if not terminal else {}
         db.execute('INSERT INTO pl3_frames VALUES(?,?,?,?,?,?,?)',
-            (run['id'],nxt['turn'],encode(nxt),encode(eng.public_state(nxt)),encode(eng.decide(nxt)) if not terminal else '{}',None,now))
+            (run['id'],nxt['turn'],encode(nxt),encode(eng.public_state(nxt)),encode(next_decision),None,now))
+        if run['task']==2:self._record_automatic(db,instance,run['id'],nxt,next_decision,decision)
         if terminal:
             db.execute("UPDATE pl3_questions SET status='revoked' WHERE authorized_run=? AND status='pending'",(run['id'],))
+
+    def _record_automatic(self,db,instance,run_id,state,decision,previous=None):
+        if instance['group_code']!='A':return
+        config=db.one('SELECT version FROM pl3_auto_explanation_settings WHERE instance_id=?',(instance['id'],))
+        if not config or config['version']!=automatic_explanations.VERSION:return
+        card=automatic_explanations.candidate(instance['domain'],state,decision,previous)
+        if not card:return
+        if db.one('SELECT id FROM pl3_auto_explanations WHERE run_id=? AND trigger_key=?',(run_id,card['trigger_key'])):return
+        # Stored with the same transaction as the action: retries cannot duplicate
+        # a node, and refreshing never creates an explanation or advances play.
+        card['decision_sha256']=digest(encode(decision))
+        card['state_sha256']=digest(encode(state))
+        db.execute('INSERT INTO pl3_auto_explanations VALUES(?,?,?,?,?,?,?,?)',
+            (uid(),instance['id'],run_id,state['turn'],card['trigger_key'],encode(card),time.time(),None))
+
+    def acknowledge_automatic(self,token,instance_id,explanation_id):
+        with self.db.transaction(scope=instance_id) as db:
+            instance=self._instance(db,token,instance_id)
+            if not self._ask_allowed(db,instance):raise StudyError('explanations_unavailable',403)
+            row=db.one('SELECT id FROM pl3_auto_explanations WHERE id=? AND instance_id=? AND run_id=?',
+                (explanation_id,instance_id,instance['current_run']))
+            if not row:raise StudyError('answer_unavailable',403)
+            db.execute('UPDATE pl3_auto_explanations SET displayed=COALESCE(displayed,?) WHERE id=?',(time.time(),explanation_id))
+        return {'ok':True}
 
     def _questionnaire(self,db,instance,payload):
         if instance['stage']!='questionnaire':raise StudyError('wrong_stage',409)
@@ -482,11 +525,14 @@ class Store:
             'releases': 'i.release_id=r.id',
             'tutorials': 'i.id=r.instance_id',
             'tutorial_events': 'i.id=r.instance_id',
+            'auto_explanation_settings': 'i.id=r.instance_id',
+            'auto_explanations': 'i.id=r.instance_id',
         }
         ordering = {'participants':'r.id','enrollments':'r.instance_id','instances':'r.id',
                     'runs':'r.id','frames':'r.run_id,r.turn','questions':'r.id',
                     'questionnaires':'r.instance_id','timings':'r.id','releases':'r.id',
-                    'tutorials':'r.instance_id','tutorial_events':'r.id'}
+                    'tutorials':'r.instance_id','tutorial_events':'r.id',
+                    'auto_explanation_settings':'r.instance_id','auto_explanations':'r.run_id,r.turn,r.id'}
         with self.db.transaction(read_only=True) as db:
             for name in EXPORT_TABLES:
                 # Recovery/session hashes never enter the export cursor.

@@ -82,7 +82,8 @@ def manifest(settings):
                 domain:sorted(KITCHEN_SUPPORTED_RELEASE_IDS if domain=='kitchen' else SUPPORTED_RELEASE_IDS)
                 for domain in MODULES}},
         'domains':{k:{'url':'/'+k+'/','version':engine(k).VERSION} for k in MODULES},
-        'explanations':{'group':'A','task':2,'active_only':True},
+        'explanations':{'group':'A','task':2,'active_only':True,
+            'automatic_for_new_enrollments':settings.automatic_explanations,'automatic_version':'event-nodes-v1'},
         'default_language':'en','mode':settings.mode,'storage_persistent':settings.persistent,
         'prolific':{'entry_path':'/prolific/','assignment':'randomized_block_6',
             'one_game_per_participant':True,'consent_version':prolific.CONSENT_VERSION},
@@ -320,6 +321,8 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
                 if path=='/api/prolific/enrol':
                     token,result=prolific.enrol(store,payload,self.token());self.reply(200,result,token=token);return
                 if path=='/api/study/ask':self.reply(200,store.ask(self.token(),payload));return
+                if path=='/api/study/automatic-explanation-displayed':
+                    self.reply(200,store.acknowledge_automatic(self.token(),payload.get('instance_id'),payload.get('explanation_id')));return
                 if path=='/api/study/answer-displayed':
                     self.reply(200,store.acknowledge_answer(self.token(),payload.get('instance_id'),payload.get('question_id')));return
                 prefix='/api/study/'

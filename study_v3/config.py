@@ -18,6 +18,7 @@ class Settings:
     prolific_completion_code: str = ''
     prolific_places: int = 12
     prolific_launch_confirmed: bool = False
+    automatic_explanations: bool = False
 
     @property
     def llm_configured(self):
@@ -46,4 +47,5 @@ class Settings:
             prolific_study_id=os.environ.get('POLICYLENS_PROLIFIC_STUDY_ID',''),
             prolific_completion_code=os.environ.get('POLICYLENS_PROLIFIC_COMPLETION_CODE',''),
             prolific_places=int(os.environ.get('POLICYLENS_PROLIFIC_PLACES','12')),
+            automatic_explanations=os.environ.get('POLICYLENS_AUTOMATIC_EXPLANATIONS')=='1',
             prolific_launch_confirmed=os.environ.get('POLICYLENS_PROLIFIC_LAUNCH_CONFIRMED')=='1')

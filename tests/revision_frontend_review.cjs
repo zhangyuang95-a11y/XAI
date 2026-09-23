@@ -14,7 +14,7 @@ const context=vm.createContext({console,URLSearchParams,performance,crypto:requi
  document:{hidden:false,activeElement:null,getElementById(id){return elements[id]||null},addEventListener(name,fn){handlers[name]=fn},querySelector(){return null},querySelectorAll(selector){return selector==='[data-action]'?[actionButton]:selector==='[data-example]'?[exampleButton]:[]}},
  calls,errors,actionButton,exampleButton,elements});
 let source=fs.readFileSync(path.join(__dirname,'../study_v3/web/app.js'),'utf8');
-source=source.slice(0,source.lastIndexOf('(async()=>{languageUI();'));
+source=source.slice(0,source.lastIndexOf('(async()=>{'));
 vm.runInContext(source,context);
 const run=code=>vm.runInContext(code,context);
 run(`render=async()=>{};report=e=>errors.push(e);api=(path,payload)=>new Promise((resolve,reject)=>calls.push({path,payload,resolve,reject}));

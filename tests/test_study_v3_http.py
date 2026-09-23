@@ -106,7 +106,8 @@ def test_release_liveness_and_public_metadata_do_not_expose_configuration(http_s
     assert release["source_sha256"] == server.release["source_sha256"]
     assert len(release["source_sha256"]) == 64
     assert release["human_effect_status"] == "not_measured"
-    assert release["explanations"] == {"group": "A", "task": 2, "active_only": True}
+    assert release["explanations"] == {"group": "A", "task": 2, "active_only": True,
+        "automatic_for_new_enrollments": False, "automatic_version": "event-nodes-v1"}
     serialized = json.dumps(release)
     for secret in (ADMIN, "private-model-provider", "private-model-name", "test-only-secret-api-key", "http.sqlite3"):
         assert secret not in serialized

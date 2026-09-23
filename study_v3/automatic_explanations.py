@@ -4,8 +4,13 @@ These records are separate from voluntary questions. No provider request, hidden
 future schedule, or group-dependent controller action is introduced.
 """
 
-VERSION = 'event-nodes-confirm-v2'
-SUPPORTED_VERSIONS = frozenset({'event-nodes-v1', VERSION})
+import json
+
+GUIDED_VERSION = 'guided-question-choice-v3'
+VERSION = GUIDED_VERSION
+CONFIRM_VERSIONS = frozenset({'event-nodes-confirm-v2', GUIDED_VERSION})
+SUPPORTED_VERSIONS = frozenset({'event-nodes-v1', *CONFIRM_VERSIONS})
+QUESTION = {'en': 'Why are you making this decision?', 'zh': '你为什么做这个决定？'}
 
 
 def detouring(decision):
@@ -63,3 +68,18 @@ def candidate(domain, state, decision, previous=None):
             'trigger_types': triggers, 'turn': turn,
             'body': {lang: '\n\n'.join(f[lang] for f in facts) for lang in ('en', 'zh')},
             'reason_code': decision.get('reason_code'), 'version': VERSION}
+
+
+def public_card(row, language):
+    content = json.loads(row['content_json'])
+    guided = content.get('version') == GUIDED_VERSION
+    requested = content.get('requested_at') is not None
+    return {'id': row['id'], 'turn': row['turn'],
+            'body': content['body'][language] if not guided or requested else '',
+            'trigger_types': content['trigger_types'],
+            'displayed': row['displayed'] is not None,
+            'requires_confirmation': content.get('version') in CONFIRM_VERSIONS,
+            'confirmed': row['confirmed'] is not None,
+            'guided': guided, 'onboarding': bool(content.get('onboarding')),
+            'requested': requested, 'question': QUESTION[language] if guided else '',
+            'response': content.get('response')}

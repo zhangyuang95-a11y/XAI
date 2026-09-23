@@ -18,10 +18,32 @@ const base=process.env.STUDY_SMOKE_URL||'http://127.0.0.1:9131';
    assert.equal(v.stage,'task2');assert.equal(v.mode,'preview');assert.equal(v.group,'A');
    assert(v.runs.every(r=>r.task===2));assert.equal(await page.locator('#questionInput').count(),0);
    await page.keyboard.press('Escape');assert.equal(await page.locator('#automaticDialog').evaluate(e=>e.open),true);
+   assert.equal(v.turn,0);assert.equal(await page.locator('#understoodExplanationButton').count(),0);
+   assert.equal(await page.locator('#confirmExplanationButton').count(),0);
+   await page.locator('#requestExplanationButton').click();
+   await page.waitForFunction(()=>!busy&&pendingAutomatic()?.requested);
+   assert(await page.locator('#automaticReason').innerText());
+   await page.reload();await page.waitForFunction(()=>document.querySelector('#automaticDialog')?.open&&!busy);
+   assert.equal(await page.locator('#requestExplanationButton').count(),0);
    await page.locator('#confirmExplanationButton').click();await page.waitForFunction(()=>!busy&&!pendingAutomatic());
    assert.equal(await page.evaluate(()=>view.state.turn),v.turn);
    saved[domain]=v.id;
-   console.log(domain,'direct Task 2, automatic explanation and confirmation verified');
+   console.log(domain,'Task 2 guided question at turn zero, answer persistence and confirmation verified');
+   if(domain==='kitchen'){
+    assert.equal(await page.getByRole('heading',{name:'Menu · 4 dishes',exact:true}).count(),1);
+    await page.evaluate(async()=>{for(let i=0;i<5;i++)await command('action',{run_id:view.run_id,turn:view.state.turn,action:'wait'});});
+    await page.waitForFunction(()=>document.querySelector('#automaticDialog')?.open&&!busy);
+    assert.equal(await page.locator('#understoodExplanationButton').count(),1);
+    assert.equal(await page.locator('#confirmExplanationButton').count(),0);
+    await page.locator('#understoodExplanationButton').click();await page.waitForFunction(()=>!busy&&!pendingAutomatic());
+    assert.equal(await page.evaluate(()=>view.automatic_explanations.at(-1).displayed),false);
+    await page.evaluate(async()=>{for(let i=0;i<5;i++)await command('action',{run_id:view.run_id,turn:view.state.turn,action:'wait'});});
+    await page.waitForFunction(()=>document.querySelector('#automaticDialog')?.open&&!busy);
+    await page.locator('#requestExplanationButton').click();await page.waitForFunction(()=>!busy&&pendingAutomatic()?.requested);
+    await page.locator('#confirmExplanationButton').click();await page.waitForFunction(()=>!busy&&!pendingAutomatic());
+    assert.equal(await page.evaluate(()=>view.state.turn),10);
+    console.log('Kitchen later-node skip and optional explanation paths verified');
+   }
   }
   await page.goto(base+'/try/pong');await page.locator('[data-game="pong"]').click();
   await page.waitForURL(base+'/pong/');await page.waitForFunction(()=>typeof view!=='undefined'&&!!view?.instance_id&&!busy);
@@ -35,7 +57,7 @@ const base=process.env.STUDY_SMOKE_URL||'http://127.0.0.1:9131';
   await page.evaluate(async()=>{
    for(let i=0;i<200&&view.run_status!=='completed';i++){
     const card=pendingAutomatic();
-    if(card)await command('confirm_explanation',{explanation_id:card.id});
+    if(card)await command('confirm_explanation',{explanation_id:card.id,...(card.guided?{choice:card.requested?'explanation':'understood'}:{})});
     else await command('action',{run_id:view.run_id,turn:view.state.turn,action:'wait'});
    }
   });

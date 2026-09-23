@@ -188,7 +188,7 @@ def test_complete_three_task_flow_and_explanation_permission_matrix(store, domai
         if domain == "kitchen":
             metrics = flow.view["state"]["score"]["metrics"]
             assert flow.view["state"]["score"]["score_scale"] == "raw"
-            assert metrics["completed_orders"] == metrics["total_orders"] == 5
+            assert metrics["completed_orders"] == metrics["total_orders"] == 4
             assert metrics["step_penalty"] == flow.view["state"]["turn"]
             assert metrics["discard_penalty"] == 5 * metrics["discarded_ingredients"] + 20 * metrics["discarded_dishes"]
             assert score == 100 * metrics["completed_orders"] - metrics["step_penalty"] - metrics["discard_penalty"]

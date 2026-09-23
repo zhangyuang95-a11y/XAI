@@ -1,4 +1,46 @@
-# Automatic explanations at study nodes
+# Guided questions and optional explanations
+
+Current preview release: `policylens-three-domain-20260923.v3.16-guided-question`.
+New automatic-explanation enrollments use `guided-question-choice-v3`.
+
+In Group A, Task 2 starts at turn 0 with one required guided question:
+“Why are you making this decision?” / “你为什么做这个决定？”
+The participant selects the question to request the existing controller-grounded
+answer, then confirms to continue. There is no skip button for this initial
+question. Selecting, reading, and confirming do not advance a game turn.
+
+Later warehouse, Pong, and kitchen nodes follow the trigger rules below, but
+initially show a choice instead of an answer: **I understand — continue** or
+**Show me why**. The first choice resumes directly; the second requests an
+answer that must be confirmed before resuming. No hidden answer is sent in the
+participant view until requested. The first question is a predefined selection,
+not a free-text question or an LLM-generated answer. The normal study retains
+its free-text follow-up interface; the isolated friend demo has no provider key
+and continues to disable free-text questions.
+
+The server enforces the first-question requirement and later response gates.
+Requests, responses, and confirmation survive reconnects. The existing
+`auto_explanations.content_json` export records `onboarding`, `requested_at`,
+`question_id`, the question text/language as selected, `response`, and
+`responded_at`. Responses distinguish `read_explanation` (explicit confirmation
+of the displayed answer) from `self_reported_understood`. Neither establishes
+actual comprehension. Skipping never marks an answer as displayed. Guided
+selections remain separate from voluntary `questions` records.
+
+Existing v1/v2 enrollments keep their persisted protocol. Task 1, Task 3, and
+Group B do not receive guided questions. Game rules and scores are unchanged.
+Only the independent friend-demo service is being updated; the current formal
+Prolific cohort remains on its original deployment.
+
+Validation: backend tests cover all three domains, initial-action/skip blocking,
+ownership, answer withholding, idempotent requests, reconnects, bilingual
+answers, later skip/request choices, separate exposure records, exports, and
+Task 3 isolation. The original v2 suite is explicitly pinned to its protocol.
+The browser check covers all three initial questions, keyboard/Escape blocking,
+refresh after requesting, both subsequent kitchen choices, session isolation,
+and completing the demo.
+
+## Previous automatic-confirmation protocol (v2 reference)
 
 Preview implementation: `policylens-three-domain-20260923.v3.14-confirm-explanations`.
 

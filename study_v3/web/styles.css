@@ -104,3 +104,7 @@ main{max-width:1480px;padding-top:24px}.panel{border-radius:20px;box-shadow:0 16
 }
 
 .share-preview-page .intro{max-width:100%}.share-preview-page h1{font-size:38px;letter-spacing:-1px;margin:12px 0 16px}.share-preview-page .intro p{max-width:100%;font-size:15px;margin-bottom:10px}.share-preview-page .domain-card h2{font-size:22px}.share-preview-page .domain-card p{min-height:0}.share-preview-page .field{max-width:300px}.share-preview-page .domain-card{display:flex;flex-direction:column;gap:10px}.share-preview-page .domain-card .button{margin-top:auto}.share-preview-page .domain-card h2{margin-top:4px}.share-preview-page .domain-card .hint{margin:0 0 14px}
+
+.automatic-choices{display:grid;gap:10px}
+.automatic-choices .secondary{background:#fff;color:var(--ink);border:1px solid #b9c3cc}
+.guided-question{font-size:14px;color:var(--muted);margin-bottom:10px}

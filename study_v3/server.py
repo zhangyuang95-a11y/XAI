@@ -23,7 +23,7 @@ from .config import Settings
 from .registry import MODULES, engine, demonstration
 from .kitchen_tutorial import VERSION as KITCHEN_TUTORIAL_VERSION
 from .store import Store, StudyError, encode
-from . import prolific
+from . import prolific, automatic_explanations
 
 ROOT=Path(__file__).resolve().parents[1]
 WEB=ROOT/'study_v3/web'
@@ -83,7 +83,7 @@ def manifest(settings):
                 for domain in MODULES}},
         'domains':{k:{'url':'/'+k+'/','version':engine(k).VERSION} for k in MODULES},
         'explanations':{'group':'A','task':2,'active_only':True,
-            'automatic_for_new_enrollments':settings.automatic_explanations,'automatic_version':'event-nodes-confirm-v2'},
+            'automatic_for_new_enrollments':settings.automatic_explanations,'automatic_version':automatic_explanations.VERSION},
         'default_language':'en','mode':settings.mode,'storage_persistent':settings.persistent,
         'prolific':{'entry_path':'/prolific/','assignment':'randomized_block_6',
             'one_game_per_participant':True,'consent_version':prolific.CONSENT_VERSION},

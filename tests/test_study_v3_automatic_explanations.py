@@ -8,6 +8,13 @@ from study_v3.store import Store, StudyError, encode
 from tests.test_study_v3_store import Flow
 
 
+@pytest.fixture(autouse=True)
+def legacy_confirmation_protocol(monkeypatch):
+    # Keep the v2 regression suite pinned to existing participant enrollments.
+    from study_v3 import automatic_explanations
+    monkeypatch.setattr(automatic_explanations,'VERSION','event-nodes-confirm-v2')
+
+
 def decision(**overrides):
     return {'action':'up','goal':'parcel','reason_code':'mission_progress',
             'reason_en':'I will move up toward the parcel.','reason_zh':'我会向上移动去取货。',**overrides}

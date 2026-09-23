@@ -227,13 +227,10 @@ class Store:
             result.update(state=eng.public_state(state),actions=eng.legal_actions(state) if not state['terminal'] else [],run_status=run['status'])
             if hasattr(eng,'action_label'):
                 result['action_labels']={a:eng.action_label(a,language) for a in result['actions']}
+        protocol=db.one('SELECT version FROM pl3_auto_explanation_settings WHERE instance_id=?',(instance['id'],))
+        result['automatic_explanation_protocol']=protocol['version'] if protocol else None
         if result['can_ask']:
-            result['automatic_explanations']=[{'id':r['id'],'turn':r['turn'],
-                'body':json.loads(r['content_json'])['body'][language],
-                'trigger_types':json.loads(r['content_json'])['trigger_types'],
-                'displayed':r['displayed'] is not None,
-                'requires_confirmation':json.loads(r['content_json']).get('version')==automatic_explanations.VERSION,
-                'confirmed':r['confirmed'] is not None}
+            result['automatic_explanations']=[automatic_explanations.public_card(r,language)
                 for r in db.all('SELECT a.*,c.confirmed FROM pl3_auto_explanations a LEFT JOIN pl3_auto_explanation_confirmations c ON c.explanation_id=a.id WHERE a.run_id=? ORDER BY a.turn,a.id',(instance['current_run'],))]
             result['questions']=[{'id':q['id'],'question':q['question'],'language':q['language'],
                 'result':public_answer(json.loads(q['result_json'])),'status':q['status'],'target_turn':q['target_turn'],'target_run':q['target_run']}
@@ -301,6 +298,7 @@ class Store:
             elif kind=='tutorial': self._tutorial(db,instance,payload)
             elif kind=='action': self._action(db,instance,payload)
             elif kind=='confirm_explanation': self._confirm_automatic(db,instance,payload)
+            elif kind=='request_explanation': self._request_automatic(db,instance,payload)
             elif kind=='language':
                 if payload.get('language') not in ('en','zh'): raise StudyError('invalid_language')
                 db.execute('UPDATE pl3_instances SET language=? WHERE id=?',(payload['language'],instance['id']))
@@ -391,6 +389,12 @@ class Store:
         config=db.one('SELECT version FROM pl3_auto_explanation_settings WHERE instance_id=?',(instance['id'],))
         if not config or config['version'] not in automatic_explanations.SUPPORTED_VERSIONS:return
         card=automatic_explanations.candidate(instance['domain'],state,decision,previous)
+        if config['version']==automatic_explanations.GUIDED_VERSION and state['turn']==0 and not state['terminal']:
+            card=card or {'trigger_key':'turn:0','trigger_types':[], 'turn':0,
+                         'body':{'en':decision['reason_en'],'zh':decision['reason_zh']},
+                         'reason_code':decision.get('reason_code')}
+            card['onboarding']=True
+            card['trigger_types'].append('guided_question')
         if not card:return
         if instance['domain']=='warehouse' and any(t.startswith('charge_') for t in card['trigger_types']):
             prior=db.all('SELECT content_json FROM pl3_auto_explanations WHERE run_id=?',(run_id,))
@@ -412,30 +416,57 @@ class Store:
     def _pending_automatic(self,db,instance):
         if not self._ask_allowed(db,instance):return None
         config=db.one('SELECT version FROM pl3_auto_explanation_settings WHERE instance_id=?',(instance['id'],))
-        if not config or config['version']!=automatic_explanations.VERSION:return None
+        if not config or config['version'] not in automatic_explanations.CONFIRM_VERSIONS:return None
         return db.one('SELECT a.* FROM pl3_auto_explanations a LEFT JOIN pl3_auto_explanation_confirmations c ON c.explanation_id=a.id WHERE a.run_id=? AND c.explanation_id IS NULL ORDER BY a.turn,a.id LIMIT 1',(instance['current_run'],))
+
+    def _request_automatic(self,db,instance,payload):
+        if not self._ask_allowed(db,instance):raise StudyError('explanations_unavailable',403)
+        row=self._pending_automatic(db,instance)
+        if not row or row['id']!=payload.get('explanation_id'):raise StudyError('answer_unavailable',403)
+        content=json.loads(row['content_json'])
+        if content.get('version')!=automatic_explanations.GUIDED_VERSION:raise StudyError('answer_unavailable',403)
+        if payload.get('question_id')!='why':raise StudyError('invalid_question')
+        if content.get('requested_at') is None:
+            language=instance['language']
+            content.update(requested_at=time.time(),question_id='why',
+                           question=automatic_explanations.QUESTION[language],question_language=language)
+            db.execute('UPDATE pl3_auto_explanations SET content_json=? WHERE id=?',(encode(content),row['id']))
 
     def _confirm_automatic(self,db,instance,payload):
         if not self._ask_allowed(db,instance):raise StudyError('explanations_unavailable',403)
         identifier=payload.get('explanation_id')
         row=db.one('SELECT a.*,c.confirmed FROM pl3_auto_explanations a LEFT JOIN pl3_auto_explanation_confirmations c ON c.explanation_id=a.id WHERE a.id=? AND a.instance_id=? AND a.run_id=?',
             (identifier,instance['id'],instance['current_run']))
-        if not row or json.loads(row['content_json']).get('version')!=automatic_explanations.VERSION:
+        if not row or json.loads(row['content_json']).get('version') not in automatic_explanations.CONFIRM_VERSIONS:
             raise StudyError('answer_unavailable',403)
         if row['confirmed'] is not None:return
         pending=self._pending_automatic(db,instance)
         if not pending or pending['id']!=identifier:raise StudyError('answer_unavailable',403)
         now=time.time()
+        content=json.loads(row['content_json'])
+        guided=content.get('version')==automatic_explanations.GUIDED_VERSION
+        if guided:
+            choice=payload.get('choice')
+            if content.get('requested_at') is not None:
+                if choice!='explanation':raise StudyError('invalid_explanation_choice',409)
+            elif content.get('onboarding') or choice!='understood':
+                raise StudyError('guided_question_required',409)
+            content.update(response='read_explanation' if choice=='explanation' else 'self_reported_understood',responded_at=now)
+            db.execute('UPDATE pl3_auto_explanations SET content_json=? WHERE id=?',(encode(content),identifier))
         db.execute('INSERT INTO pl3_auto_explanation_confirmations VALUES(?,?,?,?)',(identifier,instance['id'],instance['current_run'],now))
-        db.execute('UPDATE pl3_auto_explanations SET displayed=COALESCE(displayed,?) WHERE id=?',(now,identifier))
+        if not guided or content.get('requested_at') is not None:
+            db.execute('UPDATE pl3_auto_explanations SET displayed=COALESCE(displayed,?) WHERE id=?',(now,identifier))
 
     def acknowledge_automatic(self,token,instance_id,explanation_id):
         with self.db.transaction(scope=instance_id) as db:
             instance=self._instance(db,token,instance_id)
             if not self._ask_allowed(db,instance):raise StudyError('explanations_unavailable',403)
-            row=db.one('SELECT id FROM pl3_auto_explanations WHERE id=? AND instance_id=? AND run_id=?',
+            row=db.one('SELECT id,content_json FROM pl3_auto_explanations WHERE id=? AND instance_id=? AND run_id=?',
                 (explanation_id,instance_id,instance['current_run']))
             if not row:raise StudyError('answer_unavailable',403)
+            content=json.loads(row['content_json'])
+            if content.get('version')==automatic_explanations.GUIDED_VERSION and content.get('requested_at') is None:
+                raise StudyError('guided_question_required',409)
             db.execute('UPDATE pl3_auto_explanations SET displayed=COALESCE(displayed,?) WHERE id=?',(time.time(),explanation_id))
         return {'ok':True}
 

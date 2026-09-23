@@ -18,7 +18,7 @@ from study_v3 import server as server_module
 
 
 TABLES = ('participants', 'enrollments', 'instances', 'runs', 'frames',
-          'questions', 'questionnaires', 'timings', 'releases','tutorials','tutorial_events','auto_explanation_settings','auto_explanations')
+          'questions', 'questionnaires', 'timings', 'releases','tutorials','tutorial_events','auto_explanation_settings','auto_explanations','auto_explanation_confirmations')
 RELEASE = 'export-selected-release'
 ADMIN = 'export-unit-test-only-token'
 LEGACY_MARKER = 'EXCLUDED_LARGE_LEGACY_PAYLOAD'

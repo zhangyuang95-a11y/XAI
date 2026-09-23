@@ -12,12 +12,11 @@ settings=Settings(database=str(ROOT/'output/automatic-explanations-preview.sqlit
     automatic_explanations=True,admin_token='local-automatic-preview-only',origin='http://127.0.0.1:9130',mode='preview')
 server=make_server(settings,port=9130)
 store=server.store
-previews={}
-for domain in ('kitchen','pong','warehouse'):
+def prepare(domain):
     token,view=store.create({'participant_id':'auto-preview-'+domain+'-'+uuid.uuid4().hex[:8],
         'mode':'preview','domain':domain,'group':'A','language':'en','consent':True},admin=True)
     def command(kind,**fields):
-        global view
+        nonlocal view
         view=store.command(token,kind,{'instance_id':view['instance_id'],'revision':view['revision'],'command_id':uuid.uuid4().hex,**fields})
     command('demo_skip')
     # Bypass baseline only in this isolated preview DB, to show the requested UI.
@@ -30,16 +29,17 @@ for domain in ('kitchen','pong','warehouse'):
             state=json.loads(db.one('SELECT state_json FROM pl3_runs WHERE id=?',(view['run_id'],))['state_json'])
         action='wait' if domain=='kitchen' else engine(domain).human_advisor(state)
         command('action',run_id=view['run_id'],turn=state['turn'],action=action)
-    previews[domain]=token
     print(domain,'preview prepared; turn',view['state']['turn'],'cards',len(view['automatic_explanations']),flush=True)
+    return token
 original=server.RequestHandlerClass
 class PreviewHandler(original):
     def do_GET(self):
         domain=self.path.removeprefix('/auto-preview/').strip('/')
-        if self.path.startswith('/auto-preview/') and domain in previews:
+        if self.path.startswith('/auto-preview/') and domain in ('kitchen','pong','warehouse'):
+            token=prepare(domain)
             self.send_response(302)
             self.send_header('Location','/'+domain+'/')
-            self.send_header('Set-Cookie',f'{COOKIE}={previews[domain]}; Path=/; HttpOnly; SameSite=Lax')
+            self.send_header('Set-Cookie',f'{COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax')
             self.send_header('Cache-Control','no-store')
             self.send_header('Content-Length','0')
             self.end_headers();return

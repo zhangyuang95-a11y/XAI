@@ -68,3 +68,15 @@ main{max-width:1480px;padding-top:24px}.panel{border-radius:20px;box-shadow:0 16
 .automatic-explanation{position:sticky;top:96px;z-index:4;border-left:4px solid #087f8c;background:#f0fbfa;margin-bottom:16px;padding:16px 20px}
 .automatic-explanation p{white-space:pre-line;line-height:1.55;margin:8px 0 10px;color:#123b42}
 .automatic-explanation .eyebrow{color:#076773}
+
+/* A native modal keeps focus and input on the explicit confirmation. */
+.automatic-dialog{position:fixed;inset:auto;margin:0;padding:24px;width:min(440px,calc(100vw - 32px));max-width:none;max-height:none;overflow:visible;border:2px solid #f56b3d;border-radius:20px;background:#fffdfb;color:var(--ink);box-shadow:0 18px 65px #24334c40}
+.automatic-dialog::backdrop{background:#17284430}
+.automatic-dialog::after{content:"";position:absolute;bottom:-10px;left:var(--tail-x,50%);width:16px;height:16px;transform:rotate(45deg);background:#fffdfb;border-right:2px solid #f56b3d;border-bottom:2px solid #f56b3d}
+.automatic-dialog.below-ai::after{bottom:auto;top:-10px;transform:rotate(225deg)}
+.automatic-speaker{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.automatic-avatar{display:grid;place-items:center;flex-shrink:0;width:42px;height:42px;border-radius:12px;background:#f56b3d;color:white;font-size:24px;font-weight:800}
+.automatic-speaker h2{font-size:20px;line-height:1.25;margin:0 0 4px;letter-spacing:-.3px}
+.automatic-body{white-space:pre-line;font-size:16px;line-height:1.65;max-height:calc(100dvh - 280px);overflow:auto;margin-bottom:16px;overscroll-behavior:contain}
+.automatic-dialog .button{background:#c74b24}
+.automatic-dialog .hint{margin-bottom:14px}

@@ -8,37 +8,47 @@ const base=process.env.STUDY_SMOKE_URL||'http://127.0.0.1:9130';
  fs.mkdirSync('output/automatic-preview',{recursive:true});
  try{
   for(const domain of ['kitchen','pong','warehouse']){
-   const page=await browser.newPage({viewport:{width:1440,height:1050}});const errors=[];
+   const page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];
    page.on('pageerror',e=>errors.push(e.message));
    await page.goto(base+'/auto-preview/'+domain);
-   await page.locator('#automaticExplanation').waitFor();
-   await page.waitForFunction(()=>view?.can_ask&&!busy&&!animationPending);
-   const before=await page.evaluate(()=>({turn:view.state.turn,cards:view.automatic_explanations.length,id:view.automatic_explanations.at(-1).id}));
-   await page.waitForFunction(()=>automaticAcknowledged.has(latestAutomatic().id)||latestAutomatic().displayed);
-   assert.match(await page.locator('#automaticExplanation').innerText(),/task 2/i);
-   await page.evaluate(()=>window.scrollTo(0,500));
-   const rect=await page.locator('#automaticExplanation').boundingBox();
-   assert(rect.y>=76&&rect.y<120,'Explanation stays visible below the header while playing');
-   await page.evaluate(()=>window.scrollTo(0,0));
-   await page.screenshot({path:`output/automatic-preview/${domain}.png`,fullPage:true});
-   await page.reload();await page.locator('#automaticExplanation').waitFor();
-   const after=await page.evaluate(()=>({turn:view.state.turn,cards:view.automatic_explanations.length,id:view.automatic_explanations.at(-1).id}));
-   assert.deepEqual(after,before);
-   await page.locator('#chineseButton').click();await page.waitForFunction(()=>lang==='zh'&&!busy);
-   assert((await page.locator('#automaticExplanation').innerText()).includes('AI 队友解释'));
-   await page.locator('#englishButton').click();await page.waitForFunction(()=>lang==='en'&&!busy);
-   await page.locator('#replaySlider').evaluate(el=>{el.value='0';el.dispatchEvent(new Event('change',{bubbles:true}));});
-   await page.waitForFunction(()=>!!replay&&!replayLoading);
-   assert.equal(await page.locator('#automaticExplanation').count(),0);
-   await page.locator('#currentButton').click();await page.locator('#automaticExplanation').waitFor();
+   await page.waitForFunction(()=>document.querySelector('#automaticDialog')?.open&&!busy&&!animationPending);
+   const before=await page.evaluate(()=>({turn:view.state.turn,cards:view.automatic_explanations.length,id:pendingAutomatic().id}));
+   assert.match(await page.locator('#automaticDialog').innerText(),/game is paused/i);
+   assert.equal(await page.locator('[data-action]').first().isDisabled(),true);
+   await page.keyboard.press('ArrowRight');await page.keyboard.press('Escape');
+   assert.equal(await page.evaluate(()=>view.state.turn),before.turn);
+   assert.equal(await page.locator('#automaticDialog').evaluate(el=>el.open),true);
+   // Client controls and direct server actions both require an explicit confirmation.
+   const denied=await page.evaluate(async()=>{
+    const r=await fetch('/api/study/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instance_id:view.instance_id,revision:view.revision,command_id:crypto.randomUUID(),run_id:view.run_id,turn:view.state.turn,action:'wait'})});
+    return {status:r.status,...await r.json()};
+   });
+   assert.equal(denied.status,409);assert.equal(denied.error,'explanation_confirmation_required');
+   await page.screenshot({path:`output/automatic-preview/${domain}-confirm.png`});
+   await page.reload();await page.waitForFunction(()=>document.querySelector('#automaticDialog')?.open&&!busy);
+   assert.equal(await page.evaluate(()=>pendingAutomatic().id),before.id);
+   // Verify a failed confirmation leaves the modal locked and lets the user retry.
    if(domain==='kitchen'){
-    for(let i=0;i<5;i++){
-     await page.locator('[data-action="wait"]').click();
-     await page.waitForFunction(()=>!busy&&!animationPending);
-    }
-    assert.equal(await page.evaluate(()=>view.automatic_explanations.at(-1).turn),before.turn+5);
+    await page.route('**/api/study/confirm_explanation',route=>route.fulfill({status:503,contentType:'application/json',body:'{"error":"server_error"}'}),{times:1});
+    await page.locator('#confirmExplanationButton').click();await page.waitForFunction(()=>!busy);
+    assert.equal(await page.locator('#automaticDialog').evaluate(el=>el.open),true);
    }
-   assert.deepEqual(errors,[]);console.log(domain, 'visible, exposure acknowledged, refresh deduplicated, bilingual, replay isolated');
+   await page.locator('#confirmExplanationButton').click();await page.waitForFunction(()=>!pendingAutomatic()&&!busy);
+   assert.equal(await page.locator('#automaticDialog').count(),0);
+   assert.equal(await page.evaluate(()=>view.state.turn),before.turn);
+   await page.reload();await page.waitForFunction(()=>!!view?.state&&!busy);
+   assert.equal(await page.locator('#automaticDialog').count(),0);
+   const repetitions=domain==='kitchen'?5:1;
+   for(let i=0;i<repetitions;i++){
+    await page.locator('[data-action="wait"]').click();await page.waitForFunction(()=>!busy&&!animationPending);
+   }
+   assert.equal(await page.evaluate(()=>view.state.turn),before.turn+repetitions);
+   if(domain==='kitchen'){
+    await page.waitForFunction(()=>document.querySelector('#automaticDialog')?.open);
+    assert.equal(await page.evaluate(()=>pendingAutomatic().turn),before.turn+5);
+    const bounds=await page.locator('#automaticDialog').boundingBox();assert(bounds.x>=0&&bounds.y>=0&&bounds.y+bounds.height<=1000);
+   }
+   assert.deepEqual(errors,[]);console.log(domain,'modal visible, Escape/movement blocked, API gate enforced, refresh persistent, explicit confirmation unlocks');
    await page.close();
   }
  }finally{await browser.close()}

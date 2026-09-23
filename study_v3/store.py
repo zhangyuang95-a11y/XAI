@@ -44,7 +44,7 @@ EXPLANATION_ITEMS = [
 
 EXPORT_TABLES = ('participants','enrollments','instances','runs','frames',
                  'questions','questionnaires','timings','releases','tutorials','tutorial_events',
-                 'auto_explanation_settings','auto_explanations')
+                 'auto_explanation_settings','auto_explanations','auto_explanation_confirmations')
 
 class Store:
     def __init__(self, settings, explainer=None):
@@ -231,8 +231,10 @@ class Store:
             result['automatic_explanations']=[{'id':r['id'],'turn':r['turn'],
                 'body':json.loads(r['content_json'])['body'][language],
                 'trigger_types':json.loads(r['content_json'])['trigger_types'],
-                'displayed':r['displayed'] is not None}
-                for r in db.all('SELECT * FROM pl3_auto_explanations WHERE run_id=? ORDER BY turn,id',(instance['current_run'],))]
+                'displayed':r['displayed'] is not None,
+                'requires_confirmation':json.loads(r['content_json']).get('version')==automatic_explanations.VERSION,
+                'confirmed':r['confirmed'] is not None}
+                for r in db.all('SELECT a.*,c.confirmed FROM pl3_auto_explanations a LEFT JOIN pl3_auto_explanation_confirmations c ON c.explanation_id=a.id WHERE a.run_id=? ORDER BY a.turn,a.id',(instance['current_run'],))]
             result['questions']=[{'id':q['id'],'question':q['question'],'language':q['language'],
                 'result':public_answer(json.loads(q['result_json'])),'status':q['status'],'target_turn':q['target_turn'],'target_run':q['target_run']}
                 for q in db.all("SELECT * FROM pl3_questions WHERE authorized_run=? AND status IN ('answered','clarification','unavailable') ORDER BY requested",(instance['current_run'],))]
@@ -298,6 +300,7 @@ class Store:
             elif kind=='next': self._next(db,instance)
             elif kind=='tutorial': self._tutorial(db,instance,payload)
             elif kind=='action': self._action(db,instance,payload)
+            elif kind=='confirm_explanation': self._confirm_automatic(db,instance,payload)
             elif kind=='language':
                 if payload.get('language') not in ('en','zh'): raise StudyError('invalid_language')
                 db.execute('UPDATE pl3_instances SET language=? WHERE id=?',(payload['language'],instance['id']))
@@ -364,6 +367,7 @@ class Store:
         if payload.get('run_id')!=instance['current_run']:raise StudyError('wrong_run',409)
         run=db.one('SELECT * FROM pl3_runs WHERE id=?',(instance['current_run'],))
         if run['status']!='active':raise StudyError('task_finished',409)
+        if self._pending_automatic(db,instance):raise StudyError('explanation_confirmation_required',409)
         state=json.loads(run['state_json']); eng=engine(instance['domain'])
         if payload.get('turn')!=state['turn']:raise StudyError('stale_state',409)
         action=payload.get('action')
@@ -385,16 +389,37 @@ class Store:
     def _record_automatic(self,db,instance,run_id,state,decision,previous=None):
         if instance['group_code']!='A':return
         config=db.one('SELECT version FROM pl3_auto_explanation_settings WHERE instance_id=?',(instance['id'],))
-        if not config or config['version']!=automatic_explanations.VERSION:return
+        if not config or config['version'] not in automatic_explanations.SUPPORTED_VERSIONS:return
         card=automatic_explanations.candidate(instance['domain'],state,decision,previous)
         if not card:return
         if db.one('SELECT id FROM pl3_auto_explanations WHERE run_id=? AND trigger_key=?',(run_id,card['trigger_key'])):return
         # Stored with the same transaction as the action: retries cannot duplicate
         # a node, and refreshing never creates an explanation or advances play.
+        card['version']=config['version']
         card['decision_sha256']=digest(encode(decision))
         card['state_sha256']=digest(encode(state))
         db.execute('INSERT INTO pl3_auto_explanations VALUES(?,?,?,?,?,?,?,?)',
             (uid(),instance['id'],run_id,state['turn'],card['trigger_key'],encode(card),time.time(),None))
+
+    def _pending_automatic(self,db,instance):
+        if not self._ask_allowed(db,instance):return None
+        config=db.one('SELECT version FROM pl3_auto_explanation_settings WHERE instance_id=?',(instance['id'],))
+        if not config or config['version']!=automatic_explanations.VERSION:return None
+        return db.one('SELECT a.* FROM pl3_auto_explanations a LEFT JOIN pl3_auto_explanation_confirmations c ON c.explanation_id=a.id WHERE a.run_id=? AND c.explanation_id IS NULL ORDER BY a.turn,a.id LIMIT 1',(instance['current_run'],))
+
+    def _confirm_automatic(self,db,instance,payload):
+        if not self._ask_allowed(db,instance):raise StudyError('explanations_unavailable',403)
+        identifier=payload.get('explanation_id')
+        row=db.one('SELECT a.*,c.confirmed FROM pl3_auto_explanations a LEFT JOIN pl3_auto_explanation_confirmations c ON c.explanation_id=a.id WHERE a.id=? AND a.instance_id=? AND a.run_id=?',
+            (identifier,instance['id'],instance['current_run']))
+        if not row or json.loads(row['content_json']).get('version')!=automatic_explanations.VERSION:
+            raise StudyError('answer_unavailable',403)
+        if row['confirmed'] is not None:return
+        pending=self._pending_automatic(db,instance)
+        if not pending or pending['id']!=identifier:raise StudyError('answer_unavailable',403)
+        now=time.time()
+        db.execute('INSERT INTO pl3_auto_explanation_confirmations VALUES(?,?,?,?)',(identifier,instance['id'],instance['current_run'],now))
+        db.execute('UPDATE pl3_auto_explanations SET displayed=COALESCE(displayed,?) WHERE id=?',(now,identifier))
 
     def acknowledge_automatic(self,token,instance_id,explanation_id):
         with self.db.transaction(scope=instance_id) as db:
@@ -527,12 +552,13 @@ class Store:
             'tutorial_events': 'i.id=r.instance_id',
             'auto_explanation_settings': 'i.id=r.instance_id',
             'auto_explanations': 'i.id=r.instance_id',
+            'auto_explanation_confirmations': 'i.id=r.instance_id',
         }
         ordering = {'participants':'r.id','enrollments':'r.instance_id','instances':'r.id',
                     'runs':'r.id','frames':'r.run_id,r.turn','questions':'r.id',
                     'questionnaires':'r.instance_id','timings':'r.id','releases':'r.id',
                     'tutorials':'r.instance_id','tutorial_events':'r.id',
-                    'auto_explanation_settings':'r.instance_id','auto_explanations':'r.run_id,r.turn,r.id'}
+                    'auto_explanation_settings':'r.instance_id','auto_explanations':'r.run_id,r.turn,r.id','auto_explanation_confirmations':'r.explanation_id'}
         with self.db.transaction(read_only=True) as db:
             for name in EXPORT_TABLES:
                 # Recovery/session hashes never enter the export cursor.

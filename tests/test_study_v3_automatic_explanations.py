@@ -76,10 +76,23 @@ def test_store_isolation_acknowledgement_and_resume(tmp_path):
     resumed=Store(replace(store.settings,automatic_explanations=False))
     assert resumed.view(a.token,a.view['instance_id'])['automatic_explanations'][0]['displayed']
     with pytest.raises(StudyError):store.acknowledge_automatic(b.token,b.view['instance_id'],cards[0]['id'])
+    # Mere visibility never unlocks a move, including after reconnecting.
+    with pytest.raises(StudyError,match='explanation_confirmation_required'):a.step('wait')
+    saved_turn=a.view['state']['turn']
+    assert resumed.view(a.token,a.view['instance_id'])['state']['turn']==saved_turn
+    with pytest.raises(StudyError):b.command('confirm_explanation',explanation_id=cards[0]['id'])
+    with pytest.raises(StudyError):a.command('confirm_explanation',explanation_id='unknown')
+    confirmed_payload=a.command('confirm_explanation',explanation_id=cards[0]['id'])
+    assert a.view['automatic_explanations'][0]['confirmed']
+    assert a.view['state']['turn']==saved_turn  # Clicking confirm does not play a move.
+    store.command(a.token,'confirm_explanation',confirmed_payload)
+    a.command('confirm_explanation',explanation_id=cards[0]['id'])
     for _ in range(5):payload=a.step('wait')
     retry=store.command(a.token,'action',payload)
     assert len(retry['automatic_explanations'])==2
     assert [c['turn'] for c in retry['automatic_explanations']]==[5,10]
+    with pytest.raises(StudyError,match='explanation_confirmation_required'):a.step('wait')
+    a.command('confirm_explanation',explanation_id=a.view['automatic_explanations'][-1]['id'])
     a.command('language',language='zh')
     assert '我' in a.view['automatic_explanations'][-1]['body']
     with store.db.transaction() as db:
@@ -92,8 +105,10 @@ def test_store_isolation_acknowledgement_and_resume(tmp_path):
     automatic=[r['record'] for r in exported if r['table']=='auto_explanations']
     assert len(automatic)==2
     content=json.loads(automatic[0]['content_json'])
-    assert content['version']=='event-nodes-v1' and content['decision_sha256']
+    assert content['version']=='event-nodes-confirm-v2' and content['decision_sha256']
     assert not any(r['table']=='questions' for r in exported)
+    confirmations=[r['record'] for r in exported if r['table']=='auto_explanation_confirmations']
+    assert len(confirmations)==2 and all(r['confirmed'] for r in confirmations)
     with store.db.transaction() as db:
         db.execute("UPDATE pl3_runs SET status='completed' WHERE id=?",(a.view['run_id'],))
     a.command('next')
@@ -112,3 +127,15 @@ def test_existing_enrollment_never_changes_treatment_when_flag_enabled(tmp_path)
     assert not flow.view['automatic_explanations_enabled']
     assert flow.view['automatic_explanations']==[]
     new.db.close();old.db.close()
+
+
+def test_legacy_automatic_protocol_stays_nonblocking(tmp_path):
+    store=Store(Settings(database=str(tmp_path/'v1.db'),automatic_explanations=True))
+    flow=Flow(store,'kitchen','A')
+    with store.db.transaction() as db:
+        db.execute("UPDATE pl3_auto_explanation_settings SET version='event-nodes-v1' WHERE instance_id=?",(flow.view['instance_id'],))
+    task2(flow)
+    for _ in range(6):flow.step('wait')
+    assert flow.view['automatic_explanations'][0]['requires_confirmation'] is False
+    assert flow.view['state']['turn']==6
+    store.db.close()

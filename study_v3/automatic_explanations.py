@@ -4,7 +4,8 @@ These records are separate from voluntary questions. No provider request, hidden
 future schedule, or group-dependent controller action is introduced.
 """
 
-VERSION = 'event-nodes-v1'
+VERSION = 'event-nodes-confirm-v2'
+SUPPORTED_VERSIONS = frozenset({'event-nodes-v1', VERSION})
 
 
 def detouring(decision):

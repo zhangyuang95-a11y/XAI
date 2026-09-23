@@ -1,6 +1,6 @@
 # Automatic explanations at study nodes
 
-Preview implementation: `policylens-three-domain-20260923.v3.13-auto-explanations`.
+Preview implementation: `policylens-three-domain-20260923.v3.14-confirm-explanations`.
 
 Only Group A during active Task 2 receives automatic cards. Task 1 is baseline;
 Task 3 remains transfer without explanations or access to previous explanations.
@@ -23,12 +23,18 @@ scenarios, scores and task transitions are unchanged.
 - Terminal states do not create cards: the active Task 2 explanation window is
   closed immediately when the task ends.
 
-The card is above the board, stays below the header while scrolling, and needs
-no question or open-panel click. A new
-card stops a held movement key; participants can resume immediately without a
-mandatory acknowledgement or fixed reading delay. The latest card remains
-labelled with its source turn until replaced. Replay hides it to avoid presenting
-current advice as historical advice.
+For new enrollments, the explanation appears in a speech-bubble dialog anchored
+to AI teammate 2 (the AI paddle in Pong). The game cannot advance until the
+participant selects **Confirm and continue**. Keyboard movement, held movement,
+outside clicks and Escape cannot bypass the dialog. Native modal focus trapping
+keeps background controls inaccessible. Confirmation closes the dialog without
+playing a turn. A failed confirmation leaves the dialog open for retry.
+
+The server also rejects game actions while a confirmation is outstanding. Both
+refresh and reconnect restore the pending dialog. Successful confirmation is
+persisted, idempotent and scoped to the authenticated participant/current run.
+Old `event-nodes-v1` enrollments keep their original nonblocking card protocol;
+new enrollments use `event-nodes-confirm-v2`.
 
 ## Grounding and records
 
@@ -40,13 +46,15 @@ follow-up interface is unchanged. No hidden future schedule is exposed.
 `pl3_auto_explanation_settings` records the version at enrollment (including B
 controls). `pl3_auto_explanations` records each generated card, its node types,
 turn, bilingual text, state/decision hashes and first display acknowledgement.
-Both tables are included in the research export, separate from voluntary
+`pl3_auto_explanation_confirmations` separately records explicit confirmation
+timestamps. All three tables are included in the research export, separate from voluntary
 `questions`. A browser acknowledgement means at least 50% of the card entered
 an active tab's viewport; it does not establish reading or comprehension.
 
 Generation is transactional with game actions. Refresh, duplicate action
 requests and repeated acknowledgements cannot duplicate a card or overwrite
-its first exposure timestamp. Authorization checks also apply to acknowledgements.
+its first exposure or confirmation timestamp. Confirmation is evidence of an
+explicit button action, not proof of comprehension. Authorization checks also apply to acknowledgements.
 
 ## Rollout
 
@@ -66,15 +74,19 @@ protocol enrollments refers to explanations, not just answers to questions.
 
 Run `python -m tests.automatic_explanations_preview_server`, then open
 `http://127.0.0.1:9130/auto-preview/kitchen` (or `pong` / `warehouse`). This
-localhost-only helper creates synthetic researcher-preview sessions in a
+localhost-only helper creates a fresh synthetic researcher-preview session on each link visit in a
 separate SQLite database, bypasses the baseline for quick UI inspection, and
 never contacts Prolific or a language provider. It must not be used for research
 data collection. The normal full study flow remains available in the app.
 
-Validation: 146 distinct backend checks passed after updating the export and
-manifest expectations and fixing an asynchronous-readiness race in a test.
-The automatic-explanation and existing input/replay frontend checks passed.
-Real Chromium checks passed for all three games: visible card and exposure
-acknowledgement, refresh deduplication, bilingual rendering, sticky positioning,
-replay isolation, and Kitchen's next five-step trigger. No production data or
-paid participants were used for these checks.
+Validation for the confirmation revision is recorded separately from the prior
+nonblocking-card checks. Backend tests cover the server action gate, visible vs
+confirmed distinction, duplicate confirmations, ownership, reconnects, next-node
+blocking, Task 3 isolation, exports and old-protocol compatibility. Real-browser
+checks cover the modal, keyboard/Escape blocking, direct-API rejection, refresh,
+failed confirmation/retry and continuing without advancing a turn on confirmation.
+
+Confirmation revision verification: 57 backend tests passed, both frontend
+regression scripts passed, and all three real Chromium game previews passed.
+Screenshots were inspected for speech-bubble placement and readable reasons.
+The active production deployment and Prolific cohort were not changed.

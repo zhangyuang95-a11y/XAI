@@ -168,6 +168,7 @@ window.StudyBoard = class StudyBoard {
       // Warehouse facts and A/B slot numbers switch with the displayed map,
       // so a replenished job cannot relabel cargo halfway through a move.
       const [x,y]=at(xpos,ypos),visible=state.domain==='warehouse'?state[actor]:(p<.5?b:a);
+      if(actor==='ai'){this.canvas.dataset.aiAnchorX=( (x+c/2)/width ).toFixed(6);this.canvas.dataset.aiAnchorY=( (y+c/2)/height ).toFixed(6);}
       this.canvas.dataset[actor+'X']=xpos.toFixed(3);this.canvas.dataset[actor+'Y']=ypos.toFixed(3);
       this.rect(ctx,x+c*.14,y+c*.14,c*.72,c*.72,a.active===false?'#d9485f':color,c*.15);
       this.label(ctx,actor==='human'?'1':'2',x+c/2,y+c/2,c*.34,'white',900);
@@ -234,6 +235,7 @@ window.StudyBoard = class StudyBoard {
       const x=before[actor].x+(after[actor].x-before[actor].x)*p;
       const overlap=Math.abs(after.human.x-after.ai.x)<.01;
       this.rect(ctx,lane(x)-22,line+(actor==='ai'&&overlap?15:0)-7,44,13,color,5);
+      if(actor==='ai'){this.canvas.dataset.aiAnchorX=(lane(x)/w).toFixed(6);this.canvas.dataset.aiAnchorY=((line+(overlap?15:0))/h).toFixed(6);}
       this.canvas.dataset[actor+'X']=x.toFixed(3);
     }
     this.label(ctx,this.lang==='zh'?'小球 2格/步 · 大球 1格/步':'Small: 2 cells / move · Team: 1 cell / move',w/2,18,13,'#68758b');

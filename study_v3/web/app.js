@@ -166,7 +166,7 @@ function automaticPanel(){
 }
 function automaticDialog(){
  const card=pendingAutomatic();if(!card)return '';
- return `<dialog id="automaticDialog" class="automatic-dialog" aria-labelledby="automaticTitle" aria-describedby="automaticReason" data-explanation-id="${esc(card.id)}"><div class="automatic-speaker"><span class="automatic-avatar" aria-hidden="true">2</span><div><h2 id="automaticTitle">${lang==='zh'?'AI 队友的解释':'Your AI teammate explains'}</h2><div class="hint">Task 2 · ${tr('turn')} ${card.turn}</div></div></div><div id="automaticReason" class="automatic-body">${esc(card.body)}</div><p class="hint">${lang==='zh'?'游戏已暂停。请阅读原因，然后确认并继续。':'The game is paused. Read the explanation, then confirm to continue.'}</p><button id="confirmExplanationButton" class="button full">${lang==='zh'?'确认并继续':'Confirm and continue'}</button></dialog>`;
+ return `<dialog id="automaticDialog" class="automatic-dialog" data-domain="${esc(domain)}" aria-labelledby="automaticTitle" aria-describedby="automaticReason" data-explanation-id="${esc(card.id)}"><div class="automatic-speaker"><span class="automatic-avatar" aria-hidden="true">2</span><div><h2 id="automaticTitle">${lang==='zh'?'AI 队友的解释':'Your AI teammate explains'}</h2><div class="hint">Task 2 · ${tr('turn')} ${card.turn}</div></div></div><div id="automaticReason" class="automatic-body">${esc(card.body)}</div><p class="hint">${lang==='zh'?'游戏已暂停。请阅读原因，然后确认并继续。':'The game is paused. Read the explanation, then confirm to continue.'}</p><button id="confirmExplanationButton" class="button full">${lang==='zh'?'确认并继续':'Confirm and continue'}</button></dialog>`;
 }
 function automaticAnchor(){
  const canvas=$('studyCanvas');if(!canvas)return null;const rect=canvas.getBoundingClientRect();

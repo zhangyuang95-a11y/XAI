@@ -10,9 +10,11 @@ const base=process.env.STUDY_SMOKE_URL||'http://127.0.0.1:9131';
   const saved={};
   for(const domain of ['pong','warehouse','kitchen']){
    await page.goto(base+'/try/'+domain);
+   if(domain==='warehouse')await page.locator('#demoLanguage').selectOption('zh');
    await page.locator(`[data-game="${domain}"]`).click();
    await page.waitForFunction(()=>document.querySelector('#automaticDialog')?.open&&!busy&&!animationPending);
    const v=await page.evaluate(()=>({stage:view.stage,mode:view.mode,group:view.group,id:view.instance_id,turn:view.state.turn,runs:view.task_runs}));
+   if(domain==='warehouse')assert.equal(await page.evaluate(()=>lang),'zh');
    assert.equal(v.stage,'task2');assert.equal(v.mode,'preview');assert.equal(v.group,'A');
    assert(v.runs.every(r=>r.task===2));assert.equal(await page.locator('#questionInput').count(),0);
    await page.keyboard.press('Escape');assert.equal(await page.locator('#automaticDialog').evaluate(e=>e.open),true);

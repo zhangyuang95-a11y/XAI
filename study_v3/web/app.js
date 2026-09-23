@@ -85,7 +85,7 @@ async function refresh(){
  const epoch=chatEpoch,sequence=++refreshSequence;
  try{const next=await api(prolificEntry?'/api/prolific/session'+location.search:'/api/study/view?domain='+encodeURIComponent(domain));if(epoch!==chatEpoch||sequence!==refreshSequence||document.hidden)return;
  participantId=next.participant_id||participantId;if(prolificEntry&&next.domain)domain=next.domain;
- if(next.instance_id){if(view?.instance_id===next.instance_id&&next.revision<view.revision)return;const entering=!view?.instance_id;if(view?.can_ask&&!next.can_ask)clearChat();view=next;if(entering&&view.language!==lang){await command('language',{language:lang});}else{lang=view.language;languageUI();await render();}}
+ if(next.instance_id){if(view?.instance_id===next.instance_id&&next.revision<view.revision)return;const entering=!view?.instance_id;if(view?.can_ask&&!next.can_ask)clearChat();view=next;if(entering&&!view.share_preview&&view.language!==lang){await command('language',{language:lang});}else{lang=view.language;languageUI();await render();}}
  else{clearChat();replay=null;view=next;await render();}}
  catch(e){if(e.code!=='session_required')report(e);}
 }

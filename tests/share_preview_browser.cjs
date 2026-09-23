@@ -72,6 +72,7 @@ const base=process.env.STUDY_SMOKE_URL||'http://127.0.0.1:9131';
   // Complete one disposable game and verify that no Task 3 / research survey follows.
   await page.evaluate(async()=>{
    for(let i=0;i<200&&view.run_status!=='completed';i++){
+    if(pendingUnderstanding()){await command('understanding_rating',{rating_id:pendingUnderstanding().id,rating:3});continue;}
     const card=pendingAutomatic();
     if(card)await command('confirm_explanation',{explanation_id:card.id,...(card.guided?{choice:card.requested?'explanation':'understood'}:{})});
     else await command('action',{run_id:view.run_id,turn:view.state.turn,action:'wait'});

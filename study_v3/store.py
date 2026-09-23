@@ -12,7 +12,7 @@ import uuid
 from . import RELEASE_ID, SUPPORTED_RELEASE_IDS, KITCHEN_SUPPORTED_RELEASE_IDS
 from .database import Database
 from .registry import engine, demonstration, MODULES, scenario_config
-from . import kitchen_tutorial, automatic_explanations
+from . import kitchen_tutorial, automatic_explanations, understanding
 
 def encode(value): return json.dumps(value, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
 def digest(value): return hashlib.sha256(value.encode()).hexdigest()
@@ -44,7 +44,8 @@ EXPLANATION_ITEMS = [
 
 EXPORT_TABLES = ('participants','enrollments','instances','runs','frames',
                  'questions','questionnaires','timings','releases','tutorials','tutorial_events',
-                 'auto_explanation_settings','auto_explanations','auto_explanation_confirmations')
+                 'auto_explanation_settings','auto_explanations','auto_explanation_confirmations',
+                 'understanding_settings','understanding_ratings')
 
 class Store:
     def __init__(self, settings, explainer=None):
@@ -167,6 +168,9 @@ class Store:
                 if self.settings.automatic_explanations:
                     db.execute('INSERT INTO pl3_auto_explanation_settings VALUES(?,?,?)',
                         (iid,automatic_explanations.VERSION,time.time()))
+                if self.settings.understanding_ratings:
+                    db.execute('INSERT INTO pl3_understanding_settings VALUES(?,?,?,?,?)',
+                        (iid,understanding.VERSION,encode(understanding.TASKS),encode(understanding.GROUPS),time.time()))
                 instance=db.one('SELECT * FROM pl3_instances WHERE id=?',(iid,))
                 if domain=='kitchen':
                     now=time.time()
@@ -229,6 +233,11 @@ class Store:
                 result['action_labels']={a:eng.action_label(a,language) for a in result['actions']}
         protocol=db.one('SELECT version FROM pl3_auto_explanation_settings WHERE instance_id=?',(instance['id'],))
         result['automatic_explanation_protocol']=protocol['version'] if protocol else None
+        rating_config=db.one('SELECT * FROM pl3_understanding_settings WHERE instance_id=?',(instance['id'],))
+        result['understanding_rating_enabled']=bool(rating_config and instance['stage'].startswith('task')
+            and int(instance['stage'][-1]) in json.loads(rating_config['tasks_json'])
+            and instance['group_code'] in json.loads(rating_config['groups_json']))
+        result['understanding_rating']=understanding.public(self._pending_understanding(db,instance),language)
         if result['can_ask']:
             result['automatic_explanations']=[automatic_explanations.public_card(r,language)
                 for r in db.all('SELECT a.*,c.confirmed FROM pl3_auto_explanations a LEFT JOIN pl3_auto_explanation_confirmations c ON c.explanation_id=a.id WHERE a.run_id=? ORDER BY a.turn,a.id',(instance['current_run'],))]
@@ -267,12 +276,14 @@ class Store:
                 # Never return a cached response containing now-revoked answers.
                 return self._view(db,instance)
             if payload.get('revision')!=instance['revision']: raise StudyError('stale_state',409)
+            if self._pending_understanding(db,instance) and kind not in ('understanding_rating','language','timing'):
+                raise StudyError('understanding_rating_required',409)
             timings=payload.get('timings',[])
             if not isinstance(timings,list) or len(timings)>4:raise StudyError('invalid_timing')
             for measurement in timings:
                 if not isinstance(measurement,dict):raise StudyError('invalid_timing')
                 seconds=measurement.get('seconds');time_kind=measurement.get('kind')
-                if time_kind not in ('active','reading','replay') or type(seconds) not in (int,float) or not 0<=seconds<=86400:raise StudyError('invalid_timing')
+                if time_kind not in ('active','reading','replay','understanding_rating') or type(seconds) not in (int,float) or not 0<=seconds<=86400:raise StudyError('invalid_timing')
                 task=int(instance['stage'][-1]) if instance['stage'].startswith('task') else None
                 db.execute('INSERT INTO pl3_timings VALUES(?,?,?,?,?,?)',(uid(),instance['id'],task,time_kind,seconds,time.time()))
             if kind=='demo_next':
@@ -297,6 +308,7 @@ class Store:
             elif kind=='next': self._next(db,instance)
             elif kind=='tutorial': self._tutorial(db,instance,payload)
             elif kind=='action': self._action(db,instance,payload)
+            elif kind=='understanding_rating': self._submit_understanding(db,instance,payload)
             elif kind=='confirm_explanation': self._confirm_automatic(db,instance,payload)
             elif kind=='request_explanation': self._request_automatic(db,instance,payload)
             elif kind=='language':
@@ -307,7 +319,7 @@ class Store:
                 seconds=payload.get('seconds')
                 if not isinstance(seconds,(int,float)) or not 0<=seconds<=86400: raise StudyError('invalid_timing')
                 timing_kind=payload.get('kind')
-                if timing_kind not in ('reading','replay','active','explanation_wait'):raise StudyError('invalid_timing')
+                if timing_kind not in ('reading','replay','active','explanation_wait','understanding_rating'):raise StudyError('invalid_timing')
                 task=int(instance['stage'][-1]) if instance['stage'].startswith('task') else None
                 db.execute('INSERT INTO pl3_timings VALUES(?,?,?,?,?,?)',(uid(),instance['id'],task,timing_kind,seconds,time.time()))
             else: raise StudyError('unknown_command',404)
@@ -381,8 +393,31 @@ class Store:
         db.execute('INSERT INTO pl3_frames VALUES(?,?,?,?,?,?,?)',
             (run['id'],nxt['turn'],encode(nxt),encode(eng.public_state(nxt)),encode(next_decision),None,now))
         if run['task']==2:self._record_automatic(db,instance,run['id'],nxt,next_decision,decision)
+        self._record_understanding(db,instance,run,nxt)
         if terminal:
             db.execute("UPDATE pl3_questions SET status='revoked' WHERE authorized_run=? AND status='pending'",(run['id'],))
+
+    def _pending_understanding(self,db,instance):
+        return db.one('SELECT * FROM pl3_understanding_ratings WHERE instance_id=? AND run_id=? AND submitted IS NULL ORDER BY checkpoint LIMIT 1',
+            (instance['id'],instance['current_run']))
+
+    def _record_understanding(self,db,instance,run,state):
+        config=db.one('SELECT * FROM pl3_understanding_settings WHERE instance_id=?',(instance['id'],))
+        if not config or config['version']!=understanding.VERSION:return
+        if run['task'] not in json.loads(config['tasks_json']) or instance['group_code'] not in json.loads(config['groups_json']):return
+        checkpoint=understanding.checkpoint(state)
+        if checkpoint is None:return
+        if db.one('SELECT id FROM pl3_understanding_ratings WHERE run_id=? AND checkpoint=?',(run['id'],checkpoint)):return
+        db.execute('INSERT INTO pl3_understanding_ratings VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+            (uid(),instance['id'],run['id'],run['task'],checkpoint,state['turn'],state['max_turns'],config['version'],time.time(),None,None,None))
+
+    def _submit_understanding(self,db,instance,payload):
+        row=self._pending_understanding(db,instance)
+        if not row or row['id']!=payload.get('rating_id'):raise StudyError('understanding_rating_unavailable',409)
+        rating=payload.get('rating')
+        if type(rating) is not int or not 1<=rating<=5:raise StudyError('invalid_understanding_rating')
+        db.execute('UPDATE pl3_understanding_ratings SET rating=?,language=?,submitted=? WHERE id=?',
+            (rating,instance['language'],time.time(),row['id']))
 
     def _record_automatic(self,db,instance,run_id,state,decision,previous=None):
         if instance['group_code']!='A':return
@@ -503,6 +538,7 @@ class Store:
         if not isinstance(qid,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{8,100}',qid):raise StudyError('invalid_question_id')
         with self.db.transaction(scope=payload.get('instance_id')) as db:
             instance=self._instance(db,token,payload.get('instance_id'))
+            if self._pending_understanding(db,instance):raise StudyError('understanding_rating_required',409)
             if not self._ask_allowed(db,instance):raise StudyError('explanations_unavailable',403)
             if payload.get('authorized_run')!=instance['current_run']:raise StudyError('wrong_run',403)
             target=payload.get('target_run',instance['current_run']);turn=payload.get('turn')
@@ -594,12 +630,15 @@ class Store:
             'auto_explanation_settings': 'i.id=r.instance_id',
             'auto_explanations': 'i.id=r.instance_id',
             'auto_explanation_confirmations': 'i.id=r.instance_id',
+            'understanding_settings': 'i.id=r.instance_id',
+            'understanding_ratings': 'i.id=r.instance_id',
         }
         ordering = {'participants':'r.id','enrollments':'r.instance_id','instances':'r.id',
                     'runs':'r.id','frames':'r.run_id,r.turn','questions':'r.id',
                     'questionnaires':'r.instance_id','timings':'r.id','releases':'r.id',
                     'tutorials':'r.instance_id','tutorial_events':'r.id',
-                    'auto_explanation_settings':'r.instance_id','auto_explanations':'r.run_id,r.turn,r.id','auto_explanation_confirmations':'r.explanation_id'}
+                    'auto_explanation_settings':'r.instance_id','auto_explanations':'r.run_id,r.turn,r.id','auto_explanation_confirmations':'r.explanation_id',
+                    'understanding_settings':'r.instance_id','understanding_ratings':'r.run_id,r.checkpoint'}
         with self.db.transaction(read_only=True) as db:
             for name in EXPORT_TABLES:
                 # Recovery/session hashes never enter the export cursor.

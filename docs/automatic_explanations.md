@@ -1,8 +1,10 @@
 # Guided questions and optional explanations
 
-Current release: `policylens-three-domain-20260923.v3.18-ai-question-button`.
+Current release: `policylens-three-domain-20260923.v3.19-understanding-ratings`.
 
 During explanation-enabled Task 2, a keyboard-accessible question-mark button follows the AI actor in all three games. It focuses the question panel (or the first-node guided question) without advancing the game. It is absent when questions are unavailable. The first-node protocol remains unchanged.
+Both groups now receive Task 2 progress ratings; see [understanding_ratings.md](understanding_ratings.md). Ratings take precedence when they coincide with an explanation node.
+
 New automatic-explanation enrollments use `first-node-question-guide-v4`.
 
 Only Group A receives this guide. Task 2 starts normally at turn 0. No extra

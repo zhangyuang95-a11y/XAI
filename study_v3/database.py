@@ -74,6 +74,17 @@ CREATE TABLE IF NOT EXISTS pl3_questionnaires (
  instance_id TEXT PRIMARY KEY, answers_json TEXT NOT NULL,
  comprehension_json TEXT NOT NULL, submitted DOUBLE PRECISION NOT NULL
 );
+CREATE TABLE IF NOT EXISTS pl3_understanding_settings (
+ instance_id TEXT PRIMARY KEY, version TEXT NOT NULL, tasks_json TEXT NOT NULL,
+ groups_json TEXT NOT NULL, created DOUBLE PRECISION NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pl3_understanding_ratings (
+ id TEXT PRIMARY KEY, instance_id TEXT NOT NULL, run_id TEXT NOT NULL,
+ task INTEGER NOT NULL, checkpoint INTEGER NOT NULL, turn INTEGER NOT NULL,
+ max_turns INTEGER NOT NULL, version TEXT NOT NULL, created DOUBLE PRECISION NOT NULL,
+ rating INTEGER CHECK(rating BETWEEN 1 AND 5), language TEXT,
+ submitted DOUBLE PRECISION, UNIQUE(run_id, checkpoint)
+);
 CREATE TABLE IF NOT EXISTS pl3_commands (
  session_hash TEXT NOT NULL, command_id TEXT NOT NULL, request_hash TEXT NOT NULL,
  result_json TEXT NOT NULL, created DOUBLE PRECISION NOT NULL,
@@ -154,6 +165,8 @@ FLOAT_COLUMNS = {
     'pl3_auto_explanations': ('created','displayed'),
     'pl3_auto_explanation_confirmations': ('confirmed',),
     'pl3_questionnaires': ('submitted',),
+    'pl3_understanding_settings': ('created',),
+    'pl3_understanding_ratings': ('created','submitted'),
     'pl3_commands': ('created',),
     'pl3_timings': ('seconds', 'recorded'),
     'pl3_releases': ('created',),

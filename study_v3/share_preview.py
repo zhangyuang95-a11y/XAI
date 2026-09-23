@@ -16,7 +16,7 @@ def make_preview_server(*, host='127.0.0.1', port=9131, origin=None, database=No
     # Ignore production storage/Prolific settings. Only explicitly configured LLM settings are used.
     path=Path(database or '/tmp/policylens-task2-preview/preview.sqlite3')
     path.parent.mkdir(parents=True, exist_ok=True)
-    settings=Settings(database=str(path), mode='preview', automatic_explanations=True,
+    settings=Settings(database=str(path), mode='preview', automatic_explanations=True, understanding_ratings=True,
                       admin_token=secrets.token_urlsafe(32),
                       llm_api_key=os.environ.get('POLICYLENS_LLM_API_KEY',''),
                       llm_base_url=(os.environ.get('POLICYLENS_LLM_BASE_URL','https://api.deepseek.com') if os.environ.get('POLICYLENS_LLM_API_KEY') else ''),
@@ -90,7 +90,7 @@ def make_preview_server(*, host='127.0.0.1', port=9131, origin=None, database=No
                 except Exception as exc:
                     self.failure(exc)
                 return
-            allowed={'ask','answer-displayed','action','request_explanation','confirm_explanation','automatic-explanation-displayed','language','timing'}
+            allowed={'ask','answer-displayed','action','request_explanation','confirm_explanation','automatic-explanation-displayed','language','timing','understanding_rating'}
             if not path.startswith('/api/study/') or path.removeprefix('/api/study/') not in allowed:
                 return self.failure(StudyError('preview_only',403))
             super().do_POST()

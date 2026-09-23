@@ -120,3 +120,15 @@ main{max-width:1480px;padding-top:24px}.panel{border-radius:20px;box-shadow:0 16
 .ai-question-button::after{content:"";position:absolute;left:11px;bottom:-6px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid #bf431e}
 .ai-question-button:hover{background:#963315}
 .ai-question-button:focus-visible{outline:3px solid #4f6ff0;outline-offset:3px}
+
+.understanding-dialog{width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 40px);overflow:auto;border:1px solid var(--line);border-radius:18px;padding:28px;box-shadow:0 22px 80px #14233935;color:var(--ink)}
+.understanding-dialog::backdrop{background:#192a4359}
+.understanding-dialog h2{font-size:23px;line-height:1.4;margin:0 0 14px}
+.understanding-scale{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;border:0;padding:0;margin:24px 0}
+.understanding-scale label{display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 3px;border:1px solid var(--line);border-radius:10px;cursor:pointer;text-align:center;font-size:12px;line-height:1.35;overflow-wrap:anywhere}
+.understanding-scale label:has(input:checked){border-color:var(--teal);background:#e7f5f1}
+.understanding-scale label:has(input:focus-visible){outline:3px solid #4f6ff0;outline-offset:2px}
+.understanding-scale input{accent-color:var(--teal);margin:0}
+.rating-number{font-size:22px;font-weight:700}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+@media(max-width:480px){.understanding-dialog{padding:20px 14px}.understanding-scale{gap:5px}.understanding-scale label{font-size:11px}.understanding-dialog h2{font-size:20px}}

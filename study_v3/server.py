@@ -23,7 +23,7 @@ from .config import Settings
 from .registry import MODULES, engine, demonstration
 from .kitchen_tutorial import VERSION as KITCHEN_TUTORIAL_VERSION
 from .store import Store, StudyError, encode
-from . import prolific, automatic_explanations, understanding, rewards
+from . import prolific, automatic_explanations, understanding, rewards, review
 
 ROOT=Path(__file__).resolve().parents[1]
 WEB=ROOT/'study_v3/web'
@@ -231,7 +231,7 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
             self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
             if token:
                 secure='; Secure' if settings.origin.startswith('https:') else ''
-                self.send_header('Set-Cookie',f'{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000{secure}')
+                self.send_header('Set-Cookie',f'{self.cookie_name()}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000{secure}')
             self.end_headers()
         def reply_file(self,stream,content_type):
             stream.seek(0,os.SEEK_END);length=stream.tell();stream.seek(0)
@@ -241,10 +241,17 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
                     self.wfile.write(chunk)
             except (BrokenPipeError,ConnectionResetError):
                 self.close_connection=True
+        def review_domain(self):
+            parts=urlsplit(self.path).path.split('/')
+            return parts[3] if len(parts)>4 and parts[1:3]==['api','review'] and parts[3] in MODULES else None
+        def cookie_name(self):
+            domain=self.review_domain()
+            return COOKIE+'_review_'+domain if domain else COOKIE
         def token(self):
             try:
                 c=SimpleCookie();c.load(self.headers.get('Cookie',''))
-                return c[COOKIE].value if COOKIE in c else None
+                name=self.cookie_name()
+                return c[name].value if name in c else None
             except Exception:return None
         def admin(self):
             supplied=self.headers.get('Authorization','')
@@ -270,9 +277,19 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
         def do_GET(self):
             try:
                 parts=urlsplit(self.path);path=parts.path;q=parse_qs(parts.query)
+                review_domain=self.review_domain()
+                if review_domain:
+                    operation=path.removeprefix('/api/review/'+review_domain+'/')
+                    if operation=='info':
+                        consent=json.loads((ROOT/'docs/consent_review_content.json').read_text())
+                        self.reply(200,{'ready':store.ready,'consent':consent,'consent_version':prolific.CONSENT_VERSION});return
+                    if operation not in ('view','frame'):raise StudyError('not_found',404)
+                    iid=review.authorize(store,review_domain,self.token(),q.get('instance_id',[None])[0])
+                    q['instance_id']=[iid]
+                    path='/api/study/'+operation
                 if path.startswith(('/warehouse/api/','/pong/api/')) or path in ('/api/view','/api/study/reference-trajectory'):
                     self.reply(410,{'error':'release_changed','message_en':'This earlier study version cannot continue here. Please contact the researcher before beginning a new task.','message_zh':'旧版本任务无法在此继续，请先联系研究者，再开始新任务。'});return
-                if path in ('/','/warehouse/','/pong/','/kitchen/','/prolific/'):
+                if path in ('/','/warehouse/','/pong/','/kitchen/','/prolific/') or path in {'/review/'+d+'/' for d in MODULES}:
                     self.reply(200,(WEB/'index.html').read_bytes(),'text/html; charset=utf-8');return
                 if path in ('/warehouse','/pong','/kitchen'):
                     self.send_response(308);self.send_header('Location',path+'/');self.send_header('Content-Length','0');self.end_headers();return
@@ -318,6 +335,21 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
         def do_POST(self):
             try:
                 path=urlsplit(self.path).path;payload=self.body()
+                if path=='/api/study/admin/review-link':
+                    if not self.admin():raise StudyError('researcher_access_required',403)
+                    self.reply(200,review.mint(settings,payload.get('domain')));return
+                review_domain=self.review_domain()
+                if review_domain:
+                    operation=path.removeprefix('/api/review/'+review_domain+'/')
+                    if operation=='enrol':
+                        token,result=review.enrol(store,review_domain,payload,self.token())
+                        self.reply(200,result,token=token);return
+                    allowed={'demo_next','demo_finish','demo_skip','next','tutorial','action','understanding_rating',
+                        'open_question_guide','request_explanation','confirm_explanation','skip_prompts','language',
+                        'questionnaire','timing','ask','automatic-explanation-displayed','answer-displayed'}
+                    if operation not in allowed:raise StudyError('not_found',404)
+                    review.authorize(store,review_domain,self.token(),payload.get('instance_id'))
+                    path='/api/study/'+operation
                 if path=='/api/prolific/admin/release-slot':
                     if not self.admin():raise StudyError('researcher_access_required',403)
                     self.reply(200,prolific.release_slot(store,payload));return

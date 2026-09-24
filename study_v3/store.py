@@ -259,6 +259,9 @@ class Store:
             result['questionnaire']={'items':[{'id':i[0],'text':i[2 if language=='zh' else 1],'allow_na':i[0] in {q[0] for q in EXPLANATION_ITEMS}} for i in items],
                 'comprehension':[]}
         link=db.one('SELECT study_id FROM pl3_prolific_links WHERE instance_id=?',(instance['id'],))
+        if instance['mode']=='preview' and instance['participant_id'].startswith('review-'):
+            result['full_study_preview']=True
+            result['questionnaire_optional']=True
         if link:
             result['prolific']=True
             result['questionnaire_optional']=True
@@ -554,7 +557,7 @@ class Store:
         if instance['stage']!='questionnaire':raise StudyError('wrong_stage',409)
         answers=payload.get('answers',{})
         if not isinstance(answers,dict):raise StudyError('invalid_questionnaire')
-        optional=bool(db.one('SELECT instance_id FROM pl3_prolific_links WHERE instance_id=?',(instance['id'],)))
+        optional=bool(db.one('SELECT instance_id FROM pl3_prolific_links WHERE instance_id=?',(instance['id'],))) or (instance['mode']=='preview' and instance['participant_id'].startswith('review-'))
         for q in COMMON_ITEMS+(EXPLANATION_ITEMS if instance['group_code']=='A' else []):
             value=answers.get(q[0])
             if optional and value is None:

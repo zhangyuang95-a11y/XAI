@@ -57,3 +57,12 @@ or increases the approved total of 60 Prolific places. Eight NOCODE submissions
 without enrolled sessions currently occupy Prolific places; the researcher has
 explicitly chosen not to message them yet. Initially only three replacement
 places are available on Prolific, despite nine vacancies on the website.
+
+On 24 September, after those places filled, the researcher authorized adding
+places if the blockage remained. Six additional platform places (60 to 66)
+were authorized to cover the six vacant website cells at that check, costing
+£24 including the platform fee, plus up to £4.80 for their bonuses and fees.
+The website target stays at 60 occupied sessions, ten in each cell. The local
+`prolific_places` setting records the approved platform total separately; the
+reconciler itself still cannot increase it or buy places. One unfinished
+submission awaiting review must be investigated separately and is preserved.

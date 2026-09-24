@@ -59,6 +59,7 @@ class Sync:
         self.directory = directory
         settings = json.loads((directory/'settings.json').read_text())
         self.sid = settings['study_id']
+        self.platform_places = settings.get('prolific_places', 60)
         if settings['places'] != 60 or settings['cell_target'] != 10:
             raise ValueError('Expected the authorized 60-person main study')
         self.token = (directory/'prolific-api-token').read_text().strip()
@@ -98,7 +99,7 @@ class Sync:
 
     def cycle(self, apply=False, resume=False):
         study = self.request(self.study_url)
-        if study['id'] != self.sid or study['total_available_places'] != 60 or study['reward'] != 300:
+        if study['id'] != self.sid or study['total_available_places'] != self.platform_places or study['reward'] != 300:
             raise ValueError('Study identity, total places, or reward changed')
         submissions = self.submissions()
         records = self.request(self.origin+'/api/prolific/admin/payments', site=True)['records']
@@ -124,7 +125,7 @@ class Sync:
             result = plan(records, self.submissions())
             if result['releases']:
                 raise ValueError('Pending reconciliation; keep recruitment paused')
-            if result['vacancies'] == 0 or (study.get('places_taken', 60) >= 60 and result['unfinished'] == 0):
+            if result['vacancies'] == 0 or (study.get('places_taken', self.platform_places) >= self.platform_places and result['unfinished'] == 0):
                 self.pause()
             elif resume:
                 # Never offer more simultaneous reservations than the website
@@ -134,7 +135,7 @@ class Sync:
                 if config['max_concurrent_submissions'] != cap:
                     self.request(self.study_url, 'PATCH', {'submissions_config': {**config, 'max_concurrent_submissions': cap}})
                 study = self.request(self.study_url)
-                if study['status'] == 'PAUSED' and study.get('places_taken', 60) < 60:
+                if study['status'] == 'PAUSED' and study.get('places_taken', self.platform_places) < self.platform_places:
                     self.request(self.study_url+'transition/', 'POST', {'action': 'START'})
         study = self.request(self.study_url)
         result.pop('releases')
@@ -143,7 +144,7 @@ class Sync:
                       places_taken=study.get('places_taken'),
                       concurrency=study['submissions_config']['max_concurrent_submissions'],
                       applied=apply)
-        if result['vacancies'] and study.get('places_taken', 60) >= 60:
+        if result['vacancies'] and study.get('places_taken', self.platform_places) >= self.platform_places:
             result['blocked_by_prolific_capacity'] = True
         (self.directory/'sync-status.json').write_text(json.dumps(result, indent=2))
         return result

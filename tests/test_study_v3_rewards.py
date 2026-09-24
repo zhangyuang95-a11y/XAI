@@ -19,7 +19,7 @@ def test_bonus_bounds_and_rounding(domain):
 @pytest.mark.parametrize('group',['A','B'])
 def test_saved_scores_restart_and_legacy(tmp_path,group):
     settings=Settings(database=str(tmp_path/'rewards.db'));s=Store(settings);f=Flow(s,'pong',group)
-    assert f.view['rewards']['base_pence']==280
+    assert f.view['rewards']['base_pence']==300
     assert f.view['rewards']['earned_bonus_pence']==0
     f.finish_demo()
     assert f.view['rewards']['completed_tasks']==[]
@@ -36,7 +36,7 @@ def test_saved_scores_restart_and_legacy(tmp_path,group):
                        (json.dumps({'task_score':score}),f.view['instance_id'],task))
     expected=s.view(f.token,f.view['instance_id'])['rewards']
     assert [t['bonus_pence'] for t in expected['completed_tasks']]==[0,10,20]
-    assert expected['total_pence']==310
+    assert expected['total_pence']==330
     s.db.close();s=Store(settings)
     assert s.view(f.token,f.view['instance_id'])['rewards']==expected
     assert len(s.export()['reward_settings'])==1
@@ -50,13 +50,13 @@ def test_saved_scores_restart_and_legacy(tmp_path,group):
 def test_private_payment_export_and_immutable_policy(store):
     token,view=prolific.enrol(store,payload(1))
     before=prolific.payment_records(store)[0]
-    assert before['rewards']['currency']=='GBP' and before['rewards']['maximum_total_pence']==340
+    assert before['rewards']['currency']=='GBP' and before['rewards']['maximum_total_pence']==360
     assert before['rewards']['payment_status']=='not_tracked_here'
     with store.db.transaction() as db:
         row=db.one('SELECT policy_json FROM pl3_reward_settings WHERE instance_id=?',(view['instance_id'],))
-        rule=json.loads(row['policy_json']);rule['base_pence']=300
+        rule=json.loads(row['policy_json']);rule['base_pence']=280;rule['version']='gbp-280-base-20-per-task-v1'
         db.execute('UPDATE pl3_reward_settings SET policy_json=? WHERE instance_id=?',(json.dumps(rule),view['instance_id']))
-    assert prolific.resume(store,token)['rewards']['base_pence']==300
-    assert prolific.payment_records(store)[0]['rewards']['base_pence']==300
+    assert prolific.resume(store,token)['rewards']['base_pence']==280
+    assert prolific.payment_records(store)[0]['rewards']['base_pence']==280
     with store.db.transaction() as db:db.execute('DELETE FROM pl3_reward_settings WHERE instance_id=?',(view['instance_id'],))
     assert 'rewards' not in prolific.payment_records(store)[0]

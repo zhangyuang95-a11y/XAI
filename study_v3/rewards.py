@@ -6,13 +6,13 @@ All monetary amounts are integer pence; each task is rounded half up once.
 from decimal import Decimal, ROUND_HALF_UP
 import json
 
-VERSION = 'gbp-280-base-20-per-task-v1'
+VERSION = 'gbp-300-base-20-per-task-v2'
 BOUNDS = {'warehouse': (0, 100), 'pong': (45, 65), 'kitchen': (60, 120)}
 
 
 def policy(domain):
     low, high = BOUNDS[domain]
-    return {'version': VERSION, 'currency': 'GBP', 'base_pence': 280,
+    return {'version': VERSION, 'currency': 'GBP', 'base_pence': 300,
             'task_max_pence': 20, 'tasks': [1, 2, 3],
             'score_lower': low, 'score_upper': high,
             'score_field': 'task_score', 'rounding': 'nearest_penny_half_up'}

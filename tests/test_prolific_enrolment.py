@@ -41,6 +41,25 @@ def test_concurrent_blocks_cap_and_private_identity(store):
         assert view['participant_id'].startswith('pl-')
         assert 'completion_code' not in view
 
+def test_main_cohort_has_ten_per_cell_and_separate_old_cohort(store):
+    # The main study must start fresh without counting earlier allocations.
+    prolific.enrol(store, payload(100))
+    main_study = 'b' * 24
+    store.settings = replace(store.settings, prolific_study_id=main_study, prolific_places=60)
+    def enrol(n):
+        return prolific.enrol(store, {**payload(n), 'STUDY_ID': main_study})
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(enrol, range(1, 61)))
+    assert Counter((v['domain'], v['group']) for _, v in results) == Counter({cell: 10 for cell in prolific.CELLS})
+    assert all(v['rewards']['base_pence'] == 300 for _, v in results)
+    with pytest.raises(StudyError, match='prolific_full'):
+        enrol(61)
+    assert len(prolific.payment_records(store)) == 60
+    assert len(store.export()['instances']) == 61
+    with pytest.raises(StudyError, match='prolific_already_participated'):
+        enrol(100)
+
+
 def test_retry_restart_and_cross_identity_access(store):
     token,view=prolific.enrol(store,payload(1))
     same_token,same=prolific.enrol(store,payload(1),token)

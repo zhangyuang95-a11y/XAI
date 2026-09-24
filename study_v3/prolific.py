@@ -9,7 +9,7 @@ import time
 from . import rewards
 from .store import StudyError, uid
 
-CONSENT_VERSION='policylens-prolific-consent-20260924.v4-round2'
+CONSENT_VERSION='policylens-prolific-consent-20260924.v5-main'
 CELLS=tuple((domain,group) for domain in ('warehouse','pong','kitchen') for group in ('A','B'))
 
 def ready(store):

@@ -38,7 +38,7 @@ def test_complete_flow_matches_formal_protocol_and_excludes_recruitment(store,do
     token,view=review.enrol(store,domain,payload)
     assert view['group']=='A' and view['mode']=='preview' and view['stage']=='demo'
     assert view['task_runs']==[] and view['questionnaire_optional']
-    assert view['automatic_explanations_enabled'] and view['rewards']['base_pence']==280
+    assert view['automatic_explanations_enabled'] and view['rewards']['base_pence']==300
     assert review.enrol(store,domain,payload,token)[1]['instance_id']==view['instance_id']
     assert review.authorize(store,domain,token)==view['instance_id']
     f=object.__new__(Flow);f.store,f.token,f.view,f.domain=store,token,view,domain

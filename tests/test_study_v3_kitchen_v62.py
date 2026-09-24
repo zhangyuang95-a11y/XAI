@@ -248,14 +248,14 @@ def test_seeded_menus_frozen_distinct_across_tasks_no_triples_and_group_independ
             group_b = e.initial_state(seed, task)
             assert group_a == group_b
             menu = tuple(order['recipe'] for order in group_a['orders'])
-            assert len(menu) == 4 and len(set(menu)) == 2
+            assert len(menu) == 3 and len(set(menu)) == 2
             assert all(not (menu[i] == menu[i+1] == menu[i+2]) for i in range(len(menu)-2))
-            assert [o['deadline'] for o in group_a['orders']] == [100, 140, 240, 280]
-            assert group_a['max_turns'] == 280
+            assert [o['deadline'] for o in group_a['orders']] == [100, 140, 240]
+            assert group_a['max_turns'] == 240
             restored = json.loads(json.dumps(group_a))
             assert restored['orders'] == group_a['orders']
             assert e.step(restored, 'wait')['orders'] == group_a['orders']
-            assert restored['menu_version'] == 'kitchen-menu-v3-four-dishes'
+            assert restored['menu_version'] == 'kitchen-menu-v4-three-dishes'
             menus.append(menu); all_menus.add(menu)
         assert len(set(menus)) == 3
     assert len(all_menus) > 3  # No single fixed alternation template.
@@ -267,8 +267,8 @@ def test_versioned_metadata_matches_new_physics_and_public_state_is_pure():
     view = e.public_state(state)
     meta = view['rule_metadata']
     assert meta == state['rule_metadata'] == e.rule_metadata()
-    assert meta['engine_version'] == 'kitchen-v6.4.0'
-    assert meta['menu_version'] == 'kitchen-menu-v3-four-dishes'
+    assert meta['engine_version'] == 'kitchen-v6.5.0'
+    assert meta['menu_version'] == 'kitchen-menu-v4-three-dishes'
     assert meta['score'] == {'served': 100, 'step': -1, 'single_component_discard': -5, 'combined_dish_discard': -20}
     assert meta['prepared_fresh_turns'] == 20 and meta['max_consecutive_same_recipe'] == 2
     assert meta['heating']['egg_tomato']['total'] == 16 and meta['heating']['pepper_meat']['total'] == 20

@@ -12,8 +12,8 @@ from . import engine as e
 
 # Fixed development scene whose menu begins with tomato-and-egg. This choice
 # is for named-ingredient QA coverage, never a held-out performance claim.
-QA_SEED = 1000
-HEATING_SEED = 1001
+QA_SEED = 1006
+HEATING_SEED = 1005
 
 def regular_trace(seed=QA_SEED):
     state = e.initial_state(seed, 2)
@@ -186,7 +186,7 @@ def build():
     ])
     specs.extend([
         ('waiting_dish','start','Which dish are you going to cook while waiting for my first ingredient?','你现在等我给原料，准备做什么菜？',['ai_current_dishes','next_input_ingredient'],[{'path':'orders.0.recipe','equals':'egg_tomato'}],'ai','observation'),
-        ('full_menu','start','How many dishes are in the menu, and can I see the full list now?','这次菜单一共几道菜，现在能看到全部吗？',['public_rule8','order1','order2','order3','order4'],[{'path':'total_orders','equals':4}],'shared','rule'),
+        ('full_menu','start','How many dishes are in the menu, and can I see the full list now?','这次菜单一共几道菜，现在能看到全部吗？',['public_rule8','order1','order2','order3'],[{'path':'total_orders','equals':3}],'shared','rule'),
         ('protein_first','start','Why must egg and meat be cooked before tomato and pepper?','为什么鸡蛋和肉必须在番茄和辣椒之前炒？',['recipe_sequence_egg_tomato','recipe_sequence_pepper_meat'],[],'ai','rule'),
         ('prep_counts','start','How many preparation interactions do egg, meat, tomato and pepper each require?','鸡蛋、肉、番茄和辣椒分别需要备料几次？',['public_rule2'],[],'shared','rule'),
         ('prepared_freshness','egg_prepared','When was this egg prepared, and when does it expire?','这份鸡蛋哪回合备好，哪回合过期？',['freshness_egg'],[{'path':'human.holding.freshness_basis','equals':'prepared'},{'path':'human.holding.prepared_turn','equals':prepared_at},{'path':'human.holding.expires_turn','equals':prepared_at+e.PREPARED_FRESH_TURNS['egg']}],'shared','observation'),

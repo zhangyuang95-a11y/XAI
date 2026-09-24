@@ -151,12 +151,12 @@ class RealParallelTraces(unittest.TestCase):
         self.assertEqual(e.decide(state)['reason_code'],'accept_ingredient')
         self.assertEqual(e.decide(state)['slot'],0)
 
-    def test_two_real_orders_overlap_before_first_output_and_four_dishes_complete(self):
+    def test_two_real_orders_overlap_before_first_output_and_three_dishes_complete(self):
         for seed in (1000,1001,2000,2001):
             for task in (1,2,3):
                 with self.subTest(seed=seed,task=task):
                     frames,events=run(seed,task)
-                    self.assertEqual(frames[-1]['metrics']['completed_orders'],4)
+                    self.assertEqual(frames[-1]['metrics']['completed_orders'],3)
                     self.assertGreater(frames[-1]['metrics']['parallel_recipe_turns'],0)
                     overlap=[s for s in frames if all(p['phase']!='idle' for p in s['pots'])]
                     self.assertTrue(overlap)

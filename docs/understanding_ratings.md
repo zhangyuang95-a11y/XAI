@@ -15,7 +15,7 @@ Progress uses the fixed turn budget, with checkpoints rounded up:
 | --- | --- | --- | --- | --- | --- |
 | Warehouse | 24 | 48 | 72 | 96 | 120 |
 | Pong | 18 | 36 | 54 | 72 | 90 |
-| Kitchen | 56 | 112 | 168 | 224 | 280 |
+| Kitchen | 48 | 96 | 144 | 192 | 240 |
 
 An early terminal state triggers one end (100%) rating at the actual ending turn;
 unreached intermediate checkpoints are not backfilled. A terminal-state rating

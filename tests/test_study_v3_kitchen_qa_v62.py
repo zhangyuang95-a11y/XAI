@@ -190,7 +190,7 @@ def test_completed_order_question_uses_count_even_when_score_is_negative(languag
     assert state['raw_score'] < 0
     result = answer(state, ['system:completed_orders'], 'How many dishes have we completed?', language)
     assert result['status'] == 'answered'
-    assert ('completed 1 of 4 orders' if language == 'en' else '已完成 1 道，共 4 道订单') in result['answer']
+    assert ('completed 1 of 3 orders' if language == 'en' else '已完成 1 道，共 3 道订单') in result['answer']
     assert str(state['raw_score']) not in result['answer']
 
 

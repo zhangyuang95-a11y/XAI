@@ -261,7 +261,7 @@ def test_kitchen_public_menu_is_fully_known_without_an_artificial_future_order_b
     before = deepcopy(state)
     public = kitchen.public_state(state)
     assert state["_future_orders"] == []
-    assert len(public["orders"]) == 5
+    assert len(public["orders"]) == 3
     assert {order["id"] for order in public["orders"]} == {order["id"] for order in state["orders"]}
     result = simulate(kitchen, state, kitchen.decide(state), ["wait"], 4)
     assert result["steps_completed"] == 4
@@ -888,7 +888,7 @@ def test_actual_wait_reason_synonyms_render_once_without_question_keyword_bindin
         # Select the late-task waiting situation by behavior rather than an
         # old cooking-speed-dependent frame number.
         while not state['terminal']:
-            if state['metrics']['completed_orders'] == 4 and module.decide(state)['action'] == 'wait':
+            if state['metrics']['completed_orders'] == len(state['orders']) - 1 and module.decide(state)['action'] == 'wait':
                 break
             state = module.step(state, module.human_advisor(state))
         assert not state['terminal']

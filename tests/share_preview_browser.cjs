@@ -46,7 +46,7 @@ const base=process.env.STUDY_SMOKE_URL||'http://127.0.0.1:9131';
    saved[domain]=v.id;
    console.log(domain,'Task 2 starts normally; first natural node guides question-panel use, answer persistence and confirmation verified');
    if(domain==='kitchen'){
-    assert.equal(await page.getByRole('heading',{name:'Menu · 4 dishes',exact:true}).count(),1);
+    assert.equal(await page.getByRole('heading',{name:'Menu · 3 dishes',exact:true}).count(),1);
     await page.evaluate(async()=>{for(let i=0;i<5;i++)await command('action',{run_id:view.run_id,turn:view.state.turn,action:'wait'});});
     await page.waitForFunction(()=>document.querySelector('#automaticDialog')?.open&&!busy);
     assert.equal(await page.locator('#understoodExplanationButton').count(),1);

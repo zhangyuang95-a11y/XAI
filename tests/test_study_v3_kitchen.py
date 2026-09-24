@@ -325,7 +325,7 @@ class ControllerAndEvidence(unittest.TestCase):
             state = e.step(state, e.human_advisor(state)); events.extend(state['events'])
         self.assertTrue(any(event['type'] == 'waste' and original_id in event['item']['components'] and event['station'] == 'trash' for event in events))
         self.assertTrue(any(event['type'] == 'ingredient_spoiled' and event['item']['id'] == original_id for event in events))
-        self.assertEqual(state['metrics']['completed_orders'], 4)
+        self.assertEqual(state['metrics']['completed_orders'], 3)
 
     def test_raw_delivery_recovery_for_all_four_ingredients_from_initial_state(self):
         for ingredient in e.LABELS:
@@ -345,7 +345,7 @@ class ControllerAndEvidence(unittest.TestCase):
                 self.assertIn(ingredient, evidence['next_input_ingredient']['en'])
                 while not state['terminal']:
                     state = e.step(state, e.simulation_partner(state)); events.extend(state['events'])
-                self.assertEqual(state['metrics']['completed_orders'], 4)
+                self.assertEqual(state['metrics']['completed_orders'], 3)
                 self.assertTrue(any(event['type'] in ('served','waste') and wrong_id in event['item']['components'] for event in events))
                 self.assertEqual(state['metrics']['waste'], sum(len(event['item']['components']) for event in events if event['type'] == 'waste'))
 
@@ -643,8 +643,8 @@ class KitchenFeasibility(unittest.TestCase):
                 with self.subTest(seed=seed, task=task):
                     frames, events = run(seed, task)
                     final = frames[-1]
-                    self.assertEqual(final['metrics']['completed_orders'],4)
-                    self.assertEqual(e.score(final)['task_score'],400-final['turn'])
+                    self.assertEqual(final['metrics']['completed_orders'],3)
+                    self.assertEqual(e.score(final)['task_score'],300-final['turn'])
                     self.assertEqual(final['metrics']['spoiled'],0)
                     self.assertEqual(final['metrics']['waste'],0)
                     self.assertLessEqual(final['turn'],cfg['task_budgets'][str(task)])

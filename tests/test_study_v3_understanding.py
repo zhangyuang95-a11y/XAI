@@ -9,7 +9,7 @@ from tests.test_study_v3_automatic_explanations import task2
 
 
 @pytest.mark.parametrize('domain,expected',[
-    ('warehouse',[24,48,72,96,120]),('pong',[18,36,54,72,90]),('kitchen',[56,112,168,224,280])])
+    ('warehouse',[24,48,72,96,120]),('pong',[18,36,54,72,90]),('kitchen',[48,96,144,192,240])])
 @pytest.mark.parametrize('group',['A','B'])
 def test_task2_checkpoints_and_final_gate(tmp_path,domain,expected,group):
     settings=Settings(database=str(tmp_path/'ratings.db'),understanding_ratings=True)

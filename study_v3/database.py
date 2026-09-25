@@ -27,6 +27,10 @@ CREATE TABLE IF NOT EXISTS pl3_prolific_releases (
  instance_id TEXT PRIMARY KEY, submission_status TEXT NOT NULL,
  reason TEXT NOT NULL, released DOUBLE PRECISION NOT NULL
 );
+CREATE TABLE IF NOT EXISTS pl3_prolific_cohorts (
+ study_id TEXT PRIMARY KEY, completion_code TEXT NOT NULL,
+ quotas_json TEXT NOT NULL, created DOUBLE PRECISION NOT NULL
+);
 CREATE TABLE IF NOT EXISTS pl3_instances (
  id TEXT PRIMARY KEY, participant_id TEXT NOT NULL, domain TEXT NOT NULL,
  release_id TEXT NOT NULL, group_code TEXT NOT NULL, mode TEXT NOT NULL,

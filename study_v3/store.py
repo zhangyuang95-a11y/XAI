@@ -265,8 +265,10 @@ class Store:
         if link:
             result['prolific']=True
             result['questionnaire_optional']=True
-            if instance['stage']=='completed' and link['study_id']==self.settings.prolific_study_id:
-                code=self.settings.prolific_completion_code
+            if instance['stage']=='completed':
+                from .prolific import cohort
+                try:code,_=cohort(db,self.settings,link['study_id'])
+                except StudyError:code=''
                 if re.fullmatch(r'[A-Za-z0-9]{4,64}',code):
                     result['completion_code']=code
                     result['completion_url']='https://app.prolific.com/submissions/complete?cc='+code

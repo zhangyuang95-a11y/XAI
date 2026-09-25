@@ -314,7 +314,7 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
                     self.reply(200,prolific.resume(store,self.token(),{k:v[0] for k,v in q.items()} if q else None));return
                 if path=='/api/prolific/admin/payments':
                     if not self.admin():raise StudyError('researcher_access_required',403)
-                    self.reply(200,{'records':prolific.payment_records(store)});return
+                    self.reply(200,{'records':prolific.payment_records(store,q.get('study_id',[None])[0])});return
                 if path=='/api/study/view':
                     iid=q.get('instance_id',[None])[0]
                     result=store.view(self.token(),iid) if iid else store.recover_view(self.token(),q.get('domain',[None])[0])
@@ -335,6 +335,9 @@ def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
         def do_POST(self):
             try:
                 path=urlsplit(self.path).path;payload=self.body()
+                if path=='/api/prolific/admin/cohort':
+                    if not self.admin():raise StudyError('researcher_access_required',403)
+                    self.reply(200,prolific.register_cohort(store,payload));return
                 if path=='/api/study/admin/review-link':
                     if not self.admin():raise StudyError('researcher_access_required',403)
                     self.reply(200,review.mint(settings,payload.get('domain')));return

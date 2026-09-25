@@ -132,6 +132,10 @@ def test_http_entry_ids_recovery_and_restricted_payment_export(store):
         status,resumed,_=client.request('GET','/api/prolific/session')
         assert status==200 and resumed['id']==view['id']
         assert client.request('GET','/api/prolific/admin/payments')[0]==403
+        assert client.request('POST','/api/prolific/admin/cohort',replacement_config())[0]==403
+        assert client.request('POST','/api/prolific/admin/cohort',replacement_config(),headers={'Authorization':'Bearer test-only'})[0]==200
+        status,new_rows,_=client.request('GET','/api/prolific/admin/payments?study_id='+REPLACEMENT,headers={'Authorization':'Bearer test-only'})
+        assert status==200 and new_rows['records']==[]
         status,records,_=client.request('GET','/api/prolific/admin/payments',headers={'Authorization':'Bearer test-only'})
         assert status==200 and records['records'][0]['prolific_pid']==payload(1)['PROLIFIC_PID']
         stranger=Client(server.server_port)
@@ -215,3 +219,54 @@ def test_http_release_requires_researcher_and_is_idempotent(store):
         assert client.request('POST',path,release_payload(record,'TIMED_OUT'),headers=auth)[0]==409
     finally:
         server.shutdown();server.server_close();worker.join(5)
+
+REPLACEMENT='c'*24
+REPLACEMENT_QUOTAS=[{'domain':'warehouse','group':'A','places':1},
+    {'domain':'pong','group':'B','places':2}, {'domain':'kitchen','group':'A','places':1},
+    {'domain':'kitchen','group':'B','places':2}]
+
+def replacement_config():
+    return {'study_id':REPLACEMENT,'completion_code':'REPLACE1','quotas':REPLACEMENT_QUOTAS}
+
+def test_replacement_concurrent_quota_restart_duplicate_and_release(store):
+    prolific.enrol(store,payload(99))
+    config=replacement_config()
+    prolific.register_cohort(store,config)
+    assert prolific.register_cohort(store,config)['places']==6
+    with pytest.raises(StudyError,match='immutable'):
+        prolific.register_cohort(store,{**config,'completion_code':'CHANGED1'})
+    def join(n):return prolific.enrol(store,{**payload(n),'STUDY_ID':REPLACEMENT})
+    with pytest.raises(StudyError,match='already_participated'):join(99)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results=list(pool.map(join,range(1,7)))
+    assert Counter((v['domain'],v['group']) for _,v in results)==Counter({(q['domain'],q['group']):q['places'] for q in REPLACEMENT_QUOTAS})
+    with pytest.raises(StudyError,match='prolific_full'):join(7)
+    rows=prolific.payment_records(store,REPLACEMENT)
+    assert len(rows)==6 and len(prolific.payment_records(store))==1
+    released=rows[0]
+    prolific.release_slot(store,{**release_payload(released),'study_id':REPLACEMENT})
+    _,replacement=join(7)
+    assert (replacement['domain'],replacement['group'])==(released['domain'],released['group_code'])
+    reopened=Store(store.settings,RecordingExplainer())
+    try:
+        assert len(prolific.payment_records(reopened,REPLACEMENT))==7
+        with pytest.raises(StudyError,match='prolific_full'):
+            prolific.enrol(reopened,{**payload(8),'STUDY_ID':REPLACEMENT})
+    finally:reopened.db.close()
+
+@pytest.mark.parametrize('domain,group',[('warehouse','A'),('pong','B'),('kitchen','A'),('kitchen','B')])
+def test_replacement_full_flow_completion_uses_own_code(store,domain,group):
+    prolific.register_cohort(store,{'study_id':REPLACEMENT,'completion_code':'REPLACE1',
+        'quotas':[{'domain':domain,'group':group,'places':1}]})
+    token,view=prolific.enrol(store,{**payload(1),'STUDY_ID':REPLACEMENT})
+    flow=object.__new__(Flow)
+    flow.store,flow.token,flow.view,flow.domain=store,token,view,domain
+    assert view['rewards']['base_pence']==300
+    flow.finish_demo()
+    for _ in range(3):
+        flow.finish_task();flow.command('next')
+    flow.command('questionnaire',answers={},feedback='')
+    assert flow.view['completion_code']=='REPLACE1'
+    assert prolific.resume(store,token)['stage']=='completed'
+    with pytest.raises(StudyError,match='completed_slot'):
+        prolific.release_slot(store,{**release_payload(prolific.payment_records(store,REPLACEMENT)[0]),'study_id':REPLACEMENT})

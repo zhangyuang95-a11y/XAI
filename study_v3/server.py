@@ -92,7 +92,7 @@ def manifest(settings):
         'optional_prompts_for_new_enrollments':settings.optional_prompts,
         'rewards':{domain:rewards.policy(domain) for domain in MODULES},
         'default_language':'en','mode':settings.mode,'storage_persistent':settings.persistent,
-        'prolific':{'entry_path':'/prolific/','assignment':'randomized_block_6',
+        'prolific':{'entry_path':'/prolific/','assignment':'randomized_block_6_or_registered_cohort_quotas',
             'one_game_per_participant':True,'consent_version':prolific.CONSENT_VERSION},
         'semantic_qa_configured':settings.llm_configured,'deployment_validation_complete':settings.verified,'study_ready':settings.ready,
         'human_effect_status':'not_measured','target_task2_relative_gain':0.5}

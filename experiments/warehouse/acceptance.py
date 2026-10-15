@@ -888,6 +888,8 @@ def _development_pass(row: Mapping) -> bool:
     for variant in p.VARIANTS:
         measured = _stress_summary(row["stress"][variant])
         if (measured is None or
+                row["stress"][variant].get("actor_sha256") !=
+                training[variant]["actor_artifact"]["sha256"] or
                 not _same_summary(row["evaluation"][variant], measured)):
             return False
     regularized = training["regularized"]
@@ -1271,6 +1273,9 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
     if set(quality_replay_index["heldout"]) != set(p.VARIANTS):
         return False
     for variant in p.VARIANTS:
+        if held["outcomes"][variant].get("actor_sha256") != \
+                selected_pair["variants"][variant]["actor_artifact"]["sha256"]:
+            return False
         if set(quality_replay_index["heldout"][variant]) != set(map(str, p.TASKS)):
             return False
         for task in p.TASKS:

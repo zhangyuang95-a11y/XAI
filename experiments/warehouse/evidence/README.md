@@ -15,6 +15,7 @@ formal paired run, final independent program audit, or held-out test.
 | v6.4 50k paired PPO probe | [Failure](warehouse-v64-50k-ppo-10688-failure.md) | Pressure quality passed; robot_1 regularized program coverage and selected-checkpoint feedback gradient failed. |
 | v6.5 intrinsic tree BC probe | [Failure](warehouse-v65-10965-unregistered-failure.md) | BC pressure quality passed narrowly; both roles failed the 30% actionable program coverage precheck. |
 | v6.6 static topology screen | [Seed lock](warehouse-v66-unregistered-seed-lock.json), [failure](warehouse-v66-static-topology-11166-failure.md) | Fit-only CV estimated sampled-action coverage of 28.86% and 29.68%; the reserved four-part, audit and pressure blocks were not used. |
+| v6.6 distance-progress screen | [Failure](warehouse-v66-delta-11266-failure.md) | Replacing equivalent absolute split inputs with public action-distance deltas reduced fit-only CV actionable coverage to 19.95% and 23.22%; no reserved four-part, audit, pressure, or formal seeds were used. |
 | v6.6 joint Actor exploration | [New seed lock](warehouse-v66-joint-actor-seed-lock.json) | Fresh unregistered cohorts reserved for jointly training the tree and full Actor; no result or admission claim. |
 
 The [coverage and shutdown design note](warehouse-v6-coverage-objective-design.md)

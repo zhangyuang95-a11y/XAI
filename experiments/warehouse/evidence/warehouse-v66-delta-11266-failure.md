@@ -53,6 +53,10 @@ topology tensors, and report are preserved in ignored
 All 18 files (2,947,503 bytes) were copied and verified against the manifest,
 whose SHA-256 is
 `376086e674fa1f684b11e3bbc2ee4a44b58753dd838abd514a01fb5133d3e917`.
+The same snapshot was also copied outside the integration worktree to
+`/Users/zhangyuang/Desktop/ICLR/XAI-v6-recovery-20261015T165508Z/warehouse-v66-delta-11266-20261016/`;
+all 18 copied files, their byte counts and SHA-256 hashes, and the manifest
+bytes were independently checked against the in-worktree snapshot.
 The reserved `1120100–1120223` four-part program, `1120300–1120323` audit,
 `1120400–1120431` pressure-base, and `1121100–1121431` post-PPO blocks were
 **not used**. The next Actor/tree joint-training method needs a new

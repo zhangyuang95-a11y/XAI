@@ -1,0 +1,121 @@
+{
+  "constraints": [
+    "Synthetic tests consume no Warehouse scenario seeds. The short screen may only shape a revised method; its quality block is diagnostic and cannot be reused as independent confirmation.",
+    "The fresh-confirmation pair uses different initial Actor/BC stage seeds and all-new topology fit/CV, program four-part, audit and pressure scenes.",
+    "Only full frozen NN masked probabilities may fit Actor/program topology. Public teacher labels may train BC quality but cannot select program topology or external program actions.",
+    "Program fit, calibration, eligibility, validation and descriptive audit must be episode-disjoint. A method changed after validation, audit or pressure needs another prelocked set.",
+    "Both NN Actors choose all self-play and runtime actions through the physical legal mask; external program and real-event risk cost only update gradients or provide audited explanations.",
+    "Registered development, one-time final audit and heldout seed blocks remain untouched."
+  ],
+  "fresh_confirmation": {
+    "descriptive_audit_scenario_seeds": {
+      "count": 24,
+      "first": 1140300,
+      "last_inclusive": 1140323
+    },
+    "pair_seed": 11368,
+    "post_ppo_descriptive_audit_scenario_seeds": {
+      "count": 24,
+      "first": 1141300,
+      "last_inclusive": 1141323
+    },
+    "post_ppo_pressure_base_seeds": {
+      "count": 32,
+      "first": 1141400,
+      "last_inclusive": 1141431
+    },
+    "post_ppo_pressure_episode_count": 288,
+    "post_ppo_program_calibration_scenario_seeds": {
+      "count": 25,
+      "first": 1141150,
+      "last_inclusive": 1141174
+    },
+    "post_ppo_program_eligibility_scenario_seeds": {
+      "count": 25,
+      "first": 1141175,
+      "last_inclusive": 1141199
+    },
+    "post_ppo_program_fit_scenario_seeds": {
+      "count": 50,
+      "first": 1141100,
+      "last_inclusive": 1141149
+    },
+    "post_ppo_program_validation_scenario_seeds": {
+      "count": 24,
+      "first": 1141200,
+      "last_inclusive": 1141223
+    },
+    "pressure_action_seed_offsets": [
+      0,
+      1000000,
+      2000000
+    ],
+    "pressure_base_seeds": {
+      "count": 32,
+      "first": 1140400,
+      "last_inclusive": 1140431
+    },
+    "pressure_episode_count": 288,
+    "pressure_scenario_seed_formula": "base_seed * 10 + task, task in (1,2,3)",
+    "program_calibration_scenario_seeds": {
+      "count": 25,
+      "first": 1140150,
+      "last_inclusive": 1140174
+    },
+    "program_eligibility_scenario_seeds": {
+      "count": 25,
+      "first": 1140175,
+      "last_inclusive": 1140199
+    },
+    "program_fit_scenario_seeds": {
+      "count": 50,
+      "first": 1140100,
+      "last_inclusive": 1140149
+    },
+    "program_validation_scenario_seeds": {
+      "count": 24,
+      "first": 1140200,
+      "last_inclusive": 1140223
+    },
+    "scenario_namespace": "warehouse-v67-confirm-unregistered-11368",
+    "topology_cv_scenario_seeds": {
+      "count": 25,
+      "first": 1140050,
+      "last_inclusive": 1140074
+    },
+    "topology_fit_scenario_seeds": {
+      "count": 50,
+      "first": 1140000,
+      "last_inclusive": 1140049
+    }
+  },
+  "purpose": "Joint Actor/tree intrinsic objective and real-event cost PPO after v6.6 static topology and delta-feature screens failed; no registered or sealed seed is used",
+  "screen": {
+    "diagnostic_only": true,
+    "diagnostic_quality_scenario_seeds": {
+      "count": 24,
+      "first": 1130100,
+      "last_inclusive": 1130123
+    },
+    "diagnostic_quality_task_ids": [
+      1,
+      2,
+      3
+    ],
+    "pair_seed": 11367,
+    "scenario_namespace": "warehouse-v67-short-unregistered-11367",
+    "topology_cv_scenario_seeds": {
+      "count": 25,
+      "first": 1130050,
+      "last_inclusive": 1130074
+    },
+    "topology_fit_scenario_seeds": {
+      "count": 50,
+      "first": 1130000,
+      "last_inclusive": 1130049
+    }
+  },
+  "source_bc_seed_rule": "_bc_stage_seeds(pair_seed, stage, count) = pair_seed * 100000 + stage * 1000 + index; every actual stage seed and its disjointness from all reserved evaluation and formal blocks must be checked and receipted",
+  "status": "prelocked_unregistered_joint_actor_and_cost_exploration",
+  "version": "warehouse-v67-joint-actor-exploration-seeds.v1"
+}

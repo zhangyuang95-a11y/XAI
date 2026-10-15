@@ -76,6 +76,8 @@ class FakeBackend:
                                       "actor_role_sha256": chosen[role]}
             variants[variant] = {
                 "joint_steps": budget, "actor_decisions": budget * 2,
+                "architecture_mode": p.REGISTERED_ARCHITECTURE_MODE,
+                "bc_recipe_version": p.REGISTERED_BC_RECIPE_VERSION,
                 "online_program_extraction_steps": list(
                     spec["online_program_extraction_steps"]),
                 "online_program_split_block_cycle": p.FINAL_PROGRAM_SPLIT_COUNTS,
@@ -100,6 +102,8 @@ class FakeBackend:
             }
         pair = {"candidate_id": spec["candidate_id"],
                 "release_id": spec["release_id"],
+                "architecture_mode": spec["architecture_mode"],
+                "bc_recipe_version": spec["bc_recipe_version"],
                 "final_program_fit_seed_schedule":
                 spec["final_program_fit_seed_schedule"],
                 "final_program_fit_seed_schedule_sha256":

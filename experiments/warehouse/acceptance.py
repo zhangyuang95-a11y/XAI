@@ -137,6 +137,8 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
     if (not isinstance(variants, Mapping) or set(variants) != set(p.VARIANTS)
             or pair.get("run_spec_sha256") != expected_spec_sha
             or pair.get("training_config_sha256") != expected_training_sha
+            or pair.get("architecture_mode") !=
+            p.REGISTERED_ARCHITECTURE_MODE
             or pair.get("bc_recipe_version") != p.REGISTERED_BC_RECIPE_VERSION
             or pair.get("assigned_scenario_schedule_sha256") !=
             expected_schedule_sha
@@ -151,6 +153,10 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
                 or report.get("variant") != variant
                 or report.get("pair_seed") != seed
                 or report.get("joint_steps") != steps
+                or report.get("architecture_mode") !=
+                p.REGISTERED_ARCHITECTURE_MODE
+                or report.get("bc_recipe_version") !=
+                p.REGISTERED_BC_RECIPE_VERSION
                 or report.get("online_program_extraction_steps") !=
                 list(expected_spec.online_program_extraction_steps)
                 or report.get("online_program_split_block_cycle") !=
@@ -1028,6 +1034,10 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
     if (lock.get("passed") is not True
             or lock.get("locked_budget") != budget
             or lock.get("source_closure_sha256") != receipt["source_closure_sha256"]
+            or lock.get("architecture_mode") !=
+            p.REGISTERED_ARCHITECTURE_MODE
+            or lock.get("bc_recipe_version") !=
+            p.REGISTERED_BC_RECIPE_VERSION
             or lock.get("online_program_extraction_steps") !=
             list(p.online_program_extraction_steps(budget))
             or lock.get("final_program_fit_seed_schedule") != program_schedules

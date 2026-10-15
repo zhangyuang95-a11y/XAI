@@ -440,6 +440,8 @@ class Admission:
                 or report.get("release_id") != self.release_id
                 or report.get("pair_seed") != pair_seed
                 or report.get("joint_steps") != budget
+                or report.get("architecture_mode") != spec.architecture_mode
+                or report.get("bc_recipe_version") != spec.bc_recipe_version
                 or report.get("checkpoint_seeds") != list(spec.checkpoint_seeds)
                 or report.get("online_program_extraction_steps") !=
                 list(spec.online_program_extraction_steps)
@@ -537,6 +539,10 @@ class Admission:
             if (lock.get("final_program_fit_seed_schedule") != schedules
                     or lock.get("final_program_fit_seed_schedule_sha256") !=
                     _sha(schedules)
+                    or lock.get("architecture_mode") !=
+                    p.REGISTERED_ARCHITECTURE_MODE
+                    or lock.get("bc_recipe_version") !=
+                    p.REGISTERED_BC_RECIPE_VERSION
                     or lock.get("online_program_extraction_steps") !=
                     list(p.online_program_extraction_steps(lock["locked_budget"]))):
                 raise RuntimeError("Warehouse final-program seed lock changed")
@@ -656,6 +662,8 @@ class Admission:
                 return self._new("budget.lock.json", {
                     "locked_budget": chosen, "development_pair_seeds":
                     list(p.DEVELOPMENT_PAIR_SEEDS),
+                    "architecture_mode": p.REGISTERED_ARCHITECTURE_MODE,
+                    "bc_recipe_version": p.REGISTERED_BC_RECIPE_VERSION,
                     "online_program_extraction_steps": list(
                         p.online_program_extraction_steps(chosen)),
                     "final_program_fit_seed_schedule": final_program_schedules,
@@ -686,6 +694,10 @@ class Admission:
         if (lock.get("final_program_fit_seed_schedule") != schedules
                 or lock.get("final_program_fit_seed_schedule_sha256") !=
                 _sha(schedules)
+                or lock.get("architecture_mode") !=
+                p.REGISTERED_ARCHITECTURE_MODE
+                or lock.get("bc_recipe_version") !=
+                p.REGISTERED_BC_RECIPE_VERSION
                 or lock.get("online_program_extraction_steps") !=
                 list(p.online_program_extraction_steps(lock["locked_budget"]))):
             raise RuntimeError("Warehouse formal run seed lock changed")
@@ -922,6 +934,10 @@ class Admission:
         if (lock.get("final_program_fit_seed_schedule") != final_schedules
                 or lock.get("final_program_fit_seed_schedule_sha256") !=
                 _sha(final_schedules)
+                or lock.get("architecture_mode") !=
+                p.REGISTERED_ARCHITECTURE_MODE
+                or lock.get("bc_recipe_version") !=
+                p.REGISTERED_BC_RECIPE_VERSION
                 or lock.get("online_program_extraction_steps") !=
                 list(p.online_program_extraction_steps(lock["locked_budget"]))):
             raise RuntimeError("Warehouse frozen final-program seed schedule changed")

@@ -26,6 +26,8 @@ def _paired_training(joint_steps=200_000):
     for variant in p.VARIANTS:
         variants[variant] = {
             "joint_steps": joint_steps, "actor_decisions": 2 * joint_steps,
+            "architecture_mode": p.REGISTERED_ARCHITECTURE_MODE,
+            "bc_recipe_version": p.REGISTERED_BC_RECIPE_VERSION,
             "online_program_extraction_steps": list(
                 p.online_program_extraction_steps(joint_steps)),
             "online_program_split_block_cycle": p.FINAL_PROGRAM_SPLIT_COUNTS,
@@ -87,6 +89,8 @@ def test_seed_blocks_and_stress_streams_are_sealed_and_disjoint():
                           checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS)
     assert spec.sha256() == moved.sha256()
     assert spec.online_program_extraction_steps == (150_000, 168_000, 186_000)
+    assert spec.architecture_mode == p.REGISTERED_ARCHITECTURE_MODE
+    assert spec.bc_recipe_version == p.REGISTERED_BC_RECIPE_VERSION
     assert spec.to_mapping()["online_program_extraction_steps"] == spec.online_program_extraction_steps
     assert p.online_program_extraction_steps(300_000) == (225_000, 252_000, 279_000)
     assert p.online_program_extraction_steps(400_000) == (300_000, 336_000, 372_000)
@@ -94,6 +98,10 @@ def test_seed_blocks_and_stress_streams_are_sealed_and_disjoint():
         p.PairRunSpec("warehouse-v6-c1", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000,
                       "/tmp/run-a", checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS,
                       online_program_extraction_steps=(150_000, 170_000, 186_000))
+    with pytest.raises(ValueError, match="Actor or BC recipe"):
+        p.PairRunSpec("warehouse-v6-c1", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000,
+                      "/tmp/run-a", checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS,
+                      architecture_mode="none")
     scheduled = spec.to_mapping()["final_program_fit_seed_schedule"]
     assert {name: len(rows) for name, rows in scheduled.items()} == \
         p.FINAL_PROGRAM_SPLIT_COUNTS
@@ -146,6 +154,9 @@ def test_pair_requires_identical_bc_and_scenario_schedule_and_real_gradients():
     assert not p.paired_training_pass(bad, joint_steps=200_000)
     bad = deepcopy(reports)
     bad["regularized"]["online_program_extraction_steps"][1] += 120
+    assert not p.paired_training_pass(bad, joint_steps=200_000)
+    bad = deepcopy(reports)
+    bad["regularized"]["architecture_mode"] = "none"
     assert not p.paired_training_pass(bad, joint_steps=200_000)
 
 

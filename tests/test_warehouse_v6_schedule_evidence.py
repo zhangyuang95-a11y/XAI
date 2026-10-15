@@ -43,6 +43,8 @@ def _pair() -> dict:
     for variant, resets in (("raw", raw), ("regularized", regularized)):
         variants[variant] = {
             "variant": variant, "pair_seed": pair_seed, "joint_steps": steps,
+            "architecture_mode": spec.architecture_mode,
+            "bc_recipe_version": spec.bc_recipe_version,
             "online_program_extraction_steps": list(
                 spec.online_program_extraction_steps),
             "online_program_split_block_cycle": p.FINAL_PROGRAM_SPLIT_COUNTS,
@@ -57,6 +59,7 @@ def _pair() -> dict:
     return {
         "candidate_id": spec.candidate_id, "release_id": spec.release_id,
         "pair_seed": pair_seed, "joint_steps": steps,
+        "architecture_mode": spec.architecture_mode,
         "online_program_extraction_steps": list(
             spec.online_program_extraction_steps),
         "run_spec_sha256": spec.sha256(),

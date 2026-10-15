@@ -38,7 +38,8 @@ SCENARIO_BLOCK_STEPS = 120
 ONLINE_PROGRAM_EXTRACTION_PERCENTAGES = (75, 84, 93)
 FINAL_PROGRAM_SPLIT_COUNTS = {"fit": 50, "calibration": 25,
                               "eligibility": 25, "validation": 24}
-REGISTERED_BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.2"
+REGISTERED_ARCHITECTURE_MODE = "intrinsic_certified"
+REGISTERED_BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.5-intrinsic-certified"
 REGISTERED_BC_SPEC = {
     "bc_episodes": 200,
     "bc_epochs": 30,
@@ -208,6 +209,8 @@ class PairRunSpec:
     scenario_namespace: str = "warehouse-v6-matched-120-step-blocks"
     checkpoint_seeds: tuple[int, ...] = ()
     online_program_extraction_steps: tuple[int, ...] = ()
+    architecture_mode: str = REGISTERED_ARCHITECTURE_MODE
+    bc_recipe_version: str = REGISTERED_BC_RECIPE_VERSION
 
     def __post_init__(self) -> None:
         if not self.candidate_id or "/" in self.candidate_id or ".." in self.candidate_id:
@@ -223,6 +226,9 @@ class PairRunSpec:
                     FORMAL_SELECTION_SEEDS)
         if self.checkpoint_seeds != required:
             raise ValueError("Warehouse v6 checkpoint seeds do not match phase")
+        if (self.architecture_mode != REGISTERED_ARCHITECTURE_MODE
+                or self.bc_recipe_version != REGISTERED_BC_RECIPE_VERSION):
+            raise ValueError("Warehouse registered Actor or BC recipe mismatch")
         scheduled = online_program_extraction_steps(self.joint_steps)
         if self.online_program_extraction_steps:
             if self.online_program_extraction_steps != scheduled:
@@ -312,6 +318,8 @@ def paired_training_pass(variants: Mapping, *, joint_steps: int) -> bool:
     for report in (raw, regularized):
         if (report.get("joint_steps") != joint_steps or
                 report.get("actor_decisions") != joint_steps * len(ROLES) or
+                report.get("architecture_mode") != REGISTERED_ARCHITECTURE_MODE or
+                report.get("bc_recipe_version") != REGISTERED_BC_RECIPE_VERSION or
                 report.get("online_program_extraction_steps") != extraction_steps or
                 report.get("online_program_split_block_cycle") !=
                 FINAL_PROGRAM_SPLIT_COUNTS or

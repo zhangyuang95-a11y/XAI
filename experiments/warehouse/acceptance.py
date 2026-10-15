@@ -852,6 +852,24 @@ def _stress_summary(stress: Mapping) -> dict | None:
     return measured if _same_summary(stress.get("summary", {}), measured) else None
 
 
+def _quality_replay_receipt(*, root: Path, release_id: str, item: Mapping,
+                            actor_sha256: str, role_sha256: Mapping,
+                            rows: Sequence[Mapping],
+                            seeds: Sequence[tuple[int, int]]) -> bool:
+    """Bind an offline full NN/physics replay to its exact quality rows.
+
+    Packaging physically replays every saved frame once. Runtime rechecks the
+    content-addressed certificate against all original trace bytes and the
+    packaged Actor identity without repeating sealed statistical evaluation.
+    """
+    from .quality_replay import claimed_series
+
+    replay, _ = _asset(root, release_id, item)
+    return replay == claimed_series(
+        actor_sha256=actor_sha256, role_sha256=role_sha256,
+        rows=rows, seeds=seeds)
+
+
 def _development_pass(row: Mapping) -> bool:
     """Recompute all quality, training, split audit, and provenance gates."""
     training = row.get("training") or {}
@@ -966,6 +984,7 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
     trace_index = evidence["program_traces"]
     fit_trace_index = evidence["final_fit_traces"]
     fit_replay_index = evidence["final_fit_replays"]
+    quality_replay_index = evidence["quality_replays"]
     if (set(phase_index) != set(_PHASE_NAMES)
             or set(claim_index) != {"final_program_audit", "heldout"}
             or set(pair_index) != set(map(str, p.FORMAL_PAIR_SEEDS))
@@ -974,7 +993,9 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
             or set(fit_trace_index) != {"development", "formal"}
             or set(fit_replay_index) != {"development", "formal"}
             or set(fit_trace_index["formal"]) != set(pair_index)
-            or set(fit_replay_index["formal"]) != set(pair_index)):
+            or set(fit_replay_index["formal"]) != set(pair_index)
+            or set(quality_replay_index) != {"development", "formal", "heldout"}
+            or set(quality_replay_index["formal"]) != set(pair_index)):
         return False
     phases = {}
     for name in _PHASE_NAMES:
@@ -1015,7 +1036,8 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
             or set(dev_asset_index) != set(dev_index)
             or set(trace_index["development"]) != set(dev_index)
             or set(fit_trace_index["development"]) != set(dev_index)
-            or set(fit_replay_index["development"]) != set(dev_index)):
+            or set(fit_replay_index["development"]) != set(dev_index)
+            or set(quality_replay_index["development"]) != set(dev_index)):
         return False
     dev_reports = {}
     for candidate_budget in expected_budgets:
@@ -1025,12 +1047,14 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
         traces_section = trace_index["development"][str(candidate_budget)]
         fit_traces_section = fit_trace_index["development"][str(candidate_budget)]
         fit_replays_section = fit_replay_index["development"][str(candidate_budget)]
+        quality_replays_section = quality_replay_index["development"][str(candidate_budget)]
         if (set(section) != set(map(str, p.DEVELOPMENT_PAIR_SEEDS))
                 or set(pairs_section) != set(section)
                 or set(assets_section) != set(section)
                 or set(traces_section) != set(section)
                 or set(fit_traces_section) != set(section)
-                or set(fit_replays_section) != set(section)):
+                or set(fit_replays_section) != set(section)
+                or set(quality_replays_section) != set(section)):
             return False
         dev_reports[candidate_budget] = []
         for seed in p.DEVELOPMENT_PAIR_SEEDS:
@@ -1090,6 +1114,19 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
                     or any(_stress_summary(row["stress"][variant]) is None
                            for variant in p.VARIANTS)):
                 return False
+            quality_items = quality_replays_section[str(seed)]
+            if set(quality_items) != (set(p.VARIANTS) if row.get("stress") else set()):
+                return False
+            for variant in quality_items:
+                if not _quality_replay_receipt(
+                        root=root, release_id=release_id,
+                        item=quality_items[variant],
+                        actor_sha256=pair["variants"][variant]["actor_artifact"]["sha256"],
+                        role_sha256=pair["variants"][variant]["selected_role_sha256"],
+                        rows=row["stress"][variant]["episodes"],
+                        seeds=[(scenario_seed, action_seed)
+                               for _, scenario_seed, action_seed in p.stress_schedule()]):
+                    return False
             if candidate_budget == budget and lock["development_receipt_sha256"].get(
                     str(seed)) != file_sha:
                 return False
@@ -1159,6 +1196,15 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
                     or candidate["variants"][variant]["initial_role_sha256"] !=
                     report["initial_role_sha256"]):
                 return False
+            if (set(quality_replay_index["formal"][str(seed)]) != set(p.VARIANTS)
+                    or not _quality_replay_receipt(
+                        root=root, release_id=release_id,
+                        item=quality_replay_index["formal"][str(seed)][variant],
+                        actor_sha256=report["actor_artifact"]["sha256"],
+                        role_sha256=report["selected_role_sha256"],
+                        rows=summary["episodes"],
+                        seeds=[(item, item) for item in p.FORMAL_SELECTION_SEEDS])):
+                return False
         formal_rows.append(formal)
         pair_reports[seed] = pair
     if p.select_formal_pair(formal_rows)["pair_seed"] != receipt["selected_pair_seed"]:
@@ -1216,6 +1262,23 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
                 p.heldout_base_seeds(release_id)[-1]] for task in p.TASKS}
             or not _heldout(receipt["heldout"], release_id)):
         return False
+    if set(quality_replay_index["heldout"]) != set(p.VARIANTS):
+        return False
+    for variant in p.VARIANTS:
+        if set(quality_replay_index["heldout"][variant]) != set(map(str, p.TASKS)):
+            return False
+        for task in p.TASKS:
+            if not _quality_replay_receipt(
+                    root=root, release_id=release_id,
+                    item=quality_replay_index["heldout"][variant][str(task)],
+                    actor_sha256=selected_pair["variants"][variant][
+                        "actor_artifact"]["sha256"],
+                    role_sha256=selected_pair["variants"][variant][
+                        "selected_role_sha256"],
+                    rows=held["outcomes"][variant]["tasks"][str(task)]["episodes"],
+                    seeds=[(seed, seed) for seed in
+                           p.heldout_schedule(release_id)[task]]):
+                return False
     for phase in ("final_program_audit", "heldout"):
         claim, claim_sha = _asset(root, release_id, claim_index[phase])
         expected_seeds = (p.final_audit_seeds(release_id) if phase ==

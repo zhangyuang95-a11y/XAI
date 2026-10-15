@@ -8,6 +8,8 @@ release.  This module never installs a policy or opens the pilot.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 from hashlib import sha256
 import json
 import math
@@ -74,7 +76,50 @@ def _summary(episodes: Sequence[Mapping]) -> dict:
     }
 
 
-def _validated_episodes(result: Mapping, seeds: Sequence[int]) -> list[dict]:
+def _quality_trace_valid(value: object, scenario_seed: int, action_seed: int,
+                         actor_sha256: str | None = None) -> bool:
+    """Check compact trace shape before the independent physics replay gate."""
+    try:
+        if not isinstance(value, Mapping):
+            return False
+        if (value["schema"] != "warehouse-quality-trace.v1"
+                or value["scenario_seed"] != scenario_seed
+                or value["action_seed"] != action_seed
+                or type(value["episode_id"]) is not int
+                or type(value["frame_count"]) is not int
+                or not 1 <= value["frame_count"] <= 120
+                or value["action_encoding"] != "base64-u8-a1-times-5-plus-a2"
+                or (actor_sha256 is not None and
+                    value["actor_sha256"] != actor_sha256)):
+            return False
+        for key in ("actor_sha256", "initial_pre_state_sha256",
+                    "final_post_state_sha256", "chain_sha256"):
+            digest = value[key]
+            if (not isinstance(digest, str) or len(digest) != 64
+                    or any(char not in "0123456789abcdef" for char in digest)):
+                return False
+        roles = value["actor_role_sha256"]
+        if (not isinstance(roles, Mapping) or set(roles) != set(p.ROLES)
+                or any(not isinstance(roles[role], str)
+                       or len(roles[role]) != 64
+                       or any(char not in "0123456789abcdef"
+                              for char in roles[role]) for role in p.ROLES)):
+            return False
+        encoded = value["actions_b64"]
+        if not isinstance(encoded, str):
+            return False
+        actions = base64.b64decode(encoded, validate=True)
+        return (len(actions) == value["frame_count"]
+                and all(action < 25 for action in actions)
+                and base64.b64encode(actions).decode("ascii") == encoded)
+    except (KeyError, TypeError, ValueError, binascii.Error):
+        return False
+
+
+def _validated_episodes(result: Mapping, seeds: Sequence[int], *,
+                        require_trace: bool = False,
+                        actor_sha256: str | None = None,
+                        action_seed_offset: int = 0) -> list[dict]:
     episodes = result.get("episodes")
     if (not isinstance(episodes, list) or len(episodes) != len(seeds)
             or [row.get("seed") for row in episodes] != list(seeds)):
@@ -86,9 +131,16 @@ def _validated_episodes(result: Mapping, seeds: Sequence[int]) -> list[dict]:
                 or type(collisions) is not int or collisions < 0
                 or type(row.get("shutdown_episode")) is not bool):
             raise RuntimeError("Warehouse evaluator returned invalid episode outcome")
-        normalized.append({"seed": row["seed"], "deliveries": deliveries,
-                           "collisions": collisions,
-                           "shutdown_episode": row["shutdown_episode"]})
+        normalized_row = {"seed": row["seed"], "deliveries": deliveries,
+                          "collisions": collisions,
+                          "shutdown_episode": row["shutdown_episode"]}
+        if require_trace or "quality_trace" in row:
+            if not _quality_trace_valid(
+                    row.get("quality_trace"), row["seed"],
+                    row["seed"] + action_seed_offset, actor_sha256):
+                raise RuntimeError("Warehouse evaluator quality trace is invalid")
+            normalized_row["quality_trace"] = dict(row["quality_trace"])
+        normalized.append(normalized_row)
     measured = _summary(normalized)
     supplied = result.get("summary", {})
     if any(not math.isfinite(float(supplied.get(key, float("nan"))))
@@ -108,6 +160,9 @@ def _verify_stress(stress: Mapping) -> bool:
         for row, (task, seed, action_seed) in zip(episodes, expected, strict=True):
             if (row["task"], row["scenario_seed"], row["action_seed"]) != \
                     (task, seed, action_seed):
+                return False
+            if not _quality_trace_valid(row.get("quality_trace"), seed,
+                                        action_seed, stress["actor_sha256"]):
                 return False
             if (type(row["deliveries"]) is not int or row["deliveries"] < 0
                     or type(row["collisions"]) is not int or row["collisions"] < 0
@@ -141,6 +196,10 @@ def _verify_heldout(outcomes: Mapping, release_id: str) -> bool:
                 if any(type(item["deliveries"]) is not int or item["deliveries"] < 0
                        or type(item["collisions"]) is not int or item["collisions"] < 0
                        or type(item["shutdown_episode"]) is not bool
+                       for item in episodes):
+                    return False
+                if any(not _quality_trace_valid(item.get("quality_trace"), item["seed"],
+                                                item["seed"], row["actor_sha256"])
                        for item in episodes):
                     return False
                 recomputed = _summary(episodes)
@@ -177,7 +236,8 @@ def _verify_formal_row(row: Mapping, pair: Mapping,
                 return False
             _validated_episodes({"episodes": entry["episodes"],
                                  "summary": entry["quality"]},
-                                p.FORMAL_SELECTION_SEEDS)
+                                p.FORMAL_SELECTION_SEEDS, require_trace=True,
+                                actor_sha256=entry["actor_sha256"])
         return row["passed"] is all(
             p.quality_pass(row["variants"][variant]["quality"], development=False)
             for variant in p.VARIANTS)
@@ -286,9 +346,11 @@ class NativeBackend:
             artifact["path"], expected_sha256=artifact["sha256"],
             actor_role_sha256=actor_role_sha256)
 
-    def evaluate(self, actor, seeds: Sequence[int], *, action_seed_offset: int = 0) -> dict:
+    def evaluate(self, actor, seeds: Sequence[int], *, action_seed_offset: int = 0,
+                 trace: bool = False) -> dict:
         from backend.training.warehouse_v6_runner import evaluate
-        return evaluate(actor, seeds, action_seed_offset=action_seed_offset)
+        return evaluate(actor, seeds, action_seed_offset=action_seed_offset,
+                        trace=trace)
 
     def audit_programs(self, actor, programs: Mapping, seeds: Sequence[int], *,
                        trace_dir: str | Path | None = None) -> dict:
@@ -442,15 +504,22 @@ class Admission:
         episodes = []
         for task, scenario_seed, action_seed in p.stress_schedule():
             result = self.backend.evaluate(actor, [scenario_seed],
-                                           action_seed_offset=action_seed-scenario_seed)
-            row = _validated_episodes(result, [scenario_seed])[0]
-            episodes.append({"task": task, "scenario_seed": scenario_seed,
+                                           action_seed_offset=action_seed-scenario_seed,
+                                           trace=True)
+            row = _validated_episodes(
+                result, [scenario_seed], require_trace=True,
+                actor_sha256=actor.artifact_sha256,
+                action_seed_offset=action_seed-scenario_seed)[0]
+            episodes.append({"task": task, "seed": scenario_seed,
+                             "scenario_seed": scenario_seed,
                              "action_seed": action_seed,
                              "deliveries": row["deliveries"],
                              "collisions": row["collisions"],
-                             "shutdown_episode": row["shutdown_episode"]})
+                             "shutdown_episode": row["shutdown_episode"],
+                             "quality_trace": row["quality_trace"]})
         return {"summary": _summary(episodes), "episodes": episodes,
-                "schedule_sha256": _sha(p.stress_schedule())}
+                "schedule_sha256": _sha(p.stress_schedule()),
+                "actor_sha256": actor.artifact_sha256}
 
     def develop(self) -> dict:
         """Try registered budgets in order; lock the smallest fully passing one."""
@@ -630,8 +699,11 @@ class Admission:
                 variants = {}
                 for variant in p.VARIANTS:
                     actor = self._load_variant(pair, variant)
-                    evaluated = self.backend.evaluate(actor, p.FORMAL_SELECTION_SEEDS)
-                    episodes = _validated_episodes(evaluated, p.FORMAL_SELECTION_SEEDS)
+                    evaluated = self.backend.evaluate(
+                        actor, p.FORMAL_SELECTION_SEEDS, trace=True)
+                    episodes = _validated_episodes(
+                        evaluated, p.FORMAL_SELECTION_SEEDS,
+                        require_trace=True, actor_sha256=actor.artifact_sha256)
                     variants[variant] = {
                         "quality": _summary(episodes),
                         "episodes": episodes,
@@ -792,13 +864,16 @@ class Admission:
                 tasks, all_episodes = {}, []
                 for task in p.TASKS:
                     seeds = schedule[task]
-                    result = self.backend.evaluate(actor, seeds)
-                    episodes = _validated_episodes(result, seeds)
+                    result = self.backend.evaluate(actor, seeds, trace=True)
+                    episodes = _validated_episodes(
+                        result, seeds, require_trace=True,
+                        actor_sha256=actor.artifact_sha256)
                     tasks[str(task)] = {"summary": _summary(episodes),
                                         "episodes": episodes,
                                         "episodes_sha256": _sha(episodes)}
                     all_episodes.extend(episodes)
                 outcomes[variant] = {"summary": _summary(all_episodes),
+                                     "actor_sha256": actor.artifact_sha256,
                                      "tasks": tasks,
                                      "episode_count": len(all_episodes)}
             passed = all(p.quality_pass(outcomes[variant]["summary"],

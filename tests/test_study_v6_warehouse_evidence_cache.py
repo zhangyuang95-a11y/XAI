@@ -85,6 +85,19 @@ def _synthetic_package(root: Path) -> dict:
                 "final_fit_replay.receipt.json", f"dev-fit-replay:{seed}".encode())
                 for seed in p.DEVELOPMENT_PAIR_SEEDS}},
         },
+        "quality_replays": {
+            "formal": {str(seed): {variant: asset(
+                f"formal.{seed}.{variant}.quality-replay.json",
+                f"quality:formal:{seed}:{variant}".encode())
+                for variant in p.VARIANTS}
+                for seed in p.FORMAL_PAIR_SEEDS},
+            "development": {"200000": {str(seed): {} for seed in
+                                      p.DEVELOPMENT_PAIR_SEEDS}},
+            "heldout": {variant: {str(task): asset(
+                f"heldout.{variant}.task{task}.quality-replay.json",
+                f"quality:heldout:{variant}:{task}".encode())
+                for task in p.TASKS} for variant in p.VARIANTS},
+        },
     }
     acceptance = asset("warehouse_v6_acceptance.json", json.dumps({
         "source_closure_sha256": "7" * 64}).encode())

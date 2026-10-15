@@ -283,6 +283,7 @@ def _warehouse_evidence_snapshot(release_id: str = RELEASE_ID, *,
         "program_traces": {"development", "preaudit", "final_audit"},
         "final_fit_traces": {"development", "formal"},
         "final_fit_replays": {"development", "formal"},
+        "quality_replays": {"development", "formal", "heldout"},
     }
     if set(evidence) != set(expected):
         raise ReleaseAssetUnavailable("warehouse_evidence_incomplete")
@@ -355,6 +356,44 @@ def _warehouse_evidence_snapshot(release_id: str = RELEASE_ID, *,
                             raise ReleaseAssetUnavailable(
                                 "warehouse_final_fit_inventory_incomplete")
                         _asset(asset["path"], asset["sha256"], release_id)
+        elif category == "quality_replays":
+            if (set(rows["formal"]) != {"6101", "6102", "6103"}
+                    or set(rows["development"]) != {
+                        str(value) for value in BUDGETS if value <= budget}
+                    or set(rows["heldout"]) != {"raw", "regularized"}):
+                raise ReleaseAssetUnavailable("warehouse_quality_replays_incomplete")
+            for seed, variants in rows["formal"].items():
+                if not isinstance(variants, dict) or set(variants) != {"raw", "regularized"}:
+                    raise ReleaseAssetUnavailable("warehouse_quality_replays_incomplete")
+                for variant, item in variants.items():
+                    if (not isinstance(item, dict) or set(item) != {"path", "sha256"}
+                            or Path(item["path"]).name !=
+                            f"formal.{seed}.{variant}.quality-replay.json"):
+                        raise ReleaseAssetUnavailable("warehouse_quality_replays_incomplete")
+                    _asset(item["path"], item["sha256"], release_id)
+            for budget_key, pairs in rows["development"].items():
+                if (not isinstance(pairs, dict)
+                        or set(pairs) != set(map(str, DEVELOPMENT_PAIR_SEEDS))):
+                    raise ReleaseAssetUnavailable("warehouse_quality_replays_incomplete")
+                for seed, variants in pairs.items():
+                    if (not isinstance(variants, dict)
+                            or set(variants) not in (set(), {"raw", "regularized"})):
+                        raise ReleaseAssetUnavailable("warehouse_quality_replays_incomplete")
+                    for variant, item in variants.items():
+                        if (not isinstance(item, dict) or set(item) != {"path", "sha256"}
+                                or Path(item["path"]).name !=
+                                f"development.{budget_key}.{seed}.{variant}.quality-replay.json"):
+                            raise ReleaseAssetUnavailable("warehouse_quality_replays_incomplete")
+                        _asset(item["path"], item["sha256"], release_id)
+            for variant, tasks in rows["heldout"].items():
+                if not isinstance(tasks, dict) or set(tasks) != {"1", "2", "3"}:
+                    raise ReleaseAssetUnavailable("warehouse_quality_replays_incomplete")
+                for task, item in tasks.items():
+                    if (not isinstance(item, dict) or set(item) != {"path", "sha256"}
+                            or Path(item["path"]).name !=
+                            f"heldout.{variant}.task{task}.quality-replay.json"):
+                        raise ReleaseAssetUnavailable("warehouse_quality_replays_incomplete")
+                    _asset(item["path"], item["sha256"], release_id)
         elif category in ("development_receipts", "development_training_assets",
                         "development_pair_reports"):
             for budget_key, budget_rows in rows.items():

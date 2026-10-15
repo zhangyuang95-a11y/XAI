@@ -449,6 +449,93 @@ def _offline_replay_final_fit(receipt: dict, evidence: dict,
     return result
 
 
+def _offline_replay_quality(receipt: dict, evidence: dict,
+                            output_root: Path, *, assets_root: Path) -> dict:
+    """Replay each saved quality action stream before admitting a release.
+
+    The sealed heldout claim was created before its original evaluation. This
+    is an integrity replay of that saved trajectory, not a new model test or
+    another checkpoint selection. A content-addressed receipt lets the live
+    server validate the replay without rerunning thousands of episodes.
+    """
+    from experiments.warehouse.quality_replay import replay_series
+
+    result = {"development": {}, "formal": {}, "heldout": {}}
+
+    def certify(*, name: str, rows: list, seeds: list[tuple[int, int]],
+                actor_item: dict, role_hashes: dict) -> dict:
+        replay = replay_series(
+            actor_path=ROOT / actor_item["path"],
+            actor_sha256=actor_item["sha256"], role_sha256=role_hashes,
+            rows=rows, seeds=seeds)
+        source = (output_root / receipt["candidate_id"] / "quality_replays" /
+                  f"{name}.quality-replay.json")
+        source.parent.mkdir(parents=True, exist_ok=True)
+        encoded = (json.dumps(replay, sort_keys=True, separators=(",", ":"),
+                              allow_nan=False) + "\n").encode()
+        if source.is_file() and source.read_bytes() != encoded:
+            raise ValueError("Warehouse immutable quality replay changed")
+        if not source.is_file():
+            temporary = source.with_name(f".{source.name}.{uuid4().hex}.tmp")
+            try:
+                temporary.write_bytes(encoded)
+                os.link(temporary, source)
+            finally:
+                temporary.unlink(missing_ok=True)
+        return _bundle(str(source), sha256(encoded).hexdigest(), output_root,
+                       source.name, assets_root=assets_root)
+
+    stress_seeds = [(scenario_seed, action_seed)
+                    for _, scenario_seed, action_seed in p.stress_schedule()]
+    for budget, pairs in evidence["development_pair_reports"].items():
+        result["development"][budget] = {}
+        for seed in pairs:
+            row = _read(ROOT / evidence["development_receipts"][budget][seed]["path"])
+            pair = _read(ROOT / pairs[seed]["path"])
+            assets = evidence["development_training_assets"][budget][seed]
+            result["development"][budget][seed] = {}
+            if not row.get("stress"):
+                continue
+            if set(row["stress"]) != set(p.VARIANTS):
+                raise ValueError("Warehouse development stress variants incomplete")
+            for variant in p.VARIANTS:
+                result["development"][budget][seed][variant] = certify(
+                    name=f"development.{budget}.{seed}.{variant}",
+                    rows=row["stress"][variant]["episodes"],
+                    seeds=stress_seeds, actor_item=assets[variant]["actor"],
+                    role_hashes=pair["variants"][variant]["selected_role_sha256"])
+
+    formal_seeds = [(seed, seed) for seed in p.FORMAL_SELECTION_SEEDS]
+    for seed, pair_item in evidence["pair_reports"].items():
+        row = _read(ROOT / evidence["phase_receipts"][
+            f"formal.training.{seed}.json"]["path"])
+        pair = _read(ROOT / pair_item["path"])
+        assets = evidence["training_assets"][seed]
+        result["formal"][seed] = {}
+        for variant in p.VARIANTS:
+            result["formal"][seed][variant] = certify(
+                name=f"formal.{seed}.{variant}",
+                rows=row["variants"][variant]["episodes"],
+                seeds=formal_seeds, actor_item=assets[variant]["actor"],
+                role_hashes=pair["variants"][variant]["selected_role_sha256"])
+
+    held = _read(ROOT / evidence["phase_receipts"]["heldout.json"]["path"])
+    selected = str(receipt["selected_pair_seed"])
+    pair = _read(ROOT / evidence["pair_reports"][selected]["path"])
+    assets = evidence["training_assets"][selected]
+    schedule = p.heldout_schedule(receipt["release_id"])
+    for variant in p.VARIANTS:
+        result["heldout"][variant] = {}
+        for task in p.TASKS:
+            result["heldout"][variant][str(task)] = certify(
+                name=f"heldout.{variant}.task{task}",
+                rows=held["outcomes"][variant]["tasks"][str(task)]["episodes"],
+                seeds=[(seed, seed) for seed in schedule[task]],
+                actor_item=assets[variant]["actor"],
+                role_hashes=pair["variants"][variant]["selected_role_sha256"])
+    return result
+
+
 def package(acceptance_path: str | Path,
             *, release_id: str | None = None) -> dict:
     source = Path(acceptance_path).resolve()
@@ -487,6 +574,8 @@ def package(acceptance_path: str | Path,
     evidence["final_fit_replays"] = _offline_replay_final_fit(
         receipt, evidence, output_root, release_id=release_id,
         assets_root=assets_root)
+    evidence["quality_replays"] = _offline_replay_quality(
+        receipt, evidence, output_root, assets_root=assets_root)
     candidate = deepcopy(catalog)
     candidate["warehouse"] = {**candidate["warehouse"],
                               "status": "accepted",

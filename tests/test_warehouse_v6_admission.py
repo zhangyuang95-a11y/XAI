@@ -118,12 +118,30 @@ class FakeBackend:
         assert artifact["actor_role_sha256"] == actor_role_sha256
         return FakeProgram(payload["role"], artifact["sha256"])
 
-    def evaluate(self, actor, seeds, *, action_seed_offset=0):
+    def evaluate(self, actor, seeds, *, action_seed_offset=0, trace=False):
         self.evaluate_calls.append((actor.pair_seed, actor.variant,
-                                    list(seeds), action_seed_offset))
+                                    list(seeds), action_seed_offset, trace))
         deliveries = 7 if actor.pair_seed == 6102 else 6
-        episodes = [{"seed": seed, "deliveries": deliveries, "collisions": 1,
-                     "shutdown_episode": False} for seed in seeds]
+        episodes = []
+        for seed in seeds:
+            row = {"seed": seed, "deliveries": deliveries, "collisions": 1,
+                   "shutdown_episode": False}
+            if trace:
+                row["quality_trace"] = {
+                    "schema": "warehouse-quality-trace.v1",
+                    "actor_sha256": actor.artifact_sha256,
+                    "actor_role_sha256": actor.role_sha256,
+                    "scenario_seed": seed,
+                    "action_seed": seed + action_seed_offset,
+                    "episode_id": 0,
+                    "frame_count": 1,
+                    "action_encoding": "base64-u8-a1-times-5-plus-a2",
+                    "actions_b64": "AA==",
+                    "initial_pre_state_sha256": "0" * 64,
+                    "final_post_state_sha256": "0" * 64,
+                    "chain_sha256": "0" * 64,
+                }
+            episodes.append(row)
         return {"episodes": episodes, "summary": a._summary(episodes)}
 
     def audit_programs(self, actor, programs, seeds, *, trace_dir=None):
@@ -421,6 +439,7 @@ def test_full_packaged_acceptance_chain_and_tampered_evidence(ready, tmp_path,
     monkeypatch.setattr(packaged, "_verify_final_fit_pair", lambda **_: True)
     monkeypatch.setattr(packaged, "_final_fit_index_claim", lambda **_: True)
     monkeypatch.setattr(packaged, "_final_fit_replay_receipt", lambda **_: True)
+    monkeypatch.setattr(packaged, "_quality_replay_receipt", lambda **_: True)
 
     admission, _ = ready
     admission.final_audit()
@@ -483,6 +502,18 @@ def test_full_packaged_acceptance_chain_and_tampered_evidence(ready, tmp_path,
             "development": {budget: {seed: {} for seed in rows}
                             for budget, rows in receipt[
                                 "development_receipt_path"].items()},
+        },
+        "quality_replays": {
+            "formal": {str(seed): {variant: {} for variant in p.VARIANTS}
+                       for seed in p.FORMAL_PAIR_SEEDS},
+            "development": {budget: {seed: {
+                variant: {} for variant in p.VARIANTS}
+                if json.loads(Path(path).read_text()).get("stress") else {}
+                for seed, path in rows.items()}
+                for budget, rows in receipt[
+                    "development_receipt_path"].items()},
+            "heldout": {variant: {str(task): {} for task in p.TASKS}
+                        for variant in p.VARIANTS},
         },
     }
     selected = next(row for row in receipt["candidate_training"]

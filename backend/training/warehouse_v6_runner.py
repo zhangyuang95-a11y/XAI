@@ -11,6 +11,7 @@ from collections import deque
 from copy import deepcopy
 from hashlib import sha256
 import argparse
+import base64
 import json
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -108,6 +109,7 @@ _SOURCE_FILES = (
     "experiments/warehouse/protocol.py",
     "experiments/warehouse/admission.py",
     "experiments/warehouse/acceptance.py",
+    "experiments/warehouse/quality_replay.py",
     "domains/warehouse/neural_turnbased.py",
     "domains/warehouse/turnbased.py",
     "study_v3/policies.py",
@@ -145,6 +147,30 @@ def _digest_json(value: object) -> str:
                              allow_nan=False).encode()).hexdigest()
 
 
+def _training_config_sha256(spec: Mapping) -> str:
+    """Include BC recipe and source closure for exact checkpoint resumption."""
+    return _digest_json({key: value for key, value in spec.items()
+                         if key != "output_dir"})
+
+
+def _scientific_run_spec_sha256(spec: Mapping) -> str:
+    """Use the preregistered PairRunSpec identity in scientific receipts."""
+    if spec.get("smoke"):
+        return _training_config_sha256(spec)
+    from experiments.warehouse.protocol import PairRunSpec
+    registered = PairRunSpec(
+        candidate_id=spec["candidate_id"], pair_seed=spec["pair_seed"],
+        joint_steps=spec["joint_steps"], output_dir=spec["output_dir"],
+        release_id=spec["release_id"],
+        scenario_namespace=spec["scenario_namespace"],
+        checkpoint_seeds=tuple(spec["checkpoint_seeds"]),
+    )
+    if (registered.to_mapping()["final_program_fit_seed_schedule"] !=
+            spec["final_program_fit_seed_schedule"]):
+        raise RuntimeError("Warehouse canonical run spec program schedule drifted")
+    return registered.sha256()
+
+
 def _checked_spec(run_spec: Mapping) -> dict:
     required = {"candidate_id", "pair_seed", "joint_steps", "output_dir",
                 "scenario_namespace", "checkpoint_seeds"}
@@ -177,6 +203,8 @@ def _checked_spec(run_spec: Mapping) -> dict:
         )
         if result["joint_steps"] not in BUDGETS:
             raise ValueError("Warehouse v6 budget is not preregistered")
+        if result["scenario_namespace"] != "warehouse-v6-matched-120-step-blocks":
+            raise ValueError("Warehouse v6 scenario namespace is not preregistered")
         if result["pair_seed"] in DEVELOPMENT_PAIR_SEEDS:
             expected_seeds = DEVELOPMENT_SELECTION_SEEDS
         elif result["pair_seed"] in FORMAL_PAIR_SEEDS:
@@ -1048,22 +1076,67 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
 
 
 def evaluate(model: WarehouseV6Actor | FrozenWarehouseV6Actor,
-             seeds: Sequence[int], *, action_seed_offset: int = 0) -> dict:
+             seeds: Sequence[int], *, action_seed_offset: int = 0,
+             trace: bool = False) -> dict:
     frozen = (FrozenWarehouseV6Actor.from_model(model)
               if isinstance(model, WarehouseV6Actor) else model)
+    if trace and (len(frozen.artifact_sha256) != 64 or
+                  any(char not in "0123456789abcdef"
+                      for char in frozen.artifact_sha256)):
+        raise ValueError("Warehouse quality trace requires a frozen artifact SHA")
     episodes = []
     for seed in seeds:
         env = _environment(training_reward=False)
         env.reset(seed=int(seed))
         _set_dual_nn_mode(env)
+        action_seed = int(seed) + action_seed_offset
+        encoded_actions = bytearray()
+        first_pre_sha, last_post_sha = None, None
+        if trace:
+            header = {
+                "schema": "warehouse-quality-trace.v1",
+                "actor_sha256": frozen.artifact_sha256,
+                "scenario_seed": int(seed),
+                "action_seed": action_seed,
+                "episode_id": int(env.state.episode_id),
+            }
+            chain = bytes.fromhex(_digest_json(header))
         while not (env.state.terminated or env.state.truncated):
-            actions, _ = frozen.act(env.state, base_seed=int(seed) + action_seed_offset)
+            if trace:
+                frame = int(env.state.frame)
+                pre_sha = canonical_sha256(public_pre_action_snapshot(env.state))
+                if first_pre_sha is None:
+                    first_pre_sha = pre_sha
+            actions, _ = frozen.act(env.state, base_seed=action_seed)
             _, _, _, _, info = env.step(actions)
             if info["proposed_actions"] != actions or info["action_override_agents"]:
                 raise RuntimeError("Warehouse v6 evaluator rewrote a frozen NN action")
-        episodes.append({"seed": int(seed), "deliveries": env.state.total_deliveries,
-                         "collisions": env.state.robot_collision_events,
-                         "shutdown_episode": bool(env.state.shutdown_count)})
+            if trace:
+                a1, a2 = (ACTIONS.index(actions[role]) for role in AGENTS)
+                encoded_actions.append(len(ACTIONS) * a1 + a2)
+                last_post_sha = canonical_sha256(public_pre_action_snapshot(env.state))
+                frame_bytes = json.dumps(
+                    [frame, pre_sha, a1, a2, last_post_sha],
+                    sort_keys=True, separators=(",", ":"), allow_nan=False,
+                ).encode("utf-8")
+                chain = sha256(chain + frame_bytes).digest()
+        row = {"seed": int(seed), "deliveries": env.state.total_deliveries,
+               "collisions": env.state.robot_collision_events,
+               "shutdown_episode": bool(env.state.shutdown_count)}
+        if trace:
+            if not encoded_actions or first_pre_sha is None or last_post_sha is None:
+                raise RuntimeError("Warehouse quality trace has no executed NN frame")
+            row["quality_trace"] = {
+                **header,
+                "actor_role_sha256": dict(frozen.role_sha256),
+                "frame_count": len(encoded_actions),
+                "action_encoding": "base64-u8-a1-times-5-plus-a2",
+                "actions_b64": base64.b64encode(bytes(encoded_actions)).decode("ascii"),
+                "initial_pre_state_sha256": first_pre_sha,
+                "final_post_state_sha256": last_post_sha,
+                "chain_sha256": chain.hex(),
+            }
+        episodes.append(row)
     summary = {
         "mean_deliveries": float(np.mean([row["deliveries"] for row in episodes])),
         "mean_collisions": float(np.mean([row["collisions"] for row in episodes])),
@@ -1441,8 +1514,8 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
     optimizer = torch.optim.Adam(model.parameters(), lr=3e-5)
     generator = torch.Generator().manual_seed(spec["pair_seed"] + 1)
     checkpoint = _variant_checkpoint_path(directory, variant)
-    spec_hash = _digest_json({key: value for key, value in spec.items()
-                              if key != "output_dir"})
+    spec_hash = _training_config_sha256(spec)
+    run_spec_sha256 = _scientific_run_spec_sha256(spec)
     used_steps, episode_number = 0, 0
     histories, updates, development = [], [], []
     buffers = {role: deque(maxlen=PROGRAM_BUFFER_STATES) for role in AGENTS}
@@ -1456,7 +1529,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
     next_eval = interval
     if checkpoint.is_file():
         saved = torch.load(checkpoint, map_location="cpu", weights_only=False)
-        if (saved.get("spec_sha256") != spec_hash
+        if (saved.get("training_config_sha256") != spec_hash
                 or saved.get("source_closure_sha256") != spec["source_closure_sha256"]
                 or saved.get("variant") != variant
                 or saved.get("initial_role_sha256") != initial_role_hashes
@@ -1559,7 +1632,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                         "selected_update_index": len(updates)}
             next_eval += interval
             _save_checkpoint(checkpoint, {
-                "spec_sha256": spec_hash, "variant": variant,
+                "training_config_sha256": spec_hash, "variant": variant,
                 "source_closure_sha256": spec["source_closure_sha256"],
                 "initial_role_sha256": initial_role_hashes,
                 "model_version": MODEL_VERSION,
@@ -1619,7 +1692,8 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         "model_version": MODEL_VERSION, "actor_model_version": MODEL_VERSION,
         "observation_version": OBSERVATION_VERSION,
         "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
-        "run_spec_sha256": spec_hash,
+        "run_spec_sha256": run_spec_sha256,
+        "training_config_sha256": spec_hash,
         "release_id": spec.get("release_id"),
         "final_program_fit_seed_schedule": spec.get(
             "final_program_fit_seed_schedule"),
@@ -1670,7 +1744,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
     if variant == "raw" and (any(feedback_rows.values()) or any(gradient_norm.values())):
         raise RuntimeError("Warehouse v6 raw baseline received a program gradient")
     _save_checkpoint(checkpoint, {
-        "spec_sha256": spec_hash, "variant": variant,
+        "training_config_sha256": spec_hash, "variant": variant,
         "source_closure_sha256": spec["source_closure_sha256"],
         "initial_role_sha256": initial_role_hashes,
         "model_version": MODEL_VERSION,
@@ -1692,11 +1766,11 @@ def train_pair(run_spec: Mapping) -> dict:
     torch.manual_seed(spec["pair_seed"])
     base = WarehouseV6Actor()
     bc_checkpoint = directory / "paired_bc.checkpoint.pt"
-    spec_hash = _digest_json({key: value for key, value in spec.items()
-                              if key != "output_dir"})
+    spec_hash = _training_config_sha256(spec)
+    run_spec_sha256 = _scientific_run_spec_sha256(spec)
     if bc_checkpoint.is_file():
         saved = torch.load(bc_checkpoint, map_location="cpu", weights_only=False)
-        if (saved.get("spec_sha256") != spec_hash
+        if (saved.get("training_config_sha256") != spec_hash
                 or saved.get("source_closure_sha256") != spec["source_closure_sha256"]):
             raise RuntimeError("Warehouse v6 BC checkpoint run spec mismatch")
         base.load_state_dict(saved["state_dict"])
@@ -1709,7 +1783,7 @@ def train_pair(run_spec: Mapping) -> dict:
     else:
         bc_report = pretrain_pair(base, pair_seed=spec["pair_seed"], spec=spec)
         _assert_source_closure(spec["source_closure_sha256"])
-        _save_checkpoint(bc_checkpoint, {"spec_sha256": spec_hash,
+        _save_checkpoint(bc_checkpoint, {"training_config_sha256": spec_hash,
                                          "source_closure_sha256": spec["source_closure_sha256"],
                                          "state_dict": base.state_dict(),
                                          "report": bc_report})
@@ -1747,7 +1821,9 @@ def train_pair(run_spec: Mapping) -> dict:
     _assert_source_closure(spec["source_closure_sha256"])
     pair_report = {
         "candidate_id": spec["candidate_id"], "pair_seed": spec["pair_seed"],
-        "joint_steps": spec["joint_steps"], "run_spec_sha256": spec_hash,
+        "joint_steps": spec["joint_steps"],
+        "run_spec_sha256": run_spec_sha256,
+        "training_config_sha256": spec_hash,
         "release_id": spec.get("release_id"),
         "final_program_fit_seed_schedule": spec.get(
             "final_program_fit_seed_schedule"),

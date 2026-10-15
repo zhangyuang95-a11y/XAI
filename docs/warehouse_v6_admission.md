@@ -15,10 +15,10 @@
 
 | 阶段 | 预注册种子 | 使用方式 |
 | --- | --- | --- |
-| 开发配对 | 6110–6112 | 每个预算各训练 raw、regularized |
-| 开发 checkpoint | 260300–260323 | 训练内选 checkpoint |
-| 开发压力集 | base 260000–260255 | 每 task 三个独立动作 RNG，共 2304 轨迹／模型 |
-| 开发程序审计 | 260400–260423 | 与拟合 episode、checkpoint 和压力集分离 |
+| 开发配对 | 6120–6122 | 每个预算各训练 raw、regularized |
+| 开发 checkpoint | 261100–261123 | 训练内选 checkpoint |
+| 开发压力集 | base 261200–261455 | 每 task 三个独立动作 RNG，共 2304 轨迹／模型 |
+| 开发程序审计 | 261500–261523 | 与拟合 episode、checkpoint 和压力集分离 |
 | 正式配对 | 6101–6103 | 锁定预算后运行 |
 | 正式质量选择 | 240048–240071 | 只按两版本较差质量成绩选一对 |
 | 程序预审 | 240072–240095 | 只审被选中的一对，不改选 |
@@ -35,7 +35,7 @@
 
 ```bash
 export RUN_ROOT=/absolute/path/to/warehouse-v6-runs
-export CANDIDATE=warehouse-v6-candidate-02
+export CANDIDATE=warehouse-v6-candidate-03
 export RELEASE_ID=policylens-three-domain-20261016.v6.0
 
 python3 -m experiments.warehouse.admission develop \
@@ -54,7 +54,7 @@ python3 -m experiments.warehouse.admission acceptance \
 
 `formal-train` 缺少通过的预算锁会拒绝；`preaudit` 缺少正式质量选择会拒绝；`final-audit` 缺少通过的预审会拒绝；`heldout` 缺少通过的最终审计会拒绝。`acceptance` 会复核全部训练、阶段收据、封存 claim、资产哈希、程序证据以及留出原始行；只有核验成功才写 `passed=true`。该收据本身不会开放 pilot。发布者还须核验 Pong、Kitchen 已有收据和迁移后的逐帧执行一致性，生成完整 v6 内容寻址发布包后才能开放研究。
 
-失败候选及探索运行均保留其原始输出。曾在 6110 上跨训练代码变更的 `candidate-01` 是探索诊断，不计入锁定预检。
+失败候选及探索运行均保留其原始输出。曾在 6110 上跨训练代码变更的 `candidate-01` 是探索诊断，不计入锁定预检。`candidate-02` 在 6110、200k 步上完成配对训练但两版本质量未过门槛；它的开发选择与程序审计种子（260300–260323、260400–260423）已使用，失败收据固定保存在 `experiments/warehouse/evidence/warehouse-v6-candidate-02.failure.json`。新候选使用上表互不重叠的开发种子；旧收据中的种子不得改写。
 
 ## 训练器目录
 

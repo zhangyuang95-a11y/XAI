@@ -296,14 +296,14 @@ def test_development_advances_to_next_budget_when_programs_missing(tmp_path, mon
         failed = admission._required(f"development.200000.{seed}.json")
         assert failed["passed"] is False
         assert "lacks both role programs" in failed["program_error"]
-    assert not admission._path("development.400000.6110.json").exists()
+    assert not admission._path(f"development.400000.{p.DEVELOPMENT_PAIR_SEEDS[0]}.json").exists()
 
 
 def test_packaged_development_gate_rechecks_audit_identity_and_eligibility(ready):
     from experiments.warehouse.acceptance import _development_pass
 
     admission, _ = ready
-    original = admission._required("development.200000.6110.json")
+    original = admission._required(f"development.200000.{p.DEVELOPMENT_PAIR_SEEDS[0]}.json")
     assert _development_pass(original)
     for mutation in ("episode_ids", "feedback_eligible", "explanation_eligible"):
         changed = deepcopy(original)

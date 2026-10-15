@@ -24,6 +24,9 @@ from env.warehouse.public_observation_v6 import (
     encode_policy_features, encode_public_observation,
 )
 
+SMOKE_PAIR_SEED = 986_000
+SMOKE_EVALUATION_SEEDS = (987_000, 987_001)
+
 
 def _state(seed: int):
     env = WarehouseMultiAgentEnv(participant_study_config())
@@ -54,7 +57,7 @@ def test_actor_torch_numpy_export_parity_on_public_states(tmp_path):
     torch.manual_seed(41)
     model = WarehouseV6Actor()
     path = tmp_path / "v6.npz"
-    artifact = export_actor(model, path, pair_seed=6110,
+    artifact = export_actor(model, path, pair_seed=SMOKE_PAIR_SEED,
                             variant="regularized", candidate_id="test")
     frozen = FrozenWarehouseV6Actor.load(path, expected_sha256=artifact["sha256"],
                                           expected_role_sha256=artifact["role_sha256"])
@@ -130,9 +133,9 @@ def test_program_feedback_has_a_real_actor_gradient():
 
 def test_paired_smoke_keeps_bc_start_and_zero_raw_feedback(tmp_path):
     spec = {
-        "candidate_id": "smoke", "pair_seed": 6110, "joint_steps": 120,
+        "candidate_id": "smoke", "pair_seed": SMOKE_PAIR_SEED, "joint_steps": 120,
         "output_dir": str(tmp_path), "scenario_namespace": "smoke-v6",
-        "checkpoint_seeds": [260300, 260301], "bc_episodes": 2,
+        "checkpoint_seeds": list(SMOKE_EVALUATION_SEEDS), "bc_episodes": 2,
         "bc_epochs": 1, "dagger_rounds": 0, "smoke": True,
     }
     report = train_pair(spec)
@@ -147,7 +150,9 @@ def test_paired_smoke_keeps_bc_start_and_zero_raw_feedback(tmp_path):
     closure = source_closure_sha256()
     assert report["source_closure_sha256"] == closure
     assert raw["source_closure_sha256"] == regularized["source_closure_sha256"] == closure
-    checkpoint = tmp_path / "smoke" / "pair_6110_steps_120" / "raw.checkpoint.pt"
+    checkpoint = (tmp_path / "smoke" /
+                  f"pair_{SMOKE_PAIR_SEED}_steps_120" /
+                  "raw.checkpoint.pt")
     payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
     payload["source_closure_sha256"] = "0" * 64
     torch.save(payload, checkpoint)

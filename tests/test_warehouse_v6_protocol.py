@@ -73,13 +73,13 @@ def test_seed_blocks_and_stress_streams_are_sealed_and_disjoint():
     assert not set(next_blocks["heldout"]) & set(next_blocks["final_program_audit"])
     assert set(p.heldout_schedule("policylens-three-domain-20261016.v6.1")[1]) == {
         p.task_scenario_seed(seed, 1) for seed in next_blocks["heldout"]}
-    spec = p.PairRunSpec("warehouse-v6-c1", 6110, 200_000, "/tmp/run-a",
+    spec = p.PairRunSpec("warehouse-v6-c1", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000, "/tmp/run-a",
                          checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS)
-    moved = p.PairRunSpec("warehouse-v6-c1", 6110, 200_000, "/tmp/run-b",
+    moved = p.PairRunSpec("warehouse-v6-c1", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000, "/tmp/run-b",
                           checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS)
     assert spec.sha256() == moved.sha256()
     with pytest.raises(ValueError, match="checkpoint seeds"):
-        p.PairRunSpec("warehouse-v6-c1", 6110, 200_000, "/tmp/run-a",
+        p.PairRunSpec("warehouse-v6-c1", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000, "/tmp/run-a",
                       checkpoint_seeds=p.FORMAL_SELECTION_SEEDS)
 
 

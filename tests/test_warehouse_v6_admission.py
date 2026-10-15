@@ -127,8 +127,10 @@ class FakeBackend:
                      "final_program_audit.claim.json")
             assert claim.is_file(), "claim must exist before final rollout"
             raise RuntimeError("synthetic independent audit failure")
-        metrics = {"coverage": .50, "agreement": .98, "kl": .04,
-                   "illegal_count": 0, "rows": 1000, "sample_count": 2000,
+        metrics = {"coverage": .50, "actionable_coverage": .40,
+                   "agreement": .98, "kl": .04,
+                   "illegal_count": 0, "rows": 1000, "actionable_rows": 800,
+                   "sample_count": 2000,
                    "certified_rows": 900}
         return {role: {"role": role, "actor_role_sha256": actor.role_sha256[role],
                        "program_sha256": programs[role].sha256(),
@@ -246,6 +248,8 @@ def test_audit_recomputes_metric_sample_count_coverage_and_certification(ready):
     for role, purpose, field, value in (
             ("robot_1", "feedback", "sample_count", 1999),
             ("robot_1", "feedback", "coverage", .9),
+            ("robot_1", "feedback", "actionable_coverage", .9),
+            ("robot_1", "feedback", "actionable_rows", 1999),
             ("robot_2", "explanation", "rows", 999),
             ("robot_2", "explanation", "certified_rows", 1001)):
         changed = deepcopy(original)

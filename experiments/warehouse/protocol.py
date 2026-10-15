@@ -176,15 +176,19 @@ def program_pass(metrics: Mapping, *, purpose: str, development: bool) -> bool:
     maximum_kl = 0.25 if development else 0.35
     try:
         coverage = float(metrics["coverage"])
+        actionable_coverage = float(metrics["actionable_coverage"])
         agreement = float(metrics["agreement"])
         kl = float(metrics["kl"])
         rows = int(metrics["rows"])
+        actionable_rows = int(metrics["actionable_rows"])
         illegal = int(metrics["illegal_count"])
     except (KeyError, TypeError, ValueError):
         return False
-    return (rows > 0 and illegal == 0 and
-            all(map(_finite, (coverage, agreement, kl))) and
+    return (rows > 0 and actionable_rows > 0 and
+            actionable_rows <= rows and illegal == 0 and
+            all(map(_finite, (coverage, actionable_coverage, agreement, kl))) and
             minimum_coverage <= coverage <= 1 and
+            minimum_coverage <= actionable_coverage <= coverage and
             minimum_agreement <= agreement <= 1 and 0 <= kl <= maximum_kl)
 
 

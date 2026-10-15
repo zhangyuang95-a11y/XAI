@@ -218,15 +218,23 @@ def _audit_valid(audits: Mapping, actor, programs: Mapping,
                 return False
             sample_count = audit["sample_count"]
             rows = metrics.get("rows")
+            actionable_rows = metrics.get("actionable_rows")
             certified = metrics.get("certified_rows")
             try:
                 coverage = float(metrics["coverage"])
+                actionable_coverage = float(metrics["actionable_coverage"])
             except (KeyError, TypeError, ValueError):
                 return False
             if (metrics.get("sample_count") != sample_count
                     or type(rows) is not int or not 0 <= rows <= sample_count
+                    or type(actionable_rows) is not int
+                    or not 0 <= actionable_rows <= rows
                     or not math.isfinite(coverage)
+                    or not math.isfinite(actionable_coverage)
                     or not math.isclose(coverage, rows / sample_count,
+                                        rel_tol=0, abs_tol=1e-9)
+                    or not math.isclose(actionable_coverage,
+                                        actionable_rows / sample_count,
                                         rel_tol=0, abs_tol=1e-9)
                     or (certified is not None and
                         (type(certified) is not int or not 0 <= certified <= rows))

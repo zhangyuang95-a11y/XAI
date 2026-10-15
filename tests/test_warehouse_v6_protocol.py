@@ -11,8 +11,12 @@ def _quality(deliveries=6.0, collisions=5.0, shutdown=.02):
             "shutdown_episode_rate": shutdown}
 
 
-def _program(coverage=.35, agreement=.97, kl=.10):
+def _program(coverage=.35, agreement=.97, kl=.10, actionable_coverage=None):
+    if actionable_coverage is None:
+        actionable_coverage = coverage - .02
     return {"rows": 1_000, "coverage": coverage, "agreement": agreement,
+            "actionable_rows": 900,
+            "actionable_coverage": actionable_coverage,
             "kl": kl, "illegal_count": 0}
 
 
@@ -92,6 +96,11 @@ def test_quality_and_program_margins_are_stricter_only_in_development():
     assert p.program_pass(_program(), purpose="explanation", development=True)
     assert not p.program_pass(_program(coverage=.28), purpose="feedback", development=True)
     assert p.program_pass(_program(coverage=.28), purpose="feedback", development=False)
+    assert not p.program_pass(_program(actionable_coverage=.19),
+                              purpose="feedback", development=False)
+    assert not p.program_pass({key: value for key, value in _program().items()
+                               if key != "actionable_coverage"},
+                              purpose="feedback", development=False)
     assert not p.program_pass({**_program(), "illegal_count": 1},
                               purpose="feedback", development=False)
 

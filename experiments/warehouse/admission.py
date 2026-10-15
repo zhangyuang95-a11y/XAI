@@ -774,6 +774,50 @@ class Admission:
         selection = self._required("formal.selection.json")
         if selection.get("passed") is not True:
             raise RuntimeError("Warehouse formal selection did not pass")
+        lock = self._required("budget.lock.json")
+        budget = lock.get("locked_budget")
+        source = self.backend.source_closure_sha256()
+        if lock.get("source_closure_sha256") != source:
+            raise RuntimeError("Warehouse selected source closure changed")
+        if (lock.get("passed") is not True
+                or budget not in p.BUDGETS
+                or selection.get("locked_budget") != budget
+                or selection.get("pair_seeds") != list(p.FORMAL_PAIR_SEEDS)
+                or selection.get("selection_seeds") != list(p.FORMAL_SELECTION_SEEDS)
+                or selection.get("selection_rule") !=
+                "maximin_deliveries_minus_0.25_collisions_minus_5_shutdown"):
+            raise RuntimeError("Warehouse formal selection or budget lock changed")
+        rows = []
+        for pair_seed in p.FORMAL_PAIR_SEEDS:
+            candidate = _read(self.directory /
+                              f"pair_{pair_seed}_steps_{budget}" /
+                              "pair.training.json")
+            row = self._required(f"formal.training.{pair_seed}.json")
+            expected_schedule = p.final_program_fit_seed_schedule(
+                self.release_id, pair_seed)
+            if (not _verify_formal_row(row, candidate, source)
+                    or candidate.get("candidate_id") != self.candidate_id
+                    or candidate.get("release_id") != self.release_id
+                    or candidate.get("pair_seed") != pair_seed
+                    or candidate.get("joint_steps") != budget
+                    or candidate.get("final_program_fit_seed_schedule") !=
+                    expected_schedule
+                    or candidate.get("final_program_fit_seed_schedule_sha256") !=
+                    _sha(expected_schedule)
+                    or not p.paired_training_pass(candidate.get("variants", {}),
+                                                  joint_steps=budget)):
+                raise RuntimeError("Warehouse formal pair evidence changed")
+            rows.append(row)
+        expected_quality = {str(row["pair_seed"]): {
+            variant: row["variants"][variant]["quality"]
+            for variant in p.VARIANTS} for row in rows}
+        expected_hashes = {str(row["pair_seed"]): _file_sha(self._path(
+            f"formal.training.{row['pair_seed']}.json")) for row in rows}
+        if (selection.get("pair_quality") != expected_quality
+                or selection.get("pair_receipt_sha256") != expected_hashes
+                or p.select_formal_pair(rows)["pair_seed"] !=
+                selection.get("selected_pair_seed")):
+            raise RuntimeError("Warehouse formal quality selection changed")
         seed, budget = selection["selected_pair_seed"], selection["locked_budget"]
         path = (self.directory / f"pair_{seed}_steps_{budget}" /
                 "pair.training.json")
@@ -792,6 +836,40 @@ class Admission:
             raise RuntimeError("Warehouse selected paired training report changed")
         return selection, pair
 
+    def _verified_program_prerequisite(self, name: str, selection: Mapping,
+                                       pair: Mapping, actor, programs: Mapping,
+                                       seeds: Sequence[int], *,
+                                       sealed: bool) -> dict:
+        """Recheck the prior audit before spending a fresh sealed seed block."""
+        receipt = self._required(name)
+        program_hashes = {role: programs[role].sha256() for role in p.ROLES}
+        if (receipt.get("passed") is not True
+                or receipt.get("selected_pair_seed") !=
+                selection["selected_pair_seed"]
+                or receipt.get("actor_sha256") != actor.artifact_sha256
+                or receipt.get("program_sha256") != program_hashes
+                or receipt.get("seeds") != list(seeds)
+                or not _audit_valid(receipt.get("audit"), actor, programs,
+                                    seeds, development=False)):
+            raise RuntimeError(f"Warehouse prerequisite program audit changed: {name}")
+        if sealed:
+            claim_path = self._claim_path("final_program_audit")
+            claim = _read(claim_path)
+            expected_actor_hashes = {variant: pair["variants"][variant][
+                "actor_artifact"]["sha256"] for variant in p.VARIANTS}
+            if (claim.get("phase") != "final_program_audit"
+                    or claim.get("candidate_id") != self.candidate_id
+                    or claim.get("release_id") != self.release_id
+                    or claim.get("actor_hashes") != expected_actor_hashes
+                    or claim.get("seeds") != list(seeds)
+                    or claim.get("seed_sha256") != _sha(list(seeds))
+                    or receipt.get("one_use_claim_sha256") !=
+                    _file_sha(claim_path)):
+                raise RuntimeError("Warehouse final audit one-use claim changed")
+        elif receipt.get("one_use_claim_sha256") is not None:
+            raise RuntimeError("Warehouse preaudit unexpectedly has a sealed claim")
+        return receipt
+
     def _run_program_audit(self, phase: str, seeds: Sequence[int],
                            *, sealed: bool) -> dict:
         self._ensure_open()
@@ -802,12 +880,12 @@ class Admission:
         if phase == "program.preaudit":
             if tuple(seeds) != p.FORMAL_PROGRAM_PREAUDIT_SEEDS:
                 raise ValueError("Warehouse preaudit seed mismatch")
-        else:
-            preaudit = self._required("program.preaudit.json")
-            if preaudit.get("passed") is not True:
-                raise RuntimeError("Warehouse independent program preaudit did not pass")
         actor = self._load_variant(pair, "regularized")
         programs = self._load_programs(pair, actor)
+        if phase != "program.preaudit":
+            self._verified_program_prerequisite(
+                "program.preaudit.json", selection, pair, actor, programs,
+                p.FORMAL_PROGRAM_PREAUDIT_SEEDS, sealed=False)
         claim_sha = None
         if sealed:
             claim_path = self._claim_path("final_program_audit")
@@ -860,10 +938,15 @@ class Admission:
         self._ensure_open()
         if self._path("heldout.json").exists():
             return self._required("heldout.json")
-        final = self._required("final_program_audit.json")
-        if final.get("passed") is not True:
-            raise RuntimeError("Warehouse final independent program audit failed")
         selection, pair = self._selected_pair()
+        actor = self._load_variant(pair, "regularized")
+        programs = self._load_programs(pair, actor)
+        self._verified_program_prerequisite(
+            "program.preaudit.json", selection, pair, actor, programs,
+            p.FORMAL_PROGRAM_PREAUDIT_SEEDS, sealed=False)
+        self._verified_program_prerequisite(
+            "final_program_audit.json", selection, pair, actor, programs,
+            p.final_audit_seeds(self.release_id), sealed=True)
         schedule = p.heldout_schedule(self.release_id)
         claim_path = self._claim_path("heldout")
         try:

@@ -336,6 +336,77 @@ def test_source_change_before_sealed_phase_rejects_without_claim(ready):
     assert not admission.claim_root.exists()
 
 
+@pytest.mark.parametrize("change", (
+    "pair_seed", "actor_sha256", "program_sha256", "seeds",
+    "audit_metric", "claim_sha256"))
+def test_preaudit_mutation_rejects_before_final_seed_claim(ready, change):
+    admission, backend = ready
+    path = admission._path("program.preaudit.json")
+    receipt = json.loads(path.read_text())
+    if change == "pair_seed":
+        receipt["selected_pair_seed"] = 6101
+    elif change == "actor_sha256":
+        receipt["actor_sha256"] = "0" * 64
+    elif change == "program_sha256":
+        receipt["program_sha256"]["robot_1"] = "0" * 64
+    elif change == "seeds":
+        receipt["seeds"][0] += 1
+    elif change == "audit_metric":
+        receipt["audit"]["robot_2"]["explanation"]["coverage"] = 0.0
+    else:
+        receipt["one_use_claim_sha256"] = "0" * 64
+    path.write_text(json.dumps(receipt))
+    calls_before = len(backend.audit_calls)
+    with pytest.raises(RuntimeError, match="prerequisite program audit|preaudit"):
+        admission.final_audit()
+    assert len(backend.audit_calls) == calls_before
+    assert not admission._claim_path("final_program_audit").exists()
+
+
+def test_quality_selection_mutation_rejects_before_final_seed_claim(ready):
+    admission, backend = ready
+    path = admission._path("formal.selection.json")
+    selection = json.loads(path.read_text())
+    selection["selected_pair_seed"] = 6101
+    path.write_text(json.dumps(selection))
+    calls_before = len(backend.audit_calls)
+    with pytest.raises(RuntimeError, match="formal quality selection"):
+        admission.final_audit()
+    assert len(backend.audit_calls) == calls_before
+    assert not admission._claim_path("final_program_audit").exists()
+
+
+@pytest.mark.parametrize("change", (
+    "actor_sha256", "program_sha256", "seeds", "audit_metric",
+    "claim_sha256", "claim_actor_hash"))
+def test_final_audit_mutation_rejects_before_heldout_seed_claim(ready, change):
+    admission, backend = ready
+    assert admission.final_audit()["passed"] is True
+    path = admission._path("final_program_audit.json")
+    receipt = json.loads(path.read_text())
+    if change == "actor_sha256":
+        receipt["actor_sha256"] = "0" * 64
+    elif change == "program_sha256":
+        receipt["program_sha256"]["robot_2"] = "0" * 64
+    elif change == "seeds":
+        receipt["seeds"][0] += 1
+    elif change == "audit_metric":
+        receipt["audit"]["robot_2"]["feedback"]["coverage"] = 0.0
+    elif change == "claim_sha256":
+        receipt["one_use_claim_sha256"] = "0" * 64
+    else:
+        claim = admission._claim_path("final_program_audit")
+        claim_row = json.loads(claim.read_text())
+        claim_row["actor_hashes"]["raw"] = "0" * 64
+        claim.write_text(json.dumps(claim_row))
+    path.write_text(json.dumps(receipt))
+    calls_before = len(backend.evaluate_calls)
+    with pytest.raises(RuntimeError, match="prerequisite program audit|one-use claim"):
+        admission.heldout()
+    assert len(backend.evaluate_calls) == calls_before
+    assert not admission._claim_path("heldout").exists()
+
+
 def test_acceptance_rejects_tampered_heldout_episode(ready):
     admission, _ = ready
     admission.final_audit()

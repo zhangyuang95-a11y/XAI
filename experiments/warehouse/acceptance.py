@@ -367,21 +367,18 @@ def _replay_environment(seed: int):
     return environment
 
 
-def _verify_program_trace(*, root: Path, release_id: str,
-                          index: Mapping, audits: Mapping,
-                          entry: Mapping,
-                          expected_seeds: Sequence[int]) -> bool:
-    """Recompute audit NN draws and program metrics from saved frames.
+def _verify_program_trace_rows(*, actor, programs: Mapping,
+                               trace_bytes_by_role: Mapping[str, bytes],
+                               audits: Mapping,
+                               expected_seeds: Sequence[int]) -> bool:
+    """Recompute a saved audit from its exact local or packaged trace bytes.
 
-    This reads the one-use rollout; it does not launch another rollout on the
-    sealed seeds. Runtime action-path tests independently check environment
-    transitions and participant replacement.
+    This replays the recorded physical trajectory for integrity, but never
+    launches a new NN rollout or spends an independent evaluation seed.
     """
     import numpy as np
 
-    from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor
-    from backend.training.warehouse_v6_program import (
-        WarehouseV6Program, audit_frozen_program)
+    from backend.training.warehouse_v6_program import audit_frozen_program
     from env.warehouse.decision_protocol import (
         canonical_sha256, independent_agent_seed)
     from env.warehouse.navigation import ACTIONS
@@ -390,23 +387,19 @@ def _verify_program_trace(*, root: Path, release_id: str,
         encode_public_observation, public_pre_action_snapshot,
         rebuild_public_pre_action_state)
 
-    actor = FrozenWarehouseV6Actor.load(
-        root / entry["actor_path"], expected_sha256=entry["actor_sha256"],
-        expected_role_sha256={
-            "robot_1": entry["role_sha256"]["human"],
-            "robot_2": entry["role_sha256"]["ai"],
-        })
-    if set(index) != set(p.ROLES) or set(audits) != set(p.ROLES):
+    if (set(programs) != set(p.ROLES)
+            or set(trace_bytes_by_role) != set(p.ROLES)
+            or set(audits) != set(p.ROLES)):
         return False
     identities, records = {}, {}
-    for role, program_path in zip(p.ROLES, entry["program_paths"], strict=True):
-        program = WarehouseV6Program.load(
-            root / program_path,
-            expected_sha256=entry["program_sha256"][role],
-            actor_role_sha256=actor.role_sha256[role])
-        raw, digest = _asset_bytes(root, release_id, index[role])
+    for role in p.ROLES:
+        program = programs[role]
+        raw = trace_bytes_by_role[role]
+        digest = sha256(raw).hexdigest()
         audit = audits[role]
-        if (audit.get("trace_sha256") != digest
+        if (program.role != role
+                or program.actor_role_sha256 != actor.role_sha256[role]
+                or audit.get("trace_sha256") != digest
                 or audit.get("trace_row_count") != audit.get("sample_count")):
             return False
         samples, ordered, recorded = [], [], []
@@ -530,6 +523,44 @@ def _verify_program_trace(*, root: Path, release_id: str,
                 return False
             cursor += 1
     return cursor == len(identities["robot_1"])
+
+
+def _verify_program_trace(*, root: Path, release_id: str,
+                          index: Mapping, audits: Mapping,
+                          entry: Mapping,
+                          expected_seeds: Sequence[int]) -> bool:
+    """Verify content-addressed release traces against both frozen Actors.
+
+    The shared row verifier also serves admission before one-use seed claims.
+    This wrapper preserves release path and asset hash requirements.
+    """
+    from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor
+    from backend.training.warehouse_v6_program import WarehouseV6Program
+
+    actor = FrozenWarehouseV6Actor.load(
+        root / entry["actor_path"], expected_sha256=entry["actor_sha256"],
+        expected_role_sha256={
+            "robot_1": entry["role_sha256"]["human"],
+            "robot_2": entry["role_sha256"]["ai"],
+        })
+    if set(index) != set(p.ROLES) or set(audits) != set(p.ROLES):
+        return False
+    programs, trace_bytes_by_role = {}, {}
+    for role, program_path in zip(p.ROLES, entry["program_paths"], strict=True):
+        programs[role] = WarehouseV6Program.load(
+            root / program_path,
+            expected_sha256=entry["program_sha256"][role],
+            actor_role_sha256=actor.role_sha256[role])
+        raw, digest = _asset_bytes(root, release_id, index[role])
+        if (audits[role].get("trace_sha256") != digest
+                or audits[role].get("trace_row_count") !=
+                audits[role].get("sample_count")):
+            return False
+        trace_bytes_by_role[role] = raw
+    return _verify_program_trace_rows(
+        actor=actor, programs=programs,
+        trace_bytes_by_role=trace_bytes_by_role,
+        audits=audits, expected_seeds=expected_seeds)
 
 
 def _final_fit_verified_rows(*, root: Path, release_id: str,

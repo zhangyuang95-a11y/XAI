@@ -14,6 +14,7 @@ import ast
 import json
 from pathlib import Path
 import re
+from threading import RLock
 
 from . import RELEASE_ID
 
@@ -21,6 +22,8 @@ UPSTREAM_RELEASE_ID = "policylens-three-domain-20261014.v5.0"
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "releases" / RELEASE_ID / "catalog.json"
 _WAREHOUSE_RELEASE = re.compile(r"policylens-three-domain-20261016\.v6\.(0|[1-9][0-9]*)\Z")
+_WAREHOUSE_EVIDENCE_CACHE: dict[str, tuple[tuple, dict]] = {}
+_WAREHOUSE_EVIDENCE_CACHE_LOCK = RLock()
 
 
 @dataclass(frozen=True)
@@ -252,6 +255,13 @@ def warehouse_evidence(release_id: str = RELEASE_ID, *,
     }
     if set(evidence) != set(expected):
         raise ReleaseAssetUnavailable("warehouse_evidence_incomplete")
+    revision = None
+    if catalog_path is None:
+        revision = _warehouse_evidence_revision(release_id, evidence)
+        with _WAREHOUSE_EVIDENCE_CACHE_LOCK:
+            cached = _WAREHOUSE_EVIDENCE_CACHE.get(release_id)
+            if cached is not None and cached[0] == revision:
+                return deepcopy(cached[1])
     for category, keys in expected.items():
         rows = evidence[category]
         if not isinstance(rows, dict) or set(rows) != keys:
@@ -289,7 +299,49 @@ def warehouse_evidence(release_id: str = RELEASE_ID, *,
                 if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
                     raise ReleaseAssetUnavailable("warehouse_evidence_incomplete")
                 _asset(item["path"], item["sha256"], release_id)
+    if catalog_path is None:
+        # A file changing while the initial full SHA audit ran cannot seed a
+        # valid cache. A later request must validate the new bytes afresh.
+        if _warehouse_evidence_revision(release_id, evidence) != revision:
+            raise ReleaseAssetUnavailable("warehouse_evidence_changed_during_validation")
+        with _WAREHOUSE_EVIDENCE_CACHE_LOCK:
+            _WAREHOUSE_EVIDENCE_CACHE[release_id] = (revision, deepcopy(evidence))
     return deepcopy(evidence)
+
+
+def warehouse_evidence_revision(release_id: str = RELEASE_ID) -> tuple:
+    """Return the verified catalog and file identity for the admission cache."""
+    warehouse_evidence(release_id)
+    with _WAREHOUSE_EVIDENCE_CACHE_LOCK:
+        return _WAREHOUSE_EVIDENCE_CACHE[release_id][0]
+
+
+def _warehouse_evidence_revision(release_id: str, evidence: dict) -> tuple:
+    def assets(value):
+        if isinstance(value, dict):
+            if set(value) == {"path", "sha256"}:
+                yield value["path"], value["sha256"]
+            else:
+                for item in value.values():
+                    yield from assets(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from assets(item)
+
+    try:
+        catalog_path = warehouse_release_spec(release_id).catalog_path
+        catalog_hash = sha256(catalog_path.read_bytes()).hexdigest()
+        file_rows = []
+        for path, expected in sorted(set(assets(evidence))):
+            target = (ROOT / path).resolve()
+            if not target.is_relative_to(ROOT):
+                raise ReleaseAssetUnavailable("warehouse_evidence_path_invalid")
+            stat = target.stat()
+            file_rows.append((path, expected, stat.st_dev, stat.st_ino,
+                              stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+        return catalog_hash, tuple(file_rows)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ReleaseAssetUnavailable("warehouse_evidence_stat_unavailable") from exc
 
 
 def _warehouse_training_assets(

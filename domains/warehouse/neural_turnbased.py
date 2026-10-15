@@ -137,10 +137,13 @@ def _variant_for_policy(policy_id):
 
 def policy_artifacts(release_id=None):
     """Immutable v5 policy inventory; incomplete entries keep pilot closed."""
-    if release_id == V6_RELEASE_ID:
-        return policy_artifacts_v6()
     if release_id is not None:
-        raise ValueError("unknown Warehouse release_id")
+        from study_v3.release_catalog import ReleaseAssetUnavailable, warehouse_release_spec
+        try:
+            warehouse_release_spec(release_id)
+        except ReleaseAssetUnavailable as exc:
+            raise ValueError("unknown Warehouse release_id") from exc
+        return policy_artifacts_v6(release_id)
     return _policy_artifacts_from(_config_for_policy("warehouse-raw-v5"))
 
 

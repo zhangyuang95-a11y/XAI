@@ -6,17 +6,22 @@ from hashlib import sha256
 import json
 import math
 from pathlib import Path
+from threading import RLock
 
 from . import RELEASE_ID
 from .registry import MODULES, engine
 from .release_catalog import (UPSTREAM_RELEASE_ID, ReleaseAssetUnavailable,
                               warehouse_evidence, warehouse_policy_artifacts,
+                              warehouse_evidence_revision,
+                              warehouse_release_spec,
                               warehouse_runtime_source_closure_sha256)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 GROUP_VARIANT = {'A': 'regularized', 'B': 'regularized', 'C': 'raw'}
 WAREHOUSE_ROLES = frozenset(('robot_1', 'robot_2'))
+_WAREHOUSE_ACCEPTANCE_CACHE: set[tuple] = set()
+_WAREHOUSE_ACCEPTANCE_CACHE_LOCK = RLock()
 
 
 class PolicyUnavailable(RuntimeError):
@@ -600,7 +605,8 @@ def _warehouse_once_receipts_valid(acceptance: dict, entry: dict | None = None) 
 
 def _accepted(entry: dict, binding: dict) -> bool:
     if (binding.get('domain') == 'warehouse'
-            and binding.get('policy_id', '').endswith('-v6')):
+            and binding.get('policy_id') in
+            warehouse_release_spec(RELEASE_ID).policy_ids.values()):
         return _accepted_warehouse_v6(entry, binding)
     try:
         report_path = entry['training_report_path']
@@ -692,15 +698,29 @@ def _accepted_warehouse_v6(entry: dict, binding: dict) -> bool:
                 or _digest(entry['acceptance_path']) !=
                 entry['acceptance_sha256']):
             return False
+        source_closure = warehouse_runtime_source_closure_sha256()
+        entries = warehouse_policy_artifacts()
+        if entry != entries.get(binding['variant']):
+            return False
+        evidence = warehouse_evidence()
+        revision = warehouse_evidence_revision()
+        identity = sha256(json.dumps({'entry': entry, 'binding': binding},
+                                    sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        cache_key = (revision, source_closure, identity)
+        with _WAREHOUSE_ACCEPTANCE_CACHE_LOCK:
+            if cache_key in _WAREHOUSE_ACCEPTANCE_CACHE:
+                return True
         acceptance = json.loads(_path(entry['acceptance_path']).read_text())
-        if (acceptance.get('source_closure_sha256') !=
-                warehouse_runtime_source_closure_sha256()):
+        if acceptance.get('source_closure_sha256') != source_closure:
             return False
         from experiments.warehouse.acceptance import validate_acceptance
-        return validate_acceptance(
+        passed = validate_acceptance(
             acceptance, release_id=RELEASE_ID,
-            entries=warehouse_policy_artifacts(),
-            evidence=warehouse_evidence(), repository_root=ROOT)
+            entries=entries, evidence=evidence, repository_root=ROOT)
+        if passed:
+            with _WAREHOUSE_ACCEPTANCE_CACHE_LOCK:
+                _WAREHOUSE_ACCEPTANCE_CACHE.add(cache_key)
+        return passed
     except (ImportError, KeyError, OSError, ValueError, TypeError,
             PolicyUnavailable, ReleaseAssetUnavailable):
         return False

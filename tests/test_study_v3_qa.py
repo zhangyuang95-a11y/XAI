@@ -14,7 +14,7 @@ import pytest
 from domains.pong import turnbased as pong
 from study_v3.config import Settings
 from study_v3.qa import Explainer, PlanError, _catalog, evaluate_case, simulate
-from study_v3.registry import engine as get_engine
+from study_v3.registry import engine as get_engine, engine_for_recorded_state
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -184,7 +184,7 @@ def test_ambiguous_question_can_clarify_and_wrong_premise_uses_correcting_facts(
     selected["premise"] = "contradicted"
     result = ask(explainer_for_plan(selected), state)
     assert "differs" in result["answer"]
-    assert "wait" in result["answer"]
+    assert pong.decide(state)["reason_en"] in result["answer"]
 
 
 def test_multintent_combines_why_and_actual_counterfactual_results():
@@ -193,8 +193,8 @@ def test_multintent_combines_why_and_actual_counterfactual_results():
         {"kind": "counterfactual", "evidence_ids": [], "actions": ["right"], "horizon": 1}])
     result = ask(explainer_for_plan(selected), state)
     assert result["status"] == "answered"
-    assert "caught: +3 points" in result["answer"]
-    assert result["audit"]["simulations"][0]["raw_score_delta"] == 3
+    expected = pong.step(state, "right")["raw_score"] - state["raw_score"]
+    assert result["audit"]["simulations"][0]["raw_score_delta"] == expected
     assert "In the selected recorded state:" in result["answer"]
     assert result["answer"].index(pong.decide(state)["reason_en"]) < result["answer"].index("If you move right")
 
@@ -203,7 +203,8 @@ def test_two_counterfactuals_compare_real_different_outcomes():
     state = fixture(human=1, ai=7, turns=1)
     selected = plan(state, intents=[{"kind": "counterfactual", "evidence_ids": [], "actions": [a], "horizon": 1} for a in ("right", "wait")])
     result = ask(explainer_for_plan(selected), state)
-    assert [s["raw_score_delta"] for s in result["audit"]["simulations"]] == [3, 0]
+    assert [s["raw_score_delta"] for s in result["audit"]["simulations"]] == [
+        pong.step(state, action)["raw_score"] - state["raw_score"] for action in ("right", "wait")]
 
 
 def test_first_simulated_ai_action_matches_recorded_decision_and_state_unchanged():
@@ -366,8 +367,8 @@ def _lookup(value, path):
 
 @pytest.mark.parametrize("case", _case_files(), ids=lambda c: c["case_id"])
 def test_recorded_question_case_independent_expectations_and_composition(case):
-    engine = get_engine(case.get("domain", case["state"]["domain"]))
     state = deepcopy(case["state"])
+    engine = engine_for_recorded_state(state)
     decision = engine.decide(state)
     catalog = _catalog(engine, state, decision, case.get("public_history", []))
     for identifier in case["expected_fact_ids"]:
@@ -445,7 +446,7 @@ def test_historical_ai_reason_cannot_be_answered_with_human_event_evidence():
     for _ in range(10):
         state = engine.step(state, engine.human_advisor(state))
     wrong = plan(state, intents=[{"kind": "facts", "subject": "ai", "purpose": "reason",
-                                 "evidence_ids": ["human_state", "human_charger_distance"]}])
+                                     "evidence_ids": ["human_state"]}])
     result = explainer_for_plan(wrong).answer(engine, state, engine.decide(state), "What were you trying to do and why?")
     assert result["status"] == "unavailable"
     assert result["audit"]["failure_code"] == "missing_subject_evidence"
@@ -505,7 +506,9 @@ def test_position_hypothesis_recomputes_actual_controller_without_advancing_game
     state = fixture(human=0, ai=4, turns=4)
     original = deepcopy(state)
     actual = pong.decide(state)
-    assert actual['action'] == 'right'
+    hypothetical_state = deepcopy(state)
+    hypothetical_state['human']['x'] = 8
+    expected_action = pong.decide(hypothetical_state)['action']
     intent = {"kind": "counterfactual", "subject": "human", "purpose": "comparison",
               "evidence_ids": [], "intervention": {"human_lane": 9}, "actions": [], "horizon": 0}
     capture = []
@@ -513,7 +516,7 @@ def test_position_hypothesis_recomputes_actual_controller_without_advancing_game
                  question="If I were at lane 9, how would you move?" if language == 'en' else "如果我在第9道，你会怎么移动？")
     assert result['status'] == 'answered'
     simulation = result['audit']['simulations'][0]
-    assert simulation['intervention']['ai_action'] == 'left'
+    assert simulation['intervention']['ai_action'] == expected_action
     assert simulation['intervention']['actual_human_lane'] == 1
     assert simulation['intervention']['human_lane'] == 9
     assert simulation['steps_completed'] == 0 and simulation['trace'] == []
@@ -524,32 +527,31 @@ def test_position_hypothesis_recomputes_actual_controller_without_advancing_game
     assert capture[0]['public_observation']['human']['x'] == 0
     assert capture[0]['counterfactual_interventions']['human_lane']['maximum'] == 9
     if language == 'en':
-        assert 'If you were in lane 9: ' in result['answer']
-        assert result['answer'].count('move left') == 1
+        assert 'If you were in lane 9' in result['answer']
+        assert result['answer'].count({'left':'move left','right':'move right','wait':'wait'}[expected_action]) == 1
         assert 'hypothetical position' in result['answer'] and 'game has not changed' in result['answer']
     else:
-        assert '假设你在第9道：' in result['answer']
-        assert result['answer'].count('左移') == 1
+        assert '假设你在第9道' in result['answer']
+        assert result['answer'].count({'left':'左移','right':'右移','wait':'等待'}[expected_action]) == 1
         assert '实际游戏没有改变' in result['answer']
 
 
-def test_position_hypothesis_keeps_ai_commitment_even_when_human_can_no_longer_reach():
+def test_position_hypothesis_uses_frozen_actor_without_rule_commitment():
     state = fixture(human=0, ai=4, turns=4)
     state['policy_memory'] = deepcopy(pong.decide(state)['memory'])
     original = deepcopy(state)
-    # Lane 7 makes the other split shorter, but the actual fixed controller
-    # keeps an existing still-reachable agreement instead of erasing memory.
     maintained = simulate(pong, state, pong.decide(state), [], 0, intervention={'human_lane': 7})
-    assert maintained['intervention']['ai_action'] == 'right'
     no_commitment = deepcopy(state)
     no_commitment['policy_memory'] = {}
     changed = simulate(pong, no_commitment, pong.decide(no_commitment), [], 0,
                        intervention={'human_lane': 7})
-    assert changed['intervention']['ai_action'] == 'left'
+    assert changed['intervention']['ai_action'] == maintained['intervention']['ai_action']
     maintained_after_deviation = simulate(pong, state, pong.decide(state), [], 0, intervention={'human_lane': 9})
-    assert maintained_after_deviation['intervention']['ai_action'] == 'right'
-    assert maintained_after_deviation['intervention']['target_unchanged']
-    assert 'no longer reach' in maintained_after_deviation['intervention']['reason_en']
+    branch = deepcopy(state)
+    branch['human']['x'] = 8
+    assert maintained_after_deviation['intervention']['ai_action'] == pong.decide(branch)['action']
+    assert maintained_after_deviation['intervention']['action_unchanged'] == (
+        pong.decide(branch)['action'] == pong.decide(state)['action'])
     assert state == original
 
 
@@ -657,7 +659,7 @@ def test_focused_pong_counterfactual_keeps_consequence_without_duplicate_score_p
         'purpose': 'comparison', 'evidence_ids': [], 'actions': ['right'], 'horizon': 1}])
     result = ask(explainer_for_plan(selected), state)
     assert result['status'] == 'answered'
-    assert 'caught: +3 points' in result['answer']
+    assert pong.step(state, 'right')['events'][0]['en'] in result['answer']
     assert len(result['answer'].split()) < 65
     assert 'Catch points change by' not in result['answer']
 
@@ -721,53 +723,37 @@ def simultaneous_ball_fixture():
 
 
 @pytest.mark.parametrize('language', ['en', 'zh'])
-@pytest.mark.parametrize('ball,selected', [('t3', False), ('t4', True)])
-def test_named_ball_assignment_distinguishes_actual_plan_from_individual_reachability(language, ball, selected):
+@pytest.mark.parametrize('ball', ['t3', 't4'])
+def test_named_ball_contact_fact_never_invents_an_nn_assignment(language, ball):
     state = simultaneous_ball_fixture()
-    original = deepcopy(state)
-    actual = {assignment['ball_id']: assignment for assignment in pong.decide(state)['assignments']}
-    assert ('t3' in actual) is False
-    assert actual['t4']['ai_contact'] == 6 and actual['t4']['human_contact'] == 0
     chosen = plan(state, language=language, intents=[{'kind': 'facts', 'subject': 'shared',
         'purpose': 'assignment', 'object_id': ball, 'evidence_ids': ['ball_plan:' + ball]}])
-    captured = []
-    result = ask(explainer_for_plan(chosen, captured), state,
-                 question=f'For {ball}, which lane should I cover, and which will you cover?')
+    result = ask(explainer_for_plan(chosen), state,
+                 question=f'For {ball}, which lanes need coverage?')
     assert result['status'] == 'answered'
     assert result['evidence_ids'] == ['ball_plan:' + ball]
-    fact = next(row for row in captured[0]['evidence'] if row['id'] == 'ball_plan:' + ball)
-    assert fact['subject'] == 'shared' and fact['purpose'] == 'assignment' and fact['object_id'] == ball
-    assert (fact['plan_status'] != 'not_selected') is selected
-    if language == 'en':
-        assert 'I cover lane 7; you cover lane 1' in result['answer']
-        assert 'I cover lane 9' not in result['answer']
-        if not selected:
-            assert 'not selected' in result['answer'] and 'cannot catch both' in result['answer']
-    elif not selected:
-        assert '没有选择t3' in result['answer'] and '选择接t4' in result['answer']
-    assert state == original
+    assert ('not issued a catch assignment' if language == 'en' else '没有发布接球分工') in result['answer']
+    assert pong.facts(state)[0]['id'] == 'position'
 
 
 @pytest.mark.parametrize('object_id,ids,error', [
-    ('t3', ['ball:t3', 'comparison:1'], 'missing_ball_assignment_evidence'),
+    ('t3', ['ball:t3'], 'missing_ball_assignment_evidence'),
     ('t3', ['ball_plan:t4'], 'missing_ball_assignment_evidence'),
     (None, ['ball_plan:t3'], 'missing_ball_assignment_evidence'),
-    ('t3', ['ball_plan:t3', 'comparison:1'], 'isolated_reachability_is_not_assignment'),
 ])
-def test_assignment_intents_require_the_named_balls_actual_plan_fact(object_id, ids, error):
+def test_contact_intents_require_the_named_ball_fact(object_id, ids, error):
     state = simultaneous_ball_fixture()
     selected = plan(state, intents=[{'kind': 'facts', 'subject': 'shared',
         'purpose': 'assignment', 'object_id': object_id, 'evidence_ids': ids}])
     result = ask(explainer_for_plan(selected), state)
     assert result['status'] == 'unavailable'
     assert result['audit']['failure_code'] == error
-    assert result['audit']['repair_attempt']['failure_code'] == error
 
 
-def test_invalid_assignment_plan_gets_one_semantic_repair_with_exact_plan_evidence():
+def test_invalid_contact_plan_gets_one_semantic_repair():
     state = simultaneous_ball_fixture()
     bad = plan(state, intents=[{'kind': 'facts', 'subject': 'shared', 'purpose': 'assignment',
-        'object_id': 't3', 'evidence_ids': ['comparison:1']}])
+        'object_id': 't3', 'evidence_ids': ['ball:t3']}])
     good = deepcopy(bad)
     good['intents'][0]['evidence_ids'] = ['ball_plan:t3']
     instance = explainer_for_plan(good)
@@ -779,35 +765,35 @@ def test_invalid_assignment_plan_gets_one_semantic_repair_with_exact_plan_eviden
     result = ask(instance, state)
     assert result['status'] == 'answered'
     assert len(requests) == 2 and result['audit']['repair_attempt']['successful']
-    assert 'not selected' in result['answer']
+    assert 'not issued a catch assignment' in result['answer']
 
 
-def test_nearest_ball_preset_answers_distance_arrival_and_actual_coordination_separately():
+def test_nearest_ball_and_human_actor_advice_are_separate_facts():
     state = simultaneous_ball_fixture()
     selected = plan(state, intents=[{'kind': 'facts', 'subject': 'human', 'purpose': 'observation',
         'evidence_ids': ['human_nearest_ball']}, {'kind': 'facts', 'subject': 'human', 'purpose': 'advice',
-        'evidence_ids': ['system:human_advice', 'assignment:0']}])
+        'evidence_ids': ['system:human_advice']}])
     result = ask(explainer_for_plan(selected), state,
-                 question='Which ball am I closest to, how many turns until it arrives, and how can I coordinate with you?')
+                 question='Which ball is nearest and what action might I choose?')
     assert result['status'] == 'answered'
     assert 's11' in result['answer'] and '0 moves away' in result['answer']
     assert 'arriving in 4 turns' in result['answer']
-    assert 'assigns it to you' in result['answer']
-    assert 'wait' in result['answer'] and 't4' in result['answer']
+    assert 'The frozen human-role Actor suggests' in result['answer']
+    assert 'assigns it' not in result['answer']
 
 
-@pytest.mark.parametrize('language',('en','zh'))
-@pytest.mark.parametrize('order',(('system:ai_reason','arrival_payoff:4'),('arrival_payoff:4','system:ai_reason')))
-def test_pong_payoff_is_separate_from_short_reason_when_explicitly_requested(language,order):
+@pytest.mark.parametrize('language', ('en', 'zh'))
+def test_pong_reason_has_no_fabricated_payoff_plan(language):
     state = simultaneous_ball_fixture()
     decision = pong.decide(state)
-    selected = plan(state,language=language,ids=order)
-    result = ask(explainer_for_plan(selected),state,question='为什么这样接球，一共能得几分？' if language=='zh' else 'Why choose this catch, and how many points can it earn?')
+    evidence = _catalog(pong, state, decision, [])
+    assert not any(key.startswith('arrival_payoff:') for key in evidence)
+    selected = plan(state, language=language, ids=('system:ai_reason',))
+    result = ask(explainer_for_plan(selected), state,
+                 question='Why did you choose this action?')
     assert result['status'] == 'answered'
-    assert decision['reason_'+language] in result['answer']
-    assert result['evidence_ids'] == list(order)
-    assert result['answer'].count('合计5分' if language=='zh' else '= 5 points') == 1
-    assert ('合计' if language=='zh' else 'points') not in decision['reason_'+language]
+    assert decision['reason_' + language] in result['answer']
+    assert 'plan' not in decision['reason_en']
 
 
 def test_current_pong_recorded_cases_reproduce_from_their_builder():
@@ -817,9 +803,10 @@ def test_current_pong_recorded_cases_reproduce_from_their_builder():
     assert len(recorded) == 80
 
 
-def kitchen_production_trajectory(target):
+def kitchen_production_trajectory(target, *, legacy=False):
     """Reproduce the production test's legal tomato-first inputs, no saved identity."""
-    kitchen = get_engine('kitchen')
+    from domains.kitchen import engine as historical_kitchen
+    kitchen = historical_kitchen if legacy else get_engine('kitchen')
     state = kitchen.initial_state(2000, 2)
     supplied = False
     while state['turn'] < target:
@@ -866,6 +853,7 @@ def test_kitchen_delivery_counterfactual_counts_real_completed_orders_independen
     kitchen = get_engine('kitchen')
     state = next(s for s in regular_trace() if s['human']['holding'] and s['human']['holding']['stage'] == 'plated'
                  and (kitchen._front(s['human']) or {}).get('id') == 'serve')
+    kitchen = engine_for_recorded_state(state)
     actions = ['wait','interact'] if wait_first else ['interact']
     selected = plan(state, language=language, intents=[{'kind':'counterfactual','subject':'human','purpose':'comparison',
         'evidence_ids':[],'actions':actions,'horizon':len(actions)}])
@@ -898,7 +886,8 @@ def test_actual_wait_reason_synonyms_render_once_without_question_keyword_bindin
     while state['turn'] < turn:
         state = module.step(state,module.human_advisor(state))
     decision = module.decide(state)
-    assert decision['action'] == 'wait'
+    if domain != 'pong':
+        assert decision['action'] == 'wait'
     selected = plan(state,language=language,ids=['system:ai_action','system:ai_reason'])
     result = explainer_for_plan(selected).answer(module,state,decision,'What were you trying to do and why?')
     assert result['status'] == 'answered'
@@ -945,14 +934,14 @@ def test_one_step_human_comparison_explains_visible_deadline_without_extending_w
     assert [s['steps_completed'] for s in result['audit']['simulations']] == [1,1]
     assert [s['raw_score_delta'] for s in result['audit']['simulations']] == [0,0]
     assert 's9' in result['answer']
-    assert ('waiting now would miss' if language=='en' else '如果先等待，就会错过') in result['answer']
+    assert ('physical reachability check' if language=='en' else '物理上能否赶到') in result['answer']
     assert ('This window shows no score advantage' if language=='en' else '在这个窗口内，两种选择没有得分优势') in result['answer']
 
 
 @pytest.mark.parametrize('language',['en','zh'])
 def test_old_kitchen_slot_event_uses_exact_metadata_in_historical_evidence_without_rewriting_history(language):
-    kitchen = get_engine('kitchen')
-    saved = kitchen_production_trajectory(15)
+    saved = kitchen_production_trajectory(15, legacy=True)
+    kitchen = engine_for_recorded_state(saved)
     index,event = next((i,event) for i,event in enumerate(saved['events']) if event['type']=='item_placed' and event.get('station')=='ai_raw')
     assert event['slot']==0
     event.update(en='AI put prepared tomato on two ingredient slots.',zh='AI放下了备好的番茄（双槽原料暂存台）。')
@@ -971,8 +960,8 @@ def test_old_kitchen_slot_event_uses_exact_metadata_in_historical_evidence_witho
 
 
 def test_historical_event_action_misclassification_requires_semantic_repair_not_validation_bypass():
-    kitchen=get_engine('kitchen')
-    earlier=kitchen_production_trajectory(15)
+    earlier=kitchen_production_trajectory(15, legacy=True)
+    kitchen=engine_for_recorded_state(earlier)
     current=kitchen.step(earlier,'wait')
     index=next(i for i,e in enumerate(earlier['events']) if e['type']=='item_placed' and e.get('station')=='ai_raw')
     bad=plan(current,intents=[{'kind':'facts','subject':'ai','purpose':'action',

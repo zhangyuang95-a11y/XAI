@@ -1,4 +1,4 @@
-> Historical first-pilot configuration (£3.00 flat). For new enrollments, see [performance rewards](performance_rewards.md): £2.80 base plus up to £0.60.
+> Historical first-pilot configuration (£3.00 flat). For later enrollments, see [performance rewards](performance_rewards.md): £3.00 base plus up to £0.60. The v6 pilot remains closed until all admission gates pass.
 
 # Prolific smoke-test deployment
 

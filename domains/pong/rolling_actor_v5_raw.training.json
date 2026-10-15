@@ -1,0 +1,7383 @@
+{
+  "bc_checkpoint_sha256": "b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba",
+  "candidate_program_audits": {
+    "251014": {
+      "ai": {
+        "action_fidelity": 0.9796875,
+        "mean_kl_divergence": 0.09319523738005672,
+        "passed": true,
+        "purpose": "explanation",
+        "sample_count": 1920
+      },
+      "human": {
+        "action_fidelity": 0.765625,
+        "mean_kl_divergence": 0.5242679042212391,
+        "passed": true,
+        "purpose": "training_feedback",
+        "sample_count": 1920
+      }
+    },
+    "251015": {
+      "ai": {
+        "action_fidelity": 0.93125,
+        "mean_kl_divergence": 0.18790144808352244,
+        "passed": false,
+        "purpose": "explanation",
+        "sample_count": 1920
+      },
+      "human": {
+        "action_fidelity": 0.8421875,
+        "mean_kl_divergence": 0.4285127634640971,
+        "passed": true,
+        "purpose": "training_feedback",
+        "sample_count": 1920
+      }
+    },
+    "251016": {
+      "ai": {
+        "action_fidelity": 0.9807291666666667,
+        "mean_kl_divergence": 0.09425670611560065,
+        "passed": true,
+        "purpose": "explanation",
+        "sample_count": 1920
+      },
+      "human": {
+        "action_fidelity": 0.8489583333333334,
+        "mean_kl_divergence": 0.3702861437394846,
+        "passed": true,
+        "purpose": "training_feedback",
+        "sample_count": 1920
+      }
+    }
+  },
+  "candidate_program_provenance": {
+    "251014": {
+      "ai": {
+        "source": "training_time_extraction",
+        "training_time_selected_actor_audit": {
+          "action_fidelity": 0.9796875,
+          "mean_kl_divergence": 0.09319523738005672,
+          "passed": true,
+          "purpose": "explanation",
+          "sample_count": 1920
+        }
+      },
+      "human": {
+        "post_training_refit": {
+          "feedback_to_actor": false,
+          "frozen_actor_weights_unchanged": true,
+          "selected_actor_development_audit": {
+            "action_fidelity": 0.765625,
+            "mean_kl_divergence": 0.5242679042212391,
+            "passed": true,
+            "purpose": "training_feedback",
+            "sample_count": 1920
+          },
+          "train_seeds": [
+            870100,
+            870101,
+            870102,
+            870103,
+            870104,
+            870105,
+            870106,
+            870107,
+            870108,
+            870109,
+            870110,
+            870111,
+            870112,
+            870113,
+            870114,
+            870115,
+            870116,
+            870117,
+            870118,
+            870119,
+            870120,
+            870121,
+            870122,
+            870123,
+            870124,
+            870125,
+            870126,
+            870127,
+            870128,
+            870129,
+            870130,
+            870131
+          ],
+          "train_state_count": 1536,
+          "validation_metrics": {
+            "action_fidelity": 0.8,
+            "action_regret": 0.1901889040305557,
+            "counterfactual_changed_pairs": 0,
+            "counterfactual_dataset_pairs": 0,
+            "counterfactual_delta_error": null,
+            "counterfactual_direction_fidelity": null,
+            "counterfactual_validation_pairs": 0,
+            "explanation_eligible": false,
+            "explanation_ineligibility_reasons": [
+              "overall_fidelity_below_explanation_threshold",
+              "program_fit_kl_above_explanation_threshold"
+            ],
+            "extractability_loss": 0.3023893795088248,
+            "extractability_score": 0.7390502378375844,
+            "extraction_time_seconds": 0.2732710409909487,
+            "feedback_eligible": true,
+            "feedback_ineligibility_reasons": [],
+            "feedback_weight": 0.01,
+            "group_action_fidelity": {
+              "ordinary": 0.8
+            },
+            "group_validation_samples": {
+              "ordinary": 480
+            },
+            "interaction_macro_fidelity": null,
+            "interaction_validation_samples": 0,
+            "mean_kl_divergence": 0.5077437725441242,
+            "program_depth": 5,
+            "program_leaf_count": 16,
+            "program_predicate_count": 13,
+            "program_size": 31,
+            "relational_predicate_count": 0,
+            "required_predicate_group_coverage": {},
+            "safety_property_violation_rate": 0.0,
+            "sample_count": 480,
+            "semantic_predicate_coverage_complete": true
+          },
+          "validation_seeds": [
+            870200,
+            870201,
+            870202,
+            870203,
+            870204,
+            870205,
+            870206,
+            870207
+          ],
+          "validation_state_count": 480
+        },
+        "source": "post_training_selected_actor_extraction",
+        "training_time_selected_actor_audit": {
+          "action_fidelity": 0.6942708333333333,
+          "mean_kl_divergence": 0.6174167808944355,
+          "passed": false,
+          "purpose": "training_feedback",
+          "sample_count": 1920
+        }
+      }
+    },
+    "251015": {
+      "ai": {
+        "source": "training_time_extraction",
+        "training_time_selected_actor_audit": {
+          "action_fidelity": 0.93125,
+          "mean_kl_divergence": 0.18790144808352244,
+          "passed": false,
+          "purpose": "explanation",
+          "sample_count": 1920
+        }
+      },
+      "human": {
+        "source": "training_time_extraction",
+        "training_time_selected_actor_audit": {
+          "action_fidelity": 0.8421875,
+          "mean_kl_divergence": 0.4285127634640971,
+          "passed": true,
+          "purpose": "training_feedback",
+          "sample_count": 1920
+        }
+      }
+    },
+    "251016": {
+      "ai": {
+        "source": "training_time_extraction",
+        "training_time_selected_actor_audit": {
+          "action_fidelity": 0.9807291666666667,
+          "mean_kl_divergence": 0.09425670611560065,
+          "passed": true,
+          "purpose": "explanation",
+          "sample_count": 1920
+        }
+      },
+      "human": {
+        "source": "training_time_extraction",
+        "training_time_selected_actor_audit": {
+          "action_fidelity": 0.8489583333333334,
+          "mean_kl_divergence": 0.3702861437394846,
+          "passed": true,
+          "purpose": "training_feedback",
+          "sample_count": 1920
+        }
+      }
+    }
+  },
+  "development_seeds": [
+    880100,
+    880101,
+    880102,
+    880103,
+    880104,
+    880105,
+    880106,
+    880107,
+    880108,
+    880109,
+    880110,
+    880111,
+    880112,
+    880113,
+    880114,
+    880115,
+    880116,
+    880117,
+    880118,
+    880119,
+    880120,
+    880121,
+    880122,
+    880123
+  ],
+  "development_tuning": {
+    "changed_at_utc": "2026-10-14T10:23:35Z",
+    "heldout_examined_before_change": false,
+    "initial_explanation_gate": {
+      "maximum_mean_kl": 0.1,
+      "minimum_action_fidelity": 0.9
+    },
+    "initial_feedback_gate": {
+      "maximum_mean_kl": 0.2,
+      "minimum_action_fidelity": 0.8
+    },
+    "observed_first_pair_program_metrics": {
+      "ai": {
+        "action_fidelity": 0.918,
+        "mean_kl": 0.2322167145793046
+      },
+      "human": {
+        "action_fidelity": 0.764,
+        "mean_kl": 0.5096878053799138
+      }
+    },
+    "reason": "The first development pair passed Pong task gates but both role programs failed the initial soft-distribution KL feedback gate, yielding zero regularization rows. The replacement feedback gate retains per-state NN/program action agreement; the AI explanation gate remains stricter.",
+    "revised_extraction_explanation_gate": {
+      "maximum_mean_kl": 0.25,
+      "minimum_action_fidelity": 0.9
+    },
+    "revised_feedback_gate": {
+      "maximum_mean_kl": 0.6,
+      "minimum_action_fidelity": 0.75
+    },
+    "selected_actor_explanation_gate": {
+      "maximum_mean_kl": 0.1,
+      "minimum_action_fidelity": 0.95,
+      "reason": "The explanation audit uses independent development states and the selected frozen Actor; its gate is stricter than the training-feedback and extraction-time gates.",
+      "set_at_utc": "2026-10-14T10:39:00Z"
+    }
+  },
+  "heldout": {
+    "passed": true,
+    "rows": [
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890000,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890001,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890002,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.25,
+        "score": 60.833333,
+        "seed": 890003,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 83.75,
+        "score": 55.833333,
+        "seed": 890004,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890005,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.75,
+        "score": 62.5,
+        "seed": 890006,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890007,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890008,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890009,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890010,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890011,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890012,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890013,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.25,
+        "score": 60.833333,
+        "seed": 890014,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890015,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 93.75,
+        "score": 62.5,
+        "seed": 890016,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 88.75,
+        "score": 59.166667,
+        "seed": 890017,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 88.75,
+        "score": 59.166667,
+        "seed": 890018,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890019,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890020,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.25,
+        "score": 60.833333,
+        "seed": 890021,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890022,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 88.75,
+        "score": 59.166667,
+        "seed": 890023,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890024,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890025,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890026,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 85.0,
+        "score": 56.666667,
+        "seed": 890027,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890028,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890029,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 100.0,
+        "score": 66.666667,
+        "seed": 890030,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 86.25,
+        "score": 57.5,
+        "seed": 890031,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890032,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890033,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890034,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 88.75,
+        "score": 59.166667,
+        "seed": 890035,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.25,
+        "score": 60.833333,
+        "seed": 890036,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 88.75,
+        "score": 59.166667,
+        "seed": 890037,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890038,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 85.0,
+        "score": 56.666667,
+        "seed": 890039,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.75,
+        "score": 62.5,
+        "seed": 890040,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890041,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890042,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 93.75,
+        "score": 62.5,
+        "seed": 890043,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890044,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.1,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890045,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 83.75,
+        "score": 55.833333,
+        "seed": 890046,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890047,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.75,
+        "score": 62.5,
+        "seed": 890048,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890049,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.25,
+        "score": 60.833333,
+        "seed": 890050,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890051,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 93.75,
+        "score": 62.5,
+        "seed": 890052,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 91.25,
+        "score": 60.833333,
+        "seed": 890053,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890054,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890055,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.1,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890056,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890057,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.75,
+        "score": 62.5,
+        "seed": 890058,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890059,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890060,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890061,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 83.75,
+        "score": 55.833333,
+        "seed": 890062,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890063,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 86.25,
+        "score": 57.5,
+        "seed": 890064,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890065,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890066,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 88.75,
+        "score": 59.166667,
+        "seed": 890067,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 93.75,
+        "score": 62.5,
+        "seed": 890068,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.75,
+        "score": 62.5,
+        "seed": 890069,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890070,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890071,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890072,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 91.25,
+        "score": 60.833333,
+        "seed": 890073,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 88.75,
+        "score": 59.166667,
+        "seed": 890074,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890075,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890076,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890077,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.25,
+        "score": 60.833333,
+        "seed": 890078,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890079,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890080,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890081,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 91.25,
+        "score": 60.833333,
+        "seed": 890082,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 91.25,
+        "score": 60.833333,
+        "seed": 890083,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.1,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890084,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 96.25,
+        "score": 64.166667,
+        "seed": 890085,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890086,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890087,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 88.75,
+        "score": 59.166667,
+        "seed": 890088,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890089,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.75,
+        "score": 62.5,
+        "seed": 890090,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.75,
+        "score": 62.5,
+        "seed": 890091,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890092,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890093,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890094,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 88.75,
+        "score": 59.166667,
+        "seed": 890095,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890096,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.1,
+        "capacity_percent": 93.75,
+        "score": 62.5,
+        "seed": 890097,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.1,
+        "capacity_percent": 88.75,
+        "score": 59.166667,
+        "seed": 890098,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890099,
+        "task": 1
+      },
+      {
+        "ai_wait_rate": 0.011111111111111112,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890000,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890001,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.011111111111111112,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890002,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.1111111111111111,
+        "capacity_percent": 95.83333333333333,
+        "score": 63.888889,
+        "seed": 890003,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.08888888888888889,
+        "capacity_percent": 96.66666666666667,
+        "score": 64.444444,
+        "seed": 890004,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890005,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890006,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890007,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890008,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890009,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890010,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.011111111111111112,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890011,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890012,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890013,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890014,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890015,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890016,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 95.83333333333333,
+        "score": 63.888889,
+        "seed": 890017,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890018,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890019,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 85.83333333333333,
+        "score": 57.222222,
+        "seed": 890020,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 89.16666666666667,
+        "score": 59.444444,
+        "seed": 890021,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890022,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890023,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890024,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890025,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890026,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890027,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 89.16666666666667,
+        "score": 59.444444,
+        "seed": 890028,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890029,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890030,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 88.33333333333333,
+        "score": 58.888889,
+        "seed": 890031,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890032,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890033,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.08888888888888889,
+        "capacity_percent": 89.16666666666667,
+        "score": 59.444444,
+        "seed": 890034,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890035,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 88.33333333333333,
+        "score": 58.888889,
+        "seed": 890036,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890037,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890038,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890039,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890040,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 89.16666666666667,
+        "score": 59.444444,
+        "seed": 890041,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.011111111111111112,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890042,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890043,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 97.5,
+        "score": 65.0,
+        "seed": 890044,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890045,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 95.83333333333333,
+        "score": 63.888889,
+        "seed": 890046,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890047,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890048,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 88.33333333333333,
+        "score": 58.888889,
+        "seed": 890049,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.66666666666667,
+        "score": 64.444444,
+        "seed": 890050,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.011111111111111112,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890051,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890052,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 88.33333333333333,
+        "score": 58.888889,
+        "seed": 890053,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 95.83333333333333,
+        "score": 63.888889,
+        "seed": 890054,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890055,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890056,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890057,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.011111111111111112,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890058,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890059,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 89.16666666666667,
+        "score": 59.444444,
+        "seed": 890060,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890061,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 89.16666666666667,
+        "score": 59.444444,
+        "seed": 890062,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890063,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890064,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890065,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.66666666666667,
+        "score": 64.444444,
+        "seed": 890066,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890067,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890068,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890069,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890070,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 86.66666666666667,
+        "score": 57.777778,
+        "seed": 890071,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890072,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890073,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890074,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 89.16666666666667,
+        "score": 59.444444,
+        "seed": 890075,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890076,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890077,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 89.16666666666667,
+        "score": 59.444444,
+        "seed": 890078,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890079,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890080,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890081,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.66666666666667,
+        "score": 64.444444,
+        "seed": 890082,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 95.83333333333333,
+        "score": 63.888889,
+        "seed": 890083,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890084,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 97.5,
+        "score": 65.0,
+        "seed": 890085,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890086,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890087,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.011111111111111112,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890088,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 85.0,
+        "score": 56.666667,
+        "seed": 890089,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890090,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 95.83333333333333,
+        "score": 63.888889,
+        "seed": 890091,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890092,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890093,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890094,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890095,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890096,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890097,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890098,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890099,
+        "task": 2
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890000,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 85.83333333333333,
+        "score": 57.222222,
+        "seed": 890001,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890002,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890003,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890004,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 85.83333333333333,
+        "score": 57.222222,
+        "seed": 890005,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890006,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890007,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890008,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890009,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890010,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.011111111111111112,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890011,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890012,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890013,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890014,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890015,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890016,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.05555555555555555,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890017,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890018,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 86.66666666666667,
+        "score": 57.777778,
+        "seed": 890019,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890020,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 86.66666666666667,
+        "score": 57.777778,
+        "seed": 890021,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 89.16666666666667,
+        "score": 59.444444,
+        "seed": 890022,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 89.16666666666667,
+        "score": 59.444444,
+        "seed": 890023,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890024,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890025,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890026,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890027,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890028,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890029,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 95.83333333333333,
+        "score": 63.888889,
+        "seed": 890030,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890031,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890032,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890033,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890034,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890035,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890036,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890037,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890038,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890039,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890040,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890041,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.011111111111111112,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890042,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890043,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890044,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 89.16666666666667,
+        "score": 59.444444,
+        "seed": 890045,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890046,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 88.33333333333333,
+        "score": 58.888889,
+        "seed": 890047,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890048,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890049,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890050,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890051,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890052,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890053,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890054,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890055,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890056,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.03333333333333333,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890057,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890058,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890059,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890060,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890061,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890062,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 87.5,
+        "score": 58.333333,
+        "seed": 890063,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890064,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890065,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.06666666666666667,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890066,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890067,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890068,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 86.66666666666667,
+        "score": 57.777778,
+        "seed": 890069,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890070,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890071,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890072,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890073,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 85.83333333333333,
+        "score": 57.222222,
+        "seed": 890074,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890075,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890076,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890077,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890078,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890079,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 90.0,
+        "score": 60.0,
+        "seed": 890080,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890081,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890082,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.66666666666667,
+        "score": 64.444444,
+        "seed": 890083,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890084,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.044444444444444446,
+        "capacity_percent": 89.16666666666667,
+        "score": 59.444444,
+        "seed": 890085,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890086,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 90.83333333333333,
+        "score": 60.555556,
+        "seed": 890087,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890088,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 94.16666666666667,
+        "score": 62.777778,
+        "seed": 890089,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 93.33333333333333,
+        "score": 62.222222,
+        "seed": 890090,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 96.66666666666667,
+        "score": 64.444444,
+        "seed": 890091,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890092,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890093,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890094,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 95.83333333333333,
+        "score": 63.888889,
+        "seed": 890095,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890096,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 92.5,
+        "score": 61.666667,
+        "seed": 890097,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.022222222222222223,
+        "capacity_percent": 95.0,
+        "score": 63.333333,
+        "seed": 890098,
+        "task": 3
+      },
+      {
+        "ai_wait_rate": 0.0,
+        "capacity_percent": 91.66666666666667,
+        "score": 61.111111,
+        "seed": 890099,
+        "task": 3
+      }
+    ],
+    "summaries": [
+      {
+        "max_ai_wait_rate": 0.1,
+        "mean_ai_wait_rate": 0.02066666666666667,
+        "mean_capacity_percent": 91.9125,
+        "min_capacity_percent": 83.75,
+        "task": 1
+      },
+      {
+        "max_ai_wait_rate": 0.1111111111111111,
+        "mean_ai_wait_rate": 0.018222222222222223,
+        "mean_capacity_percent": 92.18333333333334,
+        "min_capacity_percent": 85.0,
+        "task": 2
+      },
+      {
+        "max_ai_wait_rate": 0.06666666666666667,
+        "mean_ai_wait_rate": 0.012222222222222223,
+        "mean_capacity_percent": 91.94166666666666,
+        "min_capacity_percent": 85.83333333333333,
+        "task": 3
+      }
+    ]
+  },
+  "heldout_seeds": [
+    890000,
+    890001,
+    890002,
+    890003,
+    890004,
+    890005,
+    890006,
+    890007,
+    890008,
+    890009,
+    890010,
+    890011,
+    890012,
+    890013,
+    890014,
+    890015,
+    890016,
+    890017,
+    890018,
+    890019,
+    890020,
+    890021,
+    890022,
+    890023,
+    890024,
+    890025,
+    890026,
+    890027,
+    890028,
+    890029,
+    890030,
+    890031,
+    890032,
+    890033,
+    890034,
+    890035,
+    890036,
+    890037,
+    890038,
+    890039,
+    890040,
+    890041,
+    890042,
+    890043,
+    890044,
+    890045,
+    890046,
+    890047,
+    890048,
+    890049,
+    890050,
+    890051,
+    890052,
+    890053,
+    890054,
+    890055,
+    890056,
+    890057,
+    890058,
+    890059,
+    890060,
+    890061,
+    890062,
+    890063,
+    890064,
+    890065,
+    890066,
+    890067,
+    890068,
+    890069,
+    890070,
+    890071,
+    890072,
+    890073,
+    890074,
+    890075,
+    890076,
+    890077,
+    890078,
+    890079,
+    890080,
+    890081,
+    890082,
+    890083,
+    890084,
+    890085,
+    890086,
+    890087,
+    890088,
+    890089,
+    890090,
+    890091,
+    890092,
+    890093,
+    890094,
+    890095,
+    890096,
+    890097,
+    890098,
+    890099
+  ],
+  "pair_seeds": [
+    251014,
+    251015,
+    251016
+  ],
+  "paired_runs": [
+    {
+      "action_override_count": 0,
+      "actor_weight_change_l2": {
+        "ai": 0.10162388353995266,
+        "human": 0.14333654385032485
+      },
+      "batch_seeds": 8,
+      "bc_checkpoint_path": "output/pong_rolling_nn/pre_self_play.pt",
+      "bc_checkpoint_sha256": "b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba",
+      "checkpoint_path": "output/pong_rolling_v5/pair_251014_raw.pt",
+      "checkpoint_sha256": "23cf39e4c123a72d279efe75a37a4d99c3bf5afc5633f18a6352530c72a129e8",
+      "development": {
+        "passed": true,
+        "rows": [
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.75,
+            "score": 59.166667,
+            "seed": 880100,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880101,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880102,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880103,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880104,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880105,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.06666666666666667,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880106,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.75,
+            "score": 59.166667,
+            "seed": 880107,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 96.25,
+            "score": 64.166667,
+            "seed": 880108,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.25,
+            "score": 60.833333,
+            "seed": 880109,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.75,
+            "score": 62.5,
+            "seed": 880110,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.75,
+            "score": 62.5,
+            "seed": 880111,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880112,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 86.25,
+            "score": 57.5,
+            "seed": 880113,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.75,
+            "score": 59.166667,
+            "seed": 880114,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.03333333333333333,
+            "capacity_percent": 91.25,
+            "score": 60.833333,
+            "seed": 880115,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.75,
+            "score": 62.5,
+            "seed": 880116,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.25,
+            "score": 60.833333,
+            "seed": 880117,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880118,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880119,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880120,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.75,
+            "score": 62.5,
+            "seed": 880121,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880122,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.03333333333333333,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880123,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880100,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880101,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.83333333333333,
+            "score": 63.888889,
+            "seed": 880102,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880103,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880104,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.011111111111111112,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880105,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880106,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880107,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880108,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880109,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.83333333333333,
+            "score": 63.888889,
+            "seed": 880110,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880111,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880112,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880113,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880114,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.044444444444444446,
+            "capacity_percent": 82.5,
+            "score": 55.0,
+            "seed": 880115,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880116,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.83333333333333,
+            "score": 63.888889,
+            "seed": 880117,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 89.16666666666667,
+            "score": 59.444444,
+            "seed": 880118,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880119,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880120,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880121,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880122,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 86.66666666666667,
+            "score": 57.777778,
+            "seed": 880123,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880100,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880101,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880102,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880103,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.33333333333333,
+            "score": 58.888889,
+            "seed": 880104,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880105,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880106,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880107,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880108,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 88.33333333333333,
+            "score": 58.888889,
+            "seed": 880109,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880110,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880111,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 89.16666666666667,
+            "score": 59.444444,
+            "seed": 880112,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880113,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.33333333333333,
+            "score": 58.888889,
+            "seed": 880114,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880115,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 89.16666666666667,
+            "score": 59.444444,
+            "seed": 880116,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880117,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880118,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880119,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880120,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880121,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.83333333333333,
+            "score": 63.888889,
+            "seed": 880122,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880123,
+            "task": 3
+          }
+        ],
+        "summaries": [
+          {
+            "max_ai_wait_rate": 0.06666666666666667,
+            "mean_ai_wait_rate": 0.005555555555555556,
+            "mean_capacity_percent": 91.5625,
+            "min_capacity_percent": 86.25,
+            "task": 1
+          },
+          {
+            "max_ai_wait_rate": 0.044444444444444446,
+            "mean_ai_wait_rate": 0.006018518518518519,
+            "mean_capacity_percent": 92.1875,
+            "min_capacity_percent": 82.5,
+            "task": 2
+          },
+          {
+            "max_ai_wait_rate": 0.022222222222222223,
+            "mean_ai_wait_rate": 0.00462962962962963,
+            "mean_capacity_percent": 91.5625,
+            "min_capacity_percent": 88.33333333333333,
+            "task": 3
+          }
+        ]
+      },
+      "extraction_history": {
+        "ai": [],
+        "human": []
+      },
+      "feedback_weighted_rows": {
+        "ai": 0.0,
+        "human": 0.0
+      },
+      "initial_actor_sha256": {
+        "ai": "b91653f579e579da56980ae3de3c2676bbd9ea02e6c90bbc31b71f6e88b48683",
+        "human": "ca43e746f64d5bd48d769904659b465d766de578fcfb1e0eba5bd8daaf697a65"
+      },
+      "joint_steps": 200000,
+      "neural_actions": 400000,
+      "pair_index": 0,
+      "pair_seed": 251014,
+      "post_policy_override_count": 0,
+      "program_feedback_rows": {
+        "ai": 0,
+        "human": 0
+      },
+      "seed_schedule": [
+        [
+          810000,
+          810001,
+          810002,
+          810003,
+          810004,
+          810005,
+          810006,
+          810007
+        ],
+        [
+          810008,
+          810009,
+          810010,
+          810011,
+          810012,
+          810013,
+          810014,
+          810015
+        ],
+        [
+          810016,
+          810017,
+          810018,
+          810019,
+          810020,
+          810021,
+          810022,
+          810023
+        ],
+        [
+          810024,
+          810025,
+          810026,
+          810027,
+          810028,
+          810029,
+          810030,
+          810031
+        ],
+        [
+          810032,
+          810033,
+          810034,
+          810035,
+          810036,
+          810037,
+          810038,
+          810039
+        ],
+        [
+          810040,
+          810041,
+          810042,
+          810043,
+          810044,
+          810045,
+          810046,
+          810047
+        ],
+        [
+          810048,
+          810049,
+          810050,
+          810051,
+          810052,
+          810053,
+          810054,
+          810055
+        ],
+        [
+          810056,
+          810057,
+          810058,
+          810059,
+          810060,
+          810061,
+          810062,
+          810063
+        ],
+        [
+          810064,
+          810065,
+          810066,
+          810067,
+          810068,
+          810069,
+          810070,
+          810071
+        ],
+        [
+          810072,
+          810073,
+          810074,
+          810075,
+          810076,
+          810077,
+          810078,
+          810079
+        ],
+        [
+          810080,
+          810081,
+          810082,
+          810083,
+          810084,
+          810085,
+          810086,
+          810087
+        ],
+        [
+          810088,
+          810089,
+          810090,
+          810091,
+          810092,
+          810093,
+          810094,
+          810095
+        ],
+        [
+          810096,
+          810097,
+          810098,
+          810099,
+          810100,
+          810101,
+          810102,
+          810103
+        ],
+        [
+          810104,
+          810105,
+          810106,
+          810107,
+          810108,
+          810109,
+          810110,
+          810111
+        ],
+        [
+          810112,
+          810113,
+          810114,
+          810115,
+          810116,
+          810117,
+          810118,
+          810119
+        ],
+        [
+          810120,
+          810121,
+          810122,
+          810123,
+          810124,
+          810125,
+          810126,
+          810127
+        ],
+        [
+          810128,
+          810129,
+          810130,
+          810131,
+          810132,
+          810133,
+          810134,
+          810135
+        ],
+        [
+          810136,
+          810137,
+          810138,
+          810139,
+          810140,
+          810141,
+          810142,
+          810143
+        ],
+        [
+          810144,
+          810145,
+          810146,
+          810147,
+          810148,
+          810149,
+          810150,
+          810151
+        ],
+        [
+          810152,
+          810153,
+          810154,
+          810155,
+          810156,
+          810157,
+          810158,
+          810159
+        ],
+        [
+          810160,
+          810161,
+          810162,
+          810163,
+          810164,
+          810165,
+          810166,
+          810167
+        ],
+        [
+          810168,
+          810169,
+          810170,
+          810171,
+          810172,
+          810173,
+          810174,
+          810175
+        ],
+        [
+          810176,
+          810177,
+          810178,
+          810179,
+          810180,
+          810181,
+          810182,
+          810183
+        ],
+        [
+          810184,
+          810185,
+          810186,
+          810187,
+          810188,
+          810189,
+          810190,
+          810191
+        ],
+        [
+          810192,
+          810193,
+          810194,
+          810195,
+          810196,
+          810197,
+          810198,
+          810199
+        ],
+        [
+          810200,
+          810201,
+          810202,
+          810203,
+          810204,
+          810205,
+          810206,
+          810207
+        ],
+        [
+          810208,
+          810209,
+          810210,
+          810211,
+          810212,
+          810213,
+          810214,
+          810215
+        ],
+        [
+          810216,
+          810217,
+          810218,
+          810219,
+          810220,
+          810221,
+          810222,
+          810223
+        ],
+        [
+          810224,
+          810225,
+          810226,
+          810227,
+          810228,
+          810229,
+          810230,
+          810231
+        ],
+        [
+          810232,
+          810233,
+          810234,
+          810235,
+          810236,
+          810237,
+          810238,
+          810239
+        ],
+        [
+          810240,
+          810241,
+          810242,
+          810243,
+          810244,
+          810245,
+          810246,
+          810247
+        ],
+        [
+          810248,
+          810249,
+          810250,
+          810251,
+          810252,
+          810253,
+          810254,
+          810255
+        ],
+        [
+          810256,
+          810257,
+          810258,
+          810259,
+          810260,
+          810261,
+          810262,
+          810263
+        ],
+        [
+          810264,
+          810265,
+          810266,
+          810267,
+          810268,
+          810269,
+          810270,
+          810271
+        ],
+        [
+          810272,
+          810273,
+          810274,
+          810275,
+          810276,
+          810277,
+          810278,
+          810279
+        ],
+        [
+          810280,
+          810281,
+          810282,
+          810283,
+          810284,
+          810285,
+          810286,
+          810287
+        ],
+        [
+          810288,
+          810289,
+          810290,
+          810291,
+          810292,
+          810293,
+          810294,
+          810295
+        ],
+        [
+          810296,
+          810297,
+          810298,
+          810299,
+          810300,
+          810301,
+          810302,
+          810303
+        ],
+        [
+          810304,
+          810305,
+          810306,
+          810307,
+          810308,
+          810309,
+          810310,
+          810311
+        ],
+        [
+          810312,
+          810313,
+          810314,
+          810315,
+          810316,
+          810317,
+          810318,
+          810319
+        ],
+        [
+          810320,
+          810321,
+          810322,
+          810323,
+          810324,
+          810325,
+          810326,
+          810327
+        ],
+        [
+          810328,
+          810329,
+          810330,
+          810331,
+          810332,
+          810333,
+          810334,
+          810335
+        ],
+        [
+          810336,
+          810337,
+          810338,
+          810339,
+          810340,
+          810341,
+          810342,
+          810343
+        ],
+        [
+          810344,
+          810345,
+          810346,
+          810347,
+          810348,
+          810349,
+          810350,
+          810351
+        ],
+        [
+          810352,
+          810353,
+          810354,
+          810355,
+          810356,
+          810357,
+          810358,
+          810359
+        ],
+        [
+          810360,
+          810361,
+          810362,
+          810363,
+          810364,
+          810365,
+          810366,
+          810367
+        ],
+        [
+          810368,
+          810369,
+          810370,
+          810371,
+          810372,
+          810373,
+          810374,
+          810375
+        ],
+        [
+          810376,
+          810377,
+          810378,
+          810379,
+          810380,
+          810381,
+          810382,
+          810383
+        ],
+        [
+          810384,
+          810385,
+          810386,
+          810387,
+          810388,
+          810389,
+          810390,
+          810391
+        ],
+        [
+          810392,
+          810393,
+          810394,
+          810395,
+          810396,
+          810397,
+          810398,
+          810399
+        ],
+        [
+          810400,
+          810401,
+          810402,
+          810403,
+          810404,
+          810405,
+          810406,
+          810407
+        ],
+        [
+          810408,
+          810409,
+          810410,
+          810411,
+          810412,
+          810413,
+          810414,
+          810415
+        ],
+        [
+          810416,
+          810417,
+          810418,
+          810419,
+          810420,
+          810421,
+          810422,
+          810423
+        ],
+        [
+          810424,
+          810425,
+          810426,
+          810427,
+          810428,
+          810429,
+          810430,
+          810431
+        ],
+        [
+          810432,
+          810433,
+          810434,
+          810435,
+          810436,
+          810437,
+          810438,
+          810439
+        ],
+        [
+          810440,
+          810441,
+          810442,
+          810443,
+          810444,
+          810445,
+          810446,
+          810447
+        ],
+        [
+          810448,
+          810449,
+          810450,
+          810451,
+          810452,
+          810453,
+          810454,
+          810455
+        ],
+        [
+          810456,
+          810457,
+          810458,
+          810459,
+          810460,
+          810461,
+          810462,
+          810463
+        ],
+        [
+          810464,
+          810465,
+          810466,
+          810467,
+          810468,
+          810469,
+          810470,
+          810471
+        ],
+        [
+          810472,
+          810473,
+          810474,
+          810475,
+          810476,
+          810477,
+          810478,
+          810479
+        ],
+        [
+          810480,
+          810481,
+          810482,
+          810483,
+          810484,
+          810485,
+          810486,
+          810487
+        ],
+        [
+          810488,
+          810489,
+          810490,
+          810491,
+          810492,
+          810493,
+          810494,
+          810495
+        ],
+        [
+          810496,
+          810497,
+          810498,
+          810499,
+          810500,
+          810501,
+          810502,
+          810503
+        ],
+        [
+          810504,
+          810505,
+          810506,
+          810507,
+          810508,
+          810509,
+          810510,
+          810511
+        ],
+        [
+          810512,
+          810513,
+          810514,
+          810515,
+          810516,
+          810517,
+          810518,
+          810519
+        ],
+        [
+          810520,
+          810521,
+          810522,
+          810523,
+          810524,
+          810525,
+          810526,
+          810527
+        ],
+        [
+          810528,
+          810529,
+          810530,
+          810531,
+          810532,
+          810533,
+          810534,
+          810535
+        ],
+        [
+          810536,
+          810537,
+          810538,
+          810539,
+          810540,
+          810541,
+          810542,
+          810543
+        ],
+        [
+          810544,
+          810545,
+          810546,
+          810547,
+          810548,
+          810549,
+          810550,
+          810551
+        ],
+        [
+          810552,
+          810553,
+          810554,
+          810555,
+          810556,
+          810557,
+          810558,
+          810559
+        ],
+        [
+          810560,
+          810561,
+          810562,
+          810563,
+          810564,
+          810565,
+          810566,
+          810567
+        ],
+        [
+          810568,
+          810569,
+          810570,
+          810571,
+          810572,
+          810573,
+          810574,
+          810575
+        ],
+        [
+          810576,
+          810577,
+          810578,
+          810579,
+          810580,
+          810581,
+          810582,
+          810583
+        ],
+        [
+          810584,
+          810585,
+          810586,
+          810587,
+          810588,
+          810589,
+          810590,
+          810591
+        ],
+        [
+          810592,
+          810593,
+          810594,
+          810595,
+          810596,
+          810597,
+          810598,
+          810599
+        ],
+        [
+          810600,
+          810601,
+          810602,
+          810603,
+          810604,
+          810605,
+          810606,
+          810607
+        ],
+        [
+          810608,
+          810609,
+          810610,
+          810611,
+          810612,
+          810613,
+          810614,
+          810615
+        ],
+        [
+          810616,
+          810617,
+          810618,
+          810619,
+          810620,
+          810621,
+          810622,
+          810623
+        ],
+        [
+          810624,
+          810625,
+          810626,
+          810627,
+          810628,
+          810629,
+          810630,
+          810631
+        ],
+        [
+          810632,
+          810633,
+          810634,
+          810635,
+          810636,
+          810637,
+          810638,
+          810639
+        ],
+        [
+          810640,
+          810641,
+          810642,
+          810643,
+          810644,
+          810645,
+          810646,
+          810647
+        ],
+        [
+          810648,
+          810649,
+          810650,
+          810651,
+          810652,
+          810653,
+          810654,
+          810655
+        ],
+        [
+          810656,
+          810657,
+          810658,
+          810659,
+          810660,
+          810661,
+          810662,
+          810663
+        ],
+        [
+          810664,
+          810665,
+          810666,
+          810667,
+          810668,
+          810669,
+          810670,
+          810671
+        ],
+        [
+          810672,
+          810673,
+          810674,
+          810675,
+          810676,
+          810677,
+          810678,
+          810679
+        ],
+        [
+          810680,
+          810681,
+          810682,
+          810683,
+          810684,
+          810685,
+          810686,
+          810687
+        ],
+        [
+          810688,
+          810689,
+          810690,
+          810691,
+          810692,
+          810693,
+          810694,
+          810695
+        ],
+        [
+          810696,
+          810697,
+          810698,
+          810699,
+          810700,
+          810701,
+          810702,
+          810703
+        ],
+        [
+          810704,
+          810705,
+          810706,
+          810707,
+          810708,
+          810709,
+          810710,
+          810711
+        ],
+        [
+          810712,
+          810713,
+          810714,
+          810715,
+          810716,
+          810717,
+          810718,
+          810719
+        ],
+        [
+          810720,
+          810721,
+          810722,
+          810723,
+          810724,
+          810725,
+          810726,
+          810727
+        ],
+        [
+          810728,
+          810729,
+          810730,
+          810731,
+          810732,
+          810733,
+          810734,
+          810735
+        ],
+        [
+          810736,
+          810737,
+          810738,
+          810739,
+          810740,
+          810741,
+          810742,
+          810743
+        ],
+        [
+          810744,
+          810745,
+          810746,
+          810747,
+          810748,
+          810749,
+          810750,
+          810751
+        ],
+        [
+          810752,
+          810753,
+          810754,
+          810755,
+          810756,
+          810757,
+          810758,
+          810759
+        ],
+        [
+          810760,
+          810761,
+          810762,
+          810763,
+          810764,
+          810765,
+          810766,
+          810767
+        ],
+        [
+          810768,
+          810769,
+          810770,
+          810771,
+          810772,
+          810773,
+          810774,
+          810775
+        ],
+        [
+          810776,
+          810777,
+          810778,
+          810779,
+          810780,
+          810781,
+          810782,
+          810783
+        ],
+        [
+          810784,
+          810785,
+          810786,
+          810787,
+          810788,
+          810789,
+          810790,
+          810791
+        ],
+        [
+          810792,
+          810793,
+          810794,
+          810795,
+          810796,
+          810797,
+          810798,
+          810799
+        ],
+        [
+          810800,
+          810801,
+          810802,
+          810803,
+          810804,
+          810805,
+          810806,
+          810807
+        ],
+        [
+          810808,
+          810809,
+          810810,
+          810811,
+          810812,
+          810813,
+          810814,
+          810815
+        ],
+        [
+          810816,
+          810817,
+          810818,
+          810819,
+          810820,
+          810821,
+          810822,
+          810823
+        ],
+        [
+          810824,
+          810825,
+          810826,
+          810827,
+          810828,
+          810829,
+          810830,
+          810831
+        ],
+        [
+          810832,
+          810833,
+          810834,
+          810835,
+          810836,
+          810837,
+          810838,
+          810839
+        ]
+      ],
+      "seed_schedule_sha256": "9c96e867333767a1aaa30400de937ec49e5bd68d940d8ff1524569c299eb9ddd",
+      "selected_checkpoint_steps": 101760,
+      "selected_program_metrics": {},
+      "variant": "raw"
+    },
+    {
+      "action_override_count": 0,
+      "actor_weight_change_l2": {
+        "ai": 0.0994691120579139,
+        "human": 0.09305757043773516
+      },
+      "batch_seeds": 8,
+      "bc_checkpoint_path": "output/pong_rolling_nn/pre_self_play.pt",
+      "bc_checkpoint_sha256": "b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba",
+      "checkpoint_path": "output/pong_rolling_v5/pair_251015_raw.pt",
+      "checkpoint_sha256": "2a802c066cd61713eccb4fc79c4b9fcbfd90f6560c47927ec262b70c0c0c7f1b",
+      "development": {
+        "passed": true,
+        "rows": [
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.75,
+            "score": 59.166667,
+            "seed": 880100,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880101,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880102,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880103,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880104,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880105,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.06666666666666667,
+            "capacity_percent": 88.75,
+            "score": 59.166667,
+            "seed": 880106,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.75,
+            "score": 59.166667,
+            "seed": 880107,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 96.25,
+            "score": 64.166667,
+            "seed": 880108,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.25,
+            "score": 60.833333,
+            "seed": 880109,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.75,
+            "score": 62.5,
+            "seed": 880110,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.03333333333333333,
+            "capacity_percent": 96.25,
+            "score": 64.166667,
+            "seed": 880111,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880112,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.75,
+            "score": 59.166667,
+            "seed": 880113,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.75,
+            "score": 59.166667,
+            "seed": 880114,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.03333333333333333,
+            "capacity_percent": 91.25,
+            "score": 60.833333,
+            "seed": 880115,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.75,
+            "score": 62.5,
+            "seed": 880116,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.25,
+            "score": 60.833333,
+            "seed": 880117,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880118,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880119,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880120,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.75,
+            "score": 62.5,
+            "seed": 880121,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880122,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.03333333333333333,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880123,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.044444444444444446,
+            "capacity_percent": 96.66666666666667,
+            "score": 64.444444,
+            "seed": 880100,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880101,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.83333333333333,
+            "score": 63.888889,
+            "seed": 880102,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880103,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880104,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.011111111111111112,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880105,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 89.16666666666667,
+            "score": 59.444444,
+            "seed": 880106,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880107,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880108,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.044444444444444446,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880109,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880110,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880111,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.33333333333333,
+            "score": 58.888889,
+            "seed": 880112,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880113,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880114,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 82.5,
+            "score": 55.0,
+            "seed": 880115,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880116,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.83333333333333,
+            "score": 63.888889,
+            "seed": 880117,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 89.16666666666667,
+            "score": 59.444444,
+            "seed": 880118,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880119,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 89.16666666666667,
+            "score": 59.444444,
+            "seed": 880120,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880121,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880122,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.044444444444444446,
+            "capacity_percent": 88.33333333333333,
+            "score": 58.888889,
+            "seed": 880123,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880100,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.33333333333333,
+            "score": 58.888889,
+            "seed": 880101,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880102,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880103,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.044444444444444446,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880104,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880105,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880106,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880107,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880108,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 85.83333333333333,
+            "score": 57.222222,
+            "seed": 880109,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880110,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880111,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880112,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880113,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.33333333333333,
+            "score": 58.888889,
+            "seed": 880114,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880115,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880116,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880117,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880118,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880119,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880120,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880121,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.83333333333333,
+            "score": 63.888889,
+            "seed": 880122,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880123,
+            "task": 3
+          }
+        ],
+        "summaries": [
+          {
+            "max_ai_wait_rate": 0.06666666666666667,
+            "mean_ai_wait_rate": 0.006944444444444444,
+            "mean_capacity_percent": 91.71875,
+            "min_capacity_percent": 88.75,
+            "task": 1
+          },
+          {
+            "max_ai_wait_rate": 0.044444444444444446,
+            "mean_ai_wait_rate": 0.011574074074074075,
+            "mean_capacity_percent": 91.94444444444444,
+            "min_capacity_percent": 82.5,
+            "task": 2
+          },
+          {
+            "max_ai_wait_rate": 0.044444444444444446,
+            "mean_ai_wait_rate": 0.006481481481481481,
+            "mean_capacity_percent": 91.45833333333333,
+            "min_capacity_percent": 85.83333333333333,
+            "task": 3
+          }
+        ]
+      },
+      "extraction_history": {
+        "ai": [],
+        "human": []
+      },
+      "feedback_weighted_rows": {
+        "ai": 0.0,
+        "human": 0.0
+      },
+      "initial_actor_sha256": {
+        "ai": "b91653f579e579da56980ae3de3c2676bbd9ea02e6c90bbc31b71f6e88b48683",
+        "human": "ca43e746f64d5bd48d769904659b465d766de578fcfb1e0eba5bd8daaf697a65"
+      },
+      "joint_steps": 200000,
+      "neural_actions": 400000,
+      "pair_index": 1,
+      "pair_seed": 251015,
+      "post_policy_override_count": 0,
+      "program_feedback_rows": {
+        "ai": 0,
+        "human": 0
+      },
+      "seed_schedule": [
+        [
+          820000,
+          820001,
+          820002,
+          820003,
+          820004,
+          820005,
+          820006,
+          820007
+        ],
+        [
+          820008,
+          820009,
+          820010,
+          820011,
+          820012,
+          820013,
+          820014,
+          820015
+        ],
+        [
+          820016,
+          820017,
+          820018,
+          820019,
+          820020,
+          820021,
+          820022,
+          820023
+        ],
+        [
+          820024,
+          820025,
+          820026,
+          820027,
+          820028,
+          820029,
+          820030,
+          820031
+        ],
+        [
+          820032,
+          820033,
+          820034,
+          820035,
+          820036,
+          820037,
+          820038,
+          820039
+        ],
+        [
+          820040,
+          820041,
+          820042,
+          820043,
+          820044,
+          820045,
+          820046,
+          820047
+        ],
+        [
+          820048,
+          820049,
+          820050,
+          820051,
+          820052,
+          820053,
+          820054,
+          820055
+        ],
+        [
+          820056,
+          820057,
+          820058,
+          820059,
+          820060,
+          820061,
+          820062,
+          820063
+        ],
+        [
+          820064,
+          820065,
+          820066,
+          820067,
+          820068,
+          820069,
+          820070,
+          820071
+        ],
+        [
+          820072,
+          820073,
+          820074,
+          820075,
+          820076,
+          820077,
+          820078,
+          820079
+        ],
+        [
+          820080,
+          820081,
+          820082,
+          820083,
+          820084,
+          820085,
+          820086,
+          820087
+        ],
+        [
+          820088,
+          820089,
+          820090,
+          820091,
+          820092,
+          820093,
+          820094,
+          820095
+        ],
+        [
+          820096,
+          820097,
+          820098,
+          820099,
+          820100,
+          820101,
+          820102,
+          820103
+        ],
+        [
+          820104,
+          820105,
+          820106,
+          820107,
+          820108,
+          820109,
+          820110,
+          820111
+        ],
+        [
+          820112,
+          820113,
+          820114,
+          820115,
+          820116,
+          820117,
+          820118,
+          820119
+        ],
+        [
+          820120,
+          820121,
+          820122,
+          820123,
+          820124,
+          820125,
+          820126,
+          820127
+        ],
+        [
+          820128,
+          820129,
+          820130,
+          820131,
+          820132,
+          820133,
+          820134,
+          820135
+        ],
+        [
+          820136,
+          820137,
+          820138,
+          820139,
+          820140,
+          820141,
+          820142,
+          820143
+        ],
+        [
+          820144,
+          820145,
+          820146,
+          820147,
+          820148,
+          820149,
+          820150,
+          820151
+        ],
+        [
+          820152,
+          820153,
+          820154,
+          820155,
+          820156,
+          820157,
+          820158,
+          820159
+        ],
+        [
+          820160,
+          820161,
+          820162,
+          820163,
+          820164,
+          820165,
+          820166,
+          820167
+        ],
+        [
+          820168,
+          820169,
+          820170,
+          820171,
+          820172,
+          820173,
+          820174,
+          820175
+        ],
+        [
+          820176,
+          820177,
+          820178,
+          820179,
+          820180,
+          820181,
+          820182,
+          820183
+        ],
+        [
+          820184,
+          820185,
+          820186,
+          820187,
+          820188,
+          820189,
+          820190,
+          820191
+        ],
+        [
+          820192,
+          820193,
+          820194,
+          820195,
+          820196,
+          820197,
+          820198,
+          820199
+        ],
+        [
+          820200,
+          820201,
+          820202,
+          820203,
+          820204,
+          820205,
+          820206,
+          820207
+        ],
+        [
+          820208,
+          820209,
+          820210,
+          820211,
+          820212,
+          820213,
+          820214,
+          820215
+        ],
+        [
+          820216,
+          820217,
+          820218,
+          820219,
+          820220,
+          820221,
+          820222,
+          820223
+        ],
+        [
+          820224,
+          820225,
+          820226,
+          820227,
+          820228,
+          820229,
+          820230,
+          820231
+        ],
+        [
+          820232,
+          820233,
+          820234,
+          820235,
+          820236,
+          820237,
+          820238,
+          820239
+        ],
+        [
+          820240,
+          820241,
+          820242,
+          820243,
+          820244,
+          820245,
+          820246,
+          820247
+        ],
+        [
+          820248,
+          820249,
+          820250,
+          820251,
+          820252,
+          820253,
+          820254,
+          820255
+        ],
+        [
+          820256,
+          820257,
+          820258,
+          820259,
+          820260,
+          820261,
+          820262,
+          820263
+        ],
+        [
+          820264,
+          820265,
+          820266,
+          820267,
+          820268,
+          820269,
+          820270,
+          820271
+        ],
+        [
+          820272,
+          820273,
+          820274,
+          820275,
+          820276,
+          820277,
+          820278,
+          820279
+        ],
+        [
+          820280,
+          820281,
+          820282,
+          820283,
+          820284,
+          820285,
+          820286,
+          820287
+        ],
+        [
+          820288,
+          820289,
+          820290,
+          820291,
+          820292,
+          820293,
+          820294,
+          820295
+        ],
+        [
+          820296,
+          820297,
+          820298,
+          820299,
+          820300,
+          820301,
+          820302,
+          820303
+        ],
+        [
+          820304,
+          820305,
+          820306,
+          820307,
+          820308,
+          820309,
+          820310,
+          820311
+        ],
+        [
+          820312,
+          820313,
+          820314,
+          820315,
+          820316,
+          820317,
+          820318,
+          820319
+        ],
+        [
+          820320,
+          820321,
+          820322,
+          820323,
+          820324,
+          820325,
+          820326,
+          820327
+        ],
+        [
+          820328,
+          820329,
+          820330,
+          820331,
+          820332,
+          820333,
+          820334,
+          820335
+        ],
+        [
+          820336,
+          820337,
+          820338,
+          820339,
+          820340,
+          820341,
+          820342,
+          820343
+        ],
+        [
+          820344,
+          820345,
+          820346,
+          820347,
+          820348,
+          820349,
+          820350,
+          820351
+        ],
+        [
+          820352,
+          820353,
+          820354,
+          820355,
+          820356,
+          820357,
+          820358,
+          820359
+        ],
+        [
+          820360,
+          820361,
+          820362,
+          820363,
+          820364,
+          820365,
+          820366,
+          820367
+        ],
+        [
+          820368,
+          820369,
+          820370,
+          820371,
+          820372,
+          820373,
+          820374,
+          820375
+        ],
+        [
+          820376,
+          820377,
+          820378,
+          820379,
+          820380,
+          820381,
+          820382,
+          820383
+        ],
+        [
+          820384,
+          820385,
+          820386,
+          820387,
+          820388,
+          820389,
+          820390,
+          820391
+        ],
+        [
+          820392,
+          820393,
+          820394,
+          820395,
+          820396,
+          820397,
+          820398,
+          820399
+        ],
+        [
+          820400,
+          820401,
+          820402,
+          820403,
+          820404,
+          820405,
+          820406,
+          820407
+        ],
+        [
+          820408,
+          820409,
+          820410,
+          820411,
+          820412,
+          820413,
+          820414,
+          820415
+        ],
+        [
+          820416,
+          820417,
+          820418,
+          820419,
+          820420,
+          820421,
+          820422,
+          820423
+        ],
+        [
+          820424,
+          820425,
+          820426,
+          820427,
+          820428,
+          820429,
+          820430,
+          820431
+        ],
+        [
+          820432,
+          820433,
+          820434,
+          820435,
+          820436,
+          820437,
+          820438,
+          820439
+        ],
+        [
+          820440,
+          820441,
+          820442,
+          820443,
+          820444,
+          820445,
+          820446,
+          820447
+        ],
+        [
+          820448,
+          820449,
+          820450,
+          820451,
+          820452,
+          820453,
+          820454,
+          820455
+        ],
+        [
+          820456,
+          820457,
+          820458,
+          820459,
+          820460,
+          820461,
+          820462,
+          820463
+        ],
+        [
+          820464,
+          820465,
+          820466,
+          820467,
+          820468,
+          820469,
+          820470,
+          820471
+        ],
+        [
+          820472,
+          820473,
+          820474,
+          820475,
+          820476,
+          820477,
+          820478,
+          820479
+        ],
+        [
+          820480,
+          820481,
+          820482,
+          820483,
+          820484,
+          820485,
+          820486,
+          820487
+        ],
+        [
+          820488,
+          820489,
+          820490,
+          820491,
+          820492,
+          820493,
+          820494,
+          820495
+        ],
+        [
+          820496,
+          820497,
+          820498,
+          820499,
+          820500,
+          820501,
+          820502,
+          820503
+        ],
+        [
+          820504,
+          820505,
+          820506,
+          820507,
+          820508,
+          820509,
+          820510,
+          820511
+        ],
+        [
+          820512,
+          820513,
+          820514,
+          820515,
+          820516,
+          820517,
+          820518,
+          820519
+        ],
+        [
+          820520,
+          820521,
+          820522,
+          820523,
+          820524,
+          820525,
+          820526,
+          820527
+        ],
+        [
+          820528,
+          820529,
+          820530,
+          820531,
+          820532,
+          820533,
+          820534,
+          820535
+        ],
+        [
+          820536,
+          820537,
+          820538,
+          820539,
+          820540,
+          820541,
+          820542,
+          820543
+        ],
+        [
+          820544,
+          820545,
+          820546,
+          820547,
+          820548,
+          820549,
+          820550,
+          820551
+        ],
+        [
+          820552,
+          820553,
+          820554,
+          820555,
+          820556,
+          820557,
+          820558,
+          820559
+        ],
+        [
+          820560,
+          820561,
+          820562,
+          820563,
+          820564,
+          820565,
+          820566,
+          820567
+        ],
+        [
+          820568,
+          820569,
+          820570,
+          820571,
+          820572,
+          820573,
+          820574,
+          820575
+        ],
+        [
+          820576,
+          820577,
+          820578,
+          820579,
+          820580,
+          820581,
+          820582,
+          820583
+        ],
+        [
+          820584,
+          820585,
+          820586,
+          820587,
+          820588,
+          820589,
+          820590,
+          820591
+        ],
+        [
+          820592,
+          820593,
+          820594,
+          820595,
+          820596,
+          820597,
+          820598,
+          820599
+        ],
+        [
+          820600,
+          820601,
+          820602,
+          820603,
+          820604,
+          820605,
+          820606,
+          820607
+        ],
+        [
+          820608,
+          820609,
+          820610,
+          820611,
+          820612,
+          820613,
+          820614,
+          820615
+        ],
+        [
+          820616,
+          820617,
+          820618,
+          820619,
+          820620,
+          820621,
+          820622,
+          820623
+        ],
+        [
+          820624,
+          820625,
+          820626,
+          820627,
+          820628,
+          820629,
+          820630,
+          820631
+        ],
+        [
+          820632,
+          820633,
+          820634,
+          820635,
+          820636,
+          820637,
+          820638,
+          820639
+        ],
+        [
+          820640,
+          820641,
+          820642,
+          820643,
+          820644,
+          820645,
+          820646,
+          820647
+        ],
+        [
+          820648,
+          820649,
+          820650,
+          820651,
+          820652,
+          820653,
+          820654,
+          820655
+        ],
+        [
+          820656,
+          820657,
+          820658,
+          820659,
+          820660,
+          820661,
+          820662,
+          820663
+        ],
+        [
+          820664,
+          820665,
+          820666,
+          820667,
+          820668,
+          820669,
+          820670,
+          820671
+        ],
+        [
+          820672,
+          820673,
+          820674,
+          820675,
+          820676,
+          820677,
+          820678,
+          820679
+        ],
+        [
+          820680,
+          820681,
+          820682,
+          820683,
+          820684,
+          820685,
+          820686,
+          820687
+        ],
+        [
+          820688,
+          820689,
+          820690,
+          820691,
+          820692,
+          820693,
+          820694,
+          820695
+        ],
+        [
+          820696,
+          820697,
+          820698,
+          820699,
+          820700,
+          820701,
+          820702,
+          820703
+        ],
+        [
+          820704,
+          820705,
+          820706,
+          820707,
+          820708,
+          820709,
+          820710,
+          820711
+        ],
+        [
+          820712,
+          820713,
+          820714,
+          820715,
+          820716,
+          820717,
+          820718,
+          820719
+        ],
+        [
+          820720,
+          820721,
+          820722,
+          820723,
+          820724,
+          820725,
+          820726,
+          820727
+        ],
+        [
+          820728,
+          820729,
+          820730,
+          820731,
+          820732,
+          820733,
+          820734,
+          820735
+        ],
+        [
+          820736,
+          820737,
+          820738,
+          820739,
+          820740,
+          820741,
+          820742,
+          820743
+        ],
+        [
+          820744,
+          820745,
+          820746,
+          820747,
+          820748,
+          820749,
+          820750,
+          820751
+        ],
+        [
+          820752,
+          820753,
+          820754,
+          820755,
+          820756,
+          820757,
+          820758,
+          820759
+        ],
+        [
+          820760,
+          820761,
+          820762,
+          820763,
+          820764,
+          820765,
+          820766,
+          820767
+        ],
+        [
+          820768,
+          820769,
+          820770,
+          820771,
+          820772,
+          820773,
+          820774,
+          820775
+        ],
+        [
+          820776,
+          820777,
+          820778,
+          820779,
+          820780,
+          820781,
+          820782,
+          820783
+        ],
+        [
+          820784,
+          820785,
+          820786,
+          820787,
+          820788,
+          820789,
+          820790,
+          820791
+        ],
+        [
+          820792,
+          820793,
+          820794,
+          820795,
+          820796,
+          820797,
+          820798,
+          820799
+        ],
+        [
+          820800,
+          820801,
+          820802,
+          820803,
+          820804,
+          820805,
+          820806,
+          820807
+        ],
+        [
+          820808,
+          820809,
+          820810,
+          820811,
+          820812,
+          820813,
+          820814,
+          820815
+        ],
+        [
+          820816,
+          820817,
+          820818,
+          820819,
+          820820,
+          820821,
+          820822,
+          820823
+        ],
+        [
+          820824,
+          820825,
+          820826,
+          820827,
+          820828,
+          820829,
+          820830,
+          820831
+        ],
+        [
+          820832,
+          820833,
+          820834,
+          820835,
+          820836,
+          820837,
+          820838,
+          820839
+        ]
+      ],
+      "seed_schedule_sha256": "c7f0dc456bdce23660402458cb0456c151f89fa546de9618cdbdec033d487c96",
+      "selected_checkpoint_steps": 40320,
+      "selected_program_metrics": {},
+      "variant": "raw"
+    },
+    {
+      "action_override_count": 0,
+      "actor_weight_change_l2": {
+        "ai": 0.19077055938151968,
+        "human": 0.19888845996561352
+      },
+      "batch_seeds": 8,
+      "bc_checkpoint_path": "output/pong_rolling_nn/pre_self_play.pt",
+      "bc_checkpoint_sha256": "b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba",
+      "checkpoint_path": "output/pong_rolling_v5/pair_251016_raw.pt",
+      "checkpoint_sha256": "4ca55cd4753a8c5259393281d8a34432134d2c91f77605490552da7d33d62a4e",
+      "development": {
+        "passed": true,
+        "rows": [
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 87.5,
+            "score": 58.333333,
+            "seed": 880100,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880101,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880102,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880103,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880104,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880105,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.03333333333333333,
+            "capacity_percent": 87.5,
+            "score": 58.333333,
+            "seed": 880106,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.75,
+            "score": 59.166667,
+            "seed": 880107,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 96.25,
+            "score": 64.166667,
+            "seed": 880108,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.03333333333333333,
+            "capacity_percent": 97.5,
+            "score": 65.0,
+            "seed": 880109,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.75,
+            "score": 62.5,
+            "seed": 880110,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.75,
+            "score": 62.5,
+            "seed": 880111,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.25,
+            "score": 60.833333,
+            "seed": 880112,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.75,
+            "score": 59.166667,
+            "seed": 880113,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.06666666666666667,
+            "capacity_percent": 91.25,
+            "score": 60.833333,
+            "seed": 880114,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880115,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.75,
+            "score": 62.5,
+            "seed": 880116,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.75,
+            "score": 59.166667,
+            "seed": 880117,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880118,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880119,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880120,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.75,
+            "score": 62.5,
+            "seed": 880121,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.13333333333333333,
+            "capacity_percent": 87.5,
+            "score": 58.333333,
+            "seed": 880122,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.03333333333333333,
+            "capacity_percent": 91.25,
+            "score": 60.833333,
+            "seed": 880123,
+            "task": 1
+          },
+          {
+            "ai_wait_rate": 0.044444444444444446,
+            "capacity_percent": 96.66666666666667,
+            "score": 64.444444,
+            "seed": 880100,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880101,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.83333333333333,
+            "score": 63.888889,
+            "seed": 880102,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880103,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 89.16666666666667,
+            "score": 59.444444,
+            "seed": 880104,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.06666666666666667,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880105,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 89.16666666666667,
+            "score": 59.444444,
+            "seed": 880106,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880107,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880108,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.044444444444444446,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880109,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.83333333333333,
+            "score": 63.888889,
+            "seed": 880110,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880111,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880112,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880113,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.06666666666666667,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880114,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 87.5,
+            "score": 58.333333,
+            "seed": 880115,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880116,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.83333333333333,
+            "score": 63.888889,
+            "seed": 880117,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 89.16666666666667,
+            "score": 59.444444,
+            "seed": 880118,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880119,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 89.16666666666667,
+            "score": 59.444444,
+            "seed": 880120,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.011111111111111112,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880121,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880122,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.044444444444444446,
+            "capacity_percent": 84.16666666666667,
+            "score": 56.111111,
+            "seed": 880123,
+            "task": 2
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880100,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880101,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880102,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880103,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.044444444444444446,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880104,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880105,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.03333333333333333,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880106,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880107,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.044444444444444446,
+            "capacity_percent": 86.66666666666667,
+            "score": 57.777778,
+            "seed": 880108,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 87.5,
+            "score": 58.333333,
+            "seed": 880109,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 88.33333333333333,
+            "score": 58.888889,
+            "seed": 880110,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.044444444444444446,
+            "capacity_percent": 92.5,
+            "score": 61.666667,
+            "seed": 880111,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 89.16666666666667,
+            "score": 59.444444,
+            "seed": 880112,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880113,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.044444444444444446,
+            "capacity_percent": 90.83333333333333,
+            "score": 60.555556,
+            "seed": 880114,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 91.66666666666667,
+            "score": 61.111111,
+            "seed": 880115,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.044444444444444446,
+            "capacity_percent": 89.16666666666667,
+            "score": 59.444444,
+            "seed": 880116,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880117,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.022222222222222223,
+            "capacity_percent": 93.33333333333333,
+            "score": 62.222222,
+            "seed": 880118,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.0,
+            "score": 63.333333,
+            "seed": 880119,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880120,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 94.16666666666667,
+            "score": 62.777778,
+            "seed": 880121,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 95.83333333333333,
+            "score": 63.888889,
+            "seed": 880122,
+            "task": 3
+          },
+          {
+            "ai_wait_rate": 0.0,
+            "capacity_percent": 90.0,
+            "score": 60.0,
+            "seed": 880123,
+            "task": 3
+          }
+        ],
+        "summaries": [
+          {
+            "max_ai_wait_rate": 0.13333333333333333,
+            "mean_ai_wait_rate": 0.012499999999999999,
+            "mean_capacity_percent": 91.71875,
+            "min_capacity_percent": 87.5,
+            "task": 1
+          },
+          {
+            "max_ai_wait_rate": 0.06666666666666667,
+            "mean_ai_wait_rate": 0.015277777777777779,
+            "mean_capacity_percent": 92.22222222222223,
+            "min_capacity_percent": 84.16666666666667,
+            "task": 2
+          },
+          {
+            "max_ai_wait_rate": 0.044444444444444446,
+            "mean_ai_wait_rate": 0.015277777777777779,
+            "mean_capacity_percent": 91.7361111111111,
+            "min_capacity_percent": 86.66666666666667,
+            "task": 3
+          }
+        ]
+      },
+      "extraction_history": {
+        "ai": [],
+        "human": []
+      },
+      "feedback_weighted_rows": {
+        "ai": 0.0,
+        "human": 0.0
+      },
+      "initial_actor_sha256": {
+        "ai": "b91653f579e579da56980ae3de3c2676bbd9ea02e6c90bbc31b71f6e88b48683",
+        "human": "ca43e746f64d5bd48d769904659b465d766de578fcfb1e0eba5bd8daaf697a65"
+      },
+      "joint_steps": 200000,
+      "neural_actions": 400000,
+      "pair_index": 2,
+      "pair_seed": 251016,
+      "post_policy_override_count": 0,
+      "program_feedback_rows": {
+        "ai": 0,
+        "human": 0
+      },
+      "seed_schedule": [
+        [
+          830000,
+          830001,
+          830002,
+          830003,
+          830004,
+          830005,
+          830006,
+          830007
+        ],
+        [
+          830008,
+          830009,
+          830010,
+          830011,
+          830012,
+          830013,
+          830014,
+          830015
+        ],
+        [
+          830016,
+          830017,
+          830018,
+          830019,
+          830020,
+          830021,
+          830022,
+          830023
+        ],
+        [
+          830024,
+          830025,
+          830026,
+          830027,
+          830028,
+          830029,
+          830030,
+          830031
+        ],
+        [
+          830032,
+          830033,
+          830034,
+          830035,
+          830036,
+          830037,
+          830038,
+          830039
+        ],
+        [
+          830040,
+          830041,
+          830042,
+          830043,
+          830044,
+          830045,
+          830046,
+          830047
+        ],
+        [
+          830048,
+          830049,
+          830050,
+          830051,
+          830052,
+          830053,
+          830054,
+          830055
+        ],
+        [
+          830056,
+          830057,
+          830058,
+          830059,
+          830060,
+          830061,
+          830062,
+          830063
+        ],
+        [
+          830064,
+          830065,
+          830066,
+          830067,
+          830068,
+          830069,
+          830070,
+          830071
+        ],
+        [
+          830072,
+          830073,
+          830074,
+          830075,
+          830076,
+          830077,
+          830078,
+          830079
+        ],
+        [
+          830080,
+          830081,
+          830082,
+          830083,
+          830084,
+          830085,
+          830086,
+          830087
+        ],
+        [
+          830088,
+          830089,
+          830090,
+          830091,
+          830092,
+          830093,
+          830094,
+          830095
+        ],
+        [
+          830096,
+          830097,
+          830098,
+          830099,
+          830100,
+          830101,
+          830102,
+          830103
+        ],
+        [
+          830104,
+          830105,
+          830106,
+          830107,
+          830108,
+          830109,
+          830110,
+          830111
+        ],
+        [
+          830112,
+          830113,
+          830114,
+          830115,
+          830116,
+          830117,
+          830118,
+          830119
+        ],
+        [
+          830120,
+          830121,
+          830122,
+          830123,
+          830124,
+          830125,
+          830126,
+          830127
+        ],
+        [
+          830128,
+          830129,
+          830130,
+          830131,
+          830132,
+          830133,
+          830134,
+          830135
+        ],
+        [
+          830136,
+          830137,
+          830138,
+          830139,
+          830140,
+          830141,
+          830142,
+          830143
+        ],
+        [
+          830144,
+          830145,
+          830146,
+          830147,
+          830148,
+          830149,
+          830150,
+          830151
+        ],
+        [
+          830152,
+          830153,
+          830154,
+          830155,
+          830156,
+          830157,
+          830158,
+          830159
+        ],
+        [
+          830160,
+          830161,
+          830162,
+          830163,
+          830164,
+          830165,
+          830166,
+          830167
+        ],
+        [
+          830168,
+          830169,
+          830170,
+          830171,
+          830172,
+          830173,
+          830174,
+          830175
+        ],
+        [
+          830176,
+          830177,
+          830178,
+          830179,
+          830180,
+          830181,
+          830182,
+          830183
+        ],
+        [
+          830184,
+          830185,
+          830186,
+          830187,
+          830188,
+          830189,
+          830190,
+          830191
+        ],
+        [
+          830192,
+          830193,
+          830194,
+          830195,
+          830196,
+          830197,
+          830198,
+          830199
+        ],
+        [
+          830200,
+          830201,
+          830202,
+          830203,
+          830204,
+          830205,
+          830206,
+          830207
+        ],
+        [
+          830208,
+          830209,
+          830210,
+          830211,
+          830212,
+          830213,
+          830214,
+          830215
+        ],
+        [
+          830216,
+          830217,
+          830218,
+          830219,
+          830220,
+          830221,
+          830222,
+          830223
+        ],
+        [
+          830224,
+          830225,
+          830226,
+          830227,
+          830228,
+          830229,
+          830230,
+          830231
+        ],
+        [
+          830232,
+          830233,
+          830234,
+          830235,
+          830236,
+          830237,
+          830238,
+          830239
+        ],
+        [
+          830240,
+          830241,
+          830242,
+          830243,
+          830244,
+          830245,
+          830246,
+          830247
+        ],
+        [
+          830248,
+          830249,
+          830250,
+          830251,
+          830252,
+          830253,
+          830254,
+          830255
+        ],
+        [
+          830256,
+          830257,
+          830258,
+          830259,
+          830260,
+          830261,
+          830262,
+          830263
+        ],
+        [
+          830264,
+          830265,
+          830266,
+          830267,
+          830268,
+          830269,
+          830270,
+          830271
+        ],
+        [
+          830272,
+          830273,
+          830274,
+          830275,
+          830276,
+          830277,
+          830278,
+          830279
+        ],
+        [
+          830280,
+          830281,
+          830282,
+          830283,
+          830284,
+          830285,
+          830286,
+          830287
+        ],
+        [
+          830288,
+          830289,
+          830290,
+          830291,
+          830292,
+          830293,
+          830294,
+          830295
+        ],
+        [
+          830296,
+          830297,
+          830298,
+          830299,
+          830300,
+          830301,
+          830302,
+          830303
+        ],
+        [
+          830304,
+          830305,
+          830306,
+          830307,
+          830308,
+          830309,
+          830310,
+          830311
+        ],
+        [
+          830312,
+          830313,
+          830314,
+          830315,
+          830316,
+          830317,
+          830318,
+          830319
+        ],
+        [
+          830320,
+          830321,
+          830322,
+          830323,
+          830324,
+          830325,
+          830326,
+          830327
+        ],
+        [
+          830328,
+          830329,
+          830330,
+          830331,
+          830332,
+          830333,
+          830334,
+          830335
+        ],
+        [
+          830336,
+          830337,
+          830338,
+          830339,
+          830340,
+          830341,
+          830342,
+          830343
+        ],
+        [
+          830344,
+          830345,
+          830346,
+          830347,
+          830348,
+          830349,
+          830350,
+          830351
+        ],
+        [
+          830352,
+          830353,
+          830354,
+          830355,
+          830356,
+          830357,
+          830358,
+          830359
+        ],
+        [
+          830360,
+          830361,
+          830362,
+          830363,
+          830364,
+          830365,
+          830366,
+          830367
+        ],
+        [
+          830368,
+          830369,
+          830370,
+          830371,
+          830372,
+          830373,
+          830374,
+          830375
+        ],
+        [
+          830376,
+          830377,
+          830378,
+          830379,
+          830380,
+          830381,
+          830382,
+          830383
+        ],
+        [
+          830384,
+          830385,
+          830386,
+          830387,
+          830388,
+          830389,
+          830390,
+          830391
+        ],
+        [
+          830392,
+          830393,
+          830394,
+          830395,
+          830396,
+          830397,
+          830398,
+          830399
+        ],
+        [
+          830400,
+          830401,
+          830402,
+          830403,
+          830404,
+          830405,
+          830406,
+          830407
+        ],
+        [
+          830408,
+          830409,
+          830410,
+          830411,
+          830412,
+          830413,
+          830414,
+          830415
+        ],
+        [
+          830416,
+          830417,
+          830418,
+          830419,
+          830420,
+          830421,
+          830422,
+          830423
+        ],
+        [
+          830424,
+          830425,
+          830426,
+          830427,
+          830428,
+          830429,
+          830430,
+          830431
+        ],
+        [
+          830432,
+          830433,
+          830434,
+          830435,
+          830436,
+          830437,
+          830438,
+          830439
+        ],
+        [
+          830440,
+          830441,
+          830442,
+          830443,
+          830444,
+          830445,
+          830446,
+          830447
+        ],
+        [
+          830448,
+          830449,
+          830450,
+          830451,
+          830452,
+          830453,
+          830454,
+          830455
+        ],
+        [
+          830456,
+          830457,
+          830458,
+          830459,
+          830460,
+          830461,
+          830462,
+          830463
+        ],
+        [
+          830464,
+          830465,
+          830466,
+          830467,
+          830468,
+          830469,
+          830470,
+          830471
+        ],
+        [
+          830472,
+          830473,
+          830474,
+          830475,
+          830476,
+          830477,
+          830478,
+          830479
+        ],
+        [
+          830480,
+          830481,
+          830482,
+          830483,
+          830484,
+          830485,
+          830486,
+          830487
+        ],
+        [
+          830488,
+          830489,
+          830490,
+          830491,
+          830492,
+          830493,
+          830494,
+          830495
+        ],
+        [
+          830496,
+          830497,
+          830498,
+          830499,
+          830500,
+          830501,
+          830502,
+          830503
+        ],
+        [
+          830504,
+          830505,
+          830506,
+          830507,
+          830508,
+          830509,
+          830510,
+          830511
+        ],
+        [
+          830512,
+          830513,
+          830514,
+          830515,
+          830516,
+          830517,
+          830518,
+          830519
+        ],
+        [
+          830520,
+          830521,
+          830522,
+          830523,
+          830524,
+          830525,
+          830526,
+          830527
+        ],
+        [
+          830528,
+          830529,
+          830530,
+          830531,
+          830532,
+          830533,
+          830534,
+          830535
+        ],
+        [
+          830536,
+          830537,
+          830538,
+          830539,
+          830540,
+          830541,
+          830542,
+          830543
+        ],
+        [
+          830544,
+          830545,
+          830546,
+          830547,
+          830548,
+          830549,
+          830550,
+          830551
+        ],
+        [
+          830552,
+          830553,
+          830554,
+          830555,
+          830556,
+          830557,
+          830558,
+          830559
+        ],
+        [
+          830560,
+          830561,
+          830562,
+          830563,
+          830564,
+          830565,
+          830566,
+          830567
+        ],
+        [
+          830568,
+          830569,
+          830570,
+          830571,
+          830572,
+          830573,
+          830574,
+          830575
+        ],
+        [
+          830576,
+          830577,
+          830578,
+          830579,
+          830580,
+          830581,
+          830582,
+          830583
+        ],
+        [
+          830584,
+          830585,
+          830586,
+          830587,
+          830588,
+          830589,
+          830590,
+          830591
+        ],
+        [
+          830592,
+          830593,
+          830594,
+          830595,
+          830596,
+          830597,
+          830598,
+          830599
+        ],
+        [
+          830600,
+          830601,
+          830602,
+          830603,
+          830604,
+          830605,
+          830606,
+          830607
+        ],
+        [
+          830608,
+          830609,
+          830610,
+          830611,
+          830612,
+          830613,
+          830614,
+          830615
+        ],
+        [
+          830616,
+          830617,
+          830618,
+          830619,
+          830620,
+          830621,
+          830622,
+          830623
+        ],
+        [
+          830624,
+          830625,
+          830626,
+          830627,
+          830628,
+          830629,
+          830630,
+          830631
+        ],
+        [
+          830632,
+          830633,
+          830634,
+          830635,
+          830636,
+          830637,
+          830638,
+          830639
+        ],
+        [
+          830640,
+          830641,
+          830642,
+          830643,
+          830644,
+          830645,
+          830646,
+          830647
+        ],
+        [
+          830648,
+          830649,
+          830650,
+          830651,
+          830652,
+          830653,
+          830654,
+          830655
+        ],
+        [
+          830656,
+          830657,
+          830658,
+          830659,
+          830660,
+          830661,
+          830662,
+          830663
+        ],
+        [
+          830664,
+          830665,
+          830666,
+          830667,
+          830668,
+          830669,
+          830670,
+          830671
+        ],
+        [
+          830672,
+          830673,
+          830674,
+          830675,
+          830676,
+          830677,
+          830678,
+          830679
+        ],
+        [
+          830680,
+          830681,
+          830682,
+          830683,
+          830684,
+          830685,
+          830686,
+          830687
+        ],
+        [
+          830688,
+          830689,
+          830690,
+          830691,
+          830692,
+          830693,
+          830694,
+          830695
+        ],
+        [
+          830696,
+          830697,
+          830698,
+          830699,
+          830700,
+          830701,
+          830702,
+          830703
+        ],
+        [
+          830704,
+          830705,
+          830706,
+          830707,
+          830708,
+          830709,
+          830710,
+          830711
+        ],
+        [
+          830712,
+          830713,
+          830714,
+          830715,
+          830716,
+          830717,
+          830718,
+          830719
+        ],
+        [
+          830720,
+          830721,
+          830722,
+          830723,
+          830724,
+          830725,
+          830726,
+          830727
+        ],
+        [
+          830728,
+          830729,
+          830730,
+          830731,
+          830732,
+          830733,
+          830734,
+          830735
+        ],
+        [
+          830736,
+          830737,
+          830738,
+          830739,
+          830740,
+          830741,
+          830742,
+          830743
+        ],
+        [
+          830744,
+          830745,
+          830746,
+          830747,
+          830748,
+          830749,
+          830750,
+          830751
+        ],
+        [
+          830752,
+          830753,
+          830754,
+          830755,
+          830756,
+          830757,
+          830758,
+          830759
+        ],
+        [
+          830760,
+          830761,
+          830762,
+          830763,
+          830764,
+          830765,
+          830766,
+          830767
+        ],
+        [
+          830768,
+          830769,
+          830770,
+          830771,
+          830772,
+          830773,
+          830774,
+          830775
+        ],
+        [
+          830776,
+          830777,
+          830778,
+          830779,
+          830780,
+          830781,
+          830782,
+          830783
+        ],
+        [
+          830784,
+          830785,
+          830786,
+          830787,
+          830788,
+          830789,
+          830790,
+          830791
+        ],
+        [
+          830792,
+          830793,
+          830794,
+          830795,
+          830796,
+          830797,
+          830798,
+          830799
+        ],
+        [
+          830800,
+          830801,
+          830802,
+          830803,
+          830804,
+          830805,
+          830806,
+          830807
+        ],
+        [
+          830808,
+          830809,
+          830810,
+          830811,
+          830812,
+          830813,
+          830814,
+          830815
+        ],
+        [
+          830816,
+          830817,
+          830818,
+          830819,
+          830820,
+          830821,
+          830822,
+          830823
+        ],
+        [
+          830824,
+          830825,
+          830826,
+          830827,
+          830828,
+          830829,
+          830830,
+          830831
+        ],
+        [
+          830832,
+          830833,
+          830834,
+          830835,
+          830836,
+          830837,
+          830838,
+          830839
+        ]
+      ],
+      "seed_schedule_sha256": "0738ebc2e25df4327edea74508d3a2687bfd85e95927b2820945af0df1b00397",
+      "selected_checkpoint_steps": 180480,
+      "selected_program_metrics": {},
+      "variant": "raw"
+    }
+  ],
+  "protocol": "pong-paired-dual-actor-v5",
+  "selected_actor_development_program_audit": {},
+  "selected_pair_seed": 251016,
+  "variant": "raw"
+}

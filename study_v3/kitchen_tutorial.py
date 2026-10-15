@@ -4,7 +4,7 @@ Every action uses the real kitchen transition with a neutral waiting teammate.
 Independent fixtures are explicitly labelled and never enter formal task runs.
 """
 from copy import deepcopy
-from domains.kitchen import engine as k
+from domains.kitchen import engine_v5_frozen as k
 
 VERSION = 'kitchen-operations-tutorial.v2'
 COUNT = 6

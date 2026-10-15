@@ -16,7 +16,7 @@ class Settings:
     verified: bool = False
     prolific_study_id: str = ''
     prolific_completion_code: str = ''
-    prolific_places: int = 12
+    prolific_places: int = 18
     prolific_launch_confirmed: bool = False
     automatic_explanations: bool = False
     understanding_ratings: bool = False
@@ -48,7 +48,7 @@ class Settings:
             verified=os.environ.get('POLICYLENS_STUDY_VERIFIED')=='1',
             prolific_study_id=os.environ.get('POLICYLENS_PROLIFIC_STUDY_ID',''),
             prolific_completion_code=os.environ.get('POLICYLENS_PROLIFIC_COMPLETION_CODE',''),
-            prolific_places=int(os.environ.get('POLICYLENS_PROLIFIC_PLACES','12')),
+            prolific_places=int(os.environ.get('POLICYLENS_PROLIFIC_PLACES','18')),
             automatic_explanations=os.environ.get('POLICYLENS_AUTOMATIC_EXPLANATIONS')=='1',
             optional_prompts=os.environ.get('POLICYLENS_OPTIONAL_PROMPTS','1')=='1',
             understanding_ratings=os.environ.get('POLICYLENS_UNDERSTANDING_RATINGS','1')=='1',

@@ -2,19 +2,104 @@
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from hashlib import sha256
 import json
 import threading
 import pytest
 
+from study_v3 import RELEASE_ID
 from study_v3.config import Settings
 from study_v3.store import Store, StudyError
-from study_v3 import prolific
+from study_v3 import prolific, server as server_module, store as store_module
+from tests import test_study_v3_store as flow_module
 from tests.test_study_v3_store import RecordingExplainer, Flow
 
 STUDY='a'*24
 
+class _SyntheticEngine:
+    """Fast deterministic policy for allocator tests, never a release asset."""
+
+    def __init__(self, domain):
+        self.domain = domain
+
+    def initial_state(self, seed, task, policy_id, release_id=None):
+        variant = 'raw' if '-raw-' in policy_id else 'regularized'
+        binding = _synthetic_binding(self.domain, 'C' if variant == 'raw' else 'A')
+        return {'domain': self.domain, 'version': 'synthetic-allocation-test',
+                'seed': seed, 'task': task, 'turn': 0, 'max_turns': 1,
+                'terminal': False, 'policy_id': policy_id, 'release_id': release_id,
+                'actor_sha256': binding['actor_sha256'],
+                'role_sha256': {'human': binding['human_actor_sha256'],
+                                'ai': binding['ai_actor_sha256']}}
+
+    def decide(self, state):
+        return {'policy_id': state['policy_id'],
+                'actor_sha256': state['actor_sha256'], 'action': 'wait'}
+
+    def step(self, state, action, decision):
+        assert action == 'wait' and decision == self.decide(state)
+        return {**state, 'turn': state['turn'] + 1, 'terminal': True}
+
+    def legal_actions(self, state):
+        return ['wait']
+
+    def human_advisor(self, state):
+        return 'wait'
+
+    def score(self, state):
+        return {'task_score': state['turn']}
+
+    def public_state(self, state):
+        return {'turn': state['turn'], 'max_turns': state['max_turns'],
+                'terminal': state['terminal'], 'score': self.score(state)}
+
+    def rules(self, language='en'):
+        return ['Synthetic allocation test']
+
+    def rule_metadata(self, policy_id=None):
+        return {'version': 'synthetic-allocation-test'}
+
+
+def _synthetic_binding(domain, group):
+    variant = 'raw' if group == 'C' else 'regularized'
+    ident = f'{domain}-{variant}-' + ('v6' if domain == 'warehouse' else 'v5')
+    role = lambda name: sha256(f'{ident}:{name}'.encode()).hexdigest()
+    return {'policy_id': ident, 'domain': domain, 'variant': variant,
+            'actor_path': f'synthetic-allocation-test/{ident}',
+            'actor_sha256': role('pair'), 'human_actor_sha256': role('human'),
+            'ai_actor_sha256': role('ai'), 'program_hashes': {},
+            'actor_model_version': 'synthetic-allocation-test',
+            'feature_schema_sha256': role('schema')}
+
+
 @pytest.fixture
-def store(tmp_path):
+def store(tmp_path, monkeypatch):
+    # Warehouse v6 remains unaccepted. Exercise Prolific allocation with a
+    # synthetic engine so this suite cannot accidentally admit real pilots.
+    engines = {domain: _SyntheticEngine(domain)
+               for domain in ('warehouse', 'pong', 'kitchen')}
+    monkeypatch.setattr(Store, 'ready', property(lambda self: True))
+    monkeypatch.setattr(Store, '_release_policies_match', staticmethod(lambda db: True))
+    monkeypatch.setattr(store_module, 'all_policies_accepted', lambda: True)
+    monkeypatch.setattr(store_module, 'binding_for_group', _synthetic_binding)
+    monkeypatch.setattr(store_module, 'policy_id',
+                        lambda domain, group: _synthetic_binding(domain, group)['policy_id'])
+    monkeypatch.setattr(store_module, 'verify_binding', lambda binding: binding)
+    monkeypatch.setattr(store_module, 'engine', lambda domain: engines[domain])
+    monkeypatch.setattr(store_module, 'demonstration',
+                        lambda domain, policy_id: {'captions': ['Synthetic demo'],
+                                                   'frames': [{'turn': 0}]})
+    monkeypatch.setattr(flow_module, 'engine', lambda domain: engines[domain])
+    monkeypatch.setattr(server_module, 'policy_manifest',
+                        lambda: {domain: {'raw': {'accepted': True},
+                                         'regularized': {'accepted': True}}
+                                 for domain in engines})
+    monkeypatch.setattr(server_module, 'all_policies_accepted', lambda: True)
+    monkeypatch.setattr(server_module, 'policy_id',
+                        lambda domain, group: _synthetic_binding(domain, group)['policy_id'])
+    monkeypatch.setattr(server_module, 'demonstration',
+                        lambda domain, policy_id: {'captions': ['Synthetic demo'],
+                                                   'frames': [{'turn': 0}]})
     s=Settings(database=str(tmp_path/'prolific.sqlite3'),persistent=True,admin_token='test-only',
         mode='pilot',verified=True,llm_base_url='https://test.invalid',llm_model='test',
         prolific_study_id=STUDY,prolific_completion_code='TESTONLY',prolific_launch_confirmed=True)
@@ -27,13 +112,13 @@ def payload(n):
         'consent':True,'age_21':True,'consent_version':prolific.CONSENT_VERSION}
 
 def test_concurrent_blocks_cap_and_private_identity(store):
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        results=list(pool.map(lambda n:prolific.enrol(store,payload(n)),range(1,13)))
+    with ThreadPoolExecutor(max_workers=9) as pool:
+        results=list(pool.map(lambda n:prolific.enrol(store,payload(n)),range(1,19)))
     assert Counter((v['domain'],v['group']) for _,v in results)==Counter({cell:2 for cell in prolific.CELLS})
     records=prolific.payment_records(store)
-    for block in (records[:6],records[6:]):
+    for block in (records[:9],records[9:]):
         assert {(r['domain'],r['group_code']) for r in block}==set(prolific.CELLS)
-    with pytest.raises(StudyError,match='prolific_full'):prolific.enrol(store,payload(13))
+    with pytest.raises(StudyError,match='prolific_full'):prolific.enrol(store,payload(19))
     exported=json.dumps(store.export())
     assert 'prolific_pid' not in exported and 'submission_id' not in exported
     for n,(_,view) in enumerate(results,1):
@@ -45,17 +130,17 @@ def test_main_cohort_has_ten_per_cell_and_separate_old_cohort(store):
     # The main study must start fresh without counting earlier allocations.
     prolific.enrol(store, payload(100))
     main_study = 'b' * 24
-    store.settings = replace(store.settings, prolific_study_id=main_study, prolific_places=60)
+    store.settings = replace(store.settings, prolific_study_id=main_study, prolific_places=90)
     def enrol(n):
         return prolific.enrol(store, {**payload(n), 'STUDY_ID': main_study})
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        results = list(pool.map(enrol, range(1, 61)))
+    with ThreadPoolExecutor(max_workers=9) as pool:
+        results = list(pool.map(enrol, range(1, 91)))
     assert Counter((v['domain'], v['group']) for _, v in results) == Counter({cell: 10 for cell in prolific.CELLS})
     assert all(v['rewards']['base_pence'] == 300 for _, v in results)
     with pytest.raises(StudyError, match='prolific_full'):
-        enrol(61)
-    assert len(prolific.payment_records(store)) == 60
-    assert len(store.export()['instances']) == 61
+        enrol(91)
+    assert len(prolific.payment_records(store)) == 90
+    assert len(store.export()['instances']) == 91
     with pytest.raises(StudyError, match='prolific_already_participated'):
         enrol(100)
 
@@ -148,9 +233,9 @@ def release_payload(record, status='RETURNED'):
         'submission_status':status,'reason':'Verified terminal status in Prolific study submissions.'}
 
 def test_replacements_fill_only_released_cells_without_rewriting_history(store):
-    sessions=[prolific.enrol(store,payload(n)) for n in range(1,13)]
+    sessions=[prolific.enrol(store,payload(n)) for n in range(1,19)]
     before=prolific.payment_records(store)
-    missing={('warehouse','B'),('kitchen','A'),('kitchen','B')}
+    missing={('warehouse','C'),('kitchen','A'),('kitchen','C')}
     released=[]
     for cell in sorted(missing):
         record=next(r for r in before if (r['domain'],r['group_code'])==cell)
@@ -159,11 +244,11 @@ def test_replacements_fill_only_released_cells_without_rewriting_history(store):
         released.append(record)
     # Three parallel arrivals fill each vacant cell exactly once.
     with ThreadPoolExecutor(max_workers=3) as pool:
-        replacements=list(pool.map(lambda n:prolific.enrol(store,payload(n)),range(13,16)))
+        replacements=list(pool.map(lambda n:prolific.enrol(store,payload(n)),range(19,22)))
     assert {(v['domain'],v['group']) for _,v in replacements}==missing
-    with pytest.raises(StudyError,match='prolific_full'):prolific.enrol(store,payload(16))
+    with pytest.raises(StudyError,match='prolific_full'):prolific.enrol(store,payload(22))
     after=prolific.payment_records(store)
-    assert len(after)==15 and [r['allocation_index'] for r in after]==list(range(1,16))
+    assert len(after)==21 and [r['allocation_index'] for r in after]==list(range(1,22))
     assert Counter((r['domain'],r['group_code']) for r in after if not r['released'])==Counter({cell:2 for cell in prolific.CELLS})
     for old,new in zip(before,after):
         for key in ('prolific_pid','consented','instance_id','participant_id','allocation_index','stage'):
@@ -221,9 +306,9 @@ def test_http_release_requires_researcher_and_is_idempotent(store):
         server.shutdown();server.server_close();worker.join(5)
 
 REPLACEMENT='c'*24
-REPLACEMENT_QUOTAS=[{'domain':'warehouse','group':'A','places':1},
+REPLACEMENT_QUOTAS=[{'domain':'warehouse','group':'C','places':1},
     {'domain':'pong','group':'B','places':2}, {'domain':'kitchen','group':'A','places':1},
-    {'domain':'kitchen','group':'B','places':2}]
+    {'domain':'kitchen','group':'C','places':2}]
 
 def replacement_config():
     return {'study_id':REPLACEMENT,'completion_code':'REPLACE1','quotas':REPLACEMENT_QUOTAS}
@@ -254,7 +339,7 @@ def test_replacement_concurrent_quota_restart_duplicate_and_release(store):
             prolific.enrol(reopened,{**payload(8),'STUDY_ID':REPLACEMENT})
     finally:reopened.db.close()
 
-@pytest.mark.parametrize('domain,group',[('warehouse','A'),('pong','B'),('kitchen','A'),('kitchen','B')])
+@pytest.mark.parametrize('domain,group',[('warehouse','C'),('pong','B'),('kitchen','A'),('kitchen','C')])
 def test_replacement_full_flow_completion_uses_own_code(store,domain,group):
     prolific.register_cohort(store,{'study_id':REPLACEMENT,'completion_code':'REPLACE1',
         'quotas':[{'domain':domain,'group':group,'places':1}]})

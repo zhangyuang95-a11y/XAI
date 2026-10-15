@@ -1,7 +1,10 @@
 # Cooperative Kitchen: two compound recipes
 
-Current implementation: `kitchen-v6.2.0`, with prepared20 freshness, +30 serving, constrained menus and16/20 heating turns. See
-[current verification and publication status](kitchen_16_20_verification.md).
+Current participant adapter: `kitchen-v7.0.0-neural`, using a frozen neural
+Actor over the v6.3 Kitchen physical rules. See [the neural-policy contract
+and acceptance report](kitchen_nn.md). The sections below are historical
+controller documentation; their AI decision descriptions do not apply to the
+new participant adapter.
 
 The sections below are the historical **v4** specification and evidence. Their
 timers, budgets and validation claims do not describe the current release.

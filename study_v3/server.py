@@ -21,7 +21,10 @@ from urllib.parse import urlsplit, parse_qs
 from . import RELEASE_ID, SUPPORTED_RELEASE_IDS, KITCHEN_SUPPORTED_RELEASE_IDS
 from .config import Settings
 from .registry import MODULES, engine, demonstration
+from .policies import all_policies_accepted, policy_manifest, policy_id
+from .release_catalog import CATALOG_PATH, catalog_sha256, source_provenance
 from .kitchen_tutorial import VERSION as KITCHEN_TUTORIAL_VERSION
+from domains.pong import nn_policy as pong_nn_policy
 from .store import Store, StudyError, encode
 from . import prolific, automatic_explanations, understanding, rewards, review
 
@@ -60,28 +63,39 @@ def manifest(settings):
     try: commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True,stderr=subprocess.DEVNULL).strip()
     except (OSError,subprocess.CalledProcessError): commit=os.environ.get('RENDER_GIT_COMMIT','unknown')
     source=hashlib.sha256()
-    paths=list((ROOT/'study_v3').rglob('*.py'))+list(WEB.glob('*'))
-    paths+=[ROOT/(p.replace('.','/')+'.py') for p in MODULES.values()]
-    # Warehouse runs the preserved physical engine and the pinned historical
-    # controller. Include its actual transitive runtime sources and Actor.
-    paths+=list((ROOT/'env/warehouse').rglob('*.py'))
-    paths+=[ROOT/'backend/adapters/warehouse_explanations.py',
-            ROOT/'output/deployment/warehouse_mappo_v68_6x7_actor.npz']
-    paths+=list((ROOT/'configs').glob('study_v3_*.json'))
-    paths+=[ROOT/'ui/domain_hub_server.py',ROOT/'requirements-render.txt',ROOT/'.python-version']
-    paths+=[ROOT/'docs/consent_review_content.json']
+    code_roots = ('study_v3', 'domains/pong', 'domains/kitchen', 'domains/warehouse',
+                  'env/warehouse', 'backend/training', 'backend/adapters', 'core', 'ui',
+                  'experiments/warehouse')
+    paths = [path for name in code_roots for path in (ROOT/name).rglob('*.py')]
+    paths += list(WEB.glob('*'))
+    paths += [ROOT/'configs/study_v3_kitchen_frozen_v5.json',
+              ROOT/'configs/study_v3_kitchen_v5.json',
+              ROOT/'configs/study_v3_pong.json',
+              ROOT/'configs/study_v3_warehouse_neural_v6.json',
+              ROOT/'configs/study_v3_qa_cases.json',
+              ROOT/'domains/kitchen/neural_qa_cases.json',
+              ROOT/'domains/warehouse/neural_qa_cases.json',
+              ROOT/'requirements-render.txt',ROOT/'.python-version',
+              ROOT/'docs/consent_review_content.json']
+    paths += list(CATALOG_PATH.parent.rglob('*'))
     for path in sorted(set(paths)):
         if path.is_file():source.update(str(path.relative_to(ROOT)).encode()+b'\0'+path.read_bytes())
+    policies=policy_manifest()
+    source.update(encode(policies).encode())
+    accepted=all_policies_accepted()
     return {'release_id':RELEASE_ID,'commit':commit,'source_sha256':source.hexdigest(),
-        'kitchen_rules':engine('kitchen').rule_metadata(),
+        'release_catalog_sha256':catalog_sha256(),
+        'upstream_v5_assets':source_provenance(),
+        'kitchen_rules':engine('kitchen').rule_metadata('kitchen-regularized-v5'),
         'kitchen_tutorial_version':KITCHEN_TUTORIAL_VERSION,
-        'enrollment':{'group_selection':'participant_choice_at_new_domain',
+        'enrollment':{'group_selection':'balanced_randomized_per_domain_and_scenario_seed',
             'resume_preserves_group':True,'parallel_domains':True,
             'compatible_session_releases':[RELEASE_ID],
             'compatible_session_releases_by_domain':{
-                domain:sorted(KITCHEN_SUPPORTED_RELEASE_IDS if domain=='kitchen' else SUPPORTED_RELEASE_IDS)
+                domain:[RELEASE_ID]
                 for domain in MODULES}},
-        'domains':{k:{'url':'/'+k+'/','version':engine(k).VERSION} for k in MODULES},
+        'domains':{k:{'url':'/'+k+'/','version':getattr(engine(k),'RELEASE_VERSION',engine(k).VERSION)} for k in MODULES},
+        'policies':policies,'policy_assets_accepted':accepted,
         'explanations':{'group':'A','task':2,'active_only':True,
             'automatic_for_new_enrollments':settings.automatic_explanations,'automatic_version':automatic_explanations.VERSION},
         'understanding_ratings':{'enabled_for_new_enrollments':settings.understanding_ratings,
@@ -92,9 +106,10 @@ def manifest(settings):
         'optional_prompts_for_new_enrollments':settings.optional_prompts,
         'rewards':{domain:rewards.policy(domain) for domain in MODULES},
         'default_language':'en','mode':settings.mode,'storage_persistent':settings.persistent,
-        'prolific':{'entry_path':'/prolific/','assignment':'randomized_block_6_or_registered_cohort_quotas',
+        'prolific':{'entry_path':'/prolific/','assignment':'randomized_block_9_or_registered_cohort_quotas',
             'one_game_per_participant':True,'consent_version':prolific.CONSENT_VERSION},
-        'semantic_qa_configured':settings.llm_configured,'deployment_validation_complete':settings.verified,'study_ready':settings.ready,
+        'semantic_qa_configured':settings.llm_configured,'deployment_validation_complete':settings.verified,'study_ready':settings.ready and accepted,
+
         'human_effect_status':'not_measured','target_task2_relative_gain':0.5}
 
 class QAReadinessMonitor:
@@ -116,7 +131,7 @@ class QAReadinessMonitor:
 
     def check(self):
         with self._lock:
-            if self._stopped.is_set() or self._busy or not self.store.settings.ready:
+            if self._stopped.is_set() or self._busy or not self.store.settings.ready or not all_policies_accepted():
                 return False
             healthy, version = self.store.qa_health_snapshot()
             now = self.clock()
@@ -125,7 +140,14 @@ class QAReadinessMonitor:
             self._busy, self._last_attempt = True, now
         try:
             result = self.probe()
-            healthy = isinstance(result, dict) and result.get('status') in ('answered', 'clarification')
+            healthy = (isinstance(result, dict) and set(result) == set(MODULES)
+                and all(isinstance(answer, dict)
+                        and answer.get('status') == 'answered'
+                        and isinstance(answer.get('answer'), str)
+                        and bool(answer['answer'].strip())
+                        and isinstance(answer.get('evidence_ids'), list)
+                        and 'system:ai_action' in answer['evidence_ids']
+                        for answer in result.values()))
             outcome = 'validated' if healthy else 'unavailable_or_invalid_result'
         except Exception:
             healthy, outcome = False, 'probe_exception'
@@ -176,31 +198,44 @@ class StudyHTTPServer(ThreadingHTTPServer):
         if hasattr(self,'store'):self.store.db.close()
 
 def make_server(settings,host='127.0.0.1',port=8010,explainer=None):
-    # Cold demonstrations perform complete simulated trajectories. Build them
-    # before opening the database or accepting requests so enrollment/recovery
-    # only read the cache and never hold a transaction while doing this work.
-    for domain in MODULES:
-        if domain!='kitchen':demonstration(domain)
+    # Cold demonstrations perform complete simulated trajectories. When all
+    # frozen policies are accepted, build both variants before enrollment so a
+    # participant view never simulates a trajectory inside a DB transaction.
+    if all_policies_accepted():
+        for domain in MODULES:
+            for variant in ('regularized', 'raw'):
+                demonstration(domain, policy_id(domain, 'C' if variant == 'raw' else 'A'))
     if explainer is None:
         try:
             from .qa import Explainer
             explainer=Explainer(settings)
         except ImportError: pass
     store=Store(settings,explainer)
-    # A configured service is not ready until a real, validated answer succeeds.
+    # A configured service is not ready until each formal domain returns a
+    # grounded action answer from its bound regularized Actor. Keep provider
+    # requests outside database transactions and the HTTP request path.
     # Run this check after opening the HTTP server so a transient model failure
     # cannot permanently lock enrollment or delay liveness requests.
     store.qa_healthy=False
     def qa_probe():
-        probe_engine=engine('pong');probe_state=probe_engine.initial_state(26092000,2)
-        return explainer.answer(probe_engine,probe_state,probe_engine.decide(probe_state),
-            'What is your next action?', 'en', [], [probe_engine.public_state(probe_state)])
+        results={}
+        for domain in MODULES:
+            probe_engine=engine(domain)
+            probe_state=probe_engine.initial_state(26092000,2,policy_id(domain,'A'),
+                                                  release_id=RELEASE_ID)
+            answer=explainer.answer(probe_engine,probe_state,probe_engine.decide(probe_state),
+                'What is your next action?', 'en', [], [probe_engine.public_state(probe_state)])
+            results[domain]=answer
+            if (not isinstance(answer, dict) or answer.get('status') != 'answered'
+                    or 'system:ai_action' not in answer.get('evidence_ids', ())):
+                break
+        return results
     release=manifest(settings)
     release['study_ready']=store.ready
     with store.db.transaction() as db:
         previous=db.one('SELECT manifest_json FROM pl3_releases WHERE id=?',(RELEASE_ID,))
         conflict=bool(previous and json.loads(previous['manifest_json'])['source_sha256']!=release['source_sha256'])
-        if not previous:
+        if not previous and release['policy_assets_accepted']:
             db.execute('INSERT INTO pl3_releases VALUES(?,?,?)',(RELEASE_ID,encode(release),time.time()))
     if conflict and settings.mode=='pilot':
         store.db.close()

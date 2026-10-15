@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import json
+from collections import OrderedDict
 from contextlib import closing, nullcontext
 import re
 import secrets
@@ -13,13 +14,16 @@ from . import RELEASE_ID, SUPPORTED_RELEASE_IDS, KITCHEN_SUPPORTED_RELEASE_IDS
 from .database import Database
 from .registry import engine, demonstration, MODULES, scenario_config
 from . import kitchen_tutorial, automatic_explanations, understanding, rewards
+from .policies import (GROUP_VARIANT, PolicyUnavailable, all_policies_accepted,
+                       binding_for_group, policy_id, policy_manifest, verify_binding)
+from .release_catalog import catalog_sha256, ReleaseAssetUnavailable
 
 def encode(value): return json.dumps(value, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
 def digest(value): return hashlib.sha256(value.encode()).hexdigest()
 def uid(): return uuid.uuid4().hex
 def compatible_instance(row):
     return (row["release_id"] in SUPPORTED_RELEASE_IDS
-            and (row["domain"] != "kitchen" or row["release_id"] in KITCHEN_SUPPORTED_RELEASE_IDS))
+            and (row["domain"] not in ("kitchen", "pong", "warehouse") or row["release_id"] == RELEASE_ID))
 
 def public_answer(answer):
     return {k:answer[k] for k in ('status','answer','evidence_ids','language') if k in answer}
@@ -42,16 +46,19 @@ EXPLANATION_ITEMS = [
  ('helpful','The Task 2 answers helped me choose my next action.','Task 2 的回答帮助我选择下一步动作。'),
 ]
 
-EXPORT_TABLES = ('participants','enrollments','instances','runs','frames',
-                 'questions','questionnaires','timings','releases','tutorials','tutorial_events',
-                 'auto_explanation_settings','auto_explanations','auto_explanation_confirmations',
-                 'understanding_settings','understanding_ratings','reward_settings','prompt_settings','prompt_skips')
+EXPORT_TABLES = ('participants','enrollments','policy_bindings','policy_binding_metadata',
+                 'instances','runs','frames','questions','questionnaires','timings','releases',
+                 'tutorials','tutorial_events','auto_explanation_settings','auto_explanations',
+                 'auto_explanation_confirmations','understanding_settings','understanding_ratings',
+                 'reward_settings','prompt_settings','prompt_skips')
 
 class Store:
     def __init__(self, settings, explainer=None):
         self.settings, self.db, self.explainer = settings, Database(settings.database), explainer
         self._qa_health_lock = threading.Lock()
         self._qa_healthy, self._qa_health_version = settings.verified, 0
+        self._frame_cache_lock = threading.Lock()
+        self._verified_frame_prefixes = OrderedDict()
 
     @property
     def qa_healthy(self):
@@ -77,7 +84,166 @@ class Store:
 
     @property
     def ready(self):
-        return self.settings.ready and self.qa_healthy
+        if not (self.settings.ready and self.qa_healthy and all_policies_accepted()):
+            return False
+        # A long-running preview server must not admit a pilot merely because
+        # training files appeared after startup. The frozen release manifest is
+        # written only during a verified server start.
+        with self.db.transaction(read_only=True) as db:
+            return self._release_policies_match(db)
+
+    @staticmethod
+    def _release_policies_match(db):
+        row = db.one('SELECT manifest_json FROM pl3_releases WHERE id=?', (RELEASE_ID,))
+        if row is None:
+            return False
+        try:
+            release = json.loads(row['manifest_json'])
+        except (TypeError, ValueError):
+            return False
+        try:
+            return (release.get('policy_assets_accepted') is True
+                    and release.get('release_catalog_sha256') == catalog_sha256()
+                    and release.get('policies') == policy_manifest())
+        except ReleaseAssetUnavailable:
+            return False
+
+    def _binding(self, db, instance):
+        if (instance['mode']=='pilot'
+                and (not all_policies_accepted() or not self._release_policies_match(db))):
+            raise StudyError('study_not_ready', 503)
+        row = db.one('SELECT * FROM pl3_policy_bindings WHERE instance_id=?', (instance['id'],))
+        if row is None:
+            raise StudyError('policy_binding_missing', 503)
+        if instance['group_code'] not in GROUP_VARIANT:
+            raise StudyError('policy_binding_mismatch', 503)
+        try:
+            expected_policy_id = policy_id(instance['domain'], instance['group_code'])
+        except PolicyUnavailable as exc:
+            raise StudyError('policy_unavailable', 503) from exc
+        if (row['domain'] != instance['domain']
+                or row['variant'] != GROUP_VARIANT[instance['group_code']]
+                or row['policy_id'] != expected_policy_id):
+            raise StudyError('policy_binding_mismatch', 503)
+        binding = {key: row[key] for key in ('policy_id','domain','variant','actor_path',
+                   'actor_sha256','human_actor_sha256','ai_actor_sha256')}
+        try:
+            binding['program_hashes'] = json.loads(row['program_hashes_json'])
+        except (TypeError, ValueError) as exc:
+            raise StudyError('policy_binding_mismatch', 503) from exc
+        if row['domain'] == 'warehouse':
+            metadata = db.one('SELECT actor_model_version,feature_schema_sha256 '
+                              'FROM pl3_policy_binding_metadata WHERE instance_id=?',
+                              (instance['id'],))
+            if (metadata is None or not metadata['actor_model_version']
+                    or not metadata['feature_schema_sha256']):
+                raise StudyError('policy_binding_metadata_missing', 503)
+            binding.update(metadata)
+        try:
+            return verify_binding(binding)
+        except PolicyUnavailable as exc:
+            raise StudyError('policy_unavailable', 503) from exc
+
+    @staticmethod
+    def _verified_decision(eng, state, binding):
+        Store._assert_state_binding(state, binding)
+        decision = eng.decide(state)
+        actor_hash = decision.get('actor_sha256', decision.get('model_sha256'))
+        if (decision.get('policy_id') != binding['policy_id']
+                or actor_hash != binding['actor_sha256']):
+            raise StudyError('policy_decision_mismatch', 503)
+        return decision
+
+    @staticmethod
+    def _assert_state_binding(state, binding):
+        roles = state.get('role_sha256')
+        expected_roles = {'human': binding['human_actor_sha256'],
+                          'ai': binding['ai_actor_sha256']}
+        if (state.get('policy_id') != binding['policy_id']
+                or state.get('release_id') != RELEASE_ID
+                or state.get('actor_sha256', state.get('policy_sha256')) != binding['actor_sha256']
+                or roles != expected_roles):
+            raise StudyError('policy_binding_mismatch', 503)
+
+    @staticmethod
+    def _recorded_frame(eng, row, binding):
+        """Check stored replay and QA evidence against its frozen Actor pair."""
+        state = json.loads(row['state_json'])
+        if state.get('turn') != row['turn']:
+            raise StudyError('recorded_frame_mismatch', 503)
+        Store._assert_state_binding(state, binding)
+        public = json.loads(row['public_json'])
+        if public != eng.public_state(state):
+            raise StudyError('recorded_frame_mismatch', 503)
+        decision = json.loads(row['decision_json'])
+        if state['terminal']:
+            if decision:
+                raise StudyError('recorded_decision_mismatch', 503)
+        elif decision != Store._verified_decision(eng, state, binding):
+            raise StudyError('recorded_decision_mismatch', 503)
+        return state, decision, public
+
+    @staticmethod
+    def _recorded_transition(eng, previous, current, binding):
+        before, decision, _ = Store._recorded_frame(eng, previous, binding)
+        after, _, _ = Store._recorded_frame(eng, current, binding)
+        action = previous.get('human_action')
+        if (not isinstance(action, str) or before['terminal']
+                or action not in eng.legal_actions(before)):
+            raise StudyError('recorded_transition_mismatch', 503)
+        try:
+            replayed = eng.step(before, action, decision)
+        except (RuntimeError, ValueError, KeyError) as exc:
+            raise StudyError('recorded_transition_mismatch', 503) from exc
+        if replayed != after:
+            raise StudyError('recorded_transition_mismatch', 503)
+
+    def _verified_run_prefix(self, db, eng, run, binding, turn, scenario_seed):
+        """Replay a bounded v5 history from its seeded, frozen NN start state."""
+        if (type(turn) is not int or turn < 0 or run['seed'] != scenario_seed):
+            raise StudyError('recorded_initial_mismatch', 503)
+        rows = db.all('SELECT turn,state_json,public_json,decision_json,human_action '
+                      'FROM pl3_frames WHERE run_id=? AND turn<=? ORDER BY turn',
+                      (run['id'], turn))
+        if len(rows) != turn + 1 or any(row['turn'] != index for index, row in enumerate(rows)):
+            raise StudyError('recorded_transition_mismatch', 503)
+        identity = (run['id'], run['seed'], run['task'], scenario_seed,
+                    binding['policy_id'], binding['actor_sha256'],
+                    binding['human_actor_sha256'], binding['ai_actor_sha256'])
+        fingerprints = tuple(digest(encode((row['turn'], row['state_json'], row['public_json'],
+                                            row['decision_json'], row['human_action']))) for row in rows)
+        with self._frame_cache_lock:
+            cached = self._verified_frame_prefixes.get(run['id'])
+        if cached is not None and cached['identity'] == identity:
+            old = cached['fingerprints']
+            unchanged = next((index for index in range(min(len(old), len(fingerprints)))
+                              if old[index] != fingerprints[index]), min(len(old), len(fingerprints)))
+            max_turns = cached['max_turns']
+        else:
+            unchanged, max_turns = 0, None
+        if unchanged == 0:
+            try:
+                initial = json.loads(encode(eng.initial_state(
+                    run['seed'], run['task'], binding['policy_id'], release_id=RELEASE_ID)))
+            except (OSError, RuntimeError, ValueError, KeyError) as exc:
+                raise StudyError('policy_unavailable', 503) from exc
+            max_turns = initial['max_turns']
+            first, _, _ = self._recorded_frame(eng, rows[0], binding)
+            if first != initial:
+                raise StudyError('recorded_initial_mismatch', 503)
+        if turn > max_turns:
+            raise StudyError('recorded_transition_mismatch', 503)
+        for index in range(max(1, unchanged), len(rows)):
+            self._recorded_transition(eng, rows[index - 1], rows[index], binding)
+        with self._frame_cache_lock:
+            previous = self._verified_frame_prefixes.get(run['id'])
+            if previous is None or len(previous['fingerprints']) <= len(fingerprints) or previous['identity'] != identity:
+                self._verified_frame_prefixes[run['id']] = {
+                    'identity': identity, 'fingerprints': fingerprints, 'max_turns': max_turns}
+            self._verified_frame_prefixes.move_to_end(run['id'])
+            if len(self._verified_frame_prefixes) > 128:
+                self._verified_frame_prefixes.popitem(last=False)
+        return rows
 
     def _participant(self, db, token):
         if not token: raise StudyError('session_required',401)
@@ -86,12 +252,17 @@ class Store:
         return row
 
     def _instance(self, db, token, instance_id):
-        participant=self._participant(db,token)
-        row=db.one('SELECT * FROM pl3_instances WHERE id=? AND participant_id=?',(instance_id,participant['id']))
-        if row is None: raise StudyError('study_not_found',404)
+        row=self._owned_instance(db,token,instance_id)
         if not compatible_instance(row): raise StudyError('release_changed',409)
         if db.one('SELECT instance_id FROM pl3_prolific_releases WHERE instance_id=?',(row['id'],)):
             raise StudyError('prolific_submission_closed',409)
+        return row
+
+    def _owned_instance(self,db,token,instance_id):
+        participant=self._participant(db,token)
+        row=db.one('SELECT * FROM pl3_instances WHERE id=? AND participant_id=?',(instance_id,participant['id']))
+        if row is None: raise StudyError('study_not_found',404)
+        # Historic instances remain visible through the read-only archive view.
         return row
 
     def _ask_allowed(self, db, instance):
@@ -112,8 +283,10 @@ class Store:
         if mode=='pilot' and self.settings.prolific_study_id and not _prolific:
             raise StudyError('use_prolific_entry',403)
         requested_group=payload.get('group')
-        if requested_group is not None and requested_group not in ('A','B'):
+        if requested_group is not None and requested_group not in ('A','B','C'):
             raise StudyError('invalid_group')
+        if mode=='pilot' and requested_group is not None and not _prolific:
+            raise StudyError('group_override_forbidden',403)
         language='zh' if payload.get('language')=='zh' else 'en'
         recovery=None
         with (nullcontext(_db) if _db is not None else self.db.transaction()) as db:
@@ -133,15 +306,9 @@ class Store:
                     raise StudyError('participant_exists_use_recovery',409)
                 if db.one('SELECT id FROM pl3_instances WHERE participant_id=? AND mode!=?',(name,mode)):
                     raise StudyError('participant_mode_conflict',409)
-                # The participant row retains its original assignment. A new
-                # domain may have a different explicit, per-instance choice.
-                group=requested_group or existing['group_code']
-            else:
-                counts={x['group_code']:x['n'] for x in db.all('SELECT group_code,COUNT(*) AS n FROM pl3_instances WHERE domain=? AND mode=? AND release_id=? GROUP BY group_code',(domain,mode,RELEASE_ID))}
-                group=secrets.choice(['A','B']) if counts.get('A',0)==counts.get('B',0) else min(['A','B'],key=lambda g:counts.get(g,0))
-                if requested_group: group=requested_group
+            if not existing:
                 recovery=secrets.token_urlsafe(18)
-                db.execute('INSERT INTO pl3_participants VALUES(?,?,?,?)',(name,group,digest(recovery),time.time()))
+                db.execute('INSERT INTO pl3_participants VALUES(?,?,?,?)',(name,'unassigned',digest(recovery),time.time()))
             if not authenticated or authenticated['id']!=name:
                 token=secrets.token_urlsafe(32)
                 db.execute('INSERT INTO pl3_sessions VALUES(?,?,?)',(digest(token),name,time.time()))
@@ -150,20 +317,54 @@ class Store:
             # answers and questionnaires remain intact under their release ID.
             candidates=db.all('SELECT * FROM pl3_instances WHERE participant_id=? AND domain=? ORDER BY created DESC,id DESC',(name,domain))
             instance=next((r for r in candidates if compatible_instance(r)),None)
+            if instance and requested_group and requested_group != instance['group_code']:
+                raise StudyError('group_binding_immutable',409)
             if not instance:
                 iid=uid()
                 config=scenario_config(domain)
                 seeds=config.get('heldout_seeds') or config['held_out_seeds']
                 allocations=db.all('SELECT scenario_seed,group_code,COUNT(*) AS n FROM pl3_instances WHERE domain=? AND mode=? AND release_id=? GROUP BY scenario_seed,group_code',(domain,mode,RELEASE_ID))
                 usage={(r['scenario_seed'],r['group_code']):r['n'] for r in allocations}
-                opposite='B' if group=='A' else 'A'
-                seed=min(seeds,key=lambda candidate:(usage.get((candidate,group),0),-usage.get((candidate,opposite),0),seeds.index(candidate)))
+                groups=('A','B','C')
+                group_totals={group:sum(usage.get((seed,group),0) for seed in seeds)
+                              for group in groups}
+                seed_totals={seed:sum(usage.get((seed,group),0) for group in groups)
+                             for seed in seeds}
+                if requested_group:
+                    group=requested_group
+                    seed=secrets.choice([candidate for candidate in seeds
+                        if (seed_totals[candidate],usage.get((candidate,group),0))
+                        == min((seed_totals[s],usage.get((s,group),0)) for s in seeds)])
+                else:
+                    # Keep every scenario seed's A/B/C cells within one of one
+                    # another, then balance domain-wide groups and seed exposure.
+                    eligible=[(seed,group) for seed in seeds for group in groups
+                        if usage.get((seed,group),0)
+                        == min(usage.get((seed,g),0) for g in groups)]
+                    best=min((group_totals[group],seed_totals[seed])
+                             for seed,group in eligible)
+                    seed,group=secrets.choice([(seed,group) for seed,group in eligible
+                        if (group_totals[group],seed_totals[seed])==best])
+                try:
+                    binding=binding_for_group(domain,group)
+                except PolicyUnavailable as exc:
+                    raise StudyError('policy_unavailable',503) from exc
+                if not existing:
+                    db.execute('UPDATE pl3_participants SET group_code=? WHERE id=?',(group,name))
                 db.execute('INSERT INTO pl3_instances VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (iid,name,domain,RELEASE_ID,group,mode,'demo',0,None,0,language,seed,time.time(),None))
-                if requested_group:
-                    assignment='researcher_override' if admin and mode!='pilot' else 'participant_choice'
-                else:
-                    assignment='existing_participant' if existing else 'randomized_balanced'
+                db.execute('INSERT INTO pl3_policy_bindings VALUES(?,?,?,?,?,?,?,?,?,?)',
+                    (iid,binding['policy_id'],domain,binding['variant'],binding['actor_path'],
+                     binding['actor_sha256'],binding['human_actor_sha256'],
+                     binding['ai_actor_sha256'],encode(binding['program_hashes']),time.time()))
+                if domain == 'warehouse':
+                    model_version = binding.get('actor_model_version')
+                    schema = binding.get('feature_schema_sha256')
+                    if not model_version or not schema:
+                        raise StudyError('policy_binding_metadata_missing',503)
+                    db.execute('INSERT INTO pl3_policy_binding_metadata VALUES(?,?,?,?)',
+                        (iid,model_version,schema,time.time()))
+                assignment='researcher_override' if requested_group else 'randomized_balanced'
                 db.execute('INSERT INTO pl3_enrollments VALUES(?,?,?,?,?,?)',(iid,1,language,assignment,config.get('scenario_version',config['version']),time.time()))
                 db.execute('INSERT INTO pl3_reward_settings VALUES(?,?)',(iid,encode(rewards.policy(domain))))
                 if self.settings.optional_prompts:
@@ -193,15 +394,48 @@ class Store:
                 compatible=[r for r in rows if compatible_instance(r)]
                 instance=next((r for r in compatible if r['stage']!='completed'),compatible[0] if compatible else None)
             if not instance: return {'participant_id':p['id'],'stage':'welcome',
-                'previous_version_saved':any(not compatible_instance(r) and (not domain or r['domain']==domain) for r in rows)}
+                'previous_version_saved':any(not compatible_instance(r) and (not domain or r['domain']==domain) for r in rows),
+                'archived_instances':[{'id':r['id'],'release_id':r['release_id'],'stage':r['stage']}
+                    for r in rows if r['domain'] in ('warehouse','kitchen','pong') and not compatible_instance(r)
+                    and (not domain or domain==r['domain'])]}
             if not compatible_instance(instance): raise StudyError('release_changed',409)
             return self._view(db,self._instance(db,token,instance['id']))
 
     def view(self, token, instance_id):
-        with self.db.transaction(read_only=True) as db: return self._view(db,self._instance(db,token,instance_id))
+        with self.db.transaction(read_only=True) as db:
+            instance=self._owned_instance(db,token,instance_id)
+            if instance['domain'] in ('warehouse','kitchen','pong') and not compatible_instance(instance):
+                return self._archive_view(db,instance)
+            if not compatible_instance(instance):raise StudyError('release_changed',409)
+            return self._view(db,instance)
+
+    def _archive_view(self,db,instance):
+        """Read stored historical frames without applying the current engine."""
+        runs=db.all('SELECT id,task,status,score_json FROM pl3_runs WHERE instance_id=? ORDER BY task',(instance['id'],))
+        task_runs=[]
+        latest=None
+        for run in runs:
+            frame=db.one('SELECT turn,public_json FROM pl3_frames WHERE run_id=? ORDER BY turn DESC LIMIT 1',(run['id'],))
+            task_runs.append({'id':run['id'],'task':run['task'],'status':run['status'],
+                              'score':json.loads(run['score_json']),'turn':frame['turn'] if frame else 0})
+            if frame:latest=(run,frame)
+        questions=db.all('SELECT id,question,language,result_json,status,target_turn,target_run FROM pl3_questions WHERE instance_id=? ORDER BY requested',(instance['id'],))
+        return {'id':instance['id'],'instance_id':instance['id'],
+                'participant_id':instance['participant_id'],'domain':instance['domain'],
+                'stage':'archived','previous_stage':instance['stage'],
+                'revision':instance['revision'],'language':instance['language'],
+                'mode':instance['mode'],'release_id':instance['release_id'],
+                'group':instance['group_code'],'archived':True,'can_ask':False,
+                'actions':[],'run_id':latest[0]['id'] if latest else None,
+                'state':json.loads(latest[1]['public_json']) if latest else None,
+                'task_runs':task_runs,'questions':[{'id':q['id'],'question':q['question'],
+                    'language':q['language'],'result':public_answer(json.loads(q['result_json'])),
+                    'status':q['status'],'target_turn':q['target_turn'],'target_run':q['target_run']}
+                    for q in questions]}
 
     def _view(self,db,instance):
         eng=engine(instance['domain'])
+        binding=self._binding(db,instance)
         language=instance['language']
         enrollment=db.one('SELECT assignment_source FROM pl3_enrollments WHERE instance_id=?',(instance['id'],))
         result={k:instance[k] for k in ('id','domain','stage','revision','language','mode','release_id')}
@@ -211,28 +445,38 @@ class Store:
             task_runs=[],questions=[],automatic_explanations=[],state=None,run_id=instance['current_run'],
             automatic_explanations_enabled=bool(db.one('SELECT instance_id FROM pl3_auto_explanation_settings WHERE instance_id=?',(instance['id'],))),
             group=instance['group_code'],group_selection_locked=True,
-            group_assignment_source=enrollment['assignment_source'] if enrollment else None)
+            group_assignment_source=enrollment['assignment_source'] if enrollment else None,
+            policy_id=binding['policy_id'],actor_sha256=binding['actor_sha256'],
+            ai_actor_sha256=binding['ai_actor_sha256'],human_actor_sha256=binding['human_actor_sha256'])
         runs=db.all('SELECT id,task,status,score_json,state_json FROM pl3_runs WHERE instance_id=? ORDER BY task',(instance['id'],))
-        result['task_runs']=[{'id':r['id'],'task':r['task'],'status':r['status'],'score':eng.public_state(json.loads(r['state_json']))['score'],'turn':json.loads(r['state_json'])['turn']} for r in runs]
+        result['task_runs']=[]
+        for run in runs:
+            recorded_state=json.loads(run['state_json'])
+            self._assert_state_binding(recorded_state,binding)
+            result['task_runs'].append({'id':run['id'],'task':run['task'],'status':run['status'],
+                'score':eng.public_state(recorded_state)['score'],'turn':recorded_state['turn']})
         result['optional_prompts']=self._optional_prompts(db,instance)
         result['rewards']=rewards.summary(db,instance['id'])
         if instance['stage']=='demo':
-            if instance['domain']=='kitchen':
-                row=db.one('SELECT state_json FROM pl3_tutorials WHERE instance_id=?',(instance['id'],))
-                practice=json.loads(row['state_json'])
-                result['tutorial']=kitchen_tutorial.view(practice)
-                result['state']=result['tutorial']['state']
-                result['actions']=eng.legal_actions(practice['state'])
-            else:
-                demo=demonstration(instance['domain'])
-                result['demo']={'index':instance['demo_index'],'captions':demo['captions'],'frames':demo['frames']}
+            demo=demonstration(instance['domain'],binding['policy_id'])
+            result['demo']={'index':instance['demo_index'],'captions':demo['captions'],'frames':demo['frames']}
+        if instance['stage']=='practice':
+            row=db.one('SELECT state_json FROM pl3_tutorials WHERE instance_id=?',(instance['id'],))
+            practice=json.loads(row['state_json'])
+            result['tutorial']=kitchen_tutorial.view(practice)
+            result['state']=result['tutorial']['state']
+            result['actions']=eng.legal_actions(practice['state'])
         if instance['domain']=='kitchen':
             result['public_help']=kitchen_tutorial.public_help()
-            result['rule_metadata']=eng.rule_metadata()
+            result['rule_metadata']=eng.rule_metadata(binding['policy_id'])
             result['rules']=[row[language] for row in result['public_help']]
         if instance['current_run']:
             run=db.one('SELECT * FROM pl3_runs WHERE id=?',(instance['current_run'],))
             state=json.loads(run['state_json'])
+            self._assert_state_binding(state,binding)
+            history=self._verified_run_prefix(db,eng,run,binding,state['turn'],instance['scenario_seed'])
+            if self._recorded_frame(eng,history[-1],binding)[0] != state:
+                raise StudyError('recorded_frame_mismatch',503)
             result.update(state=eng.public_state(state),actions=eng.legal_actions(state) if not state['terminal'] else [],run_status=run['status'])
             if hasattr(eng,'action_label'):
                 result['action_labels']={a:eng.action_label(a,language) for a in result['actions']}
@@ -298,23 +542,22 @@ class Store:
                 db.execute('INSERT INTO pl3_timings VALUES(?,?,?,?,?,?)',(uid(),instance['id'],task,time_kind,seconds,time.time()))
             if kind=='demo_next':
                 if instance['stage']!='demo': raise StudyError('wrong_stage',409)
-                if instance['domain']=='kitchen':raise StudyError('interactive_tutorial_required',409)
-                end=len(demonstration(instance['domain'])['captions'])
+                binding=self._binding(db,instance)
+                end=len(demonstration(instance['domain'],binding['policy_id'])['captions'])
                 db.execute('UPDATE pl3_instances SET demo_index=? WHERE id=?',(min(instance['demo_index']+1,end),instance['id']))
             elif kind in ('demo_finish','demo_skip'):
                 if instance['stage']!='demo': raise StudyError('wrong_stage',409)
-                if instance['domain']=='kitchen':
-                    if kind=='demo_skip':self._tutorial(db,instance,{'command':'skip'})
-                    else:
-                        row=db.one('SELECT state_json FROM pl3_tutorials WHERE instance_id=?',(instance['id'],))
-                        if not kitchen_tutorial.normalize(json.loads(row['state_json']))['completed']:raise StudyError('finish_demo',409)
-                    end=kitchen_tutorial.COUNT
-                else:end=len(demonstration(instance['domain'])['captions'])
+                binding=self._binding(db,instance)
+                end=len(demonstration(instance['domain'],binding['policy_id'])['captions'])
                 db.execute('UPDATE pl3_instances SET demo_index=? WHERE id=?',(end,instance['id']))
                 if kind=='demo_skip':
                     # Skip is an explicit participant choice, recorded as its
                     # own idempotent command, never a simulated task action.
                     self._next(db,{**instance,'demo_index':end})
+            elif kind=='practice_skip':
+                if instance['domain']!='kitchen' or instance['stage']!='practice':raise StudyError('wrong_stage',409)
+                self._tutorial(db,instance,{'command':'skip'})
+                self._next(db,instance)
             elif kind=='next':
                 if self._optional_prompts(db,instance):self._skip_prompts(db,instance,'next_task')
                 self._next(db,instance)
@@ -345,7 +588,7 @@ class Store:
             return self._view(db,updated)
 
     def _tutorial(self,db,instance,payload):
-        if instance['domain']!='kitchen' or instance['stage']!='demo':raise StudyError('wrong_stage',409)
+        if instance['domain']!='kitchen' or instance['stage']!='practice':raise StudyError('wrong_stage',409)
         row=db.one('SELECT state_json FROM pl3_tutorials WHERE instance_id=?',(instance['id'],))
         before=json.loads(row['state_json'])
         try:after=kitchen_tutorial.apply(before,payload.get('command'),payload.get('action'))
@@ -363,12 +606,18 @@ class Store:
     def _next(self,db,instance):
         stage=instance['stage']
         if stage=='demo':
+            binding=self._binding(db,instance)
+            if instance['demo_index']<len(demonstration(instance['domain'],binding['policy_id'])['captions']):raise StudyError('finish_demo',409)
             if instance['domain']=='kitchen':
-                row=db.one('SELECT state_json FROM pl3_tutorials WHERE instance_id=?',(instance['id'],))
-                before=json.loads(row['state_json']);practice=kitchen_tutorial.normalize(before)
-                if not (practice['completed'] or practice['skipped']):raise StudyError('finish_demo',409)
-                if practice!=before:self._tutorial(db,instance,{'command':'finish'})
-            elif instance['demo_index']<len(demonstration(instance['domain'])['captions']):raise StudyError('finish_demo',409)
+                db.execute("UPDATE pl3_instances SET stage='practice',demo_index=0 WHERE id=?",(instance['id'],))
+                return
+            task=1
+        elif stage=='practice':
+            if instance['domain']!='kitchen':raise StudyError('wrong_stage',409)
+            row=db.one('SELECT state_json FROM pl3_tutorials WHERE instance_id=?',(instance['id'],))
+            before=json.loads(row['state_json']);practice=kitchen_tutorial.normalize(before)
+            if not (practice['completed'] or practice['skipped']):raise StudyError('finish_demo',409)
+            if practice!=before:self._tutorial(db,instance,{'command':'finish'})
             task=1
         elif stage in ('task1','task2','task3'):
             run=db.one('SELECT * FROM pl3_runs WHERE id=?',(instance['current_run'],))
@@ -378,11 +627,18 @@ class Store:
                 return
             task=int(stage[-1])+1
         else: raise StudyError('wrong_stage',409)
-        eng=engine(instance['domain']); state=eng.initial_state(instance['scenario_seed'],task)
+        eng=engine(instance['domain'])
+        binding=self._binding(db,instance)
+        try:
+            state=eng.initial_state(instance['scenario_seed'],task,binding['policy_id'],
+                                    release_id=RELEASE_ID)
+        except (OSError, RuntimeError) as error:
+            raise StudyError('policy_unavailable',503) from error
+        self._assert_state_binding(state,binding)
         rid=uid(); now=time.time()
         db.execute('INSERT INTO pl3_runs VALUES(?,?,?,?,?,?,?,?,?)',
             (rid,instance['id'],task,instance['scenario_seed'],encode(state),'active',encode(eng.score(state)),now,None))
-        decision=eng.decide(state)
+        decision=self._verified_decision(eng,state,binding)
         db.execute('INSERT INTO pl3_frames VALUES(?,?,?,?,?,?,?)',
             (rid,0,encode(state),encode(eng.public_state(state)),encode(decision),None,now))
         if task==2:self._record_automatic(db,instance,rid,state,decision)
@@ -395,18 +651,24 @@ class Store:
         if run['status']!='active':raise StudyError('task_finished',409)
         if self._pending_automatic(db,instance) and not self._optional_prompts(db,instance):raise StudyError('explanation_confirmation_required',409)
         state=json.loads(run['state_json']); eng=engine(instance['domain'])
+        binding=self._binding(db,instance)
+        self._assert_state_binding(state,binding)
+        history=self._verified_run_prefix(db,eng,run,binding,state['turn'],instance['scenario_seed'])
+        if self._recorded_frame(eng,history[-1],binding)[0] != state:
+            raise StudyError('recorded_frame_mismatch',503)
         if payload.get('turn')!=state['turn']:raise StudyError('stale_state',409)
         action=payload.get('action')
         if action not in eng.legal_actions(state):raise StudyError('illegal_action')
         if self._optional_prompts(db,instance):self._skip_prompts(db,instance,'continued_playing')
-        decision=eng.decide(state)
+        decision=self._verified_decision(eng,state,binding)
         nxt=eng.step(state,action,decision)
+        self._assert_state_binding(nxt,binding)
         db.execute('UPDATE pl3_frames SET human_action=?,decision_json=? WHERE run_id=? AND turn=?',
             (action,encode(decision),run['id'],state['turn']))
         now=time.time(); terminal=nxt['terminal']
         db.execute('UPDATE pl3_runs SET state_json=?,status=?,score_json=?,ended=? WHERE id=?',
             (encode(nxt),'completed' if terminal else 'active',encode(eng.score(nxt)),now if terminal else None,run['id']))
-        next_decision=eng.decide(nxt) if not terminal else {}
+        next_decision=self._verified_decision(eng,nxt,binding) if not terminal else {}
         db.execute('INSERT INTO pl3_frames VALUES(?,?,?,?,?,?,?)',
             (run['id'],nxt['turn'],encode(nxt),encode(eng.public_state(nxt)),encode(next_decision),None,now))
         if run['task']==2:self._record_automatic(db,instance,run['id'],nxt,next_decision,decision)
@@ -574,10 +836,20 @@ class Store:
 
     def frame(self,token,instance_id,run_id,turn):
         with self.db.transaction(read_only=True) as db:
-            instance=self._instance(db,token,instance_id)
-            row=db.one('SELECT f.public_json FROM pl3_frames f JOIN pl3_runs r ON r.id=f.run_id WHERE r.instance_id=? AND f.run_id=? AND f.turn=?',(instance['id'],run_id,turn))
+            instance=self._owned_instance(db,token,instance_id)
+            if not compatible_instance(instance) and instance['domain'] not in ('warehouse','kitchen','pong'):
+                raise StudyError('release_changed',409)
+            row=db.one('SELECT f.* FROM pl3_frames f JOIN pl3_runs r ON r.id=f.run_id WHERE r.instance_id=? AND f.run_id=? AND f.turn=?',(instance['id'],run_id,turn))
             if not row:raise StudyError('frame_not_found',404)
-            return {'state':json.loads(row['public_json']),'can_ask':self._ask_allowed(db,instance)}
+            if compatible_instance(instance):
+                binding=self._binding(db,instance)
+                run=db.one('SELECT * FROM pl3_runs WHERE id=? AND instance_id=?',(run_id,instance['id']))
+                history=self._verified_run_prefix(db,engine(instance['domain']),run,binding,turn,instance['scenario_seed'])
+                public=self._recorded_frame(engine(instance['domain']),history[-1],binding)[2]
+            else:
+                public=json.loads(row['public_json'])
+            return {'state':public,
+                    'can_ask':compatible_instance(instance) and self._ask_allowed(db,instance)}
 
     def ask(self,token,payload):
         question=str(payload.get('question','')).strip()
@@ -588,10 +860,20 @@ class Store:
             instance=self._instance(db,token,payload.get('instance_id'))
             if self._pending_understanding(db,instance):raise StudyError('understanding_rating_required',409)
             if not self._ask_allowed(db,instance):raise StudyError('explanations_unavailable',403)
+            binding=self._binding(db,instance)
             if payload.get('authorized_run')!=instance['current_run']:raise StudyError('wrong_run',403)
             target=payload.get('target_run',instance['current_run']);turn=payload.get('turn')
             row=db.one('SELECT f.*,r.task FROM pl3_frames f JOIN pl3_runs r ON r.id=f.run_id WHERE r.instance_id=? AND f.run_id=? AND f.turn=? AND r.task<=2',(instance['id'],target,turn))
             if not row:raise StudyError('frame_not_found',404)
+            eng=engine(instance['domain'])
+            target_run=db.one('SELECT * FROM pl3_runs WHERE id=? AND instance_id=?',(target,instance['id']))
+            verified_frames=self._verified_run_prefix(db,eng,target_run,binding,turn,instance['scenario_seed'])
+            state,decision,_=self._recorded_frame(eng,verified_frames[-1],binding)
+            # The recorded incoming decision is evidence for any question
+            # about the action that produced the displayed frame.
+            incoming=verified_frames[-2] if turn>0 else None
+            incoming_state,incoming_decision,_=(self._recorded_frame(eng,incoming,binding)
+                if incoming else (None,None,None))
             # Expire interrupted requests after both provider attempts plus a margin.
             for expired_language in ('en','zh'):
                 expired={'status':'unavailable','answer':'上一次请求已中断，请重新提问。' if expired_language=='zh' else 'The previous request was interrupted. Please ask again.','evidence_ids':[],
@@ -613,28 +895,34 @@ class Store:
             # A displayed frame is an AFTER-action snapshot. Its own stored
             # decision predicts the next transition; the previous row contains
             # the actual simultaneous actions that produced the displayed one.
-            earlier=db.all('SELECT public_json FROM pl3_frames WHERE run_id=? AND turn<=? ORDER BY turn DESC LIMIT 16',(target,turn))
-            state=json.loads(row['state_json']);decision=json.loads(row['decision_json'])
-            incoming=db.one('SELECT state_json,decision_json,human_action FROM pl3_frames WHERE run_id=? AND turn=?',
-                (target,turn-1)) if turn>0 else None
-            action_context={'state':json.loads(incoming['state_json']) if incoming else None,
-                'decision':json.loads(incoming['decision_json']) if incoming else None,
+            chronological=verified_frames[-16:]
+            public_history=[self._recorded_frame(eng,frame,binding)[2]
+                            for frame in chronological]
+            action_context={'state':incoming_state,
+                'decision':incoming_decision,
                 'human_action':incoming['human_action'] if incoming else None}
         try:
             if not self.explainer:raise RuntimeError('model_unavailable')
             answer=self.explainer.answer(engine(instance['domain']),state,decision,question,language,previous,
-                [json.loads(f['public_json']) for f in reversed(earlier)],action_context=action_context)
+                public_history,action_context=action_context)
             status=answer.get('status','answered')
             if status not in ('answered','clarification','unavailable'):status='unavailable'
         except Exception:
             status='unavailable';answer={'status':status,'answer':'问答暂时不可用，请稍后重试。' if language=='zh' else 'Questions are temporarily unavailable. Please try again.','evidence_ids':[]}
         answer.setdefault('audit',{}).update(context_question_ids=[h['id'] for h in reversed(history)],context_sha256=digest(encode(previous)),authorized_run=instance['current_run'],target_run=target,target_turn=turn,target_display_turn=turn,
             session_release_id=instance['release_id'],answer_release_id=RELEASE_ID,
+            policy_id=binding['policy_id'],actor_sha256=binding['actor_sha256'],
+            human_actor_sha256=binding['human_actor_sha256'],
+            ai_actor_sha256=binding['ai_actor_sha256'],
             performed_decision_turn=turn-1 if incoming else None,
             incoming_transition_sha256=digest(encode(action_context)),authorization_at_request=True)
-        self.qa_healthy = status in ('answered','clarification')
+        # A participant response can revoke readiness when the provider fails,
+        # but only the complete three-domain probe can certify it again.
+        if status == 'unavailable':
+            self.qa_healthy = False
         with self.db.transaction(scope=payload.get('instance_id')) as db:
             current=self._instance(db,token,instance['id'])
+            self._binding(db,current)
             permitted=self._ask_allowed(db,current) and current['current_run']==instance['current_run']
             answer['audit']['authorization_at_completion']=permitted
             db.execute('UPDATE pl3_questions SET result_json=?,status=?,finished=? WHERE id=?',
@@ -646,6 +934,7 @@ class Store:
         with self.db.transaction(scope=instance_id) as db:
             instance=self._instance(db,token,instance_id)
             if not self._ask_allowed(db,instance):raise StudyError('explanations_unavailable',403)
+            self._binding(db,instance)
             row=db.one('SELECT * FROM pl3_questions WHERE id=? AND instance_id=? AND authorized_run=?',(qid,instance_id,instance['current_run']))
             if not row or row['status'] not in ('answered','clarification','unavailable'):raise StudyError('answer_unavailable',403)
             db.execute('UPDATE pl3_questions SET displayed=? WHERE id=?',(time.time(),qid))
@@ -667,6 +956,8 @@ class Store:
         relationships = {
             'participants': 'i.participant_id=r.id',
             'enrollments': 'i.id=r.instance_id',
+            'policy_bindings': 'i.id=r.instance_id',
+            'policy_binding_metadata': 'i.id=r.instance_id',
             'instances': 'i.id=r.id',
             'runs': 'i.id=r.instance_id',
             'questions': 'i.id=r.instance_id',
@@ -684,7 +975,10 @@ class Store:
             'understanding_settings': 'i.id=r.instance_id',
             'understanding_ratings': 'i.id=r.instance_id',
         }
-        ordering = {'prompt_settings':'r.instance_id','prompt_skips':'r.prompt_id','reward_settings':'r.instance_id','participants':'r.id','enrollments':'r.instance_id','instances':'r.id',
+        ordering = {'prompt_settings':'r.instance_id','prompt_skips':'r.prompt_id',
+                    'reward_settings':'r.instance_id','participants':'r.id',
+                    'enrollments':'r.instance_id','policy_bindings':'r.instance_id',
+                    'policy_binding_metadata':'r.instance_id','instances':'r.id',
                     'runs':'r.id','frames':'r.run_id,r.turn','questions':'r.id',
                     'questionnaires':'r.instance_id','timings':'r.id','releases':'r.id',
                     'tutorials':'r.instance_id','tutorial_events':'r.id',

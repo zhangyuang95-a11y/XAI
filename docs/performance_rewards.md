@@ -1,6 +1,6 @@
 # Performance rewards — new enrollment protocol
 
-Version `gbp-300-base-20-per-task-v2`, GBP only. Applies equally to A and B.
+Version `gbp-300-base-20-per-task-v2`, GBP only. Applies equally to A, B, and C.
 Each participant plays one assigned game, completing Tasks 1, 2 and 3.
 Base pay: £3.00 on completion; each task earns £0.00–£0.20; maximum total £3.60.
 
@@ -16,6 +16,12 @@ Pong uses its displayed normalized task_score, not raw points. Warehouse and
 Kitchen use their displayed raw task_score. No Task 3 minus Task 1 calculation,
 question counts, understanding ratings, tutorial or demonstration scores enter
 payment calculations. At a midpoint score (50, 55 or 90), a task earns £0.10.
+
+The active v6 Kitchen task uses the preserved five-dish, 360-turn frozen
+environment that produced the accepted v5 Actor evidence. The three-dish,
+240-turn protocol is historical. The 60–120 Kitchen bonus interval is a
+payment rule, not the physical score range: scores above 120 receive the
+maximum £0.20 bonus. Demonstrations and offline proxy evaluations are unpaid.
 
 The complete policy is stored per new instance in `pl3_reward_settings`.
 Existing stored v1 policies retain their £2.80 base pay and bonus rules.

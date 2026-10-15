@@ -1,4 +1,4 @@
-"""Deterministic rolling cooperative Pong; controllers see visible balls only.
+"""Deterministic rolling cooperative Pong with a frozen neural teammate.
 
 The complete spawn schedule is private and fixed before play. One input advances
 one physical step; animation never changes this engine's clock. Displayed lanes
@@ -10,12 +10,56 @@ from functools import lru_cache
 import json
 from pathlib import Path
 import random
+from . import nn_policy
 
 DOMAIN = 'pong'
 CONFIG = json.loads((Path(__file__).resolve().parents[2] / 'configs/study_v3_pong.json').read_text())
 VERSION = CONFIG['version']
+RELEASE_VERSION = 'pong-paired-dual-actor-v5'
 LANES, HEIGHT, WEIGHTS = CONFIG['lanes'], CONFIG['height'], CONFIG['weights']
 _DELTAS = {'left': -1, 'wait': 0, 'right': 1}
+
+
+def policy_artifacts(release_id=None):
+    return nn_policy.policy_artifacts(release_id)
+
+
+def audited_program_evidence(state):
+    """Optional, read-only program agreement evidence for Task 2 explanations."""
+    if (state.get('policy_id') != 'pong-regularized-v5'
+            or state.get('task') != 2 or state.get('terminal')):
+        return None
+    release_id = state.get('release_id')
+    entry = nn_policy.policy_artifacts(release_id)['regularized']
+    if (state.get('actor_sha256') != entry['actor_sha256']
+            or state.get('role_sha256') != entry['role_sha256']):
+        return None
+    try:
+        evidence = nn_policy.load_bound_program(state['policy_id'], 'ai', release_id)
+        from core.program import ExecutableProgram
+        program = ExecutableProgram.from_dict(evidence['program'])
+        result = program.execute(nn_policy.semantic_features(state, 'ai'))
+        actual = nn_policy.choose(state, 'ai')
+    except (RuntimeError, OSError, ValueError, KeyError, TypeError):
+        return None
+    if result.action != actual:
+        return None
+    audit = evidence['selected_actor_development_audit']
+    agreement = 100.0 * audit['action_fidelity']
+    label_en = {'wait': 'wait', 'left': 'move left', 'right': 'move right'}[actual]
+    label_zh = {'wait': '等待', 'left': '左移', 'right': '右移'}[actual]
+    path = entry['program_paths'][1]
+    digest = entry['program_sha256'][path]
+    return {
+        'en': (f'The audited bounded program also selects {label_en} here. '
+               f'It agreed with the frozen Actor on {agreement:.1f}% of '
+               f'{audit["sample_count"]} development states. This agreement does not establish the NN\'s internal reason.'),
+        'zh': (f'通过审计的有界程序在当前状态也选择{label_zh}。'
+               f'它在开发集 {audit["sample_count"]} 个状态上与冻结 Actor 的动作一致率为 {agreement:.1f}%。'
+               '这种一致性不能证明 NN 的内在动机。'),
+        'program_sha256': digest,
+        'eligible': True,
+    }
 
 
 def _ball(identifier, kind, contacts, remaining):
@@ -93,11 +137,20 @@ def _new_state(schedule, *, seed, task, human, ai):
                         'waiting_turns': 0, 'holding_turns': 0, 'no_job_waiting_turns': 0}}
 
 
-def initial_state(seed, task):
+def initial_state(seed, task, policy_id=None, release_id=None):
     if task not in (1, 2, 3):
         raise ValueError('task must be 1, 2 or 3')
+    if policy_id is not None:
+        nn_policy.load_bound_model(policy_id, release_id)
     human, ai = (6, 2) if task == 3 else (2, 6)
-    return _new_state(_schedule(seed, task), seed=int(seed), task=task, human=human, ai=ai)
+    state = _new_state(_schedule(seed, task), seed=int(seed), task=task, human=human, ai=ai)
+    if policy_id is not None:
+        state['policy_id'] = policy_id
+        state['actor_sha256'] = nn_policy.model_sha256(policy_id, release_id)
+        state['role_sha256'] = deepcopy(nn_policy.policy_artifacts(release_id)[nn_policy.V5_POLICY_IDS[policy_id]]['role_sha256'])
+        if release_id is not None:
+            state['release_id'] = release_id
+    return state
 
 
 def legal_actions(state, actor='human'):
@@ -113,7 +166,8 @@ def _move_towards(position, target):
 
 
 def _observation(state):
-    return {key: deepcopy(state[key]) for key in ('human', 'ai', 'balls', 'policy_memory', 'terminal')}
+    keys = ('human', 'ai', 'balls', 'policy_memory', 'terminal', 'policy_id')
+    return {key: deepcopy(state[key]) for key in keys if key in state}
 
 
 def _route(start, appointments):
@@ -137,7 +191,9 @@ def _same_assignment(left, right):
     return bool(left and right and all(left.get(k) == right.get(k) for k in ('ball_id', 'ai_contact', 'human_contact')))
 
 
-# All legal simultaneous one-lane moves. This keeps planning bounded by
+# The visible-state planner below is an offline imitation teacher only. New
+# participant actions are selected by decide() using the frozen neural Actor.
+# All legal simultaneous one-lane moves. This keeps teacher planning bounded by
 # twelve time layers x 81 position pairs, not 3^(number of visible balls).
 _PAIR_MOVES = tuple(tuple((nh * LANES + na, int(nh != h) + int(na != a),
                           (2 if na > a else 1 if na < a else 0) * 3 + (2 if nh < h else 1 if nh > h else 0))
@@ -372,13 +428,8 @@ def _explanation_target(obs, assignments, ai_path):
 
 
 def target_identity(decision):
-    """A stable comparison for counterfactual location questions (no prose)."""
-    target = deepcopy(decision.get('explanation_target'))
-    if target:
-        target.pop('human_reachable', None)
-        if target.get('next_team'):
-            target['next_team'].pop('human_reachable', None)
-    return {'action': decision['action'], 'target': target}
+    """Counterfactuals compare actual frozen-policy actions, not inferred goals."""
+    return {'action': decision['action'], 'model_sha256': decision.get('model_sha256')}
 
 
 def _compact_reason(action, target, *, elapsed=0, events=None):
@@ -443,17 +494,20 @@ def _compact_reason(action, target, *, elapsed=0, events=None):
 
 
 def performed_reason(before, decision, after):
-    """Explain the saved decision that actually produced the displayed frame."""
-    elapsed = after['turn'] - before['turn']
-    if elapsed != 1:
+    """Describe the saved action and observed outcome without inventing intent."""
+    if after['turn'] - before['turn'] != 1:
         raise ValueError('A performed explanation needs one recorded transition.')
-    target = deepcopy(decision.get('explanation_target'))
-    if target and target['human_lane'] is not None:
-        target['human_reachable'] = abs(after['human']['x'] - target['human_lane']) <= target['remaining'] - elapsed
-    if target and target.get('next_team'):
-        later = target['next_team']
-        later['human_reachable'] = abs(after['human']['x'] - later['human_lane']) <= later['remaining'] - elapsed
-    return _compact_reason(decision['action'], target, elapsed=elapsed, events=after['events'])
+    en_action = {'left': 'moved left', 'right': 'moved right', 'wait': 'waited'}[decision['action']]
+    zh_action = {'left': '左移', 'right': '右移', 'wait': '等待'}[decision['action']]
+    outcomes = [e for e in after['events'] if e['type'] in ('caught', 'missed')]
+    caught = [e['ball_id'] for e in outcomes if e['type'] == 'caught']
+    missed = [e['ball_id'] for e in outcomes if e['type'] == 'missed']
+    en = f'The frozen teammate {en_action} from lane {before["ai"]["x"] + 1} to lane {after["ai"]["x"] + 1}.'
+    zh = f'冻结的队友这一步从第{before["ai"]["x"] + 1}道{zh_action}至第{after["ai"]["x"] + 1}道。'
+    if outcomes:
+        en += ' We caught ' + (', '.join(caught) if caught else 'none') + ' and missed ' + (', '.join(missed) if missed else 'none') + '.'
+        zh += '本回合接住' + ('、'.join(caught) if caught else '零颗球') + '，漏接' + ('、'.join(missed) if missed else '零颗球') + '。'
+    return {'en': en, 'zh': zh}
 
 
 def _decision_from_observation(obs):
@@ -553,7 +607,30 @@ def _cached_decision(key):
 
 
 def decide(state):
-    return _decision_from_observation(_observation(state))
+    policy_id = state.get('policy_id')
+    release_id = state.get('release_id')
+    model_sha = nn_policy.model_sha256(policy_id, release_id)
+    if policy_id:
+        entry = nn_policy.policy_artifacts(release_id)[nn_policy.V5_POLICY_IDS[policy_id]]
+        if (state.get('actor_sha256') != model_sha
+                or state.get('role_sha256') != entry['role_sha256']):
+            raise RuntimeError('Pong state policy binding does not match pinned actors')
+    provenance = {'policy_id': policy_id, 'model_sha256': model_sha} if policy_id else {'model_sha256': model_sha}
+    if state['terminal']:
+        return {'action': 'wait', 'human_action': 'wait', 'reason_code': 'task_complete',
+                'reason_en': 'The task has finished; there is no next action.',
+                'reason_zh': '任务已经结束，没有下一步动作。', 'goal': 'task_complete',
+                'memory': {}, 'explanation_target': None, 'model_version': nn_policy.MODEL_VERSION,
+                **provenance}
+    action = nn_policy.choose(state, 'ai')
+    human_action = nn_policy.choose(state, 'human')
+    en_action = {'left': 'move left', 'right': 'move right', 'wait': 'wait'}[action]
+    zh_action = {'left': '左移', 'right': '右移', 'wait': '等待'}[action]
+    return {'action': action, 'human_action': human_action, 'reason_code': 'frozen_actor_action',
+            'reason_en': f'The frozen teammate chose to {en_action} from the visible positions and balls. This is its next action, not a promised catch assignment; the action alone does not reveal its internal motive.',
+            'reason_zh': f'冻结的队友根据当前可见的球和双方位置选择{zh_action}。这是下一步动作，不代表已承诺接某颗球；仅凭动作无法推断其内部动机。',
+            'goal': 'model_action', 'memory': {}, 'explanation_target': None,
+            'model_version': nn_policy.MODEL_VERSION, **provenance}
 
 
 def _event(event_type, en, zh, **fields):
@@ -594,15 +671,15 @@ def _settle_visible(obs, human_action, decision):
     return nxt, points, events
 
 
-def step(state, human_action, decision=None):
+def _step_actions(state, human_action, ai_action, decision):
+    if decision['action'] != ai_action:
+        raise ValueError('AI action and transition decision disagree.')
     if state['terminal']:
         raise ValueError('This task is complete.')
     if human_action not in legal_actions(state):
         raise ValueError('Illegal human action.')
-    expected = decide(state)
-    if decision is not None and decision != expected:
-        raise ValueError('The AI decision does not match the submitted state.')
-    decision = expected
+    if ai_action not in legal_actions(state, 'ai'):
+        raise ValueError('Illegal AI action.')
     result = deepcopy(state)
     projected, gained, events = _settle_visible(_observation(state), human_action, decision)
     for key in ('human', 'ai', 'balls', 'policy_memory'):
@@ -612,10 +689,8 @@ def step(state, human_action, decision=None):
     result['events'] = events
     metrics = result['metrics']
     metrics['waiting_turns'] += decision['action'] == 'wait'
-    metrics['holding_turns'] += decision['action'] == 'wait' and decision['target_lane'] is not None
-    metrics['no_job_waiting_turns'] += decision['action'] == 'wait' and decision['target_lane'] is None
-    metrics['assignment_switches'] += bool(decision['assignment_changed'])
-    metrics['assignment_releases'] += bool(decision['assignment_released'])
+    metrics['holding_turns'] += decision['action'] == 'wait' and bool(state['balls'])
+    metrics['no_job_waiting_turns'] += decision['action'] == 'wait' and not state['balls']
     for event in events:
         if event['type'] == 'caught':
             metrics[event['kind'] + '_caught'] += 1
@@ -628,6 +703,19 @@ def step(state, human_action, decision=None):
     result['wave'] = min(result['wave_count'], result['turn'] // 6 + 1)
     result['terminal'] = result['turn'] >= result['max_turns']
     return result
+
+
+def step_pair(state, human_action, ai_action):
+    """Physical training transition: both actions are supplied by external actors."""
+    decision = {'action': ai_action, 'memory': {}}
+    return _step_actions(state, human_action, ai_action, decision)
+
+
+def step(state, human_action, decision=None):
+    expected = decide(state)
+    if decision is not None and decision != expected:
+        raise ValueError('The AI decision does not match the submitted state.')
+    return _step_actions(state, human_action, expected['action'], expected)
 
 
 def score(state):
@@ -645,6 +733,10 @@ def public_state(state):
     public['score'] = score(state)
     for key in ('assignment_switches', 'assignment_releases', 'holding_turns', 'no_job_waiting_turns'):
         public['score']['metrics'].pop(key, None)
+    if 'policy_id' in state:
+        public['policy_id'] = state['policy_id']
+        public['actor_sha256'] = state['actor_sha256']
+        public['role_sha256'] = deepcopy(state['role_sha256'])
     return public
 
 
@@ -665,150 +757,80 @@ def rules(language='en'):
 
 
 def facts(state, decision=None):
+    """Observed facts for the frozen policy; no planner assignments are asserted."""
     actual = decide(state)
     if decision is not None and decision != actual:
         raise ValueError('Decision evidence does not match this state.')
-    evidence = [{'id': 'position', 'en': f"You are at lane {state['human']['x'] + 1}; your teammate is at lane {state['ai']['x'] + 1}.",
-                 'zh': f"你在第{state['human']['x'] + 1}道，队友在第{state['ai']['x'] + 1}道。"},
-                {'id': 'decision', 'en': actual['reason_en'], 'zh': actual['reason_zh']},
-                {'id': 'next_action', 'en': 'This task is finished; there is no next action.' if state['terminal'] else 'The teammate\'s next action is ' + {'left':'move left','right':'move right','wait':'wait'}[actual['action']] + '.',
-                 'zh': '任务已经结束，没有下一步动作。' if state['terminal'] else '队友下一步将' + {'left':'左移','right':'右移','wait':'等待'}[actual['action']] + '。'}]
-    payoffs = _planned_arrival_payoffs(_observation(state),actual['assignments'],actual['planned_catches'])
-    human_arrival = next((row for row in payoffs if row['human_lane'] is not None), None)
-    if human_arrival is not None and not state['terminal']:
-        lane, remaining = human_arrival['human_lane'], human_arrival['arrival_turns']
-        selected = [catch['ball_id'] for catch in human_arrival['catches'] if catch['actor'] in ('human', 'team')]
-        distance = abs(state['human']['x'] - lane)
-        next_x = max(0, min(LANES - 1, state['human']['x'] + {'left':-1, 'right':1, 'wait':0}[actual['human_action']]))
-        advised_reachable = abs(next_x - lane) <= remaining - 1
-        wait_reachable = distance <= remaining - 1
-        en = f"Go to lane {lane + 1} for {' and '.join(selected)}, arriving in {remaining} turns. "
-        zh = f"你去第{lane + 1}道接{remaining}回合后的{'、'.join(selected)}。"
-        if distance == 0:
-            en += 'You are already there, so wait at this contact.'
-            zh += '你已经到位，在这里等待即可。'
-        elif distance > remaining:
-            en += 'You can no longer reach this contact in time.'
-            zh += '你已经来不及到这个接球点。'
-        else:
-            en += f"Move {'left' if actual['human_action']=='left' else 'right'} toward it" + (f"; waiting now would miss {' and '.join(selected)}." if not wait_reachable else '.')
-            zh += f"现在向{'左' if actual['human_action']=='left' else '右'}移动" + (f"；如果先等待，就会错过{'、'.join(selected)}。" if not wait_reachable else '。')
-        evidence.append({'id': 'human_catch_distance', 'ball_ids': selected,
-                         'en': f"Lane {lane + 1} is {distance} moves away; {remaining} turns remain. Waiting one turn {'still leaves enough time' if wait_reachable else 'leaves too little time'} to reach it.",
-                         'zh': f"到第{lane + 1}道还需{distance}步，剩{remaining}回合。先等待一回合后{'仍来得及' if wait_reachable else '会来不及'}。"})
-        evidence.append({'id':'human_catch_deadline', 'ball_ids':selected, 'contact_lane':lane+1,
-                         'horizontal_distance':distance, 'arrival_turns':remaining,
-                         'advised_action':actual['human_action'], 'advised_reachable':advised_reachable,
-                         'wait_reachable':wait_reachable, 'en':en, 'zh':zh})
-    for payoff in payoffs:
-        evidence.append({'id': 'arrival_payoff:' + str(payoff['arrival_turns']),
-                         'arrival_turns':payoff['arrival_turns'], 'raw_points':payoff['raw_points'],
-                         'maximum_at_arrival':payoff['maximum_at_arrival'], 'is_highest_at_arrival':payoff['is_highest_at_arrival'],
-                         'human_contact_lane':None if payoff['human_lane'] is None else payoff['human_lane']+1,
-                         'ai_contact_lane':None if payoff['ai_lane'] is None else payoff['ai_lane']+1, 'scope':payoff['scope'],
-                         'catches':deepcopy(payoff['catches']), 'en':_payoff_text(payoff), 'zh':_payoff_text(payoff,'zh')})
-        for catch in payoff['catches']:
-            evidence.append({'id':'ball_payoff:'+catch['ball_id'], 'ball_id':catch['ball_id'],
-                             'arrival_turns':payoff['arrival_turns'], 'raw_points':payoff['raw_points'],
-                             'en':_payoff_text(payoff), 'zh':_payoff_text(payoff,'zh')})
-    balls_by_id = {ball['id']: ball for ball in state['balls']}
-    assignments = {item['ball_id']: item for item in actual['assignments']}
-    ordinary_owners = {item['ball_id']: item['actor'] for item in actual['planned_catches']}
-    plan_rows = {}
+    rows = [
+        {'id': 'position', 'en': f'You are at lane {state["human"]["x"] + 1}; your teammate is at lane {state["ai"]["x"] + 1}.',
+         'zh': f'你在第{state["human"]["x"] + 1}道；队友在第{state["ai"]["x"] + 1}道。'},
+        {'id': 'decision', 'en': actual['reason_en'], 'zh': actual['reason_zh']},
+        {'id': 'next_action', 'en': actual['reason_en'], 'zh': actual['reason_zh']},
+    ]
     for ball in state['balls']:
-        lanes = ', '.join(str(x + 1) for x in ball['contacts'])
-        evidence.append({'id': 'ball:' + ball['id'],
-            'en': f"{ball['id']}: {'team' if ball['kind'] == 'cooperative' else 'small'}, {WEIGHTS[ball['kind']]} points, lane(s) {lanes}, {ball['remaining']} turns away; falls {ball.get('vy', 2 if ball['kind'] == 'ordinary' else 1)} cells each step.",
-            'zh': f"{ball['id']}是{'合作' if ball['kind'] == 'cooperative' else '小'}球，值{WEIGHTS[ball['kind']]}分，将在{ball['remaining']}回合后到达第{lanes}道，每步下降{ball.get('vy', 2 if ball['kind'] == 'ordinary' else 1)}格。"})
-        assignment = assignments.get(ball['id'])
-        owner = ordinary_owners.get(ball['id'])
-        if assignment:
-            status = 'committed' if assignment['locked'] else 'tentative'
-            en_plan = f"{ball['id']} is selected: I cover lane {assignment['ai_contact'] + 1}; you cover lane {assignment['human_contact'] + 1}, in {ball['remaining']} turns. "
-            zh_plan = f"当前选择接{ball['id']}：{ball['remaining']}回合后，我覆盖第{assignment['ai_contact'] + 1}道，你覆盖第{assignment['human_contact'] + 1}道。"
-            en_plan += 'I keep my selected side even if you move away; the team ball still requires you at the other contact.' if assignment['locked'] else 'This later plan can change.'
-            zh_plan += '即使你移开，我也保持自己选定的一侧；大球仍需要你覆盖另一端。' if assignment['locked'] else '这个后续计划可能调整。'
-            if abs(state['human']['x'] - assignment['human_contact']) > ball['remaining']:
-                en_plan += ' You can no longer reach your end in time, so this team ball will be missed.'
-                zh_plan += '你已经来不及到另一端，因此这颗大球会漏接。'
-        elif owner:
-            status = 'selected'
-            en_plan = f"{ball['id']} is selected for {'me' if owner == 'ai' else 'you'} to catch at lane {ball['contacts'][0] + 1} in {ball['remaining']} turns."
-            zh_plan = f"当前选择由{'我' if owner == 'ai' else '你'}在{ball['remaining']}回合后，于第{ball['contacts'][0] + 1}道接{ball['id']}。"
+        lanes = [x + 1 for x in ball['contacts']]
+        kind = 'team' if ball['kind'] == 'cooperative' else 'small'
+        zh_kind = '合作球' if ball['kind'] == 'cooperative' else '小球'
+        en_contacts = ' and '.join(map(str, lanes))
+        zh_contacts = '、'.join(map(str, lanes))
+        rows.append({'id': 'ball:' + ball['id'], 'ball_id': ball['id'],
+                     'en': f'{ball["id"]} is a {kind} ball worth {WEIGHTS[ball["kind"]]} points. It reaches lane {en_contacts} in {ball["remaining"]} turns and falls {ball["vy"]} cells each step.',
+                     'zh': f'{ball["id"]}是{zh_kind}，值{WEIGHTS[ball["kind"]]}分，{ball["remaining"]}回合后到第{zh_contacts}道，每步下降{ball["vy"]}格。'})
+        if ball['kind'] == 'cooperative':
+            en = f'{ball["id"]} needs one paddle at lane {lanes[0]} and the other at lane {lanes[1]} when it arrives. The frozen teammate has not issued a catch assignment.'
+            zh = f'{ball["id"]}到达时需要两块球拍分别在第{lanes[0]}道和第{lanes[1]}道。冻结的队友没有发布接球分工。'
         else:
-            status = 'not_selected'
-            en_plan = f"{ball['id']} is not selected in the current catch plan."
-            zh_plan = f"当前接球计划没有选择{ball['id']}。"
-            competitors = [item for item in actual['assignments']
-                           if balls_by_id[item['ball_id']]['remaining'] == ball['remaining']
-                           and set(balls_by_id[item['ball_id']]['contacts']) != set(ball['contacts'])]
-            if competitors:
-                competing = competitors[0]
-                other = balls_by_id[competing['ball_id']]
-                qualifier_en = 'We are taking' if competing['locked'] else 'We currently plan to take'
-                qualifier_zh = '我们选择接' if competing['locked'] else '我们暂定接'
-                en_plan += f" {qualifier_en} {other['id']} at the same arrival: I cover lane {competing['ai_contact'] + 1}; you cover lane {competing['human_contact'] + 1}."
-                zh_plan += f"同一时刻，{qualifier_zh}{other['id']}：我覆盖第{competing['ai_contact'] + 1}道，你覆盖第{competing['human_contact'] + 1}道。"
-                if len(set(other['contacts']) | set(ball['contacts'])) > 2:
-                    en_plan += ' We cannot catch both with two paddles.'
-                    zh_plan += '两块球拍无法同时接住这两颗球。'
-                if not competing['locked']:
-                    en_plan += ' This later plan can change.'
-                    zh_plan += '这个后续计划可能调整。'
-        plan_row = {'id': 'ball_plan:' + ball['id'], 'ball_id': ball['id'],
-                    'plan_status': status, 'en': en_plan, 'zh': zh_plan}
-        plan_rows[ball['id']] = plan_row
-        evidence.append(plan_row)
+            en = f'{ball["id"]} needs either paddle at lane {lanes[0]} when it arrives. The frozen teammate has not issued a catch assignment.'
+            zh = f'{ball["id"]}到达时只需任一球拍在第{lanes[0]}道。冻结的队友没有发布接球分工。'
+        rows.append({'id': 'ball_plan:' + ball['id'], 'ball_id': ball['id'],
+                     'plan_status': 'no_committed_assignment', 'en': en, 'zh': zh})
     for actor in ('human', 'ai'):
         identifier = actor + '_nearest_ball'
         if not state['balls']:
-            evidence.append({'id': identifier, 'en': 'There are no visible balls to compare.', 'zh': '当前没有可见的球可供比较。'})
+            rows.append({'id': identifier, 'en': 'There are no visible balls to compare.', 'zh': '当前没有可见的球可供比较。'})
             continue
-        position = state[actor]['x']
-        candidates = [(min(abs(position - lane) for lane in ball['contacts']), ball['remaining'], ball['id'], ball)
+        x = state[actor]['x']
+        candidates = [(min(abs(x - lane) for lane in ball['contacts']), ball['remaining'], ball['id'], ball)
                       for ball in state['balls']]
-        distance, remaining, _, nearest = min(candidates, key=lambda item: item[:3])
-        lane = min(nearest['contacts'], key=lambda contact: (abs(position - contact), contact))
-        plan_status = plan_rows[nearest['id']]['plan_status']
-        en_nearest = f"By horizontal lane distance, {'your' if actor == 'human' else 'my'} closest visible contact is {nearest['id']} at lane {lane + 1}: {distance} moves away, arriving in {remaining} turns. "
-        zh_nearest = f"按横向道距离，离{'你' if actor == 'human' else '我'}最近的可见接触点是{nearest['id']}的第{lane + 1}道，相距{distance}步，{remaining}回合后到达。"
-        if plan_status == 'not_selected':
-            en_nearest += 'This ball is not selected in the current catch plan.'
-            zh_nearest += '当前接球计划没有选择这颗球。'
-        elif nearest['kind'] == 'ordinary':
-            owner = ordinary_owners[nearest['id']]
-            en_nearest += f"The current plan assigns it to {'me' if owner == 'ai' else 'you'}."
-            zh_nearest += f"当前计划由{'我' if owner == 'ai' else '你'}接这颗球。"
+        distance, remaining, _, ball = min(candidates, key=lambda item: item[:3])
+        lane = min(ball['contacts'], key=lambda lane: (abs(x - lane), lane))
+        rows.append({'id': identifier, 'ball_id': ball['id'], 'contact_lane': lane + 1,
+                     'horizontal_distance': distance, 'arrival_turns': remaining,
+                     'plan_status': 'no_committed_assignment',
+                     'en': f'{ball["id"]} has the nearest visible contact for {"you" if actor == "human" else "me"}: lane {lane + 1}, {distance} moves away, arriving in {remaining} turns. This is a distance comparison, not an assigned target.',
+                     'zh': f'按距离，{ball["id"]}的第{lane + 1}道是离{("你" if actor == "human" else "我")}最近的可见接触点，相距{distance}步，{remaining}回合后到达。这是距离比较，并非指定目标。'})
+    if state['balls'] and not state['terminal']:
+        nearest = next(row for row in rows if row['id'] == 'human_nearest_ball')
+        lane = nearest['contact_lane']
+        remaining = nearest['arrival_turns']
+        distance = nearest['horizontal_distance']
+        advised_x = state['human']['x'] + _DELTAS[actual['human_action']]
+        rows.append({'id': 'human_catch_deadline', 'ball_ids': [nearest['ball_id']],
+                     'contact_lane': lane, 'horizontal_distance': distance, 'arrival_turns': remaining,
+                     'advised_action': actual['human_action'],
+                     'advised_reachable': abs(advised_x - (lane - 1)) <= remaining - 1,
+                     'wait_reachable': distance <= remaining - 1,
+                     'en': f'Lane {lane} is {distance} moves away and {remaining} turns remain for {nearest["ball_id"]}. This is a physical reachability check, not a promise to catch it.',
+                     'zh': f'到第{lane}道还需{distance}步，{nearest["ball_id"]}剩{remaining}回合。这只是物理上能否赶到的判断，不保证接住。'})
+    for action in ('left', 'right', 'wait'):
+        if state['terminal']:
+            en, zh = 'The task has finished; there is no next action.', '任务已经结束，没有下一步动作。'
+        elif action not in legal_actions(state, 'ai'):
+            en, zh = 'That action is outside the court and is unavailable.', '该动作会越过球场边界，不能执行。'
         else:
-            assigned = assignments[nearest['id']]
-            en_nearest += f"Our {'selected' if assigned['locked'] else 'possible later'} sides are me at lane {assigned['ai_contact'] + 1}, you at lane {assigned['human_contact'] + 1}; both contacts are needed."
-            zh_nearest += f"{'已选定' if assigned['locked'] else '暂定'}分工是我在第{assigned['ai_contact'] + 1}道、你在第{assigned['human_contact'] + 1}道；双方都需要到位。"
-        evidence.append({'id': identifier, 'ball_id': nearest['id'], 'contact_lane': lane + 1,
-                         'horizontal_distance': distance, 'arrival_turns': remaining, 'plan_status': plan_status,
-                         'en': en_nearest, 'zh': zh_nearest})
-    for i, assignment in enumerate(actual['assignments']):
-        evidence.append({'id': f'assignment:{i}', 'en': f"For {assignment['ball_id']}, the {'selected' if assignment['locked'] else 'possible later'} plan has me at lane {assignment['ai_contact'] + 1} and you at lane {assignment['human_contact'] + 1}.",
-                         'zh': f"关于{assignment['ball_id']}，{'当前选定的' if assignment['locked'] else '暂定后续'}分工是我在第{assignment['ai_contact'] + 1}道，你在第{assignment['human_contact'] + 1}道。"})
-    evidence.extend({'id': 'alternative_' + action, 'en': row['en'], 'zh': row['zh']} for action, row in actual.get('action_alternatives', {}).items())
-    for i, row in enumerate(actual['alternatives']):
-        plan_row = plan_rows.get(row.get('ball_id'))
-        en_comparison, zh_comparison = row['en'], row['zh']
-        if plan_row and plan_row['plan_status'] == 'not_selected':
-            en_comparison = f"{row['ball_id']} is not selected; the following checks reachability only, not our current plan. " + en_comparison
-            zh_comparison = f"当前没有选择{row['ball_id']}；下面只检查是否来得及，不是当前分工。" + zh_comparison
-        elif plan_row and row.get('ball_id') in assignments:
-            assigned = assignments[row['ball_id']]
-            en_comparison = f"Our {'selected' if assigned['locked'] else 'possible later'} plan for {row['ball_id']} is me at lane {assigned['ai_contact'] + 1}, you at lane {assigned['human_contact'] + 1}. This checks one possible division: " + en_comparison
-            zh_comparison = f"对于{row['ball_id']}，{'已选定' if assigned['locked'] else '暂定'}分工是我在第{assigned['ai_contact'] + 1}道、你在第{assigned['human_contact'] + 1}道。下面检查一种可能分工：" + zh_comparison
-        evidence.append({'id': f'comparison:{i}', 'en': en_comparison, 'zh': zh_comparison})
-    evidence.extend({'id': f'public_rule:{i}', 'en': en, 'zh': zh} for i, (en, zh) in enumerate(zip(rules(), rules('zh'))))
-    evidence.extend({'id': f'event:{i}', 'en': e['en'], 'zh': e['zh']} for i, e in enumerate(state['events']))
-    return evidence
+            position = state['ai']['x'] + _DELTAS[action] + 1
+            en = f'If the teammate took {action} now, it would be at lane {position}. The frozen model selected {actual["action"]}; this comparison does not establish a catch plan.'
+            zh = f'若队友这一步选择{action}，它会在第{position}道。冻结模型实际选择{actual["action"]}；这一比较不代表接球计划。'
+        rows.append({'id': 'alternative_' + action, 'en': en, 'zh': zh})
+    rows.extend({'id': f'public_rule:{i}', 'en': en, 'zh': zh}
+                for i, (en, zh) in enumerate(zip(rules(), rules('zh'))))
+    rows.extend({'id': f'event:{i}', 'en': e['en'], 'zh': e['zh']} for i, e in enumerate(state['events']))
+    return rows
 
 
 def human_advisor(state):
-    """Visible-state cooperative proxy; the real AI executes independently."""
-    return decide(state)['human_action'] if not state['terminal'] else 'wait'
+    """The separately trained human Actor offers advice but never acts for a participant."""
+    return nn_policy.choose(state, 'human') if not state['terminal'] else 'wait'
 
 
 def greedy_human(state):
@@ -836,6 +858,8 @@ def wave_feasibility(state):
     Full rolling studies use observed proxy rollouts, not a claimed exact global
     optimum. Bounding this diagnostic avoids exponential work in live QA.
     """
+    if state.get('policy_id'):
+        decide(state)  # Verify the saved pair before any NN counterfactual.
     obs = _observation(state)
     horizon = max((b['remaining'] for b in obs['balls']), default=0)
     if horizon > 6:
@@ -843,7 +867,7 @@ def wave_feasibility(state):
     def solve(current):
         if not current['balls']:
             return 0, ()
-        decision = _decision_from_observation(current)
+        decision = {'action': nn_policy.choose(current, 'ai'), 'memory': {}}
         best = (-1, ())
         for action in legal_actions(current):
             nxt, earned, _ = _settle_visible(current, action, decision)
@@ -866,13 +890,22 @@ def global_reachable_upper_bound(state):
             'scope': 'offline_small_fixture_upper_bound', 'ai_policy': VERSION, 'participant_visible': False}
 
 
-def demonstration():
+def demonstration(policy_id=None, release_id=None):
     # Use the actual seeded concurrent schedule, truncated to a finite 12 steps.
     entries = [e for e in _schedule(730100, 1) if e['arrival_turn'] <= 12]
     state = _new_state(entries, seed=0, task=1, human=2, ai=6)
+    if policy_id is not None:
+        nn_policy.load_bound_model(policy_id, release_id)
+        state['policy_id'] = policy_id
+        state['actor_sha256'] = nn_policy.model_sha256(policy_id, release_id)
+        state['role_sha256'] = deepcopy(nn_policy.policy_artifacts(release_id)[nn_policy.V5_POLICY_IDS[policy_id]]['role_sha256'])
+        if release_id is not None:
+            state['release_id'] = release_id
     frames = [public_state(state)]
     while not state['terminal']:
-        state = step(state, human_advisor(state))
+        # The demonstration is the same frozen NN pair shown in formal play.
+        human_action = nn_policy.choose(state, 'human')
+        state = step(state, human_action)
         frames.append(public_state(state))
     captions = [
         (0, 'Six small balls and four team balls are visible. Several share an arrival time.', '场上有六个小球和四个合作球，其中多颗球会同时到达。'),
@@ -880,7 +913,7 @@ def demonstration():
         (2, 'Two small balls arrive together. Each covered contact earns 1 point; each missed contact earns 0.', '两颗小球同时到达。覆盖一颗的接触位置得1分，漏接则得0分。'),
         (4, 'The next pair arrives while replacement balls continue down from the top.', '下一对球到达，同时补入的球继续从顶部下降。'),
         (6, 'Two small balls and two team balls arrive together. The team balls require four distinct lanes, so two paddles must choose which team ball to catch.', '两颗小球和两颗合作球同时到达。两颗合作球需要覆盖四条不同的道，因此两块球拍必须选择接哪颗合作球。'),
-        (12, 'The finite supply has ended. Every ball was scored once; these demonstration points do not count toward your tasks.', '演示的有限供球已经结束，每颗球只计分一次。这些分数不计入正式任务。')]
+        (12, 'The finite supply has ended. Each ball was resolved once; these demonstration points do not count toward your tasks.', '演示的有限供球已经结束，每颗球都只结算一次。这些分数不计入正式任务。')]
     return {'frames': frames, 'captions': [{'index': index, 'en': en, 'zh': zh} for index, en, zh in captions]}
 
 
@@ -888,9 +921,9 @@ def comprehension(language='en'):
     en = [
         {'id':'pong-speed','text':'A small ball and a team ball start twelve cells above the catch line. After three steps, how many cells remain for each?', 'options':['Small: six; team: nine','Small: nine; team: six','Both: nine'],'answer':0},
         {'id':'pong-two-contacts','text':'A team ball reaches lanes 3 and 7. Both paddles are in lane 3. What happens?', 'options':['The team earns 3 points','The team earns 0 points because lane 7 is uncovered','The team earns 1 point'],'answer':1},
-        {'id':'pong-two-deadlines','text':'Your teammate is in lane 6. A small ball arrives at lane 5 in one step, then its assigned team-ball contact is lane 7 one step later. Can it catch the small ball and keep that team-ball assignment?', 'options':['Yes, because small balls move faster','Yes, because one paddle can cover both lanes','No: moving from lane 5 to lane 7 needs two steps'],'answer':2}]
+        {'id':'pong-two-deadlines','text':'Your teammate is in lane 6. A small ball arrives at lane 5 in one step, then a team-ball contact arrives at lane 7 one step later. Can one paddle cover both contacts on time?', 'options':['Yes, because small balls move faster','Yes, because one paddle can cover both lanes','No: moving from lane 5 to lane 7 needs two steps'],'answer':2}]
     zh = [
         {'id':'pong-speed','text':'一个小球和一个合作球都从接球线上方十二格出发。三步后，它们各剩多少格？','options':['小球六格，合作球九格','小球九格，合作球六格','都剩九格'],'answer':0},
         {'id':'pong-two-contacts','text':'合作球到达第3道和第7道，双方球拍都在第3道，会怎样？','options':['团队得到3分','第7道没有被覆盖，因此得0分','团队得到1分'],'answer':1},
-        {'id':'pong-two-deadlines','text':'队友在第6道。小球一步后到达第5道，再过一步合作球到达队友负责的第7道。队友能先接小球并保持合作球分工吗？','options':['可以，因为小球移动更快','可以，因为一块球拍可以覆盖两道','不可以：从第5道到第7道需要两步'],'answer':2}]
+        {'id':'pong-two-deadlines','text':'队友在第6道。小球一步后到达第5道，再过一步合作球的一个接触点到达第7道。同一块球拍能按时覆盖这两个接触点吗？','options':['可以，因为小球移动更快','可以，因为一块球拍可以覆盖两道','不可以：从第5道到第7道需要两步'],'answer':2}]
     return zh if language.startswith('zh') else en

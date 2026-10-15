@@ -16,6 +16,7 @@ from http.cookies import SimpleCookie
 import pytest
 
 from study_v3.config import Settings
+from study_v3.policies import PolicyUnavailable, binding_for_group
 from study_v3.registry import engine
 from study_v3.server import COOKIE, make_server
 from tests.test_study_v3_store import Flow, RecordingExplainer, assert_public
@@ -181,7 +182,10 @@ def test_admin_jsonl_csv_exports_require_auth_and_exclude_session_credentials(ht
     status, body, _ = client.request("GET", "/api/study/admin/export", headers=auth)
     assert status == 200
     records = [json.loads(line) for line in body.splitlines()]
-    assert {r["table"] for r in records} >= {"participants", "instances", "runs", "frames", "questions", "releases"}
+    tables = {r["table"] for r in records}
+    assert tables >= {"participants", "instances", "runs", "frames", "questions"}
+    # A v5 release is persisted only after all six frozen Actor assets pass.
+    assert ("releases" in tables) is server.release["policy_assets_accepted"]
     assert "sessions" not in {r["table"] for r in records}
     assert "recovery_hash" not in body and "token_hash" not in body
     assert flow.token not in body and flow.recovery not in body and ADMIN not in body
@@ -205,21 +209,34 @@ def test_all_domain_group_flows_through_http(http_service, domain, group):
     """No direct writes to the store: every stage/action/survey travels over HTTP."""
     server, client = http_service
     status, view, _ = client.create(domain, group)
+    try:
+        binding_for_group(domain, group)
+    except PolicyUnavailable:
+        assert (status, view) == (503, {"error": "policy_unavailable"})
+        assert all(not rows for rows in server.store.export().values())
+        return
     assert status == 200 and view["language"] == "en"
     iid = view["instance_id"]
-    if domain=='kitchen':
-        assert view['tutorial']['state']['turn']==0
-        status,view,_=client.command('tutorial',view,command='start')
-        assert status==200
-        status,view,_=client.command('tutorial',view,command='action',action='wait')
-        assert status==200 and view['state']['turn']==1 and not view['task_runs']
-        status,view,_=client.command('demo_skip',view)
-    else:
-        for _ in range(len(view["demo"]["captions"])):
-            status, view, _ = client.command("demo_next", view)
-            assert status == 200
-        status, view, _ = client.command("next", view)
+    assert view["stage"] == "demo" and view["demo"]["frames"]
+    if domain == "kitchen":
+        assert "tutorial" not in view
+        assert "two frozen neural Actors" in view["demo"]["captions"][0]["en"]
+        assert view["demo"]["frames"][0]["ai"]["policy"]["policy_id"] == view["policy_id"]
+    for _ in range(len(view["demo"]["captions"])):
+        status, view, _ = client.command("demo_next", view)
+        assert status == 200
+    status, view, _ = client.command("next", view)
     assert status == 200
+    if domain == "kitchen":
+        assert view["stage"] == "practice" and "demo" not in view
+        assert view["tutorial"]["state"]["turn"] == 0
+        assert not view["task_runs"]
+        status, view, _ = client.command("tutorial", view, command="start")
+        assert status == 200
+        status, view, _ = client.command("tutorial", view, command="action", action="wait")
+        assert status == 200 and view["state"]["turn"] == 1 and not view["task_runs"]
+        status, view, _ = client.command("practice_skip", view)
+        assert status == 200
     scores = []
     for task in (1, 2, 3):
         assert view["stage"] == f"task{task}"
@@ -355,6 +372,11 @@ def test_changed_source_cannot_reuse_a_pilot_release_id(http_service,monkeypatch
     import study_v3.server as service
     server,_=http_service
     actual=service.manifest(server.store.settings)
+    # Incomplete v5 assets deliberately leave no release row at startup.
+    # Seed a previously frozen release to exercise the source-collision guard.
+    with server.store.db.transaction() as db:
+        db.execute('INSERT OR IGNORE INTO pl3_releases VALUES(?,?,?)',
+                   (actual['release_id'], json.dumps(actual), 0.0))
     monkeypatch.setattr(service,'manifest',lambda settings:{**actual,'source_sha256':'0'*64})
     with pytest.raises(RuntimeError,match='release_id_reused_with_changed_source'):
         make_server(replace(server.store.settings,mode='pilot'),port=0,explainer=RecordingExplainer())

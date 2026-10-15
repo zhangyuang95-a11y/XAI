@@ -15,8 +15,9 @@ An environment supplies opaque states and a semantic feature encoder through
 callbacks.  Legal counterfactual and interaction probes may help choose and
 audit the bounded program structure.  They never become invented supervision
 for the neural controller: the current NN supplies every extraction label, and
-the Warehouse training protocol permits a direct Actor gradient only on
-positive-advantage on-policy rows where NN, sampled action, and program agree.
+the Warehouse selective training protocol permits a direct Actor gradient
+only on independently validated covered rows where the NN argmax, sampled
+on-policy action, and program agree.
 At runtime the NN remains the sole controller; the program is local evidence
 for regularity measurement and explanation, not a replacement policy.
 """

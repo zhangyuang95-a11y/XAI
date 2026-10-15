@@ -1,5 +1,8 @@
 # Cooperative Pong: rolling court revision
 
+> Historical planning-controller record. The current frozen neural teammate is
+> documented in [study_v3_pong_nn.md](study_v3_pong_nn.md).
+
 The engine is `pong-rolling.v4.0`; the scenario generator is
 `pong-rolling-schedule.v4.0`. This replaces sequential waves with a deterministic
 rolling court. It is an action-driven environment: one accepted input advances

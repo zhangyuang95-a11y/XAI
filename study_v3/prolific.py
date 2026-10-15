@@ -11,7 +11,7 @@ from . import rewards
 from .store import StudyError, uid
 
 CONSENT_VERSION='policylens-prolific-consent-20260924.v5-main'
-CELLS=tuple((domain,group) for domain in ('warehouse','pong','kitchen') for group in ('A','B'))
+CELLS=tuple((domain,group) for domain in ('warehouse','pong','kitchen') for group in ('A','B','C'))
 
 def register_cohort(store,payload):
     """Immutable researcher-only quotas; never alter earlier enrollment records."""
@@ -21,7 +21,7 @@ def register_cohort(store,payload):
     if (not isinstance(study,str) or not re.fullmatch(r'[0-9a-f]{24}',study)
         or study==store.settings.prolific_study_id
         or not isinstance(code,str) or not re.fullmatch(r'[A-Za-z0-9]{4,64}',code)
-        or not isinstance(quotas,list) or not 1<=len(quotas)<=6):
+        or not isinstance(quotas,list) or not 1<=len(quotas)<=len(CELLS)):
         raise StudyError('invalid_prolific_cohort')
     targets={}
     for row in quotas:
@@ -44,7 +44,7 @@ def register_cohort(store,payload):
 
 def cohort(db,settings,study):
     if study==settings.prolific_study_id:
-        return settings.prolific_completion_code,{cell:settings.prolific_places//6 for cell in CELLS}
+        return settings.prolific_completion_code,{cell:settings.prolific_places//len(CELLS) for cell in CELLS}
     row=db.one('SELECT * FROM pl3_prolific_cohorts WHERE study_id=?',(study,))
     if not row:raise StudyError('wrong_prolific_study',403)
     return row['completion_code'],{(q['domain'],q['group']):q['places'] for q in json.loads(row['quotas_json'])}
@@ -54,7 +54,7 @@ def ready(store):
     return bool(store.ready and s.prolific_launch_confirmed
         and re.fullmatch(r'[0-9a-f]{24}',s.prolific_study_id)
         and re.fullmatch(r'[A-Za-z0-9]{4,64}',s.prolific_completion_code)
-        and s.prolific_places>0 and s.prolific_places%6==0)
+        and s.prolific_places>0 and s.prolific_places%len(CELLS)==0)
 
 def identifiers(payload):
     values=[]
@@ -106,7 +106,7 @@ def enrol(store,payload,token=None):
             'mode':'pilot','consent':True,'language':'en'},token=None,_db=db,_prolific=True)
         db.execute('INSERT INTO pl3_prolific_links VALUES(?,?,?,?,?,?,?,?)',
             (pid,study,submission,name,view['instance_id'],allocation_index,CONSENT_VERSION,time.time()))
-        source='prolific_randomized_vacancy' if allocation_index>allocated+1 else 'prolific_randomized_block_6'
+        source='prolific_randomized_vacancy' if allocation_index>allocated+1 else 'prolific_randomized_block_9'
         if study!=store.settings.prolific_study_id:source='prolific_replacement_quota'
         db.execute('UPDATE pl3_enrollments SET assignment_source=? WHERE instance_id=?',(source,view['instance_id']))
         instance=store._instance(db,new_token,view['instance_id'])

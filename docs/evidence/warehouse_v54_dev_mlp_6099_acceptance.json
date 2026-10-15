@@ -1,0 +1,455 @@
+{
+  "all_candidate_regularized_feedback_passed": true,
+  "artifact_sha256": {
+    "raw": "74b24b6824edf15dc2abecf6b32be4a36276045cc53e6f006dff28b5b529b74a",
+    "regularized": "52d4b6d082e35765f823f56778c8a856f9b7844a39ed978d3f160d0c8d334d0c"
+  },
+  "bc_teacher_observability_probe": {
+    "also_cleared_charging_history_changed_teacher_joint_action": 292,
+    "cleared_goal_and_route_memory_changed_teacher_joint_action": 209,
+    "joint_pre_action_states": 2400,
+    "limitation": "Offline teacher labels use the pre-action environment state, including persistent goals absent from the NN observation; the formal self-play and execution actions remain NN-selected.",
+    "scope": "pair_6001_bc_nn_visits_training_seeds_90000_through_90019"
+  },
+  "candidate_training": [
+    {
+      "initial_role_sha256": {
+        "robot_1": "63d56ea6250f267b3919752700a9867178f5e9e7a7f1eda07fea69f72e8435a8",
+        "robot_2": "3d73b2aa3e3def1ca68bca1ba5919b93f86d468e9bfdb6d9af13d9e3424472ec"
+      },
+      "pair_seed": 6099,
+      "variants": {
+        "raw": {
+          "actor_decisions": 400000,
+          "actor_weight_changed_parameter_count": {
+            "robot_1": 70352,
+            "robot_2": 71050
+          },
+          "actor_weight_delta_l2": {
+            "robot_1": 0.36178340632987716,
+            "robot_2": 0.3433382289223839
+          },
+          "both_roles_changed": true,
+          "checkpoint_sha256": "1d7ffda59e58927862336eba0d40c84b1d0e736fb055a6e35908d9fcfc40de5f",
+          "feedback_rows": {
+            "robot_1": 0,
+            "robot_2": 0
+          },
+          "feedback_window_actor_rows": {
+            "robot_1": 0,
+            "robot_2": 0
+          },
+          "initial_role_sha256": {
+            "robot_1": "63d56ea6250f267b3919752700a9867178f5e9e7a7f1eda07fea69f72e8435a8",
+            "robot_2": "3d73b2aa3e3def1ca68bca1ba5919b93f86d468e9bfdb6d9af13d9e3424472ec"
+          },
+          "joint_steps": 200000,
+          "physical_no_legal_action_rows": {
+            "robot_1": 0,
+            "robot_2": 0
+          },
+          "post_policy_interventions": 0,
+          "scenario_schedule_sha256": "7b5c8db2dc73a327410e5c0e8a3ea7f1dfd4ebc2b1748c2cf383ea55baca45cc",
+          "selected_feedback_rows": {
+            "robot_1": 0,
+            "robot_2": 0
+          },
+          "selected_role_sha256": {
+            "robot_1": "e65d8e09777cf7cd43a01eb5ea2ddbcda74427c44f625a797ecb4882d7831374",
+            "robot_2": "46d1a5dd664c5ec343d3f9ac5e58cc2936df331e8989d4590220af707afcae12"
+          },
+          "zero_action_coverage_rows": {
+            "robot_1": 0,
+            "robot_2": 0
+          }
+        },
+        "regularized": {
+          "actor_decisions": 400000,
+          "actor_weight_changed_parameter_count": {
+            "robot_1": 70572,
+            "robot_2": 71108
+          },
+          "actor_weight_delta_l2": {
+            "robot_1": 0.4019018224325509,
+            "robot_2": 0.38736383546167835
+          },
+          "both_roles_changed": true,
+          "checkpoint_sha256": "9a72a1449796f2b1bb710e9e013df5c1ad478861a25451247fbc255272e84cf0",
+          "feedback_rows": {
+            "robot_1": 14134,
+            "robot_2": 8360
+          },
+          "feedback_window_actor_rows": {
+            "robot_1": 160640,
+            "robot_2": 160640
+          },
+          "initial_role_sha256": {
+            "robot_1": "63d56ea6250f267b3919752700a9867178f5e9e7a7f1eda07fea69f72e8435a8",
+            "robot_2": "3d73b2aa3e3def1ca68bca1ba5919b93f86d468e9bfdb6d9af13d9e3424472ec"
+          },
+          "joint_steps": 200000,
+          "physical_no_legal_action_rows": {
+            "robot_1": 0,
+            "robot_2": 0
+          },
+          "post_policy_interventions": 0,
+          "scenario_schedule_sha256": "7b5c8db2dc73a327410e5c0e8a3ea7f1dfd4ebc2b1748c2cf383ea55baca45cc",
+          "selected_feedback_rows": {
+            "robot_1": 14134,
+            "robot_2": 8360
+          },
+          "selected_role_sha256": {
+            "robot_1": "1e62064f649ee4388420192bd8d0d380a07880d7bbc6353f75ff974a33c805a7",
+            "robot_2": "a75e739bf54b13e1b9f4d6f626549251101778e94655469440be26eab521dd72"
+          },
+          "zero_action_coverage_rows": {
+            "robot_1": 146506,
+            "robot_2": 152280
+          }
+        }
+      }
+    }
+  ],
+  "development": [
+    {
+      "pair_seed": 6099,
+      "preliminary_program_audit": {
+        "robot_1": {
+          "actor_role_sha256": "1e62064f649ee4388420192bd8d0d380a07880d7bbc6353f75ff974a33c805a7",
+          "audit_source": "preliminary_development_rollouts",
+          "audit_version": "warehouse-sparse-oblique-independent-dev-v5.0",
+          "development_seeds": [
+            240024,
+            240025,
+            240026,
+            240027,
+            240028,
+            240029,
+            240030,
+            240031,
+            240032,
+            240033,
+            240034,
+            240035,
+            240036,
+            240037,
+            240038,
+            240039,
+            240040,
+            240041,
+            240042,
+            240043,
+            240044,
+            240045,
+            240046,
+            240047
+          ],
+          "episode_count": 24,
+          "episode_ids": [
+            "240024",
+            "240025",
+            "240026",
+            "240027",
+            "240028",
+            "240029",
+            "240030",
+            "240031",
+            "240032",
+            "240033",
+            "240034",
+            "240035",
+            "240036",
+            "240037",
+            "240038",
+            "240039",
+            "240040",
+            "240041",
+            "240042",
+            "240043",
+            "240044",
+            "240045",
+            "240046",
+            "240047"
+          ],
+          "episode_sha256": "dbffc69faa383ad884b75b127ce630a00f3db24e5dcff02b46c09e8096672cc8",
+          "explanation": {
+            "agreement": 0.0,
+            "coverage": 0.0,
+            "illegal_count": 0,
+            "kl": null,
+            "rows": 0
+          },
+          "explanation_eligible": false,
+          "explanation_leaves": [],
+          "explanation_passed": false,
+          "feedback": {
+            "agreement": 0.0,
+            "coverage": 0.0,
+            "illegal_count": 0,
+            "kl": null,
+            "rows": 0
+          },
+          "feedback_eligible": false,
+          "feedback_leaves": [],
+          "feedback_passed": false,
+          "global": {
+            "agreement": 0.7034779490856938,
+            "coverage": 1.0,
+            "illegal_count": 19,
+            "kl": 0.4514457589106992,
+            "rows": 2789
+          },
+          "max_features_per_node": 3,
+          "passed": false,
+          "program_depth": 5,
+          "program_leaf_count": 16,
+          "program_sha256": "7149412fa8de21127077f6c1fb2ca646b23424eef1699e90714e414843883124",
+          "role": "robot_1",
+          "rows": 2789,
+          "sample_count": 2789,
+          "validation": {
+            "explanation": {
+              "agreement": 0.0,
+              "coverage": 0.0,
+              "illegal_count": 0,
+              "kl": null,
+              "rows": 0
+            },
+            "explanation_passed": false,
+            "feedback": {
+              "agreement": 0.0,
+              "coverage": 0.0,
+              "illegal_count": 0,
+              "kl": null,
+              "rows": 0
+            },
+            "feedback_passed": false,
+            "global": {
+              "agreement": 0.7034779490856938,
+              "coverage": 1.0,
+              "illegal_count": 19,
+              "kl": 0.4514457589106992,
+              "rows": 2789
+            }
+          }
+        },
+        "robot_2": {
+          "actor_role_sha256": "a75e739bf54b13e1b9f4d6f626549251101778e94655469440be26eab521dd72",
+          "audit_source": "preliminary_development_rollouts",
+          "audit_version": "warehouse-sparse-oblique-independent-dev-v5.0",
+          "development_seeds": [
+            240024,
+            240025,
+            240026,
+            240027,
+            240028,
+            240029,
+            240030,
+            240031,
+            240032,
+            240033,
+            240034,
+            240035,
+            240036,
+            240037,
+            240038,
+            240039,
+            240040,
+            240041,
+            240042,
+            240043,
+            240044,
+            240045,
+            240046,
+            240047
+          ],
+          "episode_count": 24,
+          "episode_ids": [
+            "240024",
+            "240025",
+            "240026",
+            "240027",
+            "240028",
+            "240029",
+            "240030",
+            "240031",
+            "240032",
+            "240033",
+            "240034",
+            "240035",
+            "240036",
+            "240037",
+            "240038",
+            "240039",
+            "240040",
+            "240041",
+            "240042",
+            "240043",
+            "240044",
+            "240045",
+            "240046",
+            "240047"
+          ],
+          "episode_sha256": "dbffc69faa383ad884b75b127ce630a00f3db24e5dcff02b46c09e8096672cc8",
+          "explanation": {
+            "agreement": 0.0,
+            "coverage": 0.0,
+            "illegal_count": 0,
+            "kl": null,
+            "rows": 0
+          },
+          "explanation_eligible": false,
+          "explanation_leaves": [],
+          "explanation_passed": false,
+          "feedback": {
+            "agreement": 0.0,
+            "coverage": 0.0,
+            "illegal_count": 0,
+            "kl": null,
+            "rows": 0
+          },
+          "feedback_eligible": false,
+          "feedback_leaves": [],
+          "feedback_passed": false,
+          "global": {
+            "agreement": 0.6622445320903549,
+            "coverage": 1.0,
+            "illegal_count": 70,
+            "kl": 0.5020870049392095,
+            "rows": 2789
+          },
+          "max_features_per_node": 3,
+          "passed": false,
+          "program_depth": 5,
+          "program_leaf_count": 16,
+          "program_sha256": "15cc455cd24c0f7eb70ce8e8e182c6b170b04832aeee5357415ce1700f9dd247",
+          "role": "robot_2",
+          "rows": 2789,
+          "sample_count": 2789,
+          "validation": {
+            "explanation": {
+              "agreement": 0.0,
+              "coverage": 0.0,
+              "illegal_count": 0,
+              "kl": null,
+              "rows": 0
+            },
+            "explanation_passed": false,
+            "feedback": {
+              "agreement": 0.0,
+              "coverage": 0.0,
+              "illegal_count": 0,
+              "kl": null,
+              "rows": 0
+            },
+            "feedback_passed": false,
+            "global": {
+              "agreement": 0.6622445320903549,
+              "coverage": 1.0,
+              "illegal_count": 70,
+              "kl": 0.5020870049392095,
+              "rows": 2789
+            }
+          }
+        }
+      },
+      "raw": {
+        "joint_steps": 161520,
+        "mean_collisions": 3.7083333333333335,
+        "mean_deliveries": 7.708333333333333,
+        "passed": true,
+        "quality": 6.364583333333333,
+        "shutdown_episode_rate": 0.08333333333333333
+      },
+      "regularized": {
+        "joint_steps": 200000,
+        "mean_collisions": 2.9583333333333335,
+        "mean_deliveries": 6.541666666666667,
+        "passed": true,
+        "quality": 5.385416666666667,
+        "shutdown_episode_rate": 0.08333333333333333
+      },
+      "regularized_feedback_rows": {
+        "robot_1": 14134,
+        "robot_2": 8360
+      },
+      "selected_program_audit": {}
+    }
+  ],
+  "domain": "warehouse",
+  "final_program_audit": {},
+  "heldout": {},
+  "heldout_evaluated": false,
+  "heldout_locked": true,
+  "heldout_scenario_seed_rule": "enrollment_seed_times_10_plus_task",
+  "heldout_seed_ranges": {
+    "1": [
+      250000,
+      250099
+    ],
+    "2": [
+      250000,
+      250099
+    ],
+    "3": [
+      250000,
+      250099
+    ]
+  },
+  "joint_steps": {
+    "raw": 200000,
+    "regularized": 200000
+  },
+  "max_features_per_node": 3,
+  "pair_seeds": [
+    6099
+  ],
+  "passed": false,
+  "post_policy_override_count": 0,
+  "program_schema_version": "warehouse-sparse-oblique-v5.0",
+  "program_sha256": {
+    "regularized": {
+      "robot_1": "7149412fa8de21127077f6c1fb2ca646b23424eef1699e90714e414843883124",
+      "robot_2": "15cc455cd24c0f7eb70ce8e8e182c6b170b04832aeee5357415ce1700f9dd247"
+    }
+  },
+  "raw_program_feedback_rows": {
+    "robot_1": 0,
+    "robot_2": 0
+  },
+  "regularized_program_feedback_rows": {
+    "robot_1": 14134,
+    "robot_2": 8360
+  },
+  "release": "policylens-three-domain-20261014.v5.0",
+  "role_sha256": {
+    "raw": {
+      "robot_1": "e65d8e09777cf7cd43a01eb5ea2ddbcda74427c44f625a797ecb4882d7831374",
+      "robot_2": "46d1a5dd664c5ec343d3f9ac5e58cc2936df331e8989d4590220af707afcae12"
+    },
+    "regularized": {
+      "robot_1": "1e62064f649ee4388420192bd8d0d380a07880d7bbc6353f75ff974a33c805a7",
+      "robot_2": "a75e739bf54b13e1b9f4d6f626549251101778e94655469440be26eab521dd72"
+    }
+  },
+  "selected_pair_seed": 6099,
+  "selected_regularized_feedback_rows": {
+    "robot_1": 14134,
+    "robot_2": 8360
+  },
+  "training_report_sha256": {
+    "raw": "94082dcc7dab1832f0dbe992df3cd9e53c4cb000a124a5cf4a58ef9bf5f6a52d",
+    "regularized": "5e0d8abe71e644c82cde499de1835bcb2f10de1949a74e26bc48c449941e50fc"
+  },
+  "zero_action_coverage_definition": "PPO role-row presentations during positive program coefficient, counting every optimizer epoch; no validated, legal program action agreed with both current masked NN argmax and the sampled executed NN action",
+  "zero_action_coverage_rows": {
+    "raw": {
+      "robot_1": 0,
+      "robot_2": 0
+    },
+    "regularized": {
+      "robot_1": 146506,
+      "robot_2": 152280
+    }
+  }
+}

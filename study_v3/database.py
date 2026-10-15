@@ -46,6 +46,16 @@ CREATE TABLE IF NOT EXISTS pl3_enrollments (
 CREATE TABLE IF NOT EXISTS pl3_reward_settings (
  instance_id TEXT PRIMARY KEY, policy_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS pl3_policy_bindings (
+ instance_id TEXT PRIMARY KEY, policy_id TEXT NOT NULL, domain TEXT NOT NULL,
+ variant TEXT NOT NULL, actor_path TEXT NOT NULL, actor_sha256 TEXT NOT NULL,
+ human_actor_sha256 TEXT NOT NULL, ai_actor_sha256 TEXT NOT NULL,
+ program_hashes_json TEXT NOT NULL, created DOUBLE PRECISION NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pl3_policy_binding_metadata (
+ instance_id TEXT PRIMARY KEY, actor_model_version TEXT NOT NULL,
+ feature_schema_sha256 TEXT NOT NULL, created DOUBLE PRECISION NOT NULL
+);
 CREATE TABLE IF NOT EXISTS pl3_runs (
  id TEXT PRIMARY KEY, instance_id TEXT NOT NULL, task INTEGER NOT NULL,
  seed INTEGER NOT NULL, state_json TEXT NOT NULL, status TEXT NOT NULL,
@@ -172,6 +182,8 @@ FLOAT_COLUMNS = {
     'pl3_sessions': ('created',),
     'pl3_instances': ('created', 'completed'),
     'pl3_enrollments': ('created',),
+    'pl3_policy_bindings': ('created',),
+    'pl3_policy_binding_metadata': ('created',),
     'pl3_runs': ('started', 'ended'),
     'pl3_frames': ('created',),
     'pl3_questions': ('requested', 'finished', 'displayed'),

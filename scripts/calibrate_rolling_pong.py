@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""V5 simulation-only calibration against unavoidable contact conflicts.
+"""V7 frozen-NN simulation calibration against unavoidable contact conflicts.
 
 The contact-capacity bound ignores travel and is not an attainable-score claim.
 All fixed seeds, including failed waiting targets, remain in the report. These
@@ -43,14 +43,14 @@ def run(include_baselines=False):
             for seed in pong.CONFIG[split]:
                 initial = pong.initial_state(seed, task)
                 capacity = contact_capacity(initial)
-                policies = ('cooperative_visible', 'wait', 'greedy', 'random', 'history') if include_baselines else ('cooperative_visible',)
+                policies = ('neural_pair', 'wait', 'greedy', 'random', 'history') if include_baselines else ('neural_pair',)
                 for policy in policies:
                     state = pong.initial_state(seed, task)
                     history, timing = [], []
                     rng = random.Random(seed + task * 17)
                     while not state['terminal']:
                         before = perf_counter()
-                        action = (pong.human_advisor(state) if policy == 'cooperative_visible' else 'wait' if policy == 'wait'
+                        action = (pong.human_advisor(state) if policy == 'neural_pair' else 'wait' if policy == 'wait'
                                   else pong.greedy_human(state) if policy == 'greedy' else rng.choice(pong.legal_actions(state)) if policy == 'random'
                                   else pong.history_learning_human(state, history))
                         state = pong.step(state, action)
@@ -77,11 +77,11 @@ def run(include_baselines=False):
                                   'minimum_percent_of_contact_capacity':min(r['percent_of_contact_capacity'] for r in subset),
                                   'mean_wait_rate':statistics.mean(r['wait_rate'] for r in subset), 'maximum_wait_rate':max(r['wait_rate'] for r in subset),
                                   'maximum_step_ms':max(r['max_step_ms'] for r in subset)})
-    cooperative = [r for r in summaries if r['policy'] == 'cooperative_visible']
+    cooperative = [r for r in summaries if r['policy'] == 'neural_pair']
     score_gate = all(r['mean_percent_of_contact_capacity'] >= 90 and r['minimum_percent_of_contact_capacity'] >= 80 for r in cooperative)
     waiting_met = all(r['mean_wait_rate'] <= .10 and r['maximum_wait_rate'] <= .20 for r in cooperative)
     return {'engine_version':pong.VERSION, 'scenario_version':pong.CONFIG['scenario_version'],
-            'evidence_type':'simulation_with_actual_fixed_ai_not_human_study', 'future_schedule_available_to_proxy':False,
+            'evidence_type':'simulation_with_frozen_ai_and_separate_human_nn_not_human_study', 'future_schedule_available_to_proxy':False,
             'normalization':'displayed scores divide by all scheduled raw points, including incompatible opportunities',
             'capacity_scope':'offline instantaneous-contact upper bound; ignores travel and does not claim attainability',
             'thresholds':{'mean_percent_of_contact_capacity_min':90, 'each_percent_of_contact_capacity_min':80,

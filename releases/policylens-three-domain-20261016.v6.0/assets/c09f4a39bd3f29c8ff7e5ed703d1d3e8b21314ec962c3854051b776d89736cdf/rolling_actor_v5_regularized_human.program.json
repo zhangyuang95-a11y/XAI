@@ -1,0 +1,444 @@
+{
+  "audit": {
+    "action_fidelity": 0.784,
+    "action_regret": 0.20147863394007506,
+    "counterfactual_changed_pairs": 0,
+    "counterfactual_dataset_pairs": 0,
+    "counterfactual_delta_error": null,
+    "counterfactual_direction_fidelity": null,
+    "counterfactual_validation_pairs": 0,
+    "explanation_eligible": false,
+    "explanation_ineligibility_reasons": [
+      "overall_fidelity_below_explanation_threshold",
+      "program_fit_kl_above_explanation_threshold"
+    ],
+    "extractability_loss": 0.336843607718719,
+    "extractability_score": 0.7140204984658602,
+    "extraction_time_seconds": 0.2823911248706281,
+    "feedback_eligible": false,
+    "feedback_ineligibility_reasons": [
+      "program_fit_kl_above_threshold"
+    ],
+    "feedback_weight": 0.0,
+    "group_action_fidelity": {
+      "ordinary": 0.784
+    },
+    "group_validation_samples": {
+      "ordinary": 500
+    },
+    "interaction_macro_fidelity": null,
+    "interaction_validation_samples": 0,
+    "mean_kl_divergence": 0.6000305385935953,
+    "program_depth": 5,
+    "program_leaf_count": 16,
+    "program_predicate_count": 12,
+    "program_size": 31,
+    "relational_predicate_count": 0,
+    "required_predicate_group_coverage": {},
+    "safety_property_violation_rate": 0.0,
+    "sample_count": 500,
+    "semantic_predicate_coverage_complete": true
+  },
+  "policy_id": "pong-regularized-v5",
+  "program": {
+    "action_names": [
+      "wait",
+      "left",
+      "right"
+    ],
+    "feature_names": [
+      "legal_left",
+      "legal_right",
+      "ball_0_first_own_gap",
+      "ball_1_first_own_gap",
+      "ball_0_first_own_slack",
+      "ball_2_arrival_steps",
+      "ball_3_arrival_steps",
+      "ball_0_second_own_gap",
+      "ball_0_arrival_steps",
+      "ball_1_arrival_steps",
+      "ball_1_first_contact_lane",
+      "ball_6_arrival_steps",
+      "ball_7_arrival_steps",
+      "ball_2_first_own_slack",
+      "ball_8_arrival_steps",
+      "ball_9_arrival_steps",
+      "ball_0_second_own_slack",
+      "ball_2_cooperative",
+      "ball_3_cooperative",
+      "ball_1_first_own_slack",
+      "ball_3_first_contact_lane",
+      "ball_2_second_contact_lane",
+      "ball_0_second_contact_lane",
+      "ball_0_cooperative",
+      "ball_1_cooperative",
+      "ball_3_first_own_slack",
+      "ball_3_second_own_gap",
+      "ball_1_second_own_gap",
+      "ball_0_first_contact_lane",
+      "own_lane",
+      "ball_6_first_own_gap",
+      "ball_6_second_own_gap",
+      "ball_2_second_own_gap",
+      "ball_2_second_partner_slack",
+      "ball_1_first_partner_gap",
+      "ball_5_second_own_gap",
+      "ball_2_second_own_slack",
+      "ball_2_second_partner_gap",
+      "ball_4_second_own_slack",
+      "ball_1_second_own_slack",
+      "ball_3_first_partner_slack",
+      "ball_3_first_own_gap",
+      "ball_9_first_own_slack",
+      "ball_2_first_contact_lane",
+      "ball_2_first_own_gap",
+      "ball_3_first_partner_gap",
+      "ball_0_first_partner_slack",
+      "ball_0_second_partner_gap",
+      "ball_5_second_own_slack",
+      "ball_3_second_own_slack",
+      "ball_5_first_own_gap",
+      "ball_1_first_partner_slack",
+      "ball_0_first_partner_gap",
+      "ball_3_second_partner_slack",
+      "ball_5_first_own_slack",
+      "ball_4_second_own_gap",
+      "ball_8_first_own_gap",
+      "ball_4_first_own_slack",
+      "ball_6_first_own_slack",
+      "ball_6_second_own_slack",
+      "ball_3_second_contact_lane",
+      "ball_4_arrival_steps",
+      "ball_5_arrival_steps",
+      "ball_9_second_partner_slack"
+    ],
+    "format": "rcpd_executable_program_v2",
+    "metadata": {
+      "action_constraint_reason_features": {},
+      "action_legality_features": {
+        "left": "legal_left",
+        "right": "legal_right"
+      },
+      "action_structure_weight": 0.0,
+      "candidate_depth": 5,
+      "config": {
+        "action_structure_weight": 0.0,
+        "complexity_penalty": 0.001,
+        "counterfactual_changed_pair_weight": 1.0,
+        "counterfactual_feature_selection_weight": 0.0,
+        "counterfactual_loss_weight": 0.2,
+        "distribution_penalty": 0.2,
+        "enabled": true,
+        "extraction_interval": 10000,
+        "feedback_target_mode": "program_distribution",
+        "feedback_target_strength": 0.1,
+        "importance_weight_scale": 8.0,
+        "interaction_loss_weight": 0.5,
+        "max_depth": 5,
+        "max_leaf_nodes": 16,
+        "max_predicates": 64,
+        "maximum_disagreement_actor_margin": 0.1,
+        "maximum_feedback_actor_margin": 1.0,
+        "maximum_mean_kl_for_explanation": 0.25,
+        "maximum_mean_kl_for_feedback": 0.6,
+        "maximum_regularization_lambda": 1.0,
+        "min_samples_leaf": 8,
+        "minimum_counterfactual_changed_pairs_for_explanation": 0,
+        "minimum_counterfactual_direction_fidelity_for_explanation": 0.0,
+        "minimum_counterfactual_pairs": 0,
+        "minimum_extraction_samples": 128,
+        "minimum_interaction_fidelity_for_explanation": 0.0,
+        "minimum_interaction_fidelity_for_feedback": 0.0,
+        "minimum_interaction_validation_samples": 0,
+        "minimum_overall_fidelity_for_explanation": 0.9,
+        "minimum_overall_fidelity_for_feedback": 0.75,
+        "minimum_target_weight": 0.2,
+        "program_target_temperature": 1.0,
+        "random_seed": 251016,
+        "regularization_lambda": 0.01,
+        "regularization_ramp_fraction": 0.05,
+        "regularization_start_fraction": 0.8,
+        "require_action_agreement_for_feedback": true,
+        "require_explanation_eligibility_for_counterfactual_feedback": false,
+        "require_explanation_eligibility_for_feedback": false,
+        "validation_fraction": 0.2
+      },
+      "counterfactual_changed_pair_weight": 1.0,
+      "counterfactual_changed_training_samples": 0,
+      "data_split_audit": {
+        "counterfactual_pair_overlap": [],
+        "split_group_overlap": [],
+        "training_samples": 1240,
+        "validation_counterfactual_pairs": 0,
+        "validation_group_samples": {
+          "ordinary": 360
+        },
+        "validation_samples": 360
+      },
+      "domain": "pong",
+      "method": "regularity_constrained_policy_distillation",
+      "metrics": {
+        "action_fidelity": 0.784,
+        "action_regret": 0.20147863394007506,
+        "counterfactual_changed_pairs": 0,
+        "counterfactual_dataset_pairs": 0,
+        "counterfactual_delta_error": null,
+        "counterfactual_direction_fidelity": null,
+        "counterfactual_validation_pairs": 0,
+        "explanation_eligible": false,
+        "explanation_ineligibility_reasons": [
+          "overall_fidelity_below_explanation_threshold",
+          "program_fit_kl_above_explanation_threshold"
+        ],
+        "extractability_loss": 0.336843607718719,
+        "extractability_score": 0.7140204984658602,
+        "extraction_time_seconds": 0.2823911248706281,
+        "feedback_eligible": false,
+        "feedback_ineligibility_reasons": [
+          "program_fit_kl_above_threshold"
+        ],
+        "feedback_weight": 0.0,
+        "group_action_fidelity": {
+          "ordinary": 0.784
+        },
+        "group_validation_samples": {
+          "ordinary": 500
+        },
+        "interaction_macro_fidelity": null,
+        "interaction_validation_samples": 0,
+        "mean_kl_divergence": 0.6000305385935953,
+        "program_depth": 5,
+        "program_leaf_count": 16,
+        "program_predicate_count": 12,
+        "program_size": 31,
+        "relational_predicate_count": 0,
+        "required_predicate_group_coverage": {},
+        "safety_property_violation_rate": 0.0,
+        "sample_count": 500,
+        "semantic_predicate_coverage_complete": true
+      },
+      "normalized_program_complexity": {
+        "depth": 5,
+        "leaves": 16,
+        "loss": 0.8375,
+        "normalized_depth": 1.0,
+        "normalized_leaves": 1.0,
+        "normalized_predicates": 0.1875,
+        "predicates": 12
+      },
+      "pair_seed": 251016,
+      "program_complexity": {
+        "depth": 5,
+        "leaves": 16,
+        "predicates": 12
+      },
+      "program_roles": [
+        "training_regularity_signal",
+        "local_explanation_audit"
+      ],
+      "regularization_version": true,
+      "required_predicate_group_coverage": {},
+      "required_predicate_groups": {},
+      "role": "human",
+      "runtime_controller": "neural_policy_only",
+      "selection_objective": 0.336843607718719,
+      "semantic_predicate_coverage_complete": true,
+      "source": "neural_self_play_pre_action_states",
+      "training_role": "bounded_program_actor_regularizer",
+      "training_samples": 1600,
+      "used_relational_features": []
+    },
+    "root": {
+      "feature": "ball_0_first_own_gap",
+      "left": {
+        "feature": "ball_0_first_own_gap",
+        "left": {
+          "feature": "ball_1_first_own_gap",
+          "left": {
+            "feature": "ball_1_first_own_gap",
+            "left": {
+              "feature": "ball_0_second_contact_lane",
+              "left": {
+                "probabilities": [
+                  0.06894455734688078,
+                  0.7112799734298494,
+                  0.2197754692232699
+                ]
+              },
+              "right": {
+                "probabilities": [
+                  0.6446557304845972,
+                  0.24501768979177854,
+                  0.1103265797236242
+                ]
+              },
+              "threshold": 0.5625
+            },
+            "right": {
+              "feature": "ball_1_first_partner_slack",
+              "left": {
+                "probabilities": [
+                  0.9954026153340626,
+                  0.0016075044560246172,
+                  0.0029898802099127472
+                ]
+              },
+              "right": {
+                "probabilities": [
+                  0.6642558992544887,
+                  0.17710803722553742,
+                  0.15863606351997392
+                ]
+              },
+              "threshold": -0.0416666679084301
+            },
+            "threshold": -0.0625
+          },
+          "right": {
+            "feature": "ball_1_first_partner_gap",
+            "left": {
+              "feature": "ball_4_second_own_gap",
+              "left": {
+                "probabilities": [
+                  0.2928035250593855,
+                  0.2803148957848538,
+                  0.42688157915576064
+                ]
+              },
+              "right": {
+                "probabilities": [
+                  0.04474612386357719,
+                  0.8409636044892296,
+                  0.11429027164719335
+                ]
+              },
+              "threshold": -0.0625
+            },
+            "right": {
+              "feature": "ball_1_second_own_slack",
+              "left": {
+                "probabilities": [
+                  0.4534436414674788,
+                  0.4116613491149401,
+                  0.13489500941758112
+                ]
+              },
+              "right": {
+                "probabilities": [
+                  0.000924921783665354,
+                  0.09838715025995157,
+                  0.9006879279563831
+                ]
+              },
+              "threshold": -0.0416666679084301
+            },
+            "threshold": 0.3125
+          },
+          "threshold": 0.0625
+        },
+        "right": {
+          "feature": "ball_0_first_partner_gap",
+          "left": {
+            "probabilities": [
+              0.9962207265754996,
+              0.00020103445665096395,
+              0.003578238967849319
+            ]
+          },
+          "right": {
+            "probabilities": [
+              0.5004537180822045,
+              0.20522124536287384,
+              0.29432503655492176
+            ]
+          },
+          "threshold": -0.3125
+        },
+        "threshold": -0.0625
+      },
+      "right": {
+        "feature": "ball_3_first_own_slack",
+        "left": {
+          "feature": "ball_3_first_partner_slack",
+          "left": {
+            "feature": "ball_1_second_own_slack",
+            "left": {
+              "probabilities": [
+                0.29521343266555644,
+                0.7047026731945156,
+                8.389413992789535e-05
+              ]
+            },
+            "right": {
+              "probabilities": [
+                0.07196811817469034,
+                0.01385599784746306,
+                0.9141758839778465
+              ]
+            },
+            "threshold": -0.4166666716337204
+          },
+          "right": {
+            "feature": "ball_6_first_own_gap",
+            "left": {
+              "feature": "ball_8_first_own_gap",
+              "left": {
+                "probabilities": [
+                  0.0239231863599985,
+                  0.0009023616137591751,
+                  0.9751744520262423
+                ]
+              },
+              "right": {
+                "probabilities": [
+                  0.40625446167149676,
+                  0.00025780725238528756,
+                  0.593487731076118
+                ]
+              },
+              "threshold": -0.1875
+            },
+            "right": {
+              "probabilities": [
+                0.007449440028178342,
+                0.008320072988663675,
+                0.984230486983158
+              ]
+            },
+            "threshold": -0.1875
+          },
+          "threshold": -0.1250000037252903
+        },
+        "right": {
+          "probabilities": [
+            2.7168941745432563e-09,
+            0.999443503119606,
+            0.0005564941634999102
+          ]
+        },
+        "threshold": 0.2916666716337204
+      },
+      "threshold": 0.0625
+    }
+  },
+  "program_provenance": {
+    "source": "training_time_extraction",
+    "training_time_selected_actor_audit": {
+      "action_fidelity": 0.8489583333333334,
+      "mean_kl_divergence": 0.3702861437394846,
+      "passed": true,
+      "purpose": "training_feedback",
+      "sample_count": 1920
+    }
+  },
+  "role": "human",
+  "selected_actor_artifact_sha256": "1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6",
+  "selected_actor_development_audit": {
+    "action_fidelity": 0.8489583333333334,
+    "mean_kl_divergence": 0.3702861437394846,
+    "passed": true,
+    "purpose": "training_feedback",
+    "sample_count": 1920
+  },
+  "selected_role_sha256": "aabe915937418ec9d6c3fb3e95bf71a5c90572a55ae9b84ebba15e49357b3a57"
+}

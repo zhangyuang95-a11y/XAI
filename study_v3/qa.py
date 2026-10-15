@@ -95,20 +95,19 @@ about decision/alternative fact IDs use that prefix in performed scope.
 For advice to the human, include system:human_advice, which contains a concrete
 legal suggested action. Legal-action lists or an AI plan alone are NOT human
 advice. Add relevant current facts to explain the coordination condition.
-For human advice with an explicit "why", state an actual causal coordination
-condition, not just the actors' positions or the item on a counter. In Warehouse
-and Kitchen, prefer system:human_advice plus system:ai_reason when that reason
-explains the suggested coordination (for example, the AI clears the destination
-square or collects the prepared ingredient while the human waits).
+For human advice with an explicit "why", use the verified one-step outcome in
+system:human_advice and any directly relevant public state. In Warehouse, the
+frozen NN's action does not establish a causal task assignment, avoidance plan
+or intention. Do not present a simulated human option as an optimal strategy.
+In Kitchen, system:ai_reason may explain a documented physical handoff.
 For a comparison after human advice, keep subject=human even when the previous
 answer also mentioned the AI. "that" refers to the recommended HUMAN action.
 Compare its supplied recommended_human_action with the requested alternative
 using two human counterfactual intents. AI alternative facts describe the AI,
 so cannot substitute for a human comparison. If the recommended action and the proposed alternative are the SAME action, explain the same action using its actual advice/reason facts; do not ask for clarification. If both outcomes are equal over
 the stated window, do not claim one is better or assume a longer-term benefit.
-In Pong, also select human_catch_deadline when it establishes why the recommended
-move keeps a currently selected catch reachable but waiting misses its deadline.
-This is a visible-contact distance calculation, not a longer simulation: retain
+In Pong, human_catch_deadline is a physical distance calculation for the nearest
+visible contact. It does not establish that either actor committed to that catch. Retain
 the requested/default simulation window and its honest score result.
 
 Use the language of the current question, even if it differs from the interface.
@@ -133,19 +132,16 @@ if present, not alternatives for every ball. Do not add unrelated comparisons.
 In Pong, this is ONE comparison intent containing ONLY the requested
 alternative fact; do not also add a reason intent, system:ai_reason, scores or
 other targets unless the question separately asks for them.
-In Warehouse, if system:ai_reason already names the requested alternative AI
-move, the specific conflicting human command and the collision location or kind,
-that reason alone answers why not: do not repeat the same collision using an
-alternative fact. Add the alternative only when the user asks for a further
-detail absent from the reason, such as the route distance after that alternative.
+In Warehouse, system:ai_reason reports the sampled NN action and its model
+probability, but cannot establish why the NN preferred it. A named alternative
+fact reports one-step physical collision cases under that hypothetical AI action;
+it is not evidence of the NN's internal motive or a counterfactual policy choice.
 Do not dump the rulebook or add system:teammate unless implementation
-or control authority was asked about. For "how can I help?", prefer the current
-human_available_option if provided and the current coordination condition. Give
-the participant an applicable option, not only general public instructions.
-"How can I help now, and why?" is normally ONE advice intent: select
-system:human_advice plus ONE directly relevant current condition. Do not repeat
-the same action using front_interaction/human_available_option as well, add
-multiple positions, or attach a full recipe/rulebook as a separate reason.
+or control authority was asked about. For "how can I help?", select
+system:human_advice and at most one directly relevant current physical fact.
+For Warehouse, describe its verified one-step simulation, without attributing
+a coordination goal to the NN. Do not repeat the same action using
+front_interaction/human_available_option or attach a full rulebook.
 In Kitchen, a named ingredient or pan question should select its current
 ingredient/location/phase fact, not all stations or the entire cooking sequence.
 For a named food's CURRENT condition or location, choose only the one or two
@@ -182,50 +178,40 @@ that JUST happened, prefer the recent item-disposal event and its point-deductio
 event; do not append the menu, order deadlines, serving rewards or whole score
 rule. Explain general rules only when those general rules were requested.
 
-For a named Pong ball's ACTUAL contact assignment ("For t3, which lane should
+For a named Pong ball's contact requirements ("For t3, which lane should
 I cover and which will you cover?" / "t3我该站哪道，你负责哪道？"), use a facts
 intent with purpose=assignment, subject=shared, object_id="t3" and the exact
-ball_plan:t3 evidence. ball_plan is authoritative about whether this ball was
-selected at all, including selected competing balls at the same arrival time.
-Do not substitute a general human-advice action or comparison:N reachability.
-Being able to reach a ball considered alone does NOT mean the AI plans to catch
-it: simultaneous incompatible balls can force a choice. If ball_plan says it
-is not selected, clearly use that fact instead of promising contact lanes for
-it. Add a ball's contact/arrival fact only when that detail was also asked.
+ball_plan:t3 evidence. The frozen Pong actor does not publish a committed ball
+assignment; report the physical contact lanes without promising which actor
+will occupy them. Do not infer an assignment from reachability or advice. Add
+a ball's arrival fact only when that detail was also asked.
 An ambiguous unnamed ball still needs clarification. object_id is required
 only for assignment intents. Position hypotheses remain counterfactual intents.
 For Pong "why this action?", select ONLY system:ai_reason (performed: prefixed
-when applicable). Its two-sentence answer already names the actual target lane,
-the relevant small and large balls and their arrival time, plus the human's
-other contact when needed. Do not add score arithmetic, positions, secondary
-targets, optimality claims, ball_plan or arrival_payoff/ball_payoff. A separate
-explicit question about points or another ball may select the matching fact in
-a separate intent. The fixed AI chooses a reachable small/large-ball combination
-and keeps its selected target; the participant coordinates with that plan.
-Do not say the AI changes its goal to accommodate a human's deviation unless
-the real decision/simulation evidence actually establishes a target change.
-Performed Pong reason facts already use the displayed frame's remaining time
-or say that the balls arrived in this recorded turn. Do not add a second
-before-action time statement or turn that recorded outcome into a future plan.
+when applicable). It identifies the frozen actor's actual action from visible
+inputs but does not reveal a causal internal goal. Never invent a target ball,
+commitment, optimality claim or rescue rule. A separate explicit question about
+another ball may select its physical fact in a separate intent. Performed Pong
+reason facts describe the saved action and observed result, not a future plan.
 For "Which ball am I closest to, how many turns until it arrives, and how can
 I coordinate with you?", select human_nearest_ball for distance AND arrival,
-then system:human_advice plus the current selected coordination condition.
+then system:human_advice plus a relevant current physical condition.
 For "closest to you", use ai_nearest_ball: the participant addresses the AI.
 These facts define closest by horizontal distance to a visible contact, then
-arrival time and ball ID to break ties. Closest is not the same as selected:
-never silently replace the nearest ball with the currently preferred catch.
+arrival time and ball ID to break ties. Closest does not mean the frozen actor
+has selected that ball as its target.
 A wrong premise should select the correcting facts and mark contradicted; never
 repeat an invented event. A hypothetical alternative is not a false premise
 merely because it differs from the AI's chosen action. After advice about the
 human's choices, "what about waiting instead?" means a HUMAN counterfactual
 unless the user explicitly says the AI should wait. If evidence cannot establish the requested reason or
 fact, clarify rather than fabricate. Technical implementation questions can use
-system:teammate, a plain-language fact about fixed coordination rules.
+system:teammate, a plain-language fact about the frozen actor's control.
 
 Counterfactual actions control the HUMAN ONLY. Extract explicit human actions,
 expanding repeated actions ("left for two turns" becomes ["left","left"]),
 including instructions phrased as questions. Never treat them as commands to the
-real game. A suggestion about the AI should be answered using actual plan facts,
+real game. A suggestion about the AI should be answered using actual action facts,
 not simulated as if the participant controls it. Compare alternatives using two
 counterfactual intents. Default horizon is 1; maximum is 12. Do not silently
 invent an optimal human future. If horizon exceeds explicit actions, the service
@@ -242,7 +228,7 @@ conditional outcome. Apply this equally to Chinese conditional questions.
 For Pong action counterfactuals, include answer_focus="ai_action" when the
 question asks what the AI would do, how it would move or where it would go
 (including "如果我等待，你会怎么做"). This renders only the real simulated AI
-actions/positions and outcomes for its selected targets, not all balls or score
+actions/positions and outcomes, not all balls or score
 arithmetic. Use answer_focus="summary" for general "what happens" questions or
 questions about catches/scores. Other domains must omit answer_focus.
 Pong POSITION hypotheticals are a separate supported intervention. For "If I
@@ -250,13 +236,13 @@ were at lane 5, how would you move?" (or "如果我在第5道，你会怎么移�
 set intervention={"human_lane":5}, subject=human, purpose=comparison,
 evidence_ids=[], actions=[], horizon=0. Lanes are the displayed ONE-BASED
 numbers, not x coordinates. The service changes only the human position in a
-copy and reruns the real fixed AI with its existing commitments. Never answer
+copy and reruns the real frozen AI actor. Never answer
 this by selecting the unchanged real state's AI reason or imagining the AI's
 action yourself. No movement steps are needed merely to ask its next decision.
 If subsequent human actions or a time window are explicitly requested, include
 those actions/horizon too; missing actions in an explicit window mean waiting.
 Use this only when listed in counterfactual_interventions. Never move the AI,
-change ball positions, erase commitments or alter any other state. A position
+change ball positions or alter any other state. A position
 outside the displayed court requires unsupported_question clarification.
 If no action OR supported position intervention can be identified, ask
 missing_action. Use only the provided action
@@ -328,16 +314,37 @@ def _catalog(engine, state, decision, public_history):
         {"id": "system:ai_reason", "subject": "ai", "purpose": "reason",
          "en": decision["reason_en"], "zh": decision["reason_zh"]},
     ])
+    if state.get('policy_id') and not state['terminal'] and hasattr(engine, 'audited_program_evidence'):
+        try:
+            program = engine.audited_program_evidence(state)
+        except (OSError, RuntimeError, ValueError):
+            program = None
+        if (isinstance(program, dict) and program.get('eligible') is True
+                and all(isinstance(program.get(key), str) for key in ('en','zh','program_sha256'))
+                and len(program['program_sha256']) == 64
+                and all(char in '0123456789abcdef' for char in program['program_sha256'])):
+            rows.append({'id': 'system:ai_program', 'subject': 'ai', 'purpose': 'reason',
+                         'en': program['en'], 'zh': program['zh'],
+                         'program_sha256': program['program_sha256'],
+                         'policy_id': state['policy_id']})
     if not state["terminal"]:
-        # All three advisors use the present state and the actual fixed AI.
-        # They never submit an action or inspect undisclosed future scenarios.
+        # Advice never submits an action. Every formal domain uses its bound
+        # human-role Actor; Warehouse also simulates one physical step.
         advisor_state = deepcopy(state)
         suggestion = engine.human_advisor(advisor_state)
         if advisor_state != state or suggestion not in engine.legal_actions(state):
             raise PlanError("invalid_human_advice")
-        rows.append({"id": "system:human_advice", "subject": "human", "purpose": "advice", "action": suggestion,
-            "en": "A coordination option for your next action is to " + _action_pair(engine, state, suggestion)[0] + ".",
-            "zh": "建议你下一步" + _action_pair(engine, state, suggestion)[1] + "。"})
+        if state['domain'] == 'warehouse':
+            branch = engine.step(state, suggestion, decision)
+            delta = engine.score(branch)['raw_score'] - engine.score(state)['raw_score']
+            collisions = branch['collision_events'] - state['collision_events']
+            rows.append({"id": "system:human_advice", "subject": "human", "purpose": "advice", "action": suggestion,
+                "en": f"The frozen human-role Actor suggests {suggestion}. With the frozen AI's recorded next action, this one simulated step changes the team score by {delta:g} and adds {collisions} robot collisions. You choose your action.",
+                "zh": f"冻结的人类角色 Actor 建议{suggestion}。在冻结AI已记录的下一步动作下，模拟这一步会使团队得分变化{delta:g}，新增{collisions}次机器人碰撞。你的动作仍由你决定。"})
+        else:
+            rows.append({"id": "system:human_advice", "subject": "human", "purpose": "advice", "action": suggestion,
+                "en": "The frozen human-role Actor suggests " + _action_pair(engine, state, suggestion)[0] + ". You control your own action.",
+                "zh": "冻结的人类角色 Actor 建议" + _action_pair(engine, state, suggestion)[1] + "。你的动作仍由你决定。"})
     public_score = engine.score(state)
     if state['domain'] == 'kitchen':
         completed = public_score['metrics']['completed_orders']
@@ -356,8 +363,15 @@ def _catalog(engine, state, decision, public_history):
     legal = engine.legal_actions(state)
     rows.append({"id": "system:available_actions", "en": "Your currently available actions are: " + ", ".join(_action_pair(engine, state, a)[0] for a in legal) + ". These are legal options, not a claim that all lead to the same outcome.",
                  "zh": "你当前可选的动作是：" + "、".join(_action_pair(engine, state, a)[1] for a in legal) + "。这些是合法选项，不表示它们的结果相同。"})
-    rows.append({"id": "system:teammate", "en": "Your teammate follows fixed coordination rules in this study. Questions explain its decisions; they do not change its controls.",
-                 "zh": "本研究中的队友按照固定协作规则行动。提问用于解释其决策，不会更改它的控制指令。"})
+    teammate = ({"en": "Your Warehouse teammate's actions come from a frozen neural policy. Questions and simulations do not change that policy or reveal a hidden task assignment.",
+                 "zh": "Warehouse队友的动作由冻结神经网络决定。提问和模拟不会改变策略，也不能揭示未记录的内部分工。"}
+                if state['domain'] == 'warehouse' else
+                {"en": "Your Pong teammate's actions come from a frozen neural policy. Questions do not change its controls or reveal an internal catch assignment.",
+                 "zh": "Pong队友由冻结的训练模型选择动作。提问不会改变它的控制，也不能揭示内部接球分工。"}
+                if state['domain'] == 'pong' else
+                {"en": "Your Kitchen teammate's actions come from a frozen neural policy. Questions use recorded evidence and do not change its controls.",
+                 "zh": "Kitchen 队友的动作由冻结神经网络决定。提问只使用记录的证据，不会更改它的控制指令。"})
+    rows.append({"id": "system:teammate", **teammate})
     for i, (en, zh) in enumerate(zip(engine.rules("en"), engine.rules("zh"))):
         rows.append({"id": f"system:public_rule:{i}", "en": en, "zh": zh})
     for frame in public_history[-16:]:
@@ -450,9 +464,7 @@ def _performed_catalog(engine, state, context):
         else:
             reason[lang] = actual[lang] + (" At the time: " if lang == "en" else "当时：") + text
     if state["domain"] == "pong" and hasattr(engine, "performed_reason"):
-        # Pong's structured saved target can express the incoming action in
-        # two sentences while counting arrivals from the displayed result.
-        # Never re-plan here: later decisions may have a different target.
+        # Pong describes the saved neural action and actual arrivals only.
         concise = engine.performed_reason(before, recorded, state)
         if not isinstance(concise, dict) or any(not isinstance(concise.get(lang), str) for lang in ("en", "zh")):
             raise PlanError("malformed_performed_reason")
@@ -601,7 +613,7 @@ def simulate(engine, state, decision, actions, horizon=1, *, intervention=None):
     """Immutable branch; position changes require a fresh fixed-AI decision.
 
     Ordinary action alternatives retain the recorded simultaneous first action.
-    Position interventions preserve every other field, including commitments.
+    Position interventions preserve every other field.
     """
     if intervention is not None:
         _validate_intervention(intervention, state)
@@ -623,11 +635,9 @@ def simulate(engine, state, decision, actions, horizon=1, *, intervention=None):
                         "reason_en": decision["reason_en"], "reason_zh": decision["reason_zh"],
                         "input_state_hash": _digest(current)}
         if state["domain"] == "pong" and hasattr(engine, "target_identity"):
-            # The hypothetical reruns the real controller with its existing
-            # commitments. Equal targets may have different human reachability.
-            hypothetical["target_unchanged"] = bool(
-                decision.get("explanation_target")
-                and engine.target_identity(actual_decision) == engine.target_identity(decision))
+            # A changed human position can change the frozen actor's action.
+            hypothetical["action_unchanged"] = (
+                engine.target_identity(actual_decision) == engine.target_identity(decision))
     assumed = horizon - len(actions)
     sequence = list(actions) + ["wait"] * assumed
     initial_public = engine.public_state(current)
@@ -711,9 +721,14 @@ def _simulation_text(result, language, domain, *, include_scope=True, answer_foc
         if action is None:
             return _text((f"Even if you were in lane {lane}, this task has finished; I have no next move.",
                           f"即使假设你在第{lane}道，本任务也已结束，我没有下一步动作。"), language)
-        if intervention.get("target_unchanged"):
-            hypothetical_text = _text((f"If you were in lane {lane}, I would keep the same target: ",
-                                       f"假设你在第{lane}道，我仍保持原目标："), language)
+        same_choice = (intervention.get("action_unchanged") if domain == 'pong'
+                       else intervention.get("target_unchanged"))
+        if same_choice:
+            hypothetical_text = (_text((f"If you were in lane {lane}, I would still choose the same next action: ",
+                                        f"假设你在第{lane}道，我仍会选择相同的下一步动作："), language)
+                                 if domain == 'pong' else
+                                 _text((f"If you were in lane {lane}, I would keep the same target: ",
+                                        f"假设你在第{lane}道，我仍保持原目标："), language))
         else:
             hypothetical_text = _text((f"If you were in lane {lane}: ",
                                        f"假设你在第{lane}道："), language)
@@ -912,13 +927,17 @@ class Explainer:
                     "original_plan": deepcopy(plan), "original_provider": deepcopy(provider_audit)}
                 repaired_payload = deepcopy(payload)
                 repaired_payload["repair_request"] = {
-                    "error": "The previous plan failed validation: " + str(first_error) + ". Recheck the question's speaker, requested purpose and time. When performed_action is supplied, every intent needs temporal_scope. Unqualified why-this-action/why-not asks for performed scope and performed: evidence from the saved incoming action. Explicit next decisions, current observations, advice and counterfactuals need current scope with unprefixed evidence. Never mix them. Use exact provided IDs. AI action/reason requires the matching system:ai_action/system:ai_reason; human advice requires system:human_advice. Historical observed events and positions use purpose=observation with history evidence. Actual named-ball assignments require purpose=assignment, object_id and that ball's ball_plan fact, never isolated comparison:N reachability. Simulations control the human only; a position hypothesis must use a supported intervention, empty evidence_ids and a displayed in-range lane. Never substitute the actual state's reason for a hypothetical decision. This is your only repair attempt.",
+                    "error": "The previous plan failed validation: " + str(first_error) + ". Recheck the question's speaker, requested purpose and time. When performed_action is supplied, every intent needs temporal_scope. Unqualified why-this-action/why-not asks for performed scope and performed: evidence from the saved incoming action. Explicit next decisions, current observations, advice and counterfactuals need current scope with unprefixed evidence. Never mix them. Use exact provided IDs. AI action/reason requires the matching system:ai_action/system:ai_reason; human advice requires system:human_advice. Historical observed events and positions use purpose=observation with history evidence. Named Pong ball contact requirements require purpose=assignment, object_id and that ball's ball_plan fact; do not infer a committed assignment from reachability. Simulations control the human only; a position hypothesis must use a supported intervention, empty evidence_ids and a displayed in-range lane. Never substitute the actual state's reason for a hypothetical decision. This is your only repair attempt.",
                     "previous_plan": _redact(plan, self.settings.llm_api_key)}
                 plan, provider_audit = self._request_plan(repaired_payload)
                 audit.update(provider_audit)
                 plan = _validate_plan(plan, evidence, state, temporal_context=action_context is not None)
                 audit["repair_attempt"]["successful"] = True
             audit.update(plan=deepcopy(plan), understanding="semantic_provider", evidence_catalog_hash=_digest(evidence))
+            selected_evidence_ids = {identifier for intent in plan['intents']
+                                     for identifier in intent.get('evidence_ids', [])}
+            if 'system:ai_program' in selected_evidence_ids:
+                audit['selected_program_sha256'] = evidence['system:ai_program']['program_sha256']
             selected_turns = set()
             for intent in plan["intents"]:
                 if intent.get("temporal_scope") == "performed":
@@ -1021,7 +1040,7 @@ def main():
     parser.add_argument("--domain", choices=("pong", "kitchen", "warehouse"), default="pong")
     args = parser.parse_args()
     from .config import Settings
-    from .registry import engine as get_engine
+    from .registry import engine as get_engine, engine_for_recorded_state
     engine = get_engine(args.domain)
     explainer = Explainer(Settings.from_env())
     if args.evaluate:
@@ -1033,6 +1052,10 @@ def main():
             external = json.loads((root / source).read_text())
             cases.extend(external if isinstance(external, list) else external["cases"])
         cases = [case for case in cases if case.get("domain", case["state"]["domain"]) == args.domain]
+        if args.domain == "kitchen":
+            active_cases = [case for case in cases if case["state"].get("version") == engine.VERSION]
+            if active_cases:
+                cases = active_cases
         # Round-robin categories so the bounded run is not only easy facts.
         groups = [[case for case in cases if _case_kind(case) == kind]
                   for kind in ("facts", "counterfactual", "clarification")]
@@ -1045,9 +1068,10 @@ def main():
         passed = 0
         for case in selected:
             state = case["state"]
-            result = explainer.answer(engine, state, engine.decide(state), case["question"], case["language"],
+            case_engine = engine_for_recorded_state(state)
+            result = explainer.answer(case_engine, state, case_engine.decide(state), case["question"], case["language"],
                 case.get("previous_dialogue", []), case.get("public_history", []))
-            report = evaluate_case(case, result, engine)
+            report = evaluate_case(case, result, case_engine)
             passed += report["passed"]
             print(json.dumps({"case_id": case["case_id"], "domain": args.domain, **report,
                 "status": result["status"], "answer": result["answer"], "evidence_ids": result["evidence_ids"],

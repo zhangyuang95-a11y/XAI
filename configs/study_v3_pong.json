@@ -1,5 +1,5 @@
 {
-  "version": "pong-concurrent.v6.0",
+  "version": "pong-concurrent.v7.0",
   "scenario_version": "pong-concurrent-schedule.v5.0",
   "lanes": 9,
   "weights": {
@@ -69,5 +69,5 @@
     "ordinary": 6,
     "cooperative": 4
   },
-  "controller_policy": "AI-led small/team simultaneous overlap preference; initial joint reachability; freeze the selected near-term AI route through its target arrival even if the human leaves the assigned contact. No unseen future balls."
+  "controller_policy": "Two separately trained neural actors use visible balls and positions. During participant play the human replaces the human actor; the frozen AI actor selects every AI action with only a legal-boundary mask. No unseen future balls or rule action overrides."
 }

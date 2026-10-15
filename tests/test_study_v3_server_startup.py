@@ -10,20 +10,22 @@ import threading
 
 from study_v3.config import Settings
 from study_v3.database import Database
-from study_v3.registry import MODULES, demonstration, engine
+from study_v3.registry import MODULES
 from study_v3.server import make_server
+import study_v3.server as service
 
 
-def test_cold_demonstrations_finish_before_database_transactions(tmp_path, monkeypatch):
-    demonstration.cache_clear()
+def test_accepted_pair_demonstrations_finish_before_database_transactions(tmp_path, monkeypatch):
     cold_calls = []
     transaction_depth = 0
     original_transaction = Database.transaction
+    expected = [(domain, f"{domain}-{variant}-{'v6' if domain == 'warehouse' else 'v5'}")
+                for domain in MODULES for variant in ('regularized', 'raw')]
 
     @contextmanager
     def tracked_transaction(self, *args, **kwargs):
         nonlocal transaction_depth
-        assert set(cold_calls) == set(MODULES)-{'kitchen'}, "Database opened before demos finished"
+        assert cold_calls == expected, "Database opened before both NN demos per domain finished"
         transaction_depth += 1
         try:
             with original_transaction(self, *args, **kwargs) as connection:
@@ -32,32 +34,42 @@ def test_cold_demonstrations_finish_before_database_transactions(tmp_path, monke
             transaction_depth -= 1
 
     monkeypatch.setattr(Database, 'transaction', tracked_transaction)
-    for domain in MODULES:
-        module = engine(domain)
-        original_demo = module.demonstration
+    monkeypatch.setattr(service, 'all_policies_accepted', lambda: True)
+    monkeypatch.setattr(service, 'policy_id',
+                        lambda domain, group: f"{domain}-{'raw' if group == 'C' else 'regularized'}-"
+                        f"{'v6' if domain == 'warehouse' else 'v5'}")
 
-        def cold_demo(domain=domain, original_demo=original_demo):
-            assert transaction_depth == 0, "Cold demo ran inside a database transaction"
-            result = original_demo()
-            cold_calls.append(domain)
-            return result
+    def cold_demo(domain, policy_id):
+        assert transaction_depth == 0, "Cold demo ran inside a database transaction"
+        cold_calls.append((domain, policy_id))
+        return {'captions': [], 'frames': []}
 
-        monkeypatch.setattr(module, 'demonstration', cold_demo)
+    monkeypatch.setattr(service, 'demonstration', cold_demo)
 
     server = None
     try:
         server = make_server(Settings(database=str(tmp_path / 'startup.sqlite3')), port=0, explainer=object())
-        for domain in MODULES:
-            _, view = server.store.create({'participant_id': 'startup-test-' + domain,
-                'domain': domain, 'group': 'A', 'mode': 'test', 'consent': True}, admin=True)
-            assert view['stage'] == 'demo'
-            if domain=='kitchen':assert view['tutorial']['state'] and 'demo' not in view
-            else:assert view['demo']['frames']
-        assert cold_calls == [d for d in MODULES if d!='kitchen'], "Enrollment recomputed a cold demo"
+        assert cold_calls == expected
     finally:
         if server:
             server.server_close()
-        demonstration.cache_clear()
+
+
+def test_incomplete_v5_assets_skip_cold_demonstrations_and_release_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, 'all_policies_accepted', lambda: False)
+
+    def unexpected_demo(domain, policy_id):
+        raise AssertionError(f'prewarmed an incomplete policy: {domain} {policy_id}')
+
+    monkeypatch.setattr(service, 'demonstration', unexpected_demo)
+    server = make_server(Settings(database=str(tmp_path / 'incomplete.sqlite3')),
+                         port=0, explainer=object())
+    try:
+        assert server.release['policy_assets_accepted'] is False
+        with server.store.db.transaction(read_only=True) as db:
+            assert db.one('SELECT id FROM pl3_releases') is None
+    finally:
+        server.server_close()
 
 
 def test_health_remains_read_only_while_enrollment_writer_is_active(tmp_path, monkeypatch):

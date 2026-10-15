@@ -1,0 +1,7 @@
+{
+  "model_sha256": "c9e1d27ded3a8ec735133f6299171d836553ee2b8c90eb01fd24cfd38287c8f8",
+  "development_passed": true,
+  "heldout_passed": true,
+  "model_version": "pong-rolling-actors.v1",
+  "evaluation_sha256": "a52ddd798ec8388115cf743ae2d362e564ba53da7dd4422482fcfd225859e778"
+}

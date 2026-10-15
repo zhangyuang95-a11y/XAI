@@ -17,8 +17,8 @@ from study_v3.store import Store
 from study_v3 import server as server_module
 
 
-TABLES = ('participants', 'enrollments', 'instances', 'runs', 'frames',
-          'questions', 'questionnaires', 'timings', 'releases','tutorials','tutorial_events','auto_explanation_settings','auto_explanations','auto_explanation_confirmations')
+TABLES = ('participants', 'enrollments', 'policy_bindings', 'instances', 'runs', 'frames',
+          'questions', 'questionnaires', 'timings', 'releases','tutorials','tutorial_events')
 RELEASE = 'export-selected-release'
 ADMIN = 'export-unit-test-only-token'
 LEGACY_MARKER = 'EXCLUDED_LARGE_LEGACY_PAYLOAD'
@@ -165,7 +165,8 @@ def handler_class(export_store, monkeypatch):
     # Build the real route closure without opening a socket or simulating demos.
     monkeypatch.setattr(server_module, 'Store', lambda *a, **k: export_store)
     monkeypatch.setattr(server_module, 'demonstration', lambda *a, **k: None)
-    monkeypatch.setattr(server_module, 'manifest', lambda *a: {'source_sha256': 'test-only'})
+    monkeypatch.setattr(server_module, 'manifest', lambda *a: {
+        'source_sha256': 'test-only', 'policy_assets_accepted': False})
     monkeypatch.setattr(server_module, 'StudyHTTPServer',
                         lambda address, handler: SimpleNamespace(RequestHandlerClass=handler))
     return server_module.make_server(export_store.settings, explainer=object()).RequestHandlerClass

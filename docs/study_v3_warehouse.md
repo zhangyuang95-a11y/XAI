@@ -1,5 +1,9 @@
 # Warehouse restored legacy environment (v3.3)
 
+Historical release documentation. The current Warehouse route uses the
+[pure-NN adapter](study_v3_warehouse_pure_nn.md); these legacy controls and
+results retain their original version for audit.
+
 This release restores the pre-three-domain **6-row × 7-column** Warehouse
 map, physics and raw participant scoring from commit
 `af97df8589080a6b1b79bad591059b4d52fe33ee`. AI control actually imports a

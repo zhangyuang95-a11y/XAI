@@ -352,14 +352,14 @@ def _pickup_loadable(state, item, source):
                   key=lambda pot: (_arrival_turn(state, [source, pot["id"]]), pot["id"]))
 
 
-def _descriptor(state, actor="human", slot=None):
+def _descriptor(state, actor="human", slot=None, order_id=None, explicit=False):
     """Physical front-cell interaction. Optional AI raw-slot selection is audited."""
     who, held = state[actor], state[actor]["holding"]
     station = _front(who)
     if not station:
         return None
     target, kind = station["id"], station["kind"]
-    out = {"station": target}
+    out = {"station": target, "neural": explicit}
     if kind == "trash":
         return dict(out, kind="discard") if held else None
     if target == "handoff" or target == "human_buffer" and actor == "human":
@@ -380,9 +380,11 @@ def _descriptor(state, actor="human", slot=None):
     if target == "ai_raw":
         choices = ([i for i, item in enumerate(state["buffers"]["ai_raw"]) if item is None] if held and held["stage"] in ("raw", "prepared") else
                    [i for i, item in enumerate(state["buffers"]["ai_raw"]) if item is not None] if held is None else [])
+        if explicit and slot is None:
+            return None
         if slot is not None:
             choices = [slot] if slot in choices else []
-        return dict(out, kind="take" if held is None else "put", slot=choices[0]) if choices else None
+        return dict(out, kind="take" if held is None else "put", slot=choices[0], neural=explicit) if choices else None
     if kind == "protein_buffer":
         item, pot_id = state["buffers"]["protein"][station["pot_id"]], station["pot_id"]
         if held and item is None and held.get("pot_id") == pot_id and held["stage"] in ("cooked_protein", "finished"):
@@ -397,7 +399,19 @@ def _descriptor(state, actor="human", slot=None):
         expired_unfinished = pot["order_id"] and not _order(state, pot["order_id"]) and pot["phase"] != "mix"
         if held is None and (pot["status"] == "burnt" or expired_unfinished):
             return dict(out, kind="take_waste" if pot["item"] else "clear_pot")
-        if pot in _loadable(state, held):
+        if explicit and held and held["stage"] == "prepared":
+            order = _order(state, order_id) if order_id else None
+            if (order and order["recipe"] == held["recipe"] and held.get("order_id") in (None, order_id)
+                    and _fresh_through(held, state["turn"] + 1) and pot["status"] == "empty"):
+                spec = RECIPES[held["recipe"]]
+                protein = (held["ingredient"] == spec["protein"] and pot["phase"] == "idle"
+                           and state["buffers"]["protein"][pot["id"]] is None
+                           and not any(other["order_id"] == order_id for other in state["pots"]))
+                vegetable = (held["ingredient"] == spec["vegetable"] and pot["phase"] == "await_vegetable"
+                             and pot["order_id"] == order_id)
+                if protein or vegetable:
+                    return dict(out, kind="load", order_id=order_id, neural=True)
+        elif not explicit and pot in _loadable(state, held):
             return dict(out, kind="load")
         if held is None and pot["status"] == "ready" and pot["phase"] in ("protein", "mix"):
             return dict(out, kind="remove")
@@ -869,7 +883,7 @@ def _interact(state, actor, descriptor, new_turn, newly_loaded):
                 old.pop("storage_since_turn", None)
                 old.pop("storage_station", None)
         who["holding"] = old
-        if old and actor == "ai":
+        if old and actor == "ai" and not descriptor.get("neural"):
             _assign(state, old)
         item = held if held else old
         en, zh = _transfer_text(actor, item, target, descriptor.get("slot"), bool(held))
@@ -879,7 +893,10 @@ def _interact(state, actor, descriptor, new_turn, newly_loaded):
         if not _fresh_through(held, new_turn):
             raise ValueError("The prepared portion expires before this loading action can complete")
         pot = _pot(state, target)
-        _assign(state, held)
+        if descriptor.get("neural"):
+            held["order_id"] = descriptor["order_id"]
+        else:
+            _assign(state, held)
         protein = held["ingredient"] == RECIPES[held["recipe"]]["protein"]
         pot.update(status="cooking", phase="protein" if protein else "vegetable", recipe=held["recipe"], order_id=held["order_id"], item=held,
                    remaining=COOK_TURNS[held["ingredient"]], ready_age=0)
@@ -962,10 +979,13 @@ def step(state, human_action, decision=None):
     if human_action not in legal_actions(state):
         raise ValueError("That action is not available in front of you")
     decision = deepcopy(decision) if decision is not None else decide(state)
-    if decision["action"] not in legal_actions(state, "ai"):
+    if decision["action"] not in MOVES and decision["action"] != "wait" and decision["action"] != "interact":
         raise ValueError("AI action is not legal in the saved state")
     actions = {"human": human_action, "ai": decision["action"]}
-    descriptors = {actor: _descriptor(state, actor, decision.get("slot") if actor == "ai" else None) if action == "interact" else None
+    descriptors = {actor: _descriptor(state, actor, decision.get("slot") if actor == "ai" else None,
+                                      decision.get("order_id") if actor == "ai" else None,
+                                      decision.get("policy_origin") == "kitchen_nn" if actor == "ai" else False)
+                   if action == "interact" else None
                    for actor, action in actions.items()}
     if any(actions[actor] == "interact" and descriptors[actor] is None for actor in actions):
         raise ValueError("Selected interaction is not available in front")
@@ -1332,7 +1352,7 @@ def _physical_food_locations(state):
     return result
 
 
-def facts(state, decision=None):
+def facts(state, decision=None, *, include_human_advice=True):
     decision = decide(state) if decision is None else decision
     rows = [{"id": "ai_reason", "en": decision["reason_en"], "zh": decision["reason_zh"]},
             {"id": "ai_next_action", "en": "The task has ended; there is no executable next action." if state["terminal"] else "My next action is to " + decision.get("action_label_en", action_label(decision["action"])).lower() + ".", "zh": "任务已结束，没有可执行的下一步动作。" if state["terminal"] else "我下一步会" + decision.get("action_label_zh", action_label(decision["action"], "zh")) + "。"},
@@ -1428,8 +1448,9 @@ def facts(state, decision=None):
                  "en": f"Every prepared ingredient expires {PREPARED_FRESH_TURNS['egg']} turns after preparation finishes. Changing hands, handoff counters or storage slots never resets that deadline. The actual pan-loading action must finish before the expiry turn.",
                  "zh": f"四种备好原料都在完成备料的 {PREPARED_FRESH_TURNS['egg']} 回合后变质。拿起、交接或换暂存位置都不重置期限；实际下锅动作必须在过期回合之前完成。"})
     if not state["terminal"]:
-        suggestion = human_advisor(state)
-        rows.append({"id": "human_available_option", "en": "One available next action is: " + action_label(suggestion).lower() + ". It is a suggestion, not a guarantee of the final score.", "zh": "你下一步可选择" + action_label(suggestion, "zh") + "。这是一项建议，不保证最终分数。"})
+        if include_human_advice:
+            suggestion = human_advisor(state)
+            rows.append({"id": "human_available_option", "en": "One available next action is: " + action_label(suggestion).lower() + ". It is a suggestion, not a guarantee of the final score.", "zh": "你下一步可选择" + action_label(suggestion, "zh") + "。这是一项建议，不保证最终分数。"})
         rows.append({"id": "front_interaction", "en": "Your front-cell interaction is: " + interaction_label(state) + ".", "zh": "你面前当前可做的交互是：" + interaction_label(state, language="zh") + "。"})
     for i, (en, zh) in enumerate(zip(rules(), rules("zh"))):
         rows.append({"id": f"public_rule{i}", "en": en, "zh": zh})

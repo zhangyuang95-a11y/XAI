@@ -7,8 +7,24 @@ import threading
 import pytest
 
 from study_v3.config import Settings
+from study_v3.registry import MODULES
 from study_v3.server import QAReadinessMonitor, make_server
 from study_v3.store import Store
+import study_v3.server as service
+
+
+def grounded_answers():
+    return {domain: {'status': 'answered', 'answer': 'The frozen Actor will wait.',
+                     'evidence_ids': ['system:ai_action']}
+            for domain in MODULES}
+
+
+@pytest.fixture(autouse=True)
+def accepted_release_for_probe_unit_tests(monkeypatch):
+    # Exercise provider readiness independently of the on-disk training gate.
+    monkeypatch.setattr(service, 'all_policies_accepted', lambda: True)
+    monkeypatch.setattr('study_v3.store.all_policies_accepted', lambda: True)
+    monkeypatch.setattr(Store, '_release_policies_match', staticmethod(lambda db: True))
 
 
 def pilot_settings(tmp_path):
@@ -32,7 +48,7 @@ def test_failed_probes_recover_only_after_validated_response_and_rate_limit(stor
     calls = []
     outcomes = [RuntimeError('private-api-key-must-not-be-logged'),
                 {'status': 'unavailable'}, {'status': 'unknown'}, None,
-                {'status': 'answered', 'answer': 'Verified fixture answer.'}]
+                grounded_answers()]
 
     def probe():
         calls.append(now[0])
@@ -61,7 +77,7 @@ def test_failed_probes_recover_only_after_validated_response_and_rate_limit(stor
         assert 'retry in 30 seconds' in caplog.text
         # A later genuine QA failure also recovers without a process restart.
         store.qa_healthy = False
-        outcomes.append({'status': 'answered'})
+        outcomes.append(grounded_answers())
         assert monitor.check() is True
         assert store.ready is True and len(calls) == 6
     finally:
@@ -87,6 +103,23 @@ def test_configuration_gates_cannot_be_bypassed_by_reprobe(tmp_path, fields):
         instance.db.close()
 
 
+@pytest.mark.parametrize('invalid', [
+    lambda results: results.pop('warehouse'),
+    lambda results: results['pong'].update(status='clarification'),
+    lambda results: results['kitchen'].update(evidence_ids=[]),
+    lambda results: results['warehouse'].update(answer='  '),
+])
+def test_probe_requires_all_three_grounded_action_answers(store, invalid):
+    answers = grounded_answers()
+    invalid(answers)
+    monitor = QAReadinessMonitor(store, lambda: answers)
+    try:
+        assert monitor.check() is False
+        assert store.qa_healthy is False
+    finally:
+        monitor.stop()
+
+
 def test_single_flight_and_close_cancel_pending_result(store):
     entered, release, finished = threading.Event(), threading.Event(), threading.Event()
     calls = []
@@ -96,7 +129,7 @@ def test_single_flight_and_close_cancel_pending_result(store):
         entered.set()
         assert release.wait(3)
         finished.set()
-        return {'status': 'answered'}
+        return grounded_answers()
 
     monitor = QAReadinessMonitor(store, probe)
     monitor.start()
@@ -132,7 +165,7 @@ def test_old_probe_cannot_replace_newer_participant_qa_health(store, probe_succe
     def probe():
         entered.set()
         assert release.wait(3)
-        return {'status': 'answered' if probe_success else 'unavailable'}
+        return grounded_answers() if probe_success else {'status': 'unavailable'}
 
     monitor = QAReadinessMonitor(store, probe)
     worker = threading.Thread(target=monitor.check)
@@ -152,17 +185,47 @@ def test_old_probe_cannot_replace_newer_participant_qa_health(store, probe_succe
 
 def test_http_liveness_stays_available_during_probe_then_live_readiness_recovers(tmp_path, monkeypatch):
     # Demos are covered by cold-start tests; isolate the provider I/O here.
-    monkeypatch.setattr('study_v3.server.demonstration', lambda domain: None)
+    monkeypatch.setattr('study_v3.server.demonstration', lambda domain, policy_id: None)
+    class ProbeEngine:
+        VERSION = 'test'
+        RELEASE_VERSION = 'test'
+
+        def __init__(self, domain):
+            self.domain = domain
+
+        def rule_metadata(self, policy_id):
+            return {'policy_id': policy_id}
+
+        def initial_state(self, seed, task, policy_id, release_id=None):
+            return {'domain': self.domain, 'task': task, 'policy_id': policy_id}
+
+        def decide(self, state):
+            return {'action': 'wait'}
+
+        def public_state(self, state):
+            return {'domain': self.domain}
+
+    engines = {domain: ProbeEngine(domain) for domain in MODULES}
+    monkeypatch.setattr(service, 'engine', engines.__getitem__)
+    monkeypatch.setattr(service, 'policy_id', lambda domain, group:
+                        f"{domain}-regularized-{'v6' if domain == 'warehouse' else 'v5'}")
     entered, release = threading.Event(), threading.Event()
+    called_domains = []
 
     class BlockingExplainer:
         def answer(self, eng, state, decision, question, language, dialogue, history):
-            assert state['domain'] == 'pong' and state['task'] == 2
+            assert state['domain'] in MODULES and state['task'] == 2
+            assert state['policy_id'] == (
+                f"{state['domain']}-regularized-"
+                f"{'v6' if state['domain'] == 'warehouse' else 'v5'}")
             assert decision == eng.decide(state)
             assert history == [eng.public_state(state)]
-            entered.set()
-            assert release.wait(5)
-            return {'status': 'answered', 'answer': 'Validated stub.'}
+            called_domains.append(state['domain'])
+            if len(called_domains) == 1:
+                entered.set()
+                assert release.wait(5)
+            return {'status': 'answered', 'answer': 'Validated stub.',
+                    'evidence_ids': ['system:ai_action']}
 
     server = make_server(pilot_settings(tmp_path), port=0, explainer=BlockingExplainer())
     worker = threading.Thread(target=server.serve_forever, daemon=True)
@@ -184,6 +247,7 @@ def test_http_liveness_stays_available_during_probe_then_live_readiness_recovers
                 break
             threading.Event().wait(0.01)
         assert server.store.ready
+        assert called_domains == list(MODULES)
         for path in ('/health', '/api/release'):
             client.request('GET', path)
             response = client.getresponse()

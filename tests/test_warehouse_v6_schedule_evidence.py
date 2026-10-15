@@ -34,6 +34,8 @@ def _pair() -> dict:
     namespace = "warehouse-v6-matched-120-step-blocks"
     spec = p.PairRunSpec("schedule-test", pair_seed, steps, "/unused",
                          checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS)
+    closure = "7" * 64
+    config_hash = spec.training_config_sha256(closure)
     digest = scenario_schedule_sha256(namespace, pair_seed, steps)
     raw = _resets(pair_seed, steps, split_first=False)
     regularized = _resets(pair_seed, steps, split_first=True)
@@ -42,6 +44,7 @@ def _pair() -> dict:
         variants[variant] = {
             "variant": variant, "pair_seed": pair_seed, "joint_steps": steps,
             "run_spec_sha256": spec.sha256(),
+            "training_config_sha256": config_hash,
             "scenario_schedule_sha256": digest,
             "assigned_scenario_schedule_kind": "fixed_120_joint_step_blocks",
             "actual_episode_resets": resets,
@@ -51,6 +54,9 @@ def _pair() -> dict:
         "candidate_id": spec.candidate_id, "release_id": spec.release_id,
         "pair_seed": pair_seed, "joint_steps": steps,
         "run_spec_sha256": spec.sha256(),
+        "training_config_sha256": config_hash,
+        "source_closure_sha256": closure,
+        "bc_recipe_version": p.REGISTERED_BC_RECIPE_VERSION,
         "checkpoint_seeds": list(spec.checkpoint_seeds),
         "assigned_scenario_schedule_sha256": digest,
         "actual_episode_reset_count": {variant: len(row["actual_episode_resets"])

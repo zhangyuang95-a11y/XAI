@@ -22,6 +22,7 @@ from torch import nn
 from torch.distributions import Categorical
 
 from experiments.warehouse.protocol import (
+    REGISTERED_BC_RECIPE_VERSION, REGISTERED_BC_SPEC,
     SCENARIO_BLOCK_STEPS, scenario_seed, scenario_schedule_sha256,
 )
 from env.warehouse.decision_protocol import canonical_sha256, independent_agent_seed
@@ -58,16 +59,16 @@ PROGRAM_MIN_EPISODES = sum(PROGRAM_SPLIT_EPISODES)
 TRAINING_REWARD_OVERRIDES = {"delivery_points": 100.0,
                              "robot_collision_points": -50.0,
                              "shutdown_points": -200.0}
-DEFAULT_BC_EPISODES = 200
-DEFAULT_BC_EPOCHS = 30
-DEFAULT_DAGGER_ROUNDS = 4
-DEFAULT_DAGGER_EPISODES = 80
-DEFAULT_DAGGER_EPOCHS = 10
+DEFAULT_BC_EPISODES = REGISTERED_BC_SPEC["bc_episodes"]
+DEFAULT_BC_EPOCHS = REGISTERED_BC_SPEC["bc_epochs"]
+DEFAULT_DAGGER_ROUNDS = REGISTERED_BC_SPEC["dagger_rounds"]
+DEFAULT_DAGGER_EPISODES = REGISTERED_BC_SPEC["dagger_episodes"]
+DEFAULT_DAGGER_EPOCHS = REGISTERED_BC_SPEC["dagger_epochs"]
 
 # A single, replayable offline BC recipe is completed before either PPO
 # variant starts. Every data seed and stage is fixed by the pair seed. The
 # offline teacher and learned collision critic are absent from execution.
-BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.2"
+BC_RECIPE_VERSION = REGISTERED_BC_RECIPE_VERSION
 BC_INITIAL_TEACHER_EPISODES = 100
 BC_INITIAL_EPOCHS = 20
 BC_INITIAL_DAGGER_ROUNDS = 2
@@ -168,6 +169,9 @@ def _scientific_run_spec_sha256(spec: Mapping) -> str:
     if (registered.to_mapping()["final_program_fit_seed_schedule"] !=
             spec["final_program_fit_seed_schedule"]):
         raise RuntimeError("Warehouse canonical run spec program schedule drifted")
+    if _training_config_sha256(spec) != registered.training_config_sha256(
+            spec["source_closure_sha256"]):
+        raise RuntimeError("Warehouse registered BC config hash drifted")
     return registered.sha256()
 
 

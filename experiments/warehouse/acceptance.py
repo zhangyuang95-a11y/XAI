@@ -120,7 +120,8 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
             or type(steps) is not int or steps not in p.BUDGETS
             or p.SCENARIO_BLOCK_STEPS != 120
             or not isinstance(pair.get("candidate_id"), str)
-            or not isinstance(pair.get("release_id"), str)):
+            or not isinstance(pair.get("release_id"), str)
+            or not _sha(pair.get("source_closure_sha256"))):
         return False
     checkpoint_seeds = (p.DEVELOPMENT_SELECTION_SEEDS if
                         seed in p.DEVELOPMENT_PAIR_SEEDS else
@@ -129,10 +130,14 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
         pair["candidate_id"], seed, steps, "/ignored-by-scientific-hash",
         release_id=pair["release_id"], checkpoint_seeds=checkpoint_seeds)
     expected_spec_sha = expected_spec.sha256()
+    expected_training_sha = expected_spec.training_config_sha256(
+        pair["source_closure_sha256"])
     expected_schedule_sha = p.scenario_schedule_sha256(namespace, seed, steps)
     variants = pair.get("variants")
     if (not isinstance(variants, Mapping) or set(variants) != set(p.VARIANTS)
             or pair.get("run_spec_sha256") != expected_spec_sha
+            or pair.get("training_config_sha256") != expected_training_sha
+            or pair.get("bc_recipe_version") != p.REGISTERED_BC_RECIPE_VERSION
             or pair.get("assigned_scenario_schedule_sha256") !=
             expected_schedule_sha
             or pair.get("checkpoint_seeds") != list(checkpoint_seeds)):
@@ -145,6 +150,7 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
                 or report.get("pair_seed") != seed
                 or report.get("joint_steps") != steps
                 or report.get("run_spec_sha256") != expected_spec_sha
+                or report.get("training_config_sha256") != expected_training_sha
                 or report.get("scenario_schedule_sha256") !=
                 expected_schedule_sha
                 or report.get("assigned_scenario_schedule_kind") !=

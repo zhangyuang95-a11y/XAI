@@ -49,6 +49,8 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
     scientific = _scientific_run_spec_sha256(checked)
     assert scientific == spec.sha256()
     assert scientific != _training_config_sha256(checked)
+    assert _training_config_sha256(checked) == spec.training_config_sha256(
+        checked["source_closure_sha256"])
 
     resets = []
     for index, start in enumerate(range(0, spec.joint_steps, SCENARIO_BLOCK_STEPS)):
@@ -65,6 +67,7 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
         "variant": variant, "pair_seed": spec.pair_seed,
         "joint_steps": spec.joint_steps,
         "run_spec_sha256": scientific,
+        "training_config_sha256": _training_config_sha256(checked),
         "scenario_schedule_sha256": schedule_sha,
         "assigned_scenario_schedule_kind": "fixed_120_joint_step_blocks",
         "actual_episode_resets": resets,
@@ -74,6 +77,9 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
         "candidate_id": spec.candidate_id, "release_id": spec.release_id,
         "pair_seed": spec.pair_seed, "joint_steps": spec.joint_steps,
         "run_spec_sha256": scientific,
+        "training_config_sha256": _training_config_sha256(checked),
+        "source_closure_sha256": checked["source_closure_sha256"],
+        "bc_recipe_version": "warehouse-public-dual-bc.v6.2",
         "assigned_scenario_schedule_sha256": schedule_sha,
         "checkpoint_seeds": list(spec.checkpoint_seeds),
         "variants": variants,
@@ -82,4 +88,7 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
     }
     assert _paired_schedule_evidence(pair)
     pair["variants"]["raw"]["run_spec_sha256"] = _training_config_sha256(checked)
+    assert not _paired_schedule_evidence(pair)
+    pair["variants"]["raw"]["run_spec_sha256"] = scientific
+    pair["training_config_sha256"] = "0" * 64
     assert not _paired_schedule_evidence(pair)

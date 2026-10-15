@@ -37,6 +37,14 @@ PROGRAM_RAMP_FRACTION = 0.05
 SCENARIO_BLOCK_STEPS = 120
 FINAL_PROGRAM_SPLIT_COUNTS = {"fit": 50, "calibration": 25,
                               "eligibility": 25, "validation": 24}
+REGISTERED_BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.2"
+REGISTERED_BC_SPEC = {
+    "bc_episodes": 200,
+    "bc_epochs": 30,
+    "dagger_rounds": 4,
+    "dagger_episodes": 80,
+    "dagger_epochs": 10,
+}
 
 
 def _hash_json(value: object) -> str:
@@ -208,6 +216,18 @@ class PairRunSpec:
     def sha256(self) -> str:
         # A moved artifact directory does not change the scientific run.
         return _hash_json({key: value for key, value in self.to_mapping().items()
+                           if key != "output_dir"})
+
+    def training_config_sha256(self, source_closure_sha256: str) -> str:
+        """Independently derive the registered BC/checkpoint config identity."""
+        if (not isinstance(source_closure_sha256, str)
+                or len(source_closure_sha256) != 64
+                or any(char not in "0123456789abcdef"
+                       for char in source_closure_sha256)):
+            raise ValueError("invalid Warehouse training source closure")
+        config = {**self.to_mapping(), **REGISTERED_BC_SPEC,
+                  "source_closure_sha256": source_closure_sha256}
+        return _hash_json({key: value for key, value in config.items()
                            if key != "output_dir"})
 
 

@@ -26,7 +26,8 @@ FORMAL_SELECTION_SEEDS = tuple(range(240_048, 240_072))
 FORMAL_PROGRAM_PREAUDIT_SEEDS = tuple(range(240_072, 240_096))
 FINAL_PROGRAM_AUDIT_SEEDS = tuple(range(240_100, 240_124))
 HELDOUT_BASE_SEEDS = tuple(range(250_000, 250_100))
-_RELEASE_PATTERN = re.compile(r"policylens-three-domain-20261016\.v6\.(\d+)")
+_RELEASE_PATTERN = re.compile(
+    r"policylens-three-domain-20261016\.v6\.(0|[1-9][0-9]*)\Z")
 TASKS = (1, 2, 3)
 ROLES = ("robot_1", "robot_2")
 VARIANTS = ("raw", "regularized")
@@ -92,7 +93,7 @@ def sealed_seed_blocks(release_id: str = INITIAL_RELEASE_ID) -> dict[str, tuple[
     """
     match = _RELEASE_PATTERN.fullmatch(release_id)
     if match is None:
-        raise ValueError("unregistered Warehouse v6 release ID")
+        raise ValueError("unregistered Warehouse v6 release ID; canonical minor required")
     offset = 100_000 * int(match.group(1))
     return {
         "final_program_audit": tuple(seed + offset for seed in FINAL_PROGRAM_AUDIT_SEEDS),

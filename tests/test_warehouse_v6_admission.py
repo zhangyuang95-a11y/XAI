@@ -337,6 +337,17 @@ def test_next_release_gets_distinct_policy_ids_and_sealed_claims(tmp_path, monke
                     "policylens-three-domain-20261016.v6.01")
 
 
+def test_sealed_seed_blocks_reject_noncanonical_release_aliases():
+    for release_id in (
+            "policylens-three-domain-20261016.v6.00",
+            "policylens-three-domain-20261016.v6.01",
+            "policylens-three-domain-20261016.v6.1suffix"):
+        with pytest.raises(ValueError, match="unregistered"):
+            p.sealed_seed_blocks(release_id)
+    assert p.final_audit_seeds("policylens-three-domain-20261016.v6.1") != \
+        p.final_audit_seeds("policylens-three-domain-20261016.v6.0")
+
+
 def _package_asset(repository: Path, release_id: str, source: Path) -> dict:
     digest = sha256(source.read_bytes()).hexdigest()
     relative = f"releases/{release_id}/assets/{digest}/{source.name}"

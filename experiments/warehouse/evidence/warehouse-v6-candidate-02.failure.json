@@ -1,0 +1,223 @@
+{
+  "assets": {
+    "pair.training.json": {
+      "bytes": 812615,
+      "path": "output/warehouse_v6_runs/warehouse-v6-candidate-02/pair_6110_steps_200000/pair.training.json",
+      "sha256": "fcb9d2109d8b37ffe06113a943afcb35fe1aef0f44bc3feacbf9dab20490e84b"
+    },
+    "paired_bc.checkpoint.pt": {
+      "bytes": 1910051,
+      "path": "output/warehouse_v6_runs/warehouse-v6-candidate-02/pair_6110_steps_200000/paired_bc.checkpoint.pt",
+      "sha256": "36c9a100d6dedbf7fcdd29f95425d280409f7fa779056b199a418fe69bd4ac4f"
+    },
+    "raw.actor.npz": {
+      "bytes": 779345,
+      "path": "output/warehouse_v6_runs/warehouse-v6-candidate-02/pair_6110_steps_200000/raw.actor.npz",
+      "sha256": "6f568efef210fd7f48417e12c8993c6884d41a3c084255aecd10f07378f335ba"
+    },
+    "raw.checkpoint.pt": {
+      "bytes": 2065663,
+      "path": "output/warehouse_v6_runs/warehouse-v6-candidate-02/pair_6110_steps_200000/raw.checkpoint.pt",
+      "sha256": "119c7858715760ed156027de3111476e7d6658f83c6c1403ba1de46ec395e417"
+    },
+    "raw.training.json": {
+      "bytes": 391193,
+      "path": "output/warehouse_v6_runs/warehouse-v6-candidate-02/pair_6110_steps_200000/raw.training.json",
+      "sha256": "05f3101c3ec3e4f0c7afbf024c727b64deb195b6c39f8ba5e8585035f2336abf"
+    },
+    "regularized.actor.npz": {
+      "bytes": 779394,
+      "path": "output/warehouse_v6_runs/warehouse-v6-candidate-02/pair_6110_steps_200000/regularized.actor.npz",
+      "sha256": "c97280ad2f442386c26c35bf8c3b3e51d1175ccefa8d222417a536ec47614bcd"
+    },
+    "regularized.checkpoint.pt": {
+      "bytes": 2122607,
+      "path": "output/warehouse_v6_runs/warehouse-v6-candidate-02/pair_6110_steps_200000/regularized.checkpoint.pt",
+      "sha256": "7cb833c8faac6fe0a50f515915aaa557870a7d32e69969ff1d6bbcc69d09c025"
+    },
+    "regularized.robot_1.program.json": {
+      "bytes": 21768,
+      "path": "output/warehouse_v6_runs/warehouse-v6-candidate-02/pair_6110_steps_200000/regularized.robot_1.program.json",
+      "sha256": "f956ab8ee21d49f9087cf5d67f2ea186d9d8983786ca0a2ad8e22ba0ca5b2d9a"
+    },
+    "regularized.robot_2.program.json": {
+      "bytes": 21682,
+      "path": "output/warehouse_v6_runs/warehouse-v6-candidate-02/pair_6110_steps_200000/regularized.robot_2.program.json",
+      "sha256": "92fbadb3c424a6944769bc191c4a05854d0df1455a7ea7243b0cdc6206992701"
+    },
+    "regularized.training.json": {
+      "bytes": 413426,
+      "path": "output/warehouse_v6_runs/warehouse-v6-candidate-02/pair_6110_steps_200000/regularized.training.json",
+      "sha256": "2a69edd72e07055bfcc255a3f30e48f4e876a3d5ea4f0e1cd07dab104a7e3ab2"
+    }
+  },
+  "candidate_id": "warehouse-v6-candidate-02",
+  "checkpoint_seeds": [
+    260300,
+    260301,
+    260302,
+    260303,
+    260304,
+    260305,
+    260306,
+    260307,
+    260308,
+    260309,
+    260310,
+    260311,
+    260312,
+    260313,
+    260314,
+    260315,
+    260316,
+    260317,
+    260318,
+    260319,
+    260320,
+    260321,
+    260322,
+    260323
+  ],
+  "development_quality_gate": {
+    "mean_collisions_max": 6.0,
+    "mean_deliveries_min": 5.5,
+    "shutdown_episode_rate_max": 0.05
+  },
+  "independent_stress_evaluated": false,
+  "joint_steps": 200000,
+  "kind": "warehouse_v6_development_failure",
+  "method_lock_eligible": false,
+  "notes": "Only registered development checkpoint seeds were used for the selected quality metric; this receipt does not imply final model acceptance.",
+  "pair_invariants": {
+    "both_full_budget": true,
+    "no_action_overrides": true,
+    "raw_feedback_zero": true,
+    "regularized_both_role_gradients_nonzero": true,
+    "same_initial_role_hashes": true,
+    "same_scenario_schedule": true
+  },
+  "pair_seed": 6110,
+  "quality": {
+    "raw": {
+      "development_quality_passed": false,
+      "formal_quality_passed": false,
+      "mean_collisions": 1.75,
+      "mean_deliveries": 0.20833333333333334,
+      "quality": -0.22916666666666666,
+      "shutdown_episode_rate": 0.0
+    },
+    "regularized": {
+      "development_quality_passed": false,
+      "formal_quality_passed": false,
+      "mean_collisions": 1.7083333333333333,
+      "mean_deliveries": 0.20833333333333334,
+      "quality": -0.42708333333333326,
+      "shutdown_episode_rate": 0.041666666666666664
+    }
+  },
+  "reason": "both_variants_failed_development_delivery_threshold",
+  "regularized_internal_program_validation": {
+    "robot_1": {
+      "explanation": {
+        "agreement": 0.9932735426008968,
+        "certified_rows": 0,
+        "coverage": 0.7743055555555556,
+        "illegal_count": 0,
+        "kl": 0.02488589473068714,
+        "masked_illegal_count": 0,
+        "rows": 2230,
+        "sample_count": 2880
+      },
+      "feedback": {
+        "agreement": 0.9932735426008968,
+        "certified_rows": 0,
+        "coverage": 0.7743055555555556,
+        "illegal_count": 0,
+        "kl": 0.02488589473068714,
+        "masked_illegal_count": 0,
+        "rows": 2230,
+        "sample_count": 2880
+      }
+    },
+    "robot_2": {
+      "explanation": {
+        "agreement": 0.9534722222222223,
+        "certified_rows": 0,
+        "coverage": 1.0,
+        "illegal_count": 0,
+        "kl": 0.04948170483112335,
+        "masked_illegal_count": 0,
+        "rows": 2880,
+        "sample_count": 2880
+      },
+      "feedback": {
+        "agreement": 0.9534722222222223,
+        "certified_rows": 0,
+        "coverage": 1.0,
+        "illegal_count": 0,
+        "kl": 0.04948170483112335,
+        "masked_illegal_count": 0,
+        "rows": 2880,
+        "sample_count": 2880
+      }
+    }
+  },
+  "run_spec_sha256": "4e1aafb4d3600bfee06157315025958a64dd847f65f38367bbb2f0805cb741d2",
+  "sealed_heldout_evaluated": false,
+  "sealed_program_audit_evaluated": false,
+  "source_closure_sha256": "1f923c65aa4cdb3c52993860263435628798c456e6ad35ae277e9f262b2da43c",
+  "source_files_sha256": {
+    "backend/training/warehouse_v6_actor.py": "13324675d9b230885ad79a8ebf8c16fb10ef828a3a2cffff6c1c5311a81cbe7e",
+    "backend/training/warehouse_v6_program.py": "c6f43b9fb0a2eb2eabd4a967c3c14eedc611d80ea38af0dc6739acb827a29700",
+    "backend/training/warehouse_v6_runner.py": "ffd727e523717294c088c777c7ce2996659fc0d9479d152069678d6530975849",
+    "backend/training/warehouse_v6_teacher.py": "dbcfd918d14720c6d530c68dabca407837ab7db68298907ff923b0d96f1df2ed",
+    "configs/study_v3_warehouse_neural_v6.json": "0f37b3f5b6027db26709095d868a263e60f0b4e85a3d85adcad56fe6d608cca9",
+    "core/policy_contracts.py": "cb63dc37a9a7cd10cb812ad0051c58cc4f15645d7e83f58b492f7db6b7adfeda",
+    "env/warehouse/__init__.py": "5da880073c356d1e7b0a7b1f1d696c2d7613a056b38752db0885a6757215b913",
+    "env/warehouse/autonomy.py": "77422c4c5875c000aa1b83770d9ffa054a14a9c0befb9627f8ebac549277450a",
+    "env/warehouse/autonomy_runtime.py": "71d54152be3e383b0b879e396fb36009602aa03a37fd74e3571634adf8e048bb",
+    "env/warehouse/contracts.py": "32ef122c774ed23e2ee787184c65cfadaaa9de8ea3959bf9aa290c537455161d",
+    "env/warehouse/coordination.py": "1d95b4d19008bf1f184c2bcf5e6cdbf0f12f7d682764f94416d976917e6a1d57",
+    "env/warehouse/coordination_goals.py": "5aff7dfcab87a85c3fc3bf49ca330ab95527d3dad5dd510c25aad7bbf2cba1cb",
+    "env/warehouse/coordination_plan.py": "11d95894d32ffb8f586e1c024d38863e154340477200c57b479d4684816f9d27",
+    "env/warehouse/coordination_priority.py": "3b3187dfd65e891cd73d1f3101c6bca65f2d839189f7745545c18815e99febff",
+    "env/warehouse/coordination_reservations.py": "7e552c8d68572b1029fd7ef8bdaba0673cb9b845ba0528743f07c14b356bf657",
+    "env/warehouse/credit_assignment.py": "994ea2ed6e3af3c9946c6c6d2a2ef8821b8118457adfdfc4fbab005dfe3e99ce",
+    "env/warehouse/decision_protocol.py": "9027bdcca993e1ab4656a9451ef96a2dd202f353a339788a00b9d7e5ab3021ff",
+    "env/warehouse/domain.py": "6d228a26c6eaaf3b3a14b7ff9f06b8bfff42eb4a9efcee81a9ddf9e68aa2e99e",
+    "env/warehouse/energy_management.py": "654f370c78dbb0a4b7e1f129d24955194bd21c4e6bd2aa312f907b53264da444",
+    "env/warehouse/environment.py": "411c999ba42188e2456ce229f02bf26314da299b2fc80f77d9d66b4632d9d1da",
+    "env/warehouse/evaluation_diagnostics.py": "4281269a019f57f44173660bfad61a4effc5f93f63a9af950e7a4fe45752ad32",
+    "env/warehouse/frozen_missions.py": "62e8c136b6adaf4ea552a1a718e15dfc1db68d00bc328f9783ad54883c3009e8",
+    "env/warehouse/goal_management.py": "7ac4529fda9a301f2abc88a2c7d2e7ee1b12f08d6418024c72001cdffdb35b65",
+    "env/warehouse/gradient_guard.py": "1409b522200dffa39d61322fcecc3a15eb78d0d7df81968c2e02f58c4846ec51",
+    "env/warehouse/historical_sep2_coordination.py": "ebcbf38c6365752a73b2175ab44750f3231da369421424f5cccd4aada23729c8",
+    "env/warehouse/interaction_calibration.py": "935c30df355afb736b26dbcd8da0ece42c411cd776edfab47321c08a4d869b59",
+    "env/warehouse/joint_risk_loss.py": "26ccae604063686a925fbdaf770933f8b64fc541f35fea2022e5889252d8231c",
+    "env/warehouse/layouts.py": "687cf6b0c60d6d51bf11e230cf37a5ef8e61df7cff576dddf894278b86f9d90f",
+    "env/warehouse/mappo.py": "f0ac4de96437fa5dcc536f25d30a5399694b75549e3f423fb65a1e60f25576b7",
+    "env/warehouse/navigation.py": "497fabb65c05ad7f4578faf670463659927093cf61e1967156d78bb5ff454789",
+    "env/warehouse/numpy_policy.py": "1c7964ed5f0a65efa73e4df09aa897c2a25668b81c2f6dc17dd320974f2cf66e",
+    "env/warehouse/observations.py": "d1a86e86664ec375f38d75fb666ab6a858b9acf5c67b3ccc02a58557c2d09671",
+    "env/warehouse/partner_policies.py": "d4ee60af8590b9d1d59ea81228f5dcec88d1106080eea5a27a09de77d8dc0988",
+    "env/warehouse/policy.py": "b8d200851d705b6adc85ef156ac0b546bcc4830d6512b44851e92cd934868986",
+    "env/warehouse/policy_metrics.py": "7f85c3a995730e37a0914ae983e8a5e85418228b87293ab894594a585d66afa3",
+    "env/warehouse/public_observation_v6.py": "138341391cd7885f7d6138d3caf896587f4f5773f4a5628f50c5bf4db7da283f",
+    "env/warehouse/pure_nn.py": "23fb78604bb6e294277be19a1a4240d4d353b6c68faeb98a4e8b67b48192e29f",
+    "env/warehouse/regressions.py": "e545a0b3d967a2ae2b4effa1db05a2c4740952a4deef3500319b929952904641",
+    "env/warehouse/render_layout.py": "2b305e83dc7171c13edcfd841b96af9a5e96b1bdb40b50b8dae1c58cfa44bf42",
+    "env/warehouse/rewards.py": "7691126a368cadf8f9071615daf1e85cd8bb9ef0e506018e47f28a8c61f36fcb",
+    "env/warehouse/rollout_batch.py": "eb8244df63bfce9de92f2a8808390abea18a47a4109d53a6853081f51a18a247",
+    "env/warehouse/route_goals.py": "e63075c7e335c3bb7c83fb27de574a2d4e865ca8ce22d1d62afa2a8312537917",
+    "env/warehouse/runtime_coordination.py": "d1e02ec2e90a968addea4719f773a93bc146d6fa89ef241082f42bf37e7b447f",
+    "env/warehouse/scenario_evaluation.py": "2b4b23bb7a0a08046b0088ee85d4e5c37e92ffcb5ab8a324a4948e79afe1dde5",
+    "env/warehouse/scenarios.py": "8ac2935487f8bb5b3955ca336fa0f06e96c4c2a9ed4f25db34efafcfbdeb62fd",
+    "env/warehouse/seed_calibration.py": "0b4ae714c560e5d7169f2b11027e3f19a70157231da278d7426b1fd1b0e736c8",
+    "env/warehouse/state_support.py": "4a0ef97fbb996aa5b08220375c28a2b934a9972fc056b01a25ba8ee2375c202d",
+    "env/warehouse/teacher_efficiency.py": "23f50404540ab9017ba681c407e1f2cd4b84c2116d240c8e27f20f2ee492f9d9",
+    "env/warehouse/temporal_audit.py": "1c98f97669c576315366af7b485aec13b9dc4e194655d11781e7949bb278eefc",
+    "env/warehouse/transition_audit.py": "f3d286a8b2d58d271348636cd14d3e34fdbda3f73ca58ecf0ef55b64e7a93bd5",
+    "env/warehouse/transition_outcome.py": "0afeb14c45e0dfe64ece3c5c0a6e5bbe053a9466e9097a0af6dd1371f7677c3b",
+    "experiments/warehouse/protocol.py": "cc1ef5a55de62274b3753ce5fff9eb694d5ff825080b3b2bbd31f033c1282552"
+  }
+}

@@ -470,9 +470,28 @@ class Admission:
         artifact = entry["actor_artifact"]
         self._artifact_path(artifact)
         actor = self.backend.load_actor(artifact)
-        if actor.role_sha256 != entry["selected_role_sha256"]:
+        if (actor.artifact_sha256 != artifact["sha256"]
+                or actor.role_sha256 != artifact["role_sha256"]
+                or actor.role_sha256 != entry["selected_role_sha256"]):
             raise RuntimeError("Warehouse Actor role hash differs from training report")
         return actor
+
+    def _verify_selected_assets(self, pair: Mapping) -> None:
+        """Check both frozen Actors and training reports before a sealed claim."""
+        artifacts = {variant: pair["variants"][variant]["actor_artifact"]
+                     for variant in p.VARIANTS}
+        if (artifacts["raw"].get("model_version") !=
+                artifacts["regularized"].get("model_version")
+                or artifacts["raw"].get("feature_schema_sha256") !=
+                artifacts["regularized"].get("feature_schema_sha256")):
+            raise RuntimeError("Warehouse paired Actor architecture differs")
+        for variant in p.VARIANTS:
+            self._load_variant(pair, variant)
+            entry = pair["variants"][variant]
+            path = Path(entry["training_report_path"]).resolve()
+            if (not path.is_relative_to(self.directory)
+                    or _file_sha(path) != entry["training_report_sha256"]):
+                raise RuntimeError("Warehouse selected training report hash mismatch")
 
     def _load_programs(self, report: Mapping, actor) -> dict:
         artifacts = report["variants"]["regularized"].get("program_artifacts", {})
@@ -882,6 +901,7 @@ class Admission:
                 raise ValueError("Warehouse preaudit seed mismatch")
         actor = self._load_variant(pair, "regularized")
         programs = self._load_programs(pair, actor)
+        self._verify_selected_assets(pair)
         if phase != "program.preaudit":
             self._verified_program_prerequisite(
                 "program.preaudit.json", selection, pair, actor, programs,
@@ -941,6 +961,7 @@ class Admission:
         selection, pair = self._selected_pair()
         actor = self._load_variant(pair, "regularized")
         programs = self._load_programs(pair, actor)
+        self._verify_selected_assets(pair)
         self._verified_program_prerequisite(
             "program.preaudit.json", selection, pair, actor, programs,
             p.FORMAL_PROGRAM_PREAUDIT_SEEDS, sealed=False)

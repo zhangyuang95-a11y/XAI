@@ -376,6 +376,29 @@ def test_quality_selection_mutation_rejects_before_final_seed_claim(ready):
     assert not admission._claim_path("final_program_audit").exists()
 
 
+def test_missing_raw_actor_rejects_before_final_seed_claim(ready):
+    admission, backend = ready
+    _, pair = admission._selected_pair()
+    Path(pair["variants"]["raw"]["actor_artifact"]["path"]).unlink()
+    calls_before = len(backend.audit_calls)
+    with pytest.raises(FileNotFoundError):
+        admission.final_audit()
+    assert len(backend.audit_calls) == calls_before
+    assert not admission._claim_path("final_program_audit").exists()
+
+
+def test_training_report_hash_rejects_before_heldout_seed_claim(ready):
+    admission, backend = ready
+    admission.final_audit()
+    _, pair = admission._selected_pair()
+    Path(pair["variants"]["raw"]["training_report_path"]).write_text("{}")
+    calls_before = len(backend.evaluate_calls)
+    with pytest.raises(RuntimeError, match="training report hash"):
+        admission.heldout()
+    assert len(backend.evaluate_calls) == calls_before
+    assert not admission._claim_path("heldout").exists()
+
+
 @pytest.mark.parametrize("change", (
     "actor_sha256", "program_sha256", "seeds", "audit_metric",
     "claim_sha256", "claim_actor_hash"))

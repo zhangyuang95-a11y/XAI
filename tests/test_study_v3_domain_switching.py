@@ -9,6 +9,7 @@ import threading
 import uuid
 
 import pytest
+import study_v3.store as study_store
 
 from study_v3 import RELEASE_ID, SUPPORTED_RELEASE_IDS
 from study_v3.config import Settings
@@ -17,7 +18,8 @@ from study_v3.server import make_server
 from study_v3.store import Store, StudyError, encode
 from tests.test_study_v3_http import Client, ORIGIN
 from tests.test_study_v3_store import (BOUND_DOMAINS, UNBOUND_BINDINGS, Flow,
-                                       RecordingExplainer, assert_public, denied)
+                                       RecordingExplainer, _simulated_scenario_config,
+                                       assert_public, denied)
 
 
 PREVIOUS_RELEASE = 'policylens-three-domain-20260920.v3.2'
@@ -25,7 +27,8 @@ UNSUPPORTED_RELEASE = 'policylens-three-domain-20260920.v3.1'
 
 
 @pytest.fixture
-def synthetic_store(tmp_path):
+def synthetic_store(tmp_path, monkeypatch):
+    monkeypatch.setattr(study_store, "scenario_config", _simulated_scenario_config)
     settings = Settings(database=str(tmp_path / 'switching.sqlite3'), mode='test',
                         origin=ORIGIN, persistent=True, verified=True,
                         admin_token='switching-test-only-admin',

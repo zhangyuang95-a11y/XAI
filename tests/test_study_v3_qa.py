@@ -12,6 +12,7 @@ import threading
 import pytest
 
 from domains.pong import turnbased as pong
+from domains.kitchen.build_qa_cases import QA_SEED as KITCHEN_DEVELOPMENT_SEED
 from study_v3.config import Settings
 from study_v3.qa import Explainer, PlanError, _catalog, evaluate_case, simulate
 from study_v3.registry import engine as get_engine, engine_for_recorded_state
@@ -804,10 +805,10 @@ def test_current_pong_recorded_cases_reproduce_from_their_builder():
 
 
 def kitchen_production_trajectory(target, *, legacy=False):
-    """Reproduce the production test's legal tomato-first inputs, no saved identity."""
+    """Reproduce legal tomato-first inputs on a development scene."""
     from domains.kitchen import engine as historical_kitchen
     kitchen = historical_kitchen if legacy else get_engine('kitchen')
-    state = kitchen.initial_state(2000, 2)
+    state = kitchen.initial_state(KITCHEN_DEVELOPMENT_SEED, 2)
     supplied = False
     while state['turn'] < target:
         held = state['human']['holding']
@@ -867,7 +868,9 @@ def test_kitchen_delivery_counterfactual_counts_real_completed_orders_independen
     assert ('completed orders change by 1' if language=='en' else '完成订单数变化1') in result['answer']
 
 
-@pytest.mark.parametrize('domain,seed,task,turn',[('pong',730100,2,0),('kitchen',2000,1,10),('kitchen',2000,2,None)])
+@pytest.mark.parametrize('domain,seed,task,turn',[('pong',730100,2,0),
+    ('kitchen',KITCHEN_DEVELOPMENT_SEED,1,10),
+    ('kitchen',KITCHEN_DEVELOPMENT_SEED,2,None)])
 @pytest.mark.parametrize('language',['en','zh'])
 def test_actual_wait_reason_synonyms_render_once_without_question_keyword_binding(domain,seed,task,turn,language):
     module = get_engine(domain)
@@ -898,7 +901,7 @@ def test_actual_wait_reason_synonyms_render_once_without_question_keyword_bindin
 def test_waiting_destination_reason_does_not_hide_actual_movement():
     from study_v3.qa import _reason_states_action
     kitchen = get_engine('kitchen')
-    state = kitchen.initial_state(2000,2)
+    state = kitchen.initial_state(KITCHEN_DEVELOPMENT_SEED,2)
     decision = kitchen.decide(state)
     decision.update(action='left', reason_en='I am waiting near the handoff counter.', reason_zh='我在交接台附近等待。')
     assert not _reason_states_action(kitchen,state,decision,'en')

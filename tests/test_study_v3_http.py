@@ -14,12 +14,14 @@ from http.client import HTTPConnection
 from http.cookies import SimpleCookie
 
 import pytest
+import study_v3.store as study_store
 
 from study_v3.config import Settings
 from study_v3.policies import PolicyUnavailable, binding_for_group
 from study_v3.registry import engine
 from study_v3.server import COOKIE, make_server
-from tests.test_study_v3_store import Flow, RecordingExplainer, assert_public
+from tests.test_study_v3_store import (Flow, RecordingExplainer,
+                                       _simulated_scenario_config, assert_public)
 
 
 ORIGIN = "https://study-http-test.invalid"
@@ -67,7 +69,8 @@ class Client:
 
 
 @pytest.fixture
-def http_service(tmp_path):
+def http_service(tmp_path, monkeypatch):
+    monkeypatch.setattr(study_store, "scenario_config", _simulated_scenario_config)
     settings = Settings(database=str(tmp_path / "http.sqlite3"), origin=ORIGIN, admin_token=ADMIN,
         llm_base_url="https://private-model-provider.invalid/v1", llm_model="private-model-name",
         llm_api_key="test-only-secret-api-key")
@@ -282,6 +285,8 @@ def test_all_domain_group_flows_through_http(http_service, domain, group):
 
 
 def _http_process(database, admin, pipe):
+    # Spawned processes do not inherit the parent pytest monkeypatch.
+    study_store.scenario_config = _simulated_scenario_config
     server = make_server(Settings(database=database, origin=ORIGIN, admin_token=admin),
         port=0, explainer=RecordingExplainer())
     pipe.send(server.server_port)

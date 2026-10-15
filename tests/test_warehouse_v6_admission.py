@@ -88,7 +88,7 @@ class FakeBackend:
                     p.ROLES, 0.0 if variant == "raw" else .5),
                 "actor_artifact": {"path": str(actor_path), "sha256": actor_sha,
                                    "role_sha256": chosen,
-                                   "model_version": "warehouse-dual-actor.v6.0",
+                                   "model_version": "warehouse-dual-actor.v6.1",
                                    "feature_schema_sha256": "9" * 64},
                 "program_artifacts": programs,
                 "training_report_path": str(report_path),

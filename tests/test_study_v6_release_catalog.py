@@ -127,10 +127,10 @@ def test_warehouse_v6_binding_metadata_is_required_on_restore(tmp_path, monkeypa
                 store._binding(db, instance)
         with store.db.transaction() as db:
             db.execute("INSERT INTO pl3_policy_binding_metadata VALUES(?,?,?,?)",
-                       (instance["id"], "warehouse-dual-actor.v6.0", "d" * 64, 1.0))
+                       (instance["id"], "warehouse-dual-actor.v6.1", "d" * 64, 1.0))
         with store.db.transaction(read_only=True) as db:
             restored = store._binding(db, instance)
-        assert restored["actor_model_version"] == "warehouse-dual-actor.v6.0"
+        assert restored["actor_model_version"] == "warehouse-dual-actor.v6.1"
         assert restored["feature_schema_sha256"] == "d" * 64
     finally:
         store.db.close()
@@ -142,7 +142,7 @@ def test_warehouse_catalog_rejects_development_paths_even_with_correct_hash(monk
     source = "configs/study_v3_pong.json"
     digest = sha256((kitchen.ROOT / source).read_bytes()).hexdigest()
     entry = {"policy_id": "warehouse-raw-v6",
-             "model_version": "warehouse-dual-actor.v6.0",
+             "model_version": "warehouse-dual-actor.v6.1",
              "feature_schema_sha256":
              "1ba9702c1d70b3375eb12f4c0569393ed480995265a4c4ca3aaec37167ff1346",
              "actor_path": source, "actor_sha256": digest,

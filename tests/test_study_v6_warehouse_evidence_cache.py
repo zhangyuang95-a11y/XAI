@@ -66,7 +66,7 @@ def _synthetic_package(root: Path) -> dict:
         programs = row["programs"]
         entries[variant] = {
             "policy_id": f"warehouse-{variant}-v6",
-            "model_version": "warehouse-dual-actor.v6.0",
+            "model_version": "warehouse-dual-actor.v6.1",
             "feature_schema_sha256":
             "1ba9702c1d70b3375eb12f4c0569393ed480995265a4c4ca3aaec37167ff1346",
             "actor_path": row["actor"]["path"],

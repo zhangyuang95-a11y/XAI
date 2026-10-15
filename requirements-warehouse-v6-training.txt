@@ -1,0 +1,5 @@
+# Warehouse v6 candidate training environment. Frozen actor inference uses only
+# the runtime dependencies in requirements-render.txt.
+numpy==2.2.3
+scikit-learn==1.9.0
+torch==2.13.0

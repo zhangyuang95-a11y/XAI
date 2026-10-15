@@ -54,7 +54,7 @@ python3 -m experiments.warehouse.admission acceptance \
 
 `formal-train` 缺少通过的预算锁会拒绝；`preaudit` 缺少正式质量选择会拒绝；`final-audit` 缺少通过的预审会拒绝；`heldout` 缺少通过的最终审计会拒绝。`acceptance` 会复核全部训练、阶段收据、封存 claim、资产哈希、程序证据以及留出原始行；只有核验成功才写 `passed=true`。该收据本身不会开放 pilot。发布者还须核验 Pong、Kitchen 已有收据和迁移后的逐帧执行一致性，生成完整 v6 内容寻址发布包后才能开放研究。
 
-失败候选及探索运行均保留其原始输出。曾在 6110 上跨训练代码变更的 `candidate-01` 是探索诊断，不计入锁定预检。`candidate-02` 在 6110、200k 步上完成配对训练但两版本质量未过门槛；它的开发选择与程序审计种子（260300–260323、260400–260423）已使用，失败收据固定保存在 `experiments/warehouse/evidence/warehouse-v6-candidate-02.failure.json`。新候选使用上表互不重叠的开发种子；旧收据中的种子不得改写。
+失败候选及探索运行均保留其原始输出。曾在 6110 上跨训练代码变更的 `candidate-01` 是探索诊断，不计入锁定预检。`candidate-02` 在 6110、200k 步上完成配对训练但两版本质量未过门槛；它的开发选择与程序审计种子（260300–260323、260400–260423）已使用。失败收据和探索性数值诊断分别保存在 `experiments/warehouse/evidence/warehouse-v6-candidate-02.failure.json` 与 `experiments/warehouse/evidence/warehouse-v6-candidate-02.diagnosis.md`。新候选使用上表互不重叠的开发种子；旧收据中的种子不得改写。
 
 ## 训练器目录
 

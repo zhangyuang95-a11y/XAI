@@ -1,7 +1,7 @@
 {
-  "version": "warehouse-dual-actor.v6.0",
+  "version": "warehouse-dual-actor.v6.1",
   "scenario_version": "warehouse-dual-actor-three-tasks.v6.0",
-  "model_version": "warehouse-dual-actor.v6.0",
+  "model_version": "warehouse-dual-actor.v6.1",
   "observation_version": "warehouse-public-observation.v6.0",
   "feature_schema_sha256": "1ba9702c1d70b3375eb12f4c0569393ed480995265a4c4ca3aaec37167ff1346",
   "release_id": "policylens-three-domain-20261016.v6.0",

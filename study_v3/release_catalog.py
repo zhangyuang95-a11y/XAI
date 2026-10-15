@@ -97,7 +97,8 @@ def warehouse_runtime_source_closure_sha256() -> str:
                               for path in sorted((ROOT / "env" / "warehouse").glob("*.py")))
         paths = dynamic_paths + static_paths
         if any(not isinstance(path, str) or not (path.endswith(".py")
-               or path.endswith(".json")) for path in paths):
+               or path.endswith(".json")
+               or path == "requirements-warehouse-v6-training.txt") for path in paths):
             raise ValueError("Warehouse source file list invalid")
         hashes = {}
         for path in sorted(set(paths)):
@@ -195,7 +196,7 @@ def warehouse_policy_artifacts(release_id: str = RELEASE_ID) -> dict:
     for variant, entry in entries.items():
         if (not isinstance(entry, dict)
                 or entry.get("policy_id") != spec.policy_ids[variant]
-                or entry.get("model_version") != "warehouse-dual-actor.v6.0"
+                or entry.get("model_version") != "warehouse-dual-actor.v6.1"
                 or entry.get("feature_schema_sha256") !=
                 "1ba9702c1d70b3375eb12f4c0569393ed480995265a4c4ca3aaec37167ff1346"):
             raise ReleaseAssetUnavailable("warehouse_policy_identity_mismatch")

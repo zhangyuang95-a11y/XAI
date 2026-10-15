@@ -23,7 +23,8 @@ from torch.distributions import Categorical
 
 from experiments.warehouse.protocol import (
     FINAL_PROGRAM_SPLIT_COUNTS, REGISTERED_BC_RECIPE_VERSION, REGISTERED_BC_SPEC,
-    SCENARIO_BLOCK_STEPS, scenario_seed, scenario_schedule_sha256,
+    SCENARIO_BLOCK_STEPS, online_program_cohorts_valid,
+    scenario_seed, scenario_schedule_sha256,
 )
 from env.warehouse.decision_protocol import canonical_sha256, independent_agent_seed
 from env.warehouse.domain import participant_study_config
@@ -43,10 +44,14 @@ from .warehouse_v6_actor import (
 from .warehouse_v6_program import (
     WarehouseV6Program, fit_program, audit_frozen_program, current_actor_fidelity,
 )
+from .warehouse_v6_shutdown_cost import (
+    RiskDualConfig, ShutdownRiskDual, shutdown_cost_gae,
+    joint_shutdown_surrogate, episode_balanced_cost_critic_loss,
+)
 from .warehouse_v6_teacher_lookahead import public_lookahead_teacher
 
 
-RUNNER_VERSION = "warehouse-v6-paired-cost-ppo.v6"
+RUNNER_VERSION = "warehouse-v6-paired-complete-event-cost-ppo.v7"
 PROGRAM_LAMBDA = 0.01
 PROGRAM_START_FRACTION = 0.80
 PROGRAM_RAMP_FRACTION = 0.05
@@ -105,6 +110,7 @@ _SOURCE_FILES = (
     "backend/training/warehouse_v6_collision_critic.py",
     "backend/training/warehouse_v6_program.py",
     "backend/training/warehouse_v6_runner.py",
+    "backend/training/warehouse_v6_shutdown_cost.py",
     "backend/training/warehouse_v6_teacher.py",
     "backend/training/warehouse_v6_teacher_lookahead.py",
     "experiments/warehouse/protocol.py",
@@ -851,7 +857,7 @@ def collect_episode(model: WarehouseV6Actor, *, seed: int,
             action = torch.multinomial(policy.probs, 1, generator=generator).squeeze(-1)
             logp = policy.log_prob(action)
             reward_value = model.reward_critic(t_obs.flatten(start_dim=1))[0]
-            cost_value = model.cost_critic(t_obs.flatten(start_dim=1))[0, 0]
+            cost_value = model.cost_critic(t_obs.flatten(start_dim=1))[0, 0].sigmoid()
         commands = {role: ACTIONS[int(action[index])]
                     for index, role in enumerate(AGENTS)}
         previous_shutdowns = env.state.shutdown_count
@@ -875,7 +881,7 @@ def collect_episode(model: WarehouseV6Actor, *, seed: int,
         with torch.no_grad():
             final_obs = torch.from_numpy(encode_public_observation(env.state)).flatten()[None]
             reward_bootstrap = model.reward_critic(final_obs)[0].numpy().copy()
-            cost_bootstrap = float(model.cost_critic(final_obs)[0, 0])
+            cost_bootstrap = float(model.cost_critic(final_obs)[0, 0].sigmoid())
     summary = {"seed": seed, "episode_index": episode_index,
                "episode_key": f"{seed}:{episode_index}",
                "joint_steps": len(records),
@@ -886,7 +892,8 @@ def collect_episode(model: WarehouseV6Actor, *, seed: int,
                "shutdown_episode": bool(env.state.shutdown_count),
                "complete": complete}
     return {"records": records, "reward_bootstrap": reward_bootstrap,
-            "cost_bootstrap": cost_bootstrap}, summary
+            "cost_bootstrap": cost_bootstrap, "complete": complete,
+            "shutdown_episode": summary["shutdown_episode"]}, summary
 
 
 def _program_coefficient(progress: float) -> float:
@@ -937,23 +944,38 @@ def _program_feedback(logits: torch.Tensor, obs: torch.Tensor, masks: torch.Tens
     return coefficient * mean_kl, count, float(mean_kl.detach())
 
 
-def _ppo_rows(episodes: Sequence[Mapping]) -> dict[str, torch.Tensor]:
+def _ppo_rows(episodes: Sequence[Mapping]) -> dict:
     rows = []
-    for episode in episodes:
+    complete_outcomes = {}
+    for identifier, episode in enumerate(episodes):
+        if type(episode.get("complete")) is not bool:
+            raise ValueError("Warehouse cost PPO requires an explicit complete flag")
+        records = episode["records"]
+        if not records:
+            raise RuntimeError("Warehouse v6 PPO episode has no transitions")
+        if episode["complete"]:
+            costs = [float(item["shutdown_cost"]) for item in records]
+            values = [float(item["cost_value"]) for item in records]
+            cost_advantages, _ = shutdown_cost_gae(
+                costs, values, complete=True)
+            outcome = bool(sum(costs))
+            if episode.get("shutdown_episode") not in (None, outcome):
+                raise RuntimeError("Warehouse episode shutdown outcome disagrees with events")
+            complete_outcomes[identifier] = outcome
+        else:
+            if any(float(item["shutdown_cost"]) for item in records):
+                raise RuntimeError("Warehouse incomplete episode has a shutdown event")
+            cost_advantages = torch.zeros(len(records))
         reward_adv = np.zeros(len(AGENTS), dtype=np.float32)
-        cost_adv = 0.0
         next_reward = episode["reward_bootstrap"]
-        next_cost = float(episode["cost_bootstrap"])
         enriched = []
-        for item in reversed(episode["records"]):
+        for index in range(len(records) - 1, -1, -1):
+            item = records[index]
             reward_delta = item["reward"] + 0.99 * next_reward - item["reward_value"]
             reward_adv = reward_delta + 0.99 * 0.95 * reward_adv
-            cost_delta = item["shutdown_cost"] + 0.99 * next_cost - item["cost_value"]
-            cost_adv = cost_delta + 0.99 * 0.95 * cost_adv
             enriched.append((item, reward_adv.copy(), reward_adv + item["reward_value"],
-                             float(cost_adv), float(cost_adv + item["cost_value"])))
+                             float(cost_advantages[index]), identifier))
             next_reward = item["reward_value"]
-            next_cost = item["cost_value"]
         rows.extend(reversed(enriched))
     if not rows:
         raise RuntimeError("Warehouse v6 PPO batch has no transitions")
@@ -965,26 +987,9 @@ def _ppo_rows(episodes: Sequence[Mapping]) -> dict[str, torch.Tensor]:
         "reward_adv": torch.from_numpy(np.stack([row[1] for row in rows])),
         "reward_target": torch.from_numpy(np.stack([row[2] for row in rows])),
         "cost_adv": torch.tensor([row[3] for row in rows], dtype=torch.float32),
-        "cost_target": torch.tensor([row[4] for row in rows], dtype=torch.float32),
+        "episode_id": torch.tensor([row[4] for row in rows], dtype=torch.long),
+        "complete_episode_outcomes": complete_outcomes,
     }
-
-
-def _cost_actor_advantage(data: Mapping[str, torch.Tensor],
-                          episodes: Sequence[Mapping]) -> tuple[torch.Tensor, int, float]:
-    """Preserve shutdown-event GAE scale and suppress event-free critic noise.
-
-    The cost critic still supplies the per-state baseline in ``_ppo_rows`` and
-    is fitted to real shutdown returns in every PPO update.  A batch with no
-    observed shutdown cannot identify an action that caused a shutdown, so
-    its residual value-estimation noise must not train either Actor.
-    """
-    advantage = data["cost_adv"]
-    event_rows = sum(int(row["shutdown_cost"] > 0)
-                     for episode in episodes for row in episode["records"])
-    raw_std = float(advantage.std(unbiased=False))
-    if event_rows == 0:
-        return torch.zeros_like(advantage), 0, raw_std
-    return advantage, event_rows, raw_std
 
 
 def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
@@ -998,8 +1003,13 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
     reward_adv = data["reward_adv"]
     reward_adv = ((reward_adv - reward_adv.mean(0, keepdim=True)) /
                   reward_adv.std(0, keepdim=True, unbiased=False).clamp_min(1e-6))
-    cost_adv, cost_event_rows, cost_adv_std_raw = _cost_actor_advantage(
-        data, episodes)
+    cost_adv = data["cost_adv"]
+    complete_outcomes = data["complete_episode_outcomes"]
+    cost_event_rows = sum(complete_outcomes.values())
+    complete_values = cost_adv[torch.isin(
+        data["episode_id"], torch.tensor(list(complete_outcomes), dtype=torch.long))]
+    cost_adv_std_raw = (float(complete_values.std(unbiased=False))
+                        if len(complete_values) else 0.0)
     coefficient = _program_coefficient(progress) if programs is not None else 0.0
     counts = {role: 0 for role in AGENTS}
     gradient_norms = {role: 0.0 for role in AGENTS}
@@ -1036,18 +1046,22 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
                     feedback_disabled_epochs[role] += 1
         logits = model.outputs_encoded(encoded, masks)
         policy = Categorical(logits=logits)
-        ratio = torch.exp(policy.log_prob(actions) - old_logp)
+        new_logp = policy.log_prob(actions)
+        ratio = torch.exp(new_logp - old_logp)
         reward_surrogate = torch.minimum(
             ratio * reward_adv, ratio.clamp(0.8, 1.2) * reward_adv)
         # The shutdown cost is an observed episode event, not a hand-written
         # action-risk matrix or a run-time safety controller.
-        cost_surrogate = torch.maximum(
-            ratio * cost_adv[:, None], ratio.clamp(0.8, 1.2) * cost_adv[:, None])
+        cost_surrogate, cost_diagnostics = joint_shutdown_surrogate(
+            new_logp, old_logp, cost_adv, data["episode_id"],
+            tuple(complete_outcomes))
         reward_value = model.reward_critic(obs.flatten(start_dim=1))
-        cost_value = model.cost_critic(obs.flatten(start_dim=1)).squeeze(-1)
-        loss = (-reward_surrogate.mean() + cost_multiplier * cost_surrogate.mean()
+        cost_logits = model.cost_critic(obs.flatten(start_dim=1)).squeeze(-1)
+        cost_critic_loss = episode_balanced_cost_critic_loss(
+            cost_logits, data["episode_id"], complete_outcomes)
+        loss = (-reward_surrogate.mean() + cost_multiplier * cost_surrogate
                 + 0.5 * nn.functional.mse_loss(reward_value, data["reward_target"])
-                + 0.25 * nn.functional.mse_loss(cost_value, data["cost_target"])
+                + 0.25 * cost_critic_loss
                 - 0.005 * policy.entropy().mean()
                 + 5e-4 * torch.stack([
                     model.actors[role].bounds().mean() for role in AGENTS]).mean())
@@ -1079,8 +1093,11 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
         losses.append(float(loss.detach()))
     return {"loss": float(np.mean(losses)), "cost_multiplier": cost_multiplier,
             "cost_event_rows": cost_event_rows,
+            "completed_episodes_for_cost": len(complete_outcomes),
             "cost_advantage_std_raw": cost_adv_std_raw,
-            "cost_actor_surrogate": float(cost_surrogate.mean().detach()),
+            "cost_actor_surrogate": float(cost_surrogate.detach()),
+            "cost_joint_ratio_mean": cost_diagnostics["joint_ratio_mean"],
+            "cost_critic_loss": float(cost_critic_loss.detach()),
             "program_coefficient": coefficient, "feedback_rows": counts,
             "feedback_gradient_norm": gradient_norms, "program_kl": program_kl,
             "feedback_disabled_epochs": feedback_disabled_epochs,
@@ -1088,10 +1105,12 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
             "feedback_window_actor_rows": exposure,
             "zero_action_coverage_rows": zero_coverage,
             "physical_no_legal_action_rows": no_legal,
-            "batch_shutdown_episode_rate": float(np.mean([
-                summary["records"][-1]["shutdown_cost"] > 0
-                if summary["records"] else False for summary in episodes])),
-            "cost_critic_target_mean": float(data["cost_target"].mean())}
+            "batch_shutdown_episode_rate": (sum(complete_outcomes.values()) /
+                                             len(complete_outcomes)
+                                             if complete_outcomes else None),
+            "cost_critic_target_mean": (sum(complete_outcomes.values()) /
+                                        len(complete_outcomes)
+                                        if complete_outcomes else None)}
 
 
 def evaluate(model: WarehouseV6Actor | FrozenWarehouseV6Actor,
@@ -1525,42 +1544,6 @@ def _variant_checkpoint_path(directory: Path, variant: str) -> Path:
     return directory / f"{variant}.checkpoint.pt"
 
 
-def _online_cohorts_disjoint(extractions: Mapping[str, Sequence[Mapping]],
-                             expected_steps: Sequence[int]) -> bool:
-    """Verify actual role/purpose scenes across the prescribed online fits."""
-    if any(len(extractions[role]) != len(expected_steps) for role in AGENTS):
-        return False
-    all_scenes: set[int] = set()
-    for index, expected_step in enumerate(expected_steps):
-        role_splits = []
-        for role in AGENTS:
-            row = extractions[role][index]
-            if row.get("joint_steps") != expected_step:
-                return False
-            splits = row.get("training_split_scenario_seeds")
-            if not isinstance(splits, Mapping) or set(splits) != set(
-                    FINAL_PROGRAM_SPLIT_COUNTS):
-                return False
-            seen: set[int] = set()
-            for purpose, required in FINAL_PROGRAM_SPLIT_COUNTS.items():
-                values = splits[purpose]
-                if (not isinstance(values, list) or len(values) != required or
-                        any(type(seed) is not int for seed in values)):
-                    return False
-                chosen = set(values)
-                if len(chosen) != required or chosen & seen:
-                    return False
-                seen.update(chosen)
-            role_splits.append(splits)
-        if role_splits[0] != role_splits[1]:
-            return False
-        cohort = {seed for values in role_splits[0].values() for seed in values}
-        if cohort & all_scenes:
-            return False
-        all_scenes.update(cohort)
-    return True
-
-
 def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                    spec: Mapping, directory: Path) -> tuple[WarehouseV6Actor, dict, dict]:
     if variant not in ("raw", "regularized"):
@@ -1583,8 +1566,8 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
     next_extraction_index = 0
     last_extraction_step = 0
     best = None
-    cost_multiplier = 1.0
-    recent_complete_shutdowns = deque(maxlen=64)
+    risk_dual = ShutdownRiskDual(RiskDualConfig())
+    cost_multiplier = risk_dual.multiplier
     interval = max(1, spec["joint_steps"] // 10)
     next_eval = interval
     if checkpoint.is_file():
@@ -1609,9 +1592,10 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         used_steps, episode_number = saved["used_steps"], saved["episode_number"]
         histories, updates, development = (saved[key] for key in
                                             ("histories", "updates", "development"))
-        best, cost_multiplier, next_eval = (saved[key] for key in
-                                            ("best", "cost_multiplier", "next_eval"))
-        recent_complete_shutdowns.extend(saved["recent_complete_shutdowns"])
+        best, next_eval = saved["best"], saved["next_eval"]
+        risk_dual = ShutdownRiskDual.restore(saved["risk_dual_snapshot"],
+                                             RiskDualConfig())
+        cost_multiplier = risk_dual.multiplier
         if programs is not None:
             for role in AGENTS:
                 buffers[role].extend(saved["buffers"][role])
@@ -1655,26 +1639,23 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                             progress=used_steps / spec["joint_steps"],
                             cost_multiplier=cost_multiplier,
                             program_validation_rows=program_validation_rows)
-        # The dual variable sees actual completed episode outcomes. Segment
-        # endings are 120-step evaluation episodes, including early shutdowns.
+        # Only actual, complete 0/1 episode outcomes move the risk dual.
         complete_outcomes = [row["shutdown_episode"] for row in batch_summaries
                              if row["complete"]]
         shutdown_rate = (float(np.mean(complete_outcomes))
                          if complete_outcomes else None)
-        if shutdown_rate is not None:
-            recent_complete_shutdowns.extend(complete_outcomes)
-            window_rate = float(np.mean(recent_complete_shutdowns))
-            dual_rate = 0.5 if window_rate >= 0.04 else 2.0
-            cost_multiplier = min(20.0, max(0.0,
-                cost_multiplier + dual_rate * (window_rate - 0.04)))
-        else:
-            window_rate = (float(np.mean(recent_complete_shutdowns))
-                           if recent_complete_shutdowns else None)
+        dual_report = risk_dual.update([
+            (bool(row["complete"]), bool(row["shutdown_episode"]))
+            for row in batch_summaries])
+        cost_multiplier = risk_dual.multiplier
         update.update(joint_steps=used_steps, complete_episode_shutdown_rate=shutdown_rate,
-                      complete_episode_window_shutdown_rate=window_rate,
-                      complete_episode_window_size=len(recent_complete_shutdowns),
+                      complete_episode_window_shutdown_rate=dual_report[
+                          "window_shutdown_rate"],
+                      complete_episode_window_size=dual_report["window_episodes"],
                       completed_episodes_for_dual=len(complete_outcomes),
-                      next_cost_multiplier=cost_multiplier)
+                      next_cost_multiplier=cost_multiplier,
+                      risk_upper_bound=dual_report["one_sided_upper"],
+                      risk_dual_phase=dual_report["phase"])
         updates.append(update)
         if (next_extraction_index < len(extraction_steps) and
                 used_steps == extraction_steps[next_extraction_index]):
@@ -1738,7 +1719,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 "cost_multiplier": cost_multiplier, "next_eval": next_eval,
                 "next_extraction_index": next_extraction_index,
                 "last_extraction_step": last_extraction_step,
-                "recent_complete_shutdowns": list(recent_complete_shutdowns),
+                "risk_dual_snapshot": risk_dual.snapshot(),
                 "buffers": ({role: list(buffers[role]) for role in AGENTS}
                             if programs is not None else {}),
                 "programs": ({role: (programs[role].to_dict()
@@ -1749,8 +1730,17 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
             })
     if best is None:
         raise RuntimeError("Warehouse v6 training produced no selected checkpoint")
-    if (variant == "regularized" and not spec.get("smoke", False) and
-            not _online_cohorts_disjoint(extractions, extraction_steps)):
+    if variant == "regularized" and spec.get("smoke", False):
+        scenes = [seed for item in extractions[AGENTS[0]]
+                  for values in item.get("training_split_scenario_seeds", {}).values()
+                  for seed in values]
+        cohorts_valid = (len(extractions[AGENTS[0]]) == len(extraction_steps)
+                         and len(scenes) == len(set(scenes)))
+    else:
+        cohorts_valid = (online_program_cohorts_valid(
+            extractions, joint_steps=spec["joint_steps"])
+            if variant == "regularized" else True)
+    if not cohorts_valid:
         raise RuntimeError("Warehouse online program cohorts overlap or miss a prescribed step")
     _assert_source_closure(spec["source_closure_sha256"])
     model.load_state_dict(best["state_dict"])
@@ -1795,9 +1785,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         "bc_recipe_version": spec.get("bc_recipe_version", "smoke"),
         "online_program_extraction_steps": list(extraction_steps),
         "online_program_split_block_cycle": dict(FINAL_PROGRAM_SPLIT_COUNTS),
-        "online_program_cohorts_disjoint": (
-            _online_cohorts_disjoint(extractions, extraction_steps)
-            if variant == "regularized" else True),
+        "online_program_cohorts_disjoint": cohorts_valid,
         "final_program_fit_seed_schedule": spec.get(
             "final_program_fit_seed_schedule"),
         "final_program_fit_seed_schedule_sha256": spec.get(
@@ -1827,9 +1815,12 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         "zero_action_coverage_rows": {role: sum(
             item["zero_action_coverage_rows"][role] for item in selected_updates)
             for role in AGENTS},
-        "cost_critic_training": True, "cost_target_event": "actual_episode_shutdown",
-        "cost_actor_advantage": "unscaled_shutdown_event_GAE_zero_on_no_event_batch",
-        "cost_constraint_target": 0.04, "final_cost_multiplier": cost_multiplier,
+        "cost_critic_training": True, "cost_target_event": "complete_episode_shutdown_binary",
+        "cost_actor_advantage": "complete_episode_undiscounted_event_minus_sigmoid_critic",
+        "cost_actor_ratio": "joint_product_of_two_nn_actor_ratios",
+        "cost_constraint_target": risk_dual.config.target,
+        "risk_dual_snapshot": risk_dual.snapshot(),
+        "final_cost_multiplier": cost_multiplier,
         "training_reward_overrides": dict(TRAINING_REWARD_OVERRIDES),
         "selected_development": best["development"],
         "quality": {key: value for key, value in best["development"].items()

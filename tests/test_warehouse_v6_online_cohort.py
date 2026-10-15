@@ -75,23 +75,6 @@ def test_online_extractions_stop_at_boundaries_and_never_reuse_scenes(
                for row in report["training_episodes"])
 
 
-def test_online_cohort_evidence_rejects_a_reused_scene():
-    purposes = {"fit": 50, "calibration": 25,
-                "eligibility": 25, "validation": 24}
-    def receipt(step, offset):
-        cursor, parts = offset, {}
-        for name, count in purposes.items():
-            parts[name] = list(range(cursor, cursor + count))
-            cursor += count
-        return {"joint_steps": step, "training_split_scenario_seeds": parts}
-    first, second = receipt(150000, 1000), receipt(168000, 1124)
-    records = {role: [first, second] for role in AGENTS}
-    assert runner._online_cohorts_disjoint(records, [150000, 168000])
-    reused = receipt(168000, 1123)
-    records = {role: [first, reused] for role in AGENTS}
-    assert not runner._online_cohorts_disjoint(records, [150000, 168000])
-
-
 def test_online_program_split_uses_exact_scenario_quota_and_keeps_resets_together(
         monkeypatch):
     class StubProgram:

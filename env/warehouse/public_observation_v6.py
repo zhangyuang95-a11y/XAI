@@ -130,6 +130,62 @@ def encode_policy_features(obs: np.ndarray, masks: np.ndarray) -> np.ndarray:
     return np.concatenate((data, legal), axis=-1)
 
 
+def public_pre_action_snapshot(state) -> dict:
+    """Serialize exactly the public fields needed to rebuild both NN inputs.
+
+    This intentionally omits private goals, route commitments, coordination
+    plans, reward bookkeeping, and any current or future action.
+    """
+    return {
+        "schema": OBSERVATION_VERSION,
+        "map_layout_id": STUDY_MAP_LAYOUT.layout_id,
+        "episode_id": int(state.episode_id),
+        "frame": int(state.frame),
+        "agents": [{
+            "agent_id": agent.agent_id,
+            "position": list(agent.position),
+            "battery": float(agent.battery),
+            "active": bool(agent.active),
+            "carrying_task_id": agent.carrying_task_id,
+            "heading": agent.heading,
+            "last_executed_action": agent.last_executed_action,
+            "last_battery_delta": float(agent.last_battery_delta),
+            "steps_since_charging": int(agent.steps_since_charging),
+            "charger_wait_streak": int(agent.charger_wait_streak),
+            "recent_positions": [list(position) for position in agent.recent_positions],
+        } for agent in (state.by_id(role) for role in AGENTS)],
+        "tasks": [{
+            "task_id": task.task_id,
+            "pickup_position": list(task.pickup_position),
+            "delivery_position": list(task.delivery_position),
+            "status": task.status,
+            "carrier_agent_id": task.carrier_agent_id,
+        } for task in sorted(state.tasks, key=lambda item: item.task_id)],
+    }
+
+
+def rebuild_public_pre_action_state(snapshot: dict):
+    """Rebuild the observation/mask state from an independent trace row."""
+    from .domain import AgentState, DeliveryTask, WarehouseState
+    if (snapshot.get("schema") != OBSERVATION_VERSION
+            or snapshot.get("map_layout_id") != STUDY_MAP_LAYOUT.layout_id):
+        raise ValueError("Warehouse public snapshot schema or map mismatch")
+    agents = [AgentState(**{
+        **entry,
+        "position": tuple(entry["position"]),
+        "recent_positions": tuple(tuple(value) for value in entry["recent_positions"]),
+    }) for entry in snapshot["agents"]]
+    tasks = [DeliveryTask(**{
+        **entry,
+        "pickup_position": tuple(entry["pickup_position"]),
+        "delivery_position": tuple(entry["delivery_position"]),
+    }) for entry in snapshot["tasks"]]
+    if [agent.agent_id for agent in agents] != list(AGENTS) or len(tasks) != 2:
+        raise ValueError("Warehouse public snapshot roles or orders mismatch")
+    return WarehouseState(episode_id=int(snapshot["episode_id"]),
+                          frame=int(snapshot["frame"]), agents=agents, tasks=tasks)
+
+
 def reconstruct_public_history(frames: list[dict] | tuple[dict, ...],
                                actor: str) -> dict:
     """Rebuild the history coordinates from exported consecutive public frames.
@@ -172,5 +228,6 @@ __all__ = [
     "OBSERVATION_VERSION", "OBSERVATION_DIM", "OBSERVATION_FEATURE_NAMES",
     "FEATURE_NAMES", "FEATURE_DIM", "FEATURE_SCHEMA_SHA256", "action_masks",
     "encode_role_observation", "encode_public_observation", "encode_policy_features",
-    "reconstruct_public_history",
+    "reconstruct_public_history", "public_pre_action_snapshot",
+    "rebuild_public_pre_action_state",
 ]

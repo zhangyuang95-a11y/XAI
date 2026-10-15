@@ -79,9 +79,13 @@ def _training_assets(root: Path, release_id: str, index: Mapping,
                 or not isinstance(trained, Mapping)):
             return False
         actor_sha = _asset_bytes(root, release_id, bundle["actor"])[1]
-        report_sha = _asset_bytes(root, release_id, bundle["training_report"])[1]
+        report, report_sha = _asset(root, release_id, bundle["training_report"])
+        expected_report = {key: value for key, value in trained.items()
+                           if key not in ("training_report_path",
+                                          "training_report_sha256")}
         if (actor_sha != trained["actor_artifact"]["sha256"]
                 or report_sha != trained["training_report_sha256"]
+                or report != expected_report
                 or trained["actor_artifact"].get("role_sha256") !=
                 trained.get("selected_role_sha256")):
             return False
@@ -109,15 +113,12 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
     immutable contract is the same seed assigned to each joint-step block,
     with both actual lists reported faithfully; equality is not required.
     """
-    from backend.training.warehouse_v6_runner import (
-        SCENARIO_BLOCK_STEPS, scenario_schedule_sha256, scenario_seed)
-
     namespace = "warehouse-v6-matched-120-step-blocks"
     seed, steps = pair.get("pair_seed"), pair.get("joint_steps")
     if (type(seed) is not int or seed not in (*p.DEVELOPMENT_PAIR_SEEDS,
                                               *p.FORMAL_PAIR_SEEDS)
             or type(steps) is not int or steps not in p.BUDGETS
-            or SCENARIO_BLOCK_STEPS != 120
+            or p.SCENARIO_BLOCK_STEPS != 120
             or not isinstance(pair.get("candidate_id"), str)
             or not isinstance(pair.get("release_id"), str)):
         return False
@@ -128,7 +129,7 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
         pair["candidate_id"], seed, steps, "/ignored-by-scientific-hash",
         release_id=pair["release_id"], checkpoint_seeds=checkpoint_seeds)
     expected_spec_sha = expected_spec.sha256()
-    expected_schedule_sha = scenario_schedule_sha256(namespace, seed, steps)
+    expected_schedule_sha = p.scenario_schedule_sha256(namespace, seed, steps)
     variants = pair.get("variants")
     if (not isinstance(variants, Mapping) or set(variants) != set(p.VARIANTS)
             or pair.get("run_spec_sha256") != expected_spec_sha
@@ -160,7 +161,7 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
                     "joint_steps", "complete", "shutdown_episode"}:
                 return False
             episode_steps = row["joint_steps"]
-            limit = min(SCENARIO_BLOCK_STEPS - cursor % SCENARIO_BLOCK_STEPS,
+            limit = min(p.SCENARIO_BLOCK_STEPS - cursor % p.SCENARIO_BLOCK_STEPS,
                         steps - cursor)
             if (type(row["seed"]) is not int
                     or type(row["episode_index"]) is not int
@@ -170,7 +171,7 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
                     or type(row["shutdown_episode"]) is not bool
                     or row["episode_index"] != index
                     or row["start_joint_step"] != cursor
-                    or row["seed"] != scenario_seed(namespace, seed, cursor)
+                    or row["seed"] != p.scenario_seed(namespace, seed, cursor)
                     or row["episode_key"] != f'{row["seed"]}:{index}'
                     or not 1 <= episode_steps <= limit
                     or (not row["complete"] and episode_steps != limit)):
@@ -324,10 +325,27 @@ def _same_recomputed(claimed: object, measured: object) -> bool:
         return type(claimed) is type(measured) and claimed == measured
     if isinstance(measured, int):
         return type(claimed) is int and claimed == measured
+    # Different deployment CPUs can vary the final bit of a NumPy reduction.
+    # Discrete actions, leaves, episode identity and every asset hash remain exact.
     return (type(claimed) in (int, float)
             and math.isfinite(float(claimed))
             and math.isclose(float(claimed), float(measured),
-                             rel_tol=0.0, abs_tol=1e-8))
+                             rel_tol=0.0, abs_tol=1e-6))
+
+
+def _replay_environment(seed: int):
+    """Recreate the exact neutral NN–NN study state without trainer imports."""
+    from env.warehouse.domain import participant_study_config
+    from env.warehouse.environment import WarehouseMultiAgentEnv
+
+    environment = WarehouseMultiAgentEnv(participant_study_config())
+    environment.reset(seed=seed)
+    # The trainer's state restoration also refreshes public navigation state.
+    # A direct field assignment would not reproduce the recorded pre-state.
+    marked = environment.get_state()
+    marked.participant_controlled_agent_id = "robot_1"
+    environment.set_state(marked)
+    return environment
 
 
 def _verify_program_trace(*, root: Path, release_id: str,
@@ -345,8 +363,6 @@ def _verify_program_trace(*, root: Path, release_id: str,
     from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor
     from backend.training.warehouse_v6_program import (
         WarehouseV6Program, audit_frozen_program)
-    from backend.training.warehouse_v6_runner import (
-        _environment, _set_dual_nn_mode)
     from env.warehouse.decision_protocol import (
         canonical_sha256, independent_agent_seed)
     from env.warehouse.navigation import ACTIONS
@@ -463,9 +479,7 @@ def _verify_program_trace(*, root: Path, release_id: str,
     # never selects a checkpoint or computes a fresh quality estimate.
     cursor = 0
     for seed in expected_seeds:
-        env = _environment(training_reward=False)
-        env.reset(seed=int(seed))
-        _set_dual_nn_mode(env)
+        env = _replay_environment(int(seed))
         while not (env.state.terminated or env.state.truncated):
             if cursor >= len(identities["robot_1"]):
                 return False
@@ -497,6 +511,319 @@ def _verify_program_trace(*, root: Path, release_id: str,
                 return False
             cursor += 1
     return cursor == len(identities["robot_1"])
+
+
+def _final_fit_verified_rows(*, root: Path, release_id: str,
+                             index: Mapping, pair: Mapping,
+                             assets: Mapping) -> dict:
+    """Replay all four post-selection fit splits against the frozen dual NN.
+
+    The returned rows are suitable for an independent offline `fit_program`
+    replay at packaging time. Runtime calls this function too, but never needs
+    Torch or the trainer. A trace row is accepted only if the real environment
+    produces its pre/post state and both seeded NN actions.
+    """
+    import numpy as np
+
+    from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor
+    from env.warehouse.decision_protocol import (
+        canonical_sha256, independent_agent_seed)
+    from env.warehouse.navigation import ACTIONS
+    from env.warehouse.public_observation_v6 import (
+        action_masks, encode_public_observation, public_pre_action_snapshot)
+
+    seed = pair["pair_seed"]
+    schedule = p.final_program_fit_seed_schedule(release_id, seed)
+    trained = pair["variants"]["regularized"]
+    bundle = assets["regularized"]
+    reports = trained["final_fresh_program_reports"]
+    if (set(index) != set(schedule) or set(reports) != set(p.ROLES)
+            or pair.get("release_id") != release_id
+            or trained.get("release_id") != release_id
+            or trained.get("final_program_fit_seed_schedule") != schedule
+            or trained.get("final_program_fit_seed_schedule_sha256") != _digest(schedule)
+            or trained["actor_artifact"]["sha256"] != bundle["actor"]["sha256"]):
+        raise ValueError("Warehouse final fit schedule or Actor differs")
+    actor = FrozenWarehouseV6Actor.load(
+        root / bundle["actor"]["path"],
+        expected_sha256=bundle["actor"]["sha256"],
+        expected_role_sha256=trained["selected_role_sha256"])
+    used_training = {row["seed"] for row in trained["training_episodes"]}
+    if used_training & {value for seeds in schedule.values() for value in seeds}:
+        raise ValueError("Warehouse final fit reused a training episode")
+    traces = reports[p.ROLES[0]]["final_fit_traces"]
+    if (set(traces) != set(schedule)
+            or any(reports[role].get("final_fit_traces") != traces
+                   or reports[role].get("split_seeds") != schedule
+                   or reports[role].get("split_seed_schedule_sha256") != _digest(schedule)
+                   or reports[role].get("actor_artifact_sha256") != actor.artifact_sha256
+                   or reports[role].get("release_id") != release_id
+                   for role in p.ROLES)):
+        raise ValueError("Warehouse final fit report trace inventory differs")
+    samples = {role: {} for role in p.ROLES}
+    for split, seeds in schedule.items():
+        claim, asset = traces[split], index[split]
+        if (set(claim) != {"path", "sha256", "row_count", "seeds"}
+                or set(asset) != {"path", "sha256"}
+                or claim["seeds"] != seeds
+                or claim["sha256"] != asset["sha256"]
+                or Path(claim["path"]).name != Path(asset["path"]).name
+                or Path(asset["path"]).name != f"{split}.jsonl"):
+            raise ValueError("Warehouse final fit trace identity differs")
+        raw, _ = _asset_bytes(root, release_id, asset)
+        if (not raw.endswith(b"\n") or raw.count(b"\n") != claim["row_count"]
+                or claim["row_count"] < len(seeds)):
+            raise ValueError("Warehouse final fit trace row count differs")
+        saved = iter(raw.splitlines())
+        for scenario_seed in seeds:
+            env = _replay_environment(int(scenario_seed))
+            while not (env.state.terminated or env.state.truncated):
+                try:
+                    row = json.loads(next(saved))
+                except StopIteration as exc:
+                    raise ValueError("Warehouse final fit frame missing") from exc
+                if (not isinstance(row, Mapping)
+                        or set(row) != {"base_seed", "episode_id", "frame",
+                                           "pre_state_public", "pre_state_public_sha256",
+                                           "post_state_public", "post_state_public_sha256",
+                                           "actor_sha256", "roles"}
+                        or any(type(row[name]) is not int for name in
+                               ("base_seed", "episode_id", "frame"))
+                        or (row["base_seed"], row["episode_id"], row["frame"]) !=
+                        (scenario_seed, env.state.episode_id, env.state.frame)
+                        or row["actor_sha256"] != actor.artifact_sha256
+                        or set(row["roles"]) != set(p.ROLES)):
+                    raise ValueError("Warehouse final fit frame identity differs")
+                pre = public_pre_action_snapshot(env.state)
+                if (row["pre_state_public"] != pre
+                        or row["pre_state_public_sha256"] != canonical_sha256(pre)):
+                    raise ValueError("Warehouse final fit pre-state differs")
+                obs, masks = encode_public_observation(env.state), action_masks(env.state)
+                actions, distributions = actor.act(env.state, base_seed=int(scenario_seed))
+                for position, role in enumerate(p.ROLES):
+                    role_row = row["roles"][role]
+                    if (not isinstance(role_row, Mapping)
+                            or set(role_row) != {"obs", "mask", "sampled_action",
+                                                 "nn_probabilities", "rng_seed",
+                                                 "actor_role_sha256"}):
+                        raise ValueError("Warehouse final fit role row incomplete")
+                    probabilities = np.asarray(
+                        role_row["nn_probabilities"], dtype=np.float64)
+                    role_obs = np.asarray(role_row["obs"], dtype=np.float32)
+                    role_mask = np.asarray(role_row["mask"], dtype=np.float32)
+                    expected_rng = independent_agent_seed(
+                        base_seed=int(scenario_seed),
+                        episode_id=int(env.state.episode_id),
+                        frame=int(env.state.frame), agent_id=role)
+                    if (not np.array_equal(role_obs, obs[position])
+                            or not np.array_equal(role_mask, masks[position])
+                            or probabilities.shape != (len(ACTIONS),)
+                            or not np.isfinite(probabilities).all()
+                            or not np.allclose(probabilities,
+                                               distributions[role].probabilities,
+                                               rtol=0.0, atol=1e-7)
+                            or role_row["sampled_action"] != actions[role]
+                            or type(role_row["rng_seed"]) is not int
+                            or role_row["rng_seed"] != expected_rng
+                            or role_row["actor_role_sha256"] !=
+                            actor.role_sha256[role]
+                            or role_mask[ACTIONS.index(actions[role])] <= .5):
+                        raise ValueError("Warehouse final fit NN action differs")
+                    samples[role].setdefault(split, []).append({
+                        "episode": str(scenario_seed),
+                        "base_seed": int(scenario_seed),
+                        "obs": role_obs, "mask": role_mask,
+                        "sampled_action": actions[role],
+                    })
+                _, _, _, _, info = env.step(actions)
+                if (info["proposed_actions"] != actions
+                        or info["action_override_agents"]):
+                    raise ValueError("Warehouse final fit action was rewritten")
+                post = public_pre_action_snapshot(env.state)
+                if (row["post_state_public"] != post
+                        or row["post_state_public_sha256"] != canonical_sha256(post)):
+                    raise ValueError("Warehouse final fit post-state differs")
+        if next(saved, None) is not None:
+            raise ValueError("Warehouse final fit contains an extra frame")
+    return samples
+
+
+def _final_fit_index_claim(*, root: Path, release_id: str,
+                           index: Mapping, pair: Mapping,
+                           assets: Mapping) -> bool:
+    """Check unselected split bytes and schedules against offline replay receipts.
+
+    Packaging physically replays and refits every pair. At runtime the selected
+    formal pair is replayed again; other pairs use their content hashes, fixed
+    seed schedule and package-time refit receipt so a cold study process does
+    not replay hundreds of thousands of development frames.
+    """
+    schedule = p.final_program_fit_seed_schedule(release_id, pair["pair_seed"])
+    trained = pair["variants"]["regularized"]
+    reports = trained["final_fresh_program_reports"]
+    actor_sha = trained["actor_artifact"]["sha256"]
+    if (pair.get("release_id") != release_id
+            or trained.get("release_id") != release_id
+            or trained.get("final_program_fit_seed_schedule") != schedule
+            or trained.get("final_program_fit_seed_schedule_sha256") != _digest(schedule)
+            or assets["regularized"]["actor"]["sha256"] != actor_sha
+            or set(reports) != set(p.ROLES)
+            or set(index) != set(schedule)):
+        return False
+    traces = reports[p.ROLES[0]].get("final_fit_traces")
+    if not isinstance(traces, Mapping) or set(traces) != set(schedule):
+        return False
+    programs = trained.get("program_artifacts") or {}
+    for role in p.ROLES:
+        claim = reports[role]
+        if (claim.get("final_fit_traces") != traces
+                or claim.get("actor_artifact_sha256") != actor_sha
+                or claim.get("split_seeds") != schedule
+                or claim.get("split_seed_schedule_sha256") != _digest(schedule)
+                or claim.get("release_id") != release_id):
+            return False
+        if claim.get("status") == "frozen_actor_fresh_four_part_fit":
+            if (role not in programs
+                    or claim.get("actor_role_sha256") !=
+                    trained["selected_role_sha256"][role]
+                    or claim.get("program_sha256") != programs[role]["sha256"]
+                    or claim.get("validation") != trained.get(
+                        "selected_program_reports", {}).get(role, {}).get("validation")):
+                return False
+        elif claim.get("status") != "failed" or role in programs:
+            return False
+    for split, seeds in schedule.items():
+        claim, item = traces[split], index[split]
+        if (not isinstance(claim, Mapping)
+                or set(claim) != {"path", "sha256", "row_count", "seeds"}
+                or not isinstance(item, Mapping)
+                or set(item) != {"path", "sha256"}
+                or claim["seeds"] != seeds
+                or claim["sha256"] != item["sha256"]
+                or Path(claim["path"]).name != f"{split}.jsonl"
+                or Path(item["path"]).name != f"{split}.jsonl"
+                or type(claim["row_count"]) is not int
+                or claim["row_count"] < len(seeds)):
+            return False
+        raw, _ = _asset_bytes(root, release_id, item)
+        if raw.count(b"\n") != claim["row_count"] or not raw.endswith(b"\n"):
+            return False
+    return True
+
+
+def _verify_final_fit_pair(*, root: Path, release_id: str,
+                           index: Mapping, pair: Mapping,
+                           assets: Mapping,
+                           verified_samples: Mapping | None = None) -> bool:
+    """Derive final leaf qualification and validation from independent rows."""
+    from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor
+    from backend.training.warehouse_v6_program import (
+        WarehouseV6Program, _eligible, _metrics, _passes,
+        FEEDBACK_AGREEMENT, EXPLANATION_AGREEMENT, MAX_COVERED_KL)
+
+    samples = verified_samples if verified_samples is not None else \
+        _final_fit_verified_rows(
+            root=root, release_id=release_id, index=index, pair=pair, assets=assets)
+    trained = pair["variants"]["regularized"]
+    reports = trained["final_fresh_program_reports"]
+    programs = trained.get("program_artifacts") or {}
+    if set(programs) != set(assets["regularized"]["programs"]):
+        return False
+    actor = FrozenWarehouseV6Actor.load(
+        root / assets["regularized"]["actor"]["path"],
+        expected_sha256=assets["regularized"]["actor"]["sha256"],
+        expected_role_sha256=trained["selected_role_sha256"])
+    for role in p.ROLES:
+        claim = reports[role]
+        if claim.get("status") == "failed":
+            if role in programs or role in trained.get("selected_program_reports", {}):
+                return False
+            continue
+        if (claim.get("status") != "frozen_actor_fresh_four_part_fit"
+                or role not in programs
+                or claim.get("actor_role_sha256") != actor.role_sha256[role]
+                or claim.get("program_sha256") != programs[role]["sha256"]):
+            return False
+        program = WarehouseV6Program.load(
+            root / assets["regularized"]["programs"][role]["path"],
+            expected_sha256=programs[role]["sha256"],
+            actor_role_sha256=actor.role_sha256[role])
+        report = program.report
+        if (trained["selected_program_reports"].get(role) != report
+                or claim.get("validation") != report.get("validation")):
+            return False
+        expected_ids = {name: sorted(map(str, seeds)) for name, seeds in
+                        p.final_program_fit_seed_schedule(
+                            release_id, pair["pair_seed"]).items()}
+        if (report.get("split_episode_ids") != expected_ids
+                or report.get("split_episodes") != {
+                    name: len(seeds) for name, seeds in expected_ids.items()}
+                or report.get("split_episode_sha256") != {
+                    name: sha256(json.dumps(seeds, separators=(",", ":")).encode()
+                                 ).hexdigest() for name, seeds in expected_ids.items()}):
+            return False
+        leaf_reports = report.get("leaf_eligibility")
+        if not isinstance(leaf_reports, Mapping) or set(leaf_reports) != set(
+                map(str, range(program.leaf_logits.shape[0]))):
+            return False
+        selected = {"feedback": set(), "explanation": set()}
+        for leaf_text, metrics in leaf_reports.items():
+            leaf = int(leaf_text)
+            for purpose, threshold in (("feedback", FEEDBACK_AGREEMENT),
+                                       ("explanation", EXPLANATION_AGREEMENT)):
+                measured = _metrics(program, actor.roles[role],
+                                    samples[role]["eligibility"], {leaf}, purpose)
+                if not _same_recomputed(metrics.get(purpose), measured):
+                    return False
+                if _eligible(measured, threshold):
+                    selected[purpose].add(leaf)
+        if (selected["feedback"] != set(program.feedback_leaves)
+                or selected["explanation"] != set(program.explanation_leaves)):
+            return False
+        validation = {}
+        for purpose, threshold in (("feedback", FEEDBACK_AGREEMENT),
+                                   ("explanation", EXPLANATION_AGREEMENT)):
+            validation[purpose] = _metrics(
+                program, actor.roles[role], samples[role]["validation"],
+                selected[purpose], purpose)
+            measured = validation[purpose]
+            validation[purpose + "_online_passed"] = bool(
+                measured["rows"] > 0 and measured["agreement"] >= threshold
+                and measured["kl"] is not None
+                and measured["kl"] <= MAX_COVERED_KL
+                and measured["illegal_count"] == 0)
+            validation[purpose + "_passed"] = _passes(measured, threshold)
+            validation["development_" + purpose + "_passed"] = _passes(
+                measured, threshold, development=True)
+        if not _same_recomputed(report.get("validation"), validation):
+            return False
+    return True
+
+
+def _final_fit_replay_receipt(*, root: Path, release_id: str,
+                              item: Mapping, pair: Mapping,
+                              pair_sha256: str, index: Mapping,
+                              source_closure_sha256: str) -> bool:
+    """Bind the package-time Torch refit result to exact immutable inputs."""
+    replay, _ = _asset(root, release_id, item)
+    trained = pair["variants"]["regularized"]
+    expected = {
+        "format": "warehouse-final-fit-replay.v1",
+        "release_id": release_id,
+        "candidate_id": pair["candidate_id"],
+        "pair_seed": pair["pair_seed"],
+        "joint_steps": pair["joint_steps"],
+        "source_closure_sha256": source_closure_sha256,
+        "pair_report_sha256": pair_sha256,
+        "actor_sha256": trained["actor_artifact"]["sha256"],
+        "trace_sha256": {name: index[name]["sha256"]
+                         for name in p.FINAL_PROGRAM_SPLIT_COUNTS},
+        "refitted_program_sha256": {
+            role: (trained.get("program_artifacts") or {}).get(role, {}).get("sha256")
+            for role in p.ROLES},
+        "passed": True,
+    }
+    return replay == expected
 
 
 def _stress_summary(stress: Mapping) -> dict | None:
@@ -637,11 +964,17 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
     pair_index = evidence["pair_reports"]
     training_asset_index = evidence["training_assets"]
     trace_index = evidence["program_traces"]
+    fit_trace_index = evidence["final_fit_traces"]
+    fit_replay_index = evidence["final_fit_replays"]
     if (set(phase_index) != set(_PHASE_NAMES)
             or set(claim_index) != {"final_program_audit", "heldout"}
             or set(pair_index) != set(map(str, p.FORMAL_PAIR_SEEDS))
             or set(training_asset_index) != set(pair_index)
-            or set(trace_index) != {"development", "preaudit", "final_audit"}):
+            or set(trace_index) != {"development", "preaudit", "final_audit"}
+            or set(fit_trace_index) != {"development", "formal"}
+            or set(fit_replay_index) != {"development", "formal"}
+            or set(fit_trace_index["formal"]) != set(pair_index)
+            or set(fit_replay_index["formal"]) != set(pair_index)):
         return False
     phases = {}
     for name in _PHASE_NAMES:
@@ -680,7 +1013,9 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
     if (set(dev_index) != set(map(str, expected_budgets))
             or set(dev_pair_index) != set(dev_index)
             or set(dev_asset_index) != set(dev_index)
-            or set(trace_index["development"]) != set(dev_index)):
+            or set(trace_index["development"]) != set(dev_index)
+            or set(fit_trace_index["development"]) != set(dev_index)
+            or set(fit_replay_index["development"]) != set(dev_index)):
         return False
     dev_reports = {}
     for candidate_budget in expected_budgets:
@@ -688,10 +1023,14 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
         pairs_section = dev_pair_index[str(candidate_budget)]
         assets_section = dev_asset_index[str(candidate_budget)]
         traces_section = trace_index["development"][str(candidate_budget)]
+        fit_traces_section = fit_trace_index["development"][str(candidate_budget)]
+        fit_replays_section = fit_replay_index["development"][str(candidate_budget)]
         if (set(section) != set(map(str, p.DEVELOPMENT_PAIR_SEEDS))
                 or set(pairs_section) != set(section)
                 or set(assets_section) != set(section)
-                or set(traces_section) != set(section)):
+                or set(traces_section) != set(section)
+                or set(fit_traces_section) != set(section)
+                or set(fit_replays_section) != set(section)):
             return False
         dev_reports[candidate_budget] = []
         for seed in p.DEVELOPMENT_PAIR_SEEDS:
@@ -723,6 +1062,16 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
                         root, release_id, assets_section[str(seed)],
                         pair["variants"],
                         allow_missing_programs=candidate_budget < budget)
+                    or not _final_fit_index_claim(
+                        root=root, release_id=release_id,
+                        index=fit_traces_section[str(seed)], pair=pair,
+                        assets=assets_section[str(seed)])
+                    or not _final_fit_replay_receipt(
+                        root=root, release_id=release_id,
+                        item=fit_replays_section[str(seed)], pair=pair,
+                        pair_sha256=pair_sha,
+                        index=fit_traces_section[str(seed)],
+                        source_closure_sha256=receipt["source_closure_sha256"])
                     or not _audit_trace_index(
                         row.get("program_audit", {}), traces_section[str(seed)],
                         root=root, release_id=release_id)
@@ -776,6 +1125,18 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
                 or not _training_assets(root, release_id,
                                         training_asset_index[str(seed)],
                                         pair["variants"])
+                or not (
+                    _verify_final_fit_pair if seed == receipt["selected_pair_seed"]
+                    else _final_fit_index_claim)(
+                        root=root, release_id=release_id,
+                        index=fit_trace_index["formal"][str(seed)], pair=pair,
+                        assets=training_asset_index[str(seed)])
+                or not _final_fit_replay_receipt(
+                    root=root, release_id=release_id,
+                    item=fit_replay_index["formal"][str(seed)], pair=pair,
+                    pair_sha256=pair_file_sha,
+                    index=fit_trace_index["formal"][str(seed)],
+                    source_closure_sha256=receipt["source_closure_sha256"])
                 or pair.get("checkpoint_seeds") != list(p.FORMAL_SELECTION_SEEDS)
                 or formal.get("passed") is not all(
                     p.quality_pass(formal["variants"][variant]["quality"],

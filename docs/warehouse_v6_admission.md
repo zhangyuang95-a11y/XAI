@@ -9,6 +9,7 @@
 - 程序仅拟合完整 Actor 的物理掩码后动作分布，用于训练反馈及经审计的解释；不参与执行动作选择。程序拟合、校准、叶资格、内部验证按 episode 分离。
 - 独立程序审计同时报告合格叶覆盖与实际动作可用覆盖：在同一冻结 NN–NN 轨迹的动作前帧记录采样动作，审计器重算绑定 Actor 的掩码后分布。解释仅计程序动作等于该帧采样 NN 动作；反馈还须采样动作等于当帧 NN 最大概率动作。训练期实际反馈另由 `feedback_rows / feedback_window_actor_rows` 报告，不能以冻结审计覆盖率替代。
 - 每个配对种子的正式程序提取另用固定、互不重叠的 50／25／25／24 个 episode 分别拟合、校准、判定叶资格、内部验证。种子列表及 SHA 写入配对配置与预算锁；候选 ID 不能改变它们。最终程序在选定 checkpoint 后重新拟合，在线程序反馈每个 PPO 更新轮次按当前 Actor 重新验证，不能把较早 Actor 的一致性证书沿用到新权重。
+- 最终程序拟合的四分集各保存一份内容寻址的双角色逐帧 JSONL，记录动作前／后公开状态、两角色观察与掩码、冻结 Actor 的分布与采样动作。打包时对全部开发与正式配对完整重放物理轨迹、以固定 Actor 重新拟合程序，并比对程序哈希。运行时首次核验全部文件哈希及打包时的重拟合收据，并对最终选中的正式配对重新完整重放轨迹、叶资格和验证统计；其他配对的逐帧重放以内容寻址的打包收据为依据。此运行时路径不依赖训练用 PyTorch。
 - 训练源闭包 SHA 写入 checkpoint、双变体报告和配对报告。准入的所有开发与正式配对必须与锁定 SHA 相同。训练期间修改源闭包会使运行或恢复失败，不能将前后代码混合的轨迹当作完整预检。
 - 预算按 200k、300k、400k 联合环境步递增尝试；仅锁定三个开发配对种子全部通过的最小预算。正式配对固定为 6101、6102、6103，同一预算。质量选配对只读 240048–240071，程序预审不能改选。
 - 开发质量门槛：raw 和 regularized 均交付≥5.5、碰撞≤6、停机 episode≤5%。每个角色的程序反馈与解释叶覆盖率以及实际 NN 采样动作可用覆盖率均≥30%、一致率≥93%／95%、KL≤0.25、非法原始程序动作零。正式门槛：两版本交付≥5、碰撞≤8、停机 episode≤10%；两角色程序反馈的两种覆盖率均≥20%、一致率≥85%，AI 角色解释的两种覆盖率均≥20%、一致率≥90%，KL≤0.35、非法动作零。实际覆盖率以所有独立审计帧为分母；反馈还要求采样动作等于当前 NN 分布最大概率动作。
@@ -63,6 +64,8 @@ python3 -m experiments.warehouse.admission acceptance \
 ## 训练器目录
 
 新 Warehouse 研究只从 `experiments/warehouse/admission.py` 调用 `backend/training/warehouse_v6_runner.py`。旧 v5、v5.4 的九个实现（双 Actor 训练器、纯 NN 训练器、稀疏／选择性程序、结构化 Actor、开发 gate 和变体 runner）存放在 `backend/training/legacy/warehouse_v5/`。原模块名保留薄层供旧文档、检查点重现、测试和历史运行时读取；这些薄层不会进入 v6 准入的 Actor 动作链。
+
+正式服务依赖 `requirements-render.txt`，不安装 PyTorch。v6 冻结 Actor 的 NumPy 推理留在 `backend/training/warehouse_v6_actor.py`，Torch 训练定义单独放在 `warehouse_v6_actor_training.py`；程序的 Torch 拟合只在训练函数内部导入。旧 v5.4 结构化 Actor 的冻结推理另置于 `backend/inference/warehouse_structured_v5.py`，不修改旧训练实现。`tests/test_study_runtime_no_torch.py` 在阻断 PyTorch 导入的子进程里检查三域 manifest 和冻结 Actor 执行动作。
 
 旧版 `tests/test_study_v5_frame_invariants.py` 的整份测试及 `tests/test_study_v5_policy_bindings.py` 的原始完整测试已归档在 `tests/legacy_task2/archived_*`。前者的临时 v5 Actor、旧 release ID 和 active gate 假设不再适用于 v6；后者仍有价值的 8 项绑定、随机分组、历史收据一致性测试继续留在原测试模块运行。新流程的逐帧 NN 动作、演示、真人接管、回放、问答和恢复检查分别由 `tests/test_study_v6_warehouse_frame_invariants.py`、`tests/test_study_v6_pong_kitchen_frames.py` 及 v6 发布包测试承担；旧数据库、帧与收据只读留存，不改写为 v6 证据。
 

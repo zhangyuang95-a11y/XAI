@@ -28,7 +28,8 @@ versioned contracts.
 | Path | Purpose |
 | --- | --- |
 | `env/warehouse/`, `domains/pong/`, `domains/kitchen/` | Physical environments and domain-specific observations |
-| `backend/training/warehouse_v6_*.py` | One v6 Warehouse dual-Actor BC, PPO, cost-critic, and program pipeline |
+| `backend/training/warehouse_v6_runner.py`, `warehouse_v6_actor_training.py`, `warehouse_v6_collision_critic.py` | One v6 Warehouse dual-Actor BC and PPO pipeline with training-only risk critics |
+| `backend/training/warehouse_v6_actor.py`, `warehouse_v6_program.py`, `backend/inference/` | NumPy-only frozen Actor and audited program inference, including archived v5.4 reading |
 | `experiments/warehouse/` | Immutable seed blocks, phase gates, and one-use audit receipts |
 | `study_v3/` | Versioned participant flow, binding checks, replay, Q&A, and exports |
 | `releases/<release_id>/` | Content-addressed, hash-checked release package and catalog |
@@ -44,7 +45,7 @@ add the ignored `output/` experiment tree wholesale to Git.
 
 ```bash
 python3 -m pip install -r requirements-render.txt
-python3 -m pytest -q tests/test_warehouse_v6_protocol.py tests/test_warehouse_v6_public_observation.py tests/test_study_v6_release_catalog.py
+python3 -m pytest -q tests/test_warehouse_v6_protocol.py tests/test_warehouse_v6_public_observation.py tests/test_study_v6_release_catalog.py tests/test_study_runtime_no_torch.py
 python3 -m study_v3.server --host 127.0.0.1 --port 8010
 ```
 

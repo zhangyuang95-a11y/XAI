@@ -64,7 +64,8 @@ def manifest(settings):
     except (OSError,subprocess.CalledProcessError): commit=os.environ.get('RENDER_GIT_COMMIT','unknown')
     source=hashlib.sha256()
     code_roots = ('study_v3', 'domains/pong', 'domains/kitchen', 'domains/warehouse',
-                  'env/warehouse', 'backend/training', 'backend/adapters', 'core', 'ui',
+                  'env/warehouse', 'backend/training', 'backend/inference',
+                  'backend/adapters', 'core', 'ui',
                   'experiments/warehouse')
     paths = [path for name in code_roots for path in (ROOT/name).rglob('*.py')]
     paths += list(WEB.glob('*'))

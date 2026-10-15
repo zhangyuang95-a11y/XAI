@@ -417,6 +417,10 @@ def test_full_packaged_acceptance_chain_and_tampered_evidence(ready, tmp_path,
     # and actual reset rows. Their arithmetic is covered by dedicated tests.
     monkeypatch.setattr(packaged, "_verify_program_trace", lambda **_: True)
     monkeypatch.setattr(packaged, "_paired_schedule_evidence", lambda _: True)
+    monkeypatch.setattr(packaged, "_training_assets", lambda *_, **__: True)
+    monkeypatch.setattr(packaged, "_verify_final_fit_pair", lambda **_: True)
+    monkeypatch.setattr(packaged, "_final_fit_index_claim", lambda **_: True)
+    monkeypatch.setattr(packaged, "_final_fit_replay_receipt", lambda **_: True)
 
     admission, _ = ready
     admission.final_audit()
@@ -467,6 +471,18 @@ def test_full_packaged_acceptance_chain_and_tampered_evidence(ready, tmp_path,
                 repository, release_id, Path(audit["trace_path"]))
                 for role, audit in admission._required("final_program_audit.json")[
                     "audit"].items()},
+        },
+        "final_fit_traces": {
+            "formal": {str(seed): {} for seed in p.FORMAL_PAIR_SEEDS},
+            "development": {budget: {seed: {} for seed in rows}
+                            for budget, rows in receipt[
+                                "development_receipt_path"].items()},
+        },
+        "final_fit_replays": {
+            "formal": {str(seed): {} for seed in p.FORMAL_PAIR_SEEDS},
+            "development": {budget: {seed: {} for seed in rows}
+                            for budget, rows in receipt[
+                                "development_receipt_path"].items()},
         },
     }
     selected = next(row for row in receipt["candidate_training"]

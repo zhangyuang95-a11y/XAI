@@ -125,7 +125,7 @@ def _binding_from_entry(domain: str, variant: str, entry: dict, ident: str,
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             raise PolicyUnavailable('warehouse_v6_actor_artifact_invalid') from exc
     elif domain == 'warehouse' and entry.get('model_version') == _structured_model_version():
-        from backend.training.warehouse_structured_v5 import (
+        from backend.inference.warehouse_structured_v5 import (
             STRUCTURED_FEATURE_SCHEMA_SHA256, STRUCTURED_MODEL_VERSION)
         if (entry.get('model_version') != STRUCTURED_MODEL_VERSION or
                 entry.get('feature_schema_sha256') != STRUCTURED_FEATURE_SCHEMA_SHA256):
@@ -146,7 +146,7 @@ def _binding_from_entry(domain: str, variant: str, entry: dict, ident: str,
 
 
 def _structured_model_version() -> str:
-    from backend.training.warehouse_structured_v5 import STRUCTURED_MODEL_VERSION
+    from backend.inference.warehouse_structured_v5 import STRUCTURED_MODEL_VERSION
     return STRUCTURED_MODEL_VERSION
 
 
@@ -162,7 +162,7 @@ def _validated_v6_actor(path: str, artifact_sha256: str,
 @lru_cache(maxsize=8)
 def _validated_structured_actor(path: str, artifact_sha256: str,
                                 robot_1_sha256: str, robot_2_sha256: str) -> None:
-    from backend.training.warehouse_structured_v5 import FrozenStructuredDualNN
+    from backend.inference.warehouse_structured_v5 import FrozenStructuredDualNN
     FrozenStructuredDualNN.load(
         path, expected_sha256=artifact_sha256,
         expected_role_sha256={"robot_1": robot_1_sha256,
@@ -653,7 +653,7 @@ def _accepted(entry: dict, binding: dict,
                       entry.get('model_version') == _structured_model_version())
         structured_contract = True
         if structured:
-            from backend.training.warehouse_structured_v5 import (
+            from backend.inference.warehouse_structured_v5 import (
                 STRUCTURED_FEATURE_SCHEMA_SHA256, STRUCTURED_MODEL_VERSION)
             structured_contract = (
                 binding.get('actor_model_version') == STRUCTURED_MODEL_VERSION

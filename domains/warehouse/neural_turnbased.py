@@ -14,7 +14,7 @@ from backend.training.warehouse_sparse_v5 import (
     PROGRAM_VERSION as SPARSE_PROGRAM_VERSION,
     SparseObliqueProgram,
 )
-from backend.training.warehouse_structured_v5 import (
+from backend.inference.warehouse_structured_v5 import (
     FrozenStructuredDualNN, STRUCTURED_FEATURE_SCHEMA_SHA256,
     STRUCTURED_MODEL_VERSION,
 )

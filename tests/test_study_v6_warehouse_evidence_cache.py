@@ -67,6 +67,24 @@ def _synthetic_package(root: Path) -> dict:
                                          f"final:{role}".encode())
                             for role in p.ROLES},
         },
+        "final_fit_traces": {
+            "formal": {str(seed): {split: asset(
+                f"{split}.jsonl", f"fit:{seed}:{split}".encode())
+                for split in p.FINAL_PROGRAM_SPLIT_COUNTS}
+                for seed in p.FORMAL_PAIR_SEEDS},
+            "development": {"200000": {str(seed): {split: asset(
+                f"{split}.jsonl", f"dev-fit:{seed}:{split}".encode())
+                for split in p.FINAL_PROGRAM_SPLIT_COUNTS}
+                for seed in p.DEVELOPMENT_PAIR_SEEDS}},
+        },
+        "final_fit_replays": {
+            "formal": {str(seed): asset(
+                "final_fit_replay.receipt.json", f"fit-replay:{seed}".encode())
+                for seed in p.FORMAL_PAIR_SEEDS},
+            "development": {"200000": {str(seed): asset(
+                "final_fit_replay.receipt.json", f"dev-fit-replay:{seed}".encode())
+                for seed in p.DEVELOPMENT_PAIR_SEEDS}},
+        },
     }
     acceptance = asset("warehouse_v6_acceptance.json", json.dumps({
         "source_closure_sha256": "7" * 64}).encode())

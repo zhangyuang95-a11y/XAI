@@ -121,6 +121,35 @@ def _audit_trace_assets(audits: dict, output_root: Path, *,
     return assets
 
 
+def _final_fit_trace_assets(pair: dict, output_root: Path, *,
+                            assets_root: Path) -> dict:
+    """Bundle every post-selection fitting episode, including failed fits."""
+    regularized = pair["variants"]["regularized"]
+    reports = regularized.get("final_fresh_program_reports")
+    if not isinstance(reports, dict) or set(reports) != set(p.ROLES):
+        raise ValueError("Warehouse final program reports incomplete")
+    schedule = p.final_program_fit_seed_schedule(
+        pair["release_id"], pair["pair_seed"])
+    traces = reports[p.ROLES[0]].get("final_fit_traces")
+    if (not isinstance(traces, dict) or set(traces) != set(schedule)
+            or any(reports[role].get("final_fit_traces") != traces
+                   for role in p.ROLES)):
+        raise ValueError("Warehouse final fit split inventory incomplete")
+    assets = {}
+    for split, seeds in schedule.items():
+        claim = traces[split]
+        if (not isinstance(claim, dict)
+                or set(claim) != {"path", "sha256", "row_count", "seeds"}
+                or claim["seeds"] != seeds
+                or type(claim["row_count"]) is not int
+                or claim["row_count"] < len(seeds)):
+            raise ValueError("Warehouse final fit split identity incomplete")
+        assets[split] = _bundle(claim["path"], claim["sha256"],
+                                output_root, f"{split}.jsonl",
+                                assets_root=assets_root)
+    return assets
+
+
 def _evidence(receipt: dict, output_root: Path, *,
               release_id: str = RELEASE_ID,
               assets_root: Path = ASSETS) -> dict:
@@ -144,6 +173,7 @@ def _evidence(receipt: dict, output_root: Path, *,
     development = {}
     development_pairs = {}
     development_traces = {}
+    development_final_fit_traces = {}
     for budget_key in expected_budgets:
         if (set(dev_paths[budget_key]) != set(map(str, p.DEVELOPMENT_PAIR_SEEDS))
                 or set(dev_hashes[budget_key]) != set(dev_paths[budget_key])):
@@ -155,6 +185,7 @@ def _evidence(receipt: dict, output_root: Path, *,
             for seed, path in dev_paths[budget_key].items()}
         development_pairs[budget_key] = {}
         development_traces[budget_key] = {}
+        development_final_fit_traces[budget_key] = {}
         for seed, item in development[budget_key].items():
             dev_receipt = _read(ROOT / item["path"])
             pair_path = (output_root / receipt["candidate_id"] /
@@ -166,6 +197,9 @@ def _evidence(receipt: dict, output_root: Path, *,
                 dev_receipt.get("program_audit", {}), output_root,
                 required=bool(dev_receipt.get("program_audit")),
                 assets_root=assets_root)
+            development_final_fit_traces[budget_key][seed] = _final_fit_trace_assets(
+                _read(ROOT / development_pairs[budget_key][seed]["path"]),
+                output_root, assets_root=assets_root)
     pairs = receipt["candidate_training"]
     if (len(pairs) != len(p.FORMAL_PAIR_SEEDS)
             or {row["pair_seed"] for row in pairs} != set(p.FORMAL_PAIR_SEEDS)):
@@ -174,6 +208,10 @@ def _evidence(receipt: dict, output_root: Path, *,
         row["pair_report_path"], row["pair_report_sha256"],
         output_root, "pair.training.json", assets_root=assets_root)
         for row in pairs}
+    formal_final_fit_traces = {
+        seed: _final_fit_trace_assets(_read(ROOT / item["path"]), output_root,
+                                      assets_root=assets_root)
+        for seed, item in pair_reports.items()}
     phase_receipts = {name: _bundle(phases[name], phase_hashes[name],
                                     output_root, name, assets_root=assets_root)
                       for name in sorted(phase_names)}
@@ -198,6 +236,8 @@ def _evidence(receipt: dict, output_root: Path, *,
         "development_receipts": development,
         "development_pair_reports": development_pairs,
         "program_traces": audit_traces,
+        "final_fit_traces": {"formal": formal_final_fit_traces,
+                             "development": development_final_fit_traces},
         "training_assets": {seed: _training_assets(
             _read(ROOT / item["path"])["variants"], output_root,
             assets_root=assets_root)
@@ -316,6 +356,99 @@ def _verify_training_package(receipt: dict, evidence: dict) -> None:
                         raise ValueError("Warehouse packaged program role mismatch")
 
 
+def _offline_replay_final_fit(receipt: dict, evidence: dict,
+                              output_root: Path, *,
+                              release_id: str,
+                              assets_root: Path) -> dict:
+    """Re-fit every frozen role program from packaged, physically replayed rows.
+
+    This runs only in the training/package environment. The study runtime checks
+    the same rows and leaf metrics with NumPy, without importing a trainer.
+    """
+    from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor
+    from backend.training.warehouse_v6_program import fit_program
+    from experiments.warehouse.acceptance import (
+        _final_fit_verified_rows, _verify_final_fit_pair)
+
+    result = {"formal": {}, "development": {}}
+    groups = [(
+        "formal", None, evidence["pair_reports"],
+        evidence["training_assets"], evidence["final_fit_traces"]["formal"])]
+    groups.extend((
+        "development", budget, evidence["development_pair_reports"][budget],
+        evidence["development_training_assets"][budget],
+        evidence["final_fit_traces"]["development"][budget])
+        for budget in evidence["development_pair_reports"])
+    for phase, budget, pairs, assets, traces in groups:
+        if phase == "development":
+            result[phase][budget] = {}
+        for seed, item in pairs.items():
+            pair = _read(ROOT / item["path"])
+            samples = _final_fit_verified_rows(
+                root=ROOT, release_id=release_id, index=traces[seed],
+                pair=pair, assets=assets[seed])
+            if not _verify_final_fit_pair(
+                    root=ROOT, release_id=release_id, index=traces[seed],
+                    pair=pair, assets=assets[seed],
+                    verified_samples=samples):
+                raise ValueError("Warehouse final fit leaf evidence differs")
+            regularized = pair["variants"]["regularized"]
+            actor = FrozenWarehouseV6Actor.load(
+                ROOT / assets[seed]["regularized"]["actor"]["path"],
+                expected_sha256=assets[seed]["regularized"]["actor"]["sha256"],
+                expected_role_sha256=regularized["selected_role_sha256"])
+            fitted = {}
+            for role in p.ROLES:
+                try:
+                    program = fit_program(
+                        role, actor, *(samples[role][name] for name in
+                                       p.FINAL_PROGRAM_SPLIT_COUNTS))
+                except (ValueError, RuntimeError) as exc:
+                    if regularized["final_fresh_program_reports"][role].get(
+                            "status") != "failed":
+                        raise ValueError(
+                            "Warehouse previously successful program no longer fits") from exc
+                    fitted[role] = None
+                else:
+                    expected = regularized["program_artifacts"][role]["sha256"]
+                    if (program.sha256() != expected
+                            or regularized["final_fresh_program_reports"][role].get(
+                                "program_sha256") != expected):
+                        raise ValueError("Warehouse final program refit changed bytes")
+                    fitted[role] = expected
+            replay = {
+                "format": "warehouse-final-fit-replay.v1",
+                "release_id": release_id,
+                "candidate_id": receipt["candidate_id"],
+                "pair_seed": int(seed),
+                "joint_steps": pair["joint_steps"],
+                "source_closure_sha256": receipt["source_closure_sha256"],
+                "pair_report_sha256": item["sha256"],
+                "actor_sha256": actor.artifact_sha256,
+                "trace_sha256": {name: traces[seed][name]["sha256"]
+                                 for name in p.FINAL_PROGRAM_SPLIT_COUNTS},
+                "refitted_program_sha256": fitted,
+                "passed": True,
+            }
+            source = (output_root / receipt["candidate_id"] /
+                      f"pair_{seed}_steps_{pair['joint_steps']}" /
+                      "final_fit_replay.receipt.json")
+            encoded = (json.dumps(replay, sort_keys=True, separators=(",", ":"),
+                                  allow_nan=False) + "\n").encode()
+            if source.is_file() and source.read_bytes() != encoded:
+                raise ValueError("Warehouse immutable final fit replay changed")
+            if not source.is_file():
+                source.write_bytes(encoded)
+            bundled = _bundle(str(source), sha256(encoded).hexdigest(), output_root,
+                              "final_fit_replay.receipt.json",
+                              assets_root=assets_root)
+            if phase == "formal":
+                result[phase][seed] = bundled
+            else:
+                result[phase][budget][seed] = bundled
+    return result
+
+
 def package(acceptance_path: str | Path,
             *, release_id: str | None = None) -> dict:
     source = Path(acceptance_path).resolve()
@@ -351,6 +484,9 @@ def package(acceptance_path: str | Path,
     entries = _policies(receipt, evidence, output_root, acceptance_asset,
                         assets_root=assets_root)
     _verify_training_package(receipt, evidence)
+    evidence["final_fit_replays"] = _offline_replay_final_fit(
+        receipt, evidence, output_root, release_id=release_id,
+        assets_root=assets_root)
     candidate = deepcopy(catalog)
     candidate["warehouse"] = {**candidate["warehouse"],
                               "status": "accepted",

@@ -34,6 +34,7 @@ VARIANTS = ("raw", "regularized")
 PROGRAM_LAMBDA = 0.01
 PROGRAM_START_FRACTION = 0.80
 PROGRAM_RAMP_FRACTION = 0.05
+SCENARIO_BLOCK_STEPS = 120
 FINAL_PROGRAM_SPLIT_COUNTS = {"fit": 50, "calibration": 25,
                               "eligibility": 25, "validation": 24}
 
@@ -41,6 +42,24 @@ FINAL_PROGRAM_SPLIT_COUNTS = {"fit": 50, "calibration": 25,
 def _hash_json(value: object) -> str:
     return sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
                              allow_nan=False).encode()).hexdigest()
+
+
+def scenario_seed(namespace: str, pair_seed: int, joint_step: int) -> int:
+    """Assigned public scenario for a fixed joint-step block."""
+    if joint_step < 0:
+        raise ValueError("joint_step must be nonnegative")
+    message = f"{namespace}|{pair_seed}|{joint_step // SCENARIO_BLOCK_STEPS}".encode()
+    return int.from_bytes(sha256(message).digest()[:8], "big") & 0x7fff_ffff
+
+
+def scenario_schedule_sha256(namespace: str, pair_seed: int, joint_steps: int) -> str:
+    """Hash the exact assigned scenario for every joint training step."""
+    if joint_steps < 0:
+        raise ValueError("joint_steps must be nonnegative")
+    digest = sha256()
+    for step in range(joint_steps):
+        digest.update(scenario_seed(namespace, pair_seed, step).to_bytes(4, "little"))
+    return digest.hexdigest()
 
 
 def _require_disjoint() -> None:
@@ -397,4 +416,9 @@ def claim_once(path: str | Path, *, phase: str, candidate_id: str,
         json.dump(receipt, stream, sort_keys=True, separators=(",", ":"))
         stream.flush()
         os.fsync(stream.fileno())
+    directory_fd = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
     return receipt

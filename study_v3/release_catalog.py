@@ -281,6 +281,8 @@ def _warehouse_evidence_snapshot(release_id: str = RELEASE_ID, *,
         "development_pair_reports": {str(value) for value in BUDGETS
                                      if value <= budget},
         "program_traces": {"development", "preaudit", "final_audit"},
+        "final_fit_traces": {"development", "formal"},
+        "final_fit_replays": {"development", "formal"},
     }
     if set(evidence) != set(expected):
         raise ReleaseAssetUnavailable("warehouse_evidence_incomplete")
@@ -321,6 +323,38 @@ def _warehouse_evidence_snapshot(release_id: str = RELEASE_ID, *,
                         if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
                             raise ReleaseAssetUnavailable("warehouse_program_traces_incomplete")
                         _asset(item["path"], item["sha256"], release_id)
+        elif category in ("final_fit_traces", "final_fit_replays"):
+            if (set(rows["formal"]) != {"6101", "6102", "6103"}
+                    or set(rows["development"]) != {
+                        str(value) for value in BUDGETS if value <= budget}):
+                raise ReleaseAssetUnavailable("warehouse_final_fit_inventory_incomplete")
+            groups = [rows["formal"]]
+            for budget_rows in rows["development"].values():
+                if (not isinstance(budget_rows, dict)
+                        or set(budget_rows) != set(map(str, DEVELOPMENT_PAIR_SEEDS))):
+                    raise ReleaseAssetUnavailable("warehouse_final_fit_inventory_incomplete")
+                groups.append(budget_rows)
+            for group in groups:
+                for item in group.values():
+                    if category == "final_fit_traces":
+                        if (not isinstance(item, dict)
+                                or set(item) != {"fit", "calibration",
+                                                 "eligibility", "validation"}):
+                            raise ReleaseAssetUnavailable(
+                                "warehouse_final_fit_inventory_incomplete")
+                        assets = item.items()
+                    else:
+                        assets = (("final_fit_replay.receipt", item),)
+                    for name, asset in assets:
+                        if (not isinstance(asset, dict)
+                                or set(asset) != {"path", "sha256"}
+                                or Path(asset["path"]).name != f"{name}.jsonl"
+                                and not (category == "final_fit_replays" and
+                                         Path(asset["path"]).name ==
+                                         "final_fit_replay.receipt.json")):
+                            raise ReleaseAssetUnavailable(
+                                "warehouse_final_fit_inventory_incomplete")
+                        _asset(asset["path"], asset["sha256"], release_id)
         elif category in ("development_receipts", "development_training_assets",
                         "development_pair_reports"):
             for budget_key, budget_rows in rows.items():

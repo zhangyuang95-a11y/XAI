@@ -67,6 +67,10 @@ programs, scripts, and logs are preserved in the ignored snapshot
 The 95-file, 5,801,257-byte inventory was checked file by file; its
 `archive_manifest.json` SHA-256 is
 `f41f385bf9dc4fbecfedb99634e87bd4381bcc8cc9ae1b8d4718863d061c0ce4`.
+An independent copy outside the ignored worktree is preserved at
+`/Users/zhangyuang/Desktop/ICLR/XAI-v6-recovery-20261015T165508Z/warehouse-v65-10965-unregistered-20261016/`;
+all 95 files and their recorded byte counts and SHA-256 digests were checked
+again in that copy. The 82 GB historical output tree was not copied.
 No old failure checkpoint or sealed data was moved into release assets.
 
 Next exploratory hypothesis: expand legal sparse directions to three public

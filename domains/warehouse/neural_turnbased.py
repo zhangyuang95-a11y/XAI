@@ -826,8 +826,13 @@ def _audited_v6_program_evidence(state):
         obs = v6_role_observation(env.state, "robot_2")
         mask = action_masks(env.state, env.config.map_layout_id)[1]
         selected, _, _ = _selection(env, state["scenario_seed"], state["policy_id"])
+        actor = _actor(state["policy_id"])
+        if (actor.artifact_sha256 != entry["actor_sha256"]
+                or actor.role_sha256["robot_2"] != entry["role_sha256"]["ai"]):
+            return None
         evidence = program.covered({"obs": obs, "mask": mask},
-                                   actor_action=selected, purpose="explanation")
+                                   actor_action=selected, purpose="explanation",
+                                   actor_role=actor.roles["robot_2"])
         if evidence is None:
             return None
         agreement = float(metric["agreement"])

@@ -2,6 +2,11 @@
 from __future__ import annotations
 
 import pytest
+from hashlib import sha256
+import json
+from types import SimpleNamespace
+
+import numpy as np
 
 from domains.warehouse import neural_turnbased as warehouse
 
@@ -81,3 +86,71 @@ def test_explanation_audit_uses_state_release_identity_and_sealed_block(monkeypa
     state["policy_id"] = "warehouse-regularized-v6"
     assert warehouse._audited_v6_program_evidence(state) is None
     assert calls == [("audit", later)]
+
+
+def test_audited_explanation_supplies_the_bound_frozen_ai_role(monkeypatch, tmp_path):
+    """An accepted program must inspect the same Actor role used for execution."""
+    release_id = warehouse.V6_RELEASE_ID
+    policy_id = "warehouse-regularized-v6"
+    episode_ids = [str(seed) for seed in protocol.final_audit_seeds(release_id)]
+    program_path = tmp_path / "program.json"
+    program_path.write_text("{}")
+    program_sha = sha256(program_path.read_bytes()).hexdigest()
+    receipt = {
+        "passed": True, "heldout_evaluated": True, "release_id": release_id,
+        "artifact_sha256": {"regularized": "actor-sha"},
+        "role_sha256": {"regularized": {"robot_2": "ai-sha"}},
+        "program_sha256": {"regularized": {"robot_2": program_sha}},
+        "final_program_audit": {"robot_2": {
+            "actor_role_sha256": "ai-sha", "program_sha256": program_sha,
+            "feature_schema_sha256": warehouse.V6_FEATURE_SCHEMA_SHA256,
+            "episode_ids": episode_ids, "sample_count": 1200,
+            "explanation_eligible": True, "max_depth": 5,
+            "leaf_count": 16, "max_features_per_node": 3,
+            "explanation": {"coverage": .31, "actionable_coverage": .30,
+                            "agreement": .96, "kl": .10, "illegal_count": 0},
+        }},
+    }
+    report = {"selected_role_sha256": {"robot_2": "ai-sha"}}
+    (tmp_path / "acceptance.json").write_text(json.dumps(receipt))
+    (tmp_path / "report.json").write_text(json.dumps(report))
+    entry = {
+        "readiness": True, "acceptance_path": "acceptance.json",
+        "training_report_path": "report.json", "program_paths": ["unused", "program.json"],
+        "program_sha256": {"robot_2": program_sha}, "actor_sha256": "actor-sha",
+        "role_sha256": {"ai": "ai-sha"},
+    }
+    role = object()
+    actor = SimpleNamespace(artifact_sha256="actor-sha",
+                            role_sha256={"robot_2": "ai-sha"},
+                            roles={"robot_2": role})
+    seen = []
+
+    class Program:
+        @staticmethod
+        def load(*args, **kwargs):
+            return Program()
+
+        def covered(self, sample, *, actor_action, purpose, actor_role):
+            seen.append((actor_action, purpose, actor_role))
+            return {"path": [], "leaf_id": 0}
+
+    monkeypatch.setattr(warehouse, "ROOT", tmp_path)
+    monkeypatch.setattr(warehouse, "policy_artifacts_v6",
+                        lambda _: {"regularized": entry})
+    monkeypatch.setattr(warehouse, "WarehouseV6Program", Program)
+    monkeypatch.setattr(warehouse, "_restore", lambda _:
+                        SimpleNamespace(state=object(), config=SimpleNamespace(map_layout_id="map")))
+    monkeypatch.setattr(warehouse, "v6_role_observation", lambda *_: np.zeros(1))
+    monkeypatch.setattr(warehouse, "action_masks", lambda *_: np.ones((2, 5)))
+    monkeypatch.setattr(warehouse, "_selection", lambda *_: ("WAIT", {}, {}))
+    monkeypatch.setattr(warehouse, "_actor", lambda _: actor)
+    state = {"terminal": False, "release_id": release_id,
+             "policy_id": policy_id, "scenario_seed": 7}
+    evidence = warehouse._audited_v6_program_evidence(state)
+    assert evidence is not None and evidence["nn_action"] == "wait"
+    assert seen == [("WAIT", "explanation", role)]
+
+    actor.role_sha256["robot_2"] = "different-sha"
+    assert warehouse._audited_v6_program_evidence(state) is None
+    assert seen == [("WAIT", "explanation", role)]

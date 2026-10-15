@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 import pytest
+import study_v3.store as study_store
 
 from study_v3.config import Settings
 from study_v3.policies import PolicyUnavailable, binding_for_group
@@ -107,8 +108,22 @@ class Flow:
             feedback="Automated flow test; this is not a participant response.")
 
 
+_SIMULATED_SEED_START = {"pong": 9_731_100, "kitchen": 9_002_000,
+                         "warehouse": 9_250_000}
+
+
+def _simulated_scenario_config(domain):
+    """Keep flow tests off accepted research holdouts."""
+    config = dict(scenario_config(domain))
+    key = "heldout_seeds" if "heldout_seeds" in config else "held_out_seeds"
+    config[key] = list(range(_SIMULATED_SEED_START[domain],
+                             _SIMULATED_SEED_START[domain] + 24))
+    return config
+
+
 @pytest.fixture
-def store(tmp_path):
+def store(tmp_path, monkeypatch):
+    monkeypatch.setattr(study_store, "scenario_config", _simulated_scenario_config)
     return Store(Settings(database=str(tmp_path / "flow.sqlite3")), RecordingExplainer())
 
 
@@ -534,7 +549,11 @@ def test_unsupported_release_can_start_fresh_without_changing_archived_rows(stor
 
 
 @pytest.mark.parametrize("domain", BOUND_DOMAINS)
-def test_enrollment_preserves_consent_language_assignment_and_heldout_scenario(store, domain):
+def test_enrollment_preserves_consent_language_assignment_and_heldout_scenario(
+        store, domain, monkeypatch):
+    # This test inspects the allocation without starting a task. All rollout
+    # tests retain the synthetic seed block installed by the store fixture.
+    monkeypatch.setattr(study_store, "scenario_config", scenario_config)
     flow = Flow(store, domain)
     enrollment = store.export()["enrollments"][0]
     instance = store.export()["instances"][0]

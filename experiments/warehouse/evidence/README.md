@@ -17,6 +17,11 @@ formal paired run, final independent program audit, or held-out test.
 | v6.6 static topology screen | [Seed lock](warehouse-v66-unregistered-seed-lock.json), [failure](warehouse-v66-static-topology-11166-failure.md) | Fit-only CV estimated sampled-action coverage of 28.86% and 29.68%; the reserved four-part, audit and pressure blocks were not used. |
 | v6.6 joint Actor exploration | [New seed lock](warehouse-v66-joint-actor-seed-lock.json) | Fresh unregistered cohorts reserved for jointly training the tree and full Actor; no result or admission claim. |
 
+The [coverage and shutdown design note](warehouse-v6-coverage-objective-design.md)
+records the unregistered failure analysis, a pointwise Actor/tree margin
+certificate, and proposed training changes. It is a hypothesis, not an
+accepted model or a change to any gate.
+
 Exploratory raw artifacts are stored under ignored, run-specific
 `output/warehouse_v6_repro_snapshots/` directories. The later failure reports
 name their byte-verified manifests and source closures. The immutable v6 admission

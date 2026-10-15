@@ -307,6 +307,68 @@ def program_pass(metrics: Mapping, *, purpose: str, development: bool) -> bool:
             minimum_agreement <= agreement <= 1 and 0 <= kl <= maximum_kl)
 
 
+def online_program_cohorts_valid(extractions: object, *,
+                                 joint_steps: int) -> bool:
+    """Recompute the four purpose cohorts instead of trusting a report flag."""
+    if not isinstance(extractions, Mapping) or set(extractions) != set(ROLES):
+        return False
+    steps = online_program_extraction_steps(joint_steps)
+    all_scenes: set[int] = set()
+    all_episode_ids: set[str] = set()
+    for index, step in enumerate(steps):
+        reference = None
+        for role in ROLES:
+            rows = extractions[role]
+            if not isinstance(rows, list) or len(rows) != len(steps):
+                return False
+            row = rows[index]
+            if not isinstance(row, Mapping) or (
+                    row.get("joint_steps"), row.get("window_start_joint_step"),
+                    row.get("window_end_joint_step")) != (
+                    step, 0 if index == 0 else steps[index - 1], step):
+                return False
+            scenes = row.get("training_split_scenario_seeds")
+            episode_ids = row.get("training_split_episode_ids")
+            counts = row.get("training_split_episode_counts")
+            if (not isinstance(scenes, Mapping)
+                    or not isinstance(episode_ids, Mapping)
+                    or not isinstance(counts, Mapping)
+                    or any(set(part) != set(FINAL_PROGRAM_SPLIT_COUNTS)
+                           for part in (scenes, episode_ids, counts))):
+                return False
+            local_scenes: set[int] = set()
+            local_ids: set[str] = set()
+            for purpose, required in FINAL_PROGRAM_SPLIT_COUNTS.items():
+                seeds, ids = scenes[purpose], episode_ids[purpose]
+                if (not isinstance(seeds, list) or len(seeds) != required
+                        or any(type(seed) is not int for seed in seeds)
+                        or not isinstance(ids, list) or not ids
+                        or any(not isinstance(item, str) for item in ids)
+                        or counts[purpose] != len(ids)):
+                    return False
+                seed_set, id_set = set(seeds), set(ids)
+                if (len(seed_set) != required or len(id_set) != len(ids)
+                        or seed_set & local_scenes or id_set & local_ids):
+                    return False
+                try:
+                    id_scenes = {int(item.split(":", 1)[0]) for item in ids}
+                except ValueError:
+                    return False
+                if id_scenes != seed_set:
+                    return False
+                local_scenes.update(seed_set)
+                local_ids.update(id_set)
+            if reference is None:
+                reference = (scenes, episode_ids)
+                if local_scenes & all_scenes or local_ids & all_episode_ids:
+                    return False
+                all_scenes.update(local_scenes)
+                all_episode_ids.update(local_ids)
+            elif reference != (scenes, episode_ids):
+                return False
+    return True
+
+
 def paired_training_pass(variants: Mapping, *, joint_steps: int) -> bool:
     """Check identical starts/schedules and actual gradients for both roles."""
     if joint_steps not in BUDGETS or set(variants) != set(VARIANTS):
@@ -353,6 +415,9 @@ def paired_training_pass(variants: Mapping, *, joint_steps: int) -> bool:
         return False
     if any(raw["selected_role_sha256"][role] ==
            regularized["selected_role_sha256"][role] for role in ROLES):
+        return False
+    if not online_program_cohorts_valid(
+            regularized.get("program_extractions"), joint_steps=joint_steps):
         return False
     for report, should_be_positive in ((raw, False), (regularized, True)):
         rows = report.get("feedback_rows")

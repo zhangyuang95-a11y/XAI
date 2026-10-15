@@ -19,6 +19,26 @@ def _write(path: Path, value: object) -> str:
     return sha256(path.read_bytes()).hexdigest()
 
 
+def _fake_online_extractions(joint_steps):
+    steps = p.online_program_extraction_steps(joint_steps)
+    rows = []
+    for index, step in enumerate(steps):
+        cursor = step * 10
+        scenes, ids, counts = {}, {}, {}
+        for purpose, count in p.FINAL_PROGRAM_SPLIT_COUNTS.items():
+            scenes[purpose] = list(range(cursor, cursor + count))
+            ids[purpose] = [f"{seed}:0" for seed in scenes[purpose]]
+            counts[purpose] = count
+            cursor += count
+        rows.append({"joint_steps": step,
+                     "window_start_joint_step": 0 if index == 0 else steps[index - 1],
+                     "window_end_joint_step": step,
+                     "training_split_scenario_seeds": scenes,
+                     "training_split_episode_ids": ids,
+                     "training_split_episode_counts": counts})
+    return {role: deepcopy(rows) for role in p.ROLES}
+
+
 class FakeActor:
     def __init__(self, digest, roles, pair_seed, variant):
         self.artifact_sha256 = digest
@@ -101,6 +121,8 @@ class FakeBackend:
                 "training_report_path": str(report_path),
                 "training_report_sha256": report_sha,
             }
+            if variant == "regularized":
+                variants[variant]["program_extractions"] = _fake_online_extractions(budget)
         pair = {"candidate_id": spec["candidate_id"],
                 "release_id": spec["release_id"],
                 "architecture_mode": spec["architecture_mode"],

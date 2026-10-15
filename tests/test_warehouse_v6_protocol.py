@@ -20,6 +20,26 @@ def _program(coverage=.35, agreement=.97, kl=.10, actionable_coverage=None):
             "kl": kl, "illegal_count": 0}
 
 
+def _online_extractions(joint_steps):
+    steps = p.online_program_extraction_steps(joint_steps)
+    rows = []
+    for index, step in enumerate(steps):
+        cursor = step * 10
+        scenes, ids, counts = {}, {}, {}
+        for purpose, count in p.FINAL_PROGRAM_SPLIT_COUNTS.items():
+            scenes[purpose] = list(range(cursor, cursor + count))
+            ids[purpose] = [f"{seed}:0" for seed in scenes[purpose]]
+            counts[purpose] = count
+            cursor += count
+        rows.append({"joint_steps": step,
+                     "window_start_joint_step": 0 if index == 0 else steps[index - 1],
+                     "window_end_joint_step": step,
+                     "training_split_scenario_seeds": scenes,
+                     "training_split_episode_ids": ids,
+                     "training_split_episode_counts": counts})
+    return {role: deepcopy(rows) for role in p.ROLES}
+
+
 def _paired_training(joint_steps=200_000):
     initial = {"robot_1": "a" * 64, "robot_2": "b" * 64}
     variants = {}
@@ -43,6 +63,8 @@ def _paired_training(joint_steps=200_000):
             "feedback_gradient_norm": {"robot_1": 0.0 if variant == "raw" else .1,
                                        "robot_2": 0.0 if variant == "raw" else .1},
         }
+        if variant == "regularized":
+            variants[variant]["program_extractions"] = _online_extractions(joint_steps)
     return variants
 
 
@@ -157,6 +179,13 @@ def test_pair_requires_identical_bc_and_scenario_schedule_and_real_gradients():
     assert not p.paired_training_pass(bad, joint_steps=200_000)
     bad = deepcopy(reports)
     bad["regularized"]["architecture_mode"] = "none"
+    assert not p.paired_training_pass(bad, joint_steps=200_000)
+    bad = deepcopy(reports)
+    bad["regularized"]["program_extractions"]["robot_1"][1][
+        "training_split_scenario_seeds"]["fit"][0] = bad["regularized"][
+            "program_extractions"]["robot_1"][0][
+                "training_split_scenario_seeds"]["fit"][0]
+    bad["regularized"]["online_program_cohorts_disjoint"] = True
     assert not p.paired_training_pass(bad, joint_steps=200_000)
 
 

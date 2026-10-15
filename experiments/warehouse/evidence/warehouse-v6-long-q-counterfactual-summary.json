@@ -1,0 +1,289 @@
+{
+  "branch_seeds": [
+    988100,
+    988111
+  ],
+  "groups": {
+    "all": {
+      "long_q_collision": {
+        "contexts": 35,
+        "contexts_with_nonconstant_return": 35,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.14733027239718574,
+            0.12859376651430932
+          ],
+          "pair_concordance_percentile_95": [
+            0.4410112359550562,
+            0.5578034682080925
+          ]
+        },
+        "informative_action_pairs": 347,
+        "mean_within_context_spearman": -0.0069572974851060555,
+        "pairwise_concordance": 0.5014409221902018
+      },
+      "long_q_delivery": {
+        "contexts": 35,
+        "contexts_with_nonconstant_return": 35,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.03033400738395197,
+            0.2691961118952608
+          ],
+          "pair_concordance_percentile_95": [
+            0.4854629912960696,
+            0.6176561929119473
+          ]
+        },
+        "informative_action_pairs": 339,
+        "mean_within_context_spearman": 0.11217081005957581,
+        "pairwise_concordance": 0.5486725663716814
+      },
+      "long_q_shutdown": {
+        "contexts": 35,
+        "contexts_with_nonconstant_return": 12,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.24562820378046307,
+            0.230617828732435
+          ],
+          "pair_concordance_percentile_95": [
+            0.36538461538461536,
+            0.6410377358490564
+          ]
+        },
+        "informative_action_pairs": 67,
+        "mean_within_context_spearman": -0.044520411559680596,
+        "pairwise_concordance": 0.47761194029850745
+      },
+      "one_step_collision": {
+        "contexts": 35,
+        "contexts_with_nonconstant_return": 35,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.26469546774340735,
+            0.15479473220970813
+          ],
+          "pair_concordance_percentile_95": [
+            0.39325842696629215,
+            0.5731905758406693
+          ]
+        },
+        "informative_action_pairs": 347,
+        "mean_within_context_spearman": -0.06044534317860263,
+        "pairwise_concordance": 0.4812680115273775
+      }
+    },
+    "return_margin_7_to_12": {
+      "long_q_collision": {
+        "contexts": 9,
+        "contexts_with_nonconstant_return": 9,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.21111111111111108,
+            0.2940114719096918
+          ],
+          "pair_concordance_percentile_95": [
+            0.4222222222222222,
+            0.6136363636363636
+          ]
+        },
+        "informative_action_pairs": 89,
+        "mean_within_context_spearman": 0.03845591635413631,
+        "pairwise_concordance": 0.5168539325842697
+      },
+      "long_q_delivery": {
+        "contexts": 9,
+        "contexts_with_nonconstant_return": 9,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.17748912942127607,
+            0.3957722268843519
+          ],
+          "pair_concordance_percentile_95": [
+            0.4318181818181818,
+            0.6896551724137931
+          ]
+        },
+        "informative_action_pairs": 87,
+        "mean_within_context_spearman": 0.10028864835650171,
+        "pairwise_concordance": 0.5517241379310345
+      },
+      "long_q_shutdown": {
+        "contexts": 9,
+        "contexts_with_nonconstant_return": 3,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            0.30779350562554625,
+            0.44721359549995787
+          ],
+          "pair_concordance_percentile_95": [
+            0.6666666666666666,
+            0.75
+          ]
+        },
+        "informative_action_pairs": 20,
+        "mean_within_context_spearman": 0.3695201639062593,
+        "pairwise_concordance": 0.7
+      },
+      "one_step_collision": {
+        "contexts": 9,
+        "contexts_with_nonconstant_return": 9,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.4940114719096918,
+            0.07864372284728291
+          ],
+          "pair_concordance_percentile_95": [
+            0.28888888888888886,
+            0.5393258426966292
+          ]
+        },
+        "informative_action_pairs": 89,
+        "mean_within_context_spearman": -0.19401147190969184,
+        "pairwise_concordance": 0.4157303370786517
+      }
+    },
+    "return_margin_gt_12": {
+      "long_q_collision": {
+        "contexts": 23,
+        "contexts_with_nonconstant_return": 23,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.27557868441572514,
+            0.11959830721361757
+          ],
+          "pair_concordance_percentile_95": [
+            0.39611283643892337,
+            0.5459009952854896
+          ]
+        },
+        "informative_action_pairs": 228,
+        "mean_within_context_spearman": -0.07780907213764947,
+        "pairwise_concordance": 0.4692982456140351
+      },
+      "long_q_delivery": {
+        "contexts": 23,
+        "contexts_with_nonconstant_return": 23,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.05039225841673108,
+            0.25514644440700107
+          ],
+          "pair_concordance_percentile_95": [
+            0.47271464646464645,
+            0.6034521590556072
+          ]
+        },
+        "informative_action_pairs": 223,
+        "mean_within_context_spearman": 0.09031640302997444,
+        "pairwise_concordance": 0.5336322869955157
+      },
+      "long_q_shutdown": {
+        "contexts": 23,
+        "contexts_with_nonconstant_return": 7,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.48221756345744177,
+            0.2838147828279846
+          ],
+          "pair_concordance_percentile_95": [
+            0.16666666666666666,
+            0.6923076923076923
+          ]
+        },
+        "informative_action_pairs": 30,
+        "mean_within_context_spearman": -0.11028357674071547,
+        "pairwise_concordance": 0.43333333333333335
+      },
+      "one_step_collision": {
+        "contexts": 23,
+        "contexts_with_nonconstant_return": 23,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.3439384193865843,
+            0.1470723576472447
+          ],
+          "pair_concordance_percentile_95": [
+            0.36361881361881365,
+            0.5720524017467249
+          ]
+        },
+        "informative_action_pairs": 228,
+        "mean_within_context_spearman": -0.11606451148103765,
+        "pairwise_concordance": 0.4605263157894737
+      }
+    },
+    "return_margin_le_6": {
+      "long_q_collision": {
+        "contexts": 3,
+        "contexts_with_nonconstant_return": 3,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.09999999999999999,
+            0.8999999999999998
+          ],
+          "pair_concordance_percentile_95": [
+            0.5,
+            0.9
+          ]
+        },
+        "informative_action_pairs": 30,
+        "mean_within_context_spearman": 0.3999999999999999,
+        "pairwise_concordance": 0.7
+      },
+      "long_q_delivery": {
+        "contexts": 3,
+        "contexts_with_nonconstant_return": 3,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.15389675281277312,
+            0.6999999999999998
+          ],
+          "pair_concordance_percentile_95": [
+            0.4444444444444444,
+            0.8
+          ]
+        },
+        "informative_action_pairs": 29,
+        "mean_within_context_spearman": 0.3153677490624089,
+        "pairwise_concordance": 0.6551724137931034
+      },
+      "long_q_shutdown": {
+        "contexts": 3,
+        "contexts_with_nonconstant_return": 2,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            -0.6708203932499369,
+            -0.19999999999999998
+          ],
+          "pair_concordance_percentile_95": [
+            0.14285714285714285,
+            0.4
+          ]
+        },
+        "informative_action_pairs": 17,
+        "mean_within_context_spearman": -0.4354101966249684,
+        "pairwise_concordance": 0.29411764705882354
+      },
+      "one_step_collision": {
+        "contexts": 3,
+        "contexts_with_nonconstant_return": 3,
+        "episode_cluster_bootstrap_5000": {
+          "mean_spearman_percentile_95": [
+            0.6,
+            0.9999999999999999
+          ],
+          "pair_concordance_percentile_95": [
+            0.7,
+            1.0
+          ]
+        },
+        "informative_action_pairs": 30,
+        "mean_within_context_spearman": 0.7666666666666666,
+        "pairwise_concordance": 0.8333333333333334
+      }
+    }
+  },
+  "status": "unregistered branch diagnostic; Q never selected any participant action"
+}

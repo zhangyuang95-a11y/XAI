@@ -144,9 +144,17 @@ def _asset(path: str, expected: str, release_id: str = RELEASE_ID) -> None:
         raise ReleaseAssetUnavailable("release_asset_hash_mismatch")
 
 
+def _catalog_section(catalog: dict, name: str) -> dict:
+    """Treat a malformed nested catalog section as an unavailable release."""
+    section = catalog.get(name)
+    if not isinstance(section, dict):
+        raise ReleaseAssetUnavailable("release_catalog_invalid")
+    return section
+
+
 def runtime_config(domain: str, release_id: str = RELEASE_ID) -> Path:
     """Read a frozen physical scenario config only from its verified package."""
-    item = (_catalog(release_id).get("runtime_configs") or {}).get(domain)
+    item = _catalog_section(_catalog(release_id), "runtime_configs").get(domain)
     if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
         raise ReleaseAssetUnavailable("release_runtime_config_missing")
     if domain == "pong" and item["sha256"] != PONG_V5_CONFIG_SHA256:
@@ -161,7 +169,7 @@ def policy_artifacts(domain: str) -> dict:
         raise ReleaseAssetUnavailable("release_domain_unavailable")
     catalog = _catalog()
     runtime_config(domain)
-    entries = (catalog.get("policies") or {}).get(domain)
+    entries = _catalog_section(catalog, "policies").get(domain)
     if not isinstance(entries, dict) or set(entries) != {"raw", "regularized"}:
         raise ReleaseAssetUnavailable("release_policy_pair_incomplete")
     for variant, entry in entries.items():
@@ -174,11 +182,18 @@ def policy_artifacts(domain: str) -> dict:
                                    ("acceptance_path", "acceptance_sha256")):
             _asset(entry.get(path_key), entry.get(hash_key))
         paths = entry.get("program_paths")
-        if not isinstance(paths, list) or len(paths) != (2 if variant == "regularized" else 0):
+        if (not isinstance(paths, list)
+                or len(paths) != (2 if variant == "regularized" else 0)
+                or any(not isinstance(path, str) for path in paths)):
+            raise ReleaseAssetUnavailable("release_role_programs_incomplete")
+        program_hashes = entry.get("program_sha256")
+        expected_keys = (set(paths) if domain == "pong" else {"human", "ai"})
+        if (not isinstance(program_hashes, dict)
+                or set(program_hashes) != (expected_keys if variant == "regularized" else set())):
             raise ReleaseAssetUnavailable("release_role_programs_incomplete")
         for role, path in zip(("human", "ai"), paths):
             key = path if domain == "pong" else role
-            _asset(path, (entry.get("program_sha256") or {}).get(key))
+            _asset(path, program_hashes[key])
         roles = entry.get("role_sha256")
         if (not isinstance(roles, dict) or set(roles) != {"human", "ai"}
                 or any(not isinstance(value, str) or len(value) != 64
@@ -197,10 +212,11 @@ def warehouse_policy_artifacts(release_id: str = RELEASE_ID) -> dict:
 
     spec = warehouse_release_spec(release_id)
     catalog = _catalog(release_id)
-    if (catalog.get("warehouse", {}).get("status") != "accepted"
-            or catalog.get("warehouse", {}).get("policy_ids") != spec.policy_ids):
+    warehouse = _catalog_section(catalog, "warehouse")
+    if (warehouse.get("status") != "accepted"
+            or warehouse.get("policy_ids") != spec.policy_ids):
         raise ReleaseAssetUnavailable("warehouse_release_pending")
-    entries = (catalog.get("policies") or {}).get("warehouse")
+    entries = _catalog_section(catalog, "policies").get("warehouse")
     if not isinstance(entries, dict) or set(entries) != {"raw", "regularized"}:
         raise ReleaseAssetUnavailable("warehouse_policy_pair_incomplete")
     for variant, entry in entries.items():
@@ -259,7 +275,7 @@ def _warehouse_evidence_snapshot(release_id: str = RELEASE_ID, *,
 
     catalog, catalog_digest = _catalog_with_digest(
         release_id, catalog_path=catalog_path)
-    section = catalog.get("warehouse") or {}
+    section = _catalog_section(catalog, "warehouse")
     if section.get("status") != "accepted":
         raise ReleaseAssetUnavailable("warehouse_release_pending")
     budget = section.get("locked_budget")

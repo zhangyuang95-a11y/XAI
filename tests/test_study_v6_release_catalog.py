@@ -203,6 +203,47 @@ def test_warehouse_catalog_rejects_development_paths_even_with_correct_hash(monk
         warehouse_policy_artifacts()
 
 
+@pytest.mark.parametrize("section", (None, True, ["wrong shape"]))
+def test_malformed_nested_release_sections_fail_closed(monkeypatch, section):
+    import study_v3.release_catalog as catalog_module
+
+    monkeypatch.setattr(catalog_module, "_catalog", lambda release_id=RELEASE_ID: {
+        "warehouse": section,
+        "policies": section,
+        "runtime_configs": section,
+    })
+    with pytest.raises(ReleaseAssetUnavailable, match="release_catalog_invalid"):
+        warehouse_policy_artifacts()
+    with pytest.raises(ReleaseAssetUnavailable, match="release_catalog_invalid"):
+        runtime_config("pong")
+    monkeypatch.setattr(catalog_module, "runtime_config", lambda domain: None)
+    with pytest.raises(ReleaseAssetUnavailable, match="release_catalog_invalid"):
+        policy_artifacts("pong")
+
+
+def test_malformed_program_hash_index_rejects_v5_catalog(monkeypatch):
+    import study_v3.release_catalog as catalog_module
+
+    original = catalog_module._catalog()
+    corrupted = json.loads(json.dumps(original))
+    corrupted["policies"]["pong"]["regularized"]["program_sha256"] = ["wrong shape"]
+    monkeypatch.setattr(catalog_module, "_catalog", lambda release_id=RELEASE_ID: corrupted)
+    with pytest.raises(ReleaseAssetUnavailable, match="release_role_programs_incomplete"):
+        policy_artifacts("pong")
+
+
+def test_warehouse_policy_index_must_be_an_object(monkeypatch):
+    import study_v3.release_catalog as catalog_module
+
+    monkeypatch.setattr(catalog_module, "_catalog", lambda release_id=RELEASE_ID: {
+        "warehouse": {"status": "accepted", "policy_ids":
+                      warehouse_release_spec(release_id).policy_ids},
+        "policies": ["wrong shape"],
+    })
+    with pytest.raises(ReleaseAssetUnavailable, match="release_catalog_invalid"):
+        warehouse_policy_artifacts()
+
+
 def test_lightweight_warehouse_source_closure_matches_training_contract():
     from backend.training.warehouse_v6_runner import source_closure_sha256
 

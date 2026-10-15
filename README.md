@@ -41,6 +41,13 @@ implementations. New v6 runs use `warehouse_v6_runner.py` with one explicit run
 specification; their outputs are isolated under a candidate and run ID. Do not
 add the ignored `output/` experiment tree wholesale to Git.
 
+The root `run.py`, `run_formal_ui.py`, and `train_rl.py` launch the earlier
+single-domain Warehouse workflow. They remain for historical compatibility and
+are not v6 study or training entrypoints. The archived pure-NN v1 Actor at
+`output/deployment/warehouse_pure_nn_v1_actor.npz` is pinned by the old config
+for legacy reading; it is not an accepted v6 policy. See the
+[entrypoint map](scripts/README.md) for current commands and historical scripts.
+
 ## Local verification
 
 ```bash

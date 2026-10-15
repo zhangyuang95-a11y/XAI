@@ -1,4 +1,7 @@
-"""Launch the development UI for the two-robot collaborative experiment."""
+"""Launch the historical single-domain Warehouse development UI.
+
+The three-domain v6 study is served by ``python -m study_v3.server``.
+"""
 
 from __future__ import annotations
 

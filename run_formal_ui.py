@@ -1,4 +1,7 @@
-"""Launch the formal pilot/confirmatory Warehouse experiment UI."""
+"""Launch the historical single-domain Warehouse formal UI.
+
+This compatibility entrypoint does not enroll the three-domain v6 study.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,7 @@
-"""Run the recommended two-robot MAPPO + RCPD training configuration."""
+"""Reproduce the historical shared-Actor Warehouse MAPPO + RCPD training.
+
+New v6 paired dual-Actor runs start from ``experiments.warehouse.admission``.
+"""
 
 from __future__ import annotations
 
@@ -92,7 +95,7 @@ def main() -> None:
             ]
         )
         print(
-            "[正式训练] 从零训练双机器人共享配送策略；"
+            "[历史 Warehouse 训练] 从零训练双机器人共享配送策略；"
             f"设备={device}，episodes=2800，输出={artifacts.root}。"
         )
 

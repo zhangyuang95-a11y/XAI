@@ -639,6 +639,10 @@ def audit_frozen_program(program: WarehouseV6Program,
     prior = program.report["split_episode_ids"]
     if any(ids & set(used) for used in prior.values()):
         raise ValueError("Warehouse independent audit reused fitting episodes")
+    scenario_ids = {str(row.get("base_seed", row["episode"])) for row in rows}
+    prior_scenarios = program.report["split_scenario_seed_ids"]
+    if any(scenario_ids & set(used) for used in prior_scenarios.values()):
+        raise ValueError("Warehouse independent audit reused fitting scenario seeds")
     role_actor = actor.roles[program.role]
     feedback = _metrics(program, role_actor, rows,
                         set(program.feedback_leaves), "feedback")

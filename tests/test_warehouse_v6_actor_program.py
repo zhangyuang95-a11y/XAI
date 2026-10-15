@@ -101,6 +101,11 @@ def test_program_uses_full_masked_nn_and_rejects_raw_illegal_actions():
     assert program.lookup(sample)["margin_certified"] is False
     with pytest.raises(ValueError, match="reused fitting episodes"):
         audit_frozen_program(program, actor, validation)
+    repeated_scenario = [{**row, "episode": f"audit-{row['episode']}",
+                          "base_seed": fit[0]["base_seed"]}
+                         for row in validation]
+    with pytest.raises(ValueError, match="reused fitting scenario seeds"):
+        audit_frozen_program(program, actor, repeated_scenario)
     illegal = int(np.flatnonzero(sample["mask"] <= 0.5)[0])
     changed = program.leaf_logits.copy()
     changed[leaf] = -20

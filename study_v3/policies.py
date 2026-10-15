@@ -11,7 +11,7 @@ from threading import RLock
 from . import RELEASE_ID
 from .registry import MODULES, engine
 from .release_catalog import (UPSTREAM_RELEASE_ID, ReleaseAssetUnavailable,
-                              warehouse_evidence, warehouse_policy_artifacts,
+                              warehouse_evidence_snapshot, warehouse_policy_artifacts,
                               warehouse_evidence_revision,
                               warehouse_release_spec,
                               warehouse_runtime_source_closure_sha256)
@@ -702,14 +702,14 @@ def _accepted_warehouse_v6(entry: dict, binding: dict) -> bool:
         entries = warehouse_policy_artifacts()
         if entry != entries.get(binding['variant']):
             return False
-        evidence = warehouse_evidence()
-        revision = warehouse_evidence_revision()
+        evidence, revision = warehouse_evidence_snapshot()
         identity = sha256(json.dumps({'entry': entry, 'binding': binding},
                                     sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         cache_key = (revision, source_closure, identity)
         with _WAREHOUSE_ACCEPTANCE_CACHE_LOCK:
-            if cache_key in _WAREHOUSE_ACCEPTANCE_CACHE:
-                return True
+            cached = cache_key in _WAREHOUSE_ACCEPTANCE_CACHE
+        if cached:
+            return warehouse_evidence_revision() == revision
         acceptance = json.loads(_path(entry['acceptance_path']).read_text())
         if acceptance.get('source_closure_sha256') != source_closure:
             return False
@@ -717,6 +717,8 @@ def _accepted_warehouse_v6(entry: dict, binding: dict) -> bool:
         passed = validate_acceptance(
             acceptance, release_id=RELEASE_ID,
             entries=entries, evidence=evidence, repository_root=ROOT)
+        if warehouse_evidence_revision() != revision:
+            return False
         if passed:
             with _WAREHOUSE_ACCEPTANCE_CACHE_LOCK:
                 _WAREHOUSE_ACCEPTANCE_CACHE.add(cache_key)

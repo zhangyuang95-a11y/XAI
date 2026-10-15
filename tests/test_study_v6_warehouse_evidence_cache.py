@@ -4,6 +4,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
+from copy import deepcopy
 
 import pytest
 
@@ -161,3 +162,77 @@ def test_acceptance_proof_is_reused_only_for_unchanged_evidence(tmp_path, monkey
     (tmp_path / missing["path"]).unlink()
     assert not policies._accepted_warehouse_v6(entry, binding)
     assert len(calls) == 1
+
+
+def test_catalog_replacement_during_acceptance_cannot_cache_old_proof(
+        tmp_path, monkeypatch):
+    from experiments.warehouse import acceptance as verifier
+    from study_v3 import policies
+
+    monkeypatch.setattr(catalog, "ROOT", tmp_path)
+    catalog_path = (tmp_path / "releases" / catalog.RELEASE_ID / "catalog.json")
+    monkeypatch.setattr(catalog, "CATALOG_PATH", catalog_path)
+    monkeypatch.setattr(catalog, "_WAREHOUSE_EVIDENCE_CACHE", {})
+    monkeypatch.setattr(policies, "ROOT", tmp_path)
+    monkeypatch.setattr(policies, "_WAREHOUSE_ACCEPTANCE_CACHE", set())
+    monkeypatch.setattr(policies, "warehouse_runtime_source_closure_sha256",
+                        lambda: "7" * 64)
+    package = _synthetic_package(tmp_path)
+    entry = package["entries"]["regularized"]
+    binding = {"domain": "warehouse", "variant": "regularized",
+               "policy_id": entry["policy_id"],
+               "actor_sha256": entry["actor_sha256"],
+               "human_actor_sha256": entry["role_sha256"]["human"],
+               "ai_actor_sha256": entry["role_sha256"]["ai"],
+               "actor_model_version": entry["model_version"],
+               "feature_schema_sha256": entry["feature_schema_sha256"]}
+
+    changed = deepcopy(json.loads(catalog_path.read_text()))
+    payload = b"semantically-invalid-new-budget-receipt"
+    digest = sha256(payload).hexdigest()
+    relative = (f"releases/{catalog.RELEASE_ID}/assets/{digest}/"
+                "budget.lock.json")
+    target = tmp_path / relative
+    target.parent.mkdir(parents=True)
+    target.write_bytes(payload)
+    changed["warehouse"]["evidence"]["phase_receipts"]["budget.lock.json"] = {
+        "path": relative, "sha256": digest}
+    old_hash = package["evidence"]["phase_receipts"]["budget.lock.json"]["sha256"]
+    seen = []
+
+    def validating(_acceptance, *, evidence, **_kwargs):
+        observed = evidence["phase_receipts"]["budget.lock.json"]["sha256"]
+        seen.append(observed)
+        if observed == old_hash:
+            catalog_path.write_text(json.dumps(changed))
+            return True
+        return False
+
+    monkeypatch.setattr(verifier, "validate_acceptance", validating)
+    assert not policies._accepted_warehouse_v6(entry, binding)
+    assert not policies._accepted_warehouse_v6(entry, binding)
+    assert seen == [old_hash, digest]
+    assert policies._WAREHOUSE_ACCEPTANCE_CACHE == set()
+
+
+def test_catalog_replacement_during_evidence_snapshot_fails_closed(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(catalog, "ROOT", tmp_path)
+    catalog_path = (tmp_path / "releases" / catalog.RELEASE_ID / "catalog.json")
+    monkeypatch.setattr(catalog, "CATALOG_PATH", catalog_path)
+    monkeypatch.setattr(catalog, "_WAREHOUSE_EVIDENCE_CACHE", {})
+    _synthetic_package(tmp_path)
+    original_revision = catalog._warehouse_evidence_revision
+
+    def replace_before_revision(release_id, evidence):
+        changed = json.loads(catalog_path.read_text())
+        changed["warehouse"]["candidate_id"] = "different-candidate"
+        catalog_path.write_text(json.dumps(changed))
+        return original_revision(release_id, evidence)
+
+    monkeypatch.setattr(catalog, "_warehouse_evidence_revision",
+                        replace_before_revision)
+    with pytest.raises(catalog.ReleaseAssetUnavailable,
+                       match="warehouse_catalog_changed_during_validation"):
+        catalog.warehouse_evidence_snapshot()
+    assert catalog._WAREHOUSE_EVIDENCE_CACHE == {}

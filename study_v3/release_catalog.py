@@ -114,10 +114,16 @@ def warehouse_runtime_source_closure_sha256() -> str:
 
 def _catalog(release_id: str = RELEASE_ID, *,
              catalog_path: Path | None = None) -> dict:
+    return _catalog_with_digest(release_id, catalog_path=catalog_path)[0]
+
+
+def _catalog_with_digest(release_id: str = RELEASE_ID, *,
+                         catalog_path: Path | None = None) -> tuple[dict, str]:
     spec = warehouse_release_spec(release_id)
     path = catalog_path if catalog_path is not None else spec.catalog_path
     try:
-        value = json.loads(path.read_text())
+        raw = path.read_bytes()
+        value = json.loads(raw)
     except (OSError, ValueError) as exc:
         raise ReleaseAssetUnavailable("release_catalog_unavailable") from exc
     if (not isinstance(value, dict)
@@ -125,7 +131,7 @@ def _catalog(release_id: str = RELEASE_ID, *,
             or value.get("release_id") != release_id
             or value.get("upstream_release_id") != UPSTREAM_RELEASE_ID):
         raise ReleaseAssetUnavailable("release_catalog_invalid")
-    return value
+    return value, sha256(raw).hexdigest()
 
 
 def _asset(path: str, expected: str, release_id: str = RELEASE_ID) -> None:
@@ -225,10 +231,31 @@ def warehouse_policy_artifacts(release_id: str = RELEASE_ID) -> dict:
 
 def warehouse_evidence(release_id: str = RELEASE_ID, *,
                        catalog_path: Path | None = None) -> dict:
+    """Return a verified copy of the release evidence."""
+    return _warehouse_evidence_snapshot(release_id, catalog_path=catalog_path)[0]
+
+
+def warehouse_evidence_snapshot(release_id: str = RELEASE_ID) -> tuple[dict, tuple]:
+    """Return evidence and its revision from one verified cache entry.
+
+    Consumers must recheck the revision after using the evidence before they
+    cache a semantic acceptance decision. Separate evidence and revision
+    reads can otherwise bind an old valid proof to a newer catalog.
+    """
+    evidence, revision = _warehouse_evidence_snapshot(release_id)
+    if revision is None:
+        raise ReleaseAssetUnavailable("warehouse_evidence_revision_missing")
+    return evidence, revision
+
+
+def _warehouse_evidence_snapshot(release_id: str = RELEASE_ID, *,
+                                 catalog_path: Path | None = None
+                                 ) -> tuple[dict, tuple | None]:
     """Verify every original Warehouse v6 admission receipt in the package."""
     from experiments.warehouse.protocol import BUDGETS, DEVELOPMENT_PAIR_SEEDS
 
-    catalog = _catalog(release_id, catalog_path=catalog_path)
+    catalog, catalog_digest = _catalog_with_digest(
+        release_id, catalog_path=catalog_path)
     section = catalog.get("warehouse") or {}
     if section.get("status") != "accepted":
         raise ReleaseAssetUnavailable("warehouse_release_pending")
@@ -259,10 +286,12 @@ def warehouse_evidence(release_id: str = RELEASE_ID, *,
     revision = None
     if catalog_path is None:
         revision = _warehouse_evidence_revision(release_id, evidence)
+        if revision[0] != catalog_digest:
+            raise ReleaseAssetUnavailable("warehouse_catalog_changed_during_validation")
         with _WAREHOUSE_EVIDENCE_CACHE_LOCK:
             cached = _WAREHOUSE_EVIDENCE_CACHE.get(release_id)
             if cached is not None and cached[0] == revision:
-                return deepcopy(cached[1])
+                return deepcopy(cached[1]), cached[0]
     for category, keys in expected.items():
         rows = evidence[category]
         if not isinstance(rows, dict) or set(rows) != keys:
@@ -307,14 +336,12 @@ def warehouse_evidence(release_id: str = RELEASE_ID, *,
             raise ReleaseAssetUnavailable("warehouse_evidence_changed_during_validation")
         with _WAREHOUSE_EVIDENCE_CACHE_LOCK:
             _WAREHOUSE_EVIDENCE_CACHE[release_id] = (revision, deepcopy(evidence))
-    return deepcopy(evidence)
+    return deepcopy(evidence), revision
 
 
 def warehouse_evidence_revision(release_id: str = RELEASE_ID) -> tuple:
     """Return the verified catalog and file identity for the admission cache."""
-    warehouse_evidence(release_id)
-    with _WAREHOUSE_EVIDENCE_CACHE_LOCK:
-        return _WAREHOUSE_EVIDENCE_CACHE[release_id][0]
+    return warehouse_evidence_snapshot(release_id)[1]
 
 
 def _warehouse_evidence_revision(release_id: str, evidence: dict) -> tuple:

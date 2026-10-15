@@ -189,7 +189,8 @@ def test_a_b_groups_share_the_same_frozen_actor(store, domain):
     assert a.view['ai_actor_sha256'] == b.view['ai_actor_sha256']
     a.finish_demo()
     b.finish_demo()
-    seed = scenario_config(domain).get('heldout_seeds', scenario_config(domain).get('held_out_seeds'))[0]
+    # Binding parity needs a common scene, not a replay of an accepted holdout.
+    seed = 9_876_541
     left = engine(domain).initial_state(seed, 1, a.view['policy_id'])
     right = engine(domain).initial_state(seed, 1, b.view['policy_id'])
     assert left == right
@@ -480,7 +481,8 @@ def test_a_b_policy_binding_gives_same_ai_decision_on_same_scene(store, domain):
     a, b = Flow(store, domain, "A"), Flow(store, domain, "B")
     assert a.view['policy_id'] == b.view['policy_id']
     assert a.view['actor_sha256'] == b.view['actor_sha256']
-    seed = scenario_config(domain).get('heldout_seeds', scenario_config(domain).get('held_out_seeds'))[0]
+    # This synthetic binding test must not consume the historical holdout.
+    seed = 9_876_542
     left = engine(domain).initial_state(seed, 2, a.view['policy_id'])
     right = engine(domain).initial_state(seed, 2, b.view['policy_id'])
     assert left == right

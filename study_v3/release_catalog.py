@@ -280,6 +280,7 @@ def _warehouse_evidence_snapshot(release_id: str = RELEASE_ID, *,
                                         if value <= budget},
         "development_pair_reports": {str(value) for value in BUDGETS
                                      if value <= budget},
+        "program_traces": {"development", "preaudit", "final_audit"},
     }
     if set(evidence) != set(expected):
         raise ReleaseAssetUnavailable("warehouse_evidence_incomplete")
@@ -296,7 +297,31 @@ def _warehouse_evidence_snapshot(release_id: str = RELEASE_ID, *,
         rows = evidence[category]
         if not isinstance(rows, dict) or set(rows) != keys:
             raise ReleaseAssetUnavailable("warehouse_evidence_incomplete")
-        if category in ("development_receipts", "development_training_assets",
+        if category == "program_traces":
+            if (not all(isinstance(rows[name], dict) for name in rows)
+                    or set(rows["development"]) != set(map(str, (
+                    value for value in BUDGETS if value <= budget)))
+                    or any(set(rows[name]) != {"robot_1", "robot_2"}
+                           for name in ("preaudit", "final_audit"))):
+                raise ReleaseAssetUnavailable("warehouse_program_traces_incomplete")
+            for name in ("preaudit", "final_audit"):
+                for item in rows[name].values():
+                    if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+                        raise ReleaseAssetUnavailable("warehouse_program_traces_incomplete")
+                    _asset(item["path"], item["sha256"], release_id)
+            for budget_key, by_seed in rows["development"].items():
+                if (not isinstance(by_seed, dict)
+                        or set(by_seed) != set(map(str, DEVELOPMENT_PAIR_SEEDS))):
+                    raise ReleaseAssetUnavailable("warehouse_program_traces_incomplete")
+                for by_role in by_seed.values():
+                    if (not isinstance(by_role, dict)
+                            or set(by_role) not in (set(), {"robot_1", "robot_2"})):
+                        raise ReleaseAssetUnavailable("warehouse_program_traces_incomplete")
+                    for item in by_role.values():
+                        if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+                            raise ReleaseAssetUnavailable("warehouse_program_traces_incomplete")
+                        _asset(item["path"], item["sha256"], release_id)
+        elif category in ("development_receipts", "development_training_assets",
                         "development_pair_reports"):
             for budget_key, budget_rows in rows.items():
                 if (not isinstance(budget_rows, dict) or

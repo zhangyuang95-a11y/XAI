@@ -56,11 +56,13 @@ def bound_v6(tmp_path, monkeypatch):
 
     monkeypatch.setattr(warehouse, "ROOT", tmp_path)
     monkeypatch.setattr(policies, "ROOT", tmp_path)
-    monkeypatch.setattr(warehouse, "policy_artifacts_v6", lambda: entries)
+    monkeypatch.setattr(warehouse, "policy_artifacts_v6", lambda release_id=warehouse.V6_RELEASE_ID: entries)
     original_catalog_entry = policies._catalog_entry
-    monkeypatch.setattr(policies, "_catalog_entry", lambda domain, variant:
+    monkeypatch.setattr(policies, "_catalog_entry", lambda domain, variant,
+                        release_id=warehouse.V6_RELEASE_ID:
                         entries[variant] if domain == "warehouse"
-                        else original_catalog_entry(domain, variant))
+                        else original_catalog_entry(domain, variant,
+                                                    release_id=release_id))
 
     def verify_fixture(policy_id):
         if policy_id not in warehouse._V6_POLICY_IDS:

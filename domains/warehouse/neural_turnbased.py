@@ -7,6 +7,7 @@ from functools import lru_cache
 from hashlib import sha256
 import json
 from pathlib import Path
+import re
 
 from backend.training.warehouse_selective_v5 import SelectiveLeafProgram as AxisLeafProgram
 from backend.training.warehouse_sparse_v5 import (
@@ -54,6 +55,29 @@ _V6_POLICY_IDS = {"warehouse-regularized-v6": "regularized",
                   "warehouse-raw-v6": "raw"}
 V6_RELEASE_ID = "policylens-three-domain-20261016.v6.0"
 V6_CATALOG_PATH = ROOT / "releases" / V6_RELEASE_ID / "catalog.json"
+_V6_POLICY_PATTERN = re.compile(
+    r"warehouse-(raw|regularized)-v6(?:\.([1-9][0-9]*))?\Z")
+
+
+def _v6_identity(policy_id: str | None) -> tuple[str, str] | None:
+    """Resolve an explicit v6.x policy to its unique versioned release."""
+    if not isinstance(policy_id, str):
+        return None
+    matched = _V6_POLICY_PATTERN.fullmatch(policy_id)
+    if matched is None:
+        return None
+    from study_v3.release_catalog import (
+        ReleaseAssetUnavailable, warehouse_release_spec)
+    variant, minor = matched.groups()
+    release_id = (V6_RELEASE_ID if minor is None else
+                  V6_RELEASE_ID.rsplit(".", 1)[0] + "." + minor)
+    try:
+        spec = warehouse_release_spec(release_id)
+    except (ReleaseAssetUnavailable, ValueError):
+        return None
+    if spec.policy_ids[variant] != policy_id:
+        raise ValueError("Warehouse v6 policy and release identity differ")
+    return variant, release_id
 
 
 def _v6_config():
@@ -120,8 +144,19 @@ def _config_for_policy(policy_id):
                 V5_CONFIG)
     if policy_id in _STRUCTURED_POLICY_IDS:
         return _structured_config()
-    if policy_id in _V6_POLICY_IDS:
-        return _v6_config()
+    v6 = _v6_identity(policy_id)
+    if v6 is not None:
+        config = _v6_config()
+        if v6[1] == V6_RELEASE_ID:
+            return config
+        # The physical scenario config is shared; the release and policy IDs
+        # are supplied by the versioned, content-addressed catalog.
+        from study_v3.release_catalog import warehouse_release_spec
+        spec = warehouse_release_spec(v6[1])
+        return {**config, "release_id": v6[1],
+                "variants": {variant: {**config["variants"][variant],
+                                       "policy_id": spec.policy_ids[variant]}
+                             for variant in ("raw", "regularized")}}
     raise ValueError("unknown Warehouse policy_id")
 
 
@@ -130,8 +165,9 @@ def _variant_for_policy(policy_id):
         return _V5_POLICY_IDS[policy_id]
     if policy_id in _STRUCTURED_POLICY_IDS:
         return _STRUCTURED_POLICY_IDS[policy_id]
-    if policy_id in _V6_POLICY_IDS:
-        return _V6_POLICY_IDS[policy_id]
+    v6 = _v6_identity(policy_id)
+    if v6 is not None:
+        return v6[0]
     raise ValueError("unknown Warehouse policy_id")
 
 
@@ -277,7 +313,7 @@ def _policy_id(policy_id):
         return LEGACY_POLICY_ID
     if (policy_id not in _V5_POLICY_IDS and
             policy_id not in _STRUCTURED_POLICY_IDS and
-            policy_id not in _V6_POLICY_IDS and
+            _v6_identity(policy_id) is None and
             policy_id != LEGACY_POLICY_ID):
         raise ValueError("unknown Warehouse policy_id")
     return policy_id
@@ -286,17 +322,21 @@ def _policy_id(policy_id):
 def _verify_v5_artifact(policy_id):
     if policy_id == LEGACY_POLICY_ID:
         return
-    if policy_id in _V6_POLICY_IDS:
-        variant = _V6_POLICY_IDS[policy_id]
-        entry = policy_artifacts_v6()[variant]
+    v6 = _v6_identity(policy_id)
+    if v6 is not None:
+        variant, release_id = v6
+        entry = policy_artifacts_v6(release_id)[variant]
         if not entry["readiness"]:
             raise RuntimeError("Warehouse v6 accepted policy binding is unavailable")
         from study_v3 import policies as study_policies
         try:
-            catalog_entry = study_policies._catalog_entry(DOMAIN, variant)
+            catalog_entry = study_policies._catalog_entry(
+                DOMAIN, variant, release_id=release_id)
             binding = study_policies.binding_for_group(
-                DOMAIN, "C" if variant == "raw" else "A")
-            if not study_policies._accepted(catalog_entry, binding):
+                DOMAIN, "C" if variant == "raw" else "A",
+                release_id=release_id)
+            if not study_policies._accepted(
+                    catalog_entry, binding, release_id=release_id):
                 raise RuntimeError("Warehouse v6 model acceptance gate failed")
         except (AttributeError, KeyError, TypeError, ValueError, OSError,
                 RuntimeError, study_policies.PolicyUnavailable) as exc:
@@ -349,8 +389,9 @@ def _actor(policy_id=None):
         if CONFIG["model_version"] != MODEL_VERSION or CONFIG["observation_version"] != OBSERVATION_VERSION:
             raise RuntimeError("Warehouse pure NN configuration mismatch")
         return FrozenPureNN.load(ROOT / CONFIG["actor_path"], expected_sha256=CONFIG["actor_sha256"])
-    if policy_id in _V6_POLICY_IDS:
-        entry = policy_artifacts_v6()[_V6_POLICY_IDS[policy_id]]
+    v6 = _v6_identity(policy_id)
+    if v6 is not None:
+        entry = policy_artifacts_v6(v6[1])[v6[0]]
         if not entry["readiness"]:
             raise RuntimeError("Warehouse v6 Actor is not accepted")
         return FrozenWarehouseV6Actor.load(
@@ -383,8 +424,9 @@ def _snapshot(env):
 def _restore(state):
     policy_id = _policy_id(state.get("policy_id"))
     _verify_v5_artifact(policy_id)
-    if policy_id in _V6_POLICY_IDS and (
-            state.get("release_id") != V6_RELEASE_ID or
+    v6 = _v6_identity(policy_id)
+    if v6 is not None and (
+            state.get("release_id") != v6[1] or
             state.get("feature_schema_sha256") != V6_FEATURE_SCHEMA_SHA256):
         raise RuntimeError("Warehouse v6 state release or feature binding mismatch")
     expected_version = _config_for_policy(policy_id)["version"]
@@ -434,8 +476,9 @@ def _state(env, task, seed, events=None, last_actions=None, charges=0, policy_id
         result.update(policy_id=policy_id, actor_sha256=actor.artifact_sha256,
                       role_sha256={"human": actor.role_sha256["robot_1"],
                                    "ai": actor.role_sha256["robot_2"]})
-    if policy_id in _V6_POLICY_IDS:
-        result.update(release_id=V6_RELEASE_ID,
+    v6 = _v6_identity(policy_id)
+    if v6 is not None:
+        result.update(release_id=v6[1],
                       feature_schema_sha256=V6_FEATURE_SCHEMA_SHA256)
     return result
 
@@ -454,9 +497,11 @@ def initial_state(seed: int, task: int, policy_id: str | None = None,
     if task not in (1, 2, 3):
         raise ValueError("task must be 1, 2, or 3")
     policy_id = _policy_id(policy_id)
-    if policy_id in _V6_POLICY_IDS and release_id not in (None, V6_RELEASE_ID):
+    v6 = _v6_identity(policy_id)
+    if v6 is not None and release_id not in (None, v6[1]):
         raise RuntimeError("Warehouse v6 release_id mismatch")
-    if policy_id not in _V6_POLICY_IDS and release_id == V6_RELEASE_ID:
+    if v6 is None and isinstance(release_id, str) and release_id.startswith(
+            V6_RELEASE_ID.rsplit(".", 1)[0] + "."):
         raise RuntimeError("Warehouse v6 requires a v6 policy_id")
     _verify_v5_artifact(policy_id)
     _actor(policy_id)
@@ -639,7 +684,8 @@ def facts(state, decision=None):
 def audited_program_evidence(state):
     """Read-only local pattern evidence; the program never selects the AI action."""
     policy_id = state.get("policy_id")
-    if policy_id == "warehouse-regularized-v6":
+    v6 = _v6_identity(policy_id)
+    if v6 is not None and v6[0] == "regularized":
         return _audited_v6_program_evidence(state)
     if (policy_id not in ("warehouse-regularized-v5",
                           "warehouse-structured-regularized-v54") or
@@ -765,10 +811,14 @@ def _audited_v6_program_evidence(state):
                 or audit.get("episode_ids") != episode_ids
                 or audit.get("sample_count", 0) < 1000
                 or audit.get("explanation_eligible") is not True
-                or audit.get("max_depth") != 4
-                or audit.get("leaf_count") != 16
-                or audit.get("max_features_per_node") != 3
+                or type(audit.get("max_depth")) is not int
+                or not 0 <= audit["max_depth"] <= 5
+                or type(audit.get("leaf_count")) is not int
+                or not 1 <= audit["leaf_count"] <= 16
+                or type(audit.get("max_features_per_node")) is not int
+                or not 1 <= audit["max_features_per_node"] <= 3
                 or metric.get("coverage", 0) < 0.20
+                or metric.get("actionable_coverage", 0) < 0.20
                 or metric.get("agreement", 0) < 0.90
                 or metric.get("kl") is None or metric["kl"] > 0.35
                 or metric.get("illegal_count") != 0):
@@ -780,14 +830,17 @@ def _audited_v6_program_evidence(state):
                                    actor_action=selected, purpose="explanation")
         if evidence is None:
             return None
-        agreement, coverage = float(metric["agreement"]), float(metric["coverage"])
+        agreement = float(metric["agreement"])
+        actionable = float(metric["actionable_coverage"])
         return {
             "en": (f"The independently audited program also selected {selected.lower()} here. "
                    f"Across eligible audit states it agreed with this frozen AI {agreement:.1%} "
-                   f"of the time and covered {coverage:.1%} of states. "
+                   f"of the time; its action matched the sampled NN action on "
+                   f"{actionable:.1%} of all audit states. "
                    "This pattern does not establish a unique motive."),
             "zh": (f"独立审计的程序在此状态也选择了{selected.lower()}。"
-                   f"合格审计状态上的动作一致率为{agreement:.1%}，覆盖率为{coverage:.1%}。"
+                   f"合格审计状态上的动作一致率为{agreement:.1%}；"
+                   f"在全部审计状态中，程序动作与采样NN动作一致的覆盖率为{actionable:.1%}。"
                    "这种模式不能证明唯一动机。"),
             "program_sha256": program_sha, "eligible": True,
             "path": evidence["path"], "leaf_id": evidence["leaf_id"],
@@ -803,7 +856,7 @@ def human_advisor(state):
         return "wait"
     env = _restore(state)
     if (state.get("policy_id") in _V5_POLICY_IDS or
-            state.get("policy_id") in _V6_POLICY_IDS or
+            _v6_identity(state.get("policy_id")) is not None or
             state.get("policy_id") in _STRUCTURED_POLICY_IDS):
         _, actions, _ = _selection(env, state["scenario_seed"], state["policy_id"])
         suggested = actions["robot_1"]
@@ -834,9 +887,11 @@ def human_advisor(state):
 def demonstration(policy_id=None, release_id: str | None = None):
     """A real AI–AI rollout from the same frozen policy used in human tasks."""
     policy_id = _policy_id(policy_id)
-    if policy_id in _V6_POLICY_IDS and release_id not in (None, V6_RELEASE_ID):
+    v6 = _v6_identity(policy_id)
+    if v6 is not None and release_id not in (None, v6[1]):
         raise RuntimeError("Warehouse v6 demonstration release_id mismatch")
-    if policy_id not in _V6_POLICY_IDS and release_id == V6_RELEASE_ID:
+    if v6 is None and isinstance(release_id, str) and release_id.startswith(
+            V6_RELEASE_ID.rsplit(".", 1)[0] + "."):
         raise RuntimeError("Warehouse v6 demonstration requires a v6 policy_id")
     _verify_v5_artifact(policy_id)
     actor = _actor(policy_id)
@@ -885,9 +940,9 @@ def _demonstration_cached(policy_id, actor_sha256):
     return {"frames": frames, "captions": captions,
             "provenance": {"kind": "pure_neural_ai_ai_rollout", "seed": seed,
                            "policy_id": policy_id, "actor_sha256": actor.artifact_sha256,
-                           **({"release_id": V6_RELEASE_ID,
+                           **({"release_id": _v6_identity(policy_id)[1],
                                "feature_schema_sha256": V6_FEATURE_SCHEMA_SHA256}
-                              if policy_id in _V6_POLICY_IDS else {}),
+                              if _v6_identity(policy_id) is not None else {}),
                            "role_sha256": ({"human": actor.role_sha256["robot_1"], "ai": actor.role_sha256["robot_2"]}
                                            if policy_id != LEGACY_POLICY_ID else {}),
                            "frame_count": len(frames)}}

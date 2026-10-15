@@ -191,6 +191,17 @@ def _audit_valid(audits: Mapping, actor, programs: Mapping,
         return False
     for role in p.ROLES:
         audit = audits[role]
+        trace_path = audit.get("trace_path") if isinstance(audit, Mapping) else None
+        if (not isinstance(trace_path, str) or not trace_path.endswith(".jsonl")
+                or type(audit.get("trace_row_count")) is not int
+                or audit["trace_row_count"] != audit.get("sample_count")
+                or not Path(trace_path).is_file()
+                or audit.get("trace_sha256") != _file_sha(trace_path)):
+            return False
+        raw_trace = Path(trace_path).read_bytes()
+        if (raw_trace.count(b"\n") != audit["trace_row_count"]
+                or not raw_trace.endswith(b"\n")):
+            return False
         if (not isinstance(audit, Mapping)
                 or audit.get("role") != role
                 or audit.get("actor_role_sha256") != actor.role_sha256[role]
@@ -279,9 +290,10 @@ class NativeBackend:
         from backend.training.warehouse_v6_runner import evaluate
         return evaluate(actor, seeds, action_seed_offset=action_seed_offset)
 
-    def audit_programs(self, actor, programs: Mapping, seeds: Sequence[int]) -> dict:
+    def audit_programs(self, actor, programs: Mapping, seeds: Sequence[int], *,
+                       trace_dir: str | Path | None = None) -> dict:
         from backend.training.warehouse_v6_runner import audit_programs
-        return audit_programs(actor, programs, seeds)
+        return audit_programs(actor, programs, seeds, trace_dir=trace_dir)
 
 
 class Admission:
@@ -354,16 +366,23 @@ class Admission:
                      pair_seed in p.DEVELOPMENT_PAIR_SEEDS else
                      p.FORMAL_SELECTION_SEEDS)
         return p.PairRunSpec(self.candidate_id, pair_seed, budget,
-                             str(self.output_root), checkpoint_seeds=selection)
+                             str(self.output_root), release_id=self.release_id,
+                             checkpoint_seeds=selection)
 
     def _train(self, pair_seed: int, budget: int) -> dict:
         spec = self._pair_spec(pair_seed, budget)
-        report = self.backend.train_pair(spec.to_mapping())
+        expected_spec = spec.to_mapping()
+        report = self.backend.train_pair(expected_spec)
         source = self.backend.source_closure_sha256()
         if (report.get("candidate_id") != self.candidate_id
+                or report.get("release_id") != self.release_id
                 or report.get("pair_seed") != pair_seed
                 or report.get("joint_steps") != budget
                 or report.get("checkpoint_seeds") != list(spec.checkpoint_seeds)
+                or report.get("final_program_fit_seed_schedule") !=
+                expected_spec["final_program_fit_seed_schedule"]
+                or report.get("final_program_fit_seed_schedule_sha256") !=
+                expected_spec["final_program_fit_seed_schedule_sha256"]
                 or not source or report.get("source_closure_sha256") != source
                 or any(row.get("source_closure_sha256") != source
                        for row in report.get("variants", {}).values())):
@@ -441,6 +460,13 @@ class Admission:
             lock = self._required("budget.lock.json")
             if lock.get("source_closure_sha256") != self.backend.source_closure_sha256():
                 raise RuntimeError("Warehouse development source closure changed after lock")
+            schedules = {str(seed): p.final_program_fit_seed_schedule(
+                self.release_id, seed)
+                for seed in (*p.DEVELOPMENT_PAIR_SEEDS, *p.FORMAL_PAIR_SEEDS)}
+            if (lock.get("final_program_fit_seed_schedule") != schedules
+                    or lock.get("final_program_fit_seed_schedule_sha256") !=
+                    _sha(schedules)):
+                raise RuntimeError("Warehouse final-program seed lock changed")
             return lock
         if self._path("development.failed.json").exists():
             return self._required("development.failed.json")
@@ -487,7 +513,9 @@ class Admission:
                             raise
                         programs, program_error = {}, str(exc)
                     audits = (self.backend.audit_programs(
-                        actor, programs, p.DEVELOPMENT_PROGRAM_AUDIT_SEEDS)
+                        actor, programs, p.DEVELOPMENT_PROGRAM_AUDIT_SEEDS,
+                        trace_dir=self.directory / "traces" /
+                        f"development.{budget}.{pair_seed}")
                         if programs else {})
                     facts = {
                         "pair_seed": pair_seed, "budget": budget,
@@ -548,9 +576,16 @@ class Admission:
             chosen = (proposed if proposed is not None and all(
                 row["passed"] for row in reports_by_budget[proposed]) else None)
             if chosen is not None:
+                final_program_schedules = {
+                    str(seed): p.final_program_fit_seed_schedule(
+                        self.release_id, seed)
+                    for seed in (*p.DEVELOPMENT_PAIR_SEEDS, *p.FORMAL_PAIR_SEEDS)}
                 return self._new("budget.lock.json", {
                     "locked_budget": chosen, "development_pair_seeds":
                     list(p.DEVELOPMENT_PAIR_SEEDS),
+                    "final_program_fit_seed_schedule": final_program_schedules,
+                    "final_program_fit_seed_schedule_sha256": _sha(
+                        final_program_schedules),
                     "source_closure_sha256": self.backend.source_closure_sha256(),
                     "development_receipt_sha256": {
                         str(seed): _file_sha(self._path(f"development.{budget}.{seed}.json"))
@@ -570,6 +605,13 @@ class Admission:
             raise RuntimeError("Warehouse development budget is not locked")
         if lock.get("source_closure_sha256") != self.backend.source_closure_sha256():
             raise RuntimeError("Warehouse formal run source differs from locked method")
+        schedules = {str(seed): p.final_program_fit_seed_schedule(
+            self.release_id, seed)
+            for seed in (*p.DEVELOPMENT_PAIR_SEEDS, *p.FORMAL_PAIR_SEEDS)}
+        if (lock.get("final_program_fit_seed_schedule") != schedules
+                or lock.get("final_program_fit_seed_schedule_sha256") !=
+                _sha(schedules)):
+            raise RuntimeError("Warehouse formal run seed lock changed")
         budget = lock["locked_budget"]
         rows = []
         for pair_seed in p.FORMAL_PAIR_SEEDS:
@@ -689,7 +731,9 @@ class Admission:
                 raise
             claim_sha = _file_sha(claim_path)
         try:
-            audits = self.backend.audit_programs(actor, programs, seeds)
+            audits = self.backend.audit_programs(
+                actor, programs, seeds,
+                trace_dir=self.directory / "traces" / phase)
             passed = _audit_valid(audits, actor, programs, seeds,
                                   development=False)
             receipt = self._new(name, {
@@ -789,6 +833,13 @@ class Admission:
             raise RuntimeError("Warehouse acceptance requires every phase to pass")
         if lock.get("source_closure_sha256") != self.backend.source_closure_sha256():
             raise RuntimeError("Warehouse acceptance source closure changed")
+        final_schedules = {
+            str(seed): p.final_program_fit_seed_schedule(self.release_id, seed)
+            for seed in (*p.DEVELOPMENT_PAIR_SEEDS, *p.FORMAL_PAIR_SEEDS)}
+        if (lock.get("final_program_fit_seed_schedule") != final_schedules
+                or lock.get("final_program_fit_seed_schedule_sha256") !=
+                _sha(final_schedules)):
+            raise RuntimeError("Warehouse frozen final-program seed schedule changed")
         development = {}
         for budget in p.BUDGETS:
             if budget > lock["locked_budget"]:
@@ -804,6 +855,11 @@ class Admission:
                         or row.get("source_closure_sha256") !=
                         lock["source_closure_sha256"]
                         or row.get("pair_report_sha256") != _sha(pair_row)
+                        or pair_row.get("release_id") != self.release_id
+                        or pair_row.get("final_program_fit_seed_schedule") !=
+                        final_schedules[str(seed)]
+                        or pair_row.get("final_program_fit_seed_schedule_sha256") !=
+                        _sha(final_schedules[str(seed)])
                         or row.get("training") != pair_row.get("variants")):
                     raise RuntimeError("Warehouse development receipt or source changed")
                 if row.get("stress") and (set(row["stress"]) != set(p.VARIANTS)
@@ -851,6 +907,11 @@ class Admission:
             receipt = self._required(f"formal.training.{pair_seed}.json")
             if (not _verify_formal_row(receipt, candidate,
                                        lock["source_closure_sha256"])
+                    or candidate.get("release_id") != self.release_id
+                    or candidate.get("final_program_fit_seed_schedule") !=
+                    final_schedules[str(pair_seed)]
+                    or candidate.get("final_program_fit_seed_schedule_sha256") !=
+                    _sha(final_schedules[str(pair_seed)])
                     or candidate.get("source_closure_sha256") !=
                     lock["source_closure_sha256"]
                     or not p.paired_training_pass(candidate["variants"],

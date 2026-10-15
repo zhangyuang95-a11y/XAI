@@ -34,6 +34,8 @@ VARIANTS = ("raw", "regularized")
 PROGRAM_LAMBDA = 0.01
 PROGRAM_START_FRACTION = 0.80
 PROGRAM_RAMP_FRACTION = 0.05
+FINAL_PROGRAM_SPLIT_COUNTS = {"fit": 50, "calibration": 25,
+                              "eligibility": 25, "validation": 24}
 
 
 def _hash_json(value: object) -> str:
@@ -115,12 +117,48 @@ def heldout_schedule(release_id: str = INITIAL_RELEASE_ID) -> dict[int, tuple[in
                         for seed in base_seeds) for task in TASKS}
 
 
+def final_program_fit_seed_schedule(release_id: str, pair_seed: int
+                                    ) -> dict[str, list[int]]:
+    """Fresh four-part program data fixed by release and paired run identity.
+
+    Candidate directory names cannot change the samples used by a formal
+    Actor's post-selection program. This schedule is distinct from every
+    quality, stress, program-audit and sealed test block.
+    """
+    if pair_seed not in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS):
+        raise ValueError("unregistered Warehouse v6 pair seed")
+    sealed = sealed_seed_blocks(release_id)
+    minor = int(release_id.rsplit(".v6.", 1)[1])
+    beginning = 50_000_000 + minor * 1_000_000 + pair_seed * 1_000
+    schedule, cursor = {}, beginning
+    for name, count in FINAL_PROGRAM_SPLIT_COUNTS.items():
+        schedule[name] = list(range(cursor, cursor + count))
+        cursor += count
+    chosen = {seed for block in schedule.values() for seed in block}
+    reserved = (
+        set(DEVELOPMENT_SELECTION_SEEDS)
+        | set(DEVELOPMENT_STRESS_BASE_SEEDS)
+        | {scenario for _, scenario, _ in stress_schedule()}
+        | set(DEVELOPMENT_PROGRAM_AUDIT_SEEDS)
+        | set(FORMAL_SELECTION_SEEDS)
+        | set(FORMAL_PROGRAM_PREAUDIT_SEEDS)
+        | set(sealed["final_program_audit"])
+        | set(sealed["heldout"])
+        | {task_scenario_seed(seed, task)
+           for seed in sealed["heldout"] for task in TASKS}
+    )
+    if chosen & reserved:
+        raise RuntimeError("Warehouse final program seeds overlap protocol blocks")
+    return schedule
+
+
 @dataclass(frozen=True)
 class PairRunSpec:
     candidate_id: str
     pair_seed: int
     joint_steps: int
     output_dir: str
+    release_id: str = INITIAL_RELEASE_ID
     scenario_namespace: str = "warehouse-v6-matched-120-step-blocks"
     checkpoint_seeds: tuple[int, ...] = ()
 
@@ -138,9 +176,15 @@ class PairRunSpec:
                     FORMAL_SELECTION_SEEDS)
         if self.checkpoint_seeds != required:
             raise ValueError("Warehouse v6 checkpoint seeds do not match phase")
+        sealed_seed_blocks(self.release_id)
+        final_program_fit_seed_schedule(self.release_id, self.pair_seed)
 
     def to_mapping(self) -> dict:
-        return asdict(self)
+        row = asdict(self)
+        schedule = final_program_fit_seed_schedule(self.release_id, self.pair_seed)
+        row["final_program_fit_seed_schedule"] = schedule
+        row["final_program_fit_seed_schedule_sha256"] = _hash_json(schedule)
+        return row
 
     def sha256(self) -> str:
         # A moved artifact directory does not change the scientific run.

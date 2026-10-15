@@ -94,7 +94,13 @@ class FakeBackend:
                 "training_report_path": str(report_path),
                 "training_report_sha256": report_sha,
             }
-        pair = {"candidate_id": spec["candidate_id"], "pair_seed": seed,
+        pair = {"candidate_id": spec["candidate_id"],
+                "release_id": spec["release_id"],
+                "final_program_fit_seed_schedule":
+                spec["final_program_fit_seed_schedule"],
+                "final_program_fit_seed_schedule_sha256":
+                spec["final_program_fit_seed_schedule_sha256"],
+                "pair_seed": seed,
                 "joint_steps": budget,
                 "checkpoint_seeds": list(spec["checkpoint_seeds"]),
                 "source_closure_sha256": self.source,
@@ -120,7 +126,7 @@ class FakeBackend:
                      "shutdown_episode": False} for seed in seeds]
         return {"episodes": episodes, "summary": a._summary(episodes)}
 
-    def audit_programs(self, actor, programs, seeds):
+    def audit_programs(self, actor, programs, seeds, *, trace_dir=None):
         self.audit_calls.append(list(seeds))
         if self.fail_final and tuple(seeds) == p.final_audit_seeds():
             claim = (self.root / "sealed_claims" / p.INITIAL_RELEASE_ID /
@@ -132,8 +138,18 @@ class FakeBackend:
                    "illegal_count": 0, "rows": 1000, "actionable_rows": 800,
                    "sample_count": 2000,
                    "certified_rows": 900}
+        directory = Path(trace_dir) if trace_dir is not None else self.root / "fake_traces"
+        directory.mkdir(parents=True, exist_ok=True)
+        traces = {}
+        for role in p.ROLES:
+            target = directory / f"{role}.jsonl"
+            target.write_bytes(b"{}\n" * 2000)
+            traces[role] = (str(target), sha256(target.read_bytes()).hexdigest())
         return {role: {"role": role, "actor_role_sha256": actor.role_sha256[role],
                        "program_sha256": programs[role].sha256(),
+                       "trace_path": traces[role][0],
+                       "trace_sha256": traces[role][1],
+                       "trace_row_count": 2000,
                        "episode_ids": sorted(map(str, seeds)),
                        "episode_count": len(seeds), "sample_count": 2000,
                        "max_depth": 4, "leaf_count": 16,
@@ -392,8 +408,15 @@ def _package_pair_assets(repository: Path, release_id: str,
     } for variant in p.VARIANTS}
 
 
-def test_full_packaged_acceptance_chain_and_tampered_evidence(ready, tmp_path):
+def test_full_packaged_acceptance_chain_and_tampered_evidence(ready, tmp_path,
+                                                            monkeypatch):
+    from experiments.warehouse import acceptance as packaged
     from experiments.warehouse.acceptance import validate_acceptance
+
+    # This orchestration fixture writes synthetic JSON instead of NN artifacts
+    # and actual reset rows. Their arithmetic is covered by dedicated tests.
+    monkeypatch.setattr(packaged, "_verify_program_trace", lambda **_: True)
+    monkeypatch.setattr(packaged, "_paired_schedule_evidence", lambda _: True)
 
     admission, _ = ready
     admission.final_audit()
@@ -429,6 +452,22 @@ def test_full_packaged_acceptance_chain_and_tampered_evidence(ready, tmp_path):
                         "pair.training.json").read_text()))
             for seed in rows}
             for budget, rows in receipt["development_receipt_path"].items()},
+        "program_traces": {
+            "development": {budget: {seed: {role: _package_asset(
+                repository, release_id, Path(audit["trace_path"]))
+                for role, audit in json.loads(Path(path).read_text())[
+                    "program_audit"].items()}
+                for seed, path in rows.items()}
+                for budget, rows in receipt["development_receipt_path"].items()},
+            "preaudit": {role: _package_asset(
+                repository, release_id, Path(audit["trace_path"]))
+                for role, audit in admission._required("program.preaudit.json")[
+                    "audit"].items()},
+            "final_audit": {role: _package_asset(
+                repository, release_id, Path(audit["trace_path"]))
+                for role, audit in admission._required("final_program_audit.json")[
+                    "audit"].items()},
+        },
     }
     selected = next(row for row in receipt["candidate_training"]
                     if row["pair_seed"] == receipt["selected_pair_seed"])

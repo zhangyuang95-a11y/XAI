@@ -102,6 +102,89 @@ def _training_assets(root: Path, release_id: str, index: Mapping,
     return True
 
 
+def _paired_schedule_evidence(pair: Mapping) -> bool:
+    """Verify the assigned block sequence and every actual environment reset.
+
+    Early episode ends can give raw and regularized different reset lists. The
+    immutable contract is the same seed assigned to each joint-step block,
+    with both actual lists reported faithfully; equality is not required.
+    """
+    from backend.training.warehouse_v6_runner import (
+        SCENARIO_BLOCK_STEPS, scenario_schedule_sha256, scenario_seed)
+
+    namespace = "warehouse-v6-matched-120-step-blocks"
+    seed, steps = pair.get("pair_seed"), pair.get("joint_steps")
+    if (type(seed) is not int or seed not in (*p.DEVELOPMENT_PAIR_SEEDS,
+                                              *p.FORMAL_PAIR_SEEDS)
+            or type(steps) is not int or steps not in p.BUDGETS
+            or SCENARIO_BLOCK_STEPS != 120
+            or not isinstance(pair.get("candidate_id"), str)
+            or not isinstance(pair.get("release_id"), str)):
+        return False
+    checkpoint_seeds = (p.DEVELOPMENT_SELECTION_SEEDS if
+                        seed in p.DEVELOPMENT_PAIR_SEEDS else
+                        p.FORMAL_SELECTION_SEEDS)
+    expected_spec = p.PairRunSpec(
+        pair["candidate_id"], seed, steps, "/ignored-by-scientific-hash",
+        release_id=pair["release_id"], checkpoint_seeds=checkpoint_seeds)
+    expected_spec_sha = expected_spec.sha256()
+    expected_schedule_sha = scenario_schedule_sha256(namespace, seed, steps)
+    variants = pair.get("variants")
+    if (not isinstance(variants, Mapping) or set(variants) != set(p.VARIANTS)
+            or pair.get("run_spec_sha256") != expected_spec_sha
+            or pair.get("assigned_scenario_schedule_sha256") !=
+            expected_schedule_sha
+            or pair.get("checkpoint_seeds") != list(checkpoint_seeds)):
+        return False
+    actual = {}
+    for variant in p.VARIANTS:
+        report = variants[variant]
+        if (not isinstance(report, Mapping)
+                or report.get("variant") != variant
+                or report.get("pair_seed") != seed
+                or report.get("joint_steps") != steps
+                or report.get("run_spec_sha256") != expected_spec_sha
+                or report.get("scenario_schedule_sha256") !=
+                expected_schedule_sha
+                or report.get("assigned_scenario_schedule_kind") !=
+                "fixed_120_joint_step_blocks"):
+            return False
+        resets = report.get("actual_episode_resets")
+        if (not isinstance(resets, list) or not resets
+                or report.get("actual_episode_resets_sha256") != _digest(resets)):
+            return False
+        cursor = 0
+        for index, row in enumerate(resets):
+            if not isinstance(row, Mapping) or set(row) != {
+                    "seed", "episode_index", "episode_key", "start_joint_step",
+                    "joint_steps", "complete", "shutdown_episode"}:
+                return False
+            episode_steps = row["joint_steps"]
+            limit = min(SCENARIO_BLOCK_STEPS - cursor % SCENARIO_BLOCK_STEPS,
+                        steps - cursor)
+            if (type(row["seed"]) is not int
+                    or type(row["episode_index"]) is not int
+                    or type(row["start_joint_step"]) is not int
+                    or type(episode_steps) is not int
+                    or type(row["complete"]) is not bool
+                    or type(row["shutdown_episode"]) is not bool
+                    or row["episode_index"] != index
+                    or row["start_joint_step"] != cursor
+                    or row["seed"] != scenario_seed(namespace, seed, cursor)
+                    or row["episode_key"] != f'{row["seed"]}:{index}'
+                    or not 1 <= episode_steps <= limit
+                    or (not row["complete"] and episode_steps != limit)):
+                return False
+            cursor += episode_steps
+        if cursor != steps:
+            return False
+        actual[variant] = resets
+    return (pair.get("actual_episode_reset_count") == {
+        variant: len(actual[variant]) for variant in p.VARIANTS}
+            and pair.get("actual_episode_resets_equal") is
+            (actual["raw"] == actual["regularized"]))
+
+
 def _summary(rows: Sequence[Mapping], expected_seeds: Sequence[int]) -> dict:
     if (not isinstance(rows, list) or len(rows) != len(expected_seeds)
             or [row.get("seed") for row in rows] != list(expected_seeds)):
@@ -181,6 +264,239 @@ def _program_audit(audits: Mapping, *, role_hashes: Mapping,
                                   development=development)):
             return False
     return True
+
+
+def _audit_trace_index(audits: Mapping, index: Mapping, *, root: Path,
+                       release_id: str) -> bool:
+    """Bind every audit summary to its original content-addressed frame rows."""
+    if not audits:
+        return index == {}
+    if (not isinstance(audits, Mapping) or set(audits) != set(p.ROLES)
+            or not isinstance(index, Mapping) or set(index) != set(p.ROLES)):
+        return False
+    for role in p.ROLES:
+        audit, item = audits[role], index[role]
+        if (not isinstance(audit, Mapping) or not isinstance(item, Mapping)
+                or set(item) != {"path", "sha256"}
+                or not isinstance(audit.get("trace_path"), str)
+                or not audit["trace_path"].endswith(".jsonl")
+                or Path(audit["trace_path"]).name != Path(item["path"]).name
+                or audit.get("trace_sha256") != item["sha256"]
+                or type(audit.get("trace_row_count")) is not int
+                or audit["trace_row_count"] != audit.get("sample_count")):
+            return False
+        raw, _ = _asset_bytes(root, release_id, item)
+        if raw.count(b"\n") != audit["trace_row_count"] or not raw.endswith(b"\n"):
+            return False
+    return True
+
+
+def _trace_actor_entry(assets: Mapping, trained: Mapping) -> dict:
+    """Build the same role binding for a development pair as the release pair."""
+    regularized = assets["regularized"]
+    report = trained["regularized"]
+    return {
+        "actor_path": regularized["actor"]["path"],
+        "actor_sha256": regularized["actor"]["sha256"],
+        "role_sha256": {
+            "human": report["selected_role_sha256"]["robot_1"],
+            "ai": report["selected_role_sha256"]["robot_2"],
+        },
+        "program_paths": [regularized["programs"][role]["path"]
+                          for role in p.ROLES],
+        "program_sha256": {role: regularized["programs"][role]["sha256"]
+                           for role in p.ROLES},
+    }
+
+
+def _same_recomputed(claimed: object, measured: object) -> bool:
+    """Compare all independently derived fields; only trace metadata may be extra."""
+    if isinstance(measured, Mapping):
+        return (isinstance(claimed, Mapping)
+                and all(key in claimed and _same_recomputed(claimed[key], value)
+                        for key, value in measured.items()))
+    if isinstance(measured, (list, tuple)):
+        return (isinstance(claimed, (list, tuple))
+                and len(claimed) == len(measured)
+                and all(_same_recomputed(left, right)
+                        for left, right in zip(claimed, measured, strict=True)))
+    if isinstance(measured, bool) or measured is None or isinstance(measured, str):
+        return type(claimed) is type(measured) and claimed == measured
+    if isinstance(measured, int):
+        return type(claimed) is int and claimed == measured
+    return (type(claimed) in (int, float)
+            and math.isfinite(float(claimed))
+            and math.isclose(float(claimed), float(measured),
+                             rel_tol=0.0, abs_tol=1e-8))
+
+
+def _verify_program_trace(*, root: Path, release_id: str,
+                          index: Mapping, audits: Mapping,
+                          entry: Mapping,
+                          expected_seeds: Sequence[int]) -> bool:
+    """Recompute audit NN draws and program metrics from saved frames.
+
+    This reads the one-use rollout; it does not launch another rollout on the
+    sealed seeds. Runtime action-path tests independently check environment
+    transitions and participant replacement.
+    """
+    import numpy as np
+
+    from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor
+    from backend.training.warehouse_v6_program import (
+        WarehouseV6Program, audit_frozen_program)
+    from backend.training.warehouse_v6_runner import (
+        _environment, _set_dual_nn_mode)
+    from env.warehouse.decision_protocol import (
+        canonical_sha256, independent_agent_seed)
+    from env.warehouse.navigation import ACTIONS
+    from env.warehouse.public_observation_v6 import (
+        OBSERVATION_DIM, action_masks, encode_policy_features,
+        encode_public_observation, public_pre_action_snapshot,
+        rebuild_public_pre_action_state)
+
+    actor = FrozenWarehouseV6Actor.load(
+        root / entry["actor_path"], expected_sha256=entry["actor_sha256"],
+        expected_role_sha256={
+            "robot_1": entry["role_sha256"]["human"],
+            "robot_2": entry["role_sha256"]["ai"],
+        })
+    if set(index) != set(p.ROLES) or set(audits) != set(p.ROLES):
+        return False
+    identities, records = {}, {}
+    for role, program_path in zip(p.ROLES, entry["program_paths"], strict=True):
+        program = WarehouseV6Program.load(
+            root / program_path,
+            expected_sha256=entry["program_sha256"][role],
+            actor_role_sha256=actor.role_sha256[role])
+        raw, digest = _asset_bytes(root, release_id, index[role])
+        audit = audits[role]
+        if (audit.get("trace_sha256") != digest
+                or audit.get("trace_row_count") != audit.get("sample_count")):
+            return False
+        samples, ordered, recorded = [], [], []
+        for line in raw.splitlines():
+            row = json.loads(line)
+            if not isinstance(row, Mapping):
+                return False
+            base_seed, episode_id, frame = (row.get("base_seed"),
+                                            row.get("episode_id"), row.get("frame"))
+            if (type(base_seed) is not int or base_seed not in expected_seeds
+                    or type(episode_id) is not int or episode_id < 0
+                    or type(frame) is not int or frame < 0
+                    or row.get("role") != role
+                    or row.get("actor_sha256") != actor.artifact_sha256
+                    or row.get("actor_role_sha256") != actor.role_sha256[role]
+                    or row.get("program_sha256") != program.sha256()):
+                return False
+            seed = independent_agent_seed(
+                base_seed=base_seed, episode_id=episode_id,
+                frame=frame, agent_id=role)
+            if (row.get("rng_seed") != seed
+                    or row.get("pre_state_public_sha256") !=
+                    canonical_sha256(row.get("pre_state_public"))):
+                return False
+            obs = np.asarray(row.get("obs"), dtype=np.float32)
+            mask = np.asarray(row.get("mask"), dtype=np.float32)
+            if (obs.shape != (OBSERVATION_DIM,)
+                    or mask.shape != (len(ACTIONS),)
+                    or not np.isfinite(obs).all()
+                    or not np.isfinite(mask).all()
+                    or np.any((mask != 0.0) & (mask != 1.0))
+                    or mask.sum() < 1):
+                return False
+            encoded = encode_policy_features(obs, mask)
+            logits = actor.roles[role].logits_encoded(encoded[None])[0]
+            masked = np.where(mask > .5, logits, -1.0e9)
+            probabilities = np.exp(masked - masked.max())
+            probabilities /= probabilities.sum()
+            action = ACTIONS[int(np.random.default_rng(seed).choice(
+                len(ACTIONS), p=probabilities))]
+            top = ACTIONS[int(probabilities.argmax())]
+            claimed_probabilities = np.asarray(
+                row.get("nn_probabilities"), dtype=np.float64)
+            if (claimed_probabilities.shape != (len(ACTIONS),)
+                    or not np.isfinite(claimed_probabilities).all()
+                    or not np.allclose(claimed_probabilities, probabilities,
+                                       rtol=0.0, atol=1e-7)
+                    or row.get("sampled_action") != action
+                    or row.get("nn_sampled_action") != action
+                    or row.get("nn_argmax_action") != top
+                    or mask[ACTIONS.index(action)] <= .5):
+                return False
+            public = row["pre_state_public"]
+            if (not isinstance(public, Mapping)
+                    or public.get("frame") != frame
+                    or public.get("episode_id") != episode_id):
+                return False
+            rebuilt = rebuild_public_pre_action_state(dict(public))
+            role_index = p.ROLES.index(role)
+            if (not np.array_equal(
+                    obs, encode_public_observation(rebuilt)[role_index])
+                    or not np.array_equal(
+                        mask, action_masks(rebuilt)[role_index])):
+                return False
+            post = row.get("post_state_public")
+            if (not isinstance(post, Mapping)
+                    or row.get("post_state_public_sha256") !=
+                    canonical_sha256(post)):
+                return False
+            samples.append({"episode": str(base_seed), "obs": obs,
+                            "mask": mask, "sampled_action": action})
+            ordered.append((base_seed, episode_id, frame))
+            recorded.append(row)
+        if len(samples) != audit["sample_count"] or len(set(ordered)) != len(ordered):
+            return False
+        if [seed for seed in expected_seeds if any(row[0] == seed for row in ordered)] != list(
+                expected_seeds):
+            return False
+        if ordered != sorted(ordered):
+            return False
+        measured = audit_frozen_program(program, actor, samples)
+        if not _same_recomputed(audit, measured):
+            return False
+        identities[role] = ordered
+        records[role] = recorded
+    if identities["robot_1"] != identities["robot_2"]:
+        return False
+    # Integrity replay authenticates the saved action-before-state chain. It
+    # never selects a checkpoint or computes a fresh quality estimate.
+    cursor = 0
+    for seed in expected_seeds:
+        env = _environment(training_reward=False)
+        env.reset(seed=int(seed))
+        _set_dual_nn_mode(env)
+        while not (env.state.terminated or env.state.truncated):
+            if cursor >= len(identities["robot_1"]):
+                return False
+            key = (int(seed), int(env.state.episode_id), int(env.state.frame))
+            if identities["robot_1"][cursor] != key:
+                return False
+            pre = public_pre_action_snapshot(env.state)
+            obs, masks = encode_public_observation(env.state), action_masks(env.state)
+            actions, distributions = actor.act(env.state, base_seed=int(seed))
+            for index_role, role in enumerate(p.ROLES):
+                row = records[role][cursor]
+                if (row["pre_state_public"] != pre
+                        or not np.array_equal(np.asarray(row["obs"], dtype=np.float32),
+                                              obs[index_role])
+                        or not np.array_equal(np.asarray(row["mask"], dtype=np.float32),
+                                              masks[index_role])
+                        or row["nn_sampled_action"] != actions[role]
+                        or not np.allclose(row["nn_probabilities"],
+                                           distributions[role].probabilities,
+                                           rtol=0.0, atol=1e-7)):
+                    return False
+            _, _, _, _, info = env.step(actions)
+            if (info["proposed_actions"] != actions
+                    or info["action_override_agents"]):
+                return False
+            post = public_pre_action_snapshot(env.state)
+            if any(records[role][cursor]["post_state_public"] != post
+                   for role in p.ROLES):
+                return False
+            cursor += 1
+    return cursor == len(identities["robot_1"])
 
 
 def _stress_summary(stress: Mapping) -> dict | None:
@@ -320,10 +636,12 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
     claim_index = evidence["one_use_claims"]
     pair_index = evidence["pair_reports"]
     training_asset_index = evidence["training_assets"]
+    trace_index = evidence["program_traces"]
     if (set(phase_index) != set(_PHASE_NAMES)
             or set(claim_index) != {"final_program_audit", "heldout"}
             or set(pair_index) != set(map(str, p.FORMAL_PAIR_SEEDS))
-            or set(training_asset_index) != set(pair_index)):
+            or set(training_asset_index) != set(pair_index)
+            or set(trace_index) != {"development", "preaudit", "final_audit"}):
         return False
     phases = {}
     for name in _PHASE_NAMES:
@@ -335,9 +653,15 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
         phases[name] = row
     lock = phases["budget.lock.json"]
     selected = phases["formal.selection.json"]
+    program_schedules = {
+        str(seed): p.final_program_fit_seed_schedule(release_id, seed)
+        for seed in (*p.DEVELOPMENT_PAIR_SEEDS, *p.FORMAL_PAIR_SEEDS)}
     if (lock.get("passed") is not True
             or lock.get("locked_budget") != budget
             or lock.get("source_closure_sha256") != receipt["source_closure_sha256"]
+            or lock.get("final_program_fit_seed_schedule") != program_schedules
+            or lock.get("final_program_fit_seed_schedule_sha256") !=
+            _digest(program_schedules)
             or lock.get("development_pair_seeds") != list(p.DEVELOPMENT_PAIR_SEEDS)
             or selected.get("passed") is not True
             or selected.get("locked_budget") != budget
@@ -355,16 +679,19 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
     expected_budgets = p.BUDGETS[:p.BUDGETS.index(budget) + 1]
     if (set(dev_index) != set(map(str, expected_budgets))
             or set(dev_pair_index) != set(dev_index)
-            or set(dev_asset_index) != set(dev_index)):
+            or set(dev_asset_index) != set(dev_index)
+            or set(trace_index["development"]) != set(dev_index)):
         return False
     dev_reports = {}
     for candidate_budget in expected_budgets:
         section = dev_index[str(candidate_budget)]
         pairs_section = dev_pair_index[str(candidate_budget)]
         assets_section = dev_asset_index[str(candidate_budget)]
+        traces_section = trace_index["development"][str(candidate_budget)]
         if (set(section) != set(map(str, p.DEVELOPMENT_PAIR_SEEDS))
                 or set(pairs_section) != set(section)
-                or set(assets_section) != set(section)):
+                or set(assets_section) != set(section)
+                or set(traces_section) != set(section)):
             return False
         dev_reports[candidate_budget] = []
         for seed in p.DEVELOPMENT_PAIR_SEEDS:
@@ -383,13 +710,30 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
                     or row.get("training") != pair.get("variants")
                     or pair.get("candidate_id") != receipt["candidate_id"]
                     or pair.get("pair_seed") != seed
+                    or pair.get("release_id") != release_id
+                    or pair.get("final_program_fit_seed_schedule") !=
+                    program_schedules[str(seed)]
+                    or pair.get("final_program_fit_seed_schedule_sha256") !=
+                    _digest(program_schedules[str(seed)])
                     or pair.get("joint_steps") != candidate_budget
                     or pair.get("source_closure_sha256") !=
                     receipt["source_closure_sha256"]
+                    or not _paired_schedule_evidence(pair)
                     or not _training_assets(
                         root, release_id, assets_section[str(seed)],
                         pair["variants"],
                         allow_missing_programs=candidate_budget < budget)
+                    or not _audit_trace_index(
+                        row.get("program_audit", {}), traces_section[str(seed)],
+                        root=root, release_id=release_id)
+                    or (bool(row.get("program_audit")) and
+                        not _verify_program_trace(
+                            root=root, release_id=release_id,
+                            index=traces_section[str(seed)],
+                            audits=row["program_audit"],
+                            entry=_trace_actor_entry(
+                                assets_section[str(seed)], pair["variants"]),
+                            expected_seeds=p.DEVELOPMENT_PROGRAM_AUDIT_SEEDS))
                     or row.get("passed") is not passed):
                 return False
             if row.get("stress") and (
@@ -419,8 +763,14 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
         if (candidate.get("pair_report_sha256") != pair_file_sha
                 or formal.get("pair_report_sha256") != pair_file_sha
                 or pair.get("pair_seed") != seed
+                or pair.get("release_id") != release_id
+                or pair.get("final_program_fit_seed_schedule") !=
+                program_schedules[str(seed)]
+                or pair.get("final_program_fit_seed_schedule_sha256") !=
+                _digest(program_schedules[str(seed)])
                 or pair.get("joint_steps") != budget
                 or pair.get("source_closure_sha256") != receipt["source_closure_sha256"]
+                or not _paired_schedule_evidence(pair)
                 or pair.get("initial_role_sha256") != candidate.get("initial_role_sha256")
                 or not p.paired_training_pass(pair.get("variants", {}), joint_steps=budget)
                 or not _training_assets(root, release_id,
@@ -471,11 +821,21 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
             ("program.preaudit.json", p.FORMAL_PROGRAM_PREAUDIT_SEEDS),
             ("final_program_audit.json", p.final_audit_seeds(release_id))):
         row = phases[phase]
+        trace_name = ("preaudit" if phase == "program.preaudit.json"
+                      else "final_audit")
         if (row.get("passed") is not True
                 or row.get("selected_pair_seed") != receipt["selected_pair_seed"]
                 or row.get("actor_sha256") != receipt["artifact_sha256"]["regularized"]
                 or row.get("program_sha256") != programs
                 or row.get("seeds") != list(expected_seeds)
+                or not _audit_trace_index(
+                    row["audit"], trace_index[trace_name], root=root,
+                    release_id=release_id)
+                or not _verify_program_trace(
+                    root=root, release_id=release_id,
+                    index=trace_index[trace_name], audits=row["audit"],
+                    entry=entries["regularized"],
+                    expected_seeds=expected_seeds)
                 or not _program_audit(row["audit"],
                                       role_hashes=receipt["role_sha256"]["regularized"],
                                       program_hashes=programs,

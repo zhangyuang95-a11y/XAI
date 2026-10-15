@@ -101,6 +101,26 @@ def _training_assets(variants: dict, output_root: Path, *,
     return assets
 
 
+def _audit_trace_assets(audits: dict, output_root: Path, *,
+                        required: bool, assets_root: Path) -> dict:
+    """Keep the exact pre-action rows behind each program-audit summary."""
+    if not audits and not required:
+        return {}
+    if not isinstance(audits, dict) or set(audits) != set(p.ROLES):
+        raise ValueError("Warehouse role audit traces incomplete")
+    assets = {}
+    for role in p.ROLES:
+        row = audits[role]
+        path = row.get("trace_path")
+        digest = row.get("trace_sha256")
+        if (not isinstance(path, str) or not path.endswith(".jsonl")
+                or row.get("trace_row_count") != row.get("sample_count")):
+            raise ValueError("Warehouse role audit trace identity incomplete")
+        assets[role] = _bundle(path, digest, output_root,
+                               assets_root=assets_root)
+    return assets
+
+
 def _evidence(receipt: dict, output_root: Path, *,
               release_id: str = RELEASE_ID,
               assets_root: Path = ASSETS) -> dict:
@@ -123,6 +143,7 @@ def _evidence(receipt: dict, output_root: Path, *,
         raise ValueError("Warehouse development receipt budget history incomplete")
     development = {}
     development_pairs = {}
+    development_traces = {}
     for budget_key in expected_budgets:
         if (set(dev_paths[budget_key]) != set(map(str, p.DEVELOPMENT_PAIR_SEEDS))
                 or set(dev_hashes[budget_key]) != set(dev_paths[budget_key])):
@@ -133,6 +154,7 @@ def _evidence(receipt: dict, output_root: Path, *,
                           assets_root=assets_root)
             for seed, path in dev_paths[budget_key].items()}
         development_pairs[budget_key] = {}
+        development_traces[budget_key] = {}
         for seed, item in development[budget_key].items():
             dev_receipt = _read(ROOT / item["path"])
             pair_path = (output_root / receipt["candidate_id"] /
@@ -140,6 +162,10 @@ def _evidence(receipt: dict, output_root: Path, *,
             development_pairs[budget_key][seed] = _bundle(
                 str(pair_path), dev_receipt["pair_report_sha256"],
                 output_root, "pair.training.json", assets_root=assets_root)
+            development_traces[budget_key][seed] = _audit_trace_assets(
+                dev_receipt.get("program_audit", {}), output_root,
+                required=bool(dev_receipt.get("program_audit")),
+                assets_root=assets_root)
     pairs = receipt["candidate_training"]
     if (len(pairs) != len(p.FORMAL_PAIR_SEEDS)
             or {row["pair_seed"] for row in pairs} != set(p.FORMAL_PAIR_SEEDS)):
@@ -151,6 +177,15 @@ def _evidence(receipt: dict, output_root: Path, *,
     phase_receipts = {name: _bundle(phases[name], phase_hashes[name],
                                     output_root, name, assets_root=assets_root)
                       for name in sorted(phase_names)}
+    audit_traces = {
+        "development": development_traces,
+        "preaudit": _audit_trace_assets(
+            _read(ROOT / phase_receipts["program.preaudit.json"]["path"])["audit"],
+            output_root, required=True, assets_root=assets_root),
+        "final_audit": _audit_trace_assets(
+            _read(ROOT / phase_receipts["final_program_audit.json"]["path"])["audit"],
+            output_root, required=True, assets_root=assets_root),
+    }
     return {
         "phase_receipts": phase_receipts,
         "one_use_claims": {phase: _bundle(claims[phase], claim_hashes[phase],
@@ -162,6 +197,7 @@ def _evidence(receipt: dict, output_root: Path, *,
         "pair_reports": pair_reports,
         "development_receipts": development,
         "development_pair_reports": development_pairs,
+        "program_traces": audit_traces,
         "training_assets": {seed: _training_assets(
             _read(ROOT / item["path"])["variants"], output_root,
             assets_root=assets_root)

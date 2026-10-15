@@ -4,6 +4,22 @@ from __future__ import annotations
 import pytest
 
 from domains.warehouse import neural_turnbased as warehouse
+
+
+def test_successor_policy_uses_its_own_release_and_stays_pending():
+    release_id = "policylens-three-domain-20261016.v6.1"
+    assert warehouse._v6_identity("warehouse-regularized-v6.1") == (
+        "regularized", release_id)
+    assert warehouse._config_for_policy("warehouse-raw-v6.1")[
+        "release_id"] == release_id
+    with pytest.raises(RuntimeError, match="release_id mismatch"):
+        warehouse.initial_state(1000, 1, "warehouse-raw-v6.1",
+                                release_id=warehouse.V6_RELEASE_ID)
+    with pytest.raises(RuntimeError, match="unavailable|accepted"):
+        warehouse.initial_state(1000, 1, "warehouse-raw-v6.1",
+                                release_id=release_id)
+    assert warehouse.policy_artifacts_v6(release_id)["regularized"][
+        "readiness"] is False
 from experiments.warehouse import protocol
 from study_v3 import release_catalog
 

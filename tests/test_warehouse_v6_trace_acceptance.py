@@ -17,6 +17,7 @@ from backend.training.warehouse_v6_runner import audit_programs
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.public_observation_v6 import FEATURE_DIM
 from experiments.warehouse.acceptance import _verify_program_trace
+from experiments.warehouse.admission import NativeBackend
 
 
 RELEASE = "policylens-three-domain-20261016.v6.0"
@@ -76,6 +77,12 @@ def test_packaged_trace_recomputes_nn_draws_and_rejects_forged_rows(tmp_path):
     seed = 999901  # unregistered; sealed and heldout blocks remain untouched
     audits = audit_programs(actor, programs, [seed],
                             trace_dir=source / "traces")
+    local_traces = {role: Path(audits[role]["trace_path"]).read_bytes()
+                    for role in actor.roles}
+    verifier = NativeBackend()
+    assert verifier.verify_program_trace(
+        actor=actor, programs=programs, trace_bytes_by_role=local_traces,
+        audits=audits, seeds=[seed])
     index = {role: _bundle(tmp_path, Path(audits[role]["trace_path"]))
              for role in actor.roles}
     entry = {
@@ -110,6 +117,10 @@ def test_packaged_trace_recomputes_nn_draws_and_rejects_forged_rows(tmp_path):
     changed_audits[role]["trace_path"] = str(forged)
     assert not _verify_program_trace(**{**proof, "index": changed_index,
                                         "audits": changed_audits})
+    assert not verifier.verify_program_trace(
+        actor=actor, programs=programs,
+        trace_bytes_by_role={**local_traces, role: forged.read_bytes()},
+        audits=changed_audits, seeds=[seed])
 
     # Both action fields describe the same executed NN draw. A contradictory
     # secondary field must fail even when the primary draw is intact.

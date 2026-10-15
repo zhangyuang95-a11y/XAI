@@ -357,6 +357,15 @@ class NativeBackend:
         from backend.training.warehouse_v6_runner import audit_programs
         return audit_programs(actor, programs, seeds, trace_dir=trace_dir)
 
+    def verify_program_trace(self, *, actor, programs: Mapping,
+                             trace_bytes_by_role: Mapping[str, bytes],
+                             audits: Mapping, seeds: Sequence[int]) -> bool:
+        from experiments.warehouse.acceptance import _verify_program_trace_rows
+        return _verify_program_trace_rows(
+            actor=actor, programs=programs,
+            trace_bytes_by_role=trace_bytes_by_role, audits=audits,
+            expected_seeds=seeds)
+
 
 class Admission:
     """State machine for a single candidate and release namespace."""
@@ -871,6 +880,24 @@ class Admission:
                 or not _audit_valid(receipt.get("audit"), actor, programs,
                                     seeds, development=False)):
             raise RuntimeError(f"Warehouse prerequisite program audit changed: {name}")
+        trace_root = (self.directory / "traces" /
+                      name.removesuffix(".json")).resolve()
+        trace_bytes = {}
+        for role in p.ROLES:
+            trace_path = Path(receipt["audit"][role]["trace_path"]).resolve()
+            if not trace_path.is_relative_to(trace_root):
+                raise RuntimeError(f"Warehouse prerequisite trace escaped run: {name}")
+            trace_bytes[role] = trace_path.read_bytes()
+        try:
+            trace_valid = self.backend.verify_program_trace(
+                actor=actor, programs=programs,
+                trace_bytes_by_role=trace_bytes, audits=receipt["audit"],
+                seeds=seeds)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Warehouse prerequisite trace could not be verified: {name}") from exc
+        if trace_valid is not True:
+            raise RuntimeError(f"Warehouse prerequisite trace invalid: {name}")
         if sealed:
             claim_path = self._claim_path("final_program_audit")
             claim = _read(claim_path)

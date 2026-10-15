@@ -49,6 +49,7 @@ class FakeBackend:
         self.audit_calls = []
         self.evaluate_calls = []
         self.fail_final = False
+        self.trace_valid = True
 
     def source_closure_sha256(self):
         return self.source
@@ -186,6 +187,12 @@ class FakeBackend:
                        "feedback_eligible": True,
                        "explanation_eligible": True,
                        "passed": True} for role in p.ROLES}
+
+    def verify_program_trace(self, *, actor, programs, trace_bytes_by_role,
+                             audits, seeds):
+        # Pure orchestration fixture: actual NN/physics trace recomputation is
+        # exercised by test_warehouse_v6_trace_acceptance.py.
+        return self.trace_valid
 
 
 @pytest.fixture
@@ -363,6 +370,14 @@ def test_preaudit_mutation_rejects_before_final_seed_claim(ready, change):
     assert not admission._claim_path("final_program_audit").exists()
 
 
+def test_rejected_local_trace_rejects_before_final_seed_claim(ready):
+    admission, backend = ready
+    backend.trace_valid = False
+    with pytest.raises(RuntimeError, match="prerequisite trace invalid"):
+        admission.final_audit()
+    assert not admission._claim_path("final_program_audit").exists()
+
+
 def test_quality_selection_mutation_rejects_before_final_seed_claim(ready):
     admission, backend = ready
     path = admission._path("formal.selection.json")
@@ -425,6 +440,17 @@ def test_final_audit_mutation_rejects_before_heldout_seed_claim(ready, change):
     path.write_text(json.dumps(receipt))
     calls_before = len(backend.evaluate_calls)
     with pytest.raises(RuntimeError, match="prerequisite program audit|one-use claim"):
+        admission.heldout()
+    assert len(backend.evaluate_calls) == calls_before
+    assert not admission._claim_path("heldout").exists()
+
+
+def test_rejected_final_trace_rejects_before_heldout_seed_claim(ready):
+    admission, backend = ready
+    admission.final_audit()
+    backend.trace_valid = False
+    calls_before = len(backend.evaluate_calls)
+    with pytest.raises(RuntimeError, match="prerequisite trace invalid"):
         admission.heldout()
     assert len(backend.evaluate_calls) == calls_before
     assert not admission._claim_path("heldout").exists()

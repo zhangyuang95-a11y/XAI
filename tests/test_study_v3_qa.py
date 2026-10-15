@@ -867,7 +867,7 @@ def test_kitchen_delivery_counterfactual_counts_real_completed_orders_independen
     assert ('completed orders change by 1' if language=='en' else '完成订单数变化1') in result['answer']
 
 
-@pytest.mark.parametrize('domain,seed,task,turn',[('pong',731100,2,0),('kitchen',2000,1,10),('kitchen',2000,2,None)])
+@pytest.mark.parametrize('domain,seed,task,turn',[('pong',730100,2,0),('kitchen',2000,1,10),('kitchen',2000,2,None)])
 @pytest.mark.parametrize('language',['en','zh'])
 def test_actual_wait_reason_synonyms_render_once_without_question_keyword_binding(domain,seed,task,turn,language):
     module = get_engine(domain)

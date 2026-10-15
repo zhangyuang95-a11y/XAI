@@ -19,6 +19,7 @@ from threading import RLock
 from . import RELEASE_ID
 
 UPSTREAM_RELEASE_ID = "policylens-three-domain-20261014.v5.0"
+PONG_V5_CONFIG_SHA256 = "1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42"
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "releases" / RELEASE_ID / "catalog.json"
 _WAREHOUSE_RELEASE = re.compile(r"policylens-three-domain-20261016\.v6\.(0|[1-9][0-9]*)\Z")
@@ -148,6 +149,8 @@ def runtime_config(domain: str, release_id: str = RELEASE_ID) -> Path:
     item = (_catalog(release_id).get("runtime_configs") or {}).get(domain)
     if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
         raise ReleaseAssetUnavailable("release_runtime_config_missing")
+    if domain == "pong" and item["sha256"] != PONG_V5_CONFIG_SHA256:
+        raise ReleaseAssetUnavailable("release_pong_config_identity_mismatch")
     _asset(item["path"], item["sha256"], release_id)
     return ROOT / item["path"]
 
@@ -157,8 +160,7 @@ def policy_artifacts(domain: str) -> dict:
     if domain not in ("pong", "kitchen"):
         raise ReleaseAssetUnavailable("release_domain_unavailable")
     catalog = _catalog()
-    if domain == "kitchen":
-        runtime_config("kitchen")
+    runtime_config(domain)
     entries = (catalog.get("policies") or {}).get(domain)
     if not isinstance(entries, dict) or set(entries) != {"raw", "regularized"}:
         raise ReleaseAssetUnavailable("release_policy_pair_incomplete")

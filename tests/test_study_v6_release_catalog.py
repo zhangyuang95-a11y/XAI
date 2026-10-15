@@ -11,6 +11,7 @@ from domains.kitchen import neural_domain as kitchen
 from domains.pong import turnbased as pong
 from study_v3.config import Settings
 from study_v3.release_catalog import (RELEASE_ID, UPSTREAM_RELEASE_ID,
+                                      PONG_V5_CONFIG_SHA256,
                                       ReleaseAssetUnavailable, policy_artifacts,
                                       runtime_config, source_provenance,
                                       warehouse_policy_artifacts,
@@ -67,6 +68,49 @@ def test_kitchen_five_dish_physics_config_is_packaged_and_rollout_identical(monk
         assert rollout() == source_frames
     finally:
         kitchen_physics._configuration.cache_clear()
+
+
+def test_pong_physics_config_is_packaged_and_rollout_identical():
+    from study_v3.registry import scenario_config
+
+    source = kitchen.ROOT / "configs/study_v3_pong.json"
+    packaged = runtime_config("pong")
+    assert packaged.read_bytes() == source.read_bytes()
+    assert sha256(packaged.read_bytes()).hexdigest() == PONG_V5_CONFIG_SHA256
+    assert scenario_config("pong") == json.loads(packaged.read_text())
+    for task in (1, 2, 3):
+        legacy = pong.initial_state(730100, task, "pong-regularized-v5")
+        bundled = pong.initial_state(730100, task, "pong-regularized-v5",
+                                     release_id=RELEASE_ID)
+        for _ in range(12):
+            assert {key: value for key, value in bundled.items()
+                    if key != "release_id"} == legacy
+            if legacy["terminal"]:
+                break
+            assert pong.decide(bundled) == pong.decide(legacy)
+            human = pong.legal_actions(legacy)[0]
+            legacy = pong.step(legacy, human)
+            bundled = pong.step(bundled, human)
+
+
+def test_pong_rejects_altered_packaged_config_and_preserves_direct_v5(tmp_path, monkeypatch):
+    import study_v3.release_catalog as catalog_module
+
+    relative = (f"releases/{RELEASE_ID}/assets/{PONG_V5_CONFIG_SHA256}/"
+                "study_v3_pong.json")
+    altered = json.loads((kitchen.ROOT / "configs/study_v3_pong.json").read_text())
+    altered["task_turns"]["1"] += 2
+    asset = tmp_path / relative
+    asset.parent.mkdir(parents=True)
+    asset.write_text(json.dumps(altered))
+    monkeypatch.setattr(catalog_module, "ROOT", tmp_path)
+    monkeypatch.setattr(catalog_module, "_catalog", lambda release_id=RELEASE_ID: {
+        "runtime_configs": {"pong": {"path": relative,
+                                      "sha256": PONG_V5_CONFIG_SHA256}}})
+    with pytest.raises(ReleaseAssetUnavailable, match="release_asset_hash_mismatch"):
+        pong.initial_state(730100, 1, "pong-regularized-v5", release_id=RELEASE_ID)
+    assert pong.initial_state(730100, 1, "pong-regularized-v5")["policy_id"] == \
+        "pong-regularized-v5"
 
 
 def test_kitchen_physics_rejects_package_hash_mismatch(monkeypatch):

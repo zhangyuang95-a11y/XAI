@@ -109,6 +109,10 @@
     "kitchen": {
       "path": "releases/policylens-three-domain-20261016.v6.0/assets/b0aeeea1772221f047e294c44c6632a98ff0b92f5e5e645678142d62c7fd7b6d/study_v3_kitchen_frozen_v5.json",
       "sha256": "b0aeeea1772221f047e294c44c6632a98ff0b92f5e5e645678142d62c7fd7b6d"
+    },
+    "pong": {
+      "path": "releases/policylens-three-domain-20261016.v6.0/assets/1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42/study_v3_pong.json",
+      "sha256": "1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42"
     }
   },
   "source_asset_index": {
@@ -119,6 +123,10 @@
     "configs/study_v3_kitchen_v5.json": {
       "bundle_path": "releases/policylens-three-domain-20261016.v6.0/assets/6b49345da601dee883719130e2581e6754bfd1447d31d3e1134da2fd262aa51c/study_v3_kitchen_v5.json",
       "sha256": "6b49345da601dee883719130e2581e6754bfd1447d31d3e1134da2fd262aa51c"
+    },
+    "configs/study_v3_pong.json": {
+      "bundle_path": "releases/policylens-three-domain-20261016.v6.0/assets/1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42/study_v3_pong.json",
+      "sha256": "1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42"
     },
     "domains/pong/rolling_actor_v5.acceptance.json": {
       "bundle_path": "releases/policylens-three-domain-20261016.v6.0/assets/ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958/rolling_actor_v5.acceptance.json",

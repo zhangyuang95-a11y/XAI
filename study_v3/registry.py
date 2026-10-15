@@ -81,10 +81,9 @@ def scenario_config(domain):
     import json
     from pathlib import Path
     if domain not in MODULES: raise ValueError('unknown_domain')
-    if domain == 'kitchen':
+    if domain in ('pong', 'kitchen'):
         from .release_catalog import runtime_config
-        return json.loads(runtime_config('kitchen').read_text())
-    names = {'warehouse': 'study_v3_warehouse_neural_v6.json',
-             'pong': 'study_v3_pong.json'}
+        return json.loads(runtime_config(domain).read_text())
+    names = {'warehouse': 'study_v3_warehouse_neural_v6.json'}
     name = names[domain]
     return json.loads((Path(__file__).resolve().parents[1]/'configs'/name).read_text())

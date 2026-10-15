@@ -71,4 +71,8 @@ Kitchen 的离线人类代理成绩只称为代理评估。
   PR。Render 仍引用的分支必须先核实并迁移部署引用，之后才可处理旧分支。
 
 架构及发布回归测试位于 `tests/`，尤其是
-`test_layer_boundaries.py`、Warehouse v6 协议/验收测试及三领域运行帧测试。
+`test_architecture_contracts.py`、`test_layer_boundaries.py`、Warehouse v6
+协议/验收测试及三领域运行帧测试。架构门禁从当前服务器、训练、验收、发布
+入口追踪本地依赖，对实际运行模块检查导入期循环和 2,000 行上限；历史候选
+不再冒充当前入口。共享物理环境 `env/warehouse/environment.py` 已有 2,171
+行技术债被冻结，不能继续增长。

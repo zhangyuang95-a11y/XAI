@@ -20,6 +20,22 @@ LANES, HEIGHT, WEIGHTS = CONFIG['lanes'], CONFIG['height'], CONFIG['weights']
 _DELTAS = {'left': -1, 'wait': 0, 'right': 1}
 
 
+def _config_for_release(release_id):
+    """Use the packaged scenario for v6 while preserving direct v5 entrypoints."""
+    if release_id is None:
+        return CONFIG
+    from study_v3 import RELEASE_ID
+    if release_id != RELEASE_ID:
+        raise ValueError('unknown Pong release catalog')
+    from study_v3.release_catalog import runtime_config
+    config = json.loads(runtime_config('pong', release_id).read_text())
+    # The frozen physics code uses source-defined constants. It must never mix
+    # those constants with a different packaged scenario under one release ID.
+    if config != CONFIG:
+        raise RuntimeError('Pong v6 scenario config differs from frozen physics')
+    return config
+
+
 def policy_artifacts(release_id=None):
     return nn_policy.policy_artifacts(release_id)
 
@@ -69,7 +85,7 @@ def _ball(identifier, kind, contacts, remaining):
             'y': HEIGHT - vy * remaining, 'vy': vy}
 
 
-def _schedule(seed, task):
+def _schedule(seed, task, config=CONFIG):
     """Finite seeded simultaneous arrivals, independent of group and play.
 
     Every two turns bring two distinct ordinary contacts. Every six turns also
@@ -78,7 +94,7 @@ def _schedule(seed, task):
     team balls, so a missed opportunity is not necessarily poor coordination.
     """
     rng = random.Random(int(seed) * 1009 + task * 71)
-    duration = CONFIG['task_turns'][str(task)]
+    duration = config['task_turns'][str(task)]
     entries, small_index, team_index = [], 0, 0
     previous = (2, 6)
     for at in range(2, duration + 1, 2):
@@ -108,7 +124,7 @@ def _schedule(seed, task):
     return sorted(entries, key=lambda row: (row['spawn_turn'], row['arrival_turn'], row['ball']['id']))
 
 
-def _new_state(schedule, *, seed, task, human, ai):
+def _new_state(schedule, *, seed, task, human, ai, config=CONFIG):
     # Historical short wave fixtures remain useful for independent QA tests.
     # Production initial_state always supplies the finite rolling schedule.
     if schedule and isinstance(schedule[0], list):
@@ -122,7 +138,7 @@ def _new_state(schedule, *, seed, task, human, ai):
         entries = deepcopy(schedule)
     all_balls = [e['ball'] for e in entries]
     duration = max((e['arrival_turn'] for e in entries), default=0)
-    return {'domain': DOMAIN, 'version': VERSION, 'scenario_version': CONFIG['scenario_version'],
+    return {'domain': DOMAIN, 'version': VERSION, 'scenario_version': config['scenario_version'],
             'task': task, 'turn': 0, 'max_turns': duration, 'height': HEIGHT, 'lanes': LANES,
             'terminal': not entries, 'events': [], 'policy_memory': {}, 'seed': seed,
             'human': {'x': human}, 'ai': {'x': ai},
@@ -140,10 +156,12 @@ def _new_state(schedule, *, seed, task, human, ai):
 def initial_state(seed, task, policy_id=None, release_id=None):
     if task not in (1, 2, 3):
         raise ValueError('task must be 1, 2 or 3')
+    config = _config_for_release(release_id)
     if policy_id is not None:
         nn_policy.load_bound_model(policy_id, release_id)
     human, ai = (6, 2) if task == 3 else (2, 6)
-    state = _new_state(_schedule(seed, task), seed=int(seed), task=task, human=human, ai=ai)
+    state = _new_state(_schedule(seed, task, config), seed=int(seed), task=task,
+                       human=human, ai=ai, config=config)
     if policy_id is not None:
         state['policy_id'] = policy_id
         state['actor_sha256'] = nn_policy.model_sha256(policy_id, release_id)

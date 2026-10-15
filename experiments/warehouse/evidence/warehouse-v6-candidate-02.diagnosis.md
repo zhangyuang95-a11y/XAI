@@ -1,0 +1,28 @@
+# Warehouse v6 candidate02 developmental diagnosis
+
+This is an unregistered development analysis, not release evidence. It reads candidate02's completed 200k pair and previously designated development seeds only. No formal pair, independent final audit, or held-out seed was touched. The immutable failure receipt is `warehouse-v6-candidate-02.failure.json` in this directory; its source closure is `1f923c65aa4cdb3c52993860263435628798c456e6ad35ae277e9f262b2da43c`. Probe scripts and their raw output are isolated under the ignored `output/warehouse_v6_probes/` directory; they did not change the candidate02 training source closure. These diagnostics describe the v6.0 Actor, not later candidates.
+
+## Frozen candidate result
+
+- Raw selected 180,960-step checkpoint: 0.208 deliveries, 1.75 collisions, 0% shutdown on 24 development episodes. Regularized selected same step: 0.208 deliveries, 1.708 collisions, 4.17% shutdown. Both fail development and formal quality.
+- Raw and regularized 200k final checkpoints also fail: deliveries 0.167 and 0.042 respectively.
+- Shared BC report: offline public teacher 6.56 deliveries/0 collisions/0 shutdown, but after four DAgger rounds the sampled NN had 2.61 deliveries, 10.65 collisions, 72.5% shutdown. Offline argmax label accuracy 91.9% does not imply effective stochastic pair control.
+
+## Three quantified failure mechanisms
+
+1. **Cost advantage amplification.** On 16 development rollouts from selected raw and regularized checkpoints, no shutdown occurred. Raw cost GAE standard deviation was 0.00676, regularized 0.00790. Batch standardization scaled these to unit variance. Actor cost gradient norms were 0.220/0.226, versus reward gradient norms 0.132/0.123. With cost multiplier about 10.45, the actor cost term was about 17.4×/19.1× the reward term despite zero observed shutdown events. Without standardization, cost gradients were 0.00149/0.00172. The multiplier decayed only 0.02 per zero-shutdown completed batch.
+2. **BC confidence and independent joint sampling.** On 16 sampled BC-policy trajectories, mean probability assigned to the public teacher's action was 0.553 per role and 0.320 for the joint pair. One-step collision probability under the independent Actor distributions was 0.103; observed collisions were 9.56/episode and shutdown occurred in 43.8%. At selected raw/regularized checkpoints, teacher-action probability fell to 0.143/0.148 and joint teacher-pair probability to 0.023/0.026. The policies took WAIT in about 71%/70% of role decisions and delivered 0.375/0.25 on these 16 episodes.
+3. **Hard-tree leaf collapse.** On 1,581 states visited by the sampled BC Actor, the nominal 16-leaf role trees occupied only 2 leaves for robot_1 and 1 for robot_2. Majority teacher-label accuracy within these occupied leaves had ceilings of 27.6%/21.2%; no leaf was 95% label-pure. Residual bounds averaged 0.830/0.854 and residual output magnitude nearly saturated those bounds. The trees still occupied only 2/1 leaves at selected PPO checkpoints. This directly obstructs a large, stable program-fidelity region.
+
+## Isolated short ablation
+
+From the exact same candidate02 paired BC weights, using an unregistered matched scenario stream for 12k joint steps each, the original cost normalization reached 3.50 deliveries/12.17 collisions/50% shutdown on 12 development seeds. Raw-scale GAE cost advantage with zero actor cost gradient in zero-event batches reached 2.83/10.17/66.7%. Initial BC was 3.83/11/75%. The cost correction fixes a numerical defect, but a 12k probe did not establish quality improvement. The initial Actor representation and joint navigation remain independent bottlenecks.
+
+## Next candidate implications
+
+- Preserve actual-event cost critic and episode-level dual update. Use empirical episodic cost advantages with leave-one-out episode baseline (zero if every episode has zero cost), or at minimum avoid unit-variance normalization and suppress actor cost gradients in no-event batches. Log raw cost variance, event count, cost/reward gradient ratio, and multiplier.
+- Train a new relational/topology-aware NN Actor from the public map and both robot/order states. Public shortest-path/action-conditioned geometry can be features, while all action scores must be learned NN outputs. Validate sampled dual-Actor quality before PPO; argmax label accuracy is not a sufficient readiness measure.
+- Train the sparse tree with differentiable soft routing and harden gradually, tracking occupied leaves, leaf purity, split sparsity, bounded-residual saturation, joint teacher-action probability, and sampled rollouts. Retain exact frozen inference parity and program-audit gates.
+- Keep candidate02 failure receipts. No candidate should be promoted merely because shutdown falls to zero when deliveries collapse.
+
+Unregistered scripts: `cost_gradient_audit.py`, `cost_ppo_ablation.py`, `actor_confidence_audit.py`, `tree_capacity_audit.py`. Numerical ablation: `cost_ppo_ablation.json`. These files remain outside the published release package.

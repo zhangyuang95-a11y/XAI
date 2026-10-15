@@ -19,8 +19,8 @@ def test_frozen_actor_quality_trace_replays_and_detects_tampering(tmp_path):
     actor = FrozenWarehouseV6Actor.load(
         artifact["path"], expected_sha256=artifact["sha256"],
         expected_role_sha256=artifact["role_sha256"])
-    rows = evaluate(actor, [1009001], trace=True)["episodes"]
-    seeds = [(1009001, 1009001)]
+    rows = evaluate(actor, [1009001], action_seed_offset=73, trace=True)["episodes"]
+    seeds = [(1009001, 1009074)]
     certified = replay_series(
         actor_path=artifact["path"], actor_sha256=artifact["sha256"],
         role_sha256=artifact["role_sha256"], rows=rows, seeds=seeds)

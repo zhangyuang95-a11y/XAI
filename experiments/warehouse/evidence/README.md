@@ -13,6 +13,8 @@ formal paired run, final independent program audit, or held-out test.
 | v6.3 irregular public tree | [Failure](warehouse-v63-irregular-tree-10377-failure.md) | The tested BC modes failed dual-role program coverage or quality. |
 | v6.4 public per-action BC | [Failure](warehouse-v64-public-action-bc-10488-failure.md) | Pressure quality passed; dual-role program coverage did not. |
 | v6.4 50k paired PPO probe | [Failure](warehouse-v64-50k-ppo-10688-failure.md) | Pressure quality passed; robot_1 regularized program coverage and selected-checkpoint feedback gradient failed. |
+| v6.5 intrinsic tree BC probe | [Failure](warehouse-v65-10965-unregistered-failure.md) | BC pressure quality passed narrowly; both roles failed the 30% actionable program coverage precheck. |
+| v6.6 exploratory design | [Seed lock](warehouse-v66-unregistered-seed-lock.json) | Fresh, disjoint unregistered cohorts reserved before topology and model evaluation; no result or admission claim. |
 
 Exploratory raw artifacts are stored under ignored, run-specific
 `output/warehouse_v6_repro_snapshots/` directories. The later failure reports

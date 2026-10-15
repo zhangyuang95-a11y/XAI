@@ -714,13 +714,29 @@ def _accepted_warehouse_v6(entry: dict, binding: dict,
     """Apply the versioned Warehouse gate to the packaged evidence only."""
     try:
         spec = warehouse_release_spec(release_id)
-        if (binding.get('variant') not in spec.policy_ids
-                or binding.get('policy_id') != spec.policy_ids[binding['variant']]
+        variant = binding.get('variant')
+        program_roles = ('robot_1', 'robot_2') if variant == 'regularized' else ()
+        program_paths = entry.get('program_paths')
+        program_sha = entry.get('program_sha256')
+        if (variant not in spec.policy_ids
+                or not isinstance(program_paths, list)
+                or len(program_paths) != len(program_roles)
+                or not isinstance(program_sha, dict)
+                or set(program_sha) != set(program_roles)):
+            return False
+        expected_program_binding = {
+            path: program_sha[role]
+            for role, path in zip(program_roles, program_paths, strict=True)}
+        if len(expected_program_binding) != len(program_roles):
+            return False
+        if (binding.get('policy_id') != spec.policy_ids[variant]
                 or entry.get('policy_id') != binding['policy_id']
+                or entry.get('actor_path') != binding.get('actor_path')
                 or entry.get('actor_sha256') != binding['actor_sha256']
                 or entry.get('role_sha256') != {
                     'human': binding['human_actor_sha256'],
                     'ai': binding['ai_actor_sha256']}
+                or binding.get('program_hashes') != expected_program_binding
                 or entry.get('model_version') != binding['actor_model_version']
                 or entry.get('feature_schema_sha256') !=
                 binding['feature_schema_sha256']

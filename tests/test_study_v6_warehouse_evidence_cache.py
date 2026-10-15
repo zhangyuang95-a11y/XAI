@@ -156,9 +156,12 @@ def test_acceptance_proof_is_reused_only_for_unchanged_evidence(tmp_path, monkey
     entry = package["entries"]["regularized"]
     binding = {"domain": "warehouse", "variant": "regularized",
                "policy_id": entry["policy_id"],
+               "actor_path": entry["actor_path"],
                "actor_sha256": entry["actor_sha256"],
                "human_actor_sha256": entry["role_sha256"]["human"],
                "ai_actor_sha256": entry["role_sha256"]["ai"],
+               "program_hashes": {path: entry["program_sha256"][role]
+                                  for role, path in zip(p.ROLES, entry["program_paths"])},
                "actor_model_version": entry["model_version"],
                "feature_schema_sha256": entry["feature_schema_sha256"]}
     calls = []
@@ -166,6 +169,13 @@ def test_acceptance_proof_is_reused_only_for_unchanged_evidence(tmp_path, monkey
                         lambda *args, **kwargs: calls.append(True) or True)
     assert policies._accepted_warehouse_v6(entry, binding)
     assert policies._accepted_warehouse_v6(entry, binding)
+    assert len(calls) == 1
+
+    wrong_path = {**binding, "actor_path": "releases/other/actor.npz"}
+    assert not policies._accepted_warehouse_v6(entry, wrong_path)
+    wrong_program = {**binding, "program_hashes": {
+        **binding["program_hashes"], entry["program_paths"][0]: "0" * 64}}
+    assert not policies._accepted_warehouse_v6(entry, wrong_program)
     assert len(calls) == 1
 
     missing = package["evidence"]["pair_reports"][str(p.FORMAL_PAIR_SEEDS[-1])]
@@ -191,9 +201,12 @@ def test_catalog_replacement_during_acceptance_cannot_cache_old_proof(
     entry = package["entries"]["regularized"]
     binding = {"domain": "warehouse", "variant": "regularized",
                "policy_id": entry["policy_id"],
+               "actor_path": entry["actor_path"],
                "actor_sha256": entry["actor_sha256"],
                "human_actor_sha256": entry["role_sha256"]["human"],
                "ai_actor_sha256": entry["role_sha256"]["ai"],
+               "program_hashes": {path: entry["program_sha256"][role]
+                                  for role, path in zip(p.ROLES, entry["program_paths"])},
                "actor_model_version": entry["model_version"],
                "feature_schema_sha256": entry["feature_schema_sha256"]}
 
@@ -265,9 +278,12 @@ def test_catalog_replacement_between_policy_entries_and_evidence_fails_closed(
     entry = package["entries"]["regularized"]
     binding = {"domain": "warehouse", "variant": "regularized",
                "policy_id": entry["policy_id"],
+               "actor_path": entry["actor_path"],
                "actor_sha256": entry["actor_sha256"],
                "human_actor_sha256": entry["role_sha256"]["human"],
                "ai_actor_sha256": entry["role_sha256"]["ai"],
+               "program_hashes": {path: entry["program_sha256"][role]
+                                  for role, path in zip(p.ROLES, entry["program_paths"])},
                "actor_model_version": entry["model_version"],
                "feature_schema_sha256": entry["feature_schema_sha256"]}
     changed = json.loads(catalog_path.read_text())

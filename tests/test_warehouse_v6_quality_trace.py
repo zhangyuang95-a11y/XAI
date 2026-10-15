@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 
+import pytest
 import torch
 
 from backend.training.warehouse_v6_actor import WarehouseV6Actor, export_actor, FrozenWarehouseV6Actor
@@ -47,11 +48,20 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
         candidate_id="hash-contract", pair_seed=6120, joint_steps=200_000,
         output_dir=str(tmp_path), checkpoint_seeds=DEVELOPMENT_SELECTION_SEEDS)
     checked = _checked_spec(spec.to_mapping())
+    assert checked["architecture_mode"] == spec.architecture_mode
+    assert checked["bc_recipe_version"] == spec.bc_recipe_version
+    assert checked["online_program_extraction_steps"] == list(
+        spec.online_program_extraction_steps)
     scientific = _scientific_run_spec_sha256(checked)
     assert scientific == spec.sha256()
     assert scientific != _training_config_sha256(checked)
     assert _training_config_sha256(checked) == spec.training_config_sha256(
         checked["source_closure_sha256"])
+    for field, value in (("architecture_mode", "unregistered"),
+                         ("bc_recipe_version", "unregistered"),
+                         ("online_program_extraction_steps", [150_000, 170_000, 186_000])):
+        with pytest.raises(ValueError, match="registered architecture"):
+            _checked_spec({**spec.to_mapping(), field: value})
 
     resets = []
     for index, start in enumerate(range(0, spec.joint_steps, SCENARIO_BLOCK_STEPS)):

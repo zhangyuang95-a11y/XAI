@@ -203,7 +203,8 @@ def _checked_spec(run_spec: Mapping) -> dict:
         from experiments.warehouse.protocol import (
             BUDGETS, DEVELOPMENT_PAIR_SEEDS, DEVELOPMENT_SELECTION_SEEDS,
             FORMAL_PAIR_SEEDS, FORMAL_SELECTION_SEEDS,
-            final_program_fit_seed_schedule,
+            REGISTERED_ARCHITECTURE_MODE, REGISTERED_BC_RECIPE_VERSION,
+            final_program_fit_seed_schedule, online_program_extraction_steps,
         )
         if result["joint_steps"] not in BUDGETS:
             raise ValueError("Warehouse v6 budget is not preregistered")
@@ -217,6 +218,20 @@ def _checked_spec(run_spec: Mapping) -> dict:
             raise ValueError("Warehouse v6 pair seed is not preregistered")
         if tuple(seeds) != tuple(expected_seeds):
             raise ValueError("Warehouse v6 checkpoint seeds do not match registered block")
+        expected_extractions = online_program_extraction_steps(result["joint_steps"])
+        requested_extractions = run_spec.get("online_program_extraction_steps",
+                                             expected_extractions)
+        if (run_spec.get("architecture_mode", REGISTERED_ARCHITECTURE_MODE) !=
+                REGISTERED_ARCHITECTURE_MODE
+                or run_spec.get("bc_recipe_version", REGISTERED_BC_RECIPE_VERSION) !=
+                REGISTERED_BC_RECIPE_VERSION
+                or not isinstance(requested_extractions, (list, tuple))
+                or tuple(requested_extractions) != expected_extractions
+                or any(type(step) is not int for step in requested_extractions)):
+            raise ValueError("Warehouse v6 registered architecture, BC, or extraction schedule mismatch")
+        result["architecture_mode"] = REGISTERED_ARCHITECTURE_MODE
+        result["bc_recipe_version"] = REGISTERED_BC_RECIPE_VERSION
+        result["online_program_extraction_steps"] = list(expected_extractions)
         release_id = run_spec.get("release_id")
         if not isinstance(release_id, str):
             raise ValueError("Warehouse v6 registered run requires release ID")

@@ -191,6 +191,8 @@ def warehouse_policy_artifacts(release_id: str = RELEASE_ID) -> dict:
     The Warehouse training directory is deliberately not a runtime fallback.
     A pending catalog or a single missing asset leaves the entire pair closed.
     """
+    from backend.training.warehouse_v6_actor import FEATURE_SCHEMA_SHA256, MODEL_VERSION
+
     spec = warehouse_release_spec(release_id)
     catalog = _catalog(release_id)
     if (catalog.get("warehouse", {}).get("status") != "accepted"
@@ -202,9 +204,8 @@ def warehouse_policy_artifacts(release_id: str = RELEASE_ID) -> dict:
     for variant, entry in entries.items():
         if (not isinstance(entry, dict)
                 or entry.get("policy_id") != spec.policy_ids[variant]
-                or entry.get("model_version") != "warehouse-dual-actor.v6.1"
-                or entry.get("feature_schema_sha256") !=
-                "1ba9702c1d70b3375eb12f4c0569393ed480995265a4c4ca3aaec37167ff1346"):
+                or entry.get("model_version") != MODEL_VERSION
+                or entry.get("feature_schema_sha256") != FEATURE_SCHEMA_SHA256):
             raise ReleaseAssetUnavailable("warehouse_policy_identity_mismatch")
         for path_key, hash_key in (("actor_path", "actor_sha256"),
                                    ("training_report_path", "training_report_sha256"),

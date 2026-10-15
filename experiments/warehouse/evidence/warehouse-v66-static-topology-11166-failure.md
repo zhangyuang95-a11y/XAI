@@ -48,6 +48,9 @@ report are preserved in ignored
 `output/warehouse_v6_repro_snapshots/warehouse-v66-static-topology-11166-20261016/`.
 Its 10-file, 1,714,203-byte checked inventory has SHA-256
 `a8675e60557a9a777714f3eae2695cb4d44a582a9257ca76f12e45cba3d8d249`.
+An independent copy outside the ignored worktree is at
+`/Users/zhangyuang/Desktop/ICLR/XAI-v6-recovery-20261015T165508Z/warehouse-v66-static-topology-11166-20261016/`;
+its manifest and all ten file hashes and byte counts were verified again.
 The fit/CV evaluation script SHA-256 is
 `b02fd72475de6b1083f8b9a97d8af33dafc378edddb0ac1c32c64115f3c67e53`;
 its report SHA-256 is

@@ -57,6 +57,16 @@ def _synthetic_package(root: Path) -> dict:
             for seed in p.DEVELOPMENT_PAIR_SEEDS}},
         "training_assets": training_assets,
         "development_training_assets": {"200000": development_assets},
+        "program_traces": {
+            "development": {"200000": {
+                str(seed): {} for seed in p.DEVELOPMENT_PAIR_SEEDS}},
+            "preaudit": {role: asset(f"preaudit.{role}.trace.json",
+                                      f"preaudit:{role}".encode())
+                         for role in p.ROLES},
+            "final_audit": {role: asset(f"final.{role}.trace.json",
+                                         f"final:{role}".encode())
+                            for role in p.ROLES},
+        },
     }
     acceptance = asset("warehouse_v6_acceptance.json", json.dumps({
         "source_closure_sha256": "7" * 64}).encode())

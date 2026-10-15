@@ -28,10 +28,12 @@ class PolicyUnavailable(RuntimeError):
     """A required frozen policy or its audit evidence is unavailable."""
 
 
-def policy_id(domain: str, group: str) -> str:
+def policy_id(domain: str, group: str, release_id: str = RELEASE_ID) -> str:
     if domain not in MODULES or group not in GROUP_VARIANT:
         raise ValueError('invalid_policy_assignment')
-    return _catalog_entry(domain, GROUP_VARIANT[group])['policy_id']
+    entry = (_catalog_entry(domain, GROUP_VARIANT[group]) if release_id == RELEASE_ID
+             else _catalog_entry(domain, GROUP_VARIANT[group], release_id=release_id))
+    return entry['policy_id']
 
 
 def _path(value: str) -> Path:
@@ -51,29 +53,41 @@ def _digest(value: str) -> str:
         raise PolicyUnavailable('policy_artifact_missing') from exc
 
 
-def _catalog_entry(domain: str, variant: str) -> dict:
+def _catalog_entry(domain: str, variant: str,
+                   release_id: str = RELEASE_ID) -> dict:
     module = engine(domain)
+    if domain != 'warehouse' and release_id != RELEASE_ID:
+        raise PolicyUnavailable('policy_release_unavailable')
     try:
-        catalog = (warehouse_policy_artifacts() if domain == 'warehouse'
-                   else module.policy_artifacts(RELEASE_ID))
+        if domain == 'warehouse':
+            spec = warehouse_release_spec(release_id)
+            catalog = (warehouse_policy_artifacts() if release_id == RELEASE_ID
+                       else warehouse_policy_artifacts(release_id))
+            expected = spec.policy_ids[variant]
+        else:
+            catalog = module.policy_artifacts(RELEASE_ID)
+            expected = f'{domain}-{variant}-v5'
     except (AttributeError, OSError, RuntimeError, ValueError,
             ReleaseAssetUnavailable) as exc:
         raise PolicyUnavailable('policy_catalog_unavailable') from exc
     entry = catalog.get(variant)
-    expected = f'{domain}-{variant}-v6' if domain == 'warehouse' else f'{domain}-{variant}-v5'
     if not isinstance(entry, dict) or entry.get('policy_id') != expected:
         raise PolicyUnavailable('policy_catalog_incomplete')
     return entry
 
 
-def binding_for_group(domain: str, group: str) -> dict:
+def binding_for_group(domain: str, group: str,
+                      release_id: str = RELEASE_ID) -> dict:
     """Verify and freeze the exact Actor pair before a new instance is stored."""
     variant = GROUP_VARIANT[group]
-    entry = _catalog_entry(domain, variant)
-    return _binding_from_entry(domain, variant, entry, entry['policy_id'])
+    entry = (_catalog_entry(domain, variant) if release_id == RELEASE_ID else
+             _catalog_entry(domain, variant, release_id=release_id))
+    return _binding_from_entry(domain, variant, entry, entry['policy_id'],
+                               release_id=release_id)
 
 
-def _binding_from_entry(domain: str, variant: str, entry: dict, ident: str) -> dict:
+def _binding_from_entry(domain: str, variant: str, entry: dict, ident: str,
+                        *, release_id: str = RELEASE_ID) -> dict:
     if entry.get('policy_id') != ident:
         raise PolicyUnavailable('policy_catalog_incomplete')
     expected = entry.get('actor_sha256')
@@ -97,7 +111,8 @@ def _binding_from_entry(domain: str, variant: str, entry: dict, ident: str) -> d
                'actor_path': entry['actor_path'], 'actor_sha256': actual,
                'human_actor_sha256': roles['human'], 'ai_actor_sha256': roles['ai'],
                'program_hashes': program_hashes}
-    if domain == 'warehouse' and ident.endswith('-v6'):
+    if (domain == 'warehouse' and
+            ident == warehouse_release_spec(release_id).policy_ids[variant]):
         from backend.training.warehouse_v6_actor import MODEL_VERSION, FEATURE_SCHEMA_SHA256
         if (entry.get('model_version') != MODEL_VERSION
                 or entry.get('feature_schema_sha256') != FEATURE_SCHEMA_SHA256):
@@ -172,7 +187,7 @@ def binding_for_warehouse_structured(ident: str) -> dict:
     return binding
 
 
-def verify_binding(binding: dict) -> dict:
+def verify_binding(binding: dict, release_id: str = RELEASE_ID) -> dict:
     """Fail closed if saved identity and current pinned assets ever diverge."""
     domain = binding.get('domain')
     variant = binding.get('variant')
@@ -183,7 +198,8 @@ def verify_binding(binding: dict) -> dict:
         current = binding_for_warehouse_structured(binding['policy_id'])
     else:
         group = 'C' if variant == 'raw' else 'A'
-        current = binding_for_group(domain, group)
+        current = (binding_for_group(domain, group) if release_id == RELEASE_ID else
+                   binding_for_group(domain, group, release_id=release_id))
     for key in ('policy_id', 'actor_path', 'actor_sha256',
                 'human_actor_sha256', 'ai_actor_sha256', 'program_hashes',
                 'actor_model_version', 'feature_schema_sha256'):
@@ -206,8 +222,9 @@ def policy_manifest() -> dict:
                 domains[domain][variant] = {**binding, 'evidence_sha256': hashes,
                     'accepted': _accepted(entry, binding)}
             except (PolicyUnavailable, AttributeError, OSError, ValueError) as exc:
-                domains[domain][variant] = {'policy_id': f'{domain}-{variant}-' +
-                                             ('v6' if domain == 'warehouse' else 'v5'),
+                expected_id = (warehouse_release_spec().policy_ids[variant]
+                               if domain == 'warehouse' else f'{domain}-{variant}-v5')
+                domains[domain][variant] = {'policy_id': expected_id,
                                              'accepted': False, 'error': str(exc)}
     return domains
 
@@ -603,11 +620,21 @@ def _warehouse_once_receipts_valid(acceptance: dict, entry: dict | None = None) 
         return False
 
 
-def _accepted(entry: dict, binding: dict) -> bool:
-    if (binding.get('domain') == 'warehouse'
-            and binding.get('policy_id') in
-            warehouse_release_spec(RELEASE_ID).policy_ids.values()):
-        return _accepted_warehouse_v6(entry, binding)
+def _accepted(entry: dict, binding: dict,
+              release_id: str = RELEASE_ID) -> bool:
+    if binding.get('domain') == 'warehouse':
+        try:
+            spec = warehouse_release_spec(release_id)
+        except ReleaseAssetUnavailable:
+            return False
+        if binding.get('policy_id') in spec.policy_ids.values():
+            return _accepted_warehouse_v6(entry, binding, release_id=release_id)
+        # A v6 candidate must never fall through to the legacy v5 receipt
+        # checker when the caller supplied the wrong release identifier.
+        ident = binding.get('policy_id')
+        if isinstance(ident, str) and ident.startswith((
+                'warehouse-raw-v6', 'warehouse-regularized-v6')):
+            return False
     try:
         report_path = entry['training_report_path']
         acceptance_path = entry['acceptance_path']
@@ -682,10 +709,14 @@ def _accepted(entry: dict, binding: dict) -> bool:
         return False
 
 
-def _accepted_warehouse_v6(entry: dict, binding: dict) -> bool:
+def _accepted_warehouse_v6(entry: dict, binding: dict,
+                           release_id: str = RELEASE_ID) -> bool:
     """Apply the versioned Warehouse gate to the packaged evidence only."""
     try:
-        if (entry.get('policy_id') != binding['policy_id']
+        spec = warehouse_release_spec(release_id)
+        if (binding.get('variant') not in spec.policy_ids
+                or binding.get('policy_id') != spec.policy_ids[binding['variant']]
+                or entry.get('policy_id') != binding['policy_id']
                 or entry.get('actor_sha256') != binding['actor_sha256']
                 or entry.get('role_sha256') != {
                     'human': binding['human_actor_sha256'],
@@ -699,30 +730,38 @@ def _accepted_warehouse_v6(entry: dict, binding: dict) -> bool:
                 entry['acceptance_sha256']):
             return False
         source_closure = warehouse_runtime_source_closure_sha256()
-        entries = warehouse_policy_artifacts()
+        entries = (warehouse_policy_artifacts() if release_id == RELEASE_ID else
+                   warehouse_policy_artifacts(release_id))
         if entry != entries.get(binding['variant']):
             return False
-        evidence, revision = warehouse_evidence_snapshot()
+        evidence, revision = (warehouse_evidence_snapshot() if release_id == RELEASE_ID
+                              else warehouse_evidence_snapshot(release_id))
         # The policy entries were read before the evidence snapshot. A catalog
         # replacement between those reads must not attach new evidence to an
         # old Actor binding, even when all referenced files still hash cleanly.
-        if warehouse_policy_artifacts() != entries:
+        current_entries = (warehouse_policy_artifacts() if release_id == RELEASE_ID
+                           else warehouse_policy_artifacts(release_id))
+        if current_entries != entries:
             return False
         identity = sha256(json.dumps({'entry': entry, 'binding': binding},
                                     sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-        cache_key = (revision, source_closure, identity)
+        cache_key = (release_id, revision, source_closure, identity)
         with _WAREHOUSE_ACCEPTANCE_CACHE_LOCK:
             cached = cache_key in _WAREHOUSE_ACCEPTANCE_CACHE
         if cached:
-            return warehouse_evidence_revision() == revision
+            current_revision = (warehouse_evidence_revision() if release_id == RELEASE_ID
+                                else warehouse_evidence_revision(release_id))
+            return current_revision == revision
         acceptance = json.loads(_path(entry['acceptance_path']).read_text())
         if acceptance.get('source_closure_sha256') != source_closure:
             return False
         from experiments.warehouse.acceptance import validate_acceptance
         passed = validate_acceptance(
-            acceptance, release_id=RELEASE_ID,
+            acceptance, release_id=release_id,
             entries=entries, evidence=evidence, repository_root=ROOT)
-        if warehouse_evidence_revision() != revision:
+        current_revision = (warehouse_evidence_revision() if release_id == RELEASE_ID
+                            else warehouse_evidence_revision(release_id))
+        if current_revision != revision:
             return False
         if passed:
             with _WAREHOUSE_ACCEPTANCE_CACHE_LOCK:

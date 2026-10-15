@@ -1,0 +1,39 @@
+{
+  "status": "prelocked_unregistered_exploratory",
+  "version": "warehouse-v66-exploration-seeds.v1",
+  "purpose": "Fresh, disjoint v6.6 structure and model exploration; never a formal or sealed audit",
+  "pair_seed": 11166,
+  "scenario_namespace": "warehouse-v66-unregistered-11166",
+  "topology_development": {
+    "fit_scenario_seeds": {"first": 1110000, "last_inclusive": 1110049, "count": 50},
+    "fit_only_cv_scenario_seeds": {"first": 1110050, "last_inclusive": 1110074, "count": 25}
+  },
+  "bc_checkpoint": {
+    "program_fit_scenario_seeds": {"first": 1110100, "last_inclusive": 1110149, "count": 50},
+    "program_calibration_scenario_seeds": {"first": 1110150, "last_inclusive": 1110174, "count": 25},
+    "program_eligibility_scenario_seeds": {"first": 1110175, "last_inclusive": 1110199, "count": 25},
+    "program_validation_scenario_seeds": {"first": 1110200, "last_inclusive": 1110223, "count": 24},
+    "descriptive_audit_scenario_seeds": {"first": 1110300, "last_inclusive": 1110323, "count": 24},
+    "pressure_base_seeds": {"first": 1110400, "last_inclusive": 1110431, "count": 32},
+    "pressure_scenario_seed_formula": "base_seed * 10 + task, task in (1,2,3)",
+    "pressure_action_seed_offsets": [0, 1000000, 2000000],
+    "pressure_episode_count": 288
+  },
+  "post_ppo_checkpoint": {
+    "program_fit_scenario_seeds": {"first": 1111100, "last_inclusive": 1111149, "count": 50},
+    "program_calibration_scenario_seeds": {"first": 1111150, "last_inclusive": 1111174, "count": 25},
+    "program_eligibility_scenario_seeds": {"first": 1111175, "last_inclusive": 1111199, "count": 25},
+    "program_validation_scenario_seeds": {"first": 1111200, "last_inclusive": 1111223, "count": 24},
+    "descriptive_audit_scenario_seeds": {"first": 1111300, "last_inclusive": 1111323, "count": 24},
+    "pressure_base_seeds": {"first": 1111400, "last_inclusive": 1111431, "count": 32},
+    "pressure_scenario_seed_formula": "base_seed * 10 + task, task in (1,2,3)",
+    "pressure_action_seed_offsets": [0, 1000000, 2000000],
+    "pressure_episode_count": 288
+  },
+  "constraints": [
+    "All scenario seed sets, including expanded pressure scenes and actual BC/PPO data seeds, must be checked for disjointness before evaluation.",
+    "Fit-only CV may guide sparse topology search. Calibration only calibrates leaves; eligibility locks leaves; validation and descriptive audit never select leaves or tune the current method.",
+    "Any method revision informed by validation, descriptive audit, or pressure needs a new, explicitly locked exploratory holdback block.",
+    "Registered development, final audit, and held-out seed blocks remain unused by this exploration."
+  ]
+}

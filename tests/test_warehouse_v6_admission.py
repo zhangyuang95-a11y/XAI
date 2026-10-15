@@ -122,7 +122,16 @@ class FakeBackend:
                 "training_report_sha256": report_sha,
             }
             if variant == "regularized":
-                variants[variant]["program_extractions"] = _fake_online_extractions(budget)
+                extractions = _fake_online_extractions(budget)
+                variants[variant]["program_extractions"] = extractions
+                variants[variant]["training_episodes"] = [
+                    {"episode_key": episode, "seed": scenario_seed,
+                     "start_joint_step": row["window_start_joint_step"],
+                     "joint_steps": 1}
+                    for row in extractions["robot_1"]
+                    for purpose, seeds in row["training_split_scenario_seeds"].items()
+                    for scenario_seed, episode in zip(
+                        seeds, row["training_split_episode_ids"][purpose], strict=True)]
         pair = {"candidate_id": spec["candidate_id"],
                 "release_id": spec["release_id"],
                 "architecture_mode": spec["architecture_mode"],

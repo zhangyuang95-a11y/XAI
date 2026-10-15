@@ -64,7 +64,16 @@ def _paired_training(joint_steps=200_000):
                                        "robot_2": 0.0 if variant == "raw" else .1},
         }
         if variant == "regularized":
-            variants[variant]["program_extractions"] = _online_extractions(joint_steps)
+            extractions = _online_extractions(joint_steps)
+            variants[variant]["program_extractions"] = extractions
+            variants[variant]["training_episodes"] = [
+                {"episode_key": episode, "seed": seed,
+                 "start_joint_step": row["window_start_joint_step"],
+                 "joint_steps": 1}
+                for row in extractions["robot_1"]
+                for purpose, seeds in row["training_split_scenario_seeds"].items()
+                for seed, episode in zip(
+                    seeds, row["training_split_episode_ids"][purpose], strict=True)]
     return variants
 
 
@@ -186,6 +195,9 @@ def test_pair_requires_identical_bc_and_scenario_schedule_and_real_gradients():
             "program_extractions"]["robot_1"][0][
                 "training_split_scenario_seeds"]["fit"][0]
     bad["regularized"]["online_program_cohorts_disjoint"] = True
+    assert not p.paired_training_pass(bad, joint_steps=200_000)
+    bad = deepcopy(reports)
+    bad["regularized"]["training_episodes"][0]["seed"] += 1
     assert not p.paired_training_pass(bad, joint_steps=200_000)
 
 

@@ -308,10 +308,31 @@ def program_pass(metrics: Mapping, *, purpose: str, development: bool) -> bool:
 
 
 def online_program_cohorts_valid(extractions: object, *,
-                                 joint_steps: int) -> bool:
+                                 joint_steps: int,
+                                 training_episodes: object) -> bool:
     """Recompute the four purpose cohorts instead of trusting a report flag."""
     if not isinstance(extractions, Mapping) or set(extractions) != set(ROLES):
         return False
+    if not isinstance(training_episodes, list) or not training_episodes:
+        return False
+    episodes = {}
+    for episode in training_episodes:
+        if not isinstance(episode, Mapping):
+            return False
+        key = episode.get("episode_key")
+        seed = episode.get("seed")
+        start = episode.get("start_joint_step")
+        length = episode.get("joint_steps")
+        if (not isinstance(key, str) or key in episodes
+                or type(seed) is not int or type(start) is not int
+                or type(length) is not int or start < 0 or length <= 0
+                or start + length > joint_steps):
+            return False
+        parts = key.split(":")
+        if (len(parts) != 2 or parts[0] != str(seed)
+                or not parts[1].isdigit() or parts[1] != str(int(parts[1]))):
+            return False
+        episodes[key] = (seed, start)
     steps = online_program_extraction_steps(joint_steps)
     all_scenes: set[int] = set()
     all_episode_ids: set[str] = set()
@@ -355,6 +376,12 @@ def online_program_cohorts_valid(extractions: object, *,
                 except ValueError:
                     return False
                 if id_scenes != seed_set:
+                    return False
+                if any(item not in episodes
+                       or episodes[item][0] not in seed_set
+                       or not (row["window_start_joint_step"] <=
+                               episodes[item][1] < step)
+                       for item in ids):
                     return False
                 local_scenes.update(seed_set)
                 local_ids.update(id_set)
@@ -417,7 +444,8 @@ def paired_training_pass(variants: Mapping, *, joint_steps: int) -> bool:
            regularized["selected_role_sha256"][role] for role in ROLES):
         return False
     if not online_program_cohorts_valid(
-            regularized.get("program_extractions"), joint_steps=joint_steps):
+            regularized.get("program_extractions"), joint_steps=joint_steps,
+            training_episodes=regularized.get("training_episodes")):
         return False
     for report, should_be_positive in ((raw, False), (regularized, True)):
         rows = report.get("feedback_rows")

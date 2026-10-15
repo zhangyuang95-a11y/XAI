@@ -23,11 +23,11 @@ from env.warehouse.public_observation_v6 import (
 )
 from .warehouse_v6_actor import (
     FrozenWarehouseV6Actor, FrozenWarehouseV6Role, MAX_SPLIT_FEATURES,
-    MIN_RESIDUAL_BOUND, TREE_DEPTH, TREE_LEAVES, TREE_NODES,
+    MIN_RESIDUAL_BOUND, MAX_RESIDUAL_BOUND, TREE_DEPTH, TREE_LEAVES, TREE_NODES,
 )
 
 
-PROGRAM_VERSION = "warehouse-role-program.v6.0"
+PROGRAM_VERSION = "warehouse-role-program.v6.1"
 MIN_LEAF_SUPPORT = 20
 MIN_COVERAGE = 0.20
 FEEDBACK_AGREEMENT = 0.85
@@ -278,6 +278,7 @@ class WarehouseV6Program:
                     result.split_weights, result.split_bias, result.actor_tree_logits,
                     result.actor_residual_bounds, result.leaf_logits))
                 or np.any(result.actor_residual_bounds < MIN_RESIDUAL_BOUND)
+                or np.any(result.actor_residual_bounds > MAX_RESIDUAL_BOUND)
                 or any(leaf < 0 or leaf >= TREE_LEAVES
                        for leaf in result.feedback_leaves | result.explanation_leaves)
                 or result.report.get("max_depth") != TREE_DEPTH
@@ -321,7 +322,7 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
     cal_x, cal_m = _sample_arrays(parts["calibration"], "calibration")
     calibrated = _calibrate_leaf_logits(fitted, role_actor, cal_x, cal_m,
                                         role_actor.leaf(cal_x))
-    bounds = MIN_RESIDUAL_BOUND + (1.0 - MIN_RESIDUAL_BOUND) / (
+    bounds = MIN_RESIDUAL_BOUND + (MAX_RESIDUAL_BOUND - MIN_RESIDUAL_BOUND) / (
         1.0 + np.exp(-role_actor.weights["leaf_bound_logits"]))
     split_hashes = {name: sha256(json.dumps(sorted(ids), separators=(",", ":")).encode()).hexdigest()
                     for name, ids in episode_ids.items()}

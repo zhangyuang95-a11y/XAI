@@ -26,6 +26,7 @@ from env.warehouse.navigation import ACTIONS
 from env.warehouse.pure_nn import AGENTS, action_masks
 from env.warehouse.public_observation_v6 import (
     FEATURE_SCHEMA_SHA256, OBSERVATION_DIM, OBSERVATION_VERSION,
+    OBSERVATION_FEATURE_NAMES,
     encode_public_observation,
 )
 from .warehouse_v6_actor import (
@@ -35,10 +36,10 @@ from .warehouse_v6_actor import (
 from .warehouse_v6_program import (
     WarehouseV6Program, fit_program, audit_frozen_program,
 )
-from .warehouse_v6_teacher import public_bc_teacher
+from .warehouse_v6_teacher_lookahead import public_lookahead_teacher
 
 
-RUNNER_VERSION = "warehouse-v6-paired-cost-ppo.v2"
+RUNNER_VERSION = "warehouse-v6-paired-cost-ppo.v4"
 SCENARIO_BLOCK_STEPS = 120
 PROGRAM_LAMBDA = 0.01
 PROGRAM_START_FRACTION = 0.80
@@ -46,7 +47,11 @@ PROGRAM_RAMP_FRACTION = 0.05
 PROGRAM_BUFFER_STATES = 20_000
 PROGRAM_SPLIT_EPISODES = (50, 25, 25, 24)
 PROGRAM_MIN_EPISODES = sum(PROGRAM_SPLIT_EPISODES)
-TRAINING_REWARD_OVERRIDES = {"robot_collision_points": -100.0,
+# PPO's training score must rank a threshold-quality delivery trajectory
+# above the inert 120-WAIT trajectory. These values affect training rewards
+# only; the participant environment and acceptance metrics are untouched.
+TRAINING_REWARD_OVERRIDES = {"delivery_points": 100.0,
+                             "robot_collision_points": -50.0,
                              "shutdown_points": -200.0}
 DEFAULT_BC_EPISODES = 200
 DEFAULT_BC_EPOCHS = 30
@@ -63,8 +68,10 @@ _SOURCE_FILES = (
     "backend/training/warehouse_v6_program.py",
     "backend/training/warehouse_v6_runner.py",
     "backend/training/warehouse_v6_teacher.py",
+    "backend/training/warehouse_v6_teacher_lookahead.py",
     "experiments/warehouse/protocol.py",
     "configs/study_v3_warehouse_neural_v6.json",
+    "requirements-warehouse-v6-training.txt",
 )
 
 
@@ -187,7 +194,7 @@ def _teacher_rows(episodes: int, seed: int) -> tuple[torch.Tensor, torch.Tensor,
         _set_dual_nn_mode(env)
         while not (env.state.terminated or env.state.truncated):
             obs, mask = encode_public_observation(env.state), action_masks(env.state)
-            chosen = public_bc_teacher(obs, mask)
+            chosen = public_lookahead_teacher(obs, mask)
             actions = {role: ACTIONS[int(chosen[index])]
                        for index, role in enumerate(AGENTS)}
             observations.append(obs)
@@ -218,8 +225,30 @@ def _bc_epochs(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
             logits = model.outputs_encoded(encoded[indices], mask[indices])
             loss = nn.functional.cross_entropy(logits.reshape(-1, len(ACTIONS)),
                                                labels[indices].reshape(-1))
-            # Both variants inherit the same learned preference for low-bound
-            # tree leaves. The raw variant receives no program gradient later.
+            tree_loss, gate_supervision = [], []
+            for index, role in enumerate(AGENTS):
+                role_rows = encoded[indices, index]
+                actor = model.actors[role]
+                tree_logits, _ = actor.tree(role_rows)
+                tree_loss.append(nn.functional.cross_entropy(
+                    tree_logits.masked_fill(mask[indices, index] <= 0.5, -1e9),
+                    labels[indices, index]))
+                with torch.no_grad():
+                    tree_prob = torch.softmax(tree_logits.masked_fill(
+                        mask[indices, index] <= 0.5, -1e9), -1)
+                    easy = (tree_prob.argmax(-1) == labels[indices, index]) & (
+                        tree_prob.max(-1).values >= 0.9)
+                gate_target = torch.where(easy, 0.1, 0.9).to(role_rows.dtype)
+                gate_supervision.append(nn.functional.binary_cross_entropy(
+                    actor.gate_values(role_rows), gate_target))
+            loss = loss + 0.05 * torch.stack(tree_loss).mean()
+            # The gate learns when the public-state tree already predicts the
+            # offline label and when the relation residual must take over.
+            # Only BC/DAgger training rows supply this target, never program
+            # qualification or independent evaluation episodes.
+            loss = loss + 0.3 * torch.stack(gate_supervision).mean()
+            # Both variants inherit the same learned preference for compact
+            # residual corrections. Raw receives no program gradient later.
             loss = loss + 5e-4 * torch.stack([
                 model.actors[role].bounds().mean() for role in AGENTS]).mean()
             optimizer.zero_grad()
@@ -231,15 +260,91 @@ def _bc_epochs(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
         return float((predicted == labels).float().mean())
 
 
+def _bc_reliability(model: WarehouseV6Actor, obs: torch.Tensor,
+                    mask: torch.Tensor, labels: torch.Tensor) -> dict:
+    """Track sampled dual-Actor reliability, including public hard states."""
+    if not len(obs):
+        raise ValueError("Warehouse v6 BC reliability requires rows")
+    probabilities, correct = [], []
+    with torch.no_grad():
+        for begin in range(0, len(obs), 512):
+            end = min(begin + 512, len(obs))
+            logits = model.outputs(obs[begin:end], mask[begin:end])
+            probabilities.append(torch.softmax(logits, -1).gather(
+                -1, labels[begin:end, :, None]).squeeze(-1))
+            correct.append(logits.argmax(-1) == labels[begin:end])
+    p = torch.cat(probabilities)
+    accurate = torch.cat(correct)
+    distance_column = OBSERVATION_FEATURE_NAMES.index("robots_shortest_distance")
+    margin_column = OBSERVATION_FEATURE_NAMES.index("self_charger_return_margin")
+    near = obs[:, 0, distance_column] * 42.0 <= 2.0
+    low_margin = obs[:, :, margin_column].min(-1).values * 50.0 <= 4.0
+
+    def describe(selected: torch.Tensor) -> dict:
+        if not bool(selected.any()):
+            return {"rows": 0, "role_teacher_action_probability": None,
+                    "joint_teacher_action_probability": None,
+                    "role_teacher_top1_accuracy": None}
+        return {"rows": int(selected.sum()),
+                "role_teacher_action_probability": {
+                    role: float(p[selected, index].mean())
+                    for index, role in enumerate(AGENTS)},
+                "joint_teacher_action_probability": float(p[selected].prod(-1).mean()),
+                "role_teacher_top1_accuracy": {
+                    role: float(accurate[selected, index].float().mean())
+                    for index, role in enumerate(AGENTS)}}
+
+    all_rows = torch.ones(len(obs), dtype=torch.bool)
+    return {"all": describe(all_rows), "near_robots": describe(near),
+            "low_return_margin": describe(low_margin),
+            "near_and_low_margin": describe(near & low_margin)}
+
+
+def _initialize_public_trees(model: WarehouseV6Actor, obs: torch.Tensor,
+                             mask: torch.Tensor, labels: torch.Tensor) -> dict:
+    """Fit both sparse Actor branches before residual BC from public rows."""
+    import sklearn
+    from sklearn.tree import DecisionTreeClassifier
+
+    features = policy_features_torch(obs, mask).numpy()
+    reports = {}
+    for index, role in enumerate(AGENTS):
+        classifier = DecisionTreeClassifier(
+            max_depth=4, max_leaf_nodes=16, min_samples_leaf=32,
+            random_state=19 + index)
+        classifier.fit(features[:, index], labels[:, index].numpy())
+        detail = model.actors[role].initialize_tree_from_classifier(classifier)
+        with torch.no_grad():
+            tree_logits, path = model.actors[role].tree(
+                torch.from_numpy(features[:, index]))
+            decision = tree_logits.masked_fill(mask[:, index] <= 0.5,
+                                               -1e9).argmax(-1)
+        reports[role] = {**detail,
+                         "sklearn_version": sklearn.__version__,
+                         "fitting_rows": len(features),
+                         "split_frozen_during_bc_and_ppo": True,
+                         "tree_initialization_sha256": _digest_json({
+                             "split_weight": model.actors[role].tree.split.weight.detach().tolist(),
+                             "split_bias": model.actors[role].tree.split.bias.detach().tolist(),
+                             "leaf_logits": model.actors[role].tree.leaf_logits.detach().tolist(),
+                         }),
+                         "training_leaf_occupancy": int((path.sum(0) > 0).sum()),
+                         "training_label_accuracy": float((
+                             decision == labels[:, index]).float().mean())}
+    return reports
+
+
 def pretrain_pair(model: WarehouseV6Actor, *, pair_seed: int, spec: Mapping) -> dict:
     """Shared BC initialization; all labels are a function of public inputs."""
     torch.manual_seed(pair_seed)
     initial_hashes = role_hashes(model)
     obs, mask, labels, teacher = _teacher_rows(spec["bc_episodes"], pair_seed + 10000)
+    tree_initialization = _initialize_public_trees(model, obs, mask, labels)
     optimizer = torch.optim.Adam(model.actors.parameters(), lr=3e-4)
     generator = torch.Generator().manual_seed(pair_seed + 31)
     accuracy = _bc_epochs(model, optimizer, obs, mask, labels,
                           epochs=spec["bc_epochs"], generator=generator)
+    initial_reliability = _bc_reliability(model, obs, mask, labels)
     history = []
     all_obs, all_mask, all_labels = [obs], [mask], [labels]
     sampling = torch.Generator().manual_seed(pair_seed + 41)
@@ -252,7 +357,7 @@ def pretrain_pair(model: WarehouseV6Actor, *, pair_seed: int, spec: Mapping) -> 
             _set_dual_nn_mode(env)
             while not (env.state.terminated or env.state.truncated):
                 row_obs, row_mask = encode_public_observation(env.state), action_masks(env.state)
-                label = public_bc_teacher(row_obs, row_mask)
+                label = public_lookahead_teacher(row_obs, row_mask)
                 with torch.no_grad():
                     logits = model.outputs(torch.from_numpy(row_obs)[None],
                                            torch.from_numpy(row_mask)[None])[0]
@@ -278,17 +383,30 @@ def pretrain_pair(model: WarehouseV6Actor, *, pair_seed: int, spec: Mapping) -> 
         accuracy = _bc_epochs(model, optimizer, joined_obs, joined_mask,
                               joined_labels, epochs=spec["dagger_epochs"],
                               generator=generator)
+        visited_reliability = _bc_reliability(
+            model, all_obs[-1], all_mask[-1], all_labels[-1])
         mean = np.mean(np.asarray(outcomes, dtype=np.float64), axis=0)
         history.append({"round": round_number, "visited_episodes": spec["dagger_episodes"],
                         "visited_joint_states": len(visited_obs),
                         "public_label_accuracy": accuracy,
+                        "visited_sampled_action_reliability": visited_reliability,
                         "nn_mean_deliveries": float(mean[0]),
                         "nn_mean_collisions": float(mean[1]),
                         "nn_shutdown_episode_rate": float(mean[2])})
     return {"source": "public_observation_only_offline_bc_and_nn_visits",
             "observation_version": OBSERVATION_VERSION,
             "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+            "bc_fit_episode_seeds": list(range(pair_seed + 10000,
+                                               pair_seed + 10000 + spec["bc_episodes"])),
+            "training_dependencies": {"torch": torch.__version__,
+                                      "numpy": np.__version__,
+                                      "sklearn": tree_initialization[AGENTS[0]]["sklearn_version"]},
             "teacher": teacher, "initial_role_sha256": initial_hashes,
+            "tree_initialization": tree_initialization,
+            "initial_bc_sampled_action_reliability": initial_reliability,
+            "final_bc_training_reliability": _bc_reliability(
+                model, torch.cat(all_obs), torch.cat(all_mask),
+                torch.cat(all_labels)),
             "pretrained_role_sha256": role_hashes(model),
             "public_label_accuracy": accuracy, "dagger": history,
             "teacher_uses_hidden_goal_or_route_state": False}
@@ -422,6 +540,24 @@ def _ppo_rows(episodes: Sequence[Mapping]) -> dict[str, torch.Tensor]:
     }
 
 
+def _cost_actor_advantage(data: Mapping[str, torch.Tensor],
+                          episodes: Sequence[Mapping]) -> tuple[torch.Tensor, int, float]:
+    """Preserve shutdown-event GAE scale and suppress event-free critic noise.
+
+    The cost critic still supplies the per-state baseline in ``_ppo_rows`` and
+    is fitted to real shutdown returns in every PPO update.  A batch with no
+    observed shutdown cannot identify an action that caused a shutdown, so
+    its residual value-estimation noise must not train either Actor.
+    """
+    advantage = data["cost_adv"]
+    event_rows = sum(int(row["shutdown_cost"] > 0)
+                     for episode in episodes for row in episode["records"])
+    raw_std = float(advantage.std(unbiased=False))
+    if event_rows == 0:
+        return torch.zeros_like(advantage), 0, raw_std
+    return advantage, event_rows, raw_std
+
+
 def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
                episodes: Sequence[Mapping], programs: Mapping[str, WarehouseV6Program | None] | None,
                *, progress: float, cost_multiplier: float, epochs: int = 4) -> dict:
@@ -432,9 +568,8 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
     reward_adv = data["reward_adv"]
     reward_adv = ((reward_adv - reward_adv.mean(0, keepdim=True)) /
                   reward_adv.std(0, keepdim=True, unbiased=False).clamp_min(1e-6))
-    cost_adv = data["cost_adv"]
-    cost_adv = ((cost_adv - cost_adv.mean()) /
-                cost_adv.std(unbiased=False).clamp_min(1e-6))
+    cost_adv, cost_event_rows, cost_adv_std_raw = _cost_actor_advantage(
+        data, episodes)
     coefficient = _program_coefficient(progress) if programs is not None else 0.0
     counts = {role: 0 for role in AGENTS}
     gradient_norms = {role: 0.0 for role in AGENTS}
@@ -468,7 +603,9 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
                     programs.get(role), coefficient=coefficient)
                 if count:
                     grads = torch.autograd.grad(
-                        penalty, tuple(model.actors[role].parameters()),
+                        penalty, tuple(parameter for parameter in
+                                       model.actors[role].parameters()
+                                       if parameter.requires_grad),
                         retain_graph=True, allow_unused=True)
                     gradient_norms[role] += float(sum(
                         grad.detach().square().sum().item()
@@ -486,6 +623,9 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
         optimizer.step()
         losses.append(float(loss.detach()))
     return {"loss": float(np.mean(losses)), "cost_multiplier": cost_multiplier,
+            "cost_event_rows": cost_event_rows,
+            "cost_advantage_std_raw": cost_adv_std_raw,
+            "cost_actor_surrogate": float(cost_surrogate.mean().detach()),
             "program_coefficient": coefficient, "feedback_rows": counts,
             "feedback_gradient_norm": gradient_norms, "program_kl": program_kl,
             "feedback_window_actor_rows": exposure,
@@ -644,6 +784,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
     extractions = {role: [] for role in AGENTS}
     best = None
     cost_multiplier = 1.0
+    recent_complete_shutdowns = deque(maxlen=64)
     interval = max(1, spec["joint_steps"] // 10)
     next_eval = interval
     if checkpoint.is_file():
@@ -670,6 +811,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                                             ("histories", "updates", "development"))
         best, cost_multiplier, next_eval = (saved[key] for key in
                                             ("best", "cost_multiplier", "next_eval"))
+        recent_complete_shutdowns.extend(saved["recent_complete_shutdowns"])
         if programs is not None:
             for role in AGENTS:
                 buffers[role].extend(saved["buffers"][role])
@@ -706,9 +848,17 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         shutdown_rate = (float(np.mean(complete_outcomes))
                          if complete_outcomes else None)
         if shutdown_rate is not None:
+            recent_complete_shutdowns.extend(complete_outcomes)
+            window_rate = float(np.mean(recent_complete_shutdowns))
+            dual_rate = 0.5 if window_rate >= 0.04 else 2.0
             cost_multiplier = min(20.0, max(0.0,
-                cost_multiplier + 0.5 * (shutdown_rate - 0.04)))
+                cost_multiplier + dual_rate * (window_rate - 0.04)))
+        else:
+            window_rate = (float(np.mean(recent_complete_shutdowns))
+                           if recent_complete_shutdowns else None)
         update.update(joint_steps=used_steps, complete_episode_shutdown_rate=shutdown_rate,
+                      complete_episode_window_shutdown_rate=window_rate,
+                      complete_episode_window_size=len(recent_complete_shutdowns),
                       completed_episodes_for_dual=len(complete_outcomes),
                       next_cost_multiplier=cost_multiplier)
         updates.append(update)
@@ -749,6 +899,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 "histories": histories, "updates": updates,
                 "development": development, "best": best,
                 "cost_multiplier": cost_multiplier, "next_eval": next_eval,
+                "recent_complete_shutdowns": list(recent_complete_shutdowns),
                 "buffers": ({role: list(buffers[role]) for role in AGENTS}
                             if programs is not None else {}),
                 "programs": ({role: (programs[role].to_dict()
@@ -800,6 +951,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
             item["zero_action_coverage_rows"][role] for item in selected_updates)
             for role in AGENTS},
         "cost_critic_training": True, "cost_target_event": "actual_episode_shutdown",
+        "cost_actor_advantage": "unscaled_shutdown_event_GAE_zero_on_no_event_batch",
         "cost_constraint_target": 0.04, "final_cost_multiplier": cost_multiplier,
         "training_reward_overrides": dict(TRAINING_REWARD_OVERRIDES),
         "selected_development": best["development"],

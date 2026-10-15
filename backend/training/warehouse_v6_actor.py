@@ -18,27 +18,38 @@ from torch import nn
 from core.policy_contracts import ActionDistribution
 from env.warehouse.decision_protocol import independent_agent_seed
 from env.warehouse.layouts import STUDY_MAP_LAYOUT
-from env.warehouse.navigation import ACTIONS
+from env.warehouse.navigation import ACTIONS, MOVE_DELTAS
 from env.warehouse.pure_nn import AGENTS, action_masks
 from env.warehouse.public_observation_v6 import (
-    FEATURE_DIM, FEATURE_SCHEMA_SHA256, OBSERVATION_DIM, OBSERVATION_VERSION,
+    FEATURE_DIM, FEATURE_NAMES, FEATURE_SCHEMA_SHA256, OBSERVATION_DIM, OBSERVATION_VERSION,
     encode_policy_features, encode_public_observation,
 )
 
 
-MODEL_VERSION = "warehouse-dual-actor.v6.0"
+MODEL_VERSION = "warehouse-dual-actor.v6.1"
 TREE_DEPTH = 4
 TREE_LEAVES = 1 << TREE_DEPTH
 TREE_NODES = TREE_LEAVES - 1
 MAX_SPLIT_FEATURES = 3
 RESIDUAL_WIDTH = 256
-MIN_RESIDUAL_BOUND = 0.03
+MIN_RESIDUAL_BOUND = 0.05
+MAX_RESIDUAL_BOUND = 8.05
+GATE_WIDTH = 64
+GEOMETRY_DIM = 6
+_POSITION_COLUMNS = tuple(FEATURE_NAMES.index(name) for name in (
+    "self_row", "self_column", "partner_row", "partner_column"))
+_MOVE = np.asarray([MOVE_DELTAS.get(action, (0, 0)) for action in ACTIONS],
+                   dtype=np.float32) / np.asarray(
+                       [max(1, STUDY_MAP_LAYOUT.rows - 1),
+                        max(1, STUDY_MAP_LAYOUT.cols - 1)], dtype=np.float32)
 TREE_GRADIENT_SCALE = 4.0
 MASK_GRADIENT_TEMPERATURE = 0.05
 _TENSOR_NAMES = (
     "tree.split.weight", "tree.split.bias", "tree.leaf_logits",
-    "residual.0.weight", "residual.0.bias", "residual.2.weight",
-    "residual.2.bias", "residual.4.weight", "residual.4.bias",
+    "gate.0.weight", "gate.0.bias", "gate.2.weight", "gate.2.bias",
+    "action_residual.0.weight", "action_residual.0.bias",
+    "action_residual.2.weight", "action_residual.2.bias",
+    "action_residual.4.weight", "action_residual.4.bias",
     "leaf_bound_logits",
 )
 
@@ -60,6 +71,10 @@ class SparseHardTree(nn.Module):
         nn.init.normal_(self.split.weight, mean=0.0, std=0.025)
         nn.init.zeros_(self.split.bias)
         nn.init.normal_(self.leaf_logits, mean=0.0, std=0.025)
+        # Training fits these supervised splits from public BC rows before
+        # optimization; held splits preserve route occupancy during PPO.
+        self.split.weight.requires_grad_(False)
+        self.split.bias.requires_grad_(False)
 
     def effective_weights(self) -> torch.Tensor:
         weights = self.split.weight
@@ -88,29 +103,123 @@ class SparseHardTree(nn.Module):
         path = self.path(encoded)
         return path @ self.leaf_logits, path
 
+    def initialize_from_classifier(self, classifier) -> dict:
+        """Initialize hard splits from a supervised, public-observation tree.
+
+        The classifier is fitted separately for each role before self-play.
+        Every deployed split has one observed input and thus stays within the
+        three-feature program limit. Filling early terminal nodes gives a
+        complete 16-leaf binary representation without changing its outputs.
+        """
+        tree = classifier.tree_
+        weights = np.zeros((TREE_NODES, FEATURE_DIM), dtype=np.float32)
+        bias = np.zeros(TREE_NODES, dtype=np.float32)
+        leaves = np.zeros((TREE_LEAVES, len(ACTIONS)), dtype=np.float32)
+        purity = np.zeros(TREE_LEAVES, dtype=np.float32)
+        occupied = set()
+
+        def fill(node: int, source: int, depth: int) -> None:
+            left, right = int(tree.children_left[source]), int(tree.children_right[source])
+            if depth == TREE_DEPTH:
+                counts = np.zeros(len(ACTIONS), dtype=np.float64)
+                class_values = np.asarray(tree.value[source, 0], dtype=np.float64)
+                if np.isclose(class_values.sum(), 1.0):
+                    class_values *= float(tree.weighted_n_node_samples[source])
+                counts[np.asarray(classifier.classes_, dtype=np.int64)] = class_values
+                probability = (counts + 1.0) / (counts.sum() + len(ACTIONS))
+                leaves[node - TREE_NODES] = np.log(probability).astype(np.float32)
+                purity[node - TREE_NODES] = float(counts.max() / max(1.0, counts.sum()))
+                occupied.add(source)
+                return
+            if left < 0:
+                # A previously terminal source is duplicated below this
+                # depth. Zero split always routes left at frozen inference.
+                fill(node * 2 + 1, source, depth + 1)
+                fill(node * 2 + 2, source, depth + 1)
+                return
+            feature = int(tree.feature[source])
+            weights[node, feature] = 4.0
+            bias[node] = -4.0 * float(tree.threshold[source])
+            fill(node * 2 + 1, left, depth + 1)
+            fill(node * 2 + 2, right, depth + 1)
+
+        fill(0, 0, 0)
+        with torch.no_grad():
+            self.split.weight.copy_(torch.from_numpy(weights))
+            self.split.bias.copy_(torch.from_numpy(bias))
+            self.leaf_logits.copy_(torch.from_numpy(leaves))
+        # Learned split locations are held fixed during on-policy updates;
+        # leaf distributions and the relation branch still learn. This
+        # prevents the observed collapse to one visited leaf under PPO.
+        self.split.weight.requires_grad_(False)
+        self.split.bias.requires_grad_(False)
+        return {"visited_source_leaves": len(occupied),
+                "leaf_purity": purity.tolist(),
+                "nonzero_split_features": int(np.count_nonzero(weights))}
+
 
 class RoleActor(nn.Module):
     def __init__(self):
         super().__init__()
         self.tree = SparseHardTree()
-        self.residual = nn.Sequential(
-            nn.Linear(FEATURE_DIM, RESIDUAL_WIDTH), nn.ReLU(),
-            nn.Linear(RESIDUAL_WIDTH, RESIDUAL_WIDTH), nn.ReLU(),
-            nn.Linear(RESIDUAL_WIDTH, len(ACTIONS)),
+        self.gate = nn.Sequential(
+            nn.Linear(FEATURE_DIM + 4, GATE_WIDTH), nn.ReLU(),
+            nn.Linear(GATE_WIDTH, 1),
         )
-        self.leaf_bound_logits = nn.Parameter(torch.full((TREE_LEAVES,), -1.0))
-        nn.init.normal_(self.residual[-1].weight, mean=0.0, std=0.01)
-        nn.init.zeros_(self.residual[-1].bias)
+        self.action_residual = nn.Sequential(
+            nn.Linear(FEATURE_DIM + GEOMETRY_DIM + len(ACTIONS), RESIDUAL_WIDTH),
+            nn.ReLU(), nn.Linear(RESIDUAL_WIDTH, RESIDUAL_WIDTH), nn.ReLU(),
+            nn.Linear(RESIDUAL_WIDTH, 1),
+        )
+        self.leaf_bound_logits = nn.Parameter(torch.full((TREE_LEAVES,), -0.9))
+        nn.init.zeros_(self.gate[-1].weight)
+        nn.init.constant_(self.gate[-1].bias, -0.7)
+        nn.init.normal_(self.action_residual[-1].weight, mean=0.0, std=0.01)
+        nn.init.zeros_(self.action_residual[-1].bias)
+
+    def initialize_tree_from_classifier(self, classifier) -> dict:
+        report = self.tree.initialize_from_classifier(classifier)
+        # Pure public-state leaves need only a small bounded correction;
+        # ambiguous leaves retain enough capacity for neural coordination.
+        desired = np.where(np.asarray(report["leaf_purity"]) >= 0.9, 4.0, 6.0)
+        fraction = np.clip((desired - MIN_RESIDUAL_BOUND) /
+                           (MAX_RESIDUAL_BOUND - MIN_RESIDUAL_BOUND), 1e-4, 1-1e-4)
+        with torch.no_grad():
+            self.leaf_bound_logits.copy_(torch.from_numpy(
+                np.log(fraction / (1.0 - fraction)).astype(np.float32)))
+        return report
 
     def bounds(self) -> torch.Tensor:
-        return MIN_RESIDUAL_BOUND + (1.0 - MIN_RESIDUAL_BOUND) * torch.sigmoid(
+        return MIN_RESIDUAL_BOUND + (MAX_RESIDUAL_BOUND - MIN_RESIDUAL_BOUND) * torch.sigmoid(
             self.leaf_bound_logits)
+
+    def _relation_features(self, encoded: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        own = encoded[..., list(_POSITION_COLUMNS[:2])]
+        partner = encoded[..., list(_POSITION_COLUMNS[2:])]
+        relative = own - partner
+        gate_input = torch.cat((encoded, relative, relative.abs()), dim=-1)
+        move = torch.as_tensor(_MOVE, dtype=encoded.dtype, device=encoded.device)
+        target_gap = own.unsqueeze(-2) + move - partner.unsqueeze(-2)
+        geometry = torch.cat((relative.unsqueeze(-2).expand_as(target_gap),
+                              target_gap, target_gap.abs()), dim=-1)
+        repeated = encoded.unsqueeze(-2).expand(encoded.shape[:-1] +
+                                                 (len(ACTIONS), FEATURE_DIM))
+        eye = torch.eye(len(ACTIONS), dtype=encoded.dtype, device=encoded.device)
+        action = eye.expand(encoded.shape[:-1] + (len(ACTIONS), len(ACTIONS)))
+        return gate_input, torch.cat((repeated, geometry, action), dim=-1)
 
     def components(self, encoded: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         tree_logits, path = self.tree(encoded)
         bound = path @ self.bounds()
-        bounded_residual = bound.unsqueeze(-1) * torch.tanh(self.residual(encoded))
+        gate_input, relation = self._relation_features(encoded)
+        gate = torch.sigmoid(self.gate(gate_input).squeeze(-1))
+        score = self.action_residual(relation).squeeze(-1)
+        bounded_residual = (gate * bound).unsqueeze(-1) * torch.tanh(score)
         return tree_logits, bounded_residual, bound
+
+    def gate_values(self, encoded: torch.Tensor) -> torch.Tensor:
+        gate_input, _ = self._relation_features(encoded)
+        return torch.sigmoid(self.gate(gate_input).squeeze(-1))
 
     def forward(self, encoded: torch.Tensor) -> torch.Tensor:
         tree_logits, residual, _ = self.components(encoded)
@@ -182,12 +291,17 @@ class FrozenWarehouseV6Role:
             "tree.split.weight": (TREE_NODES, FEATURE_DIM),
             "tree.split.bias": (TREE_NODES,),
             "tree.leaf_logits": (TREE_LEAVES, len(ACTIONS)),
-            "residual.0.weight": (RESIDUAL_WIDTH, FEATURE_DIM),
-            "residual.0.bias": (RESIDUAL_WIDTH,),
-            "residual.2.weight": (RESIDUAL_WIDTH, RESIDUAL_WIDTH),
-            "residual.2.bias": (RESIDUAL_WIDTH,),
-            "residual.4.weight": (len(ACTIONS), RESIDUAL_WIDTH),
-            "residual.4.bias": (len(ACTIONS),),
+            "gate.0.weight": (GATE_WIDTH, FEATURE_DIM + 4),
+            "gate.0.bias": (GATE_WIDTH,),
+            "gate.2.weight": (1, GATE_WIDTH),
+            "gate.2.bias": (1,),
+            "action_residual.0.weight": (
+                RESIDUAL_WIDTH, FEATURE_DIM + GEOMETRY_DIM + len(ACTIONS)),
+            "action_residual.0.bias": (RESIDUAL_WIDTH,),
+            "action_residual.2.weight": (RESIDUAL_WIDTH, RESIDUAL_WIDTH),
+            "action_residual.2.bias": (RESIDUAL_WIDTH,),
+            "action_residual.4.weight": (1, RESIDUAL_WIDTH),
+            "action_residual.4.bias": (1,),
             "leaf_bound_logits": (TREE_LEAVES,),
         }
         if (set(self.weights) != set(expected)
@@ -221,12 +335,32 @@ class FrozenWarehouseV6Role:
         w = self.weights
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             tree = w["tree.leaf_logits"][leaves]
-            bound = MIN_RESIDUAL_BOUND + (1.0 - MIN_RESIDUAL_BOUND) / (
+            bound = MIN_RESIDUAL_BOUND + (MAX_RESIDUAL_BOUND - MIN_RESIDUAL_BOUND) / (
                 1.0 + np.exp(-w["leaf_bound_logits"][leaves]))
-            hidden = np.maximum(flat @ w["residual.0.weight"].T + w["residual.0.bias"], 0)
-            hidden = np.maximum(hidden @ w["residual.2.weight"].T + w["residual.2.bias"], 0)
-            residual = bound[:, None] * np.tanh(
-                hidden @ w["residual.4.weight"].T + w["residual.4.bias"])
+            own = flat[:, list(_POSITION_COLUMNS[:2])]
+            partner = flat[:, list(_POSITION_COLUMNS[2:])]
+            relative = own - partner
+            gate_input = np.concatenate((flat, relative, np.abs(relative)), axis=-1)
+            gate_hidden = np.maximum(gate_input @ w["gate.0.weight"].T +
+                                     w["gate.0.bias"], 0)
+            gate = 1.0 / (1.0 + np.exp(-(
+                gate_hidden @ w["gate.2.weight"].T + w["gate.2.bias"])))
+            target_gap = own[:, None, :] + _MOVE[None] - partner[:, None, :]
+            geometry = np.concatenate((
+                np.broadcast_to(relative[:, None, :], target_gap.shape),
+                target_gap, np.abs(target_gap)), axis=-1)
+            repeated = np.broadcast_to(flat[:, None, :],
+                                       (len(flat), len(ACTIONS), FEATURE_DIM))
+            action = np.broadcast_to(np.eye(len(ACTIONS), dtype=np.float32)[None],
+                                     (len(flat), len(ACTIONS), len(ACTIONS)))
+            relation = np.concatenate((repeated, geometry, action), axis=-1)
+            hidden = np.maximum(relation @ w["action_residual.0.weight"].T +
+                                w["action_residual.0.bias"], 0)
+            hidden = np.maximum(hidden @ w["action_residual.2.weight"].T +
+                                w["action_residual.2.bias"], 0)
+            score = (hidden @ w["action_residual.4.weight"].T +
+                     w["action_residual.4.bias"]).squeeze(-1)
+            residual = (gate * bound[:, None]) * np.tanh(score)
         if not np.isfinite(tree).all() or not np.isfinite(residual).all():
             raise RuntimeError("Warehouse v6 role produced nonfinite logits")
         shape = data.shape[:-1]
@@ -272,7 +406,11 @@ class FrozenWarehouseV6Actor:
                     or metadata.get("action_names") != list(ACTIONS)
                     or metadata.get("tree_depth") != TREE_DEPTH
                     or metadata.get("tree_leaves") != TREE_LEAVES
-                    or metadata.get("max_split_features") != MAX_SPLIT_FEATURES):
+                    or metadata.get("max_split_features") != MAX_SPLIT_FEATURES
+                    or metadata.get("minimum_residual_bound") != MIN_RESIDUAL_BOUND
+                    or metadata.get("maximum_residual_bound") != MAX_RESIDUAL_BOUND
+                    or metadata.get("relation_geometry_dim") != GEOMETRY_DIM
+                    or metadata.get("gate_width") != GATE_WIDTH):
                 raise RuntimeError("Warehouse v6 Actor artifact contract mismatch")
             roles = {role: FrozenWarehouseV6Role({
                 name: np.asarray(archive[f"{role}.{name}"], dtype=np.float32)
@@ -336,6 +474,9 @@ def export_actor(model: WarehouseV6Actor, path: str | Path, *, pair_seed: int,
         "tree_depth": TREE_DEPTH, "tree_leaves": TREE_LEAVES,
         "max_split_features": MAX_SPLIT_FEATURES,
         "minimum_residual_bound": MIN_RESIDUAL_BOUND,
+        "maximum_residual_bound": MAX_RESIDUAL_BOUND,
+        "relation_geometry_dim": GEOMETRY_DIM,
+        "gate_width": GATE_WIDTH,
         "role_sha256": role_digests, "pair_seed": pair_seed,
         "variant": variant, "candidate_id": candidate_id,
     }

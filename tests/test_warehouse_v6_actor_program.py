@@ -126,7 +126,9 @@ def test_program_feedback_has_a_real_actor_gradient():
         logits, role_obs, role_mask, torch.tensor([action]),
         program, coefficient=0.01)
     assert count == 1
-    gradients = torch.autograd.grad(penalty, model.actors["robot_1"].parameters(),
+    gradients = torch.autograd.grad(penalty, (parameter for parameter in
+                                    model.actors["robot_1"].parameters()
+                                    if parameter.requires_grad),
                                     allow_unused=True)
     assert sum(float(grad.square().sum()) for grad in gradients if grad is not None) > 0
 

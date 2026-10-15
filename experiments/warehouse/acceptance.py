@@ -264,7 +264,7 @@ def _program_audit(audits: Mapping, *, role_hashes: Mapping,
         if (not isinstance(row, Mapping) or row.get("role") != role
                 or row.get("actor_role_sha256") != role_hashes[role]
                 or row.get("program_sha256") != program_hashes[role]
-                or set(row.get("episode_ids", ())) != set(map(str, expected_seeds))
+                or row.get("episode_ids") != sorted(map(str, expected_seeds))
                 or row.get("episode_count") != len(expected_seeds)
                 or type(row.get("sample_count")) is not int
                 or row["sample_count"] < 1000

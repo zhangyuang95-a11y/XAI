@@ -1,0 +1,47 @@
+{
+  "version": "warehouse-v69-public-history-joint-actor-exploration-seeds.v1",
+  "status": "prelocked_unregistered_new_observation_and_joint_actor_exploration",
+  "purpose": "From-scratch dual-Actor exploration with publicly reconstructible previous submitted/executed actions and collision history, learned hard topology, and complete-episode environmental shutdown cost; the old v6.8 topology and its reserved 115/116 seeds are not reused",
+  "screen": {
+    "diagnostic_only": true,
+    "pair_seed": 11769,
+    "scenario_namespace": "warehouse-v69-short-unregistered-11769",
+    "topology_fit_scenario_seeds": {"first": 1170000, "last_inclusive": 1170049, "count": 50},
+    "topology_cv_scenario_seeds": {"first": 1170050, "last_inclusive": 1170074, "count": 25},
+    "diagnostic_quality_scenario_seeds": {"first": 1170100, "last_inclusive": 1170123, "count": 24},
+    "diagnostic_quality_task_ids": [1, 2, 3]
+  },
+  "fresh_confirmation": {
+    "pair_seed": 11869,
+    "scenario_namespace": "warehouse-v69-confirm-unregistered-11869",
+    "topology_fit_scenario_seeds": {"first": 1180000, "last_inclusive": 1180049, "count": 50},
+    "topology_cv_scenario_seeds": {"first": 1180050, "last_inclusive": 1180074, "count": 25},
+    "program_fit_scenario_seeds": {"first": 1180100, "last_inclusive": 1180149, "count": 50},
+    "program_calibration_scenario_seeds": {"first": 1180150, "last_inclusive": 1180174, "count": 25},
+    "program_eligibility_scenario_seeds": {"first": 1180175, "last_inclusive": 1180199, "count": 25},
+    "program_validation_scenario_seeds": {"first": 1180200, "last_inclusive": 1180223, "count": 24},
+    "descriptive_audit_scenario_seeds": {"first": 1180300, "last_inclusive": 1180323, "count": 24},
+    "pressure_base_seeds": {"first": 1180400, "last_inclusive": 1180431, "count": 32},
+    "pressure_scenario_seed_formula": "base_seed * 10 + task, task in (1,2,3)",
+    "pressure_action_seed_offsets": [0, 1000000, 2000000],
+    "pressure_episode_count": 288,
+    "post_ppo_program_fit_scenario_seeds": {"first": 1181100, "last_inclusive": 1181149, "count": 50},
+    "post_ppo_program_calibration_scenario_seeds": {"first": 1181150, "last_inclusive": 1181174, "count": 25},
+    "post_ppo_program_eligibility_scenario_seeds": {"first": 1181175, "last_inclusive": 1181199, "count": 25},
+    "post_ppo_program_validation_scenario_seeds": {"first": 1181200, "last_inclusive": 1181223, "count": 24},
+    "post_ppo_descriptive_audit_scenario_seeds": {"first": 1181300, "last_inclusive": 1181323, "count": 24},
+    "post_ppo_pressure_base_seeds": {"first": 1181400, "last_inclusive": 1181431, "count": 32},
+    "post_ppo_pressure_episode_count": 288
+  },
+  "source_bc_seed_rule": "_bc_stage_seeds(pair_seed, stage, count) = pair_seed * 100000 + stage * 1000 + index; receipt enumerates actual stage seeds and proves they do not overlap the reserved evaluation or formal blocks",
+  "constraints": [
+    "The 117 screen may shape the method, but its CV and quality scenes are exploratory and cannot be called independent confirmation.",
+    "The 118 confirmation uses a new paired initial Actor and BC scene schedule. Its topology, four-part program, descriptive audit, and pressure scenes are purpose-disjoint.",
+    "Changing the method after viewing the 118 validation, audit, or pressure results requires another prelocked seed set.",
+    "The new observation is reconstructible from the preceding public frames and actual submitted actions. Human control supplies the actual human action, never an unexecuted NN counterfactual.",
+    "The hard topology fits the full frozen NN masked distribution from fit-only public states; public BC teacher labels may train Actor quality but do not select topology or executed actions.",
+    "Both independent NN Actors choose every self-play and runtime AI action through the physical legal mask; all environmental risk signals update NN weights only.",
+    "Complete-episode shutdown events alone supply cost critic targets and dual updates. Partial rollout fragments cannot be labeled safe.",
+    "Registered development, one-time final audit, and heldout seed blocks remain untouched. The earlier 115/116 v6.8 reservation remains unused and is not repurposed."
+  ]
+}

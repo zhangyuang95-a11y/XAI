@@ -10,20 +10,22 @@ from .environment.engine import PongEnvironment, VALID_ACTIONS
 from .explanation.evidence import ActionEvidence, ExplanationEngine, QuestionAnswerer
 from .policies.rule_demo import RuleDemoController
 from .policies.frozen_nn import FrozenNNController
+from study_three_tasks import VERSION as STUDY_VERSION, permits as study_permits, task as study_task
 
 
 @dataclass
 class PongStudySession:
-    """Continuous Task 1/Task 2 session with post-game A-group replay."""
+    """Continuous three-task session with A-group explanations only in Task 2."""
 
     group: str = "A"
     participant_id: str = "local"
-    seed: int = 260918
+    seed: int = 260920
     condition_source: str = "manual_self_select"
     study_protocol: str | None = None
     config: PongConfig = field(default_factory=PongConfig)
     nn_policy: Callable[[Mapping[str, float]], Mapping[str, float]] | None = None
     task: int = 1
+    session_id: str = field(default_factory=lambda: uuid4().hex)
     run_id: str = field(default_factory=lambda: uuid4().hex)
     environment: PongEnvironment = field(init=False)
     controller: Any = field(init=False)
@@ -34,6 +36,7 @@ class PongStudySession:
     snapshot_history: dict[int, dict[str, Any]] = field(default_factory=dict, init=False)
     question_history: list[dict[str, Any]] = field(default_factory=list, init=False)
     review_events: list[dict[str, Any]] = field(default_factory=list, init=False)
+    completed_runs: list[dict[str, Any]] = field(default_factory=list, init=False)
     input_action: str = field(default="stay", init=False)
     paused: bool = field(default=False, init=False)
     current_decision: Any = field(default=None, init=False)
@@ -67,19 +70,23 @@ class PongStudySession:
 
     @property
     def explanations_enabled(self) -> bool:
-        return self.group == "A" and self.task == 1 and self.environment.terminal
+        return study_permits("pong", self.task, self.group)
 
     @property
     def review_available(self) -> bool:
-        return self.explanations_enabled
+        return study_permits("pong", self.task, self.group, review=True) and (self.paused or self.environment.terminal)
 
     @property
     def live_intent_enabled(self) -> bool:
-        return self.group == "A" and self.task == 1 and not self.environment.terminal
+        return self.explanations_enabled and not self.environment.terminal
 
     @property
     def task2_available(self) -> bool:
         return self.task == 1 and self.environment.terminal
+
+    @property
+    def next_task_available(self) -> bool:
+        return self.task < 3 and self.environment.terminal
 
     def set_input(self, action: str) -> dict[str, Any]:
         action = str(action)
@@ -137,6 +144,8 @@ class PongStudySession:
         result_evidence = self.evidence_history.get(index - 1) if index > 0 else None
         return {
             "allowed": True,
+            "protocol_version": STUDY_VERSION,
+            "session_id": self.session_id,
             "run_id": self.run_id,
             "task": self.task,
             "frame": index,
@@ -171,6 +180,10 @@ class PongStudySession:
         if counterfactual:
             answer = counterfactual
         record = {
+            "protocol_version": STUDY_VERSION,
+            "domain_id": "pong",
+            "session_id": self.session_id,
+            "task_run_id": self.run_id,
             "question": str(question),
             "frame": frame_index,
             "time_seconds": frame_index * self.config.fixed_dt,
@@ -185,12 +198,19 @@ class PongStudySession:
         return {"allowed": True, **record}
 
     def advance_task(self) -> dict[str, Any]:
-        if self.task != 1:
-            raise RuntimeError("Pong has already completed Task 2")
+        if self.task >= 3:
+            raise RuntimeError("Pong has already completed Task 3")
         if not self.environment.terminal:
-            raise RuntimeError("finish Task 1 before starting Task 2")
-        self.task = 2
-        self.environment.reset(seed=self.seed + 1)
+            raise RuntimeError(f"finish Task {self.task} before starting the next task")
+        self.completed_runs.append({
+            "task_id": self.task, "seed": self.seed,
+            "run_id": self.run_id, "missed_balls": self.environment.frame().missed_balls,
+            "questions": sum(row["task"] == self.task for row in self.question_history),
+        })
+        self.task += 1
+        self.seed = int(study_task("pong", self.task)["seed"])
+        self.run_id = uuid4().hex
+        self.environment.reset(seed=self.seed)
         self.controller.reset()
         self.input_action = "stay"
         self.paused = False
@@ -245,6 +265,12 @@ class PongStudySession:
         total = frame.total_opportunities
         payload = {
             "domain_id": self.config.domain_id,
+            "study_version": STUDY_VERSION,
+            "session_id": self.session_id,
+            "task_run_id": self.run_id,
+            "task_seed": self.seed,
+            "task_purpose": study_task("pong", self.task)["purpose"],
+            "explanation_allowed": self.explanations_enabled,
             "version": self.config.version,
             "paddle_width": self.config.paddle_width,
             "paddle_width_percent": self.config.paddle_width_percent,
@@ -266,6 +292,9 @@ class PongStudySession:
             "input_action": self.input_action,
             "review_available": self.review_available,
             "task2_available": self.task2_available,
+            "task3_available": self.task == 2 and self.environment.terminal,
+            "next_task_available": self.next_task_available,
+            "completed_runs": deepcopy(self.completed_runs),
             "frame": self._public_frame(frame),
             "replay_frame_count": len(self.frame_history) if self.review_available else 0,
             "total_opportunities": total,
@@ -280,7 +309,7 @@ class PongStudySession:
         if self.review_available:
             payload["replay_events"] = deepcopy(self.review_events)
         # The live game exposes only common gameplay facts. Controller details
-        # become available to the A-group review response after Task 1 ends.
+        # become available to the A-group review response during Task 2 only.
         if self.review_available:
             payload.update({
                 "control_mode": self.config.control_mode,

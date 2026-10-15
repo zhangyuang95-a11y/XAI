@@ -1,9 +1,8 @@
-"""One Render entry point for the Warehouse and Cooperative Pong studies.
+"""One Render entry point for the existing Warehouse and Cooperative Pong studies.
 
-The Warehouse release stays hash-bound to its existing portable package.  This
-module only mounts it below ``/warehouse/`` and mounts Pong below ``/pong/``;
-it deliberately does not change the Warehouse release sources that the package
-verifies at startup.
+The deployed Warehouse implementation stays intact and is mounted at
+``/warehouse/``. Cooperative Pong is mounted independently at ``/pong/``.
+The root page only lets a participant choose which study to open.
 """
 from __future__ import annotations
 
@@ -14,21 +13,27 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
-import re
-import signal
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
+
+# Keep the deployed command stable without loading the legacy neural runtime.
+if __name__ == "__main__" and os.environ.get("POLICYLENS_LEGACY_HUB") != "1":
+    from study_v3.server import main as three_domain_main
+    three_domain_main()
+    raise SystemExit(0)
 
 from domains.pong.web.server import CONFIG_PATH as PONG_CONFIG_PATH
 from domains.pong.web.server import COOKIE_NAME as PONG_COOKIE
 from domains.pong.web.server import PongApplication
-from ui import warehouse_alignment_r42_server as warehouse
+from study_three_tasks import PATH as STUDY_PROTOCOL_PATH
+from ui import development_preview_server as warehouse
 
 
 ROOT = Path(__file__).resolve().parents[1]
 HUB_ASSETS = ROOT / "ui" / "domain_hub"
 PONG_ASSETS = ROOT / "domains" / "pong" / "web"
 MAX_PONG_BODY = 100_000
+MAX_WAREHOUSE_BODY = 100_000
 
 
 def _hub_asset(name: str) -> bytes:
@@ -40,29 +45,34 @@ def _pong_asset(name: str) -> bytes:
 
 
 def _mounted_warehouse_index(asset: bytes) -> bytes:
-    """Keep the existing Warehouse page intact below its explicit path."""
     return asset.replace(b'"/assets/', b'"/warehouse/assets/')
 
 
 def _mounted_warehouse_script(asset: bytes) -> bytes:
-    # The Warehouse client uses three root-relative API endpoints.  Its
-    # controller, UI and artifact bindings are otherwise left unchanged.
     return asset.replace(b'"/api/', b'"/warehouse/api/')
 
 
 class DomainHubHTTPServer(ThreadingHTTPServer):
+    """Threaded server with one Warehouse session pool and one Pong app."""
+
     daemon_threads = True
 
-    def __init__(self, address: tuple[str, int], *, store: Any,
-                 pong: PongApplication, public_origin: str) -> None:
-        self.store = store
+    def __init__(
+        self,
+        address: tuple[str, int],
+        *,
+        warehouse_sessions: Any,
+        pong: PongApplication,
+        public_origin: str,
+    ) -> None:
+        self.warehouse_sessions = warehouse_sessions
         self.pong = pong
         self.public_origin = public_origin.rstrip("/")
-        super().__init__(address, domain_hub_handler(store, pong, self.public_origin))
+        super().__init__(address, domain_hub_handler(warehouse_sessions, pong, self.public_origin))
 
 
-def domain_hub_handler(store: Any, pong: PongApplication, public_origin: str):
-    """Build the one router used by production and by the focused HTTP tests."""
+def domain_hub_handler(warehouse_sessions: Any, pong: PongApplication, public_origin: str):
+    """Create the router; dependencies stay injectable for focused tests."""
     expected_origin = public_origin.rstrip("/")
 
     class Handler(BaseHTTPRequestHandler):
@@ -71,8 +81,13 @@ def domain_hub_handler(store: Any, pong: PongApplication, public_origin: str):
         def log_message(self, *_args: Any) -> None:
             return
 
-        def _headers(self, status: int, length: int, content_type: str,
-                     cookies: tuple[str, ...] = ()) -> None:
+        def _headers(
+            self,
+            status: int,
+            length: int,
+            content_type: str,
+            cookies: tuple[str, ...] = (),
+        ) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(length))
@@ -90,38 +105,43 @@ def domain_hub_handler(store: Any, pong: PongApplication, public_origin: str):
                 self.send_header("Set-Cookie", cookie)
             self.end_headers()
 
-        def _reply(self, status: int, payload: Any, *,
-                   content_type: str = "application/json; charset=utf-8",
-                   cookies: tuple[str, ...] = ()) -> None:
-            body = payload if isinstance(payload, bytes) else warehouse._canonical(payload).encode("utf-8")
+        def _reply(
+            self,
+            status: int,
+            payload: Any,
+            *,
+            content_type: str = "application/json; charset=utf-8",
+            cookies: tuple[str, ...] = (),
+        ) -> None:
+            body = (
+                payload
+                if isinstance(payload, bytes)
+                else json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            )
             self._headers(status, len(body), content_type, cookies)
             self.wfile.write(body)
 
         def _cookies(self) -> SimpleCookie:
-            result = SimpleCookie()
+            cookies = SimpleCookie()
             try:
-                result.load(self.headers.get("Cookie", ""))
+                cookies.load(self.headers.get("Cookie", ""))
             except Exception:
                 pass
-            return result
-
-        def _warehouse_session(self) -> str:
-            cookie = self._cookies()
-            return store.session(cookie[store.cookie_name].value if store.cookie_name in cookie else None)
+            return cookies
 
         def _pong_session(self) -> str | None:
-            cookie = self._cookies()
-            return cookie[PONG_COOKIE].value if PONG_COOKIE in cookie else None
+            cookies = self._cookies()
+            return cookies[PONG_COOKIE].value if PONG_COOKIE in cookies else None
 
-        def _warehouse_cookie(self, sid: str) -> str:
+        def _pong_cookie(self, session_id: str) -> str:
             secure = "; Secure" if expected_origin.startswith("https://") else ""
-            return f"{store.cookie_name}={sid}; Path=/warehouse; HttpOnly{secure}; SameSite=Strict"
+            return f"{PONG_COOKIE}={session_id}; Path=/pong; HttpOnly{secure}; SameSite=Lax"
 
-        def _pong_cookie(self, sid: str) -> str:
-            secure = "; Secure" if expected_origin.startswith("https://") else ""
-            return f"{PONG_COOKIE}={sid}; Path=/pong; HttpOnly{secure}; SameSite=Lax"
+        def _warehouse_state(self) -> Any:
+            # Warehouse already keys its preview state using this client page id.
+            return warehouse_sessions.state_for(self.headers.get("X-Warehouse-Page"))
 
-        def _warehouse_assets(self, suffix: str) -> tuple[bytes, str] | None:
+        def _warehouse_asset(self, suffix: str) -> tuple[bytes, str] | None:
             assets = {
                 "/": ("index.html", "text/html; charset=utf-8"),
                 "/index.html": ("index.html", "text/html; charset=utf-8"),
@@ -133,7 +153,7 @@ def domain_hub_handler(store: Any, pong: PongApplication, public_origin: str):
             if item is None:
                 return None
             name, content_type = item
-            body = store.web_assets[name]
+            body = (warehouse.WEB / name).read_bytes()
             if name == "index.html":
                 body = _mounted_warehouse_index(body)
             elif name == "app.js":
@@ -141,34 +161,58 @@ def domain_hub_handler(store: Any, pong: PongApplication, public_origin: str):
             return body, content_type
 
         def _warehouse_view(self, suffix: str) -> None:
-            asset = self._warehouse_assets(suffix)
+            asset = self._warehouse_asset(suffix)
             if asset is not None:
                 body, content_type = asset
                 self._reply(HTTPStatus.OK, body, content_type=content_type)
                 return
-            sid = self._warehouse_session()
-            try:
+            state = self._warehouse_state()
+            with state.lock:
                 if suffix == "/api/view":
-                    result = store.view(sid)
-                elif suffix == "/api/history":
-                    run_id = parse_qs(urlparse(self.path).query).get("run_id", [None])[0]
-                    result = store.history(sid, run_id)
-                else:
-                    raise warehouse.CommandError("not_found", 404)
-                self._reply(HTTPStatus.OK, result, cookies=(self._warehouse_cookie(sid),))
-            except warehouse.CommandError as exc:
-                self._reply(exc.status, {"error": exc.reason, "view": exc.view},
-                            cookies=(self._warehouse_cookie(sid),))
+                    self._reply(HTTPStatus.OK, state.view())
+                    return
+                if suffix == "/api/study/reference-trajectory":
+                    self._reply(HTTPStatus.OK, state.reference_trajectory())
+                    return
+                if suffix == "/api/fixture-metrics":
+                    self._reply(
+                        HTTPStatus.OK,
+                        {
+                            "command_requests": state.command_requests,
+                            "reference_requests": state.reference_requests,
+                        },
+                    )
+                    return
+            self._reply(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+
+        def _warehouse_command(self, suffix: str) -> None:
+            if suffix != "/api/study/command":
+                self._reply(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 <= length <= MAX_WAREHOUSE_BODY:
+                    raise ValueError("invalid_body_size")
+                payload = json.loads(self.rfile.read(length) or b"{}")
+                if not isinstance(payload, Mapping):
+                    raise ValueError("request_body_must_be_object")
+                state = self._warehouse_state()
+                with state.lock:
+                    self._reply(HTTPStatus.OK, state.command(payload))
+            except (ValueError, KeyError, RuntimeError, TypeError, json.JSONDecodeError) as exc:
+                self._reply(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
 
         def _pong_view(self, suffix: str) -> None:
+            if suffix == "/study_protocol.json":
+                self._reply(HTTPStatus.OK, STUDY_PROTOCOL_PATH.read_bytes(), content_type="application/json; charset=utf-8")
+                return
             if suffix == "/api/view":
                 self._reply(HTTPStatus.OK, pong.view(self._pong_session()))
                 return
             if suffix == "/api/review":
                 value = parse_qs(urlparse(self.path).query).get("frame", [None])[0]
                 try:
-                    result = pong.review(self._pong_session(), None if value is None else int(value))
-                    self._reply(HTTPStatus.OK, result)
+                    self._reply(HTTPStatus.OK, pong.review(self._pong_session(), None if value is None else int(value)))
                 except (ValueError, TypeError, RuntimeError) as exc:
                     self._reply(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
@@ -193,8 +237,14 @@ def domain_hub_handler(store: Any, pong: PongApplication, public_origin: str):
 
         def _pong_command(self, suffix: str) -> None:
             routes = {
-                "/api/start": "start", "/api/input": "input", "/api/pause": "pause",
-                "/api/tick": "tick", "/api/step": "tick", "/api/ask": "ask", "/api/task2": "task2",
+                "/api/start": "start",
+                "/api/input": "input",
+                "/api/pause": "pause",
+                "/api/tick": "tick",
+                "/api/step": "tick",
+                "/api/ask": "ask",
+                "/api/task2": "task2",
+                "/api/task3": "task3",
             }
             operation = routes.get(suffix)
             if operation is None:
@@ -219,48 +269,26 @@ def domain_hub_handler(store: Any, pong: PongApplication, public_origin: str):
                     self._reply(HTTPStatus.OK, pong.tick(session_id, payload))
                 elif operation == "ask":
                     self._reply(HTTPStatus.OK, pong.ask(session_id, payload))
-                else:
+                elif operation == "task2":
                     self._reply(HTTPStatus.OK, pong.task2(session_id))
+                else:
+                    self._reply(HTTPStatus.OK, pong.task3(session_id))
             except (ValueError, KeyError, TypeError, RuntimeError, json.JSONDecodeError) as exc:
                 self._reply(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-
-        def _warehouse_command(self, suffix: str) -> None:
-            sid = self._warehouse_session()
-            try:
-                if suffix not in ("/api/study/command", "/api/command"):
-                    raise warehouse.CommandError("not_found", 404)
-                length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= warehouse.MAX_BODY:
-                    raise warehouse.CommandError("invalid_body_size", 413)
-                payload = json.loads(self.rfile.read(length).decode("utf-8"))
-                if not isinstance(payload, dict):
-                    raise warehouse.CommandError("invalid_body")
-                origin = self.headers.get("Origin")
-                local = expected_origin.startswith(("http://127.0.0.1", "http://localhost"))
-                if origin != expected_origin or not (origin.startswith("https://") or local):
-                    raise warehouse.CommandError("https_origin_required", 403)
-                self._reply(HTTPStatus.OK, store.command(sid, payload),
-                            cookies=(self._warehouse_cookie(sid),))
-            except warehouse.CommandError as exc:
-                self._reply(exc.status, {"error": exc.reason, "view": exc.view},
-                            cookies=(self._warehouse_cookie(sid),))
-            except (UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError):
-                self._reply(HTTPStatus.BAD_REQUEST, {"error": "invalid_request"},
-                            cookies=(self._warehouse_cookie(sid),))
 
         def do_GET(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
             if path in ("/health", "/api/health"):
-                self._reply(HTTPStatus.OK, {
-                    "status": "ok", "service": warehouse.SERVICE_FAMILY,
-                    "version": store.service_version,
-                    "release_version": store.public_release_version,
-                    "pilot_class": store.pilot_class,
-                    "data_persistent": store.data_persistent,
-                    "formal_ready": False, "formal_sample_eligible": False,
-                    "domains": {"warehouse": "/warehouse/", "pong": "/pong/"},
-                    "pong_version": pong.view(None)["version"],
-                })
+                self._reply(
+                    HTTPStatus.OK,
+                    {
+                        "status": "ok",
+                        "service": "policylens-domain-hub",
+                        "warehouse_service": "development-preview",
+                        "domains": {"warehouse": "/warehouse/", "pong": "/pong/"},
+                        "pong_version": pong.view(None)["version"],
+                    },
+                )
                 return
             if path in ("/", "/index.html"):
                 self._reply(HTTPStatus.OK, _hub_asset("index.html"), content_type="text/html; charset=utf-8")
@@ -280,9 +308,8 @@ def domain_hub_handler(store: Any, pong: PongApplication, public_origin: str):
             if path.startswith("/pong/"):
                 self._pong_view(path[len("/pong"):] or "/")
                 return
-            # Keep existing bookmarked Warehouse API URLs readable after the
-            # hub becomes the root page.
-            if path in ("/api/view", "/api/history") or path.startswith("/assets/"):
+            # Keep previously bookmarked Warehouse API and static links valid.
+            if path in ("/api/view", "/api/study/reference-trajectory", "/api/fixture-metrics") or path.startswith("/assets/"):
                 self._warehouse_view(path)
                 return
             self._reply(HTTPStatus.NOT_FOUND, {"error": "not_found"})
@@ -295,7 +322,7 @@ def domain_hub_handler(store: Any, pong: PongApplication, public_origin: str):
             if path == "/warehouse" or path.startswith("/warehouse/"):
                 self._warehouse_command(path[len("/warehouse"):] or "/")
                 return
-            if path in ("/api/study/command", "/api/command"):
+            if path == "/api/study/command":
                 self._warehouse_command(path)
                 return
             self._reply(HTTPStatus.NOT_FOUND, {"error": "not_found"})
@@ -305,68 +332,36 @@ def domain_hub_handler(store: Any, pong: PongApplication, public_origin: str):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--package", type=Path)
-    parser.add_argument("--base64", type=Path, default=os.environ.get("WAREHOUSE_RELEASE_BASE64"))
-    parser.add_argument("--expected-package-sha256", default=os.environ.get("WAREHOUSE_RELEASE_PACKAGE_SHA256"))
-    parser.add_argument("--expected-manifest-sha256", default=os.environ.get("WAREHOUSE_RELEASE_MANIFEST_SHA256"))
-    parser.add_argument("--release-module", choices=warehouse.RELEASE_MODULES,
-                        default=os.environ.get("WAREHOUSE_RELEASE_MODULE", warehouse.R42_RELEASE_MODULE))
-    parser.add_argument("--database", type=Path, default=warehouse.DEFAULT_DATABASE)
-    parser.add_argument("--storage-mode", choices=("auto", "persistent", "ephemeral"),
-                        default=os.environ.get("WAREHOUSE_STORAGE_MODE", "auto"))
-    parser.add_argument("--allow-internal-manual-groups", action="store_true")
-    parser.add_argument("--public-origin", default=os.environ.get("WAREHOUSE_PUBLIC_ORIGIN", warehouse.DEFAULT_ORIGIN))
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", warehouse.DEFAULT_PORT)))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8765")))
+    parser.add_argument(
+        "--public-origin",
+        default=os.environ.get("WAREHOUSE_PUBLIC_ORIGIN", "https://policylens-warehouse-study.onrender.com"),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if not args.expected_package_sha256 or not re.fullmatch(r"[0-9a-f]{64}", args.expected_package_sha256):
-        raise SystemExit("expected package SHA256 is required")
-    if not args.expected_manifest_sha256 or not re.fullmatch(r"[0-9a-f]{64}", args.expected_manifest_sha256):
-        raise SystemExit("expected manifest SHA256 is required")
-    if bool(args.package) == bool(args.base64):
-        raise SystemExit("provide exactly one of --package or --base64")
     if not 1 <= args.port <= 65535:
         raise SystemExit("port must be between 1 and 65535")
-    if not args.public_origin.startswith(("https://", "http://127.0.0.1", "http://localhost")):
-        raise SystemExit("public origin must use HTTPS (except loopback development)")
     if not PONG_CONFIG_PATH.is_file():
         raise SystemExit("Pong configuration is missing")
-    context = warehouse.load_online_context(
-        expected_package_sha256=args.expected_package_sha256,
-        expected_manifest_sha256=args.expected_manifest_sha256,
-        package_path=args.package, base64_path=args.base64,
-        release_module=args.release_module,
+    sessions = warehouse._require_preview_sessions()
+    server = DomainHubHTTPServer(
+        (args.host, args.port),
+        warehouse_sessions=sessions,
+        pong=PongApplication(),
+        public_origin=args.public_origin,
     )
-    store = warehouse.OnlineAlignmentStudyStore(
-        context, database=args.database, storage_mode=args.storage_mode,
-        allow_internal_manual_groups=args.allow_internal_manual_groups or None,
-    )
-    server = DomainHubHTTPServer((args.host, args.port), store=store,
-                                 pong=PongApplication(), public_origin=args.public_origin)
-    handlers: dict[int, Any] = {}
-
-    def stop(_signum: int, _frame: Any) -> None:
-        raise KeyboardInterrupt
-
+    print(f"PolicyLens domain hub: {args.public_origin}", flush=True)
     try:
-        for signum in (signal.SIGINT, signal.SIGTERM):
-            handlers[signum] = signal.getsignal(signum)
-            signal.signal(signum, stop)
-        print(warehouse._canonical(warehouse._startup_identity(store, base64_path=args.base64)), flush=True)
-        print(f"PolicyLens domain hub: {args.public_origin}", flush=True)
         server.serve_forever(poll_interval=.25)
-        return 0
     except KeyboardInterrupt:
         return 0
     finally:
         server.server_close()
-        store.close()
-        for signum, handler in handlers.items():
-            signal.signal(signum, handler)
+    return 0
 
 
 if __name__ == "__main__":

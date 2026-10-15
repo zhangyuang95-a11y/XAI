@@ -1,26 +1,31 @@
 """Deployable Web study backed by the real warehouse environment and Actor.
 
 Unlike ``tests/browser_fixture_server.py``, this service never fabricates a
-two-step round.  The demonstration and both interactive rounds use
+two-step round.  The demonstration and all three interactive rounds use
 ``WarehouseMultiAgentEnv`` for task sampling, movement, collisions, charging,
 scoring, task replacement, and the 120-step terminal boundary.
 
 The training checkpoint is exported to a dependency-light NumPy artifact for
 Render.  It evaluates the same decentralized neural Actor as the PyTorch
-runtime; no rule controller substitutes for the model in the public study.
+runtime, then applies the explicitly versioned frozen-state coordination
+controller to Robot 2's submitted action.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import threading
+import time
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -28,14 +33,18 @@ from backend.adapters.warehouse import WarehouseAdapter
 from backend.adapters.warehouse_context import _transition_events
 from core.policy_contracts import ActionDistribution
 from env.warehouse.domain import (
+    PARTICIPANT_SCORE_COEFFICIENTS,
+    PARTICIPANT_SCORE_VERSION,
     WarehouseConfig,
     WarehouseState,
-    collaborative_study_config,
+    participant_study_config,
 )
 from env.warehouse.contracts import RUNTIME_CONTROLLER
 from env.warehouse.decision_protocol import distribution_decision_metadata
 from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.navigation import ACTIONS, MOVE_DELTAS
+from env.warehouse.layouts import get_map_layout
+from env.warehouse.navigation import shortest_path_distance
 from env.warehouse.numpy_policy import NumpyWarehousePolicy
 from env.warehouse.runtime_coordination import (
     guard_participant_action,
@@ -47,6 +56,7 @@ from ui.warehouse_view import (
     serialize_warehouse_state,
     warehouse_map_payload,
 )
+from study_three_tasks import VERSION as STUDY_VERSION, permits as study_permits, task as study_task
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,8 +65,10 @@ WEB = ROOT / "ui" / "web"
 # With fixed stochastic Actor sampling it produces a complete productive
 # mission with claiming, delivery, charging, and coordination-yield events.
 TUTORIAL_SEED = 40_786
-TASK1_SEED = 51_000
-TASK2_SEED = 51_500
+TASK1_SEED = int(study_task("warehouse", 1)["seed"])
+TASK2_SEED = int(study_task("warehouse", 2)["seed"])
+TASK3_SEED = int(study_task("warehouse", 3)["seed"])
+STUDY_RECORD_DIR = ROOT / "output" / "study_records" / "warehouse" / STUDY_VERSION
 DEPLOYED_ACTOR_PATH = (
     ROOT / "output" / "deployment" / "warehouse_mappo_v68_6x7_actor.npz"
 )
@@ -131,11 +143,25 @@ def _transition_payload(
     invalid = set(info.get("invalid_move_agents", ()))
     collision = bool(info.get("robot_collision_event", False))
     events = _transition_events(info)
+    trace = info.get("decision_trace", {})
+    runtime = (
+        trace.get("runtime_decision", {})
+        if isinstance(trace, Mapping)
+        else {}
+    )
+    runtime = runtime if isinstance(runtime, Mapping) else {}
+    policy_actions = dict(runtime.get("policy_actions", {}))
+    selected_actions = dict(runtime.get("selected_actions", {}))
     agents: list[dict[str, Any]] = []
     for after_agent in after.agents:
         before_agent = before.by_id(after_agent.agent_id)
         proposed = str(actions.get(after_agent.agent_id, "WAIT"))
         actual = str(executed.get(after_agent.agent_id, after_agent.last_executed_action))
+        nn_proposed = str(policy_actions.get(after_agent.agent_id, proposed))
+        controller_selected = str(
+            selected_actions.get(after_agent.agent_id, proposed)
+        )
+        changed = controller_selected != nn_proposed
         agents.append(
             {
                 "id": after_agent.agent_id,
@@ -144,6 +170,23 @@ def _transition_payload(
                 "proposed_action": (
                     proposed
                     if reveal_ai_action or after_agent.agent_id == "robot_1"
+                    else None
+                ),
+                "nn_proposed_action": (
+                    nn_proposed
+                    if reveal_ai_action or after_agent.agent_id == "robot_1"
+                    else None
+                ),
+                "controller_selected_action": (
+                    controller_selected
+                    if reveal_ai_action or after_agent.agent_id == "robot_1"
+                    else None
+                ),
+                "environment_executed_action": actual,
+                "controller_changed_action": bool(changed),
+                "controller_reason": (
+                    str(runtime.get("controller_reason", ""))
+                    if after_agent.agent_id == "robot_2"
                     else None
                 ),
                 "executed_action": actual,
@@ -200,7 +243,7 @@ def build_development_tutorial() -> tuple[PreviewFrame, ...]:
     """Generate one verified 120-step trajectory from the real simulator."""
 
     environment = WarehouseMultiAgentEnv(
-        replace(collaborative_study_config(), participant_detour_scoring=False)
+        replace(participant_study_config(), participant_detour_scoring=False)
     )
     environment.reset(seed=TUTORIAL_SEED)
     state = environment.get_state()
@@ -282,6 +325,7 @@ def _event_tags(events: tuple[Mapping[str, Any], ...]) -> list[str]:
         "collision_risk": "conflict",
         "head_on_conflict_risk": "conflict",
         "robot_collision": "collision",
+        "shared_charger_occupancy": "charger_penalty",
     }
     result: list[str] = []
     for event in events:
@@ -306,21 +350,32 @@ class DevelopmentPreviewState:
             if tutorial_frames is not None
             else build_development_tutorial()
         )
-        self.environment = WarehouseMultiAgentEnv(collaborative_study_config())
+        self.environment = WarehouseMultiAgentEnv(participant_study_config())
         self.environment.reset(seed=TASK1_SEED)
         self.policy_seed = TASK1_SEED
         self.round_frame = _initial_frame(self.environment)
         self.stage = "idle"
         self.version = 0
         self.run_id: str | None = None
-        self.locale = "en"
+        self.locale = "zh-CN"
         self.condition = "explanation"
+        self.assignment_source = "development_default_A"
         self.participant_id = ""
         self.tutorial_index = 0
         self.tutorial_max_index = 0
         self.task1: dict[str, Any] | None = None
         self.task2: dict[str, Any] | None = None
+        self.task3: dict[str, Any] | None = None
+        self.task_run_id: str | None = None
+        self.round_started_at = time.monotonic()
+        self.survey_answers: dict[str, Any] | None = None
+        self.record_saved = False
         self.last_explanation: dict[str, Any] | None = None
+        self.action_bubble: dict[str, Any] | None = None
+        # The latest penalty is a durable, frame-bound UI affordance.  It is
+        # kept independently from the five-step explanation context so a
+        # participant can ask about a penalty several steps after it fired.
+        self.latest_charger_penalty: dict[str, Any] | None = None
         self.explanation_count = 0
         self.round_frames: list[PreviewFrame] = [self.round_frame]
         self.question_log: list[dict[str, Any]] = []
@@ -376,9 +431,9 @@ class DevelopmentPreviewState:
         return {**identity, "trajectory_hash": sha256(encoded).hexdigest()}
 
     def commands(self) -> tuple[str, ...]:
-        task1_commands = (
+        task2_commands = (
             ("human_action", "ask_explanation")
-            if self.condition == "explanation"
+            if self._explanation_allowed()
             else ("human_action",)
         )
         values = {
@@ -389,16 +444,23 @@ class DevelopmentPreviewState:
                 "tutorial_select",
                 "begin_task1",
             ),
-            "task1": task1_commands,
+            "task1": ("human_action",),
             "task1_complete": ("begin_task2",),
-            "task2": ("human_action",),
+            "task2": task2_commands,
+            "task2_complete": ("begin_task3",),
+            "task3": ("human_action",),
             "survey": ("submit_survey",),
             "completed": (),
         }[self.stage]
         return ("set_language", "restart", *values) if self.stage != "idle" else values
 
+    def _explanation_allowed(self) -> bool:
+        return self.stage == "task2" and study_permits(
+            "warehouse", 2, "A" if self.condition == "explanation" else "B"
+        )
+
     def _start_round(self, stage: str, seed: int) -> None:
-        self.environment = WarehouseMultiAgentEnv(collaborative_study_config())
+        self.environment = WarehouseMultiAgentEnv(participant_study_config())
         self.environment.reset(seed=seed)
         participant_state = self.environment.get_state()
         participant_state.participant_controlled_agent_id = (
@@ -406,10 +468,14 @@ class DevelopmentPreviewState:
         )
         self.environment.set_state(participant_state)
         self.policy_seed = int(seed)
+        self.task_run_id = uuid4().hex
+        self.round_started_at = time.monotonic()
         self.round_frame = _initial_frame(self.environment)
         self.round_frames = [self.round_frame]
         self.stage = stage
         self.last_explanation = None
+        self.action_bubble = None
+        self.latest_charger_penalty = None
         self.pending_question_sequences = []
 
     @staticmethod
@@ -420,6 +486,8 @@ class DevelopmentPreviewState:
             if task.delivered_frame is not None and task.claimed_frame is not None
         ]
         return {
+            "score_version": PARTICIPANT_SCORE_VERSION,
+            "score_coefficients": dict(PARTICIPANT_SCORE_COEFFICIENTS),
             "round_name": round_name,
             "seed": int(seed),
             "score": float(state.user_score),
@@ -427,6 +495,9 @@ class DevelopmentPreviewState:
             "deliveries": int(state.total_deliveries),
             "robot_collisions": int(state.robot_collision_events),
             "shutdowns": int(state.shutdown_count),
+            "shared_charger_penalties": float(
+                state.score_breakdown.get("shared_charger_occupancy", 0.0)
+            ),
             "human_route_regret_units": float(state.human_route_regret_units),
             "mean_delivery_latency": (
                 sum(latencies) / len(latencies) if latencies else None
@@ -471,6 +542,13 @@ class DevelopmentPreviewState:
         )
         after = self.environment.get_state()
         events = _transition_events(info)
+        for event in events:
+            if str(event.get("event", "")) == "shared_charger_occupancy":
+                self.latest_charger_penalty = {
+                    **deepcopy(dict(event)),
+                    "event_id": str(event.get("event_id", "")),
+                    "frame": int(after.frame),
+                }
         transition_payload = _transition_payload(
             before,
             after,
@@ -490,6 +568,7 @@ class DevelopmentPreviewState:
             action_distributions=dict(distributions),
         )
         self.round_frames.append(self.round_frame)
+        self._refresh_action_bubble()
         for sequence in self.pending_question_sequences:
             for record in reversed(self.question_log):
                 if int(record.get("question_sequence", -1)) == sequence:
@@ -500,21 +579,70 @@ class DevelopmentPreviewState:
         if not (terminated or truncated):
             return
         if round_name == "task1":
-            self.task1 = self._summary("task1", TASK1_SEED, after)
+            self.task1 = self._completed_summary("task1", TASK1_SEED, after)
             self.stage = "task1_complete"
+        elif round_name == "task2":
+            self.task2 = self._completed_summary("task2", TASK2_SEED, after)
+            self.stage = "task2_complete"
         else:
-            self.task2 = self._summary("task2", TASK2_SEED, after)
+            self.task3 = self._completed_summary("task3", TASK3_SEED, after)
             self.stage = "survey"
+
+    def _completed_summary(self, name: str, seed: int, state: WarehouseState) -> dict[str, Any]:
+        number = int(name[-1])
+        questions = sum(row.get("round") == name for row in self.question_log)
+        return {
+            **self._summary(name, seed, state),
+            "protocol_version": STUDY_VERSION,
+            "task_id": number,
+            "purpose": study_task("warehouse", number)["purpose"],
+            "next_stage": study_task("warehouse", number)["next_stage"],
+            "run_id": self.task_run_id,
+            "elapsed_seconds": max(0.0, time.monotonic() - self.round_started_at),
+            "pause_seconds": 0.0,
+            "review_seconds": 0.0,
+            "question_count": questions,
+            "explanation_count": questions,
+            "explanation_allowed": study_permits(
+                "warehouse", number, "A" if self.condition == "explanation" else "B"
+            ),
+        }
+
+    def _save_study_record(self) -> None:
+        """Write only the new protocol's completed session; never rewrite old records."""
+        actor = _require_deployed_actor()
+        record = {
+            "protocol_version": STUDY_VERSION,
+            "score_version": PARTICIPANT_SCORE_VERSION,
+            "score_coefficients": dict(PARTICIPANT_SCORE_COEFFICIENTS),
+            "domain_id": "warehouse",
+            "session_id": self.run_id,
+            "participant_id": self.participant_id,
+            "group": "A" if self.condition == "explanation" else "B",
+            "assignment_source": self.assignment_source,
+            "model_version": actor.metadata.model_version,
+            "model_sha256": actor.artifact_sha256,
+            "controller_version": RUNTIME_CONTROLLER,
+            "rounds": [deepcopy(self.task1), deepcopy(self.task2), deepcopy(self.task3)],
+            "questions": deepcopy(self.question_log),
+            "survey_answers": deepcopy(self.survey_answers),
+            "saved_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        STUDY_RECORD_DIR.mkdir(parents=True, exist_ok=True)
+        destination = STUDY_RECORD_DIR / f"{self.run_id}.json"
+        temporary = STUDY_RECORD_DIR / f".{self.run_id}.{uuid4().hex}.tmp"
+        try:
+            temporary.write_text(json.dumps(record, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+        self.record_saved = True
 
     def _display_frame(self) -> tuple[PreviewFrame, bool, str]:
         if self.stage == "instructions":
             return self.tutorial_frames[self.tutorial_index], True, "ai_ai_demonstration"
-        trajectory_kind = (
-            "human_ai_task1"
-            if self.stage in {"task1", "task1_complete"}
-            else "human_ai_task2"
-        )
-        return self.round_frame, self.stage not in {"task1", "task2"}, trajectory_kind
+        number = 1 if self.stage in {"task1", "task1_complete"} else 2 if self.stage in {"task2", "task2_complete"} else 3
+        return self.round_frame, self.stage not in {"task1", "task2", "task3"}, f"human_ai_task{number}"
 
     def view(self) -> dict[str, Any]:
         actor = _require_deployed_actor()
@@ -529,7 +657,7 @@ class DevelopmentPreviewState:
         )
         summaries = {
             key: value
-            for key, value in (("task1", self.task1), ("task2", self.task2))
+            for key, value in (("task1", self.task1), ("task2", self.task2), ("task3", self.task3))
             if value is not None
         }
         tutorial_count = len(self.tutorial_frames)
@@ -550,7 +678,9 @@ class DevelopmentPreviewState:
                 "trajectory_seed": (
                     TUTORIAL_SEED
                     if self.stage == "instructions"
-                    else TASK1_SEED if self.stage in {"task1", "task1_complete"} else TASK2_SEED
+                    else TASK1_SEED if self.stage in {"task1", "task1_complete"}
+                    else TASK2_SEED if self.stage in {"task2", "task2_complete"}
+                    else TASK3_SEED
                 ),
                 "agent_control": (
                     {"robot_1": "ai", "robot_2": "ai"}
@@ -559,44 +689,76 @@ class DevelopmentPreviewState:
                 ),
             },
             "study": {
+                "release_version": "three-task-study-20260919",
+                "protocol_version": STUDY_VERSION,
+                "score_version": PARTICIPANT_SCORE_VERSION,
+                "score_coefficients": dict(PARTICIPANT_SCORE_COEFFICIENTS),
+                "domain_id": "warehouse",
+                "task_run_id": self.task_run_id,
+                "task_id": int(self.stage[4]) if self.stage.startswith("task") else None,
+                "task_seed": self.policy_seed if self.stage.startswith("task") else None,
+                "explanation_display_version": "warehouse-on-demand-explanation.v1",
+                "pilot_class": "internal_pre_experiment",
+                "formal_ready": False,
                 "run_id": self.run_id,
                 "stage": self.stage,
                 "state_version": self.version,
                 "locale": self.locale,
                 "participant_id": self.participant_id,
                 "condition": self.condition if self.stage != "idle" else None,
+                "assignment_source": self.assignment_source if self.stage != "idle" else None,
                 "group_code": (
                     "A" if self.condition == "explanation" else "B"
                 ) if self.stage != "idle" else None,
                 "group_explanation_available": (
-                    self.condition == "explanation"
+                    self._explanation_allowed()
                     if self.stage != "idle" else None
                 ),
                 "test_condition_selector": True,
                 "development_controller": (
                     RUNTIME_CONTROLLER
                 ),
+                "runtime_action_mode": "nn_proposal_plus_rule_assisted_robot_2",
+                "rule_version": "shared-charger-occupancy.v1",
+                "action_override_authorized": True,
+                "action_override_count": sum(
+                    int(
+                        bool(
+                            frame.info.get("decision_trace", {})
+                            .get("runtime_decision", {})
+                            .get("selection_changed_policy", False)
+                        )
+                    )
+                    for frame in self.round_frames
+                    if isinstance(frame.info.get("decision_trace", {}), Mapping)
+                ),
                 "formal_policy_loaded": True,
                 "policy_model_version": actor.metadata.model_version,
                 "policy_artifact_sha256": actor.artifact_sha256,
                 "progress": (
                     int(self.environment.state.frame)
-                    if self.stage in {"task1", "task2"}
+                    if self.stage in {"task1", "task2", "task3"}
                     and self.environment.state is not None
                     else 0
                 ),
                 "total": int(self.environment.config.horizon),
                 "round_summaries": summaries,
-                "score_delta": (
-                    self.task2["score"] - self.task1["score"]
-                    if self.task1 is not None and self.task2 is not None
-                    and self.stage == "completed"
+                "score_delta": None,
+                "survey_answers": deepcopy(self.survey_answers) if self.stage == "completed" else None,
+                "explanation_presented": self._explanation_allowed() and self.explanation_count > 0,
+                "explanation_count": self.explanation_count if self._explanation_allowed() else 0,
+                "live_explanation_available": bool(
+                    self._explanation_allowed()
+                ),
+                "action_bubble": (
+                    self._localized_action_bubble()
+                    if self._explanation_allowed()
                     else None
                 ),
-                "explanation_presented": self.explanation_count > 0,
-                "explanation_count": self.explanation_count,
-                "live_explanation_available": bool(
-                    self.stage == "task1" and self.condition == "explanation"
+                "latest_charger_penalty": (
+                    deepcopy(self.latest_charger_penalty)
+                    if self._explanation_allowed()
+                    else None
                 ),
                 "controlled_agent": "robot_1",
                 "explanation_target_agent": "robot_2",
@@ -613,10 +775,38 @@ class DevelopmentPreviewState:
                     "complete": self.tutorial_index >= tutorial_count - 1,
                 },
                 "survey_submitted": self.stage == "completed",
+                "record_saved": self.record_saved,
                 "allowed_commands": list(self.commands()),
             },
             "trial": None,
-            "last_explanation": self._localized_explanation(),
+            "last_explanation": (
+                self._localized_explanation()
+                if self._explanation_allowed()
+                else None
+            ),
+        }
+
+    def _refresh_action_bubble(self) -> None:
+        """Expose only the completed frame; generate its explanation on request."""
+
+        self.action_bubble = None
+        if not self._explanation_allowed():
+            return
+        index = len(self.round_frames) - 1
+        if index < 1:
+            return
+        self.action_bubble = {
+            "target_agent": "robot_2",
+            "frame": int(self.round_frames[index].state.frame),
+        }
+
+    def _localized_action_bubble(self) -> dict[str, Any] | None:
+        if self.action_bubble is None:
+            return None
+        return {
+            "target_agent": "robot_2",
+            "frame": self.action_bubble.get("frame"),
+            "run_id": self.task_run_id,
         }
 
     def _localized_explanation(self) -> dict[str, Any] | None:
@@ -639,14 +829,14 @@ class DevelopmentPreviewState:
         self,
         index: int,
     ) -> tuple[WarehouseAdapter, Any]:
-        """Rebuild evidence for one executed Human-AI Task 1 transition."""
+        """Rebuild evidence for one executed Human-AI Task 2 transition."""
 
         if index < 1 or index >= len(self.round_frames):
-            raise ValueError("The requested Task 1 action has not been executed.")
+            raise ValueError("The requested Task 2 action has not been executed.")
         before = self.round_frames[index - 1]
         outcome = self.round_frames[index]
-        environment = WarehouseMultiAgentEnv(collaborative_study_config())
-        environment.reset(seed=TASK1_SEED)
+        environment = WarehouseMultiAgentEnv(participant_study_config())
+        environment.reset(seed=TASK2_SEED)
         environment.set_state(before.state)
         actor = _require_deployed_actor()
         adapter = WarehouseAdapter(environment)
@@ -698,16 +888,350 @@ class DevelopmentPreviewState:
         }
         return en.get(action, action.lower()), zh.get(action, action)
 
-    def _ask_live_task1(
+    def _controller_action_bubble(
+        self,
+        before: WarehouseState,
+        after: WarehouseState,
+        outcome: PreviewFrame,
+        runtime: Mapping[str, Any],
+        *,
+        focus: str = "action",
+    ) -> dict[str, str]:
+        """Render one frame from the same pre/post evidence used by Q&A."""
+
+        trace = outcome.info.get("decision_trace", {})
+        trace = trace if isinstance(trace, Mapping) else {}
+        decisions = trace.get("agents", {})
+        decisions = decisions if isinstance(decisions, Mapping) else {}
+        decision = decisions.get("robot_2", {})
+        decision = decision if isinstance(decision, Mapping) else {}
+        before_agent = before.by_id("robot_2")
+        after_agent = after.by_id("robot_2")
+        selected_actions = runtime.get("selected_actions", {})
+        selected_actions = selected_actions if isinstance(selected_actions, Mapping) else {}
+        selected = str(selected_actions.get("robot_2", outcome.actions.get("robot_2", "WAIT")))
+        executed_actions = outcome.info.get("executed_actions", {})
+        executed_actions = executed_actions if isinstance(executed_actions, Mapping) else {}
+        actual = str(executed_actions.get("robot_2", selected))
+        selected_record = runtime.get("selected_ai_action", {})
+        selected_record = selected_record if isinstance(selected_record, Mapping) else {}
+        effect = decision.get("direct_effect", {})
+        effect = effect if isinstance(effect, Mapping) else {}
+        before_distance = int(effect.get("distance_before", 0) or 0)
+        after_distance = int(effect.get("distance_after", before_distance) or 0)
+        frozen_goal = decision.get("frozen_goal", {})
+        frozen_goal = frozen_goal if isinstance(frozen_goal, Mapping) else {}
+        resolved_goal = decision.get("resolved_goal", {})
+        resolved_goal = resolved_goal if isinstance(resolved_goal, Mapping) else {}
+        task_id = str(
+            before_agent.carrying_task_id
+            or resolved_goal.get("goal_id")
+            or frozen_goal.get("goal_id")
+            or decision.get("committed_task")
+            or ""
+        )
+        tasks = [item for item in trace.get("tasks", ()) if isinstance(item, Mapping)]
+        if not tasks:
+            tasks = [
+                {
+                    "task_id": task.task_id,
+                    "status": task.status,
+                    "carrier_agent_id": task.carrier_agent_id,
+                    "pickup_position": task.pickup_position,
+                    "delivery_position": task.delivery_position,
+                }
+                for task in sorted(before.tasks, key=lambda item: item.task_id)
+            ]
+        task_slots = {str(item.get("task_id", "")): index for index, item in enumerate(tasks, 1)}
+        slot = task_slots.get(task_id)
+        pickup_label = f"A{slot}" if slot is not None else "当前取货点"
+        delivery_label = f"B{slot}" if slot is not None else "当前交付点"
+        goal_type = str(
+            resolved_goal.get("goal_type")
+            or frozen_goal.get("goal_type")
+            or before_agent.goal_type
+            or ""
+        ).upper()
+        carrying = before_agent.carrying_task_id is not None or goal_type in {
+            "DELIVERY", "GO_TO_DROPOFF"
+        }
+        goal_phrase_en = (
+            f"toward {delivery_label} to deliver the cargo"
+            if carrying
+            else f"toward {pickup_label} to collect the cargo"
+        )
+        goal_phrase_zh = (
+            f"前往{delivery_label}交付货物"
+            if carrying
+            else f"前往{pickup_label}取货"
+        )
+        en_action, zh_action = self._action_words(actual)
+        en_selected, zh_selected = self._action_words(selected)
+
+        def _events() -> list[Mapping[str, Any]]:
+            values = list(outcome.events)
+            values.extend(
+                event for event in outcome.info.get("rule_events", ())
+                if isinstance(event, Mapping)
+            )
+            return [event for event in values if isinstance(event, Mapping)]
+
+        penalty = next(
+            (event for event in reversed(_events())
+             if str(event.get("event", "")) == "shared_charger_occupancy"),
+            None,
+        )
+
+        def _energy_summary(agent_id: str) -> tuple[str, float | None, float | None]:
+            agent_decision = decisions.get(agent_id, {})
+            agent_decision = agent_decision if isinstance(agent_decision, Mapping) else {}
+            agent = before.by_id(agent_id)
+            charging = agent_decision.get("charging_state", {})
+            charging = charging if isinstance(charging, Mapping) else {}
+            selected_id = str(
+                agent.carrying_task_id
+                or charging.get("task_id")
+                or (agent_decision.get("resolved_goal", {}) or {}).get("goal_id", "")
+                or (agent_decision.get("frozen_goal", {}) or {}).get("goal_id", "")
+            )
+            candidates = [item for item in agent_decision.get("battery_feasibility", ()) if isinstance(item, Mapping)]
+            item = next((item for item in candidates if str(item.get("task_id", "")) == selected_id), None)
+            required = None
+            if charging.get("route_energy") is not None and charging.get("task_id"):
+                required = float(charging.get("route_energy", 0.0) or 0.0)
+                selected_id = str(charging.get("task_id"))
+            elif item is not None:
+                required = float(item.get("required_energy", 0.0) or 0.0)
+            elif candidates:
+                item = max(candidates, key=lambda value: float(value.get("required_energy", 0.0) or 0.0))
+                required = float(item.get("required_energy", 0.0) or 0.0)
+                selected_id = str(item.get("task_id", ""))
+            else:
+                config = participant_study_config()
+                fallback_tasks = [
+                    task for task in before.tasks
+                    if task.status == "available"
+                    or (task.status == "carried" and task.carrier_agent_id == agent_id)
+                ]
+                estimates: list[tuple[str, float]] = []
+                for task in fallback_tasks:
+                    if agent.carrying_task_id == task.task_id:
+                        legs = (
+                            shortest_path_distance(agent.position, task.delivery_position, config.map_layout_id)
+                            + shortest_path_distance(task.delivery_position, get_map_layout(config.map_layout_id).charger_position, config.map_layout_id)
+                        )
+                    else:
+                        legs = (
+                            shortest_path_distance(agent.position, task.pickup_position, config.map_layout_id)
+                            + shortest_path_distance(task.pickup_position, task.delivery_position, config.map_layout_id)
+                            + shortest_path_distance(task.delivery_position, get_map_layout(config.map_layout_id).charger_position, config.map_layout_id)
+                        )
+                    estimates.append((task.task_id, float(legs + config.mission_reserve_steps) * config.move_battery_cost))
+                if estimates:
+                    selected_id, required = max(estimates, key=lambda item: item[1])
+            task_slot = task_slots.get(selected_id)
+            label = f"A{task_slot}→B{task_slot}" if task_slot is not None else "当前可执行方案"
+            return label, required, float(agent.battery)
+
+        if penalty is not None:
+            responsible = str(penalty.get("responsible_agent_id", "robot_2"))
+            occupant = "你" if responsible == "robot_1" else "机器人2"
+            teammate = "机器人2" if responsible == "robot_1" else "你"
+            occupant_before = float(penalty.get("occupant_battery_before", 0.0) or 0.0)
+            occupant_after = float(penalty.get("occupant_battery_after", occupant_before) or occupant_before)
+            teammate_battery = float(penalty.get("teammate_battery_before", 0.0) or 0.0)
+            distance = int(penalty.get("teammate_distance_to_charger", 0) or 0)
+            penalty_points = abs(float(penalty.get("score_delta", 0.0)))
+            penalty_label = f"{penalty_points:g}"
+            label, required, occupant_now = _energy_summary(responsible)
+            if required is not None and occupant_after >= required:
+                budget_zh = f"{occupant}当前{occupant_after:g}%电量已足够按{label}方案完成配送并返桩"
+                budget_en = f"{occupant} had enough ({occupant_after:g}%) for the {label} delivery-and-return plan"
+            elif required is not None:
+                budget_zh = f"按{label}方案预计需要{required:g}%，{occupant}当前电量为{occupant_after:g}%"
+                budget_en = f"the {label} plan required about {required:g}%, while {occupant} had {occupant_after:g}%"
+            else:
+                budget_zh = f"{occupant}当前电量为{occupant_after:g}%"
+                budget_en = f"{occupant} had {occupant_after:g}%"
+            return {
+                "en": f"{budget_en}; {teammate} had only {teammate_battery:g}% and was {distance} cells from the charger. {occupant} stayed on the charger after charging from {occupant_before:g}% to {occupant_after:g}%, so the shared-charger rule applied −{penalty_label}; {occupant} should yield the charger.",
+                "zh-CN": f"{budget_zh}；{teammate}当时只有{teammate_battery:g}%电量，距充电桩{distance}格。{occupant}从{occupant_before:g}%充到{occupant_after:g}%后仍占用充电桩，因此触发共享充电桩−{penalty_label}处罚；{occupant}应先让出充电位置。",
+            }
+
+        collision = bool(
+            outcome.info.get("robot_collision_event")
+            or outcome.info.get("robot_collision_kind")
+        )
+        if collision:
+            human_action = str(outcome.actions.get("robot_1", "WAIT"))
+            human_en, human_zh = self._action_words(human_action)
+            kind = str(outcome.info.get("robot_collision_kind") or "joint_conflict")
+            if kind == "same_target":
+                en_result = "you tried to enter the same cell"
+                zh_result = "双方尝试进入同一格"
+            elif kind == "swap":
+                en_result = "you and Robot 2 tried to swap cells"
+                zh_result = "双方尝试交换位置"
+            elif kind == "occupied_stationary":
+                en_result = "you remained in the target cell"
+                zh_result = "你仍停留在机器人2准备进入的格子"
+            else:
+                en_result = "the joint movement conflicted"
+                zh_result = "双方移动发生冲突"
+            ai_clause_en = (
+                f"Robot 2 tried to move {en_selected} {goal_phrase_en}"
+                if selected in MOVE_DELTAS
+                else "Robot 2 stayed in its cell"
+            )
+            ai_clause_zh = (
+                f"机器人2原本准备向{zh_selected}{goal_phrase_zh}"
+                if selected in MOVE_DELTAS
+                else "机器人2当时停留在原格"
+            )
+            return {
+                "en": f"{ai_clause_en}; you simultaneously moved {human_en}, and {en_result}. The shared pre-move resolver cancelled this step from the shared pre-move state; Robot 2 did not observe your current action first.",
+                "zh-CN": f"{ai_clause_zh}；你同时向{human_zh}移动，{zh_result}，发生冲突。这一步被环境取消；机器人2没有提前看到你的本帧动作。",
+            }
+
+        charging = decision.get("charging_state", {})
+        charging = charging if isinstance(charging, Mapping) else {}
+        before_battery = float(before_agent.battery)
+        after_battery = float(after_agent.battery)
+        label, required, _ = _energy_summary("robot_2")
+        if focus in {"energy", "charge_threshold"} and required is not None:
+            deficit = max(0.0, required - after_battery)
+            return {
+                "en": f"Robot 2 has {after_battery:g}% battery; the current {label} delivery-and-return plan needs about {required:g}%, so it is {('short by ' + str(deficit).rstrip('0').rstrip('.') + ' percentage points' if deficit else 'ready to leave when the exit is safe')}.",
+                "zh-CN": f"机器人2当前电量{after_battery:g}%；按{label}配送并返桩预计需要{required:g}%，因此{('还差' + str(deficit).rstrip('0').rstrip('.') + '个百分点' if deficit else '已达到工作段需求，出口安全时可以离桩')}。",
+            }
+        if actual == "WAIT" and after_battery > before_battery:
+            deficit = max(0.0, (required or 0.0) - after_battery)
+            if required is not None:
+                return {
+                    "en": f"Robot 2 is charging from {before_battery:g}% to {after_battery:g}%; the current {label} delivery-and-return plan needs about {required:g}%{', so ' + str(deficit).rstrip('0').rstrip('.') + ' more percentage points are needed' if deficit else ', so the work requirement is met' }.",
+                    "zh-CN": f"机器人2正在充电，电量从{before_battery:g}%恢复到{after_battery:g}%；按当前{label}配送并返桩预计需要{required:g}%{('，还需' + str(deficit).rstrip('0').rstrip('.') + '个百分点' if deficit else '，已达到工作段需求')}。",
+                }
+            return {
+                "en": f"Robot 2 is charging; its battery rose from {before_battery:g}% to {after_battery:g}%, and no executable task budget is currently available.",
+                "zh-CN": f"机器人2正在充电，电量从{before_battery:g}%恢复到{after_battery:g}%；当前没有可核验的下一项任务预算。",
+            }
+
+        goal_position = resolved_goal.get("position")
+        if not isinstance(goal_position, (list, tuple)):
+            task = next((item for item in tasks if str(item.get("task_id", "")) == task_id), None)
+            if task is not None:
+                goal_position = task.get("delivery_position" if carrying else "pickup_position")
+        participant = before.by_id("robot_1")
+        blocked_by_participant = False
+        if isinstance(goal_position, (list, tuple)):
+            layout_id = participant_study_config().map_layout_id
+            blocked = {tuple(participant.position)}
+            blocked_by_participant = (
+                tuple(participant.position) != tuple(before_agent.position)
+                and self._path_exists(tuple(before_agent.position), tuple(goal_position), layout_id, blocked)
+                is False
+                and self._path_exists(tuple(before_agent.position), tuple(goal_position), layout_id, set())
+            )
+        if actual == "WAIT":
+            if participant.position == get_map_layout(participant_study_config().map_layout_id).charger_position and bool(runtime.get("participant_occupies_charger")):
+                return {
+                    "en": "You are occupying the charger, so Robot 2 waits beside it instead of entering your cell.",
+                    "zh-CN": "你当前占用充电桩，机器人2先在桩外等待，避免进入你所在的格子。",
+                }
+            if blocked_by_participant:
+                return {
+                    "en": f"You are occupying the only route to {delivery_label if carrying else pickup_label}; Robot 2 waits because no alternative walkable route is available in this state.",
+                    "zh-CN": f"你当前占住了通往{delivery_label if carrying else pickup_label}的路口，机器人2暂时没有可行绕路，因此先等待。",
+                }
+            plan = decision.get("joint_coordination_plan", {})
+            plan = plan if isinstance(plan, Mapping) else {}
+            if runtime.get("pass_through_plan_current") and plan.get("priority_agent_id"):
+                return {
+                    "en": "Robot 2 waits for the confirmed one-step clearance in the current state; the plan will be rechecked after that passage.",
+                    "zh-CN": "当前状态仍有已确认的一步让行安排，机器人2先等待通道释放，随后重新核对路线。",
+                }
+            if bool(selected_record.get("energy_violation")):
+                return {
+                    "en": "Robot 2 waits because the available move would not preserve a feasible return to the charger.",
+                    "zh-CN": "当前可移动作会破坏返桩所需电量余量，机器人2先保留电量。",
+                }
+            if bool(runtime.get("physical_clearance_required")):
+                return {
+                    "en": "Robot 2 waits for a currently verified clearance condition; this is based on the present state, not a guessed future move.",
+                    "zh-CN": "当前状态仍有已核验的通行阻挡，机器人2先等待；这不是对你下一步动作的猜测。",
+                }
+            return {
+                "en": f"Robot 2 waited without moving toward {delivery_label if carrying else pickup_label}; the current evidence does not show a charging, blocking, or route-necessity reason.",
+                "zh-CN": f"机器人2本步没有向{delivery_label if carrying else pickup_label}推进；当前证据没有显示充电、阻挡或必须等待的原因。",
+            }
+
+        if actual in MOVE_DELTAS:
+            if after_distance < before_distance:
+                return {
+                    "en": f"Robot 2 moved {en_action} {goal_phrase_en}; the walkable distance fell from {before_distance} to {after_distance} cells.",
+                    "zh-CN": f"机器人2向{zh_action}{goal_phrase_zh}，可通行距离从{before_distance}格缩短到{after_distance}格。",
+                }
+            reason = str(decision.get("primary_reason_code", ""))
+            if reason in {"CLEAR_PARTICIPANT_ROUTE", "CLEAR_PARTICIPANT_STANDOFF"}:
+                return {
+                    "en": f"Robot 2 moved {en_action} to clear your route, then can continue {goal_phrase_en}.",
+                    "zh-CN": f"机器人2向{zh_action}为你让出通道，之后继续{goal_phrase_zh}。",
+                }
+            return {
+                "en": f"Robot 2 moved {en_action} while continuing {goal_phrase_en}; this step did not shorten the remaining static route.",
+                "zh-CN": f"机器人2向{zh_action}继续{goal_phrase_zh}；这一步没有缩短静态剩余路线。",
+            }
+        return {
+            "en": "Robot 2's submitted action was resolved by the environment without a completed move; the frame evidence is shown in the details.",
+            "zh-CN": "机器人2提交的动作由环境结算，但这一步没有完成移动；详细证据显示在展开区域。",
+        }
+
+    @staticmethod
+    def _path_exists(
+        start: tuple[int, int],
+        goal: tuple[int, int],
+        layout_id: str,
+        blocked: set[tuple[int, int]],
+    ) -> bool:
+        if start == goal:
+            return start not in blocked
+        layout = get_map_layout(layout_id)
+        if not layout.is_passable(start) or not layout.is_passable(goal):
+            return False
+        queue = deque([start])
+        visited = {start}
+        while queue:
+            row, col = queue.popleft()
+            for delta in MOVE_DELTAS.values():
+                candidate = (row + delta[0], col + delta[1])
+                if candidate in visited or candidate in blocked or not layout.is_passable(candidate):
+                    continue
+                if candidate == goal:
+                    return True
+                visited.add(candidate)
+                queue.append(candidate)
+        return False
+
+    def _ask_live_task2(
         self,
         *,
         question: str,
         focus: str,
+        penalty_event_id: str | None = None,
+        penalty_frame: int | None = None,
+        action_frame: int | None = None,
+        request_id: str | None = None,
     ) -> None:
-        """Answer from at most five completed Task 1 transitions, never the future."""
+        """Answer from completed Task 2 transitions, never from the future.
 
-        if self.stage != "task1" or self.condition != "explanation":
-            raise RuntimeError("Live questions are available only to Group A during Task 1.")
+        Ordinary questions intentionally use a compact recent context.  A
+        charger-penalty question is different: it is anchored to the exact
+        durable penalty event selected by the UI, so it remains answerable
+        after more than five subsequent steps.
+        """
+
+        if not self._explanation_allowed():
+            raise RuntimeError("Live questions are available only to Group A during Task 2.")
 
         completed = list(enumerate(self.round_frames))[1:]
         recent = completed[-5:]
@@ -721,7 +1245,16 @@ class DevelopmentPreviewState:
             return str(values.get(agent_id, proposed(frame, agent_id)))
 
         anchor: tuple[int, PreviewFrame] | None = recent[-1] if recent else None
-        if focus == "wait":
+        if action_frame is not None:
+            if focus != "action" or action_frame < 1 or action_frame != int(self.round_frame.state.frame):
+                raise ValueError("Ask why must refer to the current completed Task 2 frame.")
+            anchor = next(
+                (item for item in completed if int(item[1].state.frame) == action_frame),
+                None,
+            )
+            if anchor is None:
+                raise ValueError("The requested Task 2 action frame is unavailable.")
+        elif focus == "wait":
             anchor = next(
                 (
                     item
@@ -741,6 +1274,21 @@ class DevelopmentPreviewState:
                 ),
                 None,
             )
+        elif focus == "charger_penalty":
+            penalty_matches: list[tuple[int, PreviewFrame, Mapping[str, Any]]] = []
+            for item in completed:
+                for event in item[1].info.get("rule_events", ()):
+                    if not isinstance(event, Mapping):
+                        continue
+                    if str(event.get("event", "")) != "shared_charger_occupancy":
+                        continue
+                    if penalty_event_id and str(event.get("event_id", "")) != str(penalty_event_id):
+                        continue
+                    if penalty_frame is not None and int(item[1].state.frame) != int(penalty_frame):
+                        continue
+                    penalty_matches.append((item[0], item[1], event))
+            if penalty_matches:
+                anchor = (penalty_matches[-1][0], penalty_matches[-1][1])
 
         current_frame = int(self.round_frame.state.frame)
         if anchor is None:
@@ -750,17 +1298,28 @@ class DevelopmentPreviewState:
             if focus == "collision":
                 answer_en = "No collision occurred in the last five steps."
                 answer_zh = "最近五步内没有发生碰撞。"
+            elif focus == "charger_penalty":
+                if penalty_event_id or penalty_frame is not None:
+                    answer_en = "That shared-charger penalty event is not available in this Task 2 run."
+                    answer_zh = "这次任务2中没有找到所选的共享充电桩处罚事件。"
+                else:
+                    answer_en = "No shared-charger penalty has been recorded in this Task 2 run."
+                    answer_zh = "本次任务2还没有记录共享充电桩处罚。"
             elif focus == "wait":
                 answer_en = "Robot 2 did not wait in the last five steps."
                 answer_zh = "机器人2在最近五步内没有等待。"
             else:
-                answer_en = "Robot 2 has not completed an action in Task 1 yet."
-                answer_zh = "机器人2在任务1中还没有完成任何动作。"
+                answer_en = "Robot 2 has not completed an action in Task 2 yet."
+                answer_zh = "机器人2在任务2中还没有完成任何动作。"
             evidence: dict[str, Any] = {
                 "event_type": focus,
                 "anchor_frame": anchor_frame,
                 "context_frames": context_frames,
-                "reason_code": "NO_MATCHING_RECENT_EVENT",
+                "reason_code": (
+                    "NO_MATCHING_PENALTY_EVENT"
+                    if focus == "charger_penalty"
+                    else "NO_MATCHING_RECENT_EVENT"
+                ),
                 "fact_valid": True,
             }
             recent_collision = False
@@ -774,6 +1333,17 @@ class DevelopmentPreviewState:
             ][-5:]
             context_frames = [int(frame.state.frame) for _, frame in context]
             adapter, snapshot = self._round_explanation_snapshot(anchor_index)
+            trace_for_runtime = outcome.info.get("decision_trace", {})
+            trace_for_runtime = trace_for_runtime if isinstance(trace_for_runtime, Mapping) else {}
+            runtime = trace_for_runtime.get("runtime_decision", {})
+            runtime = runtime if isinstance(runtime, Mapping) else {}
+            controller_variants = self._controller_action_bubble(
+                self.round_frames[anchor_index - 1].state,
+                outcome.state,
+                outcome,
+                runtime,
+                focus=focus,
+            )
             trace = snapshot.metadata.get("decision_trace", {})
             trace = trace if isinstance(trace, Mapping) else {}
             agents = trace.get("agents", {})
@@ -813,12 +1383,29 @@ class DevelopmentPreviewState:
                 outcome.info.get("robot_collision_event", False)
                 or outcome.info.get("robot_collision_kind")
             )
+            penalty_events = tuple(
+                event
+                for event in outcome.info.get("rule_events", ())
+                if isinstance(event, Mapping)
+                and str(event.get("event", "")) == "shared_charger_occupancy"
+            )
             evidence = {
                 "event_type": focus,
                 "anchor_frame": anchor_frame,
                 "context_frames": context_frames,
                 "human_action": proposed(outcome, "robot_1"),
                 "ai_action": proposed(outcome, "robot_2"),
+                "nn_proposed_action": (
+                    runtime.get("policy_actions", {}).get("robot_2")
+                    if isinstance(runtime.get("policy_actions"), Mapping)
+                    else None
+                ),
+                "controller_selected_action": (
+                    runtime.get("selected_actions", {}).get("robot_2")
+                    if isinstance(runtime.get("selected_actions"), Mapping)
+                    else proposed(outcome, "robot_2")
+                ),
+                "environment_executed_action": snapshot.executed_actions.get("robot_2"),
                 "executed_actions": dict(snapshot.executed_actions),
                 "collision_type": outcome.info.get("robot_collision_kind"),
                 "current_goal": (
@@ -833,34 +1420,23 @@ class DevelopmentPreviewState:
                 "pre_state_hash": trace.get("pre_state_hash"),
                 "outcome_frame": trace.get("outcome_frame"),
                 "fact_valid": bool(trace.get("fact_valid", False)),
+                "shared_charger_penalty_events": [
+                    dict(event) for event in penalty_events
+                ],
             }
-            if focus == "collision" and recent_collision:
-                human_action = proposed(outcome, "robot_1")
-                ai_action = proposed(outcome, "robot_2")
-                human_en, human_zh = self._action_words(human_action)
-                ai_en, ai_zh = self._action_words(ai_action)
-                kind = str(
-                    outcome.info.get("robot_collision_kind") or "joint_conflict"
-                )
-                kind_en = {
-                    "same_target": "a same-target-cell conflict",
-                    "swap": "a position-swap conflict",
-                    "occupied_stationary": "an occupied-cell conflict",
-                }.get(kind, "a joint movement conflict")
-                kind_zh = {
-                    "same_target": "同一目标格冲突",
-                    "swap": "位置交换冲突",
-                    "occupied_stationary": "进入未释放格子的冲突",
-                }.get(kind, "联合移动冲突")
-                answer_en = (
-                    f"You moved {human_en} while Robot 2 simultaneously moved {ai_en}; "
-                    f"the joint resolver recorded {kind_en}. Robot 2 decided from the "
-                    "shared pre-move state and did not observe your current action first."
-                )
-                answer_zh = (
-                    f"你向{human_zh}移动，机器人2同时向{ai_zh}移动；联合解析器记录为{kind_zh}。"
-                    "机器人2依据共同的移动前状态决策，没有提前看到你的本帧动作。"
-                )
+            if focus == "charger_penalty":
+                event = penalty_events[-1] if penalty_events else {}
+                evidence["penalty_event_id"] = str(event.get("event_id", ""))
+                answer_en = controller_variants["en"]
+                answer_zh = controller_variants["zh-CN"]
+            elif focus == "collision" and recent_collision:
+                answer_en = controller_variants["en"]
+                answer_zh = controller_variants["zh-CN"]
+            elif focus in {
+                "action", "wait", "energy", "charge_threshold", "task", "collaboration"
+            }:
+                answer_en = controller_variants["en"]
+                answer_zh = controller_variants["zh-CN"]
             else:
                 routed_focus = {
                     "wait": "action",
@@ -885,6 +1461,13 @@ class DevelopmentPreviewState:
         self.explanation_count += 1
         sequence = self.explanation_count
         common = {
+            "explanation_display_version": "warehouse-on-demand-explanation.v1",
+            "run_id": self.task_run_id,
+            "session_id": self.run_id,
+            "protocol_version": STUDY_VERSION,
+            "task_id": 2,
+            "requested_action_frame": action_frame,
+            "request_id": request_id,
             "target_agent": "robot_2",
             "question": question,
             "question_sequence": sequence,
@@ -894,8 +1477,8 @@ class DevelopmentPreviewState:
             "anchor_frame": anchor_frame,
             "context_frames": context_frames,
             "current_frame": current_frame,
-            "trajectory_kind": "human_ai_task1",
-            "trajectory_seed": TASK1_SEED,
+            "trajectory_kind": "human_ai_task2",
+            "trajectory_seed": TASK2_SEED,
             "agent_control": {"robot_1": "human", "robot_2": "ai"},
             "structured_evidence": evidence,
             "fact_validation": {
@@ -937,15 +1520,27 @@ class DevelopmentPreviewState:
             {
                 "participant_id": self.participant_id,
                 "condition": self.condition,
-                "round": "task1",
+                "round": "task2",
+                "protocol_version": STUDY_VERSION,
+                "task_run_id": self.task_run_id,
                 "question_sequence": sequence,
                 "question": question,
                 "question_focus": focus,
+                "explanation_display_version": "warehouse-on-demand-explanation.v1",
+                "requested_action_frame": action_frame,
+                "request_id": request_id,
+                "displayed_frame": anchor_frame,
+                "language": self.locale,
+                "penalty_event_id": (
+                    evidence.get("penalty_event_id")
+                    if focus == "charger_penalty"
+                    else None
+                ),
                 "target_agent": "robot_2",
                 "current_frame": current_frame,
                 "anchor_frame": anchor_frame,
                 "context_frames": context_frames,
-                "trajectory_kind": "human_ai_task1",
+                "trajectory_kind": "human_ai_task2",
                 "agent_control": {"robot_1": "human", "robot_2": "ai"},
                 "answer_en": answer_en,
                 "answer_zh": answer_zh,
@@ -960,32 +1555,50 @@ class DevelopmentPreviewState:
     def command(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
         operation = str(envelope["operation_id"])
         if operation in self.operations:
-            return self.operations[operation]
+            cached = self.operations[operation]
+            cached_study = cached.get("view", {}).get("study", {})
+            if (
+                cached_study.get("run_id") != self.run_id
+                or cached_study.get("task_run_id") != self.task_run_id
+                or cached_study.get("stage") != self.stage
+                or cached_study.get("state_version") != self.version
+            ):
+                raise RuntimeError("This operation belongs to an earlier study state.")
+            return cached
         command = str(envelope["command"])
         payload = dict(envelope.get("payload", {}))
         self.command_requests.append(command)
         if command in {"start", "restart"}:
             self.participant_id = str(payload.get("participant_id", "development-preview"))
             override = str(payload.get("condition_override", "auto"))
+            self.assignment_source = (
+                "manual_self_select" if override in {"control", "explanation"}
+                else "development_default_A"
+            )
             self.condition = (
                 override
                 if override in {"control", "explanation"}
                 else "explanation"
             )
-            self.locale = str(payload.get("locale", "en"))
+            self.locale = "en" if payload.get("locale") == "en" else "zh-CN"
             self.run_id = uuid4().hex
             self.stage = "instructions"
             self.tutorial_index = 0
             self.tutorial_max_index = 0
             self.task1 = None
             self.task2 = None
+            self.task3 = None
+            self.survey_answers = None
+            self.record_saved = False
             self.last_explanation = None
+            self.action_bubble = None
+            self.latest_charger_penalty = None
             self.explanation_count = 0
             self.question_log = []
             self.pending_question_sequences = []
             self._start_round("instructions", TASK1_SEED)
         elif command == "set_language":
-            self.locale = str(payload.get("locale", self.locale))
+            self.locale = "en" if payload.get("locale", self.locale) == "en" else "zh-CN"
         elif command == "tutorial_advance" and self.stage == "instructions":
             self.tutorial_index = min(
                 len(self.tutorial_frames) - 1,
@@ -1005,21 +1618,22 @@ class DevelopmentPreviewState:
             )
         elif command == "begin_task1" and self.stage == "instructions":
             self._start_round("task1", TASK1_SEED)
-        elif command == "human_action" and self.stage in {"task1", "task2"}:
+        elif command == "human_action" and self.stage in {"task1", "task2", "task3"}:
             self._advance_round(str(payload.get("action", "")))
         elif command == "begin_task2" and self.stage == "task1_complete":
             self._start_round("task2", TASK2_SEED)
+        elif command == "begin_task3" and self.stage == "task2_complete":
+            self._start_round("task3", TASK3_SEED)
         elif (
             command == "ask_explanation"
-            and self.stage == "task1"
-            and self.condition == "explanation"
+            and self._explanation_allowed()
         ):
             if any(
                 key in payload
                 for key in ("selected_frame", "trajectory_hash", "reference_index")
             ):
                 raise ValueError(
-                    "Live Task 1 questions cannot select an AI-AI replay frame."
+                    "Live Task 2 questions cannot select an AI-AI replay frame."
                 )
             target_agent = str(payload.get("target_agent", "robot_2"))
             if target_agent != "robot_2":
@@ -1037,17 +1651,47 @@ class DevelopmentPreviewState:
                 "allocation",
                 "collision",
                 "wait",
+                "charger_penalty",
                 "human_influence",
                 "goal",
             }
             if requested_focus and requested_focus not in allowed_focuses:
                 raise ValueError("Unknown explanation question kind.")
             focus = requested_focus or _study_question_focus(question)
-            self._ask_live_task1(
+            action_frame_value = payload.get("action_frame")
+            try:
+                action_frame = int(action_frame_value) if action_frame_value is not None else None
+            except (TypeError, ValueError):
+                raise ValueError("Invalid action frame.") from None
+            if action_frame is not None and (
+                str(envelope.get("run_id", "")) != str(self.run_id)
+                or str(payload.get("action_run_id", "")) != str(self.task_run_id)
+                or str(payload.get("action_stage", "")) != "task2"
+                or str(payload.get("target_agent", "")) != "robot_2"
+            ):
+                raise ValueError("Ask why must use this run's Robot 2 Task 2 action.")
+            penalty_event_id = payload.get("penalty_event_id", payload.get("event_id"))
+            penalty_frame_value = payload.get("penalty_frame", payload.get("anchor_frame"))
+            try:
+                penalty_frame = int(penalty_frame_value) if penalty_frame_value is not None else None
+            except (TypeError, ValueError):
+                raise ValueError("Invalid penalty frame.") from None
+            self._ask_live_task2(
                 question=question,
                 focus=focus,
+                penalty_event_id=(str(penalty_event_id) if penalty_event_id else None),
+                penalty_frame=penalty_frame,
+                action_frame=action_frame,
+                request_id=(str(payload.get("request_id")) if action_frame is not None else None),
             )
         elif command == "submit_survey" and self.stage == "survey":
+            self.survey_answers = {
+                key: payload.get(key) for key in (
+                    "coordination_understanding", "ai_predictability", "interface_clarity",
+                    "explanation_clarity", "explanation_usefulness", "question_helpfulness", "comment",
+                )
+            }
+            self._save_study_record()
             self.stage = "completed"
         else:
             raise RuntimeError(f"Command {command!r} is not valid during {self.stage!r}.")

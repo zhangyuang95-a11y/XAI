@@ -240,6 +240,10 @@ def environment_info(
         "human_route_regret_units": state.human_route_regret_units,
         "robot_collision_events": state.robot_collision_events,
         "invalid_move_count": state.invalid_move_count,
+        "shared_charger_penalty_occupants": tuple(
+            state.shared_charger_penalty_occupants
+        ),
+        "rule_events": tuple(state.last_rule_events),
     }
 
 

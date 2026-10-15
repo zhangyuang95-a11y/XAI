@@ -1,0 +1,3384 @@
+{
+  "model_sha256": "c9e1d27ded3a8ec735133f6299171d836553ee2b8c90eb01fd24cfd38287c8f8",
+  "development": {
+    "passed": true,
+    "summaries": [
+      {
+        "task": 1,
+        "mean_capacity_percent": 92.13541666666667,
+        "min_capacity_percent": 86.25,
+        "mean_ai_wait_rate": 0.0,
+        "max_ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "mean_capacity_percent": 91.1111111111111,
+        "min_capacity_percent": 82.5,
+        "mean_ai_wait_rate": 0.005555555555555556,
+        "max_ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "task": 3,
+        "mean_capacity_percent": 91.18055555555556,
+        "min_capacity_percent": 87.5,
+        "mean_ai_wait_rate": 0.002314814814814815,
+        "max_ai_wait_rate": 0.022222222222222223
+      }
+    ],
+    "rows": [
+      {
+        "task": 1,
+        "seed": 730100,
+        "score": 63.333333,
+        "capacity_percent": 95.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730101,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730102,
+        "score": 62.5,
+        "capacity_percent": 93.75,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730103,
+        "score": 60.833333,
+        "capacity_percent": 91.25,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730104,
+        "score": 62.5,
+        "capacity_percent": 93.75,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730105,
+        "score": 63.333333,
+        "capacity_percent": 95.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730106,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730107,
+        "score": 63.333333,
+        "capacity_percent": 95.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730108,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730109,
+        "score": 64.166667,
+        "capacity_percent": 96.25,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730110,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730111,
+        "score": 65.0,
+        "capacity_percent": 97.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730112,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730113,
+        "score": 65.0,
+        "capacity_percent": 97.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730114,
+        "score": 62.5,
+        "capacity_percent": 93.75,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730115,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730116,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730117,
+        "score": 58.333333,
+        "capacity_percent": 87.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730118,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730119,
+        "score": 60.833333,
+        "capacity_percent": 91.25,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730120,
+        "score": 59.166667,
+        "capacity_percent": 88.75,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730121,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730122,
+        "score": 59.166667,
+        "capacity_percent": 88.75,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 730123,
+        "score": 57.5,
+        "capacity_percent": 86.25,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730100,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730101,
+        "score": 61.111111,
+        "capacity_percent": 91.66666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730102,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730103,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730104,
+        "score": 58.888889,
+        "capacity_percent": 88.33333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730105,
+        "score": 58.888889,
+        "capacity_percent": 88.33333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730106,
+        "score": 58.333333,
+        "capacity_percent": 87.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730107,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730108,
+        "score": 56.666667,
+        "capacity_percent": 85.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730109,
+        "score": 62.777778,
+        "capacity_percent": 94.16666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730110,
+        "score": 55.0,
+        "capacity_percent": 82.5,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "task": 2,
+        "seed": 730111,
+        "score": 59.444444,
+        "capacity_percent": 89.16666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730112,
+        "score": 65.0,
+        "capacity_percent": 97.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730113,
+        "score": 62.222222,
+        "capacity_percent": 93.33333333333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "task": 2,
+        "seed": 730114,
+        "score": 62.777778,
+        "capacity_percent": 94.16666666666667,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "task": 2,
+        "seed": 730115,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730116,
+        "score": 62.777778,
+        "capacity_percent": 94.16666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730117,
+        "score": 63.333333,
+        "capacity_percent": 95.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730118,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730119,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730120,
+        "score": 62.222222,
+        "capacity_percent": 93.33333333333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "task": 2,
+        "seed": 730121,
+        "score": 62.222222,
+        "capacity_percent": 93.33333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730122,
+        "score": 59.444444,
+        "capacity_percent": 89.16666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 730123,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "task": 3,
+        "seed": 730100,
+        "score": 63.333333,
+        "capacity_percent": 95.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730101,
+        "score": 62.222222,
+        "capacity_percent": 93.33333333333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "task": 3,
+        "seed": 730102,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "task": 3,
+        "seed": 730103,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730104,
+        "score": 61.111111,
+        "capacity_percent": 91.66666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730105,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730106,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730107,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730108,
+        "score": 59.444444,
+        "capacity_percent": 89.16666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730109,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730110,
+        "score": 58.333333,
+        "capacity_percent": 87.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730111,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730112,
+        "score": 62.777778,
+        "capacity_percent": 94.16666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730113,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730114,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730115,
+        "score": 62.222222,
+        "capacity_percent": 93.33333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730116,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730117,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730118,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.011111111111111112
+      },
+      {
+        "task": 3,
+        "seed": 730119,
+        "score": 61.111111,
+        "capacity_percent": 91.66666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730120,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730121,
+        "score": 59.444444,
+        "capacity_percent": 89.16666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730122,
+        "score": 58.888889,
+        "capacity_percent": 88.33333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 730123,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      }
+    ]
+  },
+  "heldout": {
+    "passed": true,
+    "summaries": [
+      {
+        "task": 1,
+        "mean_capacity_percent": 90.83333333333333,
+        "min_capacity_percent": 87.5,
+        "mean_ai_wait_rate": 0.006944444444444444,
+        "max_ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "task": 2,
+        "mean_capacity_percent": 91.66666666666667,
+        "min_capacity_percent": 86.66666666666667,
+        "mean_ai_wait_rate": 0.005092592592592593,
+        "max_ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "task": 3,
+        "mean_capacity_percent": 91.45833333333333,
+        "min_capacity_percent": 87.5,
+        "mean_ai_wait_rate": 0.001851851851851852,
+        "max_ai_wait_rate": 0.022222222222222223
+      }
+    ],
+    "rows": [
+      {
+        "task": 1,
+        "seed": 731100,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731101,
+        "score": 58.333333,
+        "capacity_percent": 87.5,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "task": 1,
+        "seed": 731102,
+        "score": 63.333333,
+        "capacity_percent": 95.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731103,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731104,
+        "score": 60.833333,
+        "capacity_percent": 91.25,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731105,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731106,
+        "score": 60.833333,
+        "capacity_percent": 91.25,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "task": 1,
+        "seed": 731107,
+        "score": 58.333333,
+        "capacity_percent": 87.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731108,
+        "score": 60.833333,
+        "capacity_percent": 91.25,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731109,
+        "score": 58.333333,
+        "capacity_percent": 87.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731110,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "task": 1,
+        "seed": 731111,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731112,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731113,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731114,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "task": 1,
+        "seed": 731115,
+        "score": 58.333333,
+        "capacity_percent": 87.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731116,
+        "score": 59.166667,
+        "capacity_percent": 88.75,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731117,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "task": 1,
+        "seed": 731118,
+        "score": 62.5,
+        "capacity_percent": 93.75,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731119,
+        "score": 60.833333,
+        "capacity_percent": 91.25,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731120,
+        "score": 59.166667,
+        "capacity_percent": 88.75,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731121,
+        "score": 59.166667,
+        "capacity_percent": 88.75,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731122,
+        "score": 59.166667,
+        "capacity_percent": 88.75,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 1,
+        "seed": 731123,
+        "score": 62.5,
+        "capacity_percent": 93.75,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731100,
+        "score": 62.222222,
+        "capacity_percent": 93.33333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731101,
+        "score": 58.333333,
+        "capacity_percent": 87.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731102,
+        "score": 58.333333,
+        "capacity_percent": 87.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731103,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "task": 2,
+        "seed": 731104,
+        "score": 62.777778,
+        "capacity_percent": 94.16666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731105,
+        "score": 63.888889,
+        "capacity_percent": 95.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731106,
+        "score": 61.111111,
+        "capacity_percent": 91.66666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731107,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "task": 2,
+        "seed": 731108,
+        "score": 61.111111,
+        "capacity_percent": 91.66666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731109,
+        "score": 62.222222,
+        "capacity_percent": 93.33333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731110,
+        "score": 58.333333,
+        "capacity_percent": 87.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731111,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731112,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "task": 2,
+        "seed": 731113,
+        "score": 63.888889,
+        "capacity_percent": 95.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731114,
+        "score": 63.888889,
+        "capacity_percent": 95.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731115,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731116,
+        "score": 63.333333,
+        "capacity_percent": 95.0,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "task": 2,
+        "seed": 731117,
+        "score": 62.777778,
+        "capacity_percent": 94.16666666666667,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "task": 2,
+        "seed": 731118,
+        "score": 57.777778,
+        "capacity_percent": 86.66666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731119,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731120,
+        "score": 63.333333,
+        "capacity_percent": 95.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731121,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731122,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 2,
+        "seed": 731123,
+        "score": 57.777778,
+        "capacity_percent": 86.66666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731100,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731101,
+        "score": 59.444444,
+        "capacity_percent": 89.16666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731102,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731103,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731104,
+        "score": 62.222222,
+        "capacity_percent": 93.33333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731105,
+        "score": 63.333333,
+        "capacity_percent": 95.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731106,
+        "score": 62.222222,
+        "capacity_percent": 93.33333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731107,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731108,
+        "score": 61.111111,
+        "capacity_percent": 91.66666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731109,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731110,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "task": 3,
+        "seed": 731111,
+        "score": 59.444444,
+        "capacity_percent": 89.16666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731112,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731113,
+        "score": 60.0,
+        "capacity_percent": 90.0,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "task": 3,
+        "seed": 731114,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731115,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731116,
+        "score": 61.111111,
+        "capacity_percent": 91.66666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731117,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731118,
+        "score": 61.111111,
+        "capacity_percent": 91.66666666666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731119,
+        "score": 61.666667,
+        "capacity_percent": 92.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731120,
+        "score": 58.333333,
+        "capacity_percent": 87.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731121,
+        "score": 63.333333,
+        "capacity_percent": 95.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731122,
+        "score": 60.555556,
+        "capacity_percent": 90.83333333333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "task": 3,
+        "seed": 731123,
+        "score": 58.888889,
+        "capacity_percent": 88.33333333333333,
+        "ai_wait_rate": 0.0
+      }
+    ]
+  },
+  "human_replacement_proxies": {
+    "evidence_type": "fixed_ai_with_simulated_human_proxy",
+    "summaries": [
+      {
+        "policy": "wait",
+        "task": 1,
+        "mean_task_score": 38.92361116666667,
+        "min_task_score": 34.166667
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "mean_task_score": 37.916666625,
+        "min_task_score": 33.888889
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "mean_task_score": 36.50462970833333,
+        "min_task_score": 32.222222
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "mean_task_score": 48.472222125,
+        "min_task_score": 42.5
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "mean_task_score": 48.9814815,
+        "min_task_score": 46.111111
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "mean_task_score": 41.29629629166667,
+        "min_task_score": 35.555556
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "mean_task_score": 41.770833375,
+        "min_task_score": 36.666667
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "mean_task_score": 41.643518541666666,
+        "min_task_score": 39.444444
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "mean_task_score": 40.20833329166667,
+        "min_task_score": 35.555556
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "mean_task_score": 29.965277708333332,
+        "min_task_score": 22.5
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "mean_task_score": 31.319444416666666,
+        "min_task_score": 25.0
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "mean_task_score": 32.291666666666664,
+        "min_task_score": 25.0
+      }
+    ],
+    "rows": [
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731100,
+        "task_score": 37.5,
+        "ai_wait_rate": 0.13333333333333333
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731101,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731102,
+        "task_score": 39.166667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731103,
+        "task_score": 35.833333,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731104,
+        "task_score": 35.833333,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731105,
+        "task_score": 37.5,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731106,
+        "task_score": 39.166667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731107,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.1
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731108,
+        "task_score": 41.666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731109,
+        "task_score": 39.166667,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731110,
+        "task_score": 39.166667,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731111,
+        "task_score": 34.166667,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731112,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731113,
+        "task_score": 35.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731114,
+        "task_score": 37.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731115,
+        "task_score": 40.833333,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731116,
+        "task_score": 37.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731117,
+        "task_score": 43.333333,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731118,
+        "task_score": 44.166667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731119,
+        "task_score": 35.0,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731120,
+        "task_score": 42.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731121,
+        "task_score": 39.166667,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731122,
+        "task_score": 38.333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 1,
+        "seed": 731123,
+        "task_score": 45.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731100,
+        "task_score": 35.0,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731101,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731102,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731103,
+        "task_score": 37.777778,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731104,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731105,
+        "task_score": 37.777778,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731106,
+        "task_score": 33.888889,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731107,
+        "task_score": 38.333333,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731108,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731109,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731110,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731111,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731112,
+        "task_score": 34.444444,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731113,
+        "task_score": 38.333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731114,
+        "task_score": 38.888889,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731115,
+        "task_score": 38.333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731116,
+        "task_score": 42.777778,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731117,
+        "task_score": 38.333333,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731118,
+        "task_score": 36.111111,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731119,
+        "task_score": 39.444444,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731120,
+        "task_score": 38.333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731121,
+        "task_score": 39.444444,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731122,
+        "task_score": 35.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 2,
+        "seed": 731123,
+        "task_score": 37.777778,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731100,
+        "task_score": 40.555556,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731101,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731102,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731103,
+        "task_score": 35.555556,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731104,
+        "task_score": 36.111111,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731105,
+        "task_score": 35.555556,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731106,
+        "task_score": 33.333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731107,
+        "task_score": 33.888889,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731108,
+        "task_score": 33.888889,
+        "ai_wait_rate": 0.08888888888888889
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731109,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731110,
+        "task_score": 34.444444,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731111,
+        "task_score": 37.222222,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731112,
+        "task_score": 35.555556,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731113,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731114,
+        "task_score": 37.777778,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731115,
+        "task_score": 43.888889,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731116,
+        "task_score": 37.222222,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731117,
+        "task_score": 43.333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731118,
+        "task_score": 35.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731119,
+        "task_score": 36.111111,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731120,
+        "task_score": 35.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731121,
+        "task_score": 35.555556,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731122,
+        "task_score": 32.222222,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "wait",
+        "task": 3,
+        "seed": 731123,
+        "task_score": 37.222222,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731100,
+        "task_score": 49.166667,
+        "ai_wait_rate": 0.13333333333333333
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731101,
+        "task_score": 48.333333,
+        "ai_wait_rate": 0.1
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731102,
+        "task_score": 45.0,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731103,
+        "task_score": 45.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731104,
+        "task_score": 50.833333,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731105,
+        "task_score": 47.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731106,
+        "task_score": 46.666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731107,
+        "task_score": 48.333333,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731108,
+        "task_score": 51.666667,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731109,
+        "task_score": 50.0,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731110,
+        "task_score": 52.5,
+        "ai_wait_rate": 0.1
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731111,
+        "task_score": 45.833333,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731112,
+        "task_score": 47.5,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731113,
+        "task_score": 48.333333,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731114,
+        "task_score": 47.5,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731115,
+        "task_score": 48.333333,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731116,
+        "task_score": 42.5,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731117,
+        "task_score": 51.666667,
+        "ai_wait_rate": 0.016666666666666666
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731118,
+        "task_score": 48.333333,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731119,
+        "task_score": 48.333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731120,
+        "task_score": 48.333333,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731121,
+        "task_score": 50.833333,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731122,
+        "task_score": 50.833333,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "greedy",
+        "task": 1,
+        "seed": 731123,
+        "task_score": 50.0,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731100,
+        "task_score": 51.111111,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731101,
+        "task_score": 50.555556,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731102,
+        "task_score": 48.888889,
+        "ai_wait_rate": 0.1111111111111111
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731103,
+        "task_score": 46.111111,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731104,
+        "task_score": 50.555556,
+        "ai_wait_rate": 0.07777777777777778
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731105,
+        "task_score": 48.888889,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731106,
+        "task_score": 48.888889,
+        "ai_wait_rate": 0.08888888888888889
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731107,
+        "task_score": 48.888889,
+        "ai_wait_rate": 0.08888888888888889
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731108,
+        "task_score": 46.666667,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731109,
+        "task_score": 48.888889,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731110,
+        "task_score": 49.444444,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731111,
+        "task_score": 50.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731112,
+        "task_score": 46.111111,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731113,
+        "task_score": 48.333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731114,
+        "task_score": 48.888889,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731115,
+        "task_score": 48.888889,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731116,
+        "task_score": 49.444444,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731117,
+        "task_score": 50.0,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731118,
+        "task_score": 52.777778,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731119,
+        "task_score": 47.222222,
+        "ai_wait_rate": 0.08888888888888889
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731120,
+        "task_score": 47.777778,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731121,
+        "task_score": 50.0,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731122,
+        "task_score": 48.333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 2,
+        "seed": 731123,
+        "task_score": 48.888889,
+        "ai_wait_rate": 0.08888888888888889
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731100,
+        "task_score": 46.111111,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731101,
+        "task_score": 46.111111,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731102,
+        "task_score": 41.111111,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731103,
+        "task_score": 37.777778,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731104,
+        "task_score": 51.111111,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731105,
+        "task_score": 44.444444,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731106,
+        "task_score": 41.111111,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731107,
+        "task_score": 40.555556,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731108,
+        "task_score": 37.222222,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731109,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731110,
+        "task_score": 39.444444,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731111,
+        "task_score": 46.111111,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731112,
+        "task_score": 37.222222,
+        "ai_wait_rate": 0.08888888888888889
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731113,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731114,
+        "task_score": 37.222222,
+        "ai_wait_rate": 0.1111111111111111
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731115,
+        "task_score": 41.666667,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731116,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731117,
+        "task_score": 41.666667,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731118,
+        "task_score": 35.555556,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731119,
+        "task_score": 39.444444,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731120,
+        "task_score": 41.111111,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731121,
+        "task_score": 38.888889,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731122,
+        "task_score": 45.555556,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "greedy",
+        "task": 3,
+        "seed": 731123,
+        "task_score": 45.0,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731100,
+        "task_score": 45.0,
+        "ai_wait_rate": 0.16666666666666666
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731101,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.13333333333333333
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731102,
+        "task_score": 38.333333,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731103,
+        "task_score": 38.333333,
+        "ai_wait_rate": 0.13333333333333333
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731104,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731105,
+        "task_score": 41.666667,
+        "ai_wait_rate": 0.1
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731106,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731107,
+        "task_score": 42.5,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731108,
+        "task_score": 45.0,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731109,
+        "task_score": 44.166667,
+        "ai_wait_rate": 0.1
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731110,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731111,
+        "task_score": 41.666667,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731112,
+        "task_score": 41.666667,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731113,
+        "task_score": 42.5,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731114,
+        "task_score": 45.0,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731115,
+        "task_score": 42.5,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731116,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731117,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731118,
+        "task_score": 42.5,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731119,
+        "task_score": 40.833333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731120,
+        "task_score": 40.833333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731121,
+        "task_score": 46.666667,
+        "ai_wait_rate": 0.13333333333333333
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731122,
+        "task_score": 44.166667,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 1,
+        "seed": 731123,
+        "task_score": 45.833333,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731100,
+        "task_score": 40.555556,
+        "ai_wait_rate": 0.08888888888888889
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731101,
+        "task_score": 41.666667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731102,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731103,
+        "task_score": 42.777778,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731104,
+        "task_score": 43.333333,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731105,
+        "task_score": 44.444444,
+        "ai_wait_rate": 0.17777777777777778
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731106,
+        "task_score": 41.666667,
+        "ai_wait_rate": 0.1111111111111111
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731107,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.08888888888888889
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731108,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731109,
+        "task_score": 43.333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731110,
+        "task_score": 41.666667,
+        "ai_wait_rate": 0.08888888888888889
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731111,
+        "task_score": 40.555556,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731112,
+        "task_score": 40.555556,
+        "ai_wait_rate": 0.1111111111111111
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731113,
+        "task_score": 41.111111,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731114,
+        "task_score": 39.444444,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731115,
+        "task_score": 41.666667,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731116,
+        "task_score": 41.666667,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731117,
+        "task_score": 44.444444,
+        "ai_wait_rate": 0.08888888888888889
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731118,
+        "task_score": 42.222222,
+        "ai_wait_rate": 0.15555555555555556
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731119,
+        "task_score": 41.666667,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731120,
+        "task_score": 41.666667,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731121,
+        "task_score": 39.444444,
+        "ai_wait_rate": 0.15555555555555556
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731122,
+        "task_score": 42.222222,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 2,
+        "seed": 731123,
+        "task_score": 43.333333,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731100,
+        "task_score": 42.222222,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731101,
+        "task_score": 39.444444,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731102,
+        "task_score": 38.333333,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731103,
+        "task_score": 38.333333,
+        "ai_wait_rate": 0.1111111111111111
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731104,
+        "task_score": 37.777778,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731105,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.08888888888888889
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731106,
+        "task_score": 47.222222,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731107,
+        "task_score": 37.222222,
+        "ai_wait_rate": 0.08888888888888889
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731108,
+        "task_score": 48.333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731109,
+        "task_score": 37.777778,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731110,
+        "task_score": 38.333333,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731111,
+        "task_score": 40.555556,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731112,
+        "task_score": 47.777778,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731113,
+        "task_score": 35.555556,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731114,
+        "task_score": 41.111111,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731115,
+        "task_score": 38.333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731116,
+        "task_score": 41.111111,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731117,
+        "task_score": 43.333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731118,
+        "task_score": 37.222222,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731119,
+        "task_score": 38.333333,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731120,
+        "task_score": 38.888889,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731121,
+        "task_score": 40.555556,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731122,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "history",
+        "task": 3,
+        "seed": 731123,
+        "task_score": 40.555556,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731100,
+        "task_score": 27.5,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731101,
+        "task_score": 22.5,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731102,
+        "task_score": 28.333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731103,
+        "task_score": 26.666667,
+        "ai_wait_rate": 0.1
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731104,
+        "task_score": 25.833333,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731105,
+        "task_score": 30.833333,
+        "ai_wait_rate": 0.1
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731106,
+        "task_score": 35.833333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731107,
+        "task_score": 32.5,
+        "ai_wait_rate": 0.1
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731108,
+        "task_score": 30.0,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731109,
+        "task_score": 35.0,
+        "ai_wait_rate": 0.1
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731110,
+        "task_score": 34.166667,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731111,
+        "task_score": 32.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731112,
+        "task_score": 28.333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731113,
+        "task_score": 27.5,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731114,
+        "task_score": 35.833333,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731115,
+        "task_score": 35.0,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731116,
+        "task_score": 30.833333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731117,
+        "task_score": 32.5,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731118,
+        "task_score": 28.333333,
+        "ai_wait_rate": 0.1
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731119,
+        "task_score": 23.333333,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731120,
+        "task_score": 34.166667,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731121,
+        "task_score": 29.166667,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731122,
+        "task_score": 23.333333,
+        "ai_wait_rate": 0.1
+      },
+      {
+        "policy": "random",
+        "task": 1,
+        "seed": 731123,
+        "task_score": 29.166667,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731100,
+        "task_score": 27.777778,
+        "ai_wait_rate": 0.1
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731101,
+        "task_score": 31.666667,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731102,
+        "task_score": 32.222222,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731103,
+        "task_score": 36.111111,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731104,
+        "task_score": 32.222222,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731105,
+        "task_score": 26.111111,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731106,
+        "task_score": 31.111111,
+        "ai_wait_rate": 0.08888888888888889
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731107,
+        "task_score": 26.111111,
+        "ai_wait_rate": 0.03333333333333333
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731108,
+        "task_score": 31.111111,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731109,
+        "task_score": 25.555556,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731110,
+        "task_score": 32.222222,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731111,
+        "task_score": 31.111111,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731112,
+        "task_score": 42.222222,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731113,
+        "task_score": 32.222222,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731114,
+        "task_score": 40.0,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731115,
+        "task_score": 30.0,
+        "ai_wait_rate": 0.1111111111111111
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731116,
+        "task_score": 28.888889,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731117,
+        "task_score": 32.222222,
+        "ai_wait_rate": 0.05555555555555555
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731118,
+        "task_score": 28.888889,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731119,
+        "task_score": 33.888889,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731120,
+        "task_score": 28.888889,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731121,
+        "task_score": 26.666667,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731122,
+        "task_score": 39.444444,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 2,
+        "seed": 731123,
+        "task_score": 25.0,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731100,
+        "task_score": 33.333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731101,
+        "task_score": 31.111111,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731102,
+        "task_score": 33.333333,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731103,
+        "task_score": 31.666667,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731104,
+        "task_score": 31.111111,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731105,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731106,
+        "task_score": 31.111111,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731107,
+        "task_score": 35.0,
+        "ai_wait_rate": 0.011111111111111112
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731108,
+        "task_score": 28.888889,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731109,
+        "task_score": 25.0,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731110,
+        "task_score": 32.777778,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731111,
+        "task_score": 33.333333,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731112,
+        "task_score": 32.222222,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731113,
+        "task_score": 32.777778,
+        "ai_wait_rate": 0.06666666666666667
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731114,
+        "task_score": 27.777778,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731115,
+        "task_score": 37.777778,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731116,
+        "task_score": 32.222222,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731117,
+        "task_score": 34.444444,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731118,
+        "task_score": 38.888889,
+        "ai_wait_rate": 0.0
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731119,
+        "task_score": 36.666667,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731120,
+        "task_score": 33.888889,
+        "ai_wait_rate": 0.1111111111111111
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731121,
+        "task_score": 26.666667,
+        "ai_wait_rate": 0.022222222222222223
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731122,
+        "task_score": 28.333333,
+        "ai_wait_rate": 0.044444444444444446
+      },
+      {
+        "policy": "random",
+        "task": 3,
+        "seed": 731123,
+        "task_score": 30.0,
+        "ai_wait_rate": 0.05555555555555555
+      }
+    ]
+  },
+  "training": {
+    "clone_examples_per_role": 86400,
+    "clone_epochs": 120,
+    "dagger_rounds": 2,
+    "self_play_rounds": 8,
+    "selected_self_play_round": 1,
+    "parent_checkpoint_sha256": null,
+    "parent_training": null,
+    "training_seed_count": 120,
+    "self_play_seed_schedule": [
+      [
+        740000,
+        740001,
+        740002,
+        740003,
+        740004,
+        740005,
+        740006,
+        740007,
+        740008,
+        740009,
+        740010,
+        740011,
+        740012,
+        740013,
+        740014,
+        740015,
+        740016,
+        740017,
+        740018,
+        740019,
+        740020,
+        740021,
+        740022,
+        740023
+      ],
+      [
+        740024,
+        740025,
+        740026,
+        740027,
+        740028,
+        740029,
+        740030,
+        740031,
+        740032,
+        740033,
+        740034,
+        740035,
+        740036,
+        740037,
+        740038,
+        740039,
+        740040,
+        740041,
+        740042,
+        740043,
+        740044,
+        740045,
+        740046,
+        740047
+      ],
+      [
+        740048,
+        740049,
+        740050,
+        740051,
+        740052,
+        740053,
+        740054,
+        740055,
+        740056,
+        740057,
+        740058,
+        740059,
+        740060,
+        740061,
+        740062,
+        740063,
+        740064,
+        740065,
+        740066,
+        740067,
+        740068,
+        740069,
+        740070,
+        740071
+      ],
+      [
+        740072,
+        740073,
+        740074,
+        740075,
+        740076,
+        740077,
+        740078,
+        740079,
+        740080,
+        740081,
+        740082,
+        740083,
+        740084,
+        740085,
+        740086,
+        740087,
+        740088,
+        740089,
+        740090,
+        740091,
+        740092,
+        740093,
+        740094,
+        740095
+      ],
+      [
+        740096,
+        740097,
+        740098,
+        740099,
+        740100,
+        740101,
+        740102,
+        740103,
+        740104,
+        740105,
+        740106,
+        740107,
+        740108,
+        740109,
+        740110,
+        740111,
+        740112,
+        740113,
+        740114,
+        740115,
+        740116,
+        740117,
+        740118,
+        740119
+      ],
+      [
+        740000,
+        740001,
+        740002,
+        740003,
+        740004,
+        740005,
+        740006,
+        740007,
+        740008,
+        740009,
+        740010,
+        740011,
+        740012,
+        740013,
+        740014,
+        740015,
+        740016,
+        740017,
+        740018,
+        740019,
+        740020,
+        740021,
+        740022,
+        740023
+      ],
+      [
+        740024,
+        740025,
+        740026,
+        740027,
+        740028,
+        740029,
+        740030,
+        740031,
+        740032,
+        740033,
+        740034,
+        740035,
+        740036,
+        740037,
+        740038,
+        740039,
+        740040,
+        740041,
+        740042,
+        740043,
+        740044,
+        740045,
+        740046,
+        740047
+      ],
+      [
+        740048,
+        740049,
+        740050,
+        740051,
+        740052,
+        740053,
+        740054,
+        740055,
+        740056,
+        740057,
+        740058,
+        740059,
+        740060,
+        740061,
+        740062,
+        740063,
+        740064,
+        740065,
+        740066,
+        740067,
+        740068,
+        740069,
+        740070,
+        740071
+      ]
+    ],
+    "neural_joint_steps": 46080
+  },
+  "runtime_parity": true
+}

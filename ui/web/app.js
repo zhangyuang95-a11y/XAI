@@ -1,77 +1,104 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const PAGE_ID = crypto.randomUUID ? crypto.randomUUID() : `page-${Date.now()}`;
-const DEFAULT_LOCALE = "en";
+const PAGE_ID = (() => {
+  const key = 'warehouse.threeTask.pageId';
+  const existing = sessionStorage.getItem(key);
+  if (existing) return existing;
+  const created = crypto.randomUUID ? crypto.randomUUID() : `page-${Date.now()}`;
+  sessionStorage.setItem(key, created);
+  return created;
+})();
+const DEFAULT_LOCALE = "zh";
 const state = {
   view: null,
   locale: DEFAULT_LOCALE,
   busy: false,
   demoPlaying: false,
+  demoLoading: false,
+  demoTimeline: null,
+  demoRunId: null,
+  demoIndex: 0,
+  demoElapsedMs: 0,
+  demoLastTimestamp: null,
+  demoAnimationFrame: null,
+  demoGeneration: 0,
+  demoLoadingPromise: null,
   pendingBeginTask1: false,
   timer: null,
   animationToken: 0,
   animationFrame: null,
   visualFrame: null,
   questionTimer: null,
+  lastPenaltyFrame: null,
+  expandedBubble: null,
+  bubbleAnswers: new Map(),
+  pendingBubbleRequest: null,
+  surveyFor: null,
 };
 
 const COPY = {
   zh: {
-    appTitle: "双机器人协作配送实验", workflowDemo: "说明与演示", task1: "任务 1", task2: "任务 2", survey: "问卷",
+    appTitle: "双机器人协作配送实验", workflowDemo: "说明与演示", task1: "任务 1", task2: "任务 2", task3: "任务 3", survey: "问卷",
     warehouse: "6×7 仓库", liveScene: "协作配送现场", step: "步数", score: "总分", deliveries: "配送", collisions: "碰撞", shutdowns: "断电", detours: "绕路单位",
     shelf: "货架", pickup: "取货点", dropoff: "交付点", charger: "充电站", robots: "机器人",
-    participantSetup: "参与者登记", welcome: "开始协作配送实验", overview: "你将固定控制机器人 1，与 AI 控制的机器人 2 完成两轮 120 步配送任务。",
+    participantSetup: "参与者登记", welcome: "开始协作配送实验", overview: "你将固定控制机器人 1，与 AI 控制的机器人 2 完成三轮 120 步配送任务。",
     participantId: "参与者编号", agreement: "我已阅读并理解实验说明。", start: "开始实验",
     requiredDemo: "AI–AI 协作演示（可提前结束）", demoText: "您可以完整观看演示，也可以随时提前结束并开始任务 1。演示展示两台机器人认领、交付、协调让路和充电。",
     ruleJobs: "地图始终有两个未预分配的 A→B 共享任务。", ruleControl: "方向键、WASD 或按钮每次提交一个联合决策步；空格表示等待。",
-    ruleCharge: "成功移动耗电 2；在充电站等待恢复 10；断电会提前结束本轮。", ruleScore: "计分：配送 +100、机器人碰撞 −200、断电 −50、每步 −1、参与者绕路每单位 −2。",
-    playDemo: "播放演示", pauseDemo: "暂停演示", beginTask1: "开始任务 1", endDemoEarly: "提前结束演示并开始任务 1", roundInstruction: "控制机器人 1，与机器人 2 协作配送",
+    ruleCharge: "成功移动耗电 2；在充电站等待恢复 10；断电会提前结束本轮。", ruleScore: "计分：配送 +10、机器人碰撞 −10、每台断电 −5、违规占用充电桩 −5、每步 −1、参与者绕路每单位 −2。",
+    playDemo: "播放演示", pauseDemo: "暂停演示", replayDemo: "重播演示", loadingDemo: "正在加载演示…", beginTask1: "开始任务 1", endDemoEarly: "提前结束演示并开始任务 1", roundInstruction: "控制机器人 1，与机器人 2 协作配送",
     roundHint: "你和机器人 2 都只根据同一移动前状态独立选动作，两个动作随后同时执行。", up: "上", down: "下", left: "左", right: "右", wait: "等待", spaceKey: "空格",
-    task1Complete: "任务 1 已完成",
-    askRobot2Title: "询问机器人2", liveExplanationHint: "询问机器人2刚才的行为；生成回答时任务会暂停。", question: "你的问题", questionPlaceholder: "询问机器人2最近几步的行为。", ask: "询问机器人2", answer: "机器人2", emptyExplanation: "暂时无法生成可靠回答，请重试。",
-    presetWhyAction: "机器人2刚才为什么这样做？", presetWhyWait: "机器人2为什么等待？", presetCollision: "我们刚才为什么碰撞？", presetHumanInfluence: "我的动作影响机器人2了吗？", presetGoal: "机器人2当前想做什么？", presetEnergy: "机器人2需要充电吗？",
+    task1Complete: "任务 1 已完成", task2Complete: "任务 2 已完成",
+    askRobot2Title: "询问机器人2", askSystemTitle: "系统问答", liveExplanationHint: "询问机器人2刚才的行为；生成回答时任务会暂停。", question: "你的问题", questionPlaceholder: "询问机器人2最近几步的行为。", ask: "询问机器人2", answer: "机器人2", emptyExplanation: "暂时无法生成可靠回答，请重试。",
+    presetWhyAction: "机器人2刚才为什么这样做？", presetWhyWait: "机器人2为什么等待？", presetCollision: "我们刚才为什么碰撞？", presetHumanInfluence: "我的动作影响机器人2了吗？", presetGoal: "机器人2当前想做什么？", presetEnergy: "机器人2需要充电吗？", presetChargerPenalty: "刚才为什么被扣分？",
     surveyTitle: "结束问卷", surveyHint: "请对以下陈述按 1（非常不同意）到 5（非常同意）评分。", comment: "可选意见", submitSurvey: "提交问卷",
-    complete: "实验完成", saved: "记录已保存。", task1Score: "任务 1 得分", task2Score: "任务 2 得分", scoreDelta: "得分变化", restart: "开始新的参与者",
+    complete: "实验完成", saved: "记录已保存。", task1Score: "任务 1 得分", task2Score: "任务 2 得分", task3Score: "任务 3 得分", restart: "开始新的参与者",
     interrupted: "本轮已中断", interruptedHint: "此实验已在另一页面继续，或服务恢复后旧运行被放弃。请重新开始。", desktopRequired: "请使用宽度至少 1024 像素的桌面或笔记本电脑。",
     participant: "参与者", ai: "AI", battery: "电量", cargo: "承运", none: "无", available: "可认领", carried: "运输中", carrier: "承运者",
     coordinationUnderstanding: "我理解如何与机器人 2 协调。", aiPredictability: "机器人 2 的行为对我而言是可预测的。", interfaceClarity: "界面与计分信息清晰易懂。",
-    deliveryScore: "配送得分", collisionPenalty: "碰撞扣分（每次 −200）", shutdownPenalty: "断电扣分", timePenalty: "步数扣分", detourPenalty: "绕路扣分",
+    explanationClarity: "Task 2 的解释让我理解机器人 2 当时的行为。", explanationUsefulness: "Task 2 的解释帮助我决定如何配合。", questionHelpfulness: "Task 2 的问答帮助我理解所选动作。", notUsed: "未使用／不适用",
+    deliveryScore: "配送得分", collisionPenalty: "碰撞扣分（每次 −10）", shutdownPenalty: "断电扣分（每台 −5）", timePenalty: "步数扣分", detourPenalty: "绕路扣分", chargerOccupancyPenalty: "占桩扣分（每次 −5）",
     loading: "处理中…", requiredFields: "请填写参与者编号并确认已阅读说明。", requestFailed: "操作失败", taskLabel: "任务", roundScore: "本轮得分",
     action: "动作", requestedAction: "请求", executedAction: "实际", batteryChange: "电量",
     transitionActions: "动作", causalFrameNote: "双方从同一移动前状态决策并同步执行。", workingExplanation: "正在根据最近的人机交互生成回答…", stillWorking: "仍在生成，请稍候…",
     eventPickup: "取货", eventDelivery: "交付", eventCharging: "充电", eventChargerQueue: "排队", eventYield: "让行", eventConflict: "冲突风险", eventCollision: "碰撞",
+    askWhy: "为什么？", hideWhy: "收起", answerFrame: "所问步数",
   },
   en: {
-    appTitle: "Two-Robot Collaborative Delivery Study", workflowDemo: "Instructions & demo", task1: "Task 1", task2: "Task 2", survey: "Survey",
+    appTitle: "Two-Robot Collaborative Delivery Study", workflowDemo: "Instructions & demo", task1: "Task 1", task2: "Task 2", task3: "Task 3", survey: "Survey",
     warehouse: "6×7 warehouse", liveScene: "Collaborative delivery", step: "Steps", score: "Score", deliveries: "Deliveries", collisions: "Collisions", shutdowns: "Shutdowns", detours: "Detour units",
     shelf: "Shelf", pickup: "Pickup A", dropoff: "Drop-off B", charger: "Charger", robots: "Robots",
-    participantSetup: "Participant setup", welcome: "Start the collaborative delivery study", overview: "You will always control robot 1 and complete two 120-step delivery rounds with AI-controlled robot 2.",
+    participantSetup: "Participant setup", welcome: "Start the collaborative delivery study", overview: "You will always control robot 1 and complete three 120-step delivery rounds with AI-controlled robot 2.",
     participantId: "Participant ID", agreement: "I have read and understood the study instructions.", start: "Start study",
     requiredDemo: "AI–AI collaboration demonstration", demoText: "You may watch the complete standardized demonstration or finish it early and begin Task 1 at any time. It shows both robots claiming, delivering, yielding, and charging.",
     ruleJobs: "The map always contains two unassigned shared A-to-B jobs.", ruleControl: "Arrow keys, WASD, or a button submits one joint decision step; Space means wait.",
-    ruleCharge: "A successful move costs 2 battery; waiting at the charger restores 10; shutdown ends the round.", ruleScore: "Score: +100 delivery, −200 robot collision, −50 shutdown, −1 per step, and −2 per human detour unit.",
-    playDemo: "Play demonstration", pauseDemo: "Pause demonstration", beginTask1: "Begin Task 1", endDemoEarly: "Finish demo early and begin Task 1", roundInstruction: "Control robot 1 and collaborate with robot 2",
+    ruleCharge: "A successful move costs 2 battery; waiting at the charger restores 10; shutdown ends the round.", ruleScore: "Score: +10 per delivery, −10 per robot collision, −5 per shutdown robot, −5 per shared-charger violation, −1 per step, and −2 per participant detour unit.",
+    playDemo: "Play demonstration", pauseDemo: "Pause demonstration", replayDemo: "Replay demonstration", loadingDemo: "Loading demonstration…", beginTask1: "Begin Task 1", endDemoEarly: "Finish demo early and begin Task 1", roundInstruction: "Control robot 1 and collaborate with robot 2",
     roundHint: "You and robot 2 choose independently from the same pre-move state; both actions then execute simultaneously.", up: "Up", down: "Down", left: "Left", right: "Right", wait: "Wait", spaceKey: "Space",
-    task1Complete: "Task 1 complete",
-    askRobot2Title: "Ask Robot 2", liveExplanationHint: "Ask about what Robot 2 just did. The task pauses while the answer is prepared.", question: "Your question", questionPlaceholder: "Ask Robot 2 about the last few steps.", ask: "Ask Robot 2", answer: "Robot 2", emptyExplanation: "No grounded answer was available. Please try again.",
-    presetWhyAction: "Why did Robot 2 do that?", presetWhyWait: "Why did Robot 2 wait?", presetCollision: "Why did we just collide?", presetHumanInfluence: "Did my action affect Robot 2?", presetGoal: "What is Robot 2 trying to do?", presetEnergy: "Does Robot 2 need to charge?",
+    task1Complete: "Task 1 complete", task2Complete: "Task 2 complete",
+    askRobot2Title: "Ask Robot 2", askSystemTitle: "System questions", liveExplanationHint: "Ask about what Robot 2 just did. The task pauses while the answer is prepared.", question: "Your question", questionPlaceholder: "Ask Robot 2 about the last few steps.", ask: "Ask Robot 2", answer: "Robot 2", emptyExplanation: "No grounded answer was available. Please try again.",
+    presetWhyAction: "Why did Robot 2 do that?", presetWhyWait: "Why did Robot 2 wait?", presetCollision: "Why did we just collide?", presetHumanInfluence: "Did my action affect Robot 2?", presetGoal: "What is Robot 2 trying to do?", presetEnergy: "Does Robot 2 need to charge?", presetChargerPenalty: "Why was there a penalty just now?",
     surveyTitle: "Final survey", surveyHint: "Rate each statement from 1 (strongly disagree) to 5 (strongly agree).", comment: "Optional comment", submitSurvey: "Submit survey",
-    complete: "Study complete", saved: "The record has been saved.", task1Score: "Task 1 score", task2Score: "Task 2 score", scoreDelta: "Score change", restart: "Start a new participant",
+    complete: "Study complete", saved: "The record has been saved.", task1Score: "Task 1 score", task2Score: "Task 2 score", task3Score: "Task 3 score", restart: "Start a new participant",
     interrupted: "Run interrupted", interruptedHint: "This run continued in another page or was abandoned during recovery. Please restart.", desktopRequired: "Use a desktop or laptop at least 1024 pixels wide.",
     participant: "Participant", ai: "AI", battery: "Battery", cargo: "Carrying", none: "None", available: "Available", carried: "In transit", carrier: "Carrier",
     coordinationUnderstanding: "I understand how to coordinate with robot 2.", aiPredictability: "Robot 2's behavior is predictable to me.", interfaceClarity: "The interface and scoring information are clear.",
-    deliveryScore: "Delivery points", collisionPenalty: "Collision penalty (−200 each)", shutdownPenalty: "Shutdown penalty", timePenalty: "Step penalty", detourPenalty: "Detour penalty",
+    explanationClarity: "The Task 2 explanations helped me understand Robot 2's actions.", explanationUsefulness: "The Task 2 explanations helped me decide how to cooperate.", questionHelpfulness: "The Task 2 answers helped me understand the selected action.", notUsed: "Not used / not applicable",
+    deliveryScore: "Delivery points", collisionPenalty: "Collision penalty (−10 each)", shutdownPenalty: "Shutdown penalty (−5 per robot)", timePenalty: "Step penalty", detourPenalty: "Detour penalty", chargerOccupancyPenalty: "Charger occupancy penalty (−5 each)",
     loading: "Working…", requiredFields: "Enter a participant ID and confirm the instructions.", requestFailed: "Request failed", taskLabel: "Task", roundScore: "Round score",
     action: "Action", requestedAction: "Requested", executedAction: "Executed", batteryChange: "Battery",
     transitionActions: "Actions", causalFrameNote: "Both agents decide from the same pre-move state and execute simultaneously.", workingExplanation: "Answering from your recent Human–AI interaction…", stillWorking: "Still generating—please wait…",
     eventPickup: "Pickup", eventDelivery: "Delivery", eventCharging: "Charging", eventChargerQueue: "Queue", eventYield: "Yield", eventConflict: "Conflict risk", eventCollision: "Collision",
+    askWhy: "Ask why", hideWhy: "Hide", answerFrame: "Answered step",
   },
 };
 
 Object.assign(COPY.zh, {
-  controlTransitionHint: "任务 2 不提供即时提问，将从新的机器人状态、电量 100 和不同任务序列开始。",
+  task2TransitionHint: "任务 2 将从新的机器人状态开始；只有 A 组可以询问机器人 2。",
+  task3TransitionHint: "任务 3 从新的机器人状态开始，两组均不提供解释。",
   beginTask2: "开始任务 2",
+  beginTask3: "开始任务 3",
   ruleCharge: "成功移动耗电 2；在充电站等待恢复 10；断电会提前结束本轮。",
   testCondition: "开发测试条件",
   conditionAuto: "自动区组分配",
@@ -80,9 +107,9 @@ Object.assign(COPY.zh, {
   testConditionHint: "仅用于界面测试；数据写入独立的 development 命名空间。",
   assignedTestCondition: "当前测试条件",
   groupATitle: "您已分配到 A 组（有解释）",
-  groupADescription: "任务 1 进行期间可以随时询问机器人2；任务 2 不提供即时提问。",
+  groupADescription: "任务 1 和任务 3 无解释；任务 2 可以点击“为什么？”并询问机器人 2。",
   groupBTitle: "您已分配到 B 组（无解释）",
-  groupBDescription: "两轮任务均不显示即时提问面板。",
+  groupBDescription: "三轮任务均不显示解释面板。",
   questionTarget: "提问对象",
   robot1Option: "机器人 1（AI）",
   robot2Option: "机器人 2（AI）",
@@ -91,8 +118,10 @@ Object.assign(COPY.zh, {
   temporaryNetworkError: "临时网络连接中断，请重试；当前进度已保留。",
 });
 Object.assign(COPY.en, {
-  controlTransitionHint: "Task 2 has no live questions and starts with a fresh robot state, 100 battery, and a different task sequence.",
+  task2TransitionHint: "Task 2 begins with a fresh robot state. Only Group A can ask Robot 2 questions.",
+  task3TransitionHint: "Task 3 begins with a fresh robot state. Neither group receives explanations.",
   beginTask2: "Begin Task 2",
+  beginTask3: "Begin Task 3",
   ruleCharge: "A successful move costs 2 battery; waiting at the charger restores 10; shutdown ends the round.",
   testCondition: "Development test condition",
   conditionAuto: "Automatic block allocation",
@@ -101,9 +130,9 @@ Object.assign(COPY.en, {
   testConditionHint: "For interface testing only; records use the isolated development namespace.",
   assignedTestCondition: "Current test condition",
   groupATitle: "You are assigned to Group A (explanations)",
-  groupADescription: "You can ask Robot 2 questions at any time during Task 1; Task 2 has no live questions.",
+  groupADescription: "Tasks 1 and 3 have no explanations. In Task 2, you can click Ask why and question Robot 2.",
   groupBTitle: "You are assigned to Group B (no explanations)",
-  groupBDescription: "The live question panel is not shown in either round.",
+  groupBDescription: "Explanations are not shown in any of the three tasks.",
   questionTarget: "Robot to ask about",
   robot1Option: "Robot 1 (AI)",
   robot2Option: "Robot 2 (AI)",
@@ -170,7 +199,7 @@ function showError(error) {
 function setBusy(value) {
   state.busy = value;
   document.querySelectorAll("button").forEach((button) => {
-    if (button.id === "languageButton" || button.id === "toastClose") return;
+    if (button.id === "toastClose") return;
     const tutorialActive = state.view?.study?.stage === "instructions";
     if (tutorialActive && button.id === "beginTask1Button") {
       button.disabled = !allowed("begin_task1") || state.pendingBeginTask1;
@@ -186,6 +215,11 @@ function setBusy(value) {
 
 async function command(name, payload = {}) {
   if (state.busy) return null;
+  if (name === 'human_action') {
+    state.expandedBubble = null;
+    state.pendingBubbleRequest = null;
+    $('aiActionBubble').classList.add('hidden');
+  }
   const study = state.view?.study || { stage: "idle", state_version: 0, run_id: null };
   const envelope = {
     operation_id: operationId(),
@@ -208,6 +242,11 @@ async function command(name, payload = {}) {
   } finally {
     setBusy(false);
     renderStage();
+    if (state.pendingBeginTask1 && state.view?.study?.stage === "instructions") {
+      state.pendingBeginTask1 = false;
+      stopDemo(true);
+      void command("begin_task1");
+    }
   }
 }
 
@@ -217,14 +256,22 @@ function setLanguage(locale, notify = true, rerender = true) {
   document.documentElement.lang = requestedLocale;
   document.querySelectorAll("[data-i18n]").forEach((node) => { node.textContent = tr(node.dataset.i18n); });
   document.querySelectorAll("[data-i18n-placeholder]").forEach((node) => { node.placeholder = tr(node.dataset.i18nPlaceholder); });
-  $("languageButtonLabel").textContent = state.locale === "zh" ? "EN" : "中";
+  $("languageButtonLabel").textContent = state.locale === "zh" ? "English" : "中文";
+  const surveyAnswers = Object.fromEntries(
+    [...document.querySelectorAll('#surveyQuestions input:checked')].map((input) => [input.name, input.value])
+  );
   buildSurvey();
+  Object.entries(surveyAnswers).forEach(([name, value]) => {
+    const selected = [...document.querySelectorAll('#surveyQuestions input')]
+      .find((input) => input.name === name && input.value === value);
+    if (selected) selected.checked = true;
+  });
   if (state.view && rerender) {
     state.view = {
       ...state.view,
       study: { ...(state.view.study || {}), locale: requestedLocale },
     };
-    void render(state.view);
+    void render(state.view, { skipAnimation: true });
   }
   if (notify && allowed("set_language")) command("set_language", { locale: requestedLocale });
 }
@@ -381,6 +428,120 @@ function cancelMotion() {
   }
 }
 
+const DEMO_STEP_MS = 600;
+function demoCursorKey(runId) { return `warehouse.demo.cursor.${runId}`; }
+
+function stopDemo(clearTimeline = false) {
+  state.demoPlaying = false;
+  state.demoLastTimestamp = null;
+  state.demoGeneration += 1;
+  if (state.demoAnimationFrame !== null) cancelAnimationFrame(state.demoAnimationFrame);
+  state.demoAnimationFrame = null;
+  $("warehouseCanvas").dataset.animationRunning = "false";
+  if (clearTimeline) {
+    state.demoTimeline = null;
+    state.demoRunId = null;
+    state.demoLoading = false;
+    state.demoLoadingPromise = null;
+    state.demoIndex = 0;
+    state.demoElapsedMs = 0;
+  }
+}
+
+function demoFrameView(index) {
+  const frame = state.demoTimeline.frames[index];
+  return {
+    ...state.view,
+    map: state.demoTimeline.map,
+    state: frame.state,
+    transition: frame.transition,
+    timeline: { ...state.view.timeline, agent_control: state.demoTimeline.agent_control },
+  };
+}
+
+function paintDemoFrame() {
+  if (!state.demoTimeline || state.view?.study?.stage !== "instructions") return;
+  const view = demoFrameView(state.demoIndex);
+  renderRobots(view.state.agents || [], view.transition, true, view.timeline.agent_control, true);
+  renderScores(view.state || {});
+  renderStage();
+  drawWarehouse(view);
+  const canvas = $("warehouseCanvas");
+  canvas.dataset.demoStep = String(state.demoIndex);
+  canvas.dataset.animationProgress = "0.000";
+}
+
+function paintDemoMotion() {
+  if (!state.demoTimeline || state.demoIndex >= state.demoTimeline.frames.length - 1) return;
+  const transition = state.demoTimeline.frames[state.demoIndex + 1].transition;
+  const progress = easeMotion(state.demoElapsedMs / DEMO_STEP_MS);
+  const visual = interpolateTransition(transition, progress);
+  const canvas = $("warehouseCanvas");
+  canvas.dataset.animationRunning = "true";
+  canvas.dataset.animationMode = "demo";
+  canvas.dataset.transitionFrame = String(transition.to_frame);
+  canvas.dataset.animationProgress = progress.toFixed(3);
+  publishVisualPositions(canvas, visual);
+  drawWarehouse(demoFrameView(state.demoIndex), visual);
+}
+
+async function ensureDemoTimeline() {
+  const runId = state.view?.study?.run_id;
+  if (!runId || state.view?.study?.stage !== "instructions") return null;
+  if (state.demoTimeline && state.demoRunId === runId) return state.demoTimeline;
+  if (state.demoLoadingPromise && state.demoRunId === runId) return state.demoLoadingPromise;
+  stopDemo(true);
+  state.demoRunId = runId;
+  state.demoLoading = true;
+  renderStage();
+  const generation = state.demoGeneration;
+  const loading = api("/api/study/reference-trajectory").then((timeline) => {
+    if (generation !== state.demoGeneration || state.view?.study?.stage !== "instructions"
+        || state.view?.study?.run_id !== runId) return null;
+    if (timeline.trajectory_seed !== 40786 || timeline.trajectory_kind !== "ai_ai_demonstration"
+        || timeline.frames?.length !== 121 || timeline.frames.at(-1)?.state?.frame !== 120) {
+      throw new Error("演示轨迹与当前 120 步实验不兼容");
+    }
+    state.demoTimeline = timeline;
+    const stored = Number(sessionStorage.getItem(demoCursorKey(runId)) || 0);
+    state.demoIndex = Number.isInteger(stored) ? Math.max(0, Math.min(120, stored)) : 0;
+    state.demoElapsedMs = 0; // Refresh resumes at the last completed step boundary.
+    paintDemoFrame();
+    return timeline;
+  }).finally(() => {
+    if (generation === state.demoGeneration) {
+      state.demoLoading = false;
+      state.demoLoadingPromise = null;
+      renderStage();
+    }
+  });
+  state.demoLoadingPromise = loading;
+  return loading;
+}
+
+function demoTick(timestamp, generation) {
+  if (!state.demoPlaying || generation !== state.demoGeneration
+      || state.view?.study?.stage !== "instructions" || document.hidden) return;
+  if (state.demoLastTimestamp !== null) {
+    // A suspended tab or slow frame cannot skip events or consume hidden time.
+    state.demoElapsedMs += Math.min(DEMO_STEP_MS, Math.max(0, timestamp - state.demoLastTimestamp));
+  }
+  state.demoLastTimestamp = timestamp;
+  if (state.demoElapsedMs >= DEMO_STEP_MS) {
+    state.demoElapsedMs -= DEMO_STEP_MS;
+    state.demoIndex += 1;
+    sessionStorage.setItem(demoCursorKey(state.demoRunId), String(state.demoIndex));
+    paintDemoFrame();
+    if (state.demoIndex >= state.demoTimeline.frames.length - 1) {
+      stopDemo();
+      renderStage();
+      return;
+    }
+  }
+  paintDemoMotion();
+  state.demoAnimationFrame = requestAnimationFrame((next) => demoTick(next, generation));
+}
+
 function animateOnce(view, transition, duration = 400) {
   cancelMotion();
   const token = state.animationToken;
@@ -472,6 +633,86 @@ function renderRobots(agents, transition = null, showActions = false, agentContr
   }));
 }
 
+function renderActionBubble(view, revealOutcome) {
+  const bubble = $("aiActionBubble");
+  const payload = view.study?.action_bubble;
+  const enabled = Boolean(
+    revealOutcome
+    && view.study?.stage === "task2"
+    && view.study?.condition === "explanation"
+    && payload?.target_agent === "robot_2"
+    && payload?.run_id === view.study?.task_run_id
+    && Number(payload?.frame) > 0
+  );
+  bubble.classList.toggle("hidden", !enabled);
+  if (!enabled) return;
+  const agent = (view.state?.agents || []).find((item) => item.id === "robot_2");
+  if (!agent) { bubble.classList.add("hidden"); return; }
+  const canvas = $("warehouseCanvas");
+  const cols = Math.max(1, Number(view.map?.cols || 1));
+  const rows = Math.max(1, Number(view.map?.rows || 1));
+  const width = Math.max(1, canvas.clientWidth);
+  const height = Math.max(1, canvas.clientHeight);
+  const size = Math.min((width - 36) / cols, (height - 36) / rows);
+  const originX = (width - cols * size) / 2;
+  const originY = (height - rows * size) / 2;
+  const left = originX + (Number(agent.position[1]) + .5) * size;
+  const top = originY + (Number(agent.position[0]) + .5) * size;
+  const key = `${view.study.protocol_version}:warehouse:${view.study.run_id}:task2:${payload.run_id}:${payload.frame}`;
+  const expanded = state.expandedBubble === key;
+  const answer = state.bubbleAnswers.get(key);
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'bubble-toggle';
+  button.textContent = tr(expanded ? 'hideWhy' : 'askWhy');
+  button.disabled = state.busy;
+  button.setAttribute('aria-expanded', String(expanded));
+  button.setAttribute('aria-label', `${button.textContent} · ${tr('step')} ${payload.frame}`);
+  button.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    if (state.busy) return;
+    if (state.expandedBubble === key) {
+      state.expandedBubble = null;
+      renderActionBubble(state.view, true);
+      return;
+    }
+    if (answer) {
+      state.expandedBubble = key;
+      renderAnswer(answer);
+      renderActionBubble(state.view, true);
+      return;
+    }
+    const requestId = operationId();
+    state.pendingBubbleRequest = requestId;
+    const result = await command('ask_explanation', {
+      question: tr('presetWhyAction'), question_kind: 'action', target_agent: 'robot_2',
+      action_run_id: payload.run_id, action_stage: 'task2', action_frame: Number(payload.frame),
+      requested_language: localeCode(), request_id: requestId,
+    });
+    const report = result?.view?.last_explanation;
+    if (state.pendingBubbleRequest === requestId && report?.request_id === requestId
+      && report?.run_id === payload.run_id && Number(report?.requested_action_frame) === Number(payload.frame)
+      && state.view?.study?.stage === 'task2' && state.view?.study?.condition === 'explanation'
+      && state.view?.study?.task_run_id === payload.run_id
+      && Number(state.view?.study?.action_bubble?.frame) === Number(payload.frame)) {
+      state.bubbleAnswers.set(key, report);
+      state.expandedBubble = key;
+      renderActionBubble(state.view, true);
+    }
+    if (state.pendingBubbleRequest === requestId) state.pendingBubbleRequest = null;
+  });
+  bubble.replaceChildren(button);
+  if (expanded && answer) {
+    const explanation = document.createElement('p');
+    explanation.textContent = state.locale === 'zh' ? answer.answer_zh : answer.answer_en;
+    bubble.appendChild(explanation);
+  }
+  bubble.classList.toggle('compact', !expanded);
+  bubble.style.left = `${Math.max(92, Math.min(width - 92, left))}px`;
+  bubble.style.top = `${top}px`;
+  bubble.classList.toggle("below", top < 86);
+}
+
 function renderScores(snapshot) {
   const breakdown = snapshot.score_breakdown || {};
   $("stepValue").textContent = `${snapshot.frame || 0} / 120`;
@@ -480,19 +721,34 @@ function renderScores(snapshot) {
   $("collisionValue").textContent = snapshot.robot_collision_events || 0;
   $("shutdownValue").textContent = snapshot.shutdown_count || 0;
   $("detourValue").textContent = Number(snapshot.human_route_regret_units || 0).toFixed(1);
-  const labels = { delivery: tr("deliveryScore"), robot_collision: tr("collisionPenalty"), shutdown: tr("shutdownPenalty"), time: tr("timePenalty"), human_detour: tr("detourPenalty") };
+  const labels = { delivery: tr("deliveryScore"), robot_collision: tr("collisionPenalty"), shutdown: tr("shutdownPenalty"), time: tr("timePenalty"), human_detour: tr("detourPenalty"), shared_charger_occupancy: tr("chargerOccupancyPenalty") };
   $("scoreBreakdown").replaceChildren(...Object.entries(labels).map(([key,label]) => {
     const row = document.createElement("div"); row.innerHTML = `<span>${label}</span><strong>${Math.round(breakdown[key] || 0)}</strong>`; return row;
   }));
+  const penalty = (snapshot.rule_events || []).find((event) => event?.event === "shared_charger_occupancy");
+  const flash = $("penaltyFlash");
+  if (penalty && Number(snapshot.frame || 0) !== state.lastPenaltyFrame) {
+    state.lastPenaltyFrame = Number(snapshot.frame || 0);
+    const amount = Number(penalty.score_delta || 0);
+    flash.textContent = amount < 0
+      ? `−${Math.abs(amount).toLocaleString(state.locale === 'zh' ? 'zh-CN' : 'en-US')}`
+      : amount.toLocaleString(state.locale === 'zh' ? 'zh-CN' : 'en-US');
+    flash.classList.remove("hidden");
+    document.body.classList.add("charger-penalty-flash");
+    window.setTimeout(() => {
+      flash.classList.add("hidden");
+      document.body.classList.remove("charger-penalty-flash");
+    }, 900);
+  }
 }
 
 function renderWorkflow(stage, condition) {
-  const order = ["instructions", "task1", "task2", "survey"];
+  const order = ["instructions", "task1", "task2", "task3", "survey"];
   const normalized = stage === "completed" ? "survey" : stage;
-  const current = stage === "task1_complete" ? 2 : Math.max(0, order.indexOf(normalized));
-  ["workflowInstructions","workflowTask1","workflowTask2","workflowSurvey"].forEach((id,index) => {
+  const current = stage === "task1_complete" ? 2 : stage === "task2_complete" ? 3 : Math.max(0, order.indexOf(normalized));
+  ["workflowInstructions","workflowTask1","workflowTask2","workflowTask3","workflowSurvey"].forEach((id,index) => {
     $(id).classList.toggle("active", index === current);
-    $(id).classList.toggle("done", stage === "task1_complete" ? index <= 1 : index < current || stage === "completed");
+    $(id).classList.toggle("done", index < current || stage === "completed");
   });
 }
 
@@ -501,8 +757,8 @@ function renderStage() {
   const study = state.view.study || {};
   const stage = study.stage || "idle";
   $("sceneTitle").textContent = tr("liveScene");
-  const panels = { idle: "setupPanel", instructions: "instructionsPanel", task1: "roundPanel", task1_complete: "task1CompletePanel", task2: "roundPanel", survey: "surveyPanel", completed: "completePanel", abandoned: "interruptedPanel" };
-  ["setupPanel","instructionsPanel","roundPanel","task1CompletePanel","surveyPanel","completePanel","interruptedPanel"].forEach((id) => $(id).classList.toggle("hidden", panels[stage] !== id));
+  const panels = { idle: "setupPanel", instructions: "instructionsPanel", task1: "roundPanel", task1_complete: "task1CompletePanel", task2: "roundPanel", task2_complete: "task2CompletePanel", task3: "roundPanel", survey: "surveyPanel", completed: "completePanel", abandoned: "interruptedPanel" };
+  ["setupPanel","instructionsPanel","roundPanel","task1CompletePanel","task2CompletePanel","surveyPanel","completePanel","interruptedPanel"].forEach((id) => $(id).classList.toggle("hidden", panels[stage] !== id));
   renderWorkflow(stage, study.condition);
   const tutorial = study.tutorial || {};
   $("testConditionField").classList.toggle("hidden", !study.test_condition_selector);
@@ -526,18 +782,22 @@ function renderStage() {
     $("testConditionStatus").textContent = `${tr("assignedTestCondition")}: ${tr(conditionKey)}`;
   }
   if (stage === "instructions") {
-    const total = Math.max(1, tutorial.total_frames || 1), played = Math.min(total, (tutorial.max_played_index || 0) + 1);
+    const total = Math.max(1, (tutorial.total_frames || 121) - 1);
+    const played = Math.min(total, state.demoTimeline ? state.demoIndex : 0);
     $("demoStatus").textContent = `${played} / ${total}`; $("demoProgressBar").style.width = `${100*played/total}%`;
+    if (state.demoLoading) $("demoStatus").textContent = tr("loadingDemo");
     const canBeginTask1 = allowed("begin_task1");
     const beginTask1Button = $("beginTask1Button");
-    const beginTask1Key = tutorial.complete ? "beginTask1" : "endDemoEarly";
+    const beginTask1Key = played === total ? "beginTask1" : "endDemoEarly";
     beginTask1Button.disabled = !canBeginTask1 || state.pendingBeginTask1;
     beginTask1Button.dataset.locked = canBeginTask1 ? "false" : "true";
     beginTask1Button.dataset.i18n = beginTask1Key;
     beginTask1Button.textContent = tr(beginTask1Key);
-    $("demoPlayButton").textContent = state.demoPlaying ? tr("pauseDemo") : tr("playDemo");
+    $("demoPlayButton").textContent = state.demoPlaying ? tr("pauseDemo")
+      : played === total ? tr("replayDemo") : tr("playDemo");
+    $("demoPlayButton").disabled = state.demoLoading;
   }
-  if (stage === "task1" || stage === "task2") {
+  if (["task1", "task2", "task3"].includes(stage)) {
     $("roundBadge").textContent = stage.toUpperCase();
     const permitted = new Set(study.allowed_human_actions || []);
     document.querySelectorAll("#actionPad button").forEach((button) => {
@@ -545,31 +805,54 @@ function renderStage() {
     });
   }
   const liveExplanationVisible = Boolean(
-    stage === "task1"
+    stage === "task2"
     && study.condition === "explanation"
     && study.live_explanation_available
   );
   $("liveExplanationPanel").classList.toggle("hidden", !liveExplanationVisible);
+  const penaltyQuestion = $("chargerPenaltyQuestionButton");
+  const latestPenalty = study.latest_charger_penalty;
+  const penaltyVisible = Boolean(liveExplanationVisible && latestPenalty?.event_id);
+  penaltyQuestion.classList.toggle("hidden", !penaltyVisible);
+  if (penaltyVisible) {
+    penaltyQuestion.textContent = `${tr("presetChargerPenalty")} · ${tr("step")} ${latestPenalty.frame}`;
+    penaltyQuestion.dataset.eventId = String(latestPenalty.event_id);
+    penaltyQuestion.dataset.penaltyFrame = String(latestPenalty.frame);
+  } else {
+    penaltyQuestion.dataset.eventId = "";
+    penaltyQuestion.dataset.penaltyFrame = "";
+  }
   if (stage === "task1_complete") {
     const summary = study.round_summaries?.task1;
     $("controlTask1Score").textContent = Math.round(summary?.score ?? 0);
     $("beginTask2Button").disabled = state.busy || !allowed("begin_task2");
     $("beginTask2Button").dataset.locked = allowed("begin_task2") ? "false" : "true";
   }
+  if (stage === "task2_complete") {
+    const summary = study.round_summaries?.task2;
+    $("controlTask2Score").textContent = Math.round(summary?.score ?? 0);
+    $("beginTask3Button").disabled = state.busy || !allowed("begin_task3");
+    $("beginTask3Button").dataset.locked = allowed("begin_task3") ? "false" : "true";
+  }
+  if (stage === "survey" && state.surveyFor !== study.group_code) buildSurvey();
   if (stage === "completed") {
     $("finalTask1").textContent = Math.round(study.round_summaries?.task1?.score ?? 0);
     $("finalTask2").textContent = Math.round(study.round_summaries?.task2?.score ?? 0);
-    $("finalDelta").textContent = Math.round(study.score_delta ?? 0);
+    $("finalTask3").textContent = Math.round(study.round_summaries?.task3?.score ?? 0);
   }
 }
 
 function renderAnswer(report) {
-  const text = report?.explanation_document?.text || report?.explanation || "";
+  if (state.view?.study?.stage !== 'task2' || state.view?.study?.condition !== 'explanation') return;
+  const text = (state.locale === 'zh' ? report?.answer_zh : report?.answer_en)
+    || report?.explanation_document?.text || report?.explanation || "";
   if (!text.trim()) {
     showError(new Error(tr("emptyExplanation")));
     return;
   }
-  $("answerText").textContent = text; $("answerPanel").classList.remove("hidden");
+  $("answerText").textContent = text;
+  $("answerFrame").textContent = `${tr('answerFrame')} ${report.anchor_frame ?? report.selected_timeline_frame ?? '—'}`;
+  $("answerPanel").classList.remove("hidden");
 }
 
 function transitionBeforeView(view) {
@@ -602,58 +885,101 @@ function paintView(view, revealOutcome = false) {
     revealOutcome,
   );
   renderScores(view.state || {});
+  renderActionBubble(view, revealOutcome);
   renderStage();
 }
 
 async function render(view, options = {}) {
+  const previous = state.view?.study;
   const requestedStage = view.study?.stage || "idle";
   if (requestedStage !== "idle" && view.study?.locale) {
     const requestedLocale = view.study.locale === "en" ? "en" : "zh";
     if (requestedLocale !== state.locale) setLanguage(requestedLocale, false, false);
   }
   const stage = view.study?.stage || "idle";
+  if (stage !== 'task2' || view.study?.condition !== 'explanation'
+      || view.study?.task_run_id !== previous?.task_run_id) {
+    state.expandedBubble = null;
+    state.pendingBubbleRequest = null;
+    if (stage !== 'task2' || view.study?.condition !== 'explanation') state.bubbleAnswers.clear();
+  } else if (Number(view.study?.action_bubble?.frame) !== Number(previous?.action_bubble?.frame)) {
+    state.expandedBubble = null;
+    state.pendingBubbleRequest = null;
+  }
+  if (stage === "instructions") {
+    state.view = view;
+    document.body.dataset.studyStage = stage;
+    if (state.demoTimeline && state.demoRunId === view.study?.run_id) {
+      paintDemoFrame();
+      if (state.demoElapsedMs > 0) paintDemoMotion();
+    } else {
+      paintView(view, true);
+      drawWarehouse(view);
+      await ensureDemoTimeline();
+    }
+    return;
+  }
+  if (state.demoRunId) stopDemo(true);
   const beforeView = transitionBeforeView(view);
-  paintView(beforeView);
-  if (view.transition) {
+  const newTransition = Boolean(view.transition && previous
+    && Number(view.study?.progress) !== Number(previous.progress) && !options.skipAnimation);
+  if (newTransition) {
+    paintView(beforeView);
     await animateOnce(beforeView, view.transition, 400);
     paintView(view, true);
     drawWarehouse(view);
   } else {
     cancelMotion();
+    paintView(view, true);
     drawWarehouse(view);
   }
-  if (view.last_explanation) renderAnswer(view.last_explanation);
+  if (stage === 'task2' && view.study?.condition === 'explanation' && view.last_explanation) {
+    renderAnswer(view.last_explanation);
+  } else if (stage !== 'task2' || view.study?.condition !== 'explanation') {
+    $("answerPanel").classList.add("hidden");
+    $("answerText").textContent = '';
+    $("questionStatus").classList.add("hidden");
+  }
 }
 
 function buildSurvey() {
+  const group = state.view?.study?.group_code;
   const questions = [
     ["coordination_understanding", tr("coordinationUnderstanding")],
     ["ai_predictability", tr("aiPredictability")],
     ["interface_clarity", tr("interfaceClarity")],
   ];
+  if (group === 'A') questions.push(
+    ["explanation_clarity", tr("explanationClarity")],
+    ["explanation_usefulness", tr("explanationUsefulness")],
+    ["question_helpfulness", tr("questionHelpfulness")],
+  );
   $("surveyQuestions").replaceChildren(...questions.map(([name,label]) => {
     const section = document.createElement("section"); section.className = "survey-question";
-    section.innerHTML = `<p>${label}</p><div class="scale">${[1,2,3,4,5].map((value) => `<label><input type="radio" name="${name}" value="${value}" required><span>${value}</span></label>`).join("")}</div>`;
+    const optional = group === 'A' && (name.startsWith('explanation_') || name === 'question_helpfulness');
+    section.innerHTML = `<p>${label}</p><div class="scale">${[1,2,3,4,5].map((value) => `<label><input type="radio" name="${name}" value="${value}" required><span>${value}</span></label>`).join("")}${optional ? `<label><input type="radio" name="${name}" value="na"><span>${tr('notUsed')}</span></label>` : ''}</div>`;
     return section;
   }));
+  state.surveyFor = group || 'none';
 }
 
 async function playDemo() {
-  if (state.demoPlaying) { state.demoPlaying = false; renderStage(); return; }
-  state.pendingBeginTask1 = false;
-  state.demoPlaying = true; renderStage();
-  while (state.demoPlaying && state.view?.study?.stage === "instructions" && !state.view.study.tutorial?.complete) {
-    const result = await command("tutorial_advance");
-    if (state.pendingBeginTask1) {
-      state.pendingBeginTask1 = false;
-      if (state.view?.study?.stage === "instructions") {
-        await command("begin_task1");
-      }
-      break;
-    }
-    if (!result) break;
+  if (state.demoPlaying) { stopDemo(); renderStage(); return; }
+  try { await ensureDemoTimeline(); } catch (error) { showError(error); return; }
+  if (!state.demoTimeline || state.view?.study?.stage !== "instructions") return;
+  if (state.demoIndex >= state.demoTimeline.frames.length - 1) {
+    state.demoIndex = 0;
+    state.demoElapsedMs = 0;
+    state.lastPenaltyFrame = null;
+    sessionStorage.setItem(demoCursorKey(state.demoRunId), "0");
+    paintDemoFrame();
   }
-  state.demoPlaying = false; renderStage();
+  state.pendingBeginTask1 = false;
+  state.demoPlaying = true;
+  state.demoLastTimestamp = null;
+  renderStage();
+  const generation = state.demoGeneration;
+  state.demoAnimationFrame = requestAnimationFrame((next) => demoTick(next, generation));
 }
 
 function restartPayload() {
@@ -681,7 +1007,7 @@ $("startButton").addEventListener("click", () => {
 $("demoPlayButton").addEventListener("click", playDemo);
 $("beginTask1Button").addEventListener("click", async () => {
   if (state.view?.study?.stage !== "instructions") return;
-  state.demoPlaying = false;
+  stopDemo(true);
   if (state.busy) {
     state.pendingBeginTask1 = true;
     renderStage();
@@ -690,9 +1016,13 @@ $("beginTask1Button").addEventListener("click", async () => {
   cancelMotion();
   await command("begin_task1");
 });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && state.demoPlaying) { stopDemo(); renderStage(); }
+});
 $("beginTask2Button").addEventListener("click", () => command("begin_task2"));
+$("beginTask3Button").addEventListener("click", () => command("begin_task3"));
 document.querySelectorAll("#actionPad button").forEach((button) => button.addEventListener("click", () => command("human_action", { action: button.dataset.action })));
-async function submitExplanationQuestion(question, questionKind = null) {
+async function submitExplanationQuestion(question, questionKind = null, anchor = null) {
   const prompt = String(question || "").trim();
   if (!prompt || state.busy || !allowed("ask_explanation")) return;
   $("questionInput").value = prompt;
@@ -707,26 +1037,45 @@ async function submitExplanationQuestion(question, questionKind = null) {
     target_agent: "robot_2",
   };
   if (questionKind) payload.question_kind = questionKind;
+  if (anchor?.event_id) payload.penalty_event_id = String(anchor.event_id);
+  if (anchor?.frame != null) payload.penalty_frame = Number(anchor.frame);
   await command("ask_explanation", payload);
   clearTimeout(state.questionTimer);
   $("questionStatus").classList.add("hidden");
 }
 document.querySelectorAll("#presetQuestions button").forEach((button) => {
+  if (button.id === "chargerPenaltyQuestionButton") return;
   button.addEventListener("click", () => {
     submitExplanationQuestion(tr(button.dataset.questionKey), button.dataset.questionKind);
   });
+});
+$("chargerPenaltyQuestionButton").addEventListener("click", () => {
+  const penalty = state.view?.study?.latest_charger_penalty;
+  submitExplanationQuestion(
+    tr("presetChargerPenalty"),
+    "charger_penalty",
+    penalty,
+  );
 });
 $("askButton").addEventListener("click", () => {
   submitExplanationQuestion($("questionInput").value);
 });
 $("surveyPanel").addEventListener("submit", (event) => {
   event.preventDefault(); const form = new FormData(event.currentTarget);
-  command("submit_survey", { coordination_understanding: Number(form.get("coordination_understanding")), ai_predictability: Number(form.get("ai_predictability")), interface_clarity: Number(form.get("interface_clarity")), comment: $("surveyComment").value.trim() });
+  const value = (name) => form.get(name) === 'na' ? 'na' : form.has(name) ? Number(form.get(name)) : null;
+  command("submit_survey", {
+    coordination_understanding: value('coordination_understanding'),
+    ai_predictability: value('ai_predictability'), interface_clarity: value('interface_clarity'),
+    explanation_clarity: value('explanation_clarity'),
+    explanation_usefulness: value('explanation_usefulness'),
+    question_helpfulness: value('question_helpfulness'),
+    comment: $("surveyComment").value.trim(),
+  });
 });
 [$("restartButton"), $("interruptedRestartButton")].forEach((button) => button.addEventListener("click", () => command("restart", restartPayload())));
 
 window.addEventListener("keydown", (event) => {
-  if (state.busy || !["task1","task2"].includes(state.view?.study?.stage) || ["INPUT","TEXTAREA"].includes(document.activeElement?.tagName)) return;
+  if (state.busy || !["task1","task2","task3"].includes(state.view?.study?.stage) || ["INPUT","TEXTAREA"].includes(document.activeElement?.tagName)) return;
   const action = { ArrowUp:"UP", w:"UP", W:"UP", ArrowDown:"DOWN", s:"DOWN", S:"DOWN", ArrowLeft:"LEFT", a:"LEFT", A:"LEFT", ArrowRight:"RIGHT", d:"RIGHT", D:"RIGHT", " ":"WAIT" }[event.key];
   if (action) { event.preventDefault(); command("human_action", { action }); }
 });

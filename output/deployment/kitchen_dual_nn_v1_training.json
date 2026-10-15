@@ -1,0 +1,41 @@
+{
+  "model_version": "kitchen-dual-nn-v1",
+  "artifact": "output/deployment/kitchen_dual_nn_v1.npz",
+  "sha256": "9aa46b8041cbef83c500b87f3ddedae4785ca9b77a0665179a8b13f608b976bd",
+  "physical_engine": "kitchen-v6.3.0",
+  "participant_adapter": "kitchen-v7.0.0-neural",
+  "feature_version": "kitchen-visible-features-v1",
+  "actors": ["human_preparation", "ai_cooking"],
+  "training": {
+    "teacher_seed_range": [10000, 10299],
+    "teacher_episodes": 900,
+    "teacher_completed_episodes": 900,
+    "teacher_samples": 271877,
+    "behavior_cloning_epochs": 15,
+    "hidden_width": 256,
+    "joint_ppo_seed_start": 17000,
+    "joint_ppo_episodes": 24,
+    "joint_ppo_steps": 7271,
+    "joint_actor_weight_l2_change": {
+      "human_first_layer": 0.00171064,
+      "ai_first_layer": 0.00153447
+    },
+    "runtime_action_selection": "legal_mask_then_deterministic_argmax",
+    "runtime_rule_action_override": false
+  },
+  "tuning": {
+    "seed_range": [20000, 20019],
+    "episodes_per_pairing": 60,
+    "nn_nn_complete": 60,
+    "frozen_nn_human_proxy_complete": 60
+  },
+  "final_evaluation": {
+    "seed_range": [30000, 30099],
+    "episodes_per_pairing": 300,
+    "required_complete_per_pairing": 240,
+    "nn_nn_complete": 300,
+    "frozen_nn_human_proxy_complete": 300,
+    "passed": true,
+    "human_participants_measured": false
+  }
+}

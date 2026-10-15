@@ -1,0 +1,31 @@
+{
+  "version": "warehouse-dual-pure-nn.v5",
+  "scenario_version": "warehouse-dual-pure-nn-three-tasks.v5",
+  "model_version": "warehouse-dual-pure-nn.v5",
+  "observation_version": "warehouse-public-raw.v1",
+  "task_seed_rule": "enrollment_seed_times_10_plus_task",
+  "demo_seed": 40786,
+  "variants": {
+    "regularized": {
+      "policy_id": "warehouse-regularized-v5",
+      "actor_path": "output/deployment/warehouse_dual_v5_regularized_actor.npz",
+      "actor_sha256": null,
+      "role_sha256": {"robot_1": null, "robot_2": null},
+      "program_paths": [
+        "output/deployment/warehouse_dual_v5_regularized_robot_1_program.json",
+        "output/deployment/warehouse_dual_v5_regularized_robot_2_program.json"
+      ],
+      "training_report_path": "output/deployment/warehouse_dual_v5_regularized_training.json",
+      "acceptance_path": "output/deployment/warehouse_dual_v5_acceptance.json"
+    },
+    "raw": {
+      "policy_id": "warehouse-raw-v5",
+      "actor_path": "output/deployment/warehouse_dual_v5_raw_actor.npz",
+      "actor_sha256": null,
+      "role_sha256": {"robot_1": null, "robot_2": null},
+      "program_paths": [],
+      "training_report_path": "output/deployment/warehouse_dual_v5_raw_training.json",
+      "acceptance_path": "output/deployment/warehouse_dual_v5_acceptance.json"
+    }
+  }
+}

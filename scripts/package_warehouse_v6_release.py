@@ -1,0 +1,376 @@
+#!/usr/bin/env python3
+"""Package a fully accepted Warehouse pair without changing any evidence bytes.
+
+The output catalog remains pending until all content-addressed assets and the
+independent acceptance verifier pass against a staged catalog. Existing v5
+Pong and Kitchen entries are copied through unchanged.
+"""
+from __future__ import annotations
+
+import argparse
+from copy import deepcopy
+from hashlib import sha256
+import json
+import os
+from pathlib import Path
+import sys
+from uuid import uuid4
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from experiments.warehouse import protocol as p
+from study_v3 import release_catalog as catalog_module
+
+
+ROOT = Path(__file__).resolve().parents[1]
+RELEASE_ID = catalog_module.RELEASE_ID
+CATALOG = catalog_module.CATALOG_PATH
+ASSETS = CATALOG.parent / "assets"
+
+
+def _read(path: Path) -> dict:
+    value = json.loads(path.read_bytes())
+    if not isinstance(value, dict):
+        raise ValueError(f"not a JSON object: {path}")
+    return value
+
+
+def _sha(path: Path) -> str:
+    return sha256(path.read_bytes()).hexdigest()
+
+
+def _source(path: str, expected: str, output_root: Path, basename: str | None = None) -> Path:
+    if (not isinstance(path, str) or not isinstance(expected, str)
+            or len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected)):
+        raise ValueError("unbound Warehouse source asset")
+    source = Path(path).resolve()
+    if (not source.is_relative_to(output_root) or not source.is_file()
+            or (basename is not None and source.name != basename)
+            or _sha(source) != expected):
+        raise ValueError(f"Warehouse source asset changed: {source}")
+    return source
+
+
+def _bundle(path: str, expected: str, output_root: Path,
+            basename: str | None = None, *,
+            assets_root: Path = ASSETS) -> dict[str, str]:
+    source = _source(path, expected, output_root, basename)
+    destination = assets_root / expected / source.name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        if _sha(destination) != expected:
+            raise ValueError(f"content-addressed asset changed: {destination}")
+    else:
+        temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
+        try:
+            temporary.write_bytes(source.read_bytes())
+            if _sha(temporary) != expected:
+                raise ValueError("source asset changed during copy")
+            os.link(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return {"path": str(destination.relative_to(ROOT)), "sha256": expected}
+
+
+def _training_assets(variants: dict, output_root: Path, *,
+                     allow_missing_regularized_programs: bool = False,
+                     assets_root: Path = ASSETS) -> dict:
+    if set(variants) != set(p.VARIANTS):
+        raise ValueError("Warehouse paired training assets incomplete")
+    assets = {}
+    for variant in p.VARIANTS:
+        row = variants[variant]
+        artifact = row["actor_artifact"]
+        programs = row.get("program_artifacts") or {}
+        allowed = ({"robot_1", "robot_2"} if variant == "regularized" else set())
+        if (set(programs) != allowed and
+                not (variant == "regularized" and
+                     allow_missing_regularized_programs and not programs)):
+            raise ValueError("Warehouse role programs incomplete")
+        assets[variant] = {
+            "actor": _bundle(artifact["path"], artifact["sha256"], output_root,
+                             assets_root=assets_root),
+            "training_report": _bundle(row["training_report_path"],
+                                       row["training_report_sha256"], output_root,
+                                       assets_root=assets_root),
+            "programs": {role: _bundle(programs[role]["path"],
+                                       programs[role]["sha256"], output_root,
+                                       assets_root=assets_root)
+                         for role in programs},
+        }
+    return assets
+
+
+def _evidence(receipt: dict, output_root: Path, *,
+              release_id: str = RELEASE_ID,
+              assets_root: Path = ASSETS) -> dict:
+    phases = receipt["phase_receipt_path"]
+    phase_hashes = receipt["phase_receipt_sha256"]
+    phase_names = {"budget.lock.json", "formal.selection.json",
+                   *(f"formal.training.{seed}.json" for seed in p.FORMAL_PAIR_SEEDS),
+                   "program.preaudit.json", "final_program_audit.json", "heldout.json"}
+    if set(phases) != phase_names or set(phase_hashes) != phase_names:
+        raise ValueError("Warehouse phase receipts incomplete")
+    claims = receipt["one_use_claim_path"]
+    claim_hashes = receipt["one_use_claim_sha256"]
+    if set(claims) != {"final_program_audit", "heldout"} or set(claim_hashes) != set(claims):
+        raise ValueError("Warehouse one-use claims incomplete")
+    budget = receipt["locked_budget"]
+    dev_paths = receipt["development_receipt_path"]
+    dev_hashes = receipt["development_receipt_sha256"]
+    expected_budgets = {str(value) for value in p.BUDGETS if value <= budget}
+    if set(dev_paths) != expected_budgets or set(dev_hashes) != expected_budgets:
+        raise ValueError("Warehouse development receipt budget history incomplete")
+    development = {}
+    development_pairs = {}
+    for budget_key in expected_budgets:
+        if (set(dev_paths[budget_key]) != set(map(str, p.DEVELOPMENT_PAIR_SEEDS))
+                or set(dev_hashes[budget_key]) != set(dev_paths[budget_key])):
+            raise ValueError("Warehouse development pairs incomplete")
+        development[budget_key] = {
+            seed: _bundle(path, dev_hashes[budget_key][seed], output_root,
+                          f"development.{budget_key}.{seed}.json",
+                          assets_root=assets_root)
+            for seed, path in dev_paths[budget_key].items()}
+        development_pairs[budget_key] = {}
+        for seed, item in development[budget_key].items():
+            dev_receipt = _read(ROOT / item["path"])
+            pair_path = (output_root / receipt["candidate_id"] /
+                         f"pair_{seed}_steps_{budget_key}" / "pair.training.json")
+            development_pairs[budget_key][seed] = _bundle(
+                str(pair_path), dev_receipt["pair_report_sha256"],
+                output_root, "pair.training.json", assets_root=assets_root)
+    pairs = receipt["candidate_training"]
+    if (len(pairs) != len(p.FORMAL_PAIR_SEEDS)
+            or {row["pair_seed"] for row in pairs} != set(p.FORMAL_PAIR_SEEDS)):
+        raise ValueError("Warehouse formal pair reports incomplete")
+    pair_reports = {str(row["pair_seed"]): _bundle(
+        row["pair_report_path"], row["pair_report_sha256"],
+        output_root, "pair.training.json", assets_root=assets_root)
+        for row in pairs}
+    phase_receipts = {name: _bundle(phases[name], phase_hashes[name],
+                                    output_root, name, assets_root=assets_root)
+                      for name in sorted(phase_names)}
+    return {
+        "phase_receipts": phase_receipts,
+        "one_use_claims": {phase: _bundle(claims[phase], claim_hashes[phase],
+                                           ROOT / "output" /
+                                           "warehouse_v6_sealed_claims" / release_id,
+                                           f"{phase}.claim.json",
+                                           assets_root=assets_root)
+                           for phase in ("final_program_audit", "heldout")},
+        "pair_reports": pair_reports,
+        "development_receipts": development,
+        "development_pair_reports": development_pairs,
+        "training_assets": {seed: _training_assets(
+            _read(ROOT / item["path"])["variants"], output_root,
+            assets_root=assets_root)
+            for seed, item in pair_reports.items()},
+        "development_training_assets": {budget_key: {
+            seed: _training_assets(_read(ROOT / item["path"])["training"],
+                                   output_root,
+                                   allow_missing_regularized_programs=
+                                   int(budget_key) < budget,
+                                   assets_root=assets_root)
+            for seed, item in section.items()}
+            for budget_key, section in development.items()},
+    }
+
+
+def _policies(receipt: dict, evidence: dict, output_root: Path,
+              acceptance_asset: dict, *, assets_root: Path = ASSETS) -> dict:
+    selected = str(receipt["selected_pair_seed"])
+    pair = _read(ROOT / evidence["pair_reports"][selected]["path"])
+    if (pair.get("candidate_id") != receipt.get("candidate_id")
+            or pair.get("pair_seed") != receipt["selected_pair_seed"]
+            or pair.get("joint_steps") != receipt["locked_budget"]):
+        raise ValueError("Warehouse selected pair identity mismatch")
+    entries = {}
+    for variant in p.VARIANTS:
+        trained = pair["variants"][variant]
+        artifact = trained["actor_artifact"]
+        actor = _bundle(artifact["path"], artifact["sha256"], output_root,
+                        assets_root=assets_root)
+        report = _bundle(trained["training_report_path"],
+                         trained["training_report_sha256"], output_root,
+                         assets_root=assets_root)
+        if (receipt["artifact_sha256"][variant] != actor["sha256"]
+                or receipt["training_report_sha256"][variant] != report["sha256"]
+                or receipt["role_sha256"][variant] != artifact["role_sha256"]):
+            raise ValueError("Warehouse selected Actor or training report differs from acceptance")
+        programs = trained.get("program_artifacts") or {}
+        if set(programs) != ({"robot_1", "robot_2"}
+                             if variant == "regularized" else set()):
+            raise ValueError("Warehouse role program pair incomplete")
+        bundled_programs = {role: _bundle(programs[role]["path"],
+                                          programs[role]["sha256"], output_root,
+                                          assets_root=assets_root)
+                            for role in programs}
+        if variant == "regularized" and {
+                role: item["sha256"] for role, item in bundled_programs.items()} != \
+                receipt["program_sha256"]["regularized"]:
+            raise ValueError("Warehouse program differs from acceptance")
+        entries[variant] = {
+            "policy_id": receipt["policy_id"][variant],
+            "model_version": receipt["actor_model_version"],
+            "feature_schema_sha256": receipt["feature_schema_sha256"],
+            "actor_path": actor["path"], "actor_sha256": actor["sha256"],
+            "role_sha256": {"human": artifact["role_sha256"]["robot_1"],
+                            "ai": artifact["role_sha256"]["robot_2"]},
+            "program_paths": [bundled_programs[role]["path"] for role in p.ROLES
+                              if role in bundled_programs],
+            "program_sha256": {role: item["sha256"]
+                               for role, item in bundled_programs.items()},
+            "training_report_path": report["path"],
+            "training_report_sha256": report["sha256"],
+            "acceptance_path": acceptance_asset["path"],
+            "acceptance_sha256": acceptance_asset["sha256"],
+        }
+    return entries
+
+
+def _verify_training_package(receipt: dict, evidence: dict) -> None:
+    """Open every formal and development Actor, report, and role program."""
+    from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor
+    from backend.training.warehouse_v6_program import WarehouseV6Program
+
+    groups = (
+        (evidence["pair_reports"], evidence["training_assets"],
+         None, receipt["locked_budget"]),
+        *((evidence["development_pair_reports"][budget],
+           evidence["development_training_assets"][budget],
+           evidence["development_receipts"][budget], int(budget))
+          for budget in evidence["development_pair_reports"]),
+    )
+    for pairs, assets, development, budget in groups:
+        if set(pairs) != set(assets):
+            raise ValueError("Warehouse paired asset inventory mismatch")
+        for seed, pair_asset in pairs.items():
+            pair = _read(ROOT / pair_asset["path"])
+            if (pair.get("candidate_id") != receipt["candidate_id"]
+                    or pair.get("pair_seed") != int(seed)
+                    or pair.get("joint_steps") != budget):
+                raise ValueError("Warehouse packaged pair identity mismatch")
+            if development is not None:
+                dev = _read(ROOT / development[seed]["path"])
+                if (dev.get("pair_report_sha256") != pair_asset["sha256"]
+                        or dev.get("training") != pair["variants"]):
+                    raise ValueError("Warehouse development training receipt mismatch")
+            for variant in p.VARIANTS:
+                trained = pair["variants"][variant]
+                packaged = assets[seed][variant]
+                if (packaged["actor"]["sha256"] !=
+                        trained["actor_artifact"]["sha256"]
+                        or packaged["training_report"]["sha256"] !=
+                        trained["training_report_sha256"]
+                        or {role: item["sha256"] for role, item in
+                            packaged["programs"].items()} != {
+                                role: item["sha256"] for role, item in
+                                trained.get("program_artifacts", {}).items()}):
+                    raise ValueError("Warehouse packaged training asset hash mismatch")
+                actor = FrozenWarehouseV6Actor.load(
+                    ROOT / packaged["actor"]["path"],
+                    expected_sha256=packaged["actor"]["sha256"],
+                    expected_role_sha256=trained["selected_role_sha256"])
+                for role, program in packaged["programs"].items():
+                    loaded = WarehouseV6Program.load(
+                        ROOT / program["path"], expected_sha256=program["sha256"],
+                        actor_role_sha256=actor.role_sha256[role])
+                    if loaded.role != role:
+                        raise ValueError("Warehouse packaged program role mismatch")
+
+
+def package(acceptance_path: str | Path,
+            *, release_id: str | None = None) -> dict:
+    source = Path(acceptance_path).resolve()
+    receipt = _read(source)
+    release_id = release_id or receipt.get("release")
+    spec = catalog_module.warehouse_release_spec(release_id)
+    catalog_path = spec.catalog_path
+    assets_root = catalog_path.parent / "assets"
+    if (source.name != "warehouse_v6_acceptance.json"
+            or source.parent.name != "admission"
+            or source.parent.parent.name != receipt.get("candidate_id")
+            or receipt.get("release") != release_id
+            or receipt.get("release_id") != release_id
+            or receipt.get("policy_id") != spec.policy_ids
+            or receipt.get("passed") is not True
+            or receipt.get("heldout_evaluated") is not True):
+        raise ValueError("Warehouse v6 acceptance is unavailable or incomplete")
+    if (receipt.get("source_closure_sha256") !=
+            catalog_module.warehouse_runtime_source_closure_sha256()):
+        raise ValueError("Warehouse source closure differs from accepted training")
+    output_root = source.parent.parent.parent
+    original_bytes = catalog_path.read_bytes()
+    catalog = json.loads(original_bytes)
+    if (catalog.get("release_id") != release_id
+            or catalog.get("warehouse", {}).get("status") != "pending"
+            or catalog.get("warehouse", {}).get("policy_ids") != spec.policy_ids):
+        raise ValueError("Warehouse release catalog is no longer pending")
+    acceptance_asset = _bundle(str(source), _sha(source), output_root,
+                               "warehouse_v6_acceptance.json",
+                               assets_root=assets_root)
+    evidence = _evidence(receipt, output_root, release_id=release_id,
+                         assets_root=assets_root)
+    entries = _policies(receipt, evidence, output_root, acceptance_asset,
+                        assets_root=assets_root)
+    _verify_training_package(receipt, evidence)
+    candidate = deepcopy(catalog)
+    candidate["warehouse"] = {**candidate["warehouse"],
+                              "status": "accepted",
+                              "locked_budget": receipt["locked_budget"],
+                              "candidate_id": receipt["candidate_id"],
+                              "evidence": evidence}
+    candidate["policies"]["warehouse"] = entries
+    staged = catalog_path.with_name(f".catalog.{uuid4().hex}.json")
+    try:
+        staged.write_text(json.dumps(candidate, sort_keys=True, indent=2) + "\n")
+        from experiments.warehouse.acceptance import validate_acceptance
+        from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor
+        for variant, entry in entries.items():
+            binding = {"domain": "warehouse", "variant": variant,
+                       "policy_id": entry["policy_id"],
+                       "actor_sha256": entry["actor_sha256"],
+                       "human_actor_sha256": entry["role_sha256"]["human"],
+                       "ai_actor_sha256": entry["role_sha256"]["ai"],
+                       "actor_model_version": entry["model_version"],
+                       "feature_schema_sha256": entry["feature_schema_sha256"],
+                       "program_hashes": {path: sha
+                                          for path, sha in zip(
+                                              entry["program_paths"],
+                                              (entry["program_sha256"].get(role)
+                                               for role in p.ROLES))}}
+            FrozenWarehouseV6Actor.load(
+                ROOT / entry["actor_path"],
+                expected_sha256=entry["actor_sha256"],
+                expected_role_sha256={
+                    "robot_1": binding["human_actor_sha256"],
+                    "robot_2": binding["ai_actor_sha256"]})
+            if not validate_acceptance(
+                    receipt, release_id=release_id, entries=entries,
+                    evidence=catalog_module.warehouse_evidence(
+                        release_id, catalog_path=staged),
+                    repository_root=ROOT):
+                raise ValueError(f"Warehouse {variant} admission gate failed")
+        if catalog_path.read_bytes() != original_bytes:
+            raise RuntimeError("Warehouse release catalog changed during packaging")
+        os.replace(staged, catalog_path)
+    finally:
+        staged.unlink(missing_ok=True)
+    return {"release_id": release_id, "candidate_id": receipt["candidate_id"],
+            "catalog_sha256": _sha(catalog_path), "policy_ids": receipt["policy_id"]}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--acceptance", required=True,
+                        help="immutable Warehouse admission/warehouse_v6_acceptance.json")
+    parser.add_argument("--release-id", default=None,
+                        help="candidate release ID; defaults to the acceptance receipt")
+    args = parser.parse_args()
+    print(json.dumps(package(args.acceptance, release_id=args.release_id),
+                     sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

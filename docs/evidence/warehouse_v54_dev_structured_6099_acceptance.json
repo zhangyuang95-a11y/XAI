@@ -1,0 +1,218 @@
+{
+  "actor_model_version": "warehouse-structured-dual-nn.v5.4.sparse3",
+  "all_candidate_regularized_feedback_passed": true,
+  "artifact_sha256": {
+    "raw": "18c12777446aa9e27e4b6370a2422dedae99f6294ff074aa1c6d96e3f783c01f",
+    "regularized": "e846c3e3449188a31a8ad12b9ccd82017f4635ea42aef52fcace5f4717a554f6"
+  },
+  "bc_teacher_observability_probe": {
+    "also_cleared_charging_history_changed_teacher_joint_action": 292,
+    "cleared_goal_and_route_memory_changed_teacher_joint_action": 209,
+    "joint_pre_action_states": 2400,
+    "limitation": "Offline teacher labels use the pre-action environment state, including persistent goals absent from the NN observation; the formal self-play and execution actions remain NN-selected.",
+    "scope": "pair_6001_bc_nn_visits_training_seeds_90000_through_90019"
+  },
+  "candidate_training": [
+    {
+      "initial_role_sha256": {
+        "robot_1": "149e137ae418cbfe3229637b294b63f38e8ee383707a58166bf2592575e158ad",
+        "robot_2": "8f0b9f40374761ccf5793930cdee479db0c7ed828d08cd6357cd660907ac6e1f"
+      },
+      "pair_seed": 6099,
+      "variants": {
+        "raw": {
+          "actor_decisions": 400000,
+          "actor_weight_changed_parameter_count": {
+            "robot_1": 90721,
+            "robot_2": 88747
+          },
+          "actor_weight_delta_l2": {
+            "robot_1": 0.19019659042459441,
+            "robot_2": 0.19924347251380947
+          },
+          "both_roles_changed": true,
+          "checkpoint_sha256": "dc95bece7813bab9df8854c7840caec8bbdfc469e37be42701e780ffa3d8340e",
+          "feedback_rows": {
+            "robot_1": 0,
+            "robot_2": 0
+          },
+          "feedback_window_actor_rows": {
+            "robot_1": 0,
+            "robot_2": 0
+          },
+          "initial_role_sha256": {
+            "robot_1": "149e137ae418cbfe3229637b294b63f38e8ee383707a58166bf2592575e158ad",
+            "robot_2": "8f0b9f40374761ccf5793930cdee479db0c7ed828d08cd6357cd660907ac6e1f"
+          },
+          "joint_steps": 200000,
+          "physical_no_legal_action_rows": {
+            "robot_1": 0,
+            "robot_2": 0
+          },
+          "post_policy_interventions": 0,
+          "scenario_schedule_sha256": "7b5c8db2dc73a327410e5c0e8a3ea7f1dfd4ebc2b1748c2cf383ea55baca45cc",
+          "selected_feedback_rows": {
+            "robot_1": 0,
+            "robot_2": 0
+          },
+          "selected_role_sha256": {
+            "robot_1": "5c4876cd61ed4922a50d01328515879429e167b7098dc2f48c0a1c13e8358904",
+            "robot_2": "47900403c0a04d2340e8b005afe0d60cc392d5b5c42764db3a7649c3b8fead77"
+          },
+          "zero_action_coverage_rows": {
+            "robot_1": 0,
+            "robot_2": 0
+          }
+        },
+        "regularized": {
+          "actor_decisions": 400000,
+          "actor_weight_changed_parameter_count": {
+            "robot_1": 91193,
+            "robot_2": 90051
+          },
+          "actor_weight_delta_l2": {
+            "robot_1": 0.5843318782456306,
+            "robot_2": 0.514083331682383
+          },
+          "both_roles_changed": true,
+          "checkpoint_sha256": "b38af4637c6a32c5f2befe428d9d9a9b2264420b178f24da0c94800df7e7078d",
+          "feedback_rows": {
+            "robot_1": 48836,
+            "robot_2": 43317
+          },
+          "feedback_window_actor_rows": {
+            "robot_1": 160640,
+            "robot_2": 160640
+          },
+          "initial_role_sha256": {
+            "robot_1": "149e137ae418cbfe3229637b294b63f38e8ee383707a58166bf2592575e158ad",
+            "robot_2": "8f0b9f40374761ccf5793930cdee479db0c7ed828d08cd6357cd660907ac6e1f"
+          },
+          "joint_steps": 200000,
+          "physical_no_legal_action_rows": {
+            "robot_1": 0,
+            "robot_2": 0
+          },
+          "post_policy_interventions": 0,
+          "scenario_schedule_sha256": "7b5c8db2dc73a327410e5c0e8a3ea7f1dfd4ebc2b1748c2cf383ea55baca45cc",
+          "selected_feedback_rows": {
+            "robot_1": 48836,
+            "robot_2": 43317
+          },
+          "selected_role_sha256": {
+            "robot_1": "9a3e78c380f595597f982c9ea8319db3ae593fd49fc0b4519afec2215672239a",
+            "robot_2": "cbbfbfd733925d9fe438ed6df3bd120a918f8e9f077b94f374972d296d2f48ba"
+          },
+          "zero_action_coverage_rows": {
+            "robot_1": 111804,
+            "robot_2": 117323
+          }
+        }
+      }
+    }
+  ],
+  "development": [
+    {
+      "pair_seed": 6099,
+      "preliminary_program_audit": {},
+      "raw": {
+        "joint_steps": 40080,
+        "mean_collisions": 6.958333333333333,
+        "mean_deliveries": 8.25,
+        "passed": true,
+        "quality": 6.09375,
+        "shutdown_episode_rate": 0.08333333333333333
+      },
+      "regularized": {
+        "joint_steps": 200000,
+        "mean_collisions": 4.666666666666667,
+        "mean_deliveries": 8.291666666666666,
+        "passed": false,
+        "quality": 5.666666666666666,
+        "shutdown_episode_rate": 0.2916666666666667
+      },
+      "regularized_feedback_rows": {
+        "robot_1": 48836,
+        "robot_2": 43317
+      },
+      "selected_program_audit": {}
+    }
+  ],
+  "domain": "warehouse",
+  "feature_schema_sha256": "1702037b08e7e832e6fa4419e4b3a95bb385de73d43ce7c89ea737f9dab16d62",
+  "final_program_audit": {},
+  "heldout": {},
+  "heldout_evaluated": false,
+  "heldout_locked": true,
+  "heldout_scenario_seed_rule": "enrollment_seed_times_10_plus_task",
+  "heldout_seed_ranges": {
+    "1": [
+      250000,
+      250099
+    ],
+    "2": [
+      250000,
+      250099
+    ],
+    "3": [
+      250000,
+      250099
+    ]
+  },
+  "joint_steps": {
+    "raw": 200000,
+    "regularized": 200000
+  },
+  "max_features_per_node": 3,
+  "pair_seeds": [
+    6099
+  ],
+  "passed": false,
+  "post_policy_override_count": 0,
+  "program_schema_version": "warehouse-sparse-oblique-v5.0",
+  "program_sha256": {
+    "regularized": {
+      "robot_1": "7faa21c66174ab1fc051400d209f07f1c174260ef25b49fb15ef55963a3f5d24",
+      "robot_2": "a4a8ed749a596e7163d0651d5393159db17e2a4c129370f29e0d6ab0aa21b921"
+    }
+  },
+  "raw_program_feedback_rows": {
+    "robot_1": 0,
+    "robot_2": 0
+  },
+  "regularized_program_feedback_rows": {
+    "robot_1": 48836,
+    "robot_2": 43317
+  },
+  "release": "policylens-three-domain-20261014.v5.0",
+  "role_sha256": {
+    "raw": {
+      "robot_1": "5c4876cd61ed4922a50d01328515879429e167b7098dc2f48c0a1c13e8358904",
+      "robot_2": "47900403c0a04d2340e8b005afe0d60cc392d5b5c42764db3a7649c3b8fead77"
+    },
+    "regularized": {
+      "robot_1": "9a3e78c380f595597f982c9ea8319db3ae593fd49fc0b4519afec2215672239a",
+      "robot_2": "cbbfbfd733925d9fe438ed6df3bd120a918f8e9f077b94f374972d296d2f48ba"
+    }
+  },
+  "selected_pair_seed": 6099,
+  "selected_regularized_feedback_rows": {
+    "robot_1": 48836,
+    "robot_2": 43317
+  },
+  "training_report_sha256": {
+    "raw": "63ebde23f31ae56472a662af7d219bf62a56e08d56a8c6571ee065c08326266d",
+    "regularized": "6da739829dbd6eaa88724222e7ffd25f98f7f046b6392f0de893de98c8717f5e"
+  },
+  "zero_action_coverage_definition": "PPO role-row presentations during positive program coefficient, counting every optimizer epoch; no validated, legal program action agreed with both current masked NN argmax and the sampled executed NN action",
+  "zero_action_coverage_rows": {
+    "raw": {
+      "robot_1": 0,
+      "robot_2": 0
+    },
+    "regularized": {
+      "robot_1": 111804,
+      "robot_2": 117323
+    }
+  }
+}

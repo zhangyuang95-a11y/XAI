@@ -5,12 +5,15 @@ const path = require('node:path');
 const vm = require('node:vm');
 const web = path.join(__dirname, '..', 'domains', 'pong', 'web');
 const payload = JSON.parse(fs.readFileSync(0, 'utf8'));
-const context = vm.createContext({ console, cases: payload.cases || [] });
+const protocol = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'configs', 'three_task_study.json'), 'utf8'));
+const context = vm.createContext({ console, cases: payload.cases || [], crypto: require('node:crypto'),
+  location: { protocol: 'http:' } });
 for (const name of ['coordinated.js', 'explain.js']) {
   vm.runInContext(fs.readFileSync(path.join(web, name), 'utf8'), context, { filename: name });
 }
 const source = fs.readFileSync(path.join(web, 'app.js'), 'utf8').split("$('start').onclick")[0];
 vm.runInContext(source, context, { filename: 'app.js' });
+vm.runInContext(`studyProtocol = ${JSON.stringify(protocol)}`, context);
 const result = vm.runInContext(`(() => {
   nnController = { controller_mode: 'coordinated', rule_version: 'pong-coordinated.v2.3' };
   return cases.map(item => {

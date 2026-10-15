@@ -30,7 +30,53 @@ let nnModel = null;
 let nnProgram = null;
 let nnController = { controller_mode: 'pure_nn' };
 let nnLoadError = null;
+let studyProtocol = null;
+const SESSION_KEY = 'pong.threeTask.active.v1';
+let pendingSession = null;
+let studySessionId = crypto.randomUUID ? crypto.randomUUID() : `session-${Date.now()}`;
 const completedRuns = [];
+const ONLINE_PONG_URL = 'https://policylens-warehouse-study.onrender.com/pong/';
+
+class ModelLoadError extends Error {
+  constructor(kind, message) { super(message); this.kind = kind; }
+}
+
+async function loadJsonAsset(path, { optional = false } = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  let response;
+  try {
+    response = await fetch(path, { cache: 'no-store', signal: controller.signal });
+  } catch (error) {
+    throw new ModelLoadError('network', error.name === 'AbortError'
+      ? '加载模型超时，请检查网络或本地服务后重试。'
+      : '无法连接模型服务，请检查网络或本地服务后重试。');
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (optional && response.status === 404) return null;
+  if (response.status === 404) throw new ModelLoadError('missing', `${path} 不存在，请检查模型导出包。`);
+  if (!response.ok) throw new ModelLoadError('network', `${path} 请求失败（HTTP ${response.status}），请重试。`);
+  try { return await response.json(); }
+  catch (_) { throw new ModelLoadError('json', `${path} 不是有效 JSON，请重新导出模型。`); }
+}
+
+function showModelLoadError(message, { directFile = false } = {}) {
+  const error = $('setupError');
+  error.replaceChildren(document.createTextNode(message));
+  if (directFile) {
+    const link = document.createElement('a');
+    link.href = ONLINE_PONG_URL;
+    link.textContent = '打开在线 Pong';
+    error.append(' ', link);
+  }
+  $('retryLoad').hidden = directFile;
+  $('start').disabled = directFile;
+}
+
+if (location.protocol === 'file:') {
+  showModelLoadError('当前是直接打开的本地文件，浏览器无法加载模型。请通过本地服务或在线地址打开游戏。', { directFile: true });
+}
 
 function validateProgramFeatures(program, featureNames) {
   if (!program?.root) return;
@@ -46,31 +92,32 @@ function validateProgramFeatures(program, featureNames) {
 async function loadFrozenNN() {
   nnLoadError = null;
   try {
-    const response = await fetch('nn_model.json', { cache: 'no-store' });
-    if (!response.ok) throw new Error(`模型文件不可用 (${response.status})`);
-    const candidate = await response.json();
-    if (candidate.format !== 'pong-browser-float32.v2' || candidate.actions?.join('|') !== 'left|right|stay') throw new Error('模型动作或特征版本不兼容；请导出 Pong v2 模型');
+    const candidate = await loadJsonAsset('nn_model.json');
+    if (candidate.format !== 'pong-browser-float32.v2' || candidate.actions?.join('|') !== 'left|right|stay') throw new ModelLoadError('signature', '模型动作或特征版本不兼容；请导出 Pong v2 模型');
     if (candidate.signature?.domain_id !== 'pong' || candidate.signature?.version !== 'pong-continuous-24x14-v7'
       || !Array.isArray(candidate.signature?.feature_names)) {
-      throw new Error('模型观察签名与当前 Pong v2 物理规则不兼容');
+      throw new ModelLoadError('signature', '模型观察签名与当前 Pong v2 物理规则不兼容');
     }
-    let candidateProgram = null;
-    const programResponse = await fetch('program.json', { cache: 'no-store' });
-    if (programResponse.ok) {
-      candidateProgram = await programResponse.json();
-      validateProgramFeatures(candidateProgram, candidate.signature.feature_names);
+    const candidateProgram = await loadJsonAsset('program.json', { optional: true });
+    if (candidateProgram) validateProgramFeatures(candidateProgram, candidate.signature.feature_names);
+    nnController = await loadJsonAsset('controller_config.json');
+    const protocol = await loadJsonAsset('study_protocol.json');
+    const tasks = protocol?.tasks?.pong;
+    if (protocol.version !== 'three-task-explanation.v1' || !Array.isArray(tasks)
+      || tasks.length !== 3 || tasks.some((task, index) => task.id !== index + 1 || task.limit !== SPEC.durationSeconds)) {
+      throw new ModelLoadError('signature', '三任务流程配置与当前 Pong 游戏不兼容');
     }
-    const controllerResponse = await fetch('controller_config.json', { cache: 'no-store' });
-    nnController = controllerResponse.ok ? await controllerResponse.json() : { controller_mode: 'pure_nn' };
-    if (!['pure_nn', 'hybrid', 'rule_only', 'coordinated'].includes(nnController.controller_mode)) throw new Error('不支持的 Pong 控制器模式');
-    if (nnController.controller_mode === 'hybrid' && nnController.rule_version !== 'pong-limited-assist.v2.2') throw new Error('规则辅助版本不兼容');
-    if (nnController.controller_mode === 'coordinated' && nnController.rule_version !== 'pong-coordinated.v2.3') throw new Error('规则协调版本不兼容');
+    if (!['pure_nn', 'hybrid', 'rule_only', 'coordinated'].includes(nnController.controller_mode)) throw new ModelLoadError('signature', '不支持的 Pong 控制器模式');
+    if (nnController.controller_mode === 'hybrid' && nnController.rule_version !== 'pong-limited-assist.v2.2') throw new ModelLoadError('signature', '规则辅助版本不兼容');
+    if (nnController.controller_mode === 'coordinated' && nnController.rule_version !== 'pong-coordinated.v2.3') throw new ModelLoadError('signature', '规则协调版本不兼容');
     if (nnController.model_sha256 && nnController.model_sha256 !== candidate.model_sha256)
-      throw new Error('控制器绑定的冻结 Actor 哈希与当前模型不一致');
+      throw new ModelLoadError('signature', '控制器绑定的冻结 Actor 哈希与当前模型不一致');
     nnModel = candidate;
     nnProgram = candidateProgram;
+    studyProtocol = protocol;
   } catch (error) {
-    nnModel = null; nnProgram = null; nnController = { controller_mode: 'pure_nn' }; nnLoadError = String(error.message || error);
+    nnModel = null; nnProgram = null; studyProtocol = null; nnController = { controller_mode: 'pure_nn' };
+    nnLoadError = error instanceof ModelLoadError ? error.message : `模型或解释程序不兼容：${String(error.message || error)}`;
   }
 }
 
@@ -103,6 +150,98 @@ function executeProgram(features) {
 }
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
+function taskSpec(number) { return studyProtocol?.tasks?.pong?.[number - 1]; }
+function mayExplain(current = game) {
+  return Boolean(current && taskSpec(current.task)?.explanation_groups?.includes(current.group));
+}
+function mayReview(current = game) {
+  return Boolean(current && taskSpec(current.task)?.review_groups?.includes(current.group));
+}
+function studyRecord(current) {
+  return {
+    protocol_version: studyProtocol.version,
+    domain_id: 'pong', session_id: studySessionId,
+    task_id: current.task, task_run_id: current.runId,
+    purpose: taskSpec(current.task).purpose,
+    next_stage: taskSpec(current.task).next_stage,
+    seed: current.seed, group: current.group, assignment_source: 'manual_self_select',
+    missed_balls: current.missedBalls,
+    missed_by_type: clone(current.missedByType),
+    missed_by_type_format: 'weighted_legacy_compatibility',
+    score_format: 'pong-misses.v2',
+    small_misses: current.missedByType.small,
+    large_misses: current.missedByType.large / 3,
+    weighted_misses: current.missedBalls,
+    total_opportunities: current.totalOpportunities,
+    successful_opportunities: current.successfulOpportunities,
+    explanation_allowed: mayExplain(current),
+    explanation_count: current.intentBubbleUpdates + current.questionHistory.length,
+    bubble_display_count: current.intentBubbleUpdates,
+    question_count: current.questionHistory.length,
+    question_history: clone(current.questionHistory),
+    controller_source: current.controllerSource,
+    controller_version: nnController.rule_version || null,
+    model_sha256: nnModel?.model_sha256 || null,
+    game_seconds: current.timeSeconds,
+    pause_seconds: current.pausedSeconds,
+    review_seconds: current.reviewSeconds,
+    terminal_reason: 'time_limit',
+  };
+}
+function saveSession(phase) {
+  if (!game) return;
+  const data = { version: studyProtocol.version, session_id: studySessionId,
+    participant_id: game.participantId, group: game.group,
+    task: game.task, phase, completed_runs: completedRuns };
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(data)); }
+  catch (_) { $('status').textContent = '浏览器无法保存会话状态；请勿刷新页面。'; }
+}
+function readSession() {
+  try {
+    const data = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
+    if (data?.version !== 'three-task-explanation.v1' || !['A', 'B'].includes(data.group)
+      || ![1, 2, 3].includes(data.task) || !Array.isArray(data.completed_runs)) return null;
+    return data;
+  } catch (_) { return null; }
+}
+
+function missCounts(run) {
+  if (!run) return null;
+  const small = Number(run.score_format === 'pong-misses.v2'
+    ? run.small_misses : run.missed_by_type?.small);
+  const large = Number(run.score_format === 'pong-misses.v2'
+    ? run.large_misses : Number(run.missed_by_type?.large) / 3);
+  const weighted = Number(run.score_format === 'pong-misses.v2'
+    ? run.weighted_misses : run.missed_balls);
+  if (![small, large, weighted].every(value => Number.isInteger(value) && value >= 0)
+      || weighted !== small + 3 * large) return null;
+  return { small, large, weighted };
+}
+
+function renderScoresTable(hostId) {
+  const table = document.createElement('table');
+  table.className = 'score-table';
+  table.setAttribute('aria-label', '三局漏球成绩');
+  const header = document.createElement('tr');
+  ['任务', '小球漏接次数', '大球漏接次数', '加权漏球数'].forEach(label => {
+    const cell = document.createElement('th'); cell.textContent = label; header.appendChild(cell);
+  });
+  const thead = document.createElement('thead'); thead.appendChild(header); table.appendChild(thead);
+  const body = document.createElement('tbody');
+  for (let taskId = 1; taskId <= 3; taskId += 1) {
+    const matches = completedRuns.filter(run => Number(run.task_id) === taskId);
+    const counts = matches.length === 1 ? missCounts(matches[0]) : null;
+    const row = document.createElement('tr');
+    [`Task ${taskId}`, counts?.small ?? '记录缺失', counts?.large ?? '—', counts?.weighted ?? '—'].forEach(value => {
+      const cell = document.createElement('td'); cell.textContent = String(value);
+      if (!counts) cell.className = 'missing';
+      row.appendChild(cell);
+    });
+    body.appendChild(row);
+  }
+  table.appendChild(body);
+  $(hostId).replaceChildren(table);
+}
 
 function reflect(position, velocity, lower, upper) {
   let next = position;
@@ -134,6 +273,11 @@ class OfflinePong {
     this.participantId = participantId || 'local';
     this.task = task;
     this.seed = seed;
+    this.runId = crypto.randomUUID ? crypto.randomUUID() : `run-${Date.now()}`;
+    this.pausedSeconds = 0;
+    this.reviewSeconds = 0;
+    this.pauseStartedAt = null;
+    this.reviewStartedAt = null;
     this.frame = 0;
     this.playerX = 4.72;
     this.aiX = 15.28;
@@ -154,6 +298,7 @@ class OfflinePong {
     this.latestDecision = null;
     this.lastDecisionFrame = -1;
     this.intentBubble = null;
+    this.intentBubbleUpdates = 0;
     this.bubbleSignature = null;
     this.bubbleUpdatedAt = -Infinity;
     this.history = [];
@@ -176,8 +321,14 @@ class OfflinePong {
       ['A1', 'small', 3, 2], ['A2', 'small', 18, 5], ['A3', 'small', 12, 8],
       ['B1', 'large', 7, 1], ['B2', 'large', 16, 6],
     ];
+    const frozenStart = this.task === 1 && seed === taskSpec(1)?.seed
+      ? taskSpec(1).initial_balls : null;
     return starts.map(([ballId, kind, x, y], index) => ({
-      ball_id: ballId, kind, x, y, vx: signs[index] * SPEC.ballSpeed, vy: SPEC.ballSpeed,
+      ball_id: ballId, kind,
+      x: frozenStart?.[ballId]?.[0] ?? x,
+      y: frozenStart?.[ballId]?.[1] ?? y,
+      vx: frozenStart?.[ballId]?.[2] ?? signs[index] * SPEC.ballSpeed,
+      vy: frozenStart?.[ballId]?.[3] ?? SPEC.ballSpeed,
       width_cells: kind === 'large' ? 2 : 1, height_cells: kind === 'large' ? 2 : 1,
       descendingEncounter: false, pendingMiss: false, pendingMissId: null, encounterIndex: 0, active: true,
     }));
@@ -583,13 +734,14 @@ class OfflinePong {
   }
 
   updateBubble(force = false) {
-    if (this.group !== 'A' || this.task !== 1 || this.terminal) return;
+    if (!mayExplain(this) || this.terminal) return;
     const decision = this.latestDecision;
     if (decision.controllerSource === 'coordinated') {
       const evidence = decision.planEvidence || {};
       const signature = [evidence.opportunity_id, evidence.contact_side, evidence.holding,
         evidence.partner_status, evidence.reason].join('|');
       if (!force && signature === this.bubbleSignature) return;
+      if (signature !== this.bubbleSignature) this.intentBubbleUpdates += 1;
       this.bubbleSignature = signature;
       this.bubbleUpdatedAt = this.timeSeconds;
       this.intentBubble = PongExplanations.bubble(decision);
@@ -598,6 +750,7 @@ class OfflinePong {
     const signature = [decision.intentType, decision.targetBallId, decision.contactSide,
       decision.requiresPartner, decision.commitmentState, Math.round((decision.distance || 0) / 2)].join('|');
     if (!force && signature === this.bubbleSignature && this.timeSeconds - this.bubbleUpdatedAt < .75) return;
+    if (signature !== this.bubbleSignature) this.intentBubbleUpdates += 1;
     this.bubbleSignature = signature;
     this.bubbleUpdatedAt = this.timeSeconds;
     if (decision.controllerSource === 'hybrid' && decision.intervened) {
@@ -718,7 +871,7 @@ function drawCourt(frame) {
     present.add(ball.ball_id);
     let node = layer.querySelector(`[data-ball-id="${ball.ball_id}"]`);
     if (!node) { node = document.createElement('i'); node.dataset.ballId = ball.ball_id; layer.appendChild(node); }
-    const assigned = game?.group === 'A' && game.task === 1 && game.intentBubble?.target_ball_id === ball.ball_id;
+    const assigned = mayExplain(game) && game.intentBubble?.target_ball_id === ball.ball_id;
     node.className = `ball ${ball.kind === 'large' ? 'large' : 'small'}${assigned ? ' assigned' : ''}`;
     node.textContent = ball.ball_id;
     node.style.left = `${(ball.x / SPEC.width) * 100}%`;
@@ -756,14 +909,14 @@ function render(frame = game?.snapshot()) {
   $('missed').textContent = String(frame.missed_balls);
   $('opportunities').textContent = String(frame.total_opportunities);
   drawCourt(frame);
-  const showBubble = game.group === 'A' && game.task === 1 && !frame.terminal && game.intentBubble;
+  const showBubble = mayExplain(game) && !frame.terminal && game.intentBubble;
   $('intentBubble').hidden = !showBubble;
   if (showBubble) {
     $('intentText').textContent = game.intentBubble.text;
     $('intentDistance').textContent = game.intentBubble.detail;
     $('intentBubble').style.setProperty('--bubble-x', `${(frame.ai_x / SPEC.width) * 100}%`);
   }
-  const reviewAvailable = game.group === 'A' && game.task === 1 && (frame.terminal || game.paused);
+  const reviewAvailable = mayReview(game) && (frame.terminal || game.paused);
   $('review').hidden = !reviewAvailable;
   if (reviewAvailable) {
     const max = Math.max(0, game.history.length - 1);
@@ -775,19 +928,29 @@ function render(frame = game?.snapshot()) {
     renderTechnical(game.history[replayIndex]);
     renderReviewEvents(replayLocked ? replayIndex : null);
   }
-  $('task2').hidden = !(game.task === 1 && frame.terminal);
-  $('task2').disabled = !(game.task === 1 && frame.terminal);
+  $('nextTask').hidden = !(game.task < 3 && frame.terminal);
+  $('nextTask').disabled = !(game.task < 3 && frame.terminal);
+  $('nextTask').textContent = `进入 Task ${game.task + 1}`;
   ['left', 'pause', 'right'].forEach(id => { $(id).hidden = frame.terminal; });
   $('pause').textContent = game.paused ? '继续' : '暂停';
-  $('reviewTitle').textContent = frame.terminal ? 'Task 1 回放与提问' : '已暂停：查看并提问';
-  const controllerStatus = game.group !== 'A' || game.task !== 1 ? '游戏在浏览器本地运行'
+  $('reviewTitle').textContent = frame.terminal ? 'Task 2 回放与提问' : '已暂停：查看并提问';
+  const controllerStatus = !mayExplain(game) ? '游戏在浏览器本地运行'
     : game.controllerSource === 'coordinated' ? '冻结 NN 建议＋规则协调接球，在浏览器本地运行'
     : game.controllerSource === 'hybrid' ? '冻结 NN＋有限规则辅助在浏览器本地运行'
     : game.controllerSource === 'frozen_nn' ? '冻结 NN 本地运行中'
     : nnLoadError ? `规则比较模式（NN 未加载：${nnLoadError}）` : '规则比较模式（未加载 NN 包）';
-  $('status').textContent = reviewAvailable ? (frame.terminal ? 'Task 1 已结束，可以回放提问' : '已暂停：A组可查看当前帧或一段过程')
-    : frame.terminal ? (game.task === 2 ? 'Task 2 已结束，请填写问卷' : '本局结束，点击进入 Task 2')
+  $('status').textContent = reviewAvailable ? (frame.terminal ? 'Task 2 已结束，可以回放提问' : '已暂停：A组可查看当前帧或一段过程')
+    : frame.terminal ? (game.task === 3 ? 'Task 3 已结束，请填写问卷' : `本局结束，点击进入 Task ${game.task + 1}`)
       : game.paused ? '已暂停' : controllerStatus;
+  const roundResult = $('roundResult');
+  roundResult.hidden = !frame.terminal;
+  if (frame.terminal) {
+    const run = completedRuns.find(item => Number(item.task_id) === game.task);
+    const scores = missCounts(run);
+    roundResult.textContent = scores
+      ? `Task ${game.task} 成绩：小球漏接 ${scores.small} 次，大球漏接 ${scores.large} 次，加权漏球数 ${scores.weighted}。`
+      : `Task ${game.task} 成绩记录缺失。`;
+  }
 }
 
 function renderTechnical(frame) {
@@ -810,7 +973,7 @@ function renderTechnical(frame) {
 }
 
 function loadReview(index) {
-  if (!game) return;
+  if (!game || !mayReview(game) || (!game.terminal && !game.paused)) return;
   replayPlaying = false;
   if (replayTimer) clearInterval(replayTimer);
   replayLocked = true;
@@ -919,10 +1082,11 @@ function advanceSimulation() {
     if (game.terminal) {
       running = false;
       currentAction = 'stay';
-      replayIndex = game.group === 'A' && game.task === 1 ? game.history.length - 1 : null;
-      completedRuns.push(game.snapshot());
-      if (game.task === 2) showQuestionnaire();
-      else if (game.group === 'B') beginTask2();
+      replayIndex = mayReview(game) ? game.history.length - 1 : null;
+      if (mayReview(game)) game.reviewStartedAt = performance.now();
+      completedRuns.push(studyRecord(game));
+      saveSession(game.task === 3 ? 'survey' : 'terminal');
+      if (game.task === 3) showQuestionnaire();
     }
     return true;
   }
@@ -944,12 +1108,11 @@ function answerForRange(start, end, question) {
 }
 
 function showQuestionnaire() {
-  if (!game || game.task !== 2 || !game.terminal) return;
+  if (!game || game.task !== 3 || !game.terminal) return;
   $('questionnaire').hidden = false;
-  const line = completedRuns.map((run, index) => `Task ${index + 1}：小球漏接${run.missed_by_type.small || 0}，大球漏接${(run.missed_by_type.large || 0) / 3}，加权漏接${run.missed_balls}，合作接住${run.successful_opportunities}`).join('； ');
-  $('scoreSummary').textContent = line;
+  renderScoresTable('scoreSummary');
   const shared = ['我能理解机器人2正在做什么。','我能预测机器人2接下来的动作。','我知道自己和机器人2应该如何分工接球。','我能与机器人2配合接住大球。','机器人2的行为符合我的预期。'];
-  const extra = game.group === 'A' ? ['游戏中的气泡清楚地说明了机器人2的行为。','暂停后的问答帮助我理解了所选片段。','解释帮助我判断自己应该去接哪个球。'] : [];
+  const extra = game.group === 'A' ? ['Task 2 的气泡清楚地说明了机器人2的行为。','Task 2 暂停后的问答帮助我理解了所选片段。','Task 2 的解释帮助我判断自己应该去接哪个球。'] : [];
   const holder = $('surveyItems'); holder.replaceChildren();
   [...shared, ...extra].forEach((prompt, index) => {
     const label = document.createElement('fieldset'); label.innerHTML = `<legend>${prompt}</legend>`;
@@ -960,17 +1123,33 @@ function showQuestionnaire() {
 }
 
 $('start').onclick = async () => {
-  await loadFrozenNN();
+  if (location.protocol === 'file:' || running) return;
+  $('start').disabled = true;
+  if (!nnModel) await loadFrozenNN();
   if (!nnModel) {
-    $('setupError').textContent = `无法启动：${nnLoadError || '冻结模型不可用'}。请检查本地导出包。`;
+    showModelLoadError(nnLoadError || '冻结模型不可用，请重试。');
+    $('start').disabled = false;
     return;
   }
-  $('setupError').textContent = '';
+  $('setupError').replaceChildren();
+  $('retryLoad').hidden = true;
   completedRuns.length = 0;
+  if (pendingSession) completedRuns.push(...pendingSession.completed_runs);
+  const requestedTask = pendingSession?.phase === 'terminal' ? pendingSession.task + 1
+    : pendingSession?.task || 1;
+  if (!taskSpec(requestedTask)) {
+    $('setupError').textContent = '无法恢复任务编号，请重新打开页面。';
+    $('start').disabled = false;
+    return;
+  }
+  if (pendingSession) studySessionId = pendingSession.session_id;
   try {
-    game = new OfflinePong({ group: $('group').value, participantId: $('participant').value, task: 1, seed: 260918 });
+    game = new OfflinePong({ group: pendingSession?.group || $('group').value,
+      participantId: pendingSession?.participant_id || $('participant').value,
+      task: requestedTask, seed: taskSpec(requestedTask).seed });
   } catch (error) {
     $('setupError').textContent = `无法启动：${String(error.message || error)}`;
+    $('start').disabled = false;
     return;
   }
   running = true;
@@ -981,7 +1160,20 @@ $('start').onclick = async () => {
   $('setup').hidden = true;
   $('game').hidden = false;
   $('questionnaire').hidden = true; $('completed').hidden = true;
+  pendingSession = null;
+  saveSession('active');
   render();
+};
+
+$('retryLoad').onclick = async () => {
+  if (location.protocol === 'file:' || running) return;
+  $('retryLoad').disabled = true;
+  await loadFrozenNN();
+  if (nnModel) {
+    $('setupError').textContent = '模型已加载，可以开始游戏。';
+    $('retryLoad').hidden = true;
+  } else showModelLoadError(nnLoadError || '冻结模型不可用，请重试。');
+  $('retryLoad').disabled = false;
 };
 function bindDirectionButton(id, action) {
   const button = $(id);
@@ -996,6 +1188,11 @@ bindDirectionButton('right', 'right');
 function togglePause() {
   if (!game || game.terminal) return;
   game.paused = !game.paused;
+  if (game.paused) game.pauseStartedAt = performance.now();
+  else if (game.pauseStartedAt !== null) {
+    game.pausedSeconds += (performance.now() - game.pauseStartedAt) / 1000;
+    game.pauseStartedAt = null;
+  }
   heldKeys.clear();
   currentAction = 'stay';
   replayLocked = false;
@@ -1020,11 +1217,21 @@ window.addEventListener('keyup', event => {
   if (event.key === 'ArrowLeft' || key === 'a') { event.preventDefault(); heldKeys.delete('left'); updateKeyboardAction(); }
   if (event.key === 'ArrowRight' || key === 'd') { event.preventDefault(); heldKeys.delete('right'); updateKeyboardAction(); }
 });
-window.addEventListener('blur', () => { heldKeys.clear(); currentAction = 'stay'; if (game && !game.terminal) { game.paused = true; render(); } });
+window.addEventListener('blur', () => { heldKeys.clear(); currentAction = 'stay'; if (game && !game.terminal) {
+  if (!game.paused) game.pauseStartedAt = performance.now();
+  game.paused = true; render();
+} });
 $('pause').onclick = togglePause;
-function beginTask2() {
-  if (!game?.terminal || game.task !== 1) return;
-  game = new OfflinePong({ group: game.group, participantId: game.participantId, task: 2, seed: 260919 });
+function beginNextTask() {
+  if (!game?.terminal || game.task >= 3) return;
+  if (game.reviewStartedAt !== null) {
+    game.reviewSeconds += (performance.now() - game.reviewStartedAt) / 1000;
+    game.reviewStartedAt = null;
+  }
+  completedRuns[completedRuns.length - 1] = studyRecord(game);
+  const next = game.task + 1;
+  game = new OfflinePong({ group: game.group, participantId: game.participantId,
+    task: next, seed: taskSpec(next).seed });
   $('answer').textContent = '';
   $('question').value = '';
   $('technicalEvidenceText').textContent = '';
@@ -1036,15 +1243,16 @@ function beginTask2() {
   replayIndex = null;
   rangeSelected = false;
   $('review').hidden = true;
+  saveSession('active');
   render();
 }
-$('task2').onclick = beginTask2;
+$('nextTask').onclick = beginNextTask;
 $('timeline').oninput = event => loadReview(event.target.value);
 $('rangeStart').oninput = event => { rangeSelected = true; if (Number(event.target.value) > (replayIndex ?? 0)) event.target.value = String(replayIndex ?? 0); };
 $('prevFrame').onclick = () => loadReview((replayIndex ?? 0) - 1);
 $('nextFrame').onclick = () => loadReview((replayIndex ?? 0) + 1);
 $('playReplay').onclick = () => {
-  if (!game?.history.length) return;
+  if (!game?.history.length || !mayReview(game) || (!game.paused && !game.terminal)) return;
   replayPlaying = !replayPlaying;
   $('playReplay').textContent = replayPlaying ? '暂停回放' : '播放';
   if (!replayPlaying) { if (replayTimer) clearInterval(replayTimer); return; }
@@ -1061,7 +1269,7 @@ $('playReplay').onclick = () => {
 };
 document.querySelectorAll('[data-question]').forEach(button => button.onclick = () => { $('question').value = button.dataset.question; $('ask').click(); });
 $('ask').onclick = () => {
-  if (!game || game.group !== 'A' || game.task !== 1 || (!game.terminal && !game.paused)) {
+  if (!game || !mayReview(game) || (!game.terminal && !game.paused)) {
     $('answer').textContent = '当前阶段不提供回放问答。';
     return;
   }
@@ -1069,32 +1277,101 @@ $('ask').onclick = () => {
   const question = $('question').value;
   $('answer').textContent = start < end ? answerForRange(start, end, question)
     : answerForReview(game.history[end], $('ballSelect').value || null, question, end);
-  game.questionHistory.push({ version: 'pong-question.v2.3', question,
+  game.questionHistory.push({ version: studyProtocol.version, domain_id: 'pong',
+    session_id: studySessionId, task_id: game.task, task_run_id: game.runId,
+    question,
     answer: $('answer').textContent, start_frame: game.history[start]?.frame,
     end_frame: game.history[end]?.frame, selected_ball_id: $('ballSelect').value || null,
     decision_id: game.history[end]?.decision?.decisionId || null });
+  if (game.terminal) {
+    completedRuns[completedRuns.length - 1] = studyRecord(game);
+    saveSession('terminal');
+  }
 };
 
 $('downloadReview').onclick = () => {
-  if (!game || game.group !== 'A' || game.task !== 1) return;
-  const body = { version: 'pong-review-log.v2.3', participant_id: game.participantId,
+  if (!game || !mayReview(game)) return;
+  const body = { version: studyProtocol.version, session_id: studySessionId,
+    task_id: game.task, task_run_id: game.runId, seed: game.seed,
+    participant_id: game.participantId,
     group: game.group, task: game.task, controller_source: game.controllerSource,
     actor_hash: nnModel?.model_sha256 || null, controller_version: nnController.rule_version || null,
     frames: game.history, questions: game.questionHistory };
   const url = URL.createObjectURL(new Blob([JSON.stringify(body, null, 2)], { type: 'application/json' }));
   const link = document.createElement('a');
-  link.href = url; link.download = `pong-task1-review-${Date.now()}.json`;
+  link.href = url; link.download = `pong-task2-review-${Date.now()}.json`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
 $('surveyForm').onsubmit = event => {
-  event.preventDefault(); if (!game || !game.terminal || game.task !== 2) return;
+  event.preventDefault(); if (!game || !game.terminal || game.task !== 3 || completedRuns.length !== 3) return;
   const values = Object.fromEntries(new FormData(event.target).entries());
-  const record = { version: 'pong-questionnaire.v1', participant_id: game.participantId, group: game.group, runs: completedRuns, answers: values, note: $('surveyNote').value, saved_at: new Date().toISOString() };
+  const record = { version: studyProtocol.version, domain_id: 'pong', session_id: studySessionId,
+    participant_id: game.participantId, group: game.group, assignment_source: 'manual_self_select',
+    runs: completedRuns, answers: values, note: $('surveyNote').value, saved_at: new Date().toISOString() };
   localStorage.setItem(`pong.questionnaire.${game.participantId}.${Date.now()}`, JSON.stringify(record));
   $('surveyStatus').textContent = '已保存到这台设备。'; $('questionnaire').hidden = true; $('completed').hidden = false;
+  $('game').hidden = true;
+  renderScoresTable('completedScores');
+  saveSession('completed');
 };
+
+$('newParticipant').onclick = () => {
+  sessionStorage.removeItem(SESSION_KEY);
+  pendingSession = null;
+  completedRuns.length = 0;
+  game = null;
+  running = false;
+  studySessionId = crypto.randomUUID ? crypto.randomUUID() : `session-${Date.now()}`;
+  $('participant').disabled = false;
+  $('group').disabled = false;
+  $('participant').value = 'local';
+  $('start').textContent = '开始 Task 1';
+  $('start').disabled = false;
+  $('setupError').textContent = '';
+  $('completed').hidden = true;
+  $('setup').hidden = false;
+};
+
+async function restoreSessionOnLoad() {
+  pendingSession = readSession();
+  if (!pendingSession) return;
+  studySessionId = pendingSession.session_id;
+  $('participant').value = pendingSession.participant_id;
+  $('group').value = pendingSession.group;
+  $('participant').disabled = true;
+  $('group').disabled = true;
+  if (pendingSession.phase === 'completed') {
+    completedRuns.push(...pendingSession.completed_runs);
+    $('setup').hidden = true;
+    $('game').hidden = true;
+    $('questionnaire').hidden = true;
+    $('completed').hidden = false;
+    renderScoresTable('completedScores');
+    return;
+  }
+  if (pendingSession.phase === 'survey') {
+    await loadFrozenNN();
+    if (!studyProtocol) {
+      $('setupError').textContent = '无法加载流程配置，问卷记录仍保留在本页会话中；请重试加载。';
+      return;
+    }
+    completedRuns.push(...pendingSession.completed_runs);
+    game = { task: 3, terminal: true, group: pendingSession.group,
+      participantId: pendingSession.participant_id };
+    $('setup').hidden = true;
+    showQuestionnaire();
+    return;
+  }
+  const next = pendingSession.phase === 'terminal' ? pendingSession.task + 1 : pendingSession.task;
+  $('start').textContent = pendingSession.phase === 'terminal'
+    ? `继续 Task ${next}` : `重新开始未完成的 Task ${next}`;
+  $('setupError').textContent = pendingSession.phase === 'terminal'
+    ? '上一局成绩已保存。点击后开始下一局。'
+    : `刷新后无法续接 Task ${next} 的精确物理帧；已完成的任务保留，点击后用同一个种子重开本局。`;
+}
+void restoreSessionOnLoad();
 
 let lastAnimationTime = null;
 let physicsAccumulator = 0;

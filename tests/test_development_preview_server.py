@@ -14,7 +14,7 @@ from backend.training.warehouse_study_acceptance import (
     _pareto_dominating_joint_actions,
 )
 from env.warehouse.layouts import STUDY_MAP_LAYOUT
-from env.warehouse.domain import collaborative_study_config
+from env.warehouse.domain import collaborative_study_config, participant_study_config
 from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.runtime_coordination import select_ai_ai_joint_actions
@@ -25,10 +25,42 @@ from ui.development_preview_server import (
     Handler,
     PreviewFrame,
     TASK1_SEED,
+    TASK2_SEED,
     _initial_frame,
     _transition_payload,
     build_development_tutorial,
 )
+
+
+def test_tutorial_scoring_change_preserves_actions_motion_energy_and_events(monkeypatch) -> None:
+    current = build_development_tutorial()
+    actual_factory = preview_server.participant_study_config
+    monkeypatch.setattr(
+        preview_server, "participant_study_config",
+        lambda **kwargs: actual_factory(
+            delivery_points=100, robot_collision_points=-200,
+            shutdown_points=-50, shared_charger_occupancy_points=-50,
+            **kwargs,
+        ),
+    )
+    legacy_scoring = build_development_tutorial()
+    assert len(current) == len(legacy_scoring) == 121
+    for new, old in zip(current, legacy_scoring):
+        assert new.actions == old.actions
+        assert [(agent.position, agent.battery, agent.carrying_task_id)
+                for agent in new.state.agents] == [
+                    (agent.position, agent.battery, agent.carrying_task_id)
+                    for agent in old.state.agents
+                ]
+        assert [(task.task_id, task.status, task.carrier_agent_id)
+                for task in new.state.tasks] == [
+                    (task.task_id, task.status, task.carrier_agent_id)
+                    for task in old.state.tasks
+                ]
+        assert [event["event"] for event in new.events] == [
+            event["event"] for event in old.events
+        ]
+    assert current[-1].state.user_score != legacy_scoring[-1].state.user_score
 
 
 def _envelope(state: DevelopmentPreviewState, command: str, **payload):
@@ -61,6 +93,19 @@ def _start_task1(
     state.command(_envelope(state, "begin_task1"))
 
 
+def _start_task2(state: DevelopmentPreviewState, **kwargs) -> None:
+    _start_task1(state, **kwargs)
+    state.stage = "task1_complete"
+    state.command(_envelope(state, "begin_task2"))
+
+
+def test_new_warehouse_session_defaults_to_chinese_without_locale_parameter() -> None:
+    state = DevelopmentPreviewState()
+    assert state.view()["study"]["locale"] == "zh-CN"
+    state.command(_envelope(state, "start", participant_id="default-locale"))
+    assert state.view()["study"]["locale"] == "zh-CN"
+
+
 def _append_explicit_transition(
     state: DevelopmentPreviewState,
     environment: WarehouseMultiAgentEnv,
@@ -84,7 +129,7 @@ def _append_explicit_transition(
             reveal_ai_action=False,
             loop=False,
         )
-        | {"before_stage": "task1"},
+        | {"before_stage": state.stage},
         action_distributions={
             agent_id: ActionDistribution(
                 agent_id=agent_id,
@@ -356,9 +401,67 @@ def test_task1_flows_directly_to_task2_without_explanation_stage() -> None:
     assert state.stage == "task2"
 
 
-def test_live_question_uses_real_task1_prefix_and_does_not_mutate_game_state() -> None:
+def test_three_task_seed_order_permissions_and_final_survey(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(preview_server, "STUDY_RECORD_DIR", tmp_path)
     state = DevelopmentPreviewState()
-    _start_task1(state)
+    _start_task1(state, condition="explanation")
+    assert state.policy_seed == 52000
+    assert state.view()["study"]["protocol_version"] == "three-task-explanation.v1"
+    assert "ask_explanation" not in state.commands()
+    with pytest.raises(RuntimeError):
+        state.command(_envelope(state, "ask_explanation", question="Why?"))
+
+    def finish_round() -> None:
+        snapshot = state.environment.get_state()
+        snapshot.frame = state.environment.config.horizon - 1
+        state.environment.set_state(snapshot)
+        state.command(_envelope(state, "human_action", action="WAIT"))
+
+    finish_round()
+    assert state.stage == "task1_complete"
+    assert state.task1["seed"] == 52000
+    state.command(_envelope(state, "begin_task2"))
+    task2_run = state.task_run_id
+    assert state.policy_seed == 51000
+    assert "ask_explanation" in state.commands()
+    state.command(_envelope(state, "human_action", action="WAIT"))
+    bubble = state.view()["study"]["action_bubble"]
+    assert bubble["run_id"] == task2_run
+    question_envelope = _envelope(state, "ask_explanation", question="Why?", question_kind="action",
+                                  target_agent="robot_2", action_run_id=task2_run,
+                                  action_stage="task2", action_frame=1)
+    state.command(question_envelope)
+    assert state.view()["last_explanation"] is not None
+    finish_round()
+    assert state.stage == "task2_complete"
+    state.command(_envelope(state, "begin_task3"))
+    assert state.policy_seed == 51500
+    assert state.task_run_id != task2_run
+    assert state.view()["last_explanation"] is None
+    assert "ask_explanation" not in state.commands()
+    with pytest.raises(RuntimeError, match="earlier study state"):
+        state.command(question_envelope)
+    with pytest.raises(RuntimeError):
+        state.command(_envelope(state, "ask_explanation", question="Why?",
+                                action_run_id=task2_run, action_stage="task2", action_frame=1))
+    finish_round()
+    assert state.stage == "survey"
+    assert set(state.view()["study"]["round_summaries"]) == {"task1", "task2", "task3"}
+    state.command(_envelope(state, "submit_survey", coordination_understanding=4,
+                            ai_predictability=3, interface_clarity=5, comment="test"))
+    assert state.stage == "completed"
+    assert state.view()["study"]["survey_answers"]["coordination_understanding"] == 4
+    record = json.loads((tmp_path / f"{state.run_id}.json").read_text(encoding="utf-8"))
+    assert record["protocol_version"] == "three-task-explanation.v1"
+    assert [round_["seed"] for round_ in record["rounds"]] == [52000, 51000, 51500]
+    assert [round_["explanation_allowed"] for round_ in record["rounds"]] == [False, True, False]
+    assert [round_["question_count"] for round_ in record["rounds"]] == [0, 1, 0]
+    assert record["survey_answers"]["coordination_understanding"] == 4
+
+
+def test_live_question_uses_real_task2_prefix_and_does_not_mutate_game_state() -> None:
+    state = DevelopmentPreviewState()
+    _start_task2(state)
     for action in ("UP", "WAIT", "LEFT"):
         state.command(_envelope(state, "human_action", action=action))
 
@@ -376,7 +479,7 @@ def test_live_question_uses_real_task1_prefix_and_does_not_mutate_game_state() -
     report = result["view"]["last_explanation"]
 
     assert after == before
-    assert report["trajectory_kind"] == "human_ai_task1"
+    assert report["trajectory_kind"] == "human_ai_task2"
     assert report["agent_control"] == {"robot_1": "human", "robot_2": "ai"}
     assert report["target_agent"] == "robot_2"
     assert len(report["context_frames"]) <= 5
@@ -386,7 +489,7 @@ def test_live_question_uses_real_task1_prefix_and_does_not_mutate_game_state() -
 
 def test_live_question_rejects_replay_frame_and_other_robot() -> None:
     state = DevelopmentPreviewState()
-    _start_task1(state)
+    _start_task2(state)
     state.command(_envelope(state, "human_action", action="WAIT"))
 
     with pytest.raises(ValueError, match="cannot select"):
@@ -415,7 +518,7 @@ def test_live_question_rejects_replay_frame_and_other_robot() -> None:
         )
 
 
-def test_live_questions_are_group_a_task1_only() -> None:
+def test_live_questions_are_group_a_task2_only() -> None:
     control = DevelopmentPreviewState()
     _start_task1(control, condition="control")
     assert "ask_explanation" not in control.commands()
@@ -431,14 +534,16 @@ def test_live_questions_are_group_a_task1_only() -> None:
         )
 
     task2 = DevelopmentPreviewState()
-    _start_task1(task2)
-    task2.stage = "task2"
+    _start_task2(task2)
+    assert "ask_explanation" in task2.commands()
+    task2.stage = "task3"
     assert "ask_explanation" not in task2.commands()
+    assert task2.view()["last_explanation"] is None
 
 
 def test_language_switch_preserves_answer_evidence_and_game_state() -> None:
     state = DevelopmentPreviewState()
-    _start_task1(state, locale="en")
+    _start_task2(state, locale="en")
     state.command(_envelope(state, "human_action", action="WAIT"))
     state.command(
         _envelope(
@@ -465,7 +570,7 @@ def test_language_switch_preserves_answer_evidence_and_game_state() -> None:
 
 def test_next_participant_action_is_attached_to_question_log() -> None:
     state = DevelopmentPreviewState()
-    _start_task1(state)
+    _start_task2(state)
     state.command(_envelope(state, "human_action", action="WAIT"))
     state.command(
         _envelope(
@@ -486,9 +591,9 @@ def test_next_participant_action_is_attached_to_question_log() -> None:
 
 def test_collision_answer_uses_same_pre_state_and_no_foresight() -> None:
     state = DevelopmentPreviewState()
-    _start_task1(state)
+    _start_task2(state)
     environment = WarehouseMultiAgentEnv(collaborative_study_config())
-    environment.reset(seed=TASK1_SEED)
+    environment.reset(seed=TASK2_SEED)
     scenario = environment.get_state()
     scenario.by_id("robot_1").position = (4, 2)
     scenario.by_id("robot_2").position = (4, 4)
@@ -523,7 +628,7 @@ def test_collision_answer_uses_same_pre_state_and_no_foresight() -> None:
 
 def test_no_recent_collision_answer_is_explicit_and_anchored_to_last_five() -> None:
     state = DevelopmentPreviewState()
-    _start_task1(state)
+    _start_task2(state)
     state.command(_envelope(state, "human_action", action="WAIT"))
 
     result = state.command(
@@ -539,3 +644,136 @@ def test_no_recent_collision_answer_is_explicit_and_anchored_to_last_five() -> N
     assert result["view"]["last_explanation"]["answer_en"] == (
         "No collision occurred in the last five steps."
     )
+
+
+def test_group_a_receives_only_a_frame_bound_ask_why_affordance_until_clicked() -> None:
+    state = DevelopmentPreviewState()
+    _start_task2(state, condition="explanation", locale="en")
+
+    result = state.command(_envelope(state, "human_action", action="WAIT"))
+    bubble = result["view"]["study"]["action_bubble"]
+    assert bubble["target_agent"] == "robot_2"
+    assert bubble["frame"] == 1
+    assert bubble["run_id"] == state.task_run_id
+    assert "text" not in bubble
+    assert result["view"]["last_explanation"] is None
+
+    before = deepcopy(state.environment.get_state())
+    answer = state.command(_envelope(
+        state, "ask_explanation", question="Why?", question_kind="action",
+        target_agent="robot_2", action_run_id=state.task_run_id,
+        action_stage="task2", action_frame=1, request_id="click-1",
+    ))["view"]["last_explanation"]
+    assert state.environment.get_state() == before
+    assert answer["requested_action_frame"] == answer["anchor_frame"] == 1
+    assert answer["request_id"] == "click-1"
+    assert "no_safe_progress" not in answer["explanation"]
+    assert "向等待" not in answer["explanation"]
+    assert state.question_log[-1]["displayed_frame"] == 1
+
+    state.command(_envelope(state, "set_language", locale="zh-CN"))
+    assert state.view()["study"]["action_bubble"] == bubble
+    assert state.view()["last_explanation"]["anchor_frame"] == 1
+    assert state.view()["last_explanation"]["explanation"] != answer["explanation"]
+
+    with pytest.raises(ValueError, match="current completed"):
+        state.command(_envelope(
+            state, "ask_explanation", question="Why?", question_kind="action",
+            target_agent="robot_2", action_run_id=state.task_run_id,
+            action_stage="task2", action_frame=2, request_id="future",
+        ))
+    with pytest.raises(ValueError, match="this run"):
+        state.command(_envelope(
+            state, "ask_explanation", question="Why?", question_kind="action",
+            target_agent="robot_2", action_run_id="another-run",
+            action_stage="task2", action_frame=1, request_id="other",
+        ))
+
+    control = DevelopmentPreviewState()
+    _start_task2(control, condition="control")
+    control.command(_envelope(control, "human_action", action="WAIT"))
+    assert control.view()["study"]["action_bubble"] is None
+    with pytest.raises(RuntimeError):
+        control.command(_envelope(
+            control, "ask_explanation", question="Why?", question_kind="action",
+            target_agent="robot_2", action_run_id=control.task_run_id,
+            action_stage="task2", action_frame=1,
+        ))
+
+    state.stage = "task3"
+    assert state.view()["study"]["action_bubble"] is None
+    assert state.view()["last_explanation"] is None
+
+
+def test_charger_penalty_question_remains_bound_after_five_steps(monkeypatch) -> None:
+    state = DevelopmentPreviewState()
+    _start_task2(state, condition="explanation", locale="en")
+    environment = WarehouseMultiAgentEnv(participant_study_config())
+    environment.reset(seed=901)
+    scenario = environment.get_state()
+    scenario.by_id("robot_1").position = environment.layout.charger_position
+    scenario.by_id("robot_1").battery = 53.0
+    scenario.by_id("robot_2").position = (4, 2)
+    scenario.by_id("robot_2").battery = 19.0
+    environment.set_state(scenario)
+    state.environment = environment
+    state.round_frame = _initial_frame(environment)
+    state.round_frames = [state.round_frame]
+
+    monkeypatch.setattr(
+        preview_server,
+        "_neural_actions",
+        lambda *_args, **_kwargs: (
+            {"robot_1": "WAIT", "robot_2": "WAIT"},
+            {},
+            {
+                "policy_actions": {"robot_1": "WAIT", "robot_2": "WAIT"},
+                "selected_actions": {"robot_1": "WAIT", "robot_2": "WAIT"},
+                "selection_changed_policy": False,
+            },
+        ),
+    )
+    state._advance_round("WAIT")
+    penalty = state.view()["study"]["latest_charger_penalty"]
+    assert penalty and penalty["event_id"]
+    bubble = state.view()["study"]["action_bubble"]
+    assert bubble["frame"] == penalty["frame"]
+    assert "text" not in bubble
+
+    for _ in range(6):
+        state._advance_round("WAIT")
+
+    result = state.command(
+        _envelope(
+            state,
+            "ask_explanation",
+            target_agent="robot_2",
+            question="Why was there a penalty just now?",
+            question_kind="charger_penalty",
+            penalty_event_id=penalty["event_id"],
+            penalty_frame=penalty["frame"],
+        )
+    )
+    answer = result["view"]["last_explanation"]["answer_en"]
+    assert "63%" in answer
+    assert "19%" in answer
+    assert "−5" in answer
+    assert result["view"]["study"]["score_version"] == "warehouse-participant-score.v2"
+
+    # The answer must use the recorded event amount even when reading an
+    # archived event scored under the previous participant formula.
+    historical = state.round_frames[1].info["rule_events"][0]
+    historical["score_delta"] = -50.0
+    previous = state.command(
+        _envelope(
+            state,
+            "ask_explanation",
+            target_agent="robot_2",
+            question="Why was this older penalty applied?",
+            question_kind="charger_penalty",
+            penalty_event_id=penalty["event_id"],
+            penalty_frame=penalty["frame"],
+        )
+    )
+    assert "−50" in previous["view"]["last_explanation"]["answer_en"]
+    assert result["view"]["last_explanation"]["structured_evidence"]["penalty_event_id"] == penalty["event_id"]

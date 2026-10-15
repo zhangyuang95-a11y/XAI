@@ -1,3 +1,7 @@
-# The online study evaluates the frozen Actor with NumPy only. Training and
-# RCPD fitting stay offline and are intentionally absent from the Render image.
+# Minimal dependencies for the public study and dependency-light neural Actor.
+# The exact trained PyTorch Actor weights are evaluated with NumPy on Render.
 numpy==2.2.3
+scikit-learn==1.9.0
+
+# Transactional persistent storage for the unified study; legacy dependencies retained.
+psycopg[binary]==3.3.6

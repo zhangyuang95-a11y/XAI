@@ -92,6 +92,12 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 #technicalEvidence pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 textarea { width: 100%; min-height: 80px; margin: 8px 0; }
 #questionnaire, #completed { margin-top: 18px; background: #fff; border: 2px solid #cdd5e3; border-radius: 4px; padding: 18px; box-shadow: 4px 4px 0 #c1cadb; }
+.round-result { margin-top: 12px; padding: 12px; border: 2px solid #cdd5e3; background: #fff; }
+.round-result p { margin: 4px 0; }
+.score-table { width: 100%; margin: 12px 0 18px; border-collapse: collapse; text-align: center; }
+.score-table th, .score-table td { border: 2px solid #cdd5e3; padding: 9px 5px; }
+.score-table th { background: #eef0ff; }
+.score-table .missing { color: #b4233b; }
 #surveyItems { display: grid; gap: 12px; }
 #surveyItems fieldset { border: 2px solid #d9def0; display: flex; gap: 12px; flex-wrap: wrap; }
 #surveyItems legend { font-weight: 700; }

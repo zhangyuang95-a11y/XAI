@@ -55,6 +55,136 @@ from .state_support import render_ascii_state, validate_warehouse_state
 from .route_goals import frozen_route_goal
 
 
+def _shared_charger_occupancy_rule(
+    environment: "WarehouseMultiAgentEnv",
+    previous: WarehouseState,
+    next_state: WarehouseState,
+    raw_actions: Mapping[str, str],
+    executed: Mapping[str, str],
+    robot_collision: bool,
+) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...]]:
+    """Evaluate the hidden shared-charger rule from one frozen transition.
+
+    Eligibility uses only ``S_t`` plus the post-action battery/position.  The
+    marker is carried across transient ineligibility and collisions, and is
+    cleared only after the marked robot actually leaves the charger.
+    """
+
+    charger = environment.layout.charger_position
+    prior_marked = set(previous.shared_charger_penalty_occupants)
+    still_marked: set[str] = set()
+    for agent_id in prior_marked:
+        before = previous.by_id(agent_id)
+        after = next_state.by_id(agent_id)
+        if before.position == charger and after.position == charger:
+            still_marked.add(agent_id)
+
+    events: list[dict[str, Any]] = []
+    if not robot_collision:
+        for occupant in previous.agents:
+            if occupant.position != charger:
+                continue
+            agent_id = occupant.agent_id
+            after = next_state.by_id(agent_id)
+            if (
+                str(raw_actions.get(agent_id, "WAIT")) != "WAIT"
+                or str(executed.get(agent_id, "WAIT")) != "WAIT"
+                or after.position != charger
+                or agent_id in prior_marked
+                or after.battery <= environment.config.shared_charger_occupancy_threshold
+            ):
+                continue
+            teammate = next(
+                other for other in previous.agents if other.agent_id != agent_id
+            )
+            if (
+                not teammate.active
+                or teammate.battery >= environment.config.shared_charger_low_battery_threshold
+                or shortest_path_distance(
+                    teammate.position,
+                    charger,
+                    environment.config.map_layout_id,
+                ) > environment.config.shared_charger_distance_limit
+                or not any(
+                    _safe_charger_departure_action(
+                        environment,
+                        previous,
+                        agent_id,
+                        candidate,
+                    )
+                    for candidate in MOVE_DELTAS
+                )
+            ):
+                continue
+            event_id = (
+                f"shared-charger-{previous.episode_id}-{next_state.frame}-"
+                f"{agent_id}"
+            )
+            still_marked.add(agent_id)
+            events.append(
+                {
+                    "event": "shared_charger_occupancy",
+                    "event_id": event_id,
+                    "rule_version": "shared-charger-occupancy.v1",
+                    "agent_id": agent_id,
+                    "responsible_agent_id": agent_id,
+                    "occupant_battery_before": float(occupant.battery),
+                    "occupant_battery_after": float(after.battery),
+                    "teammate_agent_id": teammate.agent_id,
+                    "teammate_battery_before": float(teammate.battery),
+                    "teammate_distance_to_charger": int(
+                        shortest_path_distance(
+                            teammate.position,
+                            charger,
+                            environment.config.map_layout_id,
+                        )
+                    ),
+                    "safe_departure_actions": [
+                        candidate
+                        for candidate in MOVE_DELTAS
+                        if _safe_charger_departure_action(
+                            environment,
+                            previous,
+                            agent_id,
+                            candidate,
+                        )
+                    ],
+                    "score_delta": float(
+                        environment.config.shared_charger_occupancy_points
+                    ),
+                }
+            )
+    return tuple(events), tuple(sorted(still_marked))
+
+
+def _safe_charger_departure_action(
+    environment: "WarehouseMultiAgentEnv",
+    state: WarehouseState,
+    agent_id: str,
+    candidate_action: str,
+) -> bool:
+    """Whether a charger occupant has one physically safe move in ``S_t``."""
+
+    agent = state.by_id(agent_id)
+    if (
+        agent.position != environment.layout.charger_position
+        or candidate_action not in MOVE_DELTAS
+        or agent.battery <= environment.config.move_battery_cost
+    ):
+        return False
+    teammate_id = next(
+        other.agent_id for other in state.agents if other.agent_id != agent_id
+    )
+    actions = {agent_id: candidate_action, teammate_id: "WAIT"}
+    targets, _, invalid, collision, _, _ = environment._resolve_motion(state, actions)
+    return (
+        agent_id not in invalid
+        and not collision
+        and targets[agent_id] != agent.position
+        and targets[agent_id] != state.by_id(teammate_id).position
+    )
+
+
 class WarehouseMultiAgentEnv:
     """Deterministic-seeded cooperative Markov game for two moving robots."""
 
@@ -1648,6 +1778,19 @@ class WarehouseMultiAgentEnv:
                 else 0
             )
 
+        shared_charger_events, marked_charger_occupants = (
+            _shared_charger_occupancy_rule(
+                self,
+                previous,
+                next_state,
+                raw_actions,
+                executed,
+                robot_collision,
+            )
+        )
+        next_state.last_rule_events = shared_charger_events
+        next_state.shared_charger_penalty_occupants = marked_charger_occupants
+
         (
             shutdown_agents,
             score_components,
@@ -1662,6 +1805,7 @@ class WarehouseMultiAgentEnv:
             delivered_count=len(delivered_tasks),
             robot_collision=robot_collision,
             route_regret=route_regret,
+            shared_charger_penalty_count=len(shared_charger_events),
         )
         next_state.user_score += score_delta
         for name, value in score_components.items():
@@ -1833,6 +1977,30 @@ class WarehouseMultiAgentEnv:
             {
                 "proposed_actions": dict(raw_actions),
                 "executed_actions": dict(executed),
+                # Explicit three-stage action provenance.  Robot 2 may be
+                # changed by the authorized frozen-state controller; this is
+                # intentionally not reported as a zero-override experiment.
+                "nn_proposed_actions": dict(
+                    dict(decision_metadata or {}).get("policy_actions", {})
+                ),
+                "controller_selected_actions": dict(
+                    dict(decision_metadata or {}).get("selected_actions", {})
+                ),
+                "environment_executed_actions": dict(executed),
+                "action_override_agents": tuple(
+                    sorted(
+                        agent_id
+                        for agent_id, proposed in dict(
+                            dict(decision_metadata or {}).get("policy_actions", {})
+                        ).items()
+                        if str(
+                            dict(decision_metadata or {})
+                            .get("selected_actions", {})
+                            .get(agent_id, proposed)
+                        )
+                        != str(proposed)
+                    )
+                ),
                 "pickup_agents": tuple(sorted(pickup_agents)),
                 "delivery_agents": tuple(sorted(delivery_agents)),
                 "delivered_task_ids": tuple(sorted(task.task_id for task in delivered_tasks)),
@@ -1930,6 +2098,9 @@ class WarehouseMultiAgentEnv:
                 ),
                 "charger_used": charger_energy_gained > 0.0,
                 "energy_events": tuple(energy_events),
+                "rule_events": tuple(shared_charger_events),
+                "shared_charger_penalty_events": tuple(shared_charger_events),
+                "shared_charger_penalty_count": len(shared_charger_events),
                 "available_task_ages": {
                     task.task_id: max(0, next_state.frame - task.created_frame)
                     for task in next_state.tasks

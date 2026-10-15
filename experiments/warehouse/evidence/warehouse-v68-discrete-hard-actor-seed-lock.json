@@ -1,0 +1,46 @@
+{
+  "version": "warehouse-v68-discrete-hard-actor-exploration-seeds.v1",
+  "status": "prelocked_unregistered_discrete_hard_topology_exploration",
+  "purpose": "Alternate exact hard topology fitting to the complete frozen NN masked distribution with public-state Actor training after the v6.7 soft-route failure; no registered or sealed seed is used",
+  "screen": {
+    "diagnostic_only": true,
+    "pair_seed": 11568,
+    "scenario_namespace": "warehouse-v68-short-unregistered-11568",
+    "topology_fit_scenario_seeds": {"first": 1150000, "last_inclusive": 1150049, "count": 50},
+    "topology_cv_scenario_seeds": {"first": 1150050, "last_inclusive": 1150074, "count": 25},
+    "diagnostic_quality_scenario_seeds": {"first": 1150100, "last_inclusive": 1150123, "count": 24},
+    "diagnostic_quality_task_ids": [1, 2, 3]
+  },
+  "fresh_confirmation": {
+    "pair_seed": 11668,
+    "scenario_namespace": "warehouse-v68-confirm-unregistered-11668",
+    "topology_fit_scenario_seeds": {"first": 1160000, "last_inclusive": 1160049, "count": 50},
+    "topology_cv_scenario_seeds": {"first": 1160050, "last_inclusive": 1160074, "count": 25},
+    "program_fit_scenario_seeds": {"first": 1160100, "last_inclusive": 1160149, "count": 50},
+    "program_calibration_scenario_seeds": {"first": 1160150, "last_inclusive": 1160174, "count": 25},
+    "program_eligibility_scenario_seeds": {"first": 1160175, "last_inclusive": 1160199, "count": 25},
+    "program_validation_scenario_seeds": {"first": 1160200, "last_inclusive": 1160223, "count": 24},
+    "descriptive_audit_scenario_seeds": {"first": 1160300, "last_inclusive": 1160323, "count": 24},
+    "pressure_base_seeds": {"first": 1160400, "last_inclusive": 1160431, "count": 32},
+    "pressure_scenario_seed_formula": "base_seed * 10 + task, task in (1,2,3)",
+    "pressure_action_seed_offsets": [0, 1000000, 2000000],
+    "pressure_episode_count": 288,
+    "post_ppo_program_fit_scenario_seeds": {"first": 1161100, "last_inclusive": 1161149, "count": 50},
+    "post_ppo_program_calibration_scenario_seeds": {"first": 1161150, "last_inclusive": 1161174, "count": 25},
+    "post_ppo_program_eligibility_scenario_seeds": {"first": 1161175, "last_inclusive": 1161199, "count": 25},
+    "post_ppo_program_validation_scenario_seeds": {"first": 1161200, "last_inclusive": 1161223, "count": 24},
+    "post_ppo_descriptive_audit_scenario_seeds": {"first": 1161300, "last_inclusive": 1161323, "count": 24},
+    "post_ppo_pressure_base_seeds": {"first": 1161400, "last_inclusive": 1161431, "count": 32},
+    "post_ppo_pressure_episode_count": 288
+  },
+  "source_bc_seed_rule": "_bc_stage_seeds(pair_seed, stage, count) = pair_seed * 100000 + stage * 1000 + index; receipt must enumerate every actual stage seed and prove disjointness from all reserved evaluation and formal blocks",
+  "constraints": [
+    "The screen may shape the method but its CV and diagnostic quality blocks cannot be presented as independent confirmation; changing the method after confirmation validation or pressure requires another prelocked set.",
+    "The confirmation pair uses a new paired initial Actor and BC stage schedule; all topology, four-part program, audit and pressure scenes are new and disjoint by purpose.",
+    "Every topology fit uses only the current frozen full NN masked distribution on fit episodes. Public teacher labels may train pre-self-play BC quality but never select topology or executed actions.",
+    "Split weights are fitted as exact hard decisions and checked after float32 export. No soft-routing surrogate is allowed to claim hard-route fidelity.",
+    "Program fit, calibration, eligibility, validation and descriptive audit are episode-disjoint, and no validation or audit set selects leaves or methods while still being called independent.",
+    "Both NN Actors choose every self-play and runtime action through the physical legal mask. True environmental cost signals update NN weights only; no online teacher imitation or runtime action rules.",
+    "Registered development, one-time final audit and heldout seed blocks remain untouched."
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "status": "prelocked_unregistered_joint_actor_exploration",
+  "version": "warehouse-v66-joint-actor-exploration-seeds.v1",
+  "purpose": "New Actor/tree joint-training hypothesis after static-topology fit-only CV failure; not registered or sealed",
+  "pair_seed": 11266,
+  "scenario_namespace": "warehouse-v66-joint-actor-unregistered-11266",
+  "topology_development": {
+    "fit_scenario_seeds": {"first": 1120000, "last_inclusive": 1120049, "count": 50},
+    "fit_only_cv_scenario_seeds": {"first": 1120050, "last_inclusive": 1120074, "count": 25}
+  },
+  "bc_checkpoint": {
+    "program_fit_scenario_seeds": {"first": 1120100, "last_inclusive": 1120149, "count": 50},
+    "program_calibration_scenario_seeds": {"first": 1120150, "last_inclusive": 1120174, "count": 25},
+    "program_eligibility_scenario_seeds": {"first": 1120175, "last_inclusive": 1120199, "count": 25},
+    "program_validation_scenario_seeds": {"first": 1120200, "last_inclusive": 1120223, "count": 24},
+    "descriptive_audit_scenario_seeds": {"first": 1120300, "last_inclusive": 1120323, "count": 24},
+    "pressure_base_seeds": {"first": 1120400, "last_inclusive": 1120431, "count": 32},
+    "pressure_scenario_seed_formula": "base_seed * 10 + task, task in (1,2,3)",
+    "pressure_action_seed_offsets": [0, 1000000, 2000000],
+    "pressure_episode_count": 288
+  },
+  "post_ppo_checkpoint": {
+    "program_fit_scenario_seeds": {"first": 1121100, "last_inclusive": 1121149, "count": 50},
+    "program_calibration_scenario_seeds": {"first": 1121150, "last_inclusive": 1121174, "count": 25},
+    "program_eligibility_scenario_seeds": {"first": 1121175, "last_inclusive": 1121199, "count": 25},
+    "program_validation_scenario_seeds": {"first": 1121200, "last_inclusive": 1121223, "count": 24},
+    "descriptive_audit_scenario_seeds": {"first": 1121300, "last_inclusive": 1121323, "count": 24},
+    "pressure_base_seeds": {"first": 1121400, "last_inclusive": 1121431, "count": 32},
+    "pressure_scenario_seed_formula": "base_seed * 10 + task, task in (1,2,3)",
+    "pressure_action_seed_offsets": [0, 1000000, 2000000],
+    "pressure_episode_count": 288
+  },
+  "constraints": [
+    "Actual source BC/PPO scenario seeds must be recorded and checked against every reserved evaluation scenario seed, including expanded pressure scenes.",
+    "Topology search may use only topology fit and fit-only CV episodes. Final program fit, calibration, eligibility, validation, descriptive audit, and pressure must remain disjoint in that order.",
+    "An outcome from validation, audit, or pressure cannot be used to retune the method and then treated as independent validation; a revised method needs a new seed lock.",
+    "The three registered development pairs, formal selection, sealed final audit, and held-out test remain untouched."
+  ]
+}

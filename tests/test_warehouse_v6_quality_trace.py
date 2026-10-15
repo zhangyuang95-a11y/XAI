@@ -12,7 +12,8 @@ from backend.training.warehouse_v6_runner import (
 from experiments.warehouse.admission import _quality_trace_valid, _validated_episodes
 from experiments.warehouse.acceptance import _digest, _paired_schedule_evidence
 from experiments.warehouse.protocol import (
-    DEVELOPMENT_SELECTION_SEEDS, PairRunSpec, SCENARIO_BLOCK_STEPS,
+    DEVELOPMENT_SELECTION_SEEDS, FINAL_PROGRAM_SPLIT_COUNTS, PairRunSpec,
+    SCENARIO_BLOCK_STEPS,
     scenario_schedule_sha256, scenario_seed,
 )
 
@@ -66,6 +67,12 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
     variants = {variant: {
         "variant": variant, "pair_seed": spec.pair_seed,
         "joint_steps": spec.joint_steps,
+        "architecture_mode": spec.architecture_mode,
+        "bc_recipe_version": spec.bc_recipe_version,
+        "online_program_extraction_steps": list(
+            spec.online_program_extraction_steps),
+        "online_program_split_block_cycle": FINAL_PROGRAM_SPLIT_COUNTS,
+        "online_program_cohorts_disjoint": True,
         "run_spec_sha256": scientific,
         "training_config_sha256": _training_config_sha256(checked),
         "scenario_schedule_sha256": schedule_sha,
@@ -76,10 +83,13 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
     pair = {
         "candidate_id": spec.candidate_id, "release_id": spec.release_id,
         "pair_seed": spec.pair_seed, "joint_steps": spec.joint_steps,
+        "architecture_mode": spec.architecture_mode,
+        "online_program_extraction_steps": list(
+            spec.online_program_extraction_steps),
         "run_spec_sha256": scientific,
         "training_config_sha256": _training_config_sha256(checked),
         "source_closure_sha256": checked["source_closure_sha256"],
-        "bc_recipe_version": "warehouse-public-dual-bc.v6.2",
+        "bc_recipe_version": spec.bc_recipe_version,
         "assigned_scenario_schedule_sha256": schedule_sha,
         "checkpoint_seeds": list(spec.checkpoint_seeds),
         "variants": variants,

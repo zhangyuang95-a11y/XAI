@@ -152,7 +152,7 @@ class RealParallelTraces(unittest.TestCase):
         self.assertEqual(e.decide(state)['slot'],0)
 
     def test_two_real_orders_overlap_before_first_output_and_three_dishes_complete(self):
-        for seed in (1000,1001,2000,2001):
+        for seed in (1000, 1001, 1100, 1101):
             for task in (1,2,3):
                 with self.subTest(seed=seed,task=task):
                     frames,events=run(seed,task)

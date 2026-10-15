@@ -37,6 +37,8 @@ def tick(state, human='wait', ai='wait', slot=None):
 
 
 def run(seed, task, human=None):
+    if seed in e._configuration()['held_out_seeds']:
+        raise ValueError('Kitchen test rollouts must not replay held-out seeds')
     state = e.initial_state(seed, task)
     frames, events = [deepcopy(state)], []
     while not state['terminal']:
@@ -636,9 +638,10 @@ class PhysicalDisposalAndVisibility(unittest.TestCase):
 
 
 class KitchenFeasibility(unittest.TestCase):
-    def test_all_frozen_scenarios_with_actual_fixed_ai(self):
+    def test_development_scenarios_with_actual_fixed_ai(self):
         cfg = e._configuration()
-        for seed in cfg['development_seeds'] + cfg['held_out_seeds']:
+        self.assertFalse(set(cfg['development_seeds']) & set(cfg['held_out_seeds']))
+        for seed in cfg['development_seeds']:
             for task in (1, 2, 3):
                 with self.subTest(seed=seed, task=task):
                     frames, events = run(seed, task)

@@ -239,9 +239,13 @@ def test_score_explanations_derive_from_constants_in_both_languages(monkeypatch)
     assert '23' in decision['reason_en'] and '23' in decision['reason_zh']
 
 
-def test_seeded_menus_frozen_distinct_across_tasks_no_triples_and_group_independent():
+def test_development_and_unregistered_menus_are_deterministic_and_distinct():
     all_menus = set()
-    for seed in list(range(100)) + list(range(1000, 1024)) + list(range(2000, 2024)):
+    cfg = e._configuration()
+    seeds = list(range(100)) + cfg['development_seeds']
+    if set(seeds) & set(cfg['held_out_seeds']):
+        raise AssertionError('Kitchen menu tests must not replay held-out seeds')
+    for seed in seeds:
         menus = []
         for task in (1, 2, 3):
             group_a = e.initial_state(seed, task)

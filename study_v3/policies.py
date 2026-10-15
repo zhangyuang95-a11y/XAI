@@ -703,6 +703,11 @@ def _accepted_warehouse_v6(entry: dict, binding: dict) -> bool:
         if entry != entries.get(binding['variant']):
             return False
         evidence, revision = warehouse_evidence_snapshot()
+        # The policy entries were read before the evidence snapshot. A catalog
+        # replacement between those reads must not attach new evidence to an
+        # old Actor binding, even when all referenced files still hash cleanly.
+        if warehouse_policy_artifacts() != entries:
+            return False
         identity = sha256(json.dumps({'entry': entry, 'binding': binding},
                                     sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         cache_key = (revision, source_closure, identity)

@@ -236,3 +236,40 @@ def test_catalog_replacement_during_evidence_snapshot_fails_closed(
                        match="warehouse_catalog_changed_during_validation"):
         catalog.warehouse_evidence_snapshot()
     assert catalog._WAREHOUSE_EVIDENCE_CACHE == {}
+
+
+def test_catalog_replacement_between_policy_entries_and_evidence_fails_closed(
+        tmp_path, monkeypatch):
+    from experiments.warehouse import acceptance as verifier
+    from study_v3 import policies
+
+    monkeypatch.setattr(catalog, "ROOT", tmp_path)
+    catalog_path = (tmp_path / "releases" / catalog.RELEASE_ID / "catalog.json")
+    monkeypatch.setattr(catalog, "CATALOG_PATH", catalog_path)
+    monkeypatch.setattr(catalog, "_WAREHOUSE_EVIDENCE_CACHE", {})
+    monkeypatch.setattr(policies, "ROOT", tmp_path)
+    monkeypatch.setattr(policies, "_WAREHOUSE_ACCEPTANCE_CACHE", set())
+    monkeypatch.setattr(policies, "warehouse_runtime_source_closure_sha256",
+                        lambda: "7" * 64)
+    package = _synthetic_package(tmp_path)
+    entry = package["entries"]["regularized"]
+    binding = {"domain": "warehouse", "variant": "regularized",
+               "policy_id": entry["policy_id"],
+               "actor_sha256": entry["actor_sha256"],
+               "human_actor_sha256": entry["role_sha256"]["human"],
+               "ai_actor_sha256": entry["role_sha256"]["ai"],
+               "actor_model_version": entry["model_version"],
+               "feature_schema_sha256": entry["feature_schema_sha256"]}
+    changed = json.loads(catalog_path.read_text())
+    changed["policies"]["warehouse"]["regularized"]["role_sha256"]["ai"] = "c" * 64
+    original_snapshot = policies.warehouse_evidence_snapshot
+
+    def replace_then_snapshot():
+        catalog_path.write_text(json.dumps(changed))
+        return original_snapshot()
+
+    monkeypatch.setattr(policies, "warehouse_evidence_snapshot", replace_then_snapshot)
+    monkeypatch.setattr(verifier, "validate_acceptance",
+                        lambda *_args, **_kwargs: True)
+    assert not policies._accepted_warehouse_v6(entry, binding)
+    assert policies._WAREHOUSE_ACCEPTANCE_CACHE == set()

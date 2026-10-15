@@ -13,12 +13,17 @@ from uuid import uuid4
 
 import pytest
 import torch
+import numpy as np
 
 from backend.training.warehouse_v6_actor import WarehouseV6Actor, export_actor
 from domains.warehouse import neural_turnbased as warehouse
 from env.warehouse.environment import WarehouseMultiAgentEnv
+from env.warehouse.domain import participant_study_config
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.pure_nn import action_masks
+from env.warehouse.public_observation_v6 import (
+    encode_public_observation, rebuild_public_pre_action_state_from_frames,
+)
 from study_v3 import policies, registry
 from study_v3 import store as store_module
 from study_v3.config import Settings
@@ -95,6 +100,22 @@ def _expected(state):
     return actions
 
 
+def test_historical_warehouse_public_frame_omits_v6_history_fields():
+    env = WarehouseMultiAgentEnv(participant_study_config())
+    env.reset(seed=1802)
+    state = warehouse._state(env, 1, 1802,
+                             policy_id=warehouse.LEGACY_POLICY_ID)
+    public = warehouse.public_state(state)
+    for key in ("episode_id", "previous_joint_actions",
+                "previous_collision_kind", "same_target_collision_streak"):
+        assert key not in public
+    historical = deepcopy(state)
+    unpacked = warehouse.legacy._unpack(historical["snapshot"]["state"])
+    unpacked.pop("same_target_collision_streak")
+    historical["snapshot"]["state"] = warehouse.legacy._pack(unpacked)
+    assert warehouse.public_state(historical) == public
+
+
 def test_v6_pair_binding_and_direct_human_takeover(bound_v6):
     entries, tmp_path = bound_v6
     a = policies.binding_for_group("warehouse", "A")
@@ -108,6 +129,8 @@ def test_v6_pair_binding_and_direct_human_takeover(bound_v6):
     for policy_id in (a["policy_id"], c["policy_id"]):
         state = warehouse.initial_state(1800, 1, policy_id,
                                         release_id=warehouse.V6_RELEASE_ID)
+        public_frames = [warehouse.public_state(state)]
+        assert public_frames[0]["previous_joint_actions"] is None
         for _ in range(4):
             chosen = _expected(state)
             decision = warehouse.decide(state)
@@ -122,6 +145,14 @@ def test_v6_pair_binding_and_direct_human_takeover(bound_v6):
             assert next_state["actor_sha256"] == state["actor_sha256"]
             assert next_state["role_sha256"] == state["role_sha256"]
             assert next_state["release_id"] == warehouse.V6_RELEASE_ID
+            visible = warehouse.public_state(next_state)
+            public_frames.append(visible)
+            assert visible["previous_joint_actions"]["human"]["proposed"] == human
+            assert visible["previous_joint_actions"]["ai"]["proposed"] == chosen["robot_2"].lower()
+            frame_rebuilt = rebuild_public_pre_action_state_from_frames(public_frames)
+            np.testing.assert_array_equal(
+                encode_public_observation(frame_rebuilt),
+                encode_public_observation(warehouse._restore(next_state).state))
             assert simulate(warehouse, state, decision, [human], horizon=1)["trace"][0][
                 "ai_action"] == decision["action"]
             forged = deepcopy(decision)
@@ -135,6 +166,27 @@ def test_v6_pair_binding_and_direct_human_takeover(bound_v6):
         with pytest.raises(RuntimeError, match="binding is unavailable"):
             warehouse.decide(state)
         actor_path.write_bytes(original)
+
+
+def test_v6_human_illegal_physical_move_is_proposed_but_not_executed(bound_v6):
+    state = warehouse.initial_state(1801, 1, "warehouse-raw-v6",
+                                    release_id=warehouse.V6_RELEASE_ID)
+    env = warehouse._restore(state)
+    altered = env.get_state()
+    altered.by_id("robot_1").position = (1, 1)
+    env.set_state(altered)
+    state = warehouse._state(env, state["task"], state["seed"],
+                             policy_id=state["policy_id"])
+    state["scenario_seed"] = 18011
+    assert warehouse.legal_actions(state, "human") == [item.lower() for item in ACTIONS]
+    next_state = warehouse.step(state, "up")
+    prior = warehouse.public_state(next_state)["previous_joint_actions"]
+    assert prior["human"] == {"proposed": "up", "executed": "wait"}
+    assert next_state["last_actions"]["human"] == "up"
+    with pytest.raises(ValueError, match="public history differs"):
+        forged = deepcopy(next_state)
+        forged["previous_joint_actions"]["human"]["proposed"] = "wait"
+        warehouse._restore(forged)
 
 
 def test_v6_demo_is_two_nn_and_session_replay_is_pinned(bound_v6, monkeypatch):
@@ -193,6 +245,19 @@ def test_v6_demo_is_two_nn_and_session_replay_is_pinned(bound_v6, monkeypatch):
             assert restored.frame(token, view["instance_id"], run_id, 3)["state"] == view["state"]
         finally:
             restored.db.close()
+        with study.db.transaction() as db:
+            row = db.one("SELECT public_json FROM pl3_frames WHERE run_id=? AND turn=1",
+                         (run_id,))
+            original_public = row["public_json"]
+            forged_public = json.loads(original_public)
+            forged_public["previous_joint_actions"]["human"]["proposed"] = "forged"
+            db.execute("UPDATE pl3_frames SET public_json=? WHERE run_id=? AND turn=1",
+                       (json.dumps(forged_public), run_id))
+        with pytest.raises(StudyError, match="recorded_frame_mismatch"):
+            study.frame(token, view["instance_id"], run_id, 1)
+        with study.db.transaction() as db:
+            db.execute("UPDATE pl3_frames SET public_json=? WHERE run_id=? AND turn=1",
+                       (original_public, run_id))
         with study.db.transaction() as db:
             row = db.one("SELECT decision_json FROM pl3_frames WHERE run_id=? AND turn=1",
                          (run_id,))

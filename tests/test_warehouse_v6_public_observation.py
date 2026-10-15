@@ -17,6 +17,8 @@ from env.warehouse.public_observation_v6 import (
     FEATURE_DIM, FEATURE_NAMES, FEATURE_SCHEMA_SHA256, OBSERVATION_DIM,
     OBSERVATION_FEATURE_NAMES, action_masks, encode_policy_features,
     encode_public_observation, reconstruct_public_history,
+    rebuild_public_pre_action_state_from_frames, public_pre_action_snapshot,
+    rebuild_public_pre_action_state,
 )
 
 
@@ -35,6 +37,36 @@ def _roundtrip(state):
     return WarehouseState(**data)
 
 
+def _public_frame(state):
+    """Export only fields a v6 participant frame is allowed to contain."""
+    roles = (("human", "robot_1"), ("ai", "robot_2"))
+    return {
+        "turn": state.frame, "episode_id": state.episode_id,
+        "map_id": STUDY_MAP_LAYOUT.layout_id,
+        "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+        "previous_joint_actions": (None if state.frame == 0 else {
+            role: {"proposed": state.by_id(agent_id).last_action.lower(),
+                   "executed": state.by_id(agent_id).last_executed_action.lower()}
+            for role, agent_id in roles}),
+        "previous_collision_kind": state.last_robot_collision_kind,
+        "same_target_collision_streak": state.same_target_collision_streak,
+        **{role: {"x": state.by_id(agent_id).position[1],
+                  "y": state.by_id(agent_id).position[0],
+                  "battery": state.by_id(agent_id).battery,
+                  "active": state.by_id(agent_id).active,
+                  "heading": state.by_id(agent_id).heading.lower(),
+                  "carrying": state.by_id(agent_id).carrying_task_id}
+           for role, agent_id in roles},
+        "orders": [{"id": task.task_id,
+                    "pickup": list(reversed(task.pickup_position)),
+                    "dropoff": list(reversed(task.delivery_position)),
+                    "status": task.status,
+                    "carrier": next((role for role, agent_id in roles
+                                     if agent_id == task.carrier_agent_id), None)}
+                   for task in state.tasks],
+    }
+
+
 def test_public_observation_has_stable_schema_and_derived_charge_capacity():
     state = _start().get_state()
     rows = encode_public_observation(state)
@@ -47,8 +79,12 @@ def test_public_observation_has_stable_schema_and_derived_charge_capacity():
     assert len(FEATURE_SCHEMA_SHA256) == 64
     assert np.array_equal(features[:, :OBSERVATION_DIM], rows)
     assert np.array_equal(features[:, OBSERVATION_DIM:], masks)
-
     index = {name: i for i, name in enumerate(OBSERVATION_FEATURE_NAMES)}
+    assert all(rows[:, index[f"self_last_submitted_{action.lower()}"]].sum() == 0
+               for action in ACTIONS)
+    assert np.array_equal(rows[:, index["same_target_collision_streak_capped"]],
+                          np.zeros(2))
+
     for role, agent in enumerate(state.agents):
         distance = shortest_path_distance(agent.position, STUDY_MAP_LAYOUT.charger_position,
                                           STUDY_MAP_LAYOUT.layout_id)
@@ -96,11 +132,7 @@ def test_public_history_survives_persisted_frame_roundtrip():
     public_frames = []
     for _ in range(20):
         before = env.get_state()
-        public_frames.append({"turn": before.frame, **{
-            role: {"x": before.by_id(agent).position[1],
-                   "y": before.by_id(agent).position[0],
-                   "battery": before.by_id(agent).battery}
-            for role, agent in (("human", "robot_1"), ("ai", "robot_2"))}})
+        public_frames.append(_public_frame(before))
         for role, agent in (("human", "robot_1"), ("ai", "robot_2")):
             reconstructed = reconstruct_public_history(public_frames, role)
             actual = before.by_id(agent)
@@ -109,16 +141,59 @@ def test_public_history_survives_persisted_frame_roundtrip():
                 "last_battery_delta": actual.last_battery_delta,
                 "steps_since_charging": actual.steps_since_charging,
                 "charger_wait_streak": actual.charger_wait_streak,
+                "last_submitted_action": actual.last_action if before.frame else None,
+                "last_executed_action": actual.last_executed_action if before.frame else None,
+                "last_robot_collision_kind": before.last_robot_collision_kind,
+                "same_target_collision_streak": before.same_target_collision_streak,
             }
         restored = _roundtrip(before)
         np.testing.assert_array_equal(encode_public_observation(before),
                                       encode_public_observation(restored))
+        snapshot_rebuilt = rebuild_public_pre_action_state(
+            public_pre_action_snapshot(before))
+        frame_rebuilt = rebuild_public_pre_action_state_from_frames(public_frames)
+        np.testing.assert_array_equal(encode_public_observation(before),
+                                      encode_public_observation(snapshot_rebuilt))
+        np.testing.assert_array_equal(encode_public_observation(before),
+                                      encode_public_observation(frame_rebuilt))
         masks = action_masks(before)
         labels = public_bc_teacher(encode_public_observation(before), masks)
         assert all(masks[role, int(labels[role])] == 1.0 for role in range(2))
         actions = {agent: ACTIONS[int(labels[role])]
                    for role, agent in enumerate(("robot_1", "robot_2"))}
         env.step(actions)
+
+
+def test_same_target_collision_history_exposes_proposals_not_cancelled_moves():
+    env = _start(seed=260302)
+    state = env.get_state()
+    state.by_id("robot_1").position = (1, 1)
+    state.by_id("robot_2").position = (1, 3)
+    env.set_state(state)
+    frames = [_public_frame(env.get_state())]
+    names = {name: index for index, name in enumerate(OBSERVATION_FEATURE_NAMES)}
+    for expected in (1, 2):
+        _, _, _, _, info = env.step({"robot_1": "RIGHT", "robot_2": "LEFT"})
+        assert info["robot_collision_kind"] == "same_target"
+        assert info["executed_actions"] == {"robot_1": "WAIT", "robot_2": "WAIT"}
+        current = env.get_state()
+        assert current.same_target_collision_streak == expected
+        rows = encode_public_observation(current)
+        assert rows[0, names["self_last_submitted_right"]] == 1.0
+        assert rows[0, names["partner_last_submitted_left"]] == 1.0
+        assert rows[1, names["self_last_submitted_left"]] == 1.0
+        assert rows[0, names["same_target_collision_streak_capped"]] == expected / 8
+        frames.append(_public_frame(current))
+        rebuilt = rebuild_public_pre_action_state_from_frames(frames)
+        np.testing.assert_array_equal(rows, encode_public_observation(rebuilt))
+    env.step({"robot_1": "WAIT", "robot_2": "WAIT"})
+    assert env.state.same_target_collision_streak == 0
+    frames.append(_public_frame(env.get_state()))
+    assert reconstruct_public_history(frames, "human")["same_target_collision_streak"] == 0
+    tampered = deepcopy(frames)
+    tampered[-1]["same_target_collision_streak"] = 2
+    with pytest.raises(ValueError, match="streak was altered"):
+        rebuild_public_pre_action_state_from_frames(tampered)
 
 
 def test_policy_features_reject_invalid_masks_and_nonfinite_input():

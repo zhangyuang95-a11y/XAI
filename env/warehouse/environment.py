@@ -1518,6 +1518,10 @@ class WarehouseMultiAgentEnv:
         advance_coordination_plan(previous, next_state, plan_execution)
         next_state.last_robot_collision_event = robot_collision
         next_state.last_robot_collision_kind = collision_kind
+        next_state.same_target_collision_streak = (
+            previous.same_target_collision_streak + 1
+            if robot_collision and collision_kind == "same_target" else 0
+        )
         next_state.last_coordination_events = coordination_events
         if robot_collision:
             next_state.collision_count += 1
@@ -2039,6 +2043,7 @@ class WarehouseMultiAgentEnv:
                 "invalid_move_agents": tuple(sorted(invalid)),
                 "robot_collision_event": robot_collision,
                 "robot_collision_kind": collision_kind,
+                "same_target_collision_streak": next_state.same_target_collision_streak,
                 "intended_targets": dict(intended_targets),
                 "coordination_events": coordination_events,
                 "route_regret": {self.config.human_agent_id: route_regret},

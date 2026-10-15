@@ -38,6 +38,13 @@ def validate_warehouse_state(
     positions = [agent.position for agent in state.agents]
     if len(positions) != len(set(positions)):
         errors.append("robots cannot overlap")
+    if (type(state.same_target_collision_streak) is not int
+            or not 0 <= state.same_target_collision_streak <= state.frame):
+        errors.append("same-target collision streak is outside elapsed frames")
+    if state.same_target_collision_streak and (
+            not state.last_robot_collision_event
+            or state.last_robot_collision_kind != "same_target"):
+        errors.append("same-target collision streak disagrees with the last event")
     for agent in state.agents:
         if not is_passable(agent.position, environment.config.map_layout_id):
             errors.append(f"{agent.agent_id} is outside a passable aisle")

@@ -258,6 +258,9 @@ class WarehouseState:
     invalid_move_count: int = 0
     last_robot_collision_event: bool = False
     last_robot_collision_kind: str | None = None
+    # Count consecutive physical same-target conflicts.  This is a public
+    # outcome of earlier submitted actions, never a controller instruction.
+    same_target_collision_streak: int = 0
     last_coordination_events: tuple[dict[str, Any], ...] = ()
     # Rule-audit events are separate from coordination hypotheses so scoring
     # cannot alter route-planning state.

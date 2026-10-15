@@ -1,9 +1,9 @@
 {
-  "version": "warehouse-dual-actor.v6.1",
+  "version": "warehouse-dual-actor.v6.9-exploratory",
   "scenario_version": "warehouse-dual-actor-three-tasks.v6.0",
-  "model_version": "warehouse-dual-actor.v6.1",
-  "observation_version": "warehouse-public-observation.v6.0",
-  "feature_schema_sha256": "1ba9702c1d70b3375eb12f4c0569393ed480995265a4c4ca3aaec37167ff1346",
+  "model_version": "warehouse-dual-actor.v6.9-exploratory",
+  "observation_version": "warehouse-public-observation.v6.1",
+  "feature_schema_sha256": "f1cb243f1903f4c3462f9de78ed6df5e6d0b5ade7ebfc2a56d9966fa337f99c7",
   "release_id": "policylens-three-domain-20261016.v6.0",
   "task_seed_rule": "enrollment_seed_times_10_plus_task",
   "demo_seed": 40786,

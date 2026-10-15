@@ -421,6 +421,19 @@ def _snapshot(env):
             "rng": legacy._pack(env.get_rng_state()), "episode_counter": env._episode_counter}
 
 
+def _v6_public_history(state):
+    """Only earlier submitted commands and physical outcomes, in UI order."""
+    previous = None if state.frame == 0 else {
+        role: {"proposed": state.by_id(agent_id).last_action.lower(),
+               "executed": state.by_id(agent_id).last_executed_action.lower()}
+        for role, agent_id in _ACTORS.items()
+    }
+    return {"previous_joint_actions": previous,
+            "previous_collision_kind": (state.last_robot_collision_kind
+                                        if state.frame else None),
+            "same_target_collision_streak": state.same_target_collision_streak}
+
+
 def _restore(state):
     policy_id = _policy_id(state.get("policy_id"))
     _verify_v5_artifact(policy_id)
@@ -448,6 +461,15 @@ def _restore(state):
         raise ValueError("invalid warehouse pure NN snapshot: " + str(errors))
     if env.state.frame != state["turn"] or bool(env.state.terminated or env.state.truncated) != state["terminal"]:
         raise ValueError("warehouse pure NN snapshot boundary mismatch")
+    if v6 is not None:
+        history = _v6_public_history(env.state)
+        if any(state.get(key) != value for key, value in history.items()):
+            raise ValueError("Warehouse v6 public history differs from bound snapshot")
+        prior = history["previous_joint_actions"]
+        expected_actions = (None if prior is None else
+                            {role: values["proposed"] for role, values in prior.items()})
+        if state.get("last_actions") != expected_actions:
+            raise ValueError("Warehouse v6 submitted actions differ from bound snapshot")
     if policy_id != LEGACY_POLICY_ID:
         actor = _actor(policy_id)
         if (state.get("actor_sha256") != actor.artifact_sha256 or
@@ -479,7 +501,8 @@ def _state(env, task, seed, events=None, last_actions=None, charges=0, policy_id
     v6 = _v6_identity(policy_id)
     if v6 is not None:
         result.update(release_id=v6[1],
-                      feature_schema_sha256=V6_FEATURE_SCHEMA_SHA256)
+                      feature_schema_sha256=V6_FEATURE_SCHEMA_SHA256,
+                      **_v6_public_history(s))
     return result
 
 
@@ -640,6 +663,9 @@ def public_state(state):
                    "y": STUDY_MAP_LAYOUT.charger_position[0], "kind": "charger",
                    "label_en": "Shared charger", "label_zh": "共享充电位置"}],
         score=score(state), map_id=STUDY_MAP_LAYOUT.layout_id)
+    if _v6_identity(state.get("policy_id")) is not None:
+        public.update(episode_id=env.state.episode_id,
+                      **_v6_public_history(env.state))
     collision = next((event for event in state["events"] if event["type"] == "collision"), None)
     if collision and "collision_animation" in collision:
         public["collision_animation"] = deepcopy(collision["collision_animation"])

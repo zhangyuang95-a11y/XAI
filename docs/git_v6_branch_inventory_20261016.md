@@ -14,3 +14,10 @@ The integration worktree is `/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration`.
 All four annotated archive tags are pushed and their peeled commits match the archived branch tips. Before deletion, the GitHub API showed zero open PRs and zero GitHub deployments, repository text/configuration had no explicit reference to these branches, and the Render dashboard showed that the workspace's two current services tracked `codex/three-domain-study-v3-20260920` (Warehouse) and `main` (Kitchen). Each remote tip still matched its archived SHA when deleted using an explicit tip lease; a subsequent `git ls-remote --heads` returned no matching branch. After PR #5 merged, its integration branch tip `b5ea958` was also archived at `archive/branches/three-domain-v6-integration-20261016-merged`, verified against the pushed peeled tag, and deleted with a tip lease. `main`, `core`, the active research v3 and Task 2 branches, `live`, and the active v6 release branch remain outside this cleanup. The Warehouse Render service still uses the research v3 branch, so that branch must remain until its deployment is intentionally migrated.
 
 The two local `sep2-bubble` and `sep2-rule-assisted-20260917` refs were deleted after `git branch -d` confirmed that both tips are already contained in `origin/main`. Their exact former refs remain in the verified recovery bundle and their remote archive tags. The local `render-pong-hub` alias and its historical commits remain available; the dirty primary `main` and research v3 worktrees were left in place. A fresh `git ls-remote --heads origin` listed only `main`, `core`, Task 2, research v3, live, and the v6 release branch.
+
+The Task 2, research v3, and live remote tips are all ancestors of `origin/main`,
+but ancestry alone is not a deletion signal. `docs/task2_share_preview.md`
+still names the dedicated Task 2 deployment branch. The Warehouse Render
+service still tracks research v3, and the live branch needs its deployment
+references checked before retirement. Those branches remain available until
+their external uses are resolved.

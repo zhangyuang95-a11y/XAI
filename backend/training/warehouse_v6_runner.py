@@ -22,7 +22,7 @@ from torch import nn
 from torch.distributions import Categorical
 
 from experiments.warehouse.protocol import (
-    REGISTERED_BC_RECIPE_VERSION, REGISTERED_BC_SPEC,
+    FINAL_PROGRAM_SPLIT_COUNTS, REGISTERED_BC_RECIPE_VERSION, REGISTERED_BC_SPEC,
     SCENARIO_BLOCK_STEPS, scenario_seed, scenario_schedule_sha256,
 )
 from env.warehouse.decision_protocol import canonical_sha256, independent_agent_seed
@@ -1218,56 +1218,58 @@ def _fit_training_programs(model: WarehouseV6Actor,
                            buffers: Mapping[str, deque]) -> tuple[dict, dict, dict]:
     actor = FrozenWarehouseV6Actor.from_model(model)
     programs, reports, held_validation = {}, {}, {}
-    split_names = ("fit", "calibration", "eligibility", "validation")
+    split_names = tuple(FINAL_PROGRAM_SPLIT_COUNTS)
+    if tuple(FINAL_PROGRAM_SPLIT_COUNTS.values()) != PROGRAM_SPLIT_EPISODES:
+        raise RuntimeError("Warehouse online program split counts drifted")
     for role in AGENTS:
         rows = list(buffers[role])
-        episodes = list(dict.fromkeys(row["episode"] for row in rows))
-        if len(episodes) < PROGRAM_MIN_EPISODES:
+        # One training scenario block can reset the same seed several times
+        # after early termination. Select *distinct scenario seeds*, keeping
+        # every reset of one seed in the same purpose. The most recent 124
+        # complete blocks fit inside the 20k-row buffer at every extraction.
+        scenario_seeds = list(dict.fromkeys(int(row["base_seed"]) for row in rows))
+        if len(scenario_seeds) < PROGRAM_MIN_EPISODES:
             programs[role] = None
             reports[role] = {"error": "insufficient distinct training scenario episodes",
-                             "episodes": len(episodes)}
+                             "episodes": len(scenario_seeds)}
             held_validation[role] = []
             continue
-        # A given episode has one stable purpose across every extraction.
-        # Sliding positional splits could let prior validation rows later
-        # train a program as the bounded buffer rotates.
-        assigned = {name: [] for name in split_names}
-        boundaries = np.cumsum(PROGRAM_SPLIT_EPISODES)
-        seed_for_episode = {row["episode"]: int(row["base_seed"]) for row in rows}
-        for episode in episodes:
-            bucket = int.from_bytes(sha256(
-                f"warehouse-v6-program|{role}|{seed_for_episode[episode]}".encode()
-                ).digest()[:8], "big"
-                ) % PROGRAM_MIN_EPISODES
-            name = split_names[int(np.searchsorted(boundaries, bucket, side="right"))]
-            assigned[name].append(episode)
-        groups = {name: set(assigned[name][-count:]) for name, count in
-                  zip(split_names, PROGRAM_SPLIT_EPISODES, strict=True)}
-        if any(len(groups[name]) < count for name, count in
-               zip(split_names, PROGRAM_SPLIT_EPISODES, strict=True)):
-            programs[role] = None
-            held_validation[role] = []
-            reports[role] = {"error": "insufficient fixed-purpose training episodes",
-                             "available": {name: len(assigned[name]) for name in split_names}}
-            continue
+        selected = scenario_seeds[-PROGRAM_MIN_EPISODES:]
+        groups, cursor = {}, 0
+        for name, count in zip(split_names, PROGRAM_SPLIT_EPISODES, strict=True):
+            groups[name] = set(selected[cursor:cursor + count])
+            cursor += count
+        if cursor != len(selected) or len(set().union(*groups.values())) != cursor:
+            raise RuntimeError("Warehouse online program cohort is not scene-disjoint")
         parts = {name: _resample_program_rows(actor, role, [
-            row for row in rows if row["episode"] in groups[name]])
+            row for row in rows if int(row["base_seed"]) in groups[name]])
             for name in split_names}
         held_validation[role] = parts["validation"]
+        provenance = {
+            "training_split_scenario_seeds": {
+                name: [seed for seed in selected if seed in group]
+                for name, group in groups.items()},
+            "training_split_episode_ids": {
+                name: list(dict.fromkeys(str(row["episode"]) for row in parts[name]))
+                for name in split_names},
+            "training_split_episode_counts": {
+                name: len(set(row["episode"] for row in parts[name]))
+                for name in split_names},
+        }
         try:
             program = fit_program(role, actor, *(parts[name] for name in split_names))
             programs[role] = program
             reports[role] = {"program_sha256": program.sha256(),
                              "actor_role_sha256": actor.role_sha256[role],
-                             "training_split_episode_counts": {
-                                 name: len(group) for name, group in groups.items()},
+                             **provenance,
                              "current_actor_resampled": True,
                              "fixed_validation_rows_sha256": canonical_sha256(
                                  parts["validation"]),
                              "validation": program.report["validation"]}
         except (ValueError, RuntimeError) as exc:
             programs[role] = None
-            reports[role] = {"error": f"{type(exc).__name__}: {exc}"}
+            reports[role] = {"error": f"{type(exc).__name__}: {exc}",
+                             **provenance}
     return programs, reports, held_validation
 
 
@@ -1523,6 +1525,42 @@ def _variant_checkpoint_path(directory: Path, variant: str) -> Path:
     return directory / f"{variant}.checkpoint.pt"
 
 
+def _online_cohorts_disjoint(extractions: Mapping[str, Sequence[Mapping]],
+                             expected_steps: Sequence[int]) -> bool:
+    """Verify actual role/purpose scenes across the prescribed online fits."""
+    if any(len(extractions[role]) != len(expected_steps) for role in AGENTS):
+        return False
+    all_scenes: set[int] = set()
+    for index, expected_step in enumerate(expected_steps):
+        role_splits = []
+        for role in AGENTS:
+            row = extractions[role][index]
+            if row.get("joint_steps") != expected_step:
+                return False
+            splits = row.get("training_split_scenario_seeds")
+            if not isinstance(splits, Mapping) or set(splits) != set(
+                    FINAL_PROGRAM_SPLIT_COUNTS):
+                return False
+            seen: set[int] = set()
+            for purpose, required in FINAL_PROGRAM_SPLIT_COUNTS.items():
+                values = splits[purpose]
+                if (not isinstance(values, list) or len(values) != required or
+                        any(type(seed) is not int for seed in values)):
+                    return False
+                chosen = set(values)
+                if len(chosen) != required or chosen & seen:
+                    return False
+                seen.update(chosen)
+            role_splits.append(splits)
+        if role_splits[0] != role_splits[1]:
+            return False
+        cohort = {seed for values in role_splits[0].values() for seed in values}
+        if cohort & all_scenes:
+            return False
+        all_scenes.update(cohort)
+    return True
+
+
 def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                    spec: Mapping, directory: Path) -> tuple[WarehouseV6Actor, dict, dict]:
     if variant not in ("raw", "regularized"):
@@ -1541,6 +1579,9 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
     programs = {role: None for role in AGENTS} if variant == "regularized" else None
     program_validation_rows = {role: [] for role in AGENTS}
     extractions = {role: [] for role in AGENTS}
+    extraction_steps = tuple(spec.get("online_program_extraction_steps", ()))
+    next_extraction_index = 0
+    last_extraction_step = 0
     best = None
     cost_multiplier = 1.0
     recent_complete_shutdowns = deque(maxlen=64)
@@ -1580,14 +1621,20 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                     if payload is not None else None)
             extractions = saved["extractions"]
             program_validation_rows = saved["program_validation_rows"]
+        next_extraction_index = saved["next_extraction_index"]
+        last_extraction_step = saved["last_extraction_step"]
     while used_steps < spec["joint_steps"]:
         batch, batch_summaries = [], []
         while used_steps < spec["joint_steps"] and len(batch) < 16:
             seed = scenario_seed(spec["scenario_namespace"], spec["pair_seed"], used_steps)
             block_remaining = SCENARIO_BLOCK_STEPS - used_steps % SCENARIO_BLOCK_STEPS
+            extraction_remaining = (extraction_steps[next_extraction_index] - used_steps
+                                    if next_extraction_index < len(extraction_steps) else
+                                    spec["joint_steps"] - used_steps)
             episode, summary = collect_episode(
                 model, seed=seed, generator=generator,
-                max_steps=min(block_remaining, spec["joint_steps"] - used_steps),
+                max_steps=min(block_remaining, spec["joint_steps"] - used_steps,
+                              extraction_remaining),
                 episode_index=episode_number)
             if not summary["joint_steps"]:
                 raise RuntimeError("Warehouse v6 self-play rollout yielded zero steps")
@@ -1601,6 +1648,9 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
             if programs is not None:
                 for index, role in enumerate(AGENTS):
                     buffers[role].extend(_program_rows((episode,), index))
+            if (next_extraction_index < len(extraction_steps) and
+                    used_steps == extraction_steps[next_extraction_index]):
+                break
         update = ppo_update(model, optimizer, batch, programs,
                             progress=used_steps / spec["joint_steps"],
                             cost_multiplier=cost_multiplier,
@@ -1626,17 +1676,39 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                       completed_episodes_for_dual=len(complete_outcomes),
                       next_cost_multiplier=cost_multiplier)
         updates.append(update)
-        if used_steps >= next_eval or used_steps == spec["joint_steps"]:
+        if (next_extraction_index < len(extraction_steps) and
+                used_steps == extraction_steps[next_extraction_index]):
             _assert_source_closure(spec["source_closure_sha256"])
-            if programs is not None and used_steps / spec["joint_steps"] >= PROGRAM_START_FRACTION:
+            if programs is not None:
                 programs, extracted, program_validation_rows = _fit_training_programs(
                     model, buffers)
                 for role in AGENTS:
-                    extractions[role].append({"joint_steps": used_steps, **extracted[role]})
+                    extractions[role].append({
+                        "joint_steps": used_steps,
+                        "window_start_joint_step": last_extraction_step,
+                        "window_end_joint_step": used_steps,
+                        **extracted[role],
+                    })
+                    buffers[role].clear()
+            last_extraction_step = used_steps
+            next_extraction_index += 1
+        if used_steps >= next_eval or used_steps == spec["joint_steps"]:
+            _assert_source_closure(spec["source_closure_sha256"])
             measured = evaluate(model, spec["checkpoint_seeds"])
             checkpoint_result = {"joint_steps": used_steps, **measured["summary"]}
+            checkpoint_result["external_feedback_rows"] = {
+                role: sum(item["feedback_rows"][role] for item in updates)
+                for role in AGENTS}
+            checkpoint_result["external_feedback_gradient_norm"] = {
+                role: sum(item["feedback_gradient_norm"][role] for item in updates)
+                for role in AGENTS}
             development.append(checkpoint_result)
             selectable = variant == "raw" or used_steps / spec["joint_steps"] >= 0.85
+            if variant == "regularized" and not spec.get("smoke", False):
+                selectable = selectable and all(
+                    checkpoint_result["external_feedback_rows"][role] > 0 and
+                    checkpoint_result["external_feedback_gradient_norm"][role] > 0
+                    for role in AGENTS)
             from experiments.warehouse.protocol import DEVELOPMENT_PAIR_SEEDS
             threshold = ("development_quality_passed"
                          if spec["pair_seed"] in DEVELOPMENT_PAIR_SEEDS else
@@ -1664,6 +1736,8 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 "histories": histories, "updates": updates,
                 "development": development, "best": best,
                 "cost_multiplier": cost_multiplier, "next_eval": next_eval,
+                "next_extraction_index": next_extraction_index,
+                "last_extraction_step": last_extraction_step,
                 "recent_complete_shutdowns": list(recent_complete_shutdowns),
                 "buffers": ({role: list(buffers[role]) for role in AGENTS}
                             if programs is not None else {}),
@@ -1675,6 +1749,9 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
             })
     if best is None:
         raise RuntimeError("Warehouse v6 training produced no selected checkpoint")
+    if (variant == "regularized" and not spec.get("smoke", False) and
+            not _online_cohorts_disjoint(extractions, extraction_steps)):
+        raise RuntimeError("Warehouse online program cohorts overlap or miss a prescribed step")
     _assert_source_closure(spec["source_closure_sha256"])
     model.load_state_dict(best["state_dict"])
     actor_artifact = export_actor(
@@ -1714,6 +1791,13 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         "run_spec_sha256": run_spec_sha256,
         "training_config_sha256": spec_hash,
         "release_id": spec.get("release_id"),
+        "architecture_mode": spec.get("architecture_mode", "smoke"),
+        "bc_recipe_version": spec.get("bc_recipe_version", "smoke"),
+        "online_program_extraction_steps": list(extraction_steps),
+        "online_program_split_block_cycle": dict(FINAL_PROGRAM_SPLIT_COUNTS),
+        "online_program_cohorts_disjoint": (
+            _online_cohorts_disjoint(extractions, extraction_steps)
+            if variant == "regularized" else True),
         "final_program_fit_seed_schedule": spec.get(
             "final_program_fit_seed_schedule"),
         "final_program_fit_seed_schedule_sha256": spec.get(
@@ -1844,6 +1928,12 @@ def train_pair(run_spec: Mapping) -> dict:
         "run_spec_sha256": run_spec_sha256,
         "training_config_sha256": spec_hash,
         "release_id": spec.get("release_id"),
+        "architecture_mode": spec.get("architecture_mode", "smoke"),
+        "online_program_extraction_steps": list(spec.get(
+            "online_program_extraction_steps", ())),
+        "online_program_split_block_cycle": dict(FINAL_PROGRAM_SPLIT_COUNTS),
+        "online_program_cohorts_disjoint": variants["regularized"][
+            "online_program_cohorts_disjoint"],
         "final_program_fit_seed_schedule": spec.get(
             "final_program_fit_seed_schedule"),
         "final_program_fit_seed_schedule_sha256": spec.get(

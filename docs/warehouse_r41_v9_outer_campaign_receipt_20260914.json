@@ -1,0 +1,485 @@
+{
+  "content_sha256": "0926c2d638379f3858fd9d119d09d652d4d2819bcc4c6535b1a352f5efc98a85",
+  "failed_v8_outer": {
+    "authenticated_evidence_artifact_count": 25,
+    "closeout": {
+      "campaign_key": "bdb7183fe42c729909bcf155948352aac0bf81339b363770e9a34574782e0067",
+      "content_sha256": "9cfad8816518b34d8f58198041e1f9fdd92b8f481a288991d6b45a87e1c275cc",
+      "file_sha256": "90fb466abaec7fb49a2b6cfff1d79fa74d0f3365fc8102785bb5c1a9dfd0e4c0",
+      "path": "output/warehouse_native/r41_outer_v6_failure_closeout_v9_20260913/failure_closeout.json",
+      "permanent_anchor_file_sha256": "90fb466abaec7fb49a2b6cfff1d79fa74d0f3365fc8102785bb5c1a9dfd0e4c0",
+      "permanent_anchor_path": "output/warehouse_native/r41_outer_failure_closeout_registry_v9/bdb7183fe42c729909bcf155948352aac0bf81339b363770e9a34574782e0067/failure_closeout.json"
+    },
+    "disposition": {
+      "eligible_for_development_use": true,
+      "eligible_for_outer_claim": false,
+      "formal_ready": false,
+      "outer_identity_reuse_permitted": false,
+      "outer_observation_hashes_must_win_over_future_fit_rows": true
+    },
+    "failed_gate_names": [
+      "effective_intervention_direction",
+      "effective_intervention_direction_shared_charger",
+      "effective_intervention_direction_shared_pickup"
+    ],
+    "selector_fit_overlap": {
+      "effective_intervention_pairs": 68,
+      "outer_rows": 1002,
+      "probabilities_read": false,
+      "raw_observations_read": false,
+      "row_payload_published": false,
+      "unique_observation_hashes": 795
+    },
+    "source_report_sha256": "8430854e06aa2cd28cd12311681c65d3c12d5554314b9bfb2f76484c887e7955",
+    "strict_refit_outcome": "expected_failure; source report remained byte-identical"
+  },
+  "failed_v8_outer_observation_hash_projection": {
+    "actions_included": false,
+    "content_sha256": "c31be861f068dd3a2890a816a21add251dee69aa92b4f100220518dc776095de",
+    "file_sha256": "e7ebc75e2ebb02678022358d74081c990c5227f4e2369520f248fdda39a3e915",
+    "labels_included": false,
+    "path": "output/warehouse_native/r41_diagnostic_rcpd_v9_fresh_outer_registry_20260914/outer_observation_hashes.json",
+    "probabilities_included": false,
+    "purpose": "development validation-wins exclusion; this is not the fresh v9 outer projection",
+    "raw_observations_included": false,
+    "unique_hash_count": 31164
+  },
+  "formal_ready": false,
+  "fresh_v9_outer_identity_registry": {
+    "content_sha256": "1f308c516be5eb90672d775d4150eeebb095526600b3338b87341a7c4c652c84",
+    "excluded_candidate_identity_count": 465,
+    "family_quotas": {
+      "conflict_family_01": 11,
+      "conflict_family_02": 11,
+      "conflict_family_03": 11,
+      "conflict_family_04": 11,
+      "conflict_family_05": 10,
+      "conflict_family_06": 10
+    },
+    "file_sha256": "adeb5347ea5b7740df9e5ce59c15f33605b9ad7e5dbadf3d544e28a8280b67d2",
+    "fixed_candidate_scene_count": 2160,
+    "path": "output/warehouse_native/r41_diagnostic_rcpd_v9_fresh_outer_registry_20260914/development_outer.json",
+    "remaining_candidate_scene_count": 1695,
+    "remaining_family_counts": {
+      "conflict_family_01": 279,
+      "conflict_family_02": 280,
+      "conflict_family_03": 282,
+      "conflict_family_04": 279,
+      "conflict_family_05": 287,
+      "conflict_family_06": 288
+    },
+    "report_content_sha256": "198e2b4980fd7a640d8ef371e07c055e86f1dda1ddbb52f4e1f683de1ec17a12",
+    "report_file_sha256": "c0c0a99a4bbb4cfc4874ea50d2e572ab3027a2221b81574f1c1184385690e9ce",
+    "report_path": "output/warehouse_native/r41_diagnostic_rcpd_v9_fresh_outer_registry_20260914/report.json",
+    "selected_exposed_fingerprint_overlap": 0,
+    "selected_exposed_seed_overlap": 0,
+    "selected_identity_sha256": "123ba3008f32c402e0eaf28ea4f7841a453527c78edf44435438ae89e6d8b9ac",
+    "selected_outer_identities": [
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_01",
+        "fingerprint": "0eabd787ab236478ba22c2872295dc7775429a42a358e3efea4b0e36dfc31dc9",
+        "seed": 48200198
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_01",
+        "fingerprint": "1e311c1c25752c7c13894fc807b1cfd95e936303cde03deb554ddb9c618aa7be",
+        "seed": 48300989
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_01",
+        "fingerprint": "fbf1ede97fac7601375c754f210c683b851c73c0ee0e02127a8e910fa827fed1",
+        "seed": 48100724
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_01",
+        "fingerprint": "7fbc07d221e8755d2de478df7cedb1e2defa3b00a6309bf759a7f7c3d0b7f521",
+        "seed": 48300131
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_01",
+        "fingerprint": "f3cfc2bf375933e6027bc893604020f9cd16a798dd9569b76132f75b46afbd75",
+        "seed": 48200251
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_01",
+        "fingerprint": "ab33e0b225e2fac92ebb8a54a4bf51fd98f359fae78f20380e2dd68ced331033",
+        "seed": 48100694
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_01",
+        "fingerprint": "a00fb28d931bda2344e44bc50ed31c480a64dc02b6f98f3c988c0e161eecf388",
+        "seed": 48301108
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_01",
+        "fingerprint": "d60baafbe9209287598f5b074f5239a10843e0960103f28bcf41ee3c14869f65",
+        "seed": 48100031
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_01",
+        "fingerprint": "142c8c8397b54498e4e2620f59c4d2d5ddf17b2739937531ea72f301a4a45d98",
+        "seed": 48300388
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_01",
+        "fingerprint": "991d1d2e175028218aeb0ca5ca16ecda353c8116215d4b97f360b05572e8dec5",
+        "seed": 48101024
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_01",
+        "fingerprint": "9888d00b25aed8db1c9008ccddc8c8513a6ca3ef7139df6e804ad3e445c81af7",
+        "seed": 48200348
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_02",
+        "fingerprint": "a76ffbacc8b3c17fe3594d5f3576e91d9594b8167b55336ffa1cee214bd79aea",
+        "seed": 48200028
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_02",
+        "fingerprint": "82f2a01794a33026a6b1d9abf8b477fac4325732fd64b16f7bff6fd614979928",
+        "seed": 48200361
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_02",
+        "fingerprint": "2ea771ad8d7ef8ec94712878d4dc8159f451e096476e860a9feee4e39fb95bcb",
+        "seed": 48300025
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_02",
+        "fingerprint": "849b57a4c734b141afe3af3e23f666d53908b11430a499b7c0ae6b5e82dda5ce",
+        "seed": 48300198
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_02",
+        "fingerprint": "9505e7f8f3a412c08253c745d8f027366f7186f9a46e45c173376e21c48fceb8",
+        "seed": 48300303
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_02",
+        "fingerprint": "61b80b6f823fddb8f7e6e271b7df5ba760b9c4ccb91717be7957d04479aad6c6",
+        "seed": 48300134
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_02",
+        "fingerprint": "bf053ce72d029dbe921c03916cd963f20810aedd264a620f018c9abc8fe93b5c",
+        "seed": 48100449
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_02",
+        "fingerprint": "0abb79518cfc3dd11d2df1ccf7fd0336d456dac7181fcf91643bd21dfac4641c",
+        "seed": 48100126
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_02",
+        "fingerprint": "6620c7849fd5875761f0c72521d2aacaa7a1c34a495d41c3f37c61abfd739e75",
+        "seed": 48100019
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_02",
+        "fingerprint": "c605cae3e7c156625bbdb28a5f6e09df86d0d07ef33d23c831deccc8b14ce59d",
+        "seed": 48100136
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_02",
+        "fingerprint": "1095cb59b09b990defe1311e7a0c88d23bac679ee0812b4f0211fa156e8e0f13",
+        "seed": 48300072
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_03",
+        "fingerprint": "88b05663a2d0dd1cab7f1f3953a673058d294d5401983d30c935344dd8504ead",
+        "seed": 48101883
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_03",
+        "fingerprint": "9cd33a7f08935d0a01caa556bf59f420d21ae943991c165044ab6fb30fe9c721",
+        "seed": 48101571
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_03",
+        "fingerprint": "f835395930ad08a44bdfe8c078bd4c09b2abe3a2db90b229b19a888960a0a632",
+        "seed": 48202370
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_03",
+        "fingerprint": "e0230693043705db733fcd20a4eed5eb01f638e75054981d1cf441f5cc4dc434",
+        "seed": 48300422
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_03",
+        "fingerprint": "2db3a46e8a7fa2fe6c54cca8bfd5680ecfa1d7a3fced3a81d742a08985b07222",
+        "seed": 48101353
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_03",
+        "fingerprint": "737d92d224374fad851db41febcce7d16db324772f5081b23f51454147a21a4c",
+        "seed": 48202712
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_03",
+        "fingerprint": "eb3a4e8e9f88b27946506cc4385282a609091118db53e77d37f44185af2387a0",
+        "seed": 48202872
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_03",
+        "fingerprint": "048508be895b9a2af31ea887da630025b0b602639b6e789c723f80376ee642dc",
+        "seed": 48203089
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_03",
+        "fingerprint": "7919598b897dcbaa785e91a0d14d1706e7d8df569e9dd627893af0a9f945953e",
+        "seed": 48201867
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_03",
+        "fingerprint": "2408256d1d626fe18065a2f9fa6334fab0c5d30cbf550c4fab2a34991e673aa4",
+        "seed": 48101454
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_03",
+        "fingerprint": "193b3f644a09f16add6df949a6ce3b73b09839e611d8491d3e7b98184926db50",
+        "seed": 48202378
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_04",
+        "fingerprint": "b515ddd78f53282b9fe502b13e49b0aba5f13296918377b8765bfdfdba3974f4",
+        "seed": 48200896
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_04",
+        "fingerprint": "912825d5ca4b5aa4f53b1f2804f85bbe841cc491a5f94e5a3b1061310aa86227",
+        "seed": 48100978
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_04",
+        "fingerprint": "d3d7f0af91ae445ee56f48034cf96e9ac5b21d957b8e5dfd948bbdd7ec0dead1",
+        "seed": 48300557
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_04",
+        "fingerprint": "98f1a817aa3f29485bbcbd4a28b6630ad53786624b05175aa6f7e76d06e3f36e",
+        "seed": 48100899
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_04",
+        "fingerprint": "58d7d836052b0fa8186250d0dead560a30a907fa09a32218e9e04e2d3e804267",
+        "seed": 48100410
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_04",
+        "fingerprint": "9a75ab33186c9a155a9a61ef45d0c74f263c686f72a2780c60b2b579b736233a",
+        "seed": 48300286
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_04",
+        "fingerprint": "d96f8ddcc7b171b3ea5321d4f0e78ba5da4155f7ab0b4310055531843bece77e",
+        "seed": 48200222
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_04",
+        "fingerprint": "a55f7799c09786716005185a55f4d0046ab749be8c878f219ac36520e76072c6",
+        "seed": 48100858
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_04",
+        "fingerprint": "ec69980135a53b03f973df311ecab8962688841232c19fcc5936516448c37994",
+        "seed": 48300438
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_04",
+        "fingerprint": "f22f9ef78d7a5df3261e258c8d519347f086e6155ac748ae634a617adce09444",
+        "seed": 48100252
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_04",
+        "fingerprint": "192ee3c2e4febf2b5d817b8f9e47dc718314fddc7196047b87ab436079e6115a",
+        "seed": 48300627
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_05",
+        "fingerprint": "d4972a174a4513daec66661d0425d9077ea1a686103a5eb5e6fcfbd1f81b1e73",
+        "seed": 48200206
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_05",
+        "fingerprint": "8207d3be096c48710f1182c70ad64cc30a38bc0c2f19ad53c77ee3fddadc48d2",
+        "seed": 48300413
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_05",
+        "fingerprint": "f15432b56a2a6782463a64c2e4d30b820269baba81b0f83e3b7c7e2158ccb58b",
+        "seed": 48200278
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_05",
+        "fingerprint": "bd8994d8afbfac43104cdc392e08a51fd9754c38a0451ba90e85b87c0ba55940",
+        "seed": 48300031
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_05",
+        "fingerprint": "682880f00f06ea929941aec0ae895f893a5922d42c0608e11d3a1a8f3caa246b",
+        "seed": 48300118
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_05",
+        "fingerprint": "57da86c2d3b5a68c22a31dc662c3132d1d92493402df5d2b61ba91072f9a0920",
+        "seed": 48100570
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_05",
+        "fingerprint": "3b94226397639d2a015f446c782e959a67fbfb189114ce00ef62d5fa80ebcbc7",
+        "seed": 48200516
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_05",
+        "fingerprint": "261486c7b64489b6795db06eaa1f31ddc952d962e4db86a7dfdd74458581795c",
+        "seed": 48300385
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_05",
+        "fingerprint": "060023c42ece2583b95b5325ac09410dceec4105cd4b8d44a386c5b32d7303e9",
+        "seed": 48100029
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_05",
+        "fingerprint": "0eed65afb5748fbe80928f73c82ab257ab415bdfd7100988899915e436abc7fc",
+        "seed": 48300367
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_06",
+        "fingerprint": "a918903b547f46b3b12c0eb1b80902d6faf91b39168f0726ff99ae8d9c45b85e",
+        "seed": 48300163
+      },
+      {
+        "batch_index": 2,
+        "family_id": "conflict_family_06",
+        "fingerprint": "3b9d2a2be6335707588698dbcea36ebf862797943d3c4c5e19d39734f7eb40c1",
+        "seed": 48300310
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_06",
+        "fingerprint": "66b5a4e0725eb224327049967eb52e7835331e473c2380cdd71c6d43f5c28adc",
+        "seed": 48200135
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_06",
+        "fingerprint": "9b290826424506f0a9e32e71bb88e7b1a7ec923d9864083d40a0f96c1894c66d",
+        "seed": 48100073
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_06",
+        "fingerprint": "c84c722fc12a5314ec04e12b065b54b65a00cf6fdecacae2a211f71e265abe8b",
+        "seed": 48200154
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_06",
+        "fingerprint": "d6b29bd9e207cb032ab03e25a4810d3e844d4c73f2039c241b097d0345355b0e",
+        "seed": 48100079
+      },
+      {
+        "batch_index": 0,
+        "family_id": "conflict_family_06",
+        "fingerprint": "b8fbf293e026dd105412236b2ba70f4db6a460f4922b93abb3d709a329425207",
+        "seed": 48100172
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_06",
+        "fingerprint": "4f604c00cb26496f8110a82cfb911a00152572c4b188b4ed41ca61a2f6b3ed48",
+        "seed": 48200129
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_06",
+        "fingerprint": "f4674890830b845cdd120b633f3527cd6a0235ca330beef4e156ec43e07eee1b",
+        "seed": 48200099
+      },
+      {
+        "batch_index": 1,
+        "family_id": "conflict_family_06",
+        "fingerprint": "2a2aa0996df9641d6faafe1254e533f20b5029e407083e805bf6c54ebc4b1a15",
+        "seed": 48200087
+      }
+    ],
+    "selected_scene_count": 64,
+    "selection_salt": "warehouse-r41-v9-fresh-development-outer-20260913-v1",
+    "status": "frozen_identity_only_pending_outer_collection"
+  },
+  "information_boundary": {
+    "actions_labels_probabilities_program_or_metrics_used_for_fresh_identity_selection": false,
+    "actor_loaded_or_inferred_for_fresh_identity_selection": false,
+    "failed_rows_fields_read_for_fresh_identity_selection": [
+      "scene_fingerprints"
+    ],
+    "fresh_outer_actions_labels_probabilities_or_raw_observations_collected_or_opened": false,
+    "observations_generated_for_fresh_identity_selection": false,
+    "protected_evaluation_data_accessed": false
+  },
+  "next_step_contract": {
+    "candidate_lock_status": "pending",
+    "fresh_outer_ordered_observation_hash_projection_status": "pending",
+    "full_fresh_outer_labels_and_probabilities_status": "sealed_until_candidate_lock_and_preclaim_checks_pass",
+    "selector_rule": "validation-wins exclusion must run before selection; selector may receive outer observation hashes only and may not receive outer labels, probabilities, or raw observations"
+  },
+  "status": "failed_v8_outer_closed_and_fresh_v9_identity_registry_frozen",
+  "version": "warehouse-r41-diagnostic-v9-outer-campaign-receipt.v1"
+}

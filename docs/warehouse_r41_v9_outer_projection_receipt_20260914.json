@@ -1,0 +1,73 @@
+{
+  "content_sha256": "e128189620911da6d48dd03342f967595a299b06f0ffbb22fff0c7cdb314f4f2",
+  "formal_ready": false,
+  "identity": {
+    "identity_receipt_file_sha256": "49f160cd8f8e8ed9e83d04229e4bd48cead9a1308f5ab1c8c39f4e4326083f7c",
+    "identity_receipt_path": "docs/warehouse_r41_v9_outer_campaign_receipt_20260914.json",
+    "registry_content_sha256": "1f308c516be5eb90672d775d4150eeebb095526600b3338b87341a7c4c652c84",
+    "registry_file_sha256": "adeb5347ea5b7740df9e5ce59c15f33605b9ad7e5dbadf3d544e28a8280b67d2",
+    "registry_path": "output/warehouse_native/r41_diagnostic_rcpd_v9_fresh_outer_registry_20260914/development_outer.json",
+    "scene_count": 64,
+    "selected_identity_sha256": "123ba3008f32c402e0eaf28ea4f7841a453527c78edf44435438ae89e6d8b9ac"
+  },
+  "producer_receipt": {
+    "content_sha256": "8c075a722916976787f4016d3bd32b620309bba6b8ae017f554ed838951eddab",
+    "file_sha256": "557697e570d5d4a304a75636b3de5eba35a8685afb148965a93c1d00d6c8e821",
+    "path": "output/warehouse_native/r41_diagnostic_v9_outer_hash_projection_20260914/projection_receipt.json",
+    "producer_fix_commit": "e3293a8",
+    "source_closure_sha256": "b90835a8213d6ada928f57f33ad1a3a990b77a6cca747c54a4b99e8932eff9b8",
+    "source_count": 77
+  },
+  "projection_artifact": {
+    "content_sha256": "85326a9dcbcda1b79dd206a9e12d5ec51dd26101e3078f825a29648426f8aa63",
+    "environment_steps": 35742,
+    "file_sha256": "594a50625af617c84edacb8491db44a37504866a945c04b0a7406f7b7254b110",
+    "ordered_observation_hashes_sha256": "1e2b16a2dbc0a764a3f141fedd22cd8bea4359a56bd8f45d0eeb3f12dddce103",
+    "ordered_replay_sha256": "09797557eed6fa3bca26c1366eb8b39f569eccf271cbad259fb9cf4004324ab0",
+    "ordered_row_identity_hashes_sha256": "ca8da71797f75c522f97f651f1fc7febf39b1dcd551329df0ffd94d7c9207849",
+    "path": "output/warehouse_native/r41_diagnostic_v9_outer_hash_projection_20260914/ordered_outer_observation_hashes.json",
+    "row_count": 35733,
+    "unique_observation_count": 30776,
+    "unique_observation_hashes_sha256": "0aba91868ed6999ce1dde37cc1c2fe375fe1b77779457326f03f0acd07eea978"
+  },
+  "publication_boundary": {
+    "actor_actions_published": false,
+    "actor_probabilities_published": false,
+    "full_fresh_outer_archive_created_or_opened": false,
+    "participant_data_accessed": false,
+    "program_accessed": false,
+    "published_payload": [
+      "ordered observation hashes",
+      "sorted unique observation hashes",
+      "ordered row-identity hashes",
+      "frozen registry identity"
+    ],
+    "raw_observations_published": false,
+    "runtime_action_override": false
+  },
+  "schedule": {
+    "critical_anchor_period": 5,
+    "dense_critical": false,
+    "environment_steps": 35742,
+    "partners": [
+      "skilled",
+      "assertive",
+      "noisy"
+    ],
+    "scene_count": 64,
+    "scene_offset": 448
+  },
+  "status": "fresh_v9_ordered_label_blind_projection_frozen",
+  "verification": {
+    "forbidden_serialized_fields_absent": [
+      "observations",
+      "probabilities",
+      "action_indices"
+    ],
+    "ordered_projection_semantics_passed": true,
+    "projection_unit_tests": "8 passed",
+    "source_closure_matched_at_publication_and_readback": true,
+    "strict_saved_projection_reader_passed": true
+  },
+  "version": "warehouse-r41-diagnostic-v9-outer-projection-public-receipt.v1"
+}

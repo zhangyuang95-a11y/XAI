@@ -1,0 +1,1335 @@
+"""Irrevocably score one locked v13 candidate program on one fresh development outer.
+
+The label-blind ordered hash projection is authenticated first.  A permanent
+``O_EXCL`` attempt anchor is then written *before* this module opens the raw
+public observations, Actor probabilities, or action labels in the full outer
+row archive.  The fresh outer is consequently consumed even if validation or
+scoring later fails.  A different candidate cannot reuse the same projected
+outer because the permanent attempt key binds the outer identity and its
+authenticated prior-exclusion history.
+
+This module has no protected final/holdout input and never fits or modifies a
+program.  It evaluates the already locked explicit public-tree program once.
+"""
+from __future__ import annotations
+
+import argparse
+from copy import deepcopy
+from hashlib import sha256
+from io import BytesIO
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import tempfile
+from typing import Any, Mapping, Sequence
+import zipfile
+
+import numpy as np
+
+from backend import warehouse_r41_diagnostic_boosted_tree as boosted_tree_api
+from backend import warehouse_r41_diagnostic_public_features_v9 as public_features_api
+from backend import warehouse_r41_diagnostic_public_tree_program_v9 as program_api
+from backend.training import warehouse_r41_diagnostic_outer_hash_projection_v13 as projection_api
+from backend.training import warehouse_r41_diagnostic_outer_collection_v13 as collection_api
+from backend.training import warehouse_r41_diagnostic_final_attempt_closeout_public_v13 as promoted_closeout_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v7 as rows_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v8 as metrics_api
+from backend.training import warehouse_r41_diagnostic_rcpd_v13_outer_split as registry_api
+from backend.training.warehouse_diagnostic_source_closure import local_source_hashes
+from backend.training.warehouse_native_common import canonical, digest, file_hash
+from backend.warehouse_r41_diagnostic_public_tree_program_v9 import (
+    R41DiagnosticPublicTreeProgramV9,
+)
+from env.warehouse_native.policy import NumPyNativeActor
+
+
+VERSION = "warehouse-r41-diagnostic-rcpd-v13-outer-once.v1"
+LOCK_SCHEMA = "warehouse_r41_diagnostic_rcpd_v13_candidate_lock_v1"
+COLLECTION_SCHEMA = "warehouse_r41_diagnostic_rcpd_v13_outer_collection_v1"
+LOCK_STATUS = "locked"
+COLLECTION_STATUS = "collected_unscored"
+STATUS_PASSED = "passed_fresh_development_outer_gates"
+STATUS_FAILED = "failed_fresh_development_outer_gates"
+STATUS_ABORTED = "failed_after_outer_attempt_claim"
+ANCHOR_NAME = "attempt_anchor.json"
+RESULT_NAME = "outer_result.json"
+MAX_JSON_BYTES = 512 * 1024 * 1024
+MAX_NPZ_BYTES = 512 * 1024 * 1024
+MAX_MEMBER_BYTES = 512 * 1024 * 1024
+PREDICTION_BATCH_SIZE = 16_384
+_HEX = re.compile(r"[0-9a-f]{64}\Z")
+_LOCK_BINDINGS = frozenset((
+    "actor_sha256", "protocol_sha256", "runtime_manifest_sha256",
+    "actor_feature_names_sha256", "public_feature_contract_sha256",
+    "designation_sha256", "failed_outer_closeout_sha256",
+    "fresh_outer_registry_sha256", "fresh_outer_registry_report_sha256",
+    "prior_outer_hash_projection_sha256",
+    "prior_outer_hash_projection_content_sha256",
+    "outer_hash_projection_sha256", "outer_hash_projection_receipt_sha256",
+    "development_rows_sha256", "combined_promoted_rows_sha256",
+    "promotion_closeout_sha256", "candidate_grid_sha256", "program_sha256",
+    "selector_report_sha256", "source_closure_sha256",
+))
+_REGISTRY_FIELDS = frozenset((
+    "version", "status", "contract", "bindings", "development_outer",
+    "selected_outer_identities", "exclusion_counts", "exclusion_digests",
+    "statistics", "information_boundary", "program_access",
+    "program_predictions_access", "action_labels_access",
+    "probabilities_access", "final_audit_rows_access", "formal_ready",
+    "producer_sources", "producer_sources_sha256", "content_sha256",
+))
+_REGISTRY_REPORT_FIELDS = frozenset((
+    "version", "status", "registry_file_sha256", "registry_content_sha256",
+    "bindings", "selection", "statistics", "information_boundary",
+    "producer_sources", "producer_sources_sha256", "formal_ready",
+    "content_sha256",
+))
+_REGISTRY_REPORT_SELECTION_FIELDS = frozenset((
+    "salt", "family_quotas", "selected_identity_sha256",
+    "fixed_remaining_identity_sha256", "exclusion_digests",
+))
+_PUBLIC_IDENTITY_FIELDS = frozenset((
+    "batch_index", "family_id", "seed", "fingerprint",
+))
+_SAFE_ROW_FIELDS = frozenset((
+    "observation_hashes", "scene_fingerprints", "episode_ids", "frames",
+    "group_bits", "kinds", "anchor_ids", "branch_actions",
+    "physical_hashes", "source_state_hashes", "trajectory_done",
+    "split_validation",
+))
+_PRIVATE_ROW_FIELDS = frozenset((
+    "observations", "probabilities", "action_indices", "weights",
+    "submitted_equal",
+))
+_ACTOR_MEMBERS = frozenset((
+    "metadata_json.npy", "0.weight.npy", "0.bias.npy", "2.weight.npy",
+    "2.bias.npy", "4.weight.npy", "4.bias.npy",
+))
+MAX_ACTOR_METADATA_BYTES = 4 * 1024 * 1024
+
+
+def contract() -> dict[str, Any]:
+    return {
+        "version": VERSION,
+        "purpose": "one irrevocable score of a locked program on fresh development outer",
+        "attempt_key_scope": (
+            "outer identity and authenticated prior exclusions, independent "
+            "of candidate and private row payload"),
+        "attempt_anchor_before_private_outer_read": True,
+        "preclaim_row_fields": sorted(_SAFE_ROW_FIELDS),
+        "preclaim_forbidden_row_fields": sorted(_PRIVATE_ROW_FIELDS),
+        "candidate_refit": False,
+        "program_mutation": False,
+        "candidate_runtime_source_closure_authenticated_before_attempt_anchor": True,
+        "actor_program_feature_registry_authenticated_before_attempt_anchor": True,
+        "prior_outer_hash_projection_authenticated_before_attempt_anchor": True,
+        "runtime_action_override": False,
+        "protected_final_access": False,
+        "formal_ready": False,
+    }
+
+
+def producer_sources() -> dict[str, str]:
+    return dict(sorted(local_source_hashes((Path(__file__).resolve(),)).items()))
+
+
+def runtime_program_sources() -> dict[str, str]:
+    """Return the exact local source closure that interprets a v9 program.
+
+    The saved relations contract fixes names and ordering, but a source edit
+    could change how one of those names is computed without changing the JSON
+    payload.  These hashes therefore authenticate executable semantics before
+    a fresh outer is irrevocably claimed.
+    """
+    return dict(sorted(local_source_hashes((
+        Path(program_api.__file__).resolve(),
+        Path(public_features_api.__file__).resolve(),
+        Path(boosted_tree_api.__file__).resolve(),
+    )).items()))
+
+
+def _sha(value: Any, label: str) -> str:
+    if type(value) is not str or _HEX.fullmatch(value) is None:
+        raise ValueError("Exact lowercase SHA-256 required for " + label)
+    return value
+
+
+def _content_valid(value: Mapping[str, Any]) -> bool:
+    claimed = value.get("content_sha256")
+    return (type(claimed) is str and _HEX.fullmatch(claimed) is not None
+            and claimed == digest({key: child for key, child in value.items()
+                                   if key != "content_sha256"}))
+
+
+def _regular(value: str | Path, label: str, *, maximum: int = MAX_JSON_BYTES) -> Path:
+    path = Path(value).expanduser().absolute()
+    if (not path.is_file() or path.is_symlink() or path.resolve() != path
+            or path.stat(follow_symlinks=False).st_size <= 0
+            or path.stat(follow_symlinks=False).st_size > maximum):
+        raise ValueError(label + " must be a nonempty bounded canonical regular file")
+    return path
+
+
+def _directory(value: str | Path, label: str) -> Path:
+    path = Path(value).expanduser().absolute()
+    if not path.is_dir() or path.is_symlink() or path.resolve() != path:
+        raise ValueError(label + " must be a canonical directory")
+    return path
+
+
+def _json_bytes(value: Mapping[str, Any]) -> bytes:
+    return (canonical(value) + "\n").encode("utf-8")
+
+
+def _strict_json_bytes(raw: bytes, label: str) -> dict[str, Any]:
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, child in items:
+            if key in result:
+                raise ValueError("Duplicate JSON field in " + label)
+            result[key] = child
+        return result
+
+    try:
+        value = json.loads(
+            raw.decode("utf-8"), object_pairs_hook=pairs,
+            parse_constant=lambda token: (_ for _ in ()).throw(
+                ValueError("Non-finite JSON value in " + label + ": " + token)),
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(label + " must be strict UTF-8 JSON") from error
+    if not isinstance(value, dict):
+        raise ValueError(label + " must contain one JSON object")
+    return value
+
+
+def _strict_json(
+    value: str | Path, label: str, *, expected_sha256: str,
+) -> tuple[Path, bytes, dict[str, Any]]:
+    path = _regular(value, label)
+    expected = _sha(expected_sha256, label + " SHA-256")
+    raw = path.read_bytes()
+    if sha256(raw).hexdigest() != expected:
+        raise ValueError("Exact " + label + " bytes required")
+    parsed = _strict_json_bytes(raw, label)
+    if file_hash(path) != expected:
+        raise RuntimeError(label + " changed during read")
+    return path, raw, parsed
+
+
+def _authenticate_file(
+    value: str | Path, label: str, *, expected_sha256: str,
+    maximum: int = MAX_JSON_BYTES,
+) -> Path:
+    path = _regular(value, label, maximum=maximum)
+    if file_hash(path) != _sha(expected_sha256, label + " SHA-256"):
+        raise ValueError("Exact " + label + " bytes required")
+    return path
+
+
+def _candidate_lock(
+    path: str | Path, *, expected_sha256: str,
+) -> tuple[Path, dict[str, Any], dict[str, str]]:
+    lock_path, _, value = _strict_json(
+        path, "v13 candidate lock", expected_sha256=expected_sha256)
+    bindings = value.get("bindings")
+    if (value.get("schema_version") != LOCK_SCHEMA
+            or value.get("status") != LOCK_STATUS
+            or value.get("formal_ready") is not False
+            or not _content_valid(value)
+            or not isinstance(bindings, Mapping)
+            or not _LOCK_BINDINGS.issubset(bindings)
+            or any(type(name) is not str or type(child) is not str
+                   or _HEX.fullmatch(child) is None
+                   for name, child in bindings.items())):
+        raise ValueError("V13 candidate lock semantics differ")
+    try:
+        strict_bindings = collection_api._validate_candidate_lock_shape(value)
+    except ValueError as error:
+        raise ValueError("V13 candidate lock semantics differ") from error
+    if strict_bindings != dict(bindings):
+        raise ValueError("V13 candidate lock semantics differ")
+    return lock_path, value, dict(bindings)
+
+
+def _verify_lock_files(bindings: Mapping[str, str], **paths: str | Path) -> dict[str, Path]:
+    expected_keys = {
+        "actor": "actor_sha256", "protocol": "protocol_sha256",
+        "runtime_manifest": "runtime_manifest_sha256",
+        "designation": "designation_sha256",
+        "failed_outer_closeout": "failed_outer_closeout_sha256",
+        "promotion_closeout": "promotion_closeout_sha256",
+        "fresh_outer_registry": "fresh_outer_registry_sha256",
+        "fresh_outer_registry_report": "fresh_outer_registry_report_sha256",
+        "prior_outer_hash_projection": "prior_outer_hash_projection_sha256",
+        "outer_hash_projection": "outer_hash_projection_sha256",
+        "outer_hash_projection_receipt": "outer_hash_projection_receipt_sha256",
+        "development_rows": "development_rows_sha256",
+        "combined_promoted_rows": "combined_promoted_rows_sha256",
+        "program": "program_sha256", "selector_report": "selector_report_sha256",
+    }
+    if set(paths) != set(expected_keys):
+        raise ValueError("Complete v13 candidate-lock file set required")
+    result = {}
+    for name, binding in expected_keys.items():
+        maximum = MAX_NPZ_BYTES if name in {
+            "actor", "development_rows", "combined_promoted_rows"} else MAX_JSON_BYTES
+        result[name] = _authenticate_file(
+            paths[name], name.replace("_", " "), expected_sha256=bindings[binding],
+            maximum=maximum)
+    return result
+
+
+def _validate_candidate_source_closure(
+    lock: Mapping[str, Any], selector_report_path: Path,
+    bindings: Mapping[str, str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    selector = _strict_json_bytes(
+        selector_report_path.read_bytes(), "locked v9 selector report")
+    closure = None
+    for candidate in (
+        lock.get("source_closure"), selector.get("sources"),
+        selector.get("producer_sources"),
+    ):
+        if isinstance(candidate, Mapping):
+            closure = dict(candidate)
+            break
+    if closure is None:
+        raise ValueError(
+            "V13 candidate source closure mapping is required for runtime authentication")
+    if (not closure
+            or any(type(name) is not str or type(value) is not str
+                   or _HEX.fullmatch(value) is None
+                   for name, value in closure.items())
+            or digest(closure) != bindings["source_closure_sha256"]):
+        raise ValueError("V13 candidate source closure binding differs")
+    runtime = runtime_program_sources()
+    missing = sorted(set(runtime) - set(closure))
+    changed = sorted(
+        name for name, value in runtime.items()
+        if name in closure and closure[name] != value
+    )
+    if missing or changed:
+        details = []
+        if missing:
+            details.append("missing=" + ",".join(missing))
+        if changed:
+            details.append("changed=" + ",".join(changed))
+        raise ValueError(
+            "V13 candidate runtime source closure differs: " + "; ".join(details))
+    return closure, runtime
+
+
+def _actor_feature_registry(
+    path: Path, *, expected_sha256: str,
+) -> tuple[tuple[str, ...], str]:
+    """Read only the bounded metadata member of the already-bound Actor."""
+    expected = _sha(expected_sha256, "Actor SHA-256")
+    if file_hash(path) != expected:
+        raise ValueError("Exact Actor bytes required for feature registry")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            infos = archive.infolist()
+            names = [item.filename for item in infos]
+            if len(names) != len(set(names)) or set(names) != _ACTOR_MEMBERS:
+                raise ValueError("Actor archive schema differs")
+            info = archive.getinfo("metadata_json.npy")
+            if (info.is_dir() or info.file_size <= 0
+                    or info.file_size > MAX_ACTOR_METADATA_BYTES):
+                raise ValueError("Actor metadata member is unsafe")
+            encoded = np.load(BytesIO(archive.read(info)), allow_pickle=False)
+    except (OSError, ValueError, zipfile.BadZipFile, KeyError) as error:
+        raise ValueError("Actor metadata cannot be safely authenticated") from error
+    if file_hash(path) != expected:
+        raise RuntimeError("Actor changed during feature-registry authentication")
+    if encoded.shape != () or encoded.dtype.kind not in "US":
+        raise ValueError("Actor metadata encoding differs")
+    scalar = encoded.item()
+    if isinstance(scalar, bytes):
+        raw = scalar
+    elif type(scalar) is str:
+        raw = scalar.encode("utf-8")
+    else:
+        raise ValueError("Actor metadata encoding differs")
+    metadata = _strict_json_bytes(raw, "Actor metadata")
+    feature_names = metadata.get("feature_names")
+    if (metadata.get("obs_dim") != 197
+            or metadata.get("actions") != list(metrics_api.ACTIONS)
+            or metadata.get("action_masks") is not False
+            or metadata.get("runtime_action_override") is not False
+            or not isinstance(feature_names, list)
+            or len(feature_names) != 197
+            or len(set(feature_names)) != 197
+            or any(type(name) is not str or not name for name in feature_names)):
+        raise ValueError("Actor public feature registry differs")
+    normalized = tuple(feature_names)
+    return normalized, digest(list(normalized))
+
+
+def _authenticate_program_actor_features(
+    *, program_payload: Mapping[str, Any], actor_path: Path,
+    bindings: Mapping[str, str],
+) -> tuple[tuple[str, ...], str]:
+    relations = program_payload.get("relations")
+    program_names = relations.get("base_feature_names") \
+        if isinstance(relations, Mapping) else None
+    if (not isinstance(relations, Mapping)
+            or bindings.get("public_feature_contract_sha256")
+                != digest(dict(relations))
+            or not isinstance(program_names, list) or len(program_names) != 197
+            or len(set(program_names)) != 197
+            or any(type(name) is not str or not name for name in program_names)):
+        raise ValueError("Locked v9 program public feature contract differs")
+    actor_names, feature_sha256 = _actor_feature_registry(
+        actor_path, expected_sha256=bindings["actor_sha256"])
+    if (tuple(program_names) != actor_names
+            or bindings.get("actor_feature_names_sha256") != feature_sha256):
+        raise ValueError("Locked v9 program and Actor feature registries differ")
+    return actor_names, feature_sha256
+
+
+def _registry_bundle(
+    registry_path: Path, registry_report_path: Path,
+    *, bindings: Mapping[str, str],
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Authenticate the fresh-outer identity bundle without Actor inference."""
+    value = _strict_json_bytes(
+        registry_path.read_bytes(), "fresh v13 outer registry")
+    report = _strict_json_bytes(
+        registry_report_path.read_bytes(), "fresh v13 outer registry report")
+    scenes = value.get("development_outer")
+    identities = value.get("selected_outer_identities")
+    registry_sources = value.get("producer_sources")
+    registry_sources_sha256 = value.get("producer_sources_sha256")
+    if (set(value) != _REGISTRY_FIELDS
+            or value.get("version") != registry_api.VERSION
+            or value.get("status") != registry_api.STATUS
+            or not _content_valid(value)
+            or not isinstance(scenes, list)
+            or len(scenes) != projection_api.SCENE_COUNT
+            or not isinstance(identities, list)
+            or len(identities) != projection_api.SCENE_COUNT
+            or value.get("program_access") is not False
+            or value.get("program_predictions_access") is not False
+            or value.get("action_labels_access") is not False
+            or value.get("probabilities_access") is not False
+            or value.get("final_audit_rows_access") is not False
+            or value.get("formal_ready") is not False
+            or not projection_api._frozen_sources_valid(
+                registry_sources, registry_sources_sha256)):
+        raise ValueError("Fresh v13 outer registry semantics differ")
+    public_identities = []
+    seen: set[tuple[int, str]] = set()
+    for index, (scene, identity) in enumerate(zip(scenes, identities)):
+        if (not isinstance(scene, Mapping) or not isinstance(identity, Mapping)
+                or set(identity) != _PUBLIC_IDENTITY_FIELDS):
+            raise ValueError("Fresh v13 outer registry identities differ")
+        public = {name: identity[name] for name in (
+            "batch_index", "family_id", "seed", "fingerprint")}
+        if (type(public["batch_index"]) is not int
+                or public["batch_index"] < 0
+                or type(public["seed"]) is not int
+                or type(public["family_id"]) is not str
+                or public["family_id"] not in registry_api.FAMILY_IDS
+                or type(public["fingerprint"]) is not str
+                or _HEX.fullmatch(public["fingerprint"]) is None
+                or scene.get("id") != f"diagnostic_v13_fresh_outer_{index:04d}"
+                or scene.get("seed") != public["seed"]
+                or scene.get("family_id") != public["family_id"]
+                or scene.get("fingerprint") != public["fingerprint"]
+                or (public["seed"], public["fingerprint"]) in seen):
+            raise ValueError("Fresh v13 outer registry identities differ")
+        seen.add((public["seed"], public["fingerprint"]))
+        public_identities.append(public)
+    selected_identity_sha256 = digest(public_identities)
+    selection = report.get("selection")
+    if (set(report) != _REGISTRY_REPORT_FIELDS
+            or report.get("version") != registry_api.VERSION
+            or report.get("status") != registry_api.STATUS
+            or report.get("formal_ready") is not False
+            or not _content_valid(report)
+            or report.get("registry_file_sha256")
+                != bindings["fresh_outer_registry_sha256"]
+            or report.get("registry_content_sha256") != value["content_sha256"]
+            or report.get("bindings") != value.get("bindings")
+            or report.get("statistics") != value.get("statistics")
+            or report.get("information_boundary")
+                != value.get("information_boundary")
+            or report.get("producer_sources") != registry_sources
+            or report.get("producer_sources_sha256")
+                != registry_sources_sha256
+            or not isinstance(selection, Mapping)
+            or set(selection) != _REGISTRY_REPORT_SELECTION_FIELDS
+            or selection.get("salt") != registry_api.SELECTION_SALT
+            or selection.get("family_quotas") != registry_api.FAMILY_QUOTAS
+            or selection.get("exclusion_digests")
+                != value.get("exclusion_digests")
+            or selection.get("selected_identity_sha256")
+                != selected_identity_sha256
+            or type(selection.get("fixed_remaining_identity_sha256")) is not str
+            or _HEX.fullmatch(selection["fixed_remaining_identity_sha256"]) is None):
+        raise ValueError("Fresh v13 outer registry/report identity differs")
+    if (file_hash(registry_path) != bindings["fresh_outer_registry_sha256"]
+            or file_hash(registry_report_path)
+                != bindings["fresh_outer_registry_report_sha256"]):
+        raise RuntimeError("Fresh v13 outer registry bundle changed during read")
+    return value, report, selected_identity_sha256
+
+
+def _program_payload(path: Path) -> dict[str, Any]:
+    value = _strict_json_bytes(path.read_bytes(), "locked v9 program")
+    # Instantiate the executable only after the irreversible attempt claim.
+    # Pre-claim authentication is limited to exact bytes and strict JSON.
+    if value.get("version") != "warehouse-r41-diagnostic-public-tree-program.v9":
+        raise ValueError("Locked v9 program identity differs")
+    return value
+
+
+def _zip_member(archive: zipfile.ZipFile, name: str, *, label: str) -> np.ndarray:
+    info = archive.getinfo(name + ".npy")
+    if info.is_dir() or info.file_size <= 0 or info.file_size > MAX_MEMBER_BYTES:
+        raise ValueError(label + " member is unsafe")
+    try:
+        return np.load(BytesIO(archive.read(info)), allow_pickle=False)
+    except (OSError, ValueError) as error:
+        raise ValueError(label + " member is not a safe NumPy array") from error
+
+
+def _safe_row_projection(
+    path: Path, *, expected_sha256: str, fields: frozenset[str], label: str,
+) -> dict[str, np.ndarray]:
+    expected = _sha(expected_sha256, label + " SHA-256")
+    if file_hash(path) != expected:
+        raise ValueError("Exact " + label + " bytes required")
+    expected_members = {name + ".npy" for name in rows_api._FIELDS}
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = [item.filename for item in archive.infolist()]
+            if len(names) != len(set(names)) or set(names) != expected_members:
+                raise ValueError(label + " archive schema differs")
+            result = {name: _zip_member(archive, name, label=label + " " + name)
+                      for name in fields}
+    except (OSError, zipfile.BadZipFile, KeyError) as error:
+        raise ValueError(label + " cannot be safely projected") from error
+    if file_hash(path) != expected:
+        raise RuntimeError(label + " changed during projection")
+    return result
+
+
+def _decode(array: np.ndarray, label: str) -> list[str]:
+    if array.ndim != 1 or array.dtype.kind != "S":
+        raise ValueError(label + " must be a one-dimensional byte-string array")
+    try:
+        return list(map(str, np.char.decode(array, "ascii")))
+    except UnicodeDecodeError as error:
+        raise ValueError(label + " must be ASCII") from error
+
+
+def _row_identity_hashes(arrays: Mapping[str, np.ndarray]) -> list[str]:
+    hashes = _decode(arrays["observation_hashes"], "outer observation hashes")
+    count = len(hashes)
+    text = {name: _decode(arrays[name], "outer " + name) for name in (
+        "scene_fingerprints", "episode_ids", "kinds", "anchor_ids",
+        "branch_actions", "physical_hashes", "source_state_hashes")}
+    if any(len(values) != count for values in text.values()):
+        raise ValueError("Outer ordered row identity length differs")
+    for name in ("frames", "group_bits", "trajectory_done", "split_validation"):
+        if arrays[name].shape != (count,):
+            raise ValueError("Outer ordered row identity shape differs")
+    return [digest({
+        "scene_fingerprint": text["scene_fingerprints"][index],
+        "episode_id": text["episode_ids"][index],
+        "frame": int(arrays["frames"][index]),
+        "group_bits": int(arrays["group_bits"][index]),
+        "kind": text["kinds"][index],
+        "anchor_id": text["anchor_ids"][index],
+        "branch_action": text["branch_actions"][index],
+        "physical_sha256": text["physical_hashes"][index],
+        "source_state_sha256": text["source_state_hashes"][index],
+        "trajectory_done": bool(arrays["trajectory_done"][index]),
+        "split_validation": bool(arrays["split_validation"][index]),
+    }) for index in range(count)]
+
+
+def _preflight_outer_rows(
+    *, rows_path: Path, rows_sha256: str, projection: Mapping[str, Any],
+    projection_sha256: str, prior_projection: Mapping[str, Any],
+    prior_projection_sha256: str,
+    development_rows_path: Path, development_rows_sha256: str,
+    combined_promoted_rows_path: Path, combined_promoted_rows_sha256: str,
+    promotion_closeout_sha256: str,
+    combined_promoted_rows_semantic_sha256: str,
+    combined_promoted_observation_hashes: Sequence[str],
+    registry: Mapping[str, Any], validation_wins: Mapping[str, Any],
+    validation_hash_inputs: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Recompute both validation-wins masks without opening any targets."""
+    outer = _safe_row_projection(
+        rows_path, expected_sha256=rows_sha256, fields=_SAFE_ROW_FIELDS,
+        label="full unscored outer rows")
+    ordered = _decode(outer["observation_hashes"], "outer observation hashes")
+    expected = projection["projection"]
+    row_ids = _row_identity_hashes(outer)
+    scenes = _decode(outer["scene_fingerprints"], "outer scene fingerprints")
+    registry_scenes = {str(row["fingerprint"])
+                       for row in registry["development_outer"]}
+    if (ordered != expected["ordered_observation_hashes"]
+            or row_ids != expected["ordered_row_identity_hashes"]
+            or digest(ordered) != expected["ordered_observation_hashes_sha256"]
+            or digest(row_ids) != expected["ordered_row_identity_hashes_sha256"]
+            or len(ordered) != expected["row_count"]
+            or not np.all(outer["split_validation"])
+            or set(scenes) != registry_scenes):
+        raise ValueError("Full outer ordered hash projection differs")
+
+    base = _safe_row_projection(
+        development_rows_path, expected_sha256=development_rows_sha256,
+        fields=frozenset(("observation_hashes",)),
+        label="locked base development rows")
+    promoted = _safe_row_projection(
+        combined_promoted_rows_path, expected_sha256=combined_promoted_rows_sha256,
+        fields=frozenset(("observation_hashes",)),
+        label="combined promoted development rows")
+    base_ordered = _decode(
+        base["observation_hashes"], "base development observation hashes")
+    promoted_ordered = _decode(
+        promoted["observation_hashes"], "combined-promoted observation hashes")
+    promoted_unique = sorted(set(promoted_ordered))
+    bound_promoted = list(combined_promoted_observation_hashes)
+    fresh_unique = expected["unique_observation_hashes"]
+    prior_unique = prior_projection.get("outer_observation_hashes")
+    if (not isinstance(prior_unique, list) or not prior_unique
+            or prior_unique != sorted(set(prior_unique))
+            or any(type(value) is not str or _HEX.fullmatch(value) is None
+                   for value in prior_unique)
+            or not _content_valid(prior_projection)
+            or bound_promoted != sorted(set(bound_promoted))
+            or any(type(value) is not str or _HEX.fullmatch(value) is None
+                   for value in bound_promoted)
+            or promoted_unique != bound_promoted
+            or not set(bound_promoted) <= set(prior_unique)):
+        raise ValueError("Prior/promoted outer observation-hash projection differs")
+    historical_unique = sorted(set(prior_unique) - set(bound_promoted))
+    outer_unique = sorted(set(prior_unique) | set(fresh_unique))
+    expected_hash_inputs = {
+        "prior_outer_file_sha256": prior_projection_sha256,
+        "prior_outer_content_sha256": prior_projection["content_sha256"],
+        "prior_outer_unique_observations": len(prior_unique),
+        "prior_outer_observation_hashes_sha256": digest(prior_unique),
+        "promotion_closeout_sha256": promotion_closeout_sha256,
+        "combined_promoted_rows_sha256": combined_promoted_rows_sha256,
+        "combined_promoted_rows_semantic_sha256": (
+            combined_promoted_rows_semantic_sha256),
+        "combined_promoted_unique_observations": len(bound_promoted),
+        "combined_promoted_observation_hashes_sha256": digest(bound_promoted),
+        "fresh_outer_file_sha256": projection_sha256,
+        "fresh_outer_content_sha256": projection["content_sha256"],
+        "fresh_outer_unique_observations": len(fresh_unique),
+        "fresh_outer_observation_hashes_sha256": digest(fresh_unique),
+        "prior_fresh_observation_overlap": len(
+            set(prior_unique) & set(fresh_unique)),
+        "combined_unique_observations": len(outer_unique),
+        "combined_observation_hashes_sha256": digest(outer_unique),
+        "labels_or_probabilities_included": False,
+    }
+    expected_hash_inputs["content_sha256"] = digest(expected_hash_inputs)
+    if (not isinstance(validation_hash_inputs, Mapping)
+            or dict(validation_hash_inputs) != expected_hash_inputs):
+        raise ValueError("Locked validation hash union differs")
+
+    def freeze(values: list[str], exclusions: list[str]) -> tuple[list[str], dict[str, Any]]:
+        keep = ~np.isin(
+            np.asarray(values, dtype="U64"), np.asarray(exclusions, dtype="U64"))
+        retained = [value for value, selected in zip(values, keep) if bool(selected)]
+        packed = np.ascontiguousarray(keep.astype(np.uint8))
+        return retained, {
+            "source_rows": len(values),
+            "retained_rows": len(retained),
+            "removed_rows": int(np.sum(~keep)),
+            "source_unique_observations": len(set(values)),
+            "retained_unique_observations": len(set(retained)),
+            "fresh_outer_unique_observations": len(exclusions),
+            "retained_fresh_outer_observation_overlap": 0,
+            "keep_mask_sha256": sha256(memoryview(packed).cast("B")).hexdigest(),
+            "retained_observation_hashes_sha256": digest(retained),
+            "private_development_members_read_before_mask_frozen": False,
+        }
+
+    base_retained, base_audit = freeze(base_ordered, outer_unique)
+    promoted_exclusions = sorted(set(historical_unique) | set(fresh_unique))
+    promoted_retained, promoted_audit = freeze(
+        promoted_ordered, promoted_exclusions)
+    if (set(base_retained) & set(promoted_retained)
+            or set(base_retained) & set(fresh_unique)
+            or set(promoted_retained) & set(fresh_unique)):
+        raise ValueError("Validation-wins public projection left overlap")
+    expected_top = {
+        "precedence": "fresh-v13-validation > combined-promoted-development > older-development",
+        "prior_unique_observations": len(prior_unique),
+        "historical_unique_observations": len(historical_unique),
+        "combined_promoted_unique_observations": len(bound_promoted),
+        "fresh_v13_unique_observations": len(fresh_unique),
+        "combined_promoted_projection_sha256": digest(bound_promoted),
+        "combined_source_rows": len(base_ordered) + len(promoted_ordered),
+        "combined_retained_rows": len(base_retained) + len(promoted_retained),
+        "cross_component_observation_overlap": 0,
+        "retained_fresh_outer_observation_overlap": 0,
+        "private_members_read_only_after_both_masks_frozen": True,
+        "both_source_archives_reauthenticated_after_private_read": True,
+        "all_retained_rows_marked_development": True,
+    }
+    if (not isinstance(validation_wins, Mapping)
+            or not isinstance(validation_wins.get("base"), Mapping)
+            or not isinstance(validation_wins.get("combined_promoted"), Mapping)
+            or any(validation_wins["base"].get(name) != value
+                   for name, value in base_audit.items())
+            or any(validation_wins["combined_promoted"].get(name) != value
+                   for name, value in promoted_audit.items())
+            or any(validation_wins.get(name) != value
+                   for name, value in expected_top.items())):
+        raise ValueError("Locked combined validation-wins projection differs")
+    development_hashes = set(base_retained) | set(promoted_retained)
+    return {
+        "outer_row_count": len(ordered),
+        "outer_unique_observation_count": len(set(ordered)),
+        "outer_scene_count": len(set(scenes)),
+        "development_unique_observation_count": len(development_hashes),
+        "base_development_source_row_count": len(base_ordered),
+        "base_development_retained_row_count": len(base_retained),
+        "combined_promoted_source_row_count": len(promoted_ordered),
+        "combined_promoted_retained_row_count": len(promoted_retained),
+        "combined_development_retained_row_count": (
+            len(base_retained) + len(promoted_retained)),
+        "base_validation_wins_keep_mask_sha256": base_audit["keep_mask_sha256"],
+        "combined_promoted_validation_wins_keep_mask_sha256": (
+            promoted_audit["keep_mask_sha256"]),
+        "prior_outer_unique_observation_count": len(prior_unique),
+        "fresh_outer_unique_observation_count": len(fresh_unique),
+        "combined_validation_unique_observation_count": len(outer_unique),
+        "combined_validation_observation_hashes_sha256": digest(outer_unique),
+        "development_outer_observation_overlap": 0,
+        "ordered_observation_hashes_sha256": digest(ordered),
+        "ordered_row_identity_hashes_sha256": digest(row_ids),
+        "both_development_masks_frozen_before_private_row_read": True,
+        "private_row_members_opened": False,
+    }
+
+
+def _collection_report(
+    path: str | Path, *, expected_sha256: str, lock_sha256: str,
+    bindings: Mapping[str, str], rows_path: str | Path, rows_sha256: str,
+    projection: Mapping[str, Any], projection_copy_path: str | Path,
+    expected_projection_copy_sha256: str,
+    projection_receipt_sha256: str,
+) -> tuple[Path, dict[str, Any]]:
+    value = collection_api.authenticate_saved_collection(
+        report_path=path, rows_path=rows_path,
+        projection_copy_path=projection_copy_path,
+        expected_report_sha256=expected_sha256,
+        expected_rows_sha256=rows_sha256,
+        expected_projection_copy_sha256=expected_projection_copy_sha256,
+    )
+    report_path = _authenticate_file(
+        path, "unscored outer collection report", expected_sha256=expected_sha256)
+    report_bindings = value.get("bindings")
+    collection = value.get("collection")
+    boundary = value.get("information_boundary")
+    required = {
+        "candidate_lock_sha256": lock_sha256,
+        "actor_sha256": bindings["actor_sha256"],
+        "protocol_sha256": bindings["protocol_sha256"],
+        "runtime_manifest_sha256": bindings["runtime_manifest_sha256"],
+        "designation_sha256": bindings["designation_sha256"],
+        "failed_outer_closeout_sha256": bindings[
+            "failed_outer_closeout_sha256"],
+        "promotion_closeout_sha256": bindings[
+            "promotion_closeout_sha256"],
+        "combined_promoted_rows_sha256": bindings["combined_promoted_rows_sha256"],
+        "fresh_outer_registry_sha256": bindings["fresh_outer_registry_sha256"],
+        "fresh_outer_registry_report_sha256": bindings[
+            "fresh_outer_registry_report_sha256"],
+        "prior_outer_hash_projection_sha256": bindings[
+            "prior_outer_hash_projection_sha256"],
+        "prior_outer_hash_projection_content_sha256": bindings[
+            "prior_outer_hash_projection_content_sha256"],
+        "promotion_closeout_sha256": bindings[
+            "promotion_closeout_sha256"],
+        "combined_promoted_rows_sha256": bindings["combined_promoted_rows_sha256"],
+        "outer_hash_projection_sha256": bindings["outer_hash_projection_sha256"],
+        "outer_hash_projection_receipt_sha256": projection_receipt_sha256,
+        "development_rows_sha256": bindings["development_rows_sha256"],
+        "program_sha256": bindings["program_sha256"],
+        "selector_report_sha256": bindings["selector_report_sha256"],
+        "rows_sha256": rows_sha256,
+        "projection_copy_sha256": expected_projection_copy_sha256,
+        "ordered_replay_sha256": projection["projection"]["ordered_replay_sha256"],
+    }
+    if (value.get("version") != collection_api.VERSION
+            or value.get("schema_version") != COLLECTION_SCHEMA
+            or value.get("status") != COLLECTION_STATUS
+            or value.get("formal_ready") is not False
+            or not _content_valid(value)
+            or not isinstance(report_bindings, Mapping)
+            or any(report_bindings.get(name) != expected
+                   for name, expected in required.items())
+            or not isinstance(collection, Mapping)
+            or collection.get("row_count") != projection["projection"]["row_count"]
+            or collection.get("scene_count") != projection_api.SCENE_COUNT
+            or collection.get("scored") is not False
+            or collection.get("all_submitted_actions_equal_policy_actions") is not True
+            or collection.get("all_actor_probabilities_and_actions_exact") is not True
+            or not isinstance(boundary, Mapping)
+            or boundary.get("candidate_lock_authenticated_before_outer_replay") is not True
+            or boundary.get(
+                "selector_report_and_passed_gates_authenticated_before_outer_replay")
+                is not True
+            or boundary.get(
+                "prior_outer_hash_projection_authenticated_before_outer_replay")
+                is not True
+            or boundary.get(
+                "promotion_closeout_authenticated_before_outer_replay")
+                is not True
+            or boundary.get("labels_and_probabilities_collected_only_after_candidate_lock")
+                is not True
+            or boundary.get("outer_metrics_or_candidate_score_computed") is not False
+            or boundary.get("program_loaded_or_executed") is not False
+            or boundary.get("protected_final_access") is not False
+            or boundary.get("runtime_action_override") is not False):
+        raise ValueError("Unscored outer collection report semantics differ")
+    return report_path, value
+
+
+def _write_exclusive(path: Path, raw: bytes) -> None:
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _predict(program: R41DiagnosticPublicTreeProgramV9,
+             observations: np.ndarray) -> np.ndarray:
+    chunks = [program.predict_proba_batch(
+        observations[start:start + PREDICTION_BATCH_SIZE])
+        for start in range(0, len(observations), PREDICTION_BATCH_SIZE)]
+    return np.concatenate(chunks, axis=0) if chunks else np.empty(
+        (0, len(metrics_api.ACTIONS)), dtype=np.float64)
+
+
+def _load_private_rows(path: Path, *, expected_sha256: str) -> dict[str, np.ndarray]:
+    expected = _sha(expected_sha256, "full outer rows SHA-256")
+    if file_hash(path) != expected:
+        raise ValueError("Full outer rows changed before private read")
+    arrays = collection_api.load_authenticated_rows(
+        path, expected_rows_sha256=expected)
+    if file_hash(path) != expected:
+        raise RuntimeError("Full outer rows changed during private read")
+    return arrays
+
+
+def _attempt_identity(
+    *, bindings: Mapping[str, str], projection: Mapping[str, Any],
+    registry: Mapping[str, Any], registry_report: Mapping[str, Any],
+    selected_identity_sha256: str,
+) -> tuple[str, dict[str, str]]:
+    values = {
+        "scheme": VERSION + ".outer-identity.v1",
+        "fresh_outer_registry_sha256": bindings["fresh_outer_registry_sha256"],
+        "fresh_outer_registry_content_sha256": registry["content_sha256"],
+        "fresh_outer_registry_report_sha256": bindings[
+            "fresh_outer_registry_report_sha256"],
+        "fresh_outer_registry_report_content_sha256": registry_report[
+            "content_sha256"],
+        "selected_identity_sha256": selected_identity_sha256,
+        "prior_outer_hash_projection_sha256": bindings[
+            "prior_outer_hash_projection_sha256"],
+        "prior_outer_hash_projection_content_sha256": bindings[
+            "prior_outer_hash_projection_content_sha256"],
+        "outer_hash_projection_sha256": bindings["outer_hash_projection_sha256"],
+        "outer_hash_projection_content_sha256": projection["content_sha256"],
+        "ordered_replay_sha256": projection["projection"]["ordered_replay_sha256"],
+    }
+    return digest(values), values
+
+
+def _failure_result(
+    *, attempt_key: str, anchor: Mapping[str, Any], error: BaseException,
+    sources: Mapping[str, str],
+) -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "version": VERSION,
+        "status": STATUS_ABORTED,
+        "attempt_key": attempt_key,
+        "attempt_anchor_content_sha256": anchor["content_sha256"],
+        "failure": {
+            "exception_type": type(error).__name__,
+            "message": str(error)[:1000],
+            "outer_consumed": True,
+            "retry_permitted": False,
+        },
+        "producer_sources_sha256": digest(sources),
+        "protected_final_access": False,
+        "formal_ready": False,
+    }
+    value["content_sha256"] = digest(value)
+    return value
+
+
+def build(
+    *, candidate_lock_path: str | Path, expected_candidate_lock_sha256: str,
+    actor_path: str | Path, protocol_path: str | Path,
+    runtime_manifest_path: str | Path, designation_path: str | Path,
+    failed_outer_closeout_path: str | Path,
+    promotion_closeout_path: str | Path,
+    expected_promotion_closeout_sha256: str,
+    permanent_promotion_closeout_registry: str | Path,
+    fresh_outer_registry_path: str | Path,
+    fresh_outer_registry_report_path: str | Path,
+    prior_outer_hash_projection_path: str | Path,
+    outer_hash_projection_path: str | Path,
+    outer_hash_projection_receipt_path: str | Path,
+    expected_outer_hash_projection_receipt_sha256: str,
+    outer_hash_projection_copy_path: str | Path,
+    expected_outer_hash_projection_copy_sha256: str,
+    development_rows_path: str | Path,
+    combined_promoted_rows_path: str | Path, program_path: str | Path,
+    selector_report_path: str | Path,
+    outer_collection_report_path: str | Path,
+    expected_outer_collection_report_sha256: str,
+    outer_rows_path: str | Path, expected_outer_rows_sha256: str,
+    permanent_registry: str | Path, output: str | Path,
+) -> dict[str, Any]:
+    """Claim and score one outer.  No private outer field is read pre-claim."""
+    sources = producer_sources()
+    if any("fresh_final" in name or "final_once" in name for name in sources):
+        raise RuntimeError("Protected final/holdout source entered outer scorer closure")
+    lock_path, lock, bindings = _candidate_lock(
+        candidate_lock_path, expected_sha256=expected_candidate_lock_sha256)
+    if (_sha(expected_outer_hash_projection_receipt_sha256,
+             "outer hash projection receipt")
+            != bindings["outer_hash_projection_receipt_sha256"]):
+        raise ValueError(
+            "Expected outer projection receipt differs from candidate lock")
+    if (_sha(expected_promotion_closeout_sha256,
+             "promotion closeout")
+            != bindings["promotion_closeout_sha256"]):
+        raise ValueError("Expected promotion closeout differs from candidate lock")
+    paths = _verify_lock_files(
+        bindings, actor=actor_path, protocol=protocol_path,
+        runtime_manifest=runtime_manifest_path, designation=designation_path,
+        failed_outer_closeout=failed_outer_closeout_path,
+        promotion_closeout=promotion_closeout_path,
+        fresh_outer_registry=fresh_outer_registry_path,
+        fresh_outer_registry_report=fresh_outer_registry_report_path,
+        prior_outer_hash_projection=prior_outer_hash_projection_path,
+        outer_hash_projection=outer_hash_projection_path,
+        outer_hash_projection_receipt=outer_hash_projection_receipt_path,
+        development_rows=development_rows_path,
+        combined_promoted_rows=combined_promoted_rows_path, program=program_path,
+        selector_report=selector_report_path)
+    promoted_closeout = promoted_closeout_api.read_saved_closeout_public(
+        paths["promotion_closeout"],
+        expected_closeout_sha256=expected_promotion_closeout_sha256,
+        permanent_closeout_registry=permanent_promotion_closeout_registry)
+    promoted_outer = promoted_closeout["combined_promoted_development"]
+    if promoted_outer["rows_sha256"] != bindings["combined_promoted_rows_sha256"]:
+        raise ValueError("Combined-promoted rows differ from authenticated closeout")
+    selector_report = collection_api.authenticate_locked_candidate_selector(
+        lock=lock, selector_report_path=paths["selector_report"],
+        expected_selector_report_sha256=bindings["selector_report_sha256"],
+        expected_program_sha256=bindings["program_sha256"],
+    )
+    candidate_sources, runtime_sources = _validate_candidate_source_closure(
+        lock, paths["selector_report"], bindings)
+    registry, registry_report, selected_identity_sha256 = _registry_bundle(
+        paths["fresh_outer_registry"], paths["fresh_outer_registry_report"],
+        bindings=bindings)
+    program_payload = _program_payload(paths["program"])
+    actor_feature_names, actor_feature_names_sha256 = (
+        _authenticate_program_actor_features(
+            program_payload=program_payload, actor_path=paths["actor"],
+            bindings=bindings))
+    prior_projection = _strict_json_bytes(
+        paths["prior_outer_hash_projection"].read_bytes(),
+        "prior outer observation-hash projection")
+    if (not _content_valid(prior_projection)
+            or prior_projection.get("content_sha256") != bindings[
+                "prior_outer_hash_projection_content_sha256"]):
+        raise ValueError("Prior outer observation-hash projection differs")
+    projection, projection_receipt = projection_api.read_saved_projection(
+        projection_path=paths["outer_hash_projection"],
+        receipt_path=paths["outer_hash_projection_receipt"],
+        expected_projection_sha256=bindings["outer_hash_projection_sha256"],
+        expected_receipt_sha256=bindings["outer_hash_projection_receipt_sha256"])
+    if (projection["identity"]["registry_file_sha256"]
+            != bindings["fresh_outer_registry_sha256"]
+            or projection["identity"]["registry_content_sha256"]
+                != registry["content_sha256"]
+            or projection["identity"]["selected_identity_sha256"]
+                != selected_identity_sha256
+            or projection_receipt["bindings"]["actor_sha256"]
+                != bindings["actor_sha256"]
+            or projection_receipt["bindings"].get(
+                "fresh_outer_registry_report_sha256")
+                != bindings["fresh_outer_registry_report_sha256"]):
+        raise ValueError("Candidate lock, registry, and projection identity differ")
+    projection_copy_path = _authenticate_file(
+        outer_hash_projection_copy_path, "copied outer hash projection",
+        expected_sha256=expected_outer_hash_projection_copy_sha256)
+    if (file_hash(projection_copy_path) != bindings["outer_hash_projection_sha256"]
+            or projection_copy_path.read_bytes()
+                != paths["outer_hash_projection"].read_bytes()):
+        raise ValueError("Collected outer projection copy differs from locked projection")
+    rows_path = _authenticate_file(
+        outer_rows_path, "full unscored outer rows",
+        expected_sha256=expected_outer_rows_sha256, maximum=MAX_NPZ_BYTES)
+    report_path, collection_report = _collection_report(
+        outer_collection_report_path,
+        expected_sha256=expected_outer_collection_report_sha256,
+        lock_sha256=file_hash(lock_path), bindings=bindings,
+        rows_path=rows_path, rows_sha256=file_hash(rows_path), projection=projection,
+        projection_copy_path=outer_hash_projection_copy_path,
+        expected_projection_copy_sha256=(
+            expected_outer_hash_projection_copy_sha256),
+        projection_receipt_sha256=file_hash(
+            paths["outer_hash_projection_receipt"]))
+    preflight = _preflight_outer_rows(
+        rows_path=rows_path, rows_sha256=file_hash(rows_path),
+        projection=projection,
+        projection_sha256=bindings["outer_hash_projection_sha256"],
+        prior_projection=prior_projection,
+        prior_projection_sha256=bindings[
+            "prior_outer_hash_projection_sha256"],
+        development_rows_path=paths["development_rows"],
+        development_rows_sha256=bindings["development_rows_sha256"],
+        combined_promoted_rows_path=paths["combined_promoted_rows"],
+        combined_promoted_rows_sha256=bindings["combined_promoted_rows_sha256"],
+        promotion_closeout_sha256=bindings[
+            "promotion_closeout_sha256"],
+        combined_promoted_rows_semantic_sha256=promoted_outer[
+            "rows_semantic_sha256"],
+        combined_promoted_observation_hashes=promoted_outer[
+            "observation_hash_projection"]["outer_observation_hashes"],
+        registry=registry,
+        validation_wins=selector_report["development"]["validation_wins"],
+        validation_hash_inputs=selector_report["development"][
+            "validation_hash_inputs"])
+    attempt_key, attempt_inputs = _attempt_identity(
+        bindings=bindings, projection=projection, registry=registry,
+        registry_report=registry_report,
+        selected_identity_sha256=selected_identity_sha256)
+    permanent = _directory(permanent_registry, "permanent outer-attempt registry")
+    destination = Path(output).expanduser().absolute()
+    parent = _directory(destination.parent, "outer result output parent")
+    if destination.exists() or destination.is_symlink():
+        raise ValueError("Outer result output already exists")
+    anchor: dict[str, Any] = {
+        "version": VERSION + ".attempt-anchor.v1",
+        "status": "fresh_outer_attempt_irrevocably_claimed",
+        "attempt_key": attempt_key,
+        "attempt_key_inputs": attempt_inputs,
+        "bindings": {
+            "candidate_lock_sha256": file_hash(lock_path),
+            "candidate_lock_content_sha256": lock["content_sha256"],
+            "program_sha256": file_hash(paths["program"]),
+            "program_content_sha256": digest(program_payload),
+            "outer_collection_report_sha256": file_hash(report_path),
+            "outer_collection_report_content_sha256": collection_report[
+                "content_sha256"],
+            "outer_rows_sha256": file_hash(rows_path),
+            "fresh_outer_registry_report_sha256": file_hash(
+                paths["fresh_outer_registry_report"]),
+            "fresh_outer_registry_report_content_sha256": registry_report[
+                "content_sha256"],
+            "selected_identity_sha256": selected_identity_sha256,
+            "prior_outer_hash_projection_sha256": file_hash(
+                paths["prior_outer_hash_projection"]),
+            "prior_outer_hash_projection_content_sha256": prior_projection[
+                "content_sha256"],
+            "promotion_closeout_sha256": file_hash(
+                paths["promotion_closeout"]),
+            "promotion_closeout_content_sha256": promoted_closeout[
+                "content_sha256"],
+            "combined_promoted_rows_sha256": file_hash(
+                paths["combined_promoted_rows"]),
+            "combined_promoted_rows_semantic_sha256": promoted_outer[
+                "rows_semantic_sha256"],
+            "combined_validation_observation_hashes_sha256": (
+                selector_report["development"]["validation_hash_inputs"]
+                ["combined_observation_hashes_sha256"]),
+            "outer_hash_projection_receipt_sha256": file_hash(
+                paths["outer_hash_projection_receipt"]),
+            "candidate_source_closure_sha256": digest(candidate_sources),
+            "runtime_program_source_closure_sha256": digest(runtime_sources),
+            "actor_feature_names_sha256": actor_feature_names_sha256,
+            "source_closure_sha256": digest(sources),
+        },
+        "preflight": preflight,
+        "private_outer_fields_read_before_claim": False,
+        "retry_permitted": False,
+        "protected_final_access": False,
+        "formal_ready": False,
+    }
+    anchor["content_sha256"] = digest(anchor)
+    campaign_directory = permanent / attempt_key
+    try:
+        os.mkdir(campaign_directory, 0o700)
+    except FileExistsError:
+        raise FileExistsError(
+            "This fresh outer has already been claimed and cannot be scored again") from None
+    if campaign_directory.is_symlink() or campaign_directory.resolve() != campaign_directory:
+        raise RuntimeError("Permanent outer-attempt directory is unsafe")
+    _write_exclusive(campaign_directory / ANCHOR_NAME, _json_bytes(anchor))
+    _fsync_directory(campaign_directory)
+    _fsync_directory(permanent)
+
+    result: dict[str, Any] | None = None
+    try:
+        # This is intentionally the first operation that opens observations,
+        # Actor probabilities, action labels, weights, or submitted_equal.
+        arrays = _load_private_rows(rows_path, expected_sha256=file_hash(rows_path))
+        program = R41DiagnosticPublicTreeProgramV9.from_dict(program_payload)
+        if tuple(program.action_names) != tuple(metrics_api.ACTIONS):
+            raise ValueError("Locked v9 program action registry differs")
+        actor = NumPyNativeActor(paths["actor"])
+        if (tuple(actor.metadata.get("feature_names", ())) != actor_feature_names
+                or digest(list(actor_feature_names))
+                    != bindings["actor_feature_names_sha256"]
+                or tuple(program.base_feature_names) != actor_feature_names):
+            raise ValueError("Executing v9 program and Actor feature registries differ")
+        projection_api._validate_projection_replay_arrays(
+            arrays, actor=actor, scenes=registry["development_outer"])
+        if (not np.all(arrays["split_validation"])
+                or _decode(arrays["observation_hashes"], "outer observation hashes")
+                    != projection["projection"]["ordered_observation_hashes"]
+                or _row_identity_hashes(arrays)
+                    != projection["projection"]["ordered_row_identity_hashes"]):
+            raise ValueError("Private outer rows differ from claimed ordered projection")
+        probabilities = _predict(program, arrays["observations"])
+        mask = np.ones(len(arrays["observations"]), dtype=np.bool_)
+        pairs = rows_api._effective_pairs(arrays, mask)
+        pair_bits = metrics_api._pair_group_bits(arrays, pairs)
+        metrics = metrics_api._metrics_from_probabilities(
+            probabilities, arrays, mask, pairs=pairs,
+            pair_group_bits=pair_bits)
+        gate = metrics_api._gate(metrics)
+        result = {
+            "version": VERSION,
+            "status": STATUS_PASSED if gate["passed"] else STATUS_FAILED,
+            "attempt_key": attempt_key,
+            "attempt_anchor_content_sha256": anchor["content_sha256"],
+            "candidate_lock_sha256": file_hash(lock_path),
+            "program_sha256": file_hash(paths["program"]),
+            "program_content_sha256": digest(program_payload),
+            "actor_feature_names_sha256": actor_feature_names_sha256,
+            "outer_rows_sha256": file_hash(rows_path),
+            "outer_collection_report_sha256": file_hash(report_path),
+            "metrics": metrics,
+            "gate": gate,
+            "row_accounting": {
+                "rows": len(arrays["observations"]),
+                "scenes": len(set(_decode(
+                    arrays["scene_fingerprints"], "outer scene fingerprints"))),
+                "effective_intervention_pairs": len(pairs),
+                "all_submitted_actions_equal_policy_actions": bool(
+                    np.all(arrays["submitted_equal"])),
+                "runtime_action_overrides": 0,
+            },
+            "execution": {
+                "candidate_refit": False,
+                "program_mutated": False,
+                "private_outer_fields_read_after_permanent_claim": True,
+                "outer_consumed": True,
+                "retry_permitted": False,
+                "protected_final_access": False,
+            },
+            "producer_sources": sources,
+            "producer_sources_sha256": digest(sources),
+            "explanation_eligible": bool(gate["passed"]),
+            "formal_ready": False,
+        }
+        result["content_sha256"] = digest(result)
+        if (producer_sources() != sources
+                or file_hash(lock_path) != expected_candidate_lock_sha256
+                or file_hash(paths["program"]) != bindings["program_sha256"]
+                or file_hash(paths["fresh_outer_registry_report"])
+                    != bindings["fresh_outer_registry_report_sha256"]
+                or file_hash(paths["prior_outer_hash_projection"])
+                    != bindings["prior_outer_hash_projection_sha256"]
+                or file_hash(paths["promotion_closeout"])
+                    != bindings["promotion_closeout_sha256"]
+                or file_hash(paths["combined_promoted_rows"])
+                    != bindings["combined_promoted_rows_sha256"]
+                or file_hash(paths["outer_hash_projection_receipt"])
+                    != bindings["outer_hash_projection_receipt_sha256"]
+                or file_hash(rows_path) != expected_outer_rows_sha256
+                or file_hash(report_path)
+                    != expected_outer_collection_report_sha256):
+            raise RuntimeError("Outer scorer inputs or source closure changed during scoring")
+        _write_exclusive(campaign_directory / RESULT_NAME, _json_bytes(result))
+        _fsync_directory(campaign_directory)
+    except BaseException as error:
+        failure = _failure_result(
+            attempt_key=attempt_key, anchor=anchor, error=error, sources=sources)
+        try:
+            _write_exclusive(campaign_directory / RESULT_NAME, _json_bytes(failure))
+            _fsync_directory(campaign_directory)
+        finally:
+            raise
+
+    if producer_sources() != sources:
+        raise RuntimeError("Outer scorer source closure changed after scoring")
+    promoted_closeout_api.read_saved_closeout_public(
+        paths["promotion_closeout"],
+        expected_closeout_sha256=expected_promotion_closeout_sha256,
+        permanent_closeout_registry=permanent_promotion_closeout_registry)
+    if result is None:
+        raise RuntimeError("Outer scorer did not produce a result")
+    temporary = Path(tempfile.mkdtemp(
+        prefix="." + destination.name + ".tmp-", dir=parent)).absolute()
+    try:
+        _write_exclusive(temporary / ANCHOR_NAME, _json_bytes(anchor))
+        _write_exclusive(temporary / RESULT_NAME, _json_bytes(result))
+        _fsync_directory(temporary)
+        os.rename(temporary, destination)
+        temporary = None
+        _fsync_directory(parent)
+    finally:
+        if temporary is not None:
+            shutil.rmtree(temporary, ignore_errors=True)
+    return deepcopy(result)
+
+
+def read_saved_result(
+    path: str | Path, *, expected_result_sha256: str,
+    permanent_registry: str | Path,
+) -> dict[str, Any]:
+    """Authenticate a published or permanent result against its claim anchor."""
+    result_path, raw, value = _strict_json(
+        path, "v9 one-shot outer result",
+        expected_sha256=expected_result_sha256)
+    status = value.get("status")
+    attempt_key = value.get("attempt_key")
+    if (value.get("version") != VERSION
+            or status not in {STATUS_PASSED, STATUS_FAILED, STATUS_ABORTED}
+            or type(attempt_key) is not str or _HEX.fullmatch(attempt_key) is None
+            or not _content_valid(value)
+            or value.get("formal_ready") is not False
+            or value.get("producer_sources_sha256") != digest(producer_sources())):
+        raise ValueError("Saved one-shot outer result semantics differ")
+    permanent = _directory(permanent_registry, "permanent outer-attempt registry")
+    campaign = _directory(permanent / attempt_key, "permanent outer-attempt directory")
+    anchor_path = _regular(campaign / ANCHOR_NAME, "permanent outer-attempt anchor")
+    permanent_result = _regular(
+        campaign / RESULT_NAME, "permanent one-shot outer result")
+    anchor = _strict_json_bytes(
+        anchor_path.read_bytes(), "permanent outer-attempt anchor")
+    if (anchor.get("version") != VERSION + ".attempt-anchor.v1"
+            or anchor.get("status") != "fresh_outer_attempt_irrevocably_claimed"
+            or anchor.get("attempt_key") != attempt_key
+            or not _content_valid(anchor)
+            or anchor.get("retry_permitted") is not False
+            or anchor.get("protected_final_access") is not False
+            or anchor.get("formal_ready") is not False
+            or value.get("attempt_anchor_content_sha256")
+                != anchor["content_sha256"]
+            or permanent_result.read_bytes() != raw
+            or file_hash(permanent_result) != expected_result_sha256
+            or result_path.read_bytes() != raw):
+        raise ValueError("Permanent one-shot outer result or anchor differs")
+    return deepcopy(value)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--candidate-lock", required=True)
+    parser.add_argument("--expected-candidate-lock-sha256", required=True)
+    parser.add_argument("--actor", required=True)
+    parser.add_argument("--protocol", required=True)
+    parser.add_argument("--runtime-manifest", required=True)
+    parser.add_argument("--designation", required=True)
+    parser.add_argument("--failed-outer-closeout", required=True)
+    parser.add_argument("--promotion-closeout", required=True)
+    parser.add_argument(
+        "--expected-promotion-closeout-sha256", required=True)
+    parser.add_argument("--permanent-promotion-closeout-registry", required=True)
+    parser.add_argument("--fresh-outer-registry", required=True)
+    parser.add_argument("--fresh-outer-registry-report", required=True)
+    parser.add_argument("--prior-outer-hash-projection", required=True)
+    parser.add_argument("--outer-hash-projection", required=True)
+    parser.add_argument("--outer-hash-projection-receipt", required=True)
+    parser.add_argument("--expected-outer-hash-projection-receipt-sha256", required=True)
+    parser.add_argument("--outer-hash-projection-copy", required=True)
+    parser.add_argument("--expected-outer-hash-projection-copy-sha256", required=True)
+    parser.add_argument("--development-rows", required=True)
+    parser.add_argument("--combined-promoted-rows", required=True)
+    parser.add_argument("--program", required=True)
+    parser.add_argument("--selector-report", required=True)
+    parser.add_argument("--outer-collection-report", required=True)
+    parser.add_argument("--expected-outer-collection-report-sha256", required=True)
+    parser.add_argument("--outer-rows", required=True)
+    parser.add_argument("--expected-outer-rows-sha256", required=True)
+    parser.add_argument("--permanent-registry", required=True)
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args(argv)
+    result = build(
+        candidate_lock_path=args.candidate_lock,
+        expected_candidate_lock_sha256=args.expected_candidate_lock_sha256,
+        actor_path=args.actor, protocol_path=args.protocol,
+        runtime_manifest_path=args.runtime_manifest,
+        designation_path=args.designation,
+        failed_outer_closeout_path=args.failed_outer_closeout,
+        promotion_closeout_path=args.promotion_closeout,
+        expected_promotion_closeout_sha256=(
+            args.expected_promotion_closeout_sha256),
+        permanent_promotion_closeout_registry=args.permanent_promotion_closeout_registry,
+        fresh_outer_registry_path=args.fresh_outer_registry,
+        fresh_outer_registry_report_path=args.fresh_outer_registry_report,
+        prior_outer_hash_projection_path=args.prior_outer_hash_projection,
+        outer_hash_projection_path=args.outer_hash_projection,
+        outer_hash_projection_receipt_path=args.outer_hash_projection_receipt,
+        expected_outer_hash_projection_receipt_sha256=(
+            args.expected_outer_hash_projection_receipt_sha256),
+        outer_hash_projection_copy_path=args.outer_hash_projection_copy,
+        expected_outer_hash_projection_copy_sha256=(
+            args.expected_outer_hash_projection_copy_sha256),
+        development_rows_path=args.development_rows,
+        combined_promoted_rows_path=args.combined_promoted_rows,
+        program_path=args.program, selector_report_path=args.selector_report,
+        outer_collection_report_path=args.outer_collection_report,
+        expected_outer_collection_report_sha256=(
+            args.expected_outer_collection_report_sha256),
+        outer_rows_path=args.outer_rows,
+        expected_outer_rows_sha256=args.expected_outer_rows_sha256,
+        permanent_registry=args.permanent_registry, output=args.output,
+    )
+    print(canonical({
+        "status": result["status"], "attempt_key": result["attempt_key"],
+        "gate_passed": result["gate"]["passed"],
+        "output": str(Path(args.output).expanduser().absolute()),
+    }))
+    return 0 if result["gate"]["passed"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+__all__ = [
+    "VERSION", "LOCK_SCHEMA", "COLLECTION_SCHEMA", "STATUS_PASSED",
+    "STATUS_FAILED", "STATUS_ABORTED", "ANCHOR_NAME", "RESULT_NAME",
+    "contract", "producer_sources", "build", "read_saved_result", "main",
+    "_safe_row_projection", "_preflight_outer_rows",
+]

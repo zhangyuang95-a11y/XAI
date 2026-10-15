@@ -1,0 +1,54 @@
+{
+  "version": "warehouse-r41-persistence-audit.v1",
+  "audited_date": "2026-09-11",
+  "status": "blocked_ephemeral_storage",
+  "data_persistent": false,
+  "formal_ready": false,
+  "current_declaration": {
+    "render_plan": "free",
+    "database_path": "/tmp/warehouse_alignment_online.sqlite3",
+    "storage_mode": "ephemeral",
+    "persistent_disk_declared": false
+  },
+  "live_health_observation": {
+    "checked_date": "2026-09-11",
+    "data_persistent": false,
+    "formal_ready": false,
+    "service": "warehouse_alignment_online_r2"
+  },
+  "repository_findings": {
+    "warehouse_sqlite_local_development": true,
+    "warehouse_render_disk_path_support": true,
+    "warehouse_postgresql_adapter": false,
+    "historical_kitchen_postgresql_adapter_reusable_without_port": false,
+    "authenticated_full_database_export_endpoint": false
+  },
+  "minimum_change": {
+    "backend": "sqlite_on_render_persistent_disk",
+    "paid_disk_capable_plan_required": true,
+    "mount_path": "/var/data",
+    "database_path": "/var/data/warehouse_alignment_online.sqlite3",
+    "storage_mode": "persistent"
+  },
+  "migration": {
+    "live_ephemeral_database_copy_available": "unknown",
+    "automatic_tmp_to_disk_copy_on_deploy": false,
+    "old_records_recoverable_without_prior_copy": false,
+    "must_not_claim_old_records_migrated_without_source_hash_and_integrity_check": true
+  },
+  "deployment_gates": {
+    "preflight_rejects_ephemeral": true,
+    "preflight_rejects_free_plan_with_disk": true,
+    "preflight_rejects_database_outside_mount": true,
+    "preflight_binds_disk_and_plan_to_single_target_service": true,
+    "preflight_rejects_multiple_or_autoscaled_instances": true,
+    "preflight_requires_current_paid_web_plan_id": true,
+    "preflight_rejects_symlinked_blueprint_or_release_root": true,
+    "server_rejects_persistent_label_outside_mount": true,
+    "server_auto_mode_keeps_tmp_ephemeral": true,
+    "server_auto_mode_never_claims_persistence_from_path_only": true,
+    "participant_api_hides_database_and_disk_identity": true,
+    "participant_consent_matches_storage_classification": true,
+    "real_render_restart_recovery_required": true
+  }
+}

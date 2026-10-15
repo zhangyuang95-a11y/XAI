@@ -2,10 +2,11 @@
 import json
 from dataclasses import replace
 import pytest
+from study_v3 import store as study_store
 from study_v3.automatic_explanations import candidate
 from study_v3.config import Settings
 from study_v3.store import Store, StudyError, encode
-from tests.test_study_v3_store import Flow
+from tests.test_study_v3_store import Flow, _simulated_scenario_config
 
 
 @pytest.fixture(autouse=True)
@@ -13,6 +14,7 @@ def legacy_confirmation_protocol(monkeypatch):
     # Keep the v2 regression suite pinned to existing participant enrollments.
     from study_v3 import automatic_explanations
     monkeypatch.setattr(automatic_explanations,'VERSION','event-nodes-confirm-v2')
+    monkeypatch.setattr(study_store, 'scenario_config', _simulated_scenario_config)
 
 
 def decision(**overrides):

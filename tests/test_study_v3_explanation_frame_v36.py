@@ -5,11 +5,17 @@ from uuid import uuid4
 
 import pytest
 
+from study_v3 import store as study_store
 from study_v3.config import Settings
 from study_v3.qa import Explainer, _catalog, _digest
 from study_v3.registry import engine
 from study_v3.store import Store, encode
-from tests.test_study_v3_store import Flow, RecordingExplainer
+from tests.test_study_v3_store import Flow, RecordingExplainer, _simulated_scenario_config
+
+
+@pytest.fixture(autouse=True)
+def simulated_scenarios(monkeypatch):
+    monkeypatch.setattr(study_store, 'scenario_config', _simulated_scenario_config)
 
 
 def selected_plan(state, intents, language='en'):

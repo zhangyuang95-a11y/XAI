@@ -1,10 +1,16 @@
 """Persisted guided-question onboarding and optional explanation choices."""
 import json
 import pytest
+from study_v3 import store as study_store
 from study_v3.config import Settings
 from study_v3.store import Store, StudyError
-from tests.test_study_v3_store import Flow
+from tests.test_study_v3_store import Flow, _simulated_scenario_config
 from tests.test_study_v3_automatic_explanations import task2
+
+
+@pytest.fixture(autouse=True)
+def simulated_scenarios(monkeypatch):
+    monkeypatch.setattr(study_store, 'scenario_config', _simulated_scenario_config)
 
 
 @pytest.mark.parametrize('domain',['warehouse','pong','kitchen'])

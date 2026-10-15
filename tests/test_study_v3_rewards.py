@@ -1,11 +1,18 @@
 """Money boundaries, authoritative scores, frozen promises, and private payout data."""
 import json
 import pytest
+from study_v3 import store as study_store
 from study_v3 import rewards, prolific
 from study_v3.config import Settings
 from study_v3.store import Store
-from tests.test_study_v3_store import Flow
+from tests.test_study_v3_store import Flow, _simulated_scenario_config
 from tests.test_prolific_enrolment import store, payload
+
+
+@pytest.fixture(autouse=True)
+def simulated_scenarios(monkeypatch):
+    monkeypatch.setattr(study_store, 'scenario_config', _simulated_scenario_config)
+
 
 @pytest.mark.parametrize('domain',['warehouse','pong','kitchen'])
 def test_bonus_bounds_and_rounding(domain):

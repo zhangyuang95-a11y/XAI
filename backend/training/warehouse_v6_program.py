@@ -512,12 +512,21 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
              "eligibility": list(eligibility), "validation": list(validation)}
     episode_ids = {name: {str(row["episode"]) for row in rows}
                    for name, rows in parts.items()}
+    # A scenario can be reset more than once inside a fixed training block.
+    # Distinct episode IDs from the same base seed must stay in one split.
+    scenario_ids = {
+        name: {str(row.get("base_seed", row["episode"])) for row in rows}
+        for name, rows in parts.items()
+    }
     for name, rows in parts.items():
         _sample_arrays(rows, name)
         _sampled_indices(rows)
     if any(episode_ids[left] & episode_ids[right]
            for left in parts for right in parts if left < right):
         raise ValueError("Warehouse program episode splits overlap")
+    if any(scenario_ids[left] & scenario_ids[right]
+           for left in parts for right in parts if left < right):
+        raise ValueError("Warehouse program scenario seed splits overlap")
     role_actor = actor.roles[role]
     fit_x, fit_masks = _sample_arrays(parts["fit"], "fit")
     structure, tree_report = _fit_sparse_tree(role, role_actor, parts["fit"],
@@ -536,6 +545,8 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         "split_episodes": {name: len(ids) for name, ids in episode_ids.items()},
         "split_episode_ids": {name: sorted(ids) for name, ids in episode_ids.items()},
         "split_episode_sha256": split_hashes,
+        "split_scenario_seed_ids": {
+            name: sorted(ids) for name, ids in scenario_ids.items()},
         "fit_tree": tree_report,
         "leaf_eligibility": {}, "validation": {},
         "certificate_kind": "independent_empirical_audit_only",

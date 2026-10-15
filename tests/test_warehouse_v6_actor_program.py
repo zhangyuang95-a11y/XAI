@@ -127,6 +127,31 @@ def test_program_validation_cannot_reselect_eligibility_leaves():
     np.testing.assert_array_equal(original.leaf_logits, changed.leaf_logits)
 
 
+def test_program_splits_keep_repeated_scenario_resets_together():
+    torch.manual_seed(451)
+    actor = FrozenWarehouseV6Actor.from_model(WarehouseV6Actor())
+    fit, calibration, eligibility, validation = _split_rows(actor)
+    # Different episode IDs can be resets of the same scenario seed. They
+    # cannot cross fit/calibration/eligibility/validation boundaries.
+    repeated = [{**row, "base_seed": fit[0]["base_seed"]}
+                for row in validation]
+    with pytest.raises(ValueError, match="scenario seed splits overlap"):
+        fit_program("robot_1", actor, fit, calibration, eligibility, repeated)
+
+
+def test_program_fit_targets_masked_nn_distribution_not_sampled_labels():
+    torch.manual_seed(452)
+    actor = FrozenWarehouseV6Actor.from_model(WarehouseV6Actor())
+    fit, calibration, eligibility, validation = _split_rows(actor)
+    original = fit_program("robot_1", actor, fit, calibration, eligibility, validation)
+    changed_fit = [{**row, "sampled_action": "WAIT"} for row in fit]
+    changed = fit_program("robot_1", actor, changed_fit, calibration,
+                          eligibility, validation)
+    np.testing.assert_array_equal(original.split_weights, changed.split_weights)
+    np.testing.assert_array_equal(original.split_bias, changed.split_bias)
+    np.testing.assert_array_equal(original.leaf_logits, changed.leaf_logits)
+
+
 def test_actionable_coverage_uses_actual_nn_sample_and_raw_legality():
     torch.manual_seed(46)
     actor = FrozenWarehouseV6Actor.from_model(WarehouseV6Actor())

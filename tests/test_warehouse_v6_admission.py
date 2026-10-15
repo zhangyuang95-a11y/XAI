@@ -258,6 +258,21 @@ def test_audit_recomputes_metric_sample_count_coverage_and_certification(ready):
                                   development=False), (role, purpose, field)
 
 
+def test_packaged_acceptance_recomputes_actionable_coverage():
+    from experiments.warehouse.acceptance import _audit_metric
+
+    metric = {"sample_count": 2000, "rows": 1000, "coverage": .5,
+              "actionable_rows": 800, "actionable_coverage": .4,
+              "agreement": .98, "kl": .04, "illegal_count": 0}
+    assert _audit_metric(metric, 2000, purpose="feedback", development=True)
+    for change in ({"actionable_rows": 900},
+                   {"actionable_coverage": .49},
+                   {"actionable_rows": True},
+                   {"actionable_rows": 1001}):
+        assert not _audit_metric({**metric, **change}, 2000,
+                                 purpose="feedback", development=True)
+
+
 def test_source_change_before_sealed_phase_rejects_without_claim(ready):
     admission, backend = ready
     backend.source = "a" * 64

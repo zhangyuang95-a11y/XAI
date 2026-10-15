@@ -133,9 +133,15 @@ def _audit_metric(metric: Mapping, sample_count: int, *,
     if not p.program_pass(metric, purpose=purpose, development=development):
         return False
     rows = metric.get("rows")
+    actionable_rows = metric.get("actionable_rows")
     if (type(rows) is not int or rows > sample_count
+            or type(actionable_rows) is not int
+            or not 0 <= actionable_rows <= rows
             or metric.get("sample_count") != sample_count
             or not math.isclose(float(metric["coverage"]), rows / sample_count,
+                                rel_tol=0, abs_tol=1e-9)
+            or not math.isclose(float(metric["actionable_coverage"]),
+                                actionable_rows / sample_count,
                                 rel_tol=0, abs_tol=1e-9)):
         return False
     certified = metric.get("certified_rows")

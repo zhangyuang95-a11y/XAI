@@ -1,69 +1,74 @@
-# 项目架构与维护契约
+# PolicyLens 三领域架构与发布契约
 
-## 依赖方向
+本文件描述当前三领域研究流程。早期 Warehouse 单领域架构说明保存在
+[历史文档](docs/archive/ARCHITECTURE_pre_v6_20261016.md)。当前候选是
+`policylens-three-domain-20261016.v6.0`；Warehouse 尚未通过模型验收，
+因此 pilot 报名保持关闭。版本号表示候选身份，不表示通过。
 
-项目采用单向依赖，而不是让环境、训练、解释和界面互相调用：
+## 运行边界
 
 ```text
-core
-  ↑
-env/warehouse
-  ↑
-backend/adapters ──→ backend/nlp + backend/simulation
-  ↑                         ↑
-backend/training            │
-  ↑                         │
-ui ─────────────────────────┘
-  ↑
-root entrypoints
+物理环境 + 动作前公开观察
+            ↓
+      内容哈希绑定的冻结双 Actor
+            ↓
+  演示：两个 Actor 执行 / 真人任务：人接管一个角色
+            ↓
+       环境处理合法性、碰撞和计分
+
+独立程序 → 训练反馈 / 通过审计后的解释证据
+独立程序 ↛ 执行动作选择
 ```
 
-- `core/`：环境无关的策略输出契约、可执行程序模型与后验 RCPD 蒸馏。程序表示、配置、树工具和蒸馏流程分别位于 `program.py`、`rcpd_config.py`、`rcpd_tree.py` 与 `rcpd.py`；正式仓库训练不会把程序输出反馈给 Actor。
-- `env/warehouse/`：领域状态、地图导航、动力学、观测、Reward、神经策略和离线训练场景；禁止依赖 `backend`、`ui` 或 `evaluation`。
-- `backend/adapters/`：把仓库状态翻译为通用模拟/解释契约。协作、电量和任务上下文在 `warehouse_context.py`，适配器不再重复计算。
-- `backend/nlp/`：查询 IR、解释 IR 和语言实现；不依赖具体环境。解释数据模型、消息渲染和证据编译分别位于 `explanation_model.py`、`explanation_rendering.py` 和 `explanation_ir.py`。
-- `backend/simulation/`：查询编排、反事实与证据组装；`query_engine.py` 负责用例编排，纯证据函数位于 `query_evidence.py`。
-- `backend/training/`：可以依赖环境、策略、适配器和持久化的应用层训练服务。
-- `ui/`：`warehouse_view.py` 只做公开状态序列化；`web_session.py` 管理单会话状态机；`web_application.py` 管理共享模型、并发、会话和数据库；`web_runtime.py` 仅为旧导入提供兼容导出。
-- `evaluation/`：离线评估，不参与在线生成路径；claim 验证编排与纯对齐工具分别位于 `claim_grounding.py` 和 `claim_alignment.py`。
+- `env/warehouse/` 提供 Warehouse 状态、公开观察、合法动作掩码及物理转移；
+  `domains/pong/` 和 `domains/kitchen/` 提供另外两个领域的环境与适配器。
+- `domains/warehouse/neural_turnbased.py` 是 Warehouse 的参与者适配器。
+  演示由两名冻结 Actor 行动；真人任务由人替换 `robot_1`，`robot_2`
+  的动作仍由绑定 Actor 产生。恢复、回放和问答使用相同的发布绑定。
+- `study_v3/domain_contracts.py` 定义三领域共同的物理环境、观察、
+  冻结 Actor、程序和参与者适配接口。`study_v3/policies.py`、
+  `release_catalog.py` 与 `registry.py` 验证分组、模型与发布身份；
+  `store.py` 保留实例、帧与历史数据。
+- `backend/training/warehouse_v6_runner.py` 是当前 Warehouse 双 Actor
+  BC、PPO 和开发评估的唯一正式训练管线。模型、程序、公开教师及训练专用
+  critic 分别位于同目录的 `warehouse_v6_actor*.py`、
+  `warehouse_v6_program.py`、`warehouse_v6_teacher*.py` 和
+  `warehouse_v6_collision_critic.py`。旧训练器保留为历史读取与兼容入口，
+  不得作为 v6 正式运行的替代入口。
+- `experiments/warehouse/protocol.py` 固定配对种子、场景序列、预算、
+  开发/压力/预审/封存种子边界和门槛；`admission.py`、
+  `acceptance.py` 核验成套收据。开发产物在按候选与 run ID 隔离的
+  `output/` 中；它是 Git 忽略目录，不能整目录提交。
+- `releases/<release_id>/assets/<sha256>/` 保存发布资产的内容寻址副本，
+  `catalog.json` 固定双 Actor、程序、训练报告、收据与运行配置哈希。
+  运行时只从通过验收的发布清单加载；开发输出不是运行时回退路径。
 
-依赖方向、循环依赖、版本字符串唯一性、默认产物目录和生产模块 2000 行上限由 `tests/test_architecture_contracts.py` 与 `tests/test_layer_boundaries.py` 自动检查。
+## 模型、程序与实验边界
 
-## 仓库领域分层
+每个领域的两个角色各有独立 Actor。raw 与 regularized 使用配对初始化及
+相同场景序列；两组的执行动作都由各自 NN 采样并经物理合法掩码处理。
+Warehouse regularized 的程序梯度只在规定训练窗口、独立验证通过且程序
+动作与 NN 动作一致时施加；raw 的外部程序反馈为零。停机 cost critic 只
+通过 PPO 更新权重，不在执行时接管动作。
 
-- `domain.py`：`WarehouseConfig`、任务、机器人和完整状态数据结构。
-- `layouts.py`：地图布局数据。
-- `navigation.py`：纯地图查询、动作掩码和最短路。
-- `environment.py`：联合动作解析和状态转移，并兼容导出历史公共符号。
-- `observations.py`：局部观测与集中式 Critic 状态。
-- `rewards.py`：用户分数增量与训练势能，二者保持隔离。
-- `coordination.py`：仅供行为克隆和 Actor 失败状态重标记使用的离线教师。它可以在隔离的数据生成环境中构造监督标签与教师状态序列，但不得进入 MAPPO rollout、生产 UI、参考轨迹或正式评估；这些正式路径提交的 AI 动作只能来自 Actor。
-- `policy.py`：只含网络、推理和模型 checkpoint 验证；UI 不导入训练器。
-- `mappo.py`：PPO rollout、优化与离线评估。Actor 输出原样进入环境，碰撞、阻塞、耗电和任务认领仅由环境动力学解析；训练流程本身位于 `backend/training/warehouse.py`。
+程序拟合完整 NN 的掩码后分布。拟合、校准、叶资格和内部验证按 episode
+分离；正式独立审计和留出集有一次性 claim。候选封存后若失败，该版本关闭，
+下一候选递增版本并使用全新封存种子。质量、程序保真度、解释保真度和逐帧
+NN 动作一致性全部通过后才能开放 pilot。Pong、Kitchen 沿用已验收的
+v5 模型和收据，迁移时核对内容哈希与执行一致性，不重跑已使用的留出集。
+Kitchen 的离线人类代理成绩只称为代理评估。
 
-## 单一事实源
+## 兼容与仓库维护
 
-- 所有环境、观测、Reward、模型、checkpoint、RCPD、seed、参考轨迹和日志版本只在 `env/warehouse/contracts.py` 定义。
-- 所有候选版本文件位置通过 `CollaborativeArtifactPaths` 获得。
-- 运行代码不得默认读取 `output/collaborative/current/`。该目录仅作为只读历史，不是别名或发布通道。
-- 用户得分公式、公开 API 和当前 checkpoint 契约由回归测试保护。
+- `core/` 保持环境无关的策略与程序契约；`backend/inference/` 是冻结
+  推理实现，研究训练依赖不进入正式运行时。
+- `ui/` 和旧根目录入口提供既有调用兼容。历史 v4/v5 实例、帧、收据
+  与失败候选只读保留，不改写成 v6 结果。
+- `docs/git_v6_branch_inventory_20261016.md` 记录原脏工作树的可恢复快照、
+  已归档分支与仍在使用的检出。不得重置协作者分支、强推或对大型实验输出
+  运行 `git clean -xfd`。
+- 先合入 pilot 关闭的主线与架构 PR；模型证据全通过后再单独合入 v6 发布
+  PR。Render 仍引用的分支必须先核实并迁移部署引用，之后才可处理旧分支。
 
-## 兼容与迁移
-
-- `env.warehouse.environment` 继续导出配置、状态和导航符号，已有调用无需修改；新代码应直接从 `domain` 或 `navigation` 导入。
-- `env.warehouse.mappo` 继续导出 `MAPPOPolicy`、配置和训练器；在线调用应改为 `from env.warehouse.policy import MAPPOPolicy`，避免加载训练依赖。
-- `ui.web_runtime` 继续导出应用、会话和序列化函数；新代码应分别导入 `web_application`、`web_session` 或 `warehouse_view`。
-- 训练模块从 `env.warehouse.train_rl` 迁移为 `backend.training.warehouse`。根目录 `train_rl.py` 是稳定的推荐入口。
-- `core.rcpd` 继续兼容导出程序类；新代码可从 `core.program` 导入可执行程序和 trace 数据结构。
-- 任何未来的不兼容持久化调整必须先提升 `contracts.py` 中相应版本，并提供明确拒绝旧产物的错误，而不是静默加载。
-
-## 数据与清理规则
-
-- 当前候选写入：`safe_mission_v28_individual_credit`。只有 AI–AI、20% 噪声队友和随机策略各自独立 200-seed 门控、后验 RCPD 和参考轨迹全部通过后才可成为正式默认模型。
-- 保留：v27 与更早模型、失败候选、训练 checkpoint、正式评估和实验 SQLite，均作为只读历史，不得被 v28 覆盖。
-- 可清理：明确标记为 `smoke`、临时截图、缓存和可由测试重新生成的 probe 文件。
-- 不得用清理脚本递归删除 `output/collaborative`、任一 SQLite 数据库或未知候选目录。删除前必须解析并核对每个绝对路径。
-
-## 变更验收
-
-每次架构或行为变更至少运行：语法编译、架构测试、完整 pytest、正式 checkpoint 加载与版本校验、API/UI 冒烟。修改浏览器交互时还需运行浏览器端到端测试。训练动力学变化才需要重新训练；仅重排模块且序列化契约不变时不得覆盖正式模型。
+架构及发布回归测试位于 `tests/`，尤其是
+`test_layer_boundaries.py`、Warehouse v6 协议/验收测试及三领域运行帧测试。

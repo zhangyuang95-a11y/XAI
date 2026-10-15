@@ -26,11 +26,17 @@ def test_root_layout_contains_only_clear_project_groups() -> None:
     }
     assert directories == {
         "backend",
+        "configs",
         "core",
         "docs",
+        "domains",
         "env",
         "evaluation",
+        "experiments",
         "output",
+        "releases",
+        "scripts",
+        "study_v3",
         "tests",
         "ui",
     }

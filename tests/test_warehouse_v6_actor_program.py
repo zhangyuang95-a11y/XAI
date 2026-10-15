@@ -178,6 +178,38 @@ def test_actionable_coverage_uses_actual_nn_sample_and_raw_legality():
     assert disagreement["actionable_rows"] == 0
 
 
+def test_explanation_requires_the_current_frozen_actor_role():
+    torch.manual_seed(460)
+    actor = FrozenWarehouseV6Actor.from_model(WarehouseV6Actor())
+    rows = _split_rows(actor, role_index=1)
+    program = fit_program("robot_2", actor, *rows)
+    # Exercise the runtime contract with a real program object. Eligibility
+    # and validation are prepared here because this test checks binding, not
+    # the independent scientific admission threshold.
+    report = {**program.report,
+              "validation": {**program.report["validation"],
+                             "explanation_passed": True}}
+    bound = replace(program, report=report,
+                    explanation_leaves=frozenset(range(len(program.leaf_logits))))
+    sample = {"obs": rows[-1][0]["obs"],
+              "mask": np.ones(len(ACTIONS), dtype=np.float32)}
+    selected = bound.lookup(sample)["action"]
+    evidence = bound.covered(sample, actor_action=selected,
+                             purpose="explanation",
+                             actor_role=actor.roles["robot_2"])
+    assert evidence is not None and evidence["actor_role_sha256"] == \
+        actor.role_sha256["robot_2"]
+    assert bound.covered(sample, actor_action=selected,
+                         purpose="explanation") is None
+    assert bound.covered(sample, actor_action=selected,
+                         purpose="explanation",
+                         actor_role=actor.roles["robot_1"]) is None
+    other = next(action for action in ACTIONS if action != selected)
+    assert bound.covered(sample, actor_action=other,
+                         purpose="explanation",
+                         actor_role=actor.roles["robot_2"]) is None
+
+
 def test_program_audit_trace_rebuilds_public_state_and_is_immutable(tmp_path):
     torch.manual_seed(47)
     actor = FrozenWarehouseV6Actor.from_model(WarehouseV6Actor())

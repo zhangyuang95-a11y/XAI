@@ -260,9 +260,20 @@ class WarehouseV6Program:
             "program_sha256": self.sha256(),
         }
 
-    def covered(self, sample: Mapping, *, actor_action: str, purpose: str) -> dict | None:
+    def covered(self, sample: Mapping, *, actor_action: str, purpose: str,
+                actor_role: FrozenWarehouseV6Role | None = None) -> dict | None:
         if purpose not in ("feedback", "explanation"):
             raise ValueError("unknown Warehouse program purpose")
+        # A participant-facing explanation must be checked against the role
+        # object loaded from the current, content-addressed Actor. Training
+        # feedback already checks the current Actor distribution in its PPO
+        # caller, but may supply the same role for additional binding.
+        if purpose == "explanation" and actor_role is None:
+            return None
+        if actor_role is not None and (
+                not isinstance(actor_role, FrozenWarehouseV6Role)
+                or actor_role.role_sha256 != self.actor_role_sha256):
+            return None
         leaves = self.feedback_leaves if purpose == "feedback" else self.explanation_leaves
         if not self.report["validation"][purpose + "_passed"]:
             return None

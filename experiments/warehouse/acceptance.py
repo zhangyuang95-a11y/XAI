@@ -140,6 +140,8 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
             or pair.get("bc_recipe_version") != p.REGISTERED_BC_RECIPE_VERSION
             or pair.get("assigned_scenario_schedule_sha256") !=
             expected_schedule_sha
+            or pair.get("online_program_extraction_steps") !=
+            list(expected_spec.online_program_extraction_steps)
             or pair.get("checkpoint_seeds") != list(checkpoint_seeds)):
         return False
     actual = {}
@@ -149,6 +151,11 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
                 or report.get("variant") != variant
                 or report.get("pair_seed") != seed
                 or report.get("joint_steps") != steps
+                or report.get("online_program_extraction_steps") !=
+                list(expected_spec.online_program_extraction_steps)
+                or report.get("online_program_split_block_cycle") !=
+                p.FINAL_PROGRAM_SPLIT_COUNTS
+                or report.get("online_program_cohorts_disjoint") is not True
                 or report.get("run_spec_sha256") != expected_spec_sha
                 or report.get("training_config_sha256") != expected_training_sha
                 or report.get("scenario_schedule_sha256") !=
@@ -1021,6 +1028,8 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
     if (lock.get("passed") is not True
             or lock.get("locked_budget") != budget
             or lock.get("source_closure_sha256") != receipt["source_closure_sha256"]
+            or lock.get("online_program_extraction_steps") !=
+            list(p.online_program_extraction_steps(budget))
             or lock.get("final_program_fit_seed_schedule") != program_schedules
             or lock.get("final_program_fit_seed_schedule_sha256") !=
             _digest(program_schedules)

@@ -35,6 +35,7 @@ PROGRAM_LAMBDA = 0.01
 PROGRAM_START_FRACTION = 0.80
 PROGRAM_RAMP_FRACTION = 0.05
 SCENARIO_BLOCK_STEPS = 120
+ONLINE_PROGRAM_EXTRACTION_PERCENTAGES = (75, 84, 93)
 FINAL_PROGRAM_SPLIT_COUNTS = {"fit": 50, "calibration": 25,
                               "eligibility": 25, "validation": 24}
 REGISTERED_BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.2"
@@ -179,6 +180,24 @@ def final_program_fit_seed_schedule(release_id: str, pair_seed: int
     return schedule
 
 
+def online_program_extraction_steps(joint_steps: int) -> tuple[int, ...]:
+    """Lock complete training-block boundaries before a paired run starts."""
+    if joint_steps not in BUDGETS:
+        raise ValueError("Warehouse online program budget must be preregistered")
+    numerators = tuple(joint_steps * percent
+                       for percent in ONLINE_PROGRAM_EXTRACTION_PERCENTAGES)
+    if any(numerator % 100 for numerator in numerators):
+        raise RuntimeError("Warehouse online extraction percentage is not integral")
+    steps = tuple(numerator // 100 for numerator in numerators)
+    if (any(step % SCENARIO_BLOCK_STEPS for step in steps)
+            or any(later - earlier <
+                   SCENARIO_BLOCK_STEPS * sum(FINAL_PROGRAM_SPLIT_COUNTS.values())
+                   for earlier, later in zip(steps, steps[1:]))
+            or not all(0 < step < joint_steps for step in steps)):
+        raise RuntimeError("Warehouse online program cohorts overlap or split a block")
+    return steps
+
+
 @dataclass(frozen=True)
 class PairRunSpec:
     candidate_id: str
@@ -188,6 +207,7 @@ class PairRunSpec:
     release_id: str = INITIAL_RELEASE_ID
     scenario_namespace: str = "warehouse-v6-matched-120-step-blocks"
     checkpoint_seeds: tuple[int, ...] = ()
+    online_program_extraction_steps: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.candidate_id or "/" in self.candidate_id or ".." in self.candidate_id:
@@ -203,6 +223,12 @@ class PairRunSpec:
                     FORMAL_SELECTION_SEEDS)
         if self.checkpoint_seeds != required:
             raise ValueError("Warehouse v6 checkpoint seeds do not match phase")
+        scheduled = online_program_extraction_steps(self.joint_steps)
+        if self.online_program_extraction_steps:
+            if self.online_program_extraction_steps != scheduled:
+                raise ValueError("Warehouse online program extraction schedule mismatch")
+        else:
+            object.__setattr__(self, "online_program_extraction_steps", scheduled)
         sealed_seed_blocks(self.release_id)
         final_program_fit_seed_schedule(self.release_id, self.pair_seed)
 
@@ -282,9 +308,14 @@ def paired_training_pass(variants: Mapping, *, joint_steps: int) -> bool:
     raw, regularized = (variants[name] for name in VARIANTS)
     if not isinstance(raw, Mapping) or not isinstance(regularized, Mapping):
         return False
+    extraction_steps = list(online_program_extraction_steps(joint_steps))
     for report in (raw, regularized):
         if (report.get("joint_steps") != joint_steps or
                 report.get("actor_decisions") != joint_steps * len(ROLES) or
+                report.get("online_program_extraction_steps") != extraction_steps or
+                report.get("online_program_split_block_cycle") !=
+                FINAL_PROGRAM_SPLIT_COUNTS or
+                report.get("online_program_cohorts_disjoint") is not True or
                 report.get("post_policy_interventions") != 0 or
                 report.get("physical_no_legal_action_rows") != 0):
             return False

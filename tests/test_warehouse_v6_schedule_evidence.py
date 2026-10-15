@@ -43,6 +43,10 @@ def _pair() -> dict:
     for variant, resets in (("raw", raw), ("regularized", regularized)):
         variants[variant] = {
             "variant": variant, "pair_seed": pair_seed, "joint_steps": steps,
+            "online_program_extraction_steps": list(
+                spec.online_program_extraction_steps),
+            "online_program_split_block_cycle": p.FINAL_PROGRAM_SPLIT_COUNTS,
+            "online_program_cohorts_disjoint": True,
             "run_spec_sha256": spec.sha256(),
             "training_config_sha256": config_hash,
             "scenario_schedule_sha256": digest,
@@ -53,6 +57,8 @@ def _pair() -> dict:
     return {
         "candidate_id": spec.candidate_id, "release_id": spec.release_id,
         "pair_seed": pair_seed, "joint_steps": steps,
+        "online_program_extraction_steps": list(
+            spec.online_program_extraction_steps),
         "run_spec_sha256": spec.sha256(),
         "training_config_sha256": config_hash,
         "source_closure_sha256": closure,
@@ -90,6 +96,10 @@ def test_paired_schedule_allows_different_early_resets_but_rejects_forgery():
 
     forged = deepcopy(pair)
     forged["assigned_scenario_schedule_sha256"] = "0" * 64
+    assert not _paired_schedule_evidence(forged)
+
+    forged = deepcopy(pair)
+    forged["online_program_extraction_steps"][1] += 120
     assert not _paired_schedule_evidence(forged)
 
     forged = deepcopy(pair)

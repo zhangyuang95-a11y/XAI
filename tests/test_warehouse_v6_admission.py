@@ -76,6 +76,10 @@ class FakeBackend:
                                       "actor_role_sha256": chosen[role]}
             variants[variant] = {
                 "joint_steps": budget, "actor_decisions": budget * 2,
+                "online_program_extraction_steps": list(
+                    spec["online_program_extraction_steps"]),
+                "online_program_split_block_cycle": p.FINAL_PROGRAM_SPLIT_COUNTS,
+                "online_program_cohorts_disjoint": True,
                 "post_policy_interventions": 0,
                 "physical_no_legal_action_rows": 0,
                 "scenario_schedule_sha256": "8" * 64,
@@ -102,6 +106,8 @@ class FakeBackend:
                 spec["final_program_fit_seed_schedule_sha256"],
                 "pair_seed": seed,
                 "joint_steps": budget,
+                "online_program_extraction_steps": list(
+                    spec["online_program_extraction_steps"]),
                 "checkpoint_seeds": list(spec["checkpoint_seeds"]),
                 "source_closure_sha256": self.source,
                 "initial_role_sha256": initial, "variants": variants}
@@ -202,6 +208,17 @@ def test_formal_pair_is_chosen_before_program_preaudit_and_from_quality_only(rea
     assert selection["selection_seeds"] == list(p.FORMAL_SELECTION_SEEDS)
     assert backend.audit_calls[-1] == list(p.FORMAL_PROGRAM_PREAUDIT_SEEDS)
     assert not admission.claim_root.exists()
+
+
+def test_budget_lock_rejects_online_program_schedule_change(ready):
+    admission, _ = ready
+    path = admission._path("budget.lock.json")
+    lock = json.loads(path.read_text())
+    assert lock["online_program_extraction_steps"] == [150_000, 168_000, 186_000]
+    lock["online_program_extraction_steps"][1] += 120
+    path.write_text(json.dumps(lock))
+    with pytest.raises(RuntimeError, match="seed lock changed"):
+        admission.develop()
 
 
 def test_final_audit_claim_is_one_use_and_failure_closes_candidate(ready):

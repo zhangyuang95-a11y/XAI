@@ -441,6 +441,8 @@ class Admission:
                 or report.get("pair_seed") != pair_seed
                 or report.get("joint_steps") != budget
                 or report.get("checkpoint_seeds") != list(spec.checkpoint_seeds)
+                or report.get("online_program_extraction_steps") !=
+                list(spec.online_program_extraction_steps)
                 or report.get("final_program_fit_seed_schedule") !=
                 expected_spec["final_program_fit_seed_schedule"]
                 or report.get("final_program_fit_seed_schedule_sha256") !=
@@ -534,7 +536,9 @@ class Admission:
                 for seed in (*p.DEVELOPMENT_PAIR_SEEDS, *p.FORMAL_PAIR_SEEDS)}
             if (lock.get("final_program_fit_seed_schedule") != schedules
                     or lock.get("final_program_fit_seed_schedule_sha256") !=
-                    _sha(schedules)):
+                    _sha(schedules)
+                    or lock.get("online_program_extraction_steps") !=
+                    list(p.online_program_extraction_steps(lock["locked_budget"]))):
                 raise RuntimeError("Warehouse final-program seed lock changed")
             return lock
         if self._path("development.failed.json").exists():
@@ -652,6 +656,8 @@ class Admission:
                 return self._new("budget.lock.json", {
                     "locked_budget": chosen, "development_pair_seeds":
                     list(p.DEVELOPMENT_PAIR_SEEDS),
+                    "online_program_extraction_steps": list(
+                        p.online_program_extraction_steps(chosen)),
                     "final_program_fit_seed_schedule": final_program_schedules,
                     "final_program_fit_seed_schedule_sha256": _sha(
                         final_program_schedules),
@@ -679,7 +685,9 @@ class Admission:
             for seed in (*p.DEVELOPMENT_PAIR_SEEDS, *p.FORMAL_PAIR_SEEDS)}
         if (lock.get("final_program_fit_seed_schedule") != schedules
                 or lock.get("final_program_fit_seed_schedule_sha256") !=
-                _sha(schedules)):
+                _sha(schedules)
+                or lock.get("online_program_extraction_steps") !=
+                list(p.online_program_extraction_steps(lock["locked_budget"]))):
             raise RuntimeError("Warehouse formal run seed lock changed")
         budget = lock["locked_budget"]
         rows = []
@@ -913,7 +921,9 @@ class Admission:
             for seed in (*p.DEVELOPMENT_PAIR_SEEDS, *p.FORMAL_PAIR_SEEDS)}
         if (lock.get("final_program_fit_seed_schedule") != final_schedules
                 or lock.get("final_program_fit_seed_schedule_sha256") !=
-                _sha(final_schedules)):
+                _sha(final_schedules)
+                or lock.get("online_program_extraction_steps") !=
+                list(p.online_program_extraction_steps(lock["locked_budget"]))):
             raise RuntimeError("Warehouse frozen final-program seed schedule changed")
         development = {}
         for budget in p.BUDGETS:

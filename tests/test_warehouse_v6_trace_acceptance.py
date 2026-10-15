@@ -38,6 +38,8 @@ def _program(role: str, actor: FrozenWarehouseV6Actor) -> WarehouseV6Program:
         "max_depth": 1, "leaf_count": 2, "max_features_per_node": 1,
         "split_episode_ids": {name: [name] for name in
                               ("fit", "calibration", "eligibility", "validation")},
+        "split_scenario_seed_ids": {name: [name] for name in
+                                    ("fit", "calibration", "eligibility", "validation")},
         "validation": {"feedback_online_passed": False,
                        "explanation_online_passed": False,
                        "feedback_passed": False,

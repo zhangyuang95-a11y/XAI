@@ -16,7 +16,9 @@ from backend.training.warehouse_v614_certificate_tree import (
     MAX_NODE_FEATURES, SparseProgramTree, fit_certificate_tree,
     refit_frozen_topology_fit_only, _masked_probabilities,
 )
-from backend.training.warehouse_v6_tree_routing import certified_mask_branches, unit_interval_indices
+from backend.training.warehouse_v6_tree_routing import (
+    certified_feature_bounds, certified_mask_branches,
+)
 
 
 ACTOR_SHA = "a" * 64
@@ -81,7 +83,7 @@ class CertificateTreeTests(unittest.TestCase):
                                       logits, core, {}, frozenset())
         proof = certified_mask_branches(
             weights[0], float(bias[0]), schema.mask_feature_indices,
-            unit_interval_indices(schema.feature_names))
+            certified_feature_bounds(schema.feature_names))
         self.assertIn(0, proof[1])
         for mask in (0.0, 1.0):
             for coordinate in np.linspace(0.0, 1.0, 101):
@@ -94,9 +96,20 @@ class CertificateTreeTests(unittest.TestCase):
         out_of_domain[0, names.index("self_column")] = 1.1
         with self.assertRaisesRegex(ValueError, "outside proven domain"):
             candidate.leaf_indices(out_of_domain)
+        names[1] = "charger_return_margin_if_up"
+        margin_schema = FeatureSchema(tuple(names), ACTIONS)
+        lower, upper = certified_feature_bounds(margin_schema.feature_names)[1]
+        self.assertEqual((lower, upper), (-2.0, 1.0))
+        guarded_margin = np.zeros(margin_schema.feature_dim, dtype=np.float32)
+        guarded_margin[margin_schema.mask_feature_indices[0]] = -0.7 - lower
+        guarded_margin[1] = -1.0
+        margin_proof = certified_mask_branches(
+            guarded_margin, lower, margin_schema.mask_feature_indices,
+            certified_feature_bounds(margin_schema.feature_names))
+        self.assertIn(0, margin_proof[1])
         # An unconstrained public value cannot stand in for a physical mask.
         weights[0, names.index("self_column")] = 0.0
-        weights[0, names.index("public_1")] = 1.0
+        weights[0, names.index("public_2")] = 1.0
         with self.assertRaisesRegex(ValueError, "legality proof"):
             SparseProgramTree(schema, weights, bias, left, right, 1, 2,
                               logits, core, {}, frozenset())

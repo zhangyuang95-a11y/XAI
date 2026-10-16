@@ -12,6 +12,10 @@ HARD_SPLIT_ROUTING_VERSION = "fp64-shared-left-tie-1e-10.v2"
 HARD_SPLIT_TIE_EPSILON = 1.0e-10
 UNIT_INTERVAL_FEATURE_NAMES = frozenset({
     "self_row", "self_column", "partner_row", "partner_column",
+    "self_battery_fraction",
+    *(f"{role}_recent_position_{index}_{axis}"
+      for role in ("self", "partner") for index in range(3)
+      for axis in ("row", "column")),
     *(f"order_{order}_{endpoint}_{axis}"
       for order in (0, 1) for endpoint in ("pickup", "delivery")
       for axis in ("row", "column")),
@@ -19,33 +23,47 @@ UNIT_INTERVAL_FEATURE_NAMES = frozenset({
 
 
 def unit_interval_indices(feature_names: tuple[str, ...]) -> frozenset[int]:
-    """Grid coordinates checked by the public observation encoder."""
+    """Public fractions whose supplied values are checked before proof use."""
     return frozenset(index for index, name in enumerate(feature_names)
                      if name in UNIT_INTERVAL_FEATURE_NAMES)
 
 
+def certified_feature_bounds(
+        feature_names: tuple[str, ...]) -> dict[int, tuple[float, float]]:
+    """Conservative domains for bounded pre-action physical measurements."""
+    bounds = {index: (0.0, 1.0)
+              for index in unit_interval_indices(feature_names)}
+    for index, name in enumerate(feature_names):
+        if (name == "self_charger_return_margin"
+                or name.startswith("charger_return_margin_if_")):
+            bounds[index] = (-2.0, 1.0)
+    return bounds
+
+
 def validate_certification_domain(
         encoded: np.ndarray, mask_indices: tuple[int, ...],
-        unit_indices: frozenset[int]) -> None:
+        feature_bounds: dict[int, tuple[float, float]]) -> None:
     """Reject encoded rows outside the bounds used by legality certificates."""
     rows = np.asarray(encoded, dtype=np.float32)
     if rows.ndim != 2 or not np.isfinite(rows).all():
         raise ValueError("invalid Warehouse certification features")
     masks = rows[:, mask_indices]
-    bounded = rows[:, sorted(unit_indices)]
-    if (np.any((masks != 0.0) & (masks != 1.0))
-            or np.any((bounded < 0.0) | (bounded > 1.0))):
+    if np.any((masks != 0.0) & (masks != 1.0)):
         raise ValueError("Warehouse certification feature outside proven domain")
+    for index, (lower, upper) in feature_bounds.items():
+        if np.any((rows[:, index] < lower) | (rows[:, index] > upper)):
+            raise ValueError("Warehouse certification feature outside proven domain")
 
 
 def certified_mask_branches(
         weights: np.ndarray, bias: float,
-        mask_indices: tuple[int, ...], unit_indices: frozenset[int],
+        mask_indices: tuple[int, ...],
+        feature_bounds: dict[int, tuple[float, float]],
         ) -> tuple[frozenset[int], frozenset[int]]:
     """Prove a branch implies a legal mask bit by interval arithmetic.
 
-    Every non-mask input used by the split must have a validated [0, 1]
-    interval. With mask[a]=0, a right branch is impossible when its maximum
+    Every non-mask input used by the split must have a validated interval.
+    With mask[a]=0, a right branch is impossible when its maximum
     score is at most the routing tie epsilon. The dual lower bound proves a
     left branch when mask[a]=0 cannot route left.
     """
@@ -53,11 +71,16 @@ def certified_mask_branches(
     used = frozenset(np.flatnonzero(row).tolist())
     left, right = set(), set()
     for action, mask_index in enumerate(mask_indices):
-        if mask_index not in used or not used - {mask_index} <= unit_indices:
+        others_used = sorted(used - {mask_index})
+        if mask_index not in used or not set(others_used) <= feature_bounds.keys():
             continue
-        others = row[list(sorted(used - {mask_index}))].astype(np.float64)
-        lower = float(bias) + float(np.minimum(others, 0.0).sum())
-        upper = float(bias) + float(np.maximum(others, 0.0).sum())
+        lower = upper = float(bias)
+        for index in others_used:
+            weight = float(row[index])
+            low, high = feature_bounds[index]
+            low_score, high_score = weight * low, weight * high
+            lower += min(low_score, high_score)
+            upper += max(low_score, high_score)
         if upper <= HARD_SPLIT_TIE_EPSILON:
             right.add(action)
         if lower > HARD_SPLIT_TIE_EPSILON:

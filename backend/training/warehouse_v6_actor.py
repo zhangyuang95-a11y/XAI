@@ -28,8 +28,8 @@ from env.warehouse.public_action_features_v614 import (
     encode_actor_tree_features,
 )
 from .warehouse_v6_tree_routing import (
-    HARD_SPLIT_ROUTING_VERSION, certified_mask_branches,
-    leaf_indices as hard_tree_leaf_indices, unit_interval_indices,
+    HARD_SPLIT_ROUTING_VERSION, certified_feature_bounds,
+    certified_mask_branches, leaf_indices as hard_tree_leaf_indices,
     validate_certification_domain,
 )
 
@@ -149,7 +149,7 @@ class FrozenWarehouseV6Role:
         right = values["tree.right_refs"].astype(np.int64)
         logits = values["tree.leaf_logits"]
         mask_indices = tuple(range(TREE_MASK_START, TREE_MASK_START + len(ACTIONS)))
-        unit_indices = unit_interval_indices(tuple(FEATURE_NAMES))
+        feature_bounds = certified_feature_bounds(tuple(FEATURE_NAMES))
 
         def walk(ref: int, proven: frozenset[int]) -> None:
             if ref < 0:
@@ -158,7 +158,7 @@ class FrozenWarehouseV6Role:
                     raise ValueError("Warehouse core leaf raw action lacks path legality proof")
                 return
             left_actions, right_actions = certified_mask_branches(
-                weights[ref], float(bias[ref]), mask_indices, unit_indices)
+                weights[ref], float(bias[ref]), mask_indices, feature_bounds)
             left_proven = proven | left_actions
             right_proven = proven | right_actions
             walk(int(left[ref]), left_proven)
@@ -218,7 +218,7 @@ class FrozenWarehouseV6Role:
         flat = data.reshape(-1, FEATURE_DIM)
         validate_certification_domain(
             flat, tuple(range(TREE_MASK_START, TREE_MASK_START + len(ACTIONS))),
-            unit_interval_indices(tuple(FEATURE_NAMES)))
+            certified_feature_bounds(tuple(FEATURE_NAMES)))
         weight = self.weights["tree.split.weight"]
         selected = np.argsort(-np.abs(weight), axis=-1, kind="stable")[:, :MAX_SPLIT_FEATURES]
         sparse = np.zeros_like(weight)

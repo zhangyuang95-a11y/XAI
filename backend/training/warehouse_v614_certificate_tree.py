@@ -18,9 +18,10 @@ from scipy.optimize import minimize
 from scipy.special import logsumexp
 
 from .warehouse_v6_tree_routing import (
-    HARD_SPLIT_TIE_EPSILON, certified_mask_branches,
+    HARD_SPLIT_TIE_EPSILON, certified_feature_bounds,
+    certified_mask_branches,
     leaf_indices as hard_tree_leaf_indices,
-    split_scores as hard_tree_split_scores, unit_interval_indices,
+    split_scores as hard_tree_split_scores,
     validate_certification_domain,
 )
 
@@ -173,7 +174,7 @@ class SparseProgramTree:
             left_cert, right_cert = certified_mask_branches(
                 self.split_weights[ref], float(self.split_bias[ref]),
                 self.schema.mask_feature_indices,
-                unit_interval_indices(self.schema.feature_names))
+                certified_feature_bounds(self.schema.feature_names))
             left_legal.update(left_cert)
             right_legal.update(right_cert)
             visit(int(self.left_refs[ref]), depth + 1, left_legal)
@@ -198,7 +199,7 @@ class SparseProgramTree:
             raise ValueError("invalid pre-action features for certificate sparse tree")
         validate_certification_domain(
             x, self.schema.mask_feature_indices,
-            unit_interval_indices(self.schema.feature_names))
+            certified_feature_bounds(self.schema.feature_names))
         return hard_tree_leaf_indices(
             x, self.split_weights, self.split_bias, self.left_refs,
             self.right_refs, self.node_count, MAX_DEPTH)
@@ -315,7 +316,7 @@ def _validated_fit_rows(
         raise ValueError("certificate fitter requires one frozen Actor's full masked fit target")
     validate_certification_domain(
         x, schema.mask_feature_indices,
-        unit_interval_indices(schema.feature_names))
+        certified_feature_bounds(schema.feature_names))
     return x, m, p, episodes
 
 
@@ -499,7 +500,7 @@ def _candidate_splits(
             return
         _, right_cert = certified_mask_branches(
             weight, float(bias), schema.mask_feature_indices,
-            unit_interval_indices(schema.feature_names))
+            certified_feature_bounds(schema.feature_names))
         if action is not None and action not in right_cert:
             return
         seen.add(partition)
@@ -523,9 +524,9 @@ def _candidate_splits(
         add(f"mask_gate:{schema.actions[action]}", weight, 0.5, action)
     # These two-feature conditions spend one node on both a public-state
     # partition and a proof that the selected movement is physically legal.
-    # For x in [0, 1], mask + x > 1+t implies mask=1 and x>t; likewise
-    # mask - x > 1-t implies mask=1 and x<t. The shared interval checker
-    # validates the stored float32 condition before it may certify a leaf.
+    # For x in [lo, hi], (hi-t)*mask + x-hi > 0 implies mask=1
+    # and x>t; (t-lo)*mask - x+lo > 0 implies mask=1 and x<t.
+    # The shared interval checker validates stored float32 coefficients.
     for action in range(schema.action_count):
         if action in state.legal[leaf]:
             continue
@@ -533,24 +534,25 @@ def _candidate_splits(
         legal_rows = rows[masks[rows, action] > 0.5]
         if len(legal_rows) < FIT_MIN_LEAF_ROWS:
             continue
-        for feature in sorted(unit_interval_indices(schema.feature_names)):
+        for feature, (lower, upper) in sorted(
+                certified_feature_bounds(schema.feature_names).items()):
             values = x[legal_rows, feature]
             if float(np.max(values) - np.min(values)) < 1.0e-5:
                 continue
             for quantile in config.quantiles:
                 threshold = float(np.float32(np.quantile(values, quantile)))
-                if not 1.0e-5 < threshold < 1.0 - 1.0e-5:
+                if not lower + 1.0e-5 < threshold < upper - 1.0e-5:
                     continue
                 above = np.zeros(schema.feature_dim, dtype=np.float32)
-                above[mask_index], above[feature] = 1.0, 1.0
+                above[mask_index], above[feature] = upper - threshold, 1.0
                 add(f"legal_above:{schema.actions[action]}:"
                     f"{schema.feature_names[feature]}@{quantile:g}",
-                    above, 1.0 + threshold, action)
+                    above, upper, action)
                 below = np.zeros(schema.feature_dim, dtype=np.float32)
-                below[mask_index], below[feature] = 1.0, -1.0
+                below[mask_index], below[feature] = threshold - lower, -1.0
                 add(f"legal_below:{schema.actions[action]}:"
                     f"{schema.feature_names[feature]}@{quantile:g}",
-                    below, 1.0 - threshold, action)
+                    below, -lower, action)
     pure_gates = [item for item in candidates
                   if item.label.startswith("mask_gate:")]
     guarded = sorted((item for item in candidates
@@ -862,7 +864,7 @@ def refit_frozen_topology_fit_only(
         left_cert, right_cert = certified_mask_branches(
             topology.split_weights[ref], float(topology.split_bias[ref]),
             schema.mask_feature_indices,
-            unit_interval_indices(schema.feature_names))
+            certified_feature_bounds(schema.feature_names))
         left_legal = legal | left_cert
         right_legal = legal | right_cert
         visit(int(topology.left_refs[ref]), left_legal)

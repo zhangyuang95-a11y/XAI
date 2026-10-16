@@ -7,6 +7,7 @@ import json
 import pytest
 
 from backend.training.warehouse_v6_actor import FEATURE_SCHEMA_SHA256, MODEL_VERSION
+from env.warehouse.public_action_features_v614 import ACTION_PHYSICS_CONFIG_SHA256
 from study_v3 import policies
 from study_v3 import release_catalog as catalog
 
@@ -32,6 +33,7 @@ def _candidate_catalog(root, *, status: str, forged_actor_hash: bool = False):
             "actor_path": actor_path, "actor_sha256": claimed,
             "model_version": MODEL_VERSION,
             "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+            "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
             "role_sha256": {"human": "1" * 64, "ai": "2" * 64},
             "program_paths": [], "program_sha256": {},
             "training_report_path": actor_path,
@@ -76,6 +78,7 @@ def test_v61_binding_and_acceptance_use_exact_release(tmp_path, monkeypatch):
         "actor_path": raw.name, "actor_sha256": actor_sha,
         "model_version": MODEL_VERSION,
         "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+        "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
         "role_sha256": {"human": "1" * 64, "ai": "2" * 64},
         "program_paths": [], "program_sha256": {},
         "training_report_path": report.name,

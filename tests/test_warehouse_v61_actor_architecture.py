@@ -24,9 +24,8 @@ def test_public_label_trees_keep_sparse_independent_splits_and_frozen_parity():
         actor = model.actors[role]
         weight = actor.tree.split.weight.detach().numpy()
         assert np.max(np.count_nonzero(weight, axis=-1)) <= MAX_SPLIT_FEATURES
-        assert not actor.tree.split.weight.requires_grad
-        assert not actor.tree.split.bias.requires_grad
-        assert fitted[role]["split_frozen_during_bc_and_ppo"] is True
+        assert actor.tree.split.weight.requires_grad
+        assert actor.tree.split.bias.requires_grad
         assert fitted[role]["training_leaf_occupancy"] >= 2
         role_weights.append(weight)
     assert not np.array_equal(*role_weights)

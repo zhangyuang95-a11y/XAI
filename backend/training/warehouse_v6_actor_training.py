@@ -24,7 +24,7 @@ from .warehouse_v6_actor import (
     FrozenWarehouseV6Actor, FrozenWarehouseV6Role, MODEL_VERSION,
     TREE_DEPTH, TREE_LEAVES, TREE_NODES, MAX_SPLIT_FEATURES, RESIDUAL_WIDTH,
     MIN_RESIDUAL_BOUND, MAX_RESIDUAL_BOUND, GATE_WIDTH, GEOMETRY_DIM,
-    _POSITION_COLUMNS, _MOVE, TREE_GRADIENT_SCALE, MASK_GRADIENT_TEMPERATURE,
+    _POSITION_COLUMNS, _MOVE, TREE_GRADIENT_SCALE,
     _TENSOR_NAMES, _role_arrays, role_sha256,
 )
 
@@ -36,41 +36,64 @@ def policy_features_torch(obs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor
 
 
 class SparseHardTree(nn.Module):
-    """Sixteen-leaf trainable tree; hard forward, straight-through gradient."""
+    """Hard sparse tree with local gradients through visited decisions."""
 
     def __init__(self):
         super().__init__()
         self.split = nn.Linear(FEATURE_DIM, TREE_NODES)
         self.leaf_logits = nn.Parameter(torch.zeros(TREE_LEAVES, len(ACTIONS)))
+        left = torch.zeros(TREE_NODES, dtype=torch.int64)
+        right = torch.zeros(TREE_NODES, dtype=torch.int64)
+        for node in range(TREE_NODES):
+            lhs, rhs = 2 * node + 1, 2 * node + 2
+            left[node] = lhs if lhs < TREE_NODES else -1 - (lhs - TREE_NODES)
+            right[node] = rhs if rhs < TREE_NODES else -1 - (rhs - TREE_NODES)
+        self.register_buffer("left_refs", left)
+        self.register_buffer("right_refs", right)
+        self.register_buffer("node_count", torch.tensor([TREE_NODES], dtype=torch.int64))
+        self.register_buffer("leaf_count", torch.tensor([TREE_LEAVES], dtype=torch.int64))
         nn.init.normal_(self.split.weight, mean=0.0, std=0.025)
         nn.init.zeros_(self.split.bias)
         nn.init.normal_(self.leaf_logits, mean=0.0, std=0.025)
-        # Training fits these supervised splits from public BC rows before
-        # optimization; held splits preserve route occupancy during PPO.
-        self.split.weight.requires_grad_(False)
-        self.split.bias.requires_grad_(False)
+        # Training starts from public BC splits; a local straight-through
+        # surrogate below keeps their hard routing trainable.
 
     def effective_weights(self) -> torch.Tensor:
         weights = self.split.weight
         selected = torch.argsort(-weights.abs(), dim=-1, stable=True)[
             :, :MAX_SPLIT_FEATURES]
         hard = torch.zeros_like(weights).scatter_(-1, selected, 1.0)
-        soft = torch.softmax(weights.abs() / MASK_GRADIENT_TEMPERATURE,
-                             dim=-1) * MAX_SPLIT_FEATURES
-        return weights * (hard + soft - soft.detach())
+        return weights * hard
 
     def path(self, encoded: torch.Tensor) -> torch.Tensor:
         values = encoded.reshape(-1, FEATURE_DIM)
         split = nn.functional.linear(values, self.effective_weights(), self.split.bias)
-        soft_left = torch.sigmoid(-TREE_GRADIENT_SCALE * split)
-        hard_left = (split <= 0).to(split.dtype)
-        left = hard_left + soft_left - soft_left.detach()
-        path = torch.ones((len(values), 1), dtype=values.dtype, device=values.device)
-        for depth in range(TREE_DEPTH):
-            begin, end = (1 << depth) - 1, (1 << (depth + 1)) - 1
-            gate = left[:, begin:end]
-            path = torch.stack((path * gate, path * (1.0 - gate)), dim=-1)
-            path = path.reshape(len(values), -1)
+        node_count = int(self.node_count[0])
+        leaf_count = int(self.leaf_count[0])
+        visited: set[int] = set()
+
+        def subtree(ref: int, depth: int) -> torch.Tensor:
+            if depth > TREE_DEPTH:
+                raise RuntimeError("Warehouse v6 irregular tree too deep")
+            if ref < 0:
+                leaf = -1 - ref
+                if leaf >= leaf_count:
+                    raise RuntimeError("Warehouse v6 irregular tree leaf invalid")
+                leaves = torch.full((len(values),), leaf, dtype=torch.long,
+                                    device=values.device)
+                return nn.functional.one_hot(leaves, TREE_LEAVES).to(values.dtype)
+            if ref >= node_count or ref in visited:
+                raise RuntimeError("Warehouse v6 irregular tree node invalid")
+            visited.add(ref)
+            left = subtree(int(self.left_refs[ref]), depth + 1)
+            right = subtree(int(self.right_refs[ref]), depth + 1)
+            score = split[:, ref]
+            hard_left = (score <= 0).to(values.dtype)
+            soft_left = torch.sigmoid(-TREE_GRADIENT_SCALE * score)
+            gate = hard_left + (soft_left - soft_left.detach())
+            return gate[:, None] * left + (1.0 - gate)[:, None] * right
+
+        path = subtree(0 if node_count else -1, 0)
         return path.reshape(encoded.shape[:-1] + (TREE_LEAVES,))
 
     def forward(self, encoded: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -82,52 +105,64 @@ class SparseHardTree(nn.Module):
 
         The classifier is fitted separately for each role before self-play.
         Every deployed split has one observed input and thus stays within the
-        three-feature program limit. Filling early terminal nodes gives a
-        complete 16-leaf binary representation without changing its outputs.
+        three-feature program limit. Early terminal nodes remain leaves.
         """
         tree = classifier.tree_
         weights = np.zeros((TREE_NODES, FEATURE_DIM), dtype=np.float32)
         bias = np.zeros(TREE_NODES, dtype=np.float32)
+        left_refs = np.zeros(TREE_NODES, dtype=np.int64)
+        right_refs = np.zeros(TREE_NODES, dtype=np.int64)
         leaves = np.zeros((TREE_LEAVES, len(ACTIONS)), dtype=np.float32)
         purity = np.zeros(TREE_LEAVES, dtype=np.float32)
         occupied = set()
+        node_count = 0
+        leaf_count = 0
 
-        def fill(node: int, source: int, depth: int) -> None:
-            left, right = int(tree.children_left[source]), int(tree.children_right[source])
-            if depth == TREE_DEPTH:
+        def fill(source: int, depth: int) -> int:
+            nonlocal node_count, leaf_count
+            lhs, rhs = int(tree.children_left[source]), int(tree.children_right[source])
+            if lhs < 0:
+                if leaf_count >= TREE_LEAVES:
+                    raise RuntimeError("public tree exceeds 16 leaves")
+                index = leaf_count
+                leaf_count += 1
                 counts = np.zeros(len(ACTIONS), dtype=np.float64)
                 class_values = np.asarray(tree.value[source, 0], dtype=np.float64)
                 if np.isclose(class_values.sum(), 1.0):
                     class_values *= float(tree.weighted_n_node_samples[source])
                 counts[np.asarray(classifier.classes_, dtype=np.int64)] = class_values
                 probability = (counts + 1.0) / (counts.sum() + len(ACTIONS))
-                leaves[node - TREE_NODES] = np.log(probability).astype(np.float32)
-                purity[node - TREE_NODES] = float(counts.max() / max(1.0, counts.sum()))
+                leaves[index] = np.log(probability).astype(np.float32)
+                purity[index] = float(counts.max() / max(1.0, counts.sum()))
                 occupied.add(source)
-                return
-            if left < 0:
-                # A previously terminal source is duplicated below this
-                # depth. Zero split always routes left at frozen inference.
-                fill(node * 2 + 1, source, depth + 1)
-                fill(node * 2 + 2, source, depth + 1)
-                return
+                return -1 - index
+            if depth >= TREE_DEPTH or node_count >= TREE_NODES:
+                raise RuntimeError("public tree complexity exceeds depth or nodes")
+            index = node_count
+            node_count += 1
             feature = int(tree.feature[source])
-            weights[node, feature] = 4.0
-            bias[node] = -4.0 * float(tree.threshold[source])
-            fill(node * 2 + 1, left, depth + 1)
-            fill(node * 2 + 2, right, depth + 1)
+            weights[index, feature] = 4.0
+            bias[index] = -4.0 * float(tree.threshold[source])
+            left_refs[index] = fill(lhs, depth + 1)
+            right_refs[index] = fill(rhs, depth + 1)
+            return index
 
-        fill(0, 0, 0)
+        if fill(0, 0) != (0 if node_count else -1):
+            raise RuntimeError("public tree root encoding mismatch")
+        if node_count != leaf_count - 1:
+            raise RuntimeError("public tree graph size mismatch")
         with torch.no_grad():
             self.split.weight.copy_(torch.from_numpy(weights))
             self.split.bias.copy_(torch.from_numpy(bias))
             self.leaf_logits.copy_(torch.from_numpy(leaves))
-        # Learned split locations are held fixed during on-policy updates;
-        # leaf distributions and the relation branch still learn. This
-        # prevents the observed collapse to one visited leaf under PPO.
-        self.split.weight.requires_grad_(False)
-        self.split.bias.requires_grad_(False)
+            self.left_refs.copy_(torch.from_numpy(left_refs))
+            self.right_refs.copy_(torch.from_numpy(right_refs))
+            self.node_count[0] = node_count
+            self.leaf_count[0] = leaf_count
+        self.split.weight.requires_grad_(True)
+        self.split.bias.requires_grad_(True)
         return {"visited_source_leaves": len(occupied),
+                "node_count": node_count, "leaf_count": leaf_count,
                 "leaf_purity": purity.tolist(),
                 "nonzero_split_features": int(np.count_nonzero(weights))}
 

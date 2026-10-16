@@ -24,9 +24,9 @@ from env.warehouse.public_observation_v6 import (
 )
 
 
-MODEL_VERSION = "warehouse-dual-actor.v6.1"
-TREE_DEPTH = 4
-TREE_LEAVES = 1 << TREE_DEPTH
+MODEL_VERSION = "warehouse-dual-actor.v6.9-exploratory"
+TREE_DEPTH = 5
+TREE_LEAVES = 16
 TREE_NODES = TREE_LEAVES - 1
 MAX_SPLIT_FEATURES = 3
 RESIDUAL_WIDTH = 256
@@ -44,6 +44,7 @@ TREE_GRADIENT_SCALE = 4.0
 MASK_GRADIENT_TEMPERATURE = 0.05
 _TENSOR_NAMES = (
     "tree.split.weight", "tree.split.bias", "tree.leaf_logits",
+    "tree.left_refs", "tree.right_refs", "tree.node_count", "tree.leaf_count",
     "gate.0.weight", "gate.0.bias", "gate.2.weight", "gate.2.bias",
     "action_residual.0.weight", "action_residual.0.bias",
     "action_residual.2.weight", "action_residual.2.bias",
@@ -54,8 +55,14 @@ _TENSOR_NAMES = (
 
 def _role_arrays(actor: RoleActor) -> dict[str, np.ndarray]:
     state = actor.state_dict()
-    return {name: state[name].detach().cpu().numpy().astype(np.float32).copy()
-            for name in _TENSOR_NAMES}
+    weights = {name: state[name].detach().cpu().numpy().astype(np.float32).copy()
+               for name in _TENSOR_NAMES}
+    split = weights["tree.split.weight"]
+    selected = np.argsort(-np.abs(split), axis=-1, kind="stable")[:, :MAX_SPLIT_FEATURES]
+    sparse = np.zeros_like(split)
+    np.put_along_axis(sparse, selected, 1.0, axis=-1)
+    weights["tree.split.weight"] = split * sparse
+    return weights
 
 
 def role_sha256(weights: Mapping[str, np.ndarray]) -> str:
@@ -78,6 +85,10 @@ class FrozenWarehouseV6Role:
             "tree.split.weight": (TREE_NODES, FEATURE_DIM),
             "tree.split.bias": (TREE_NODES,),
             "tree.leaf_logits": (TREE_LEAVES, len(ACTIONS)),
+            "tree.left_refs": (TREE_NODES,),
+            "tree.right_refs": (TREE_NODES,),
+            "tree.node_count": (1,),
+            "tree.leaf_count": (1,),
             "gate.0.weight": (GATE_WIDTH, FEATURE_DIM + 4),
             "gate.0.bias": (GATE_WIDTH,),
             "gate.2.weight": (1, GATE_WIDTH),
@@ -96,7 +107,53 @@ class FrozenWarehouseV6Role:
                        or not np.isfinite(self.weights[name]).all()
                        for name, shape in expected.items())):
             raise ValueError("Warehouse v6 role tensor shape or value mismatch")
+        self._validate_tree()
         self.role_sha256 = role_sha256(self.weights)
+
+    def _validate_tree(self) -> None:
+        weights = self.weights
+        raw_nodes = weights["tree.node_count"][0]
+        raw_leaves = weights["tree.leaf_count"][0]
+        if (not 0 <= raw_nodes <= TREE_NODES
+                or not 1 <= raw_leaves <= TREE_LEAVES
+                or raw_nodes != int(raw_nodes)
+                or raw_leaves != int(raw_leaves)):
+            raise ValueError("Warehouse v6 irregular tree size mismatch")
+        nodes, leaves = int(raw_nodes), int(raw_leaves)
+        if nodes != leaves - 1:
+            raise ValueError("Warehouse v6 irregular tree size mismatch")
+        left = weights["tree.left_refs"][:nodes]
+        right = weights["tree.right_refs"][:nodes]
+        if (np.any(left < -leaves) or np.any(left >= nodes)
+                or np.any(right < -leaves) or np.any(right >= nodes)
+                or np.any(left != np.floor(left))
+                or np.any(right != np.floor(right))):
+            raise ValueError("Warehouse v6 irregular tree split invalid")
+        if np.any(np.count_nonzero(weights["tree.split.weight"], axis=-1)
+                  > MAX_SPLIT_FEATURES):
+            raise ValueError("Warehouse v6 irregular tree split exceeds feature limit")
+
+        seen_nodes: set[int] = set()
+        seen_leaves: set[int] = set()
+
+        def walk(ref: int, depth: int) -> None:
+            if depth > TREE_DEPTH:
+                raise ValueError("Warehouse v6 irregular tree too deep")
+            if ref < 0:
+                leaf = -1 - ref
+                if leaf in seen_leaves:
+                    raise ValueError("Warehouse v6 irregular tree leaf invalid")
+                seen_leaves.add(leaf)
+                return
+            if ref in seen_nodes:
+                raise ValueError("Warehouse v6 irregular tree node invalid")
+            seen_nodes.add(ref)
+            walk(int(left[ref]), depth + 1)
+            walk(int(right[ref]), depth + 1)
+
+        walk(0 if nodes else -1, 0)
+        if seen_nodes != set(range(nodes)) or seen_leaves != set(range(leaves)):
+            raise ValueError("Warehouse v6 irregular tree unreachable tensors")
 
     def leaf(self, encoded: np.ndarray) -> np.ndarray:
         data = np.asarray(encoded, dtype=np.float32)
@@ -107,11 +164,23 @@ class FrozenWarehouseV6Role:
         selected = np.argsort(-np.abs(weight), axis=-1, kind="stable")[:, :MAX_SPLIT_FEATURES]
         sparse = np.zeros_like(weight)
         np.put_along_axis(sparse, selected, 1.0, axis=-1)
-        split = flat @ (weight * sparse).T + self.weights["tree.split.bias"]
-        node = np.zeros(len(flat), dtype=np.int64)
+        split = np.einsum("nf,kf->nk", flat, weight * sparse, optimize=False)
+        split += self.weights["tree.split.bias"]
+        refs = np.full(len(flat), 0 if int(self.weights["tree.node_count"][0]) else -1,
+                       dtype=np.int64)
+        left = self.weights["tree.left_refs"].astype(np.int64)
+        right = self.weights["tree.right_refs"].astype(np.int64)
         for _ in range(TREE_DEPTH):
-            node = 2 * node + 1 + (split[np.arange(len(flat)), node] > 0).astype(np.int64)
-        return (node - TREE_NODES).reshape(data.shape[:-1])
+            active = refs >= 0
+            if not np.any(active):
+                break
+            rows = np.flatnonzero(active)
+            nodes = refs[rows]
+            go_right = split[rows, nodes] > 0
+            refs[rows] = np.where(go_right, right[nodes], left[nodes])
+        if np.any(refs >= 0):
+            raise RuntimeError("Warehouse v6 irregular tree did not terminate")
+        return (-1 - refs).reshape(data.shape[:-1])
 
     def components_encoded(self, encoded: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         data = np.asarray(encoded, dtype=np.float32)

@@ -414,7 +414,7 @@ def _initialize_public_trees(model: WarehouseV6Actor, obs: torch.Tensor,
     reports = {}
     for index, role in enumerate(AGENTS):
         classifier = DecisionTreeClassifier(
-            max_depth=4, max_leaf_nodes=16, min_samples_leaf=32,
+            max_depth=5, max_leaf_nodes=16, min_samples_leaf=32,
             random_state=19 + index)
         classifier.fit(features[:, index], labels[:, index].numpy())
         detail = model.actors[role].initialize_tree_from_classifier(classifier)
@@ -426,10 +426,15 @@ def _initialize_public_trees(model: WarehouseV6Actor, obs: torch.Tensor,
         reports[role] = {**detail,
                          "sklearn_version": sklearn.__version__,
                          "fitting_rows": len(features),
-                         "split_frozen_during_bc_and_ppo": True,
+                         "split_frozen_during_bc_and_ppo": False,
+                         "split_training_method": "exact_hard_forward_sparse_STE",
                          "tree_initialization_sha256": _digest_json({
                              "split_weight": model.actors[role].tree.split.weight.detach().tolist(),
                              "split_bias": model.actors[role].tree.split.bias.detach().tolist(),
+                             "left_refs": model.actors[role].tree.left_refs.detach().tolist(),
+                             "right_refs": model.actors[role].tree.right_refs.detach().tolist(),
+                             "node_count": model.actors[role].tree.node_count.detach().tolist(),
+                             "leaf_count": model.actors[role].tree.leaf_count.detach().tolist(),
                              "leaf_logits": model.actors[role].tree.leaf_logits.detach().tolist(),
                          }),
                          "training_leaf_occupancy": int((path.sum(0) > 0).sum()),
@@ -1019,6 +1024,7 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
     program_kl = {role: 0.0 for role in AGENTS}
     feedback_disabled_epochs = {role: 0 for role in AGENTS}
     current_validation = {role: [] for role in AGENTS}
+    split_gradient_norm = {role: 0.0 for role in AGENTS}
     losses = []
     for _ in range(epochs):
         epoch_programs = {role: None for role in AGENTS}
@@ -1088,6 +1094,11 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
                     no_legal[role] += int((masks[:, index].sum(-1) <= 0.5).sum())
         optimizer.zero_grad()
         loss.backward()
+        for role in AGENTS:
+            split = model.actors[role].tree.split
+            split_gradient_norm[role] += float(sum(
+                parameter.grad.detach().square().sum().item()
+                for parameter in (split.weight, split.bias) if parameter.grad is not None) ** 0.5)
         nn.utils.clip_grad_norm_(model.parameters(), 0.5)
         optimizer.step()
         losses.append(float(loss.detach()))
@@ -1098,6 +1109,7 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
             "cost_actor_surrogate": float(cost_surrogate.detach()),
             "cost_joint_ratio_mean": cost_diagnostics["joint_ratio_mean"],
             "cost_critic_loss": float(cost_critic_loss.detach()),
+            "split_gradient_norm": split_gradient_norm,
             "program_coefficient": coefficient, "feedback_rows": counts,
             "feedback_gradient_norm": gradient_norms, "program_kl": program_kl,
             "feedback_disabled_epochs": feedback_disabled_epochs,

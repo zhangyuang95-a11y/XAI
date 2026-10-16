@@ -117,8 +117,8 @@ class CoreTreeResult:
         # change the selected topology after its content hash is recorded.
         for name in ("split_weights", "split_bias", "left_refs", "right_refs",
                      "leaf_logits", "core_mask"):
-            sealed = np.array(getattr(self, name), copy=True)
-            sealed.flags.writeable = False
+            source = np.ascontiguousarray(getattr(self, name))
+            sealed = np.frombuffer(source.tobytes(), dtype=source.dtype).reshape(source.shape)
             object.__setattr__(self, name, sealed)
 
     def content_sha256(self) -> str:
@@ -174,6 +174,7 @@ def _validated_rows(encoded: np.ndarray, masks: np.ndarray,
             or not np.isfinite(p).all()
             or np.any((m != 0.0) & (m != 1.0))
             or np.any(m.sum(1) < 1.0)
+            or not np.array_equal(x[:, -len(ACTIONS):], m)
             or np.any(p < -1e-7) or np.any(p * (1.0 - m) > 1e-6)
             or not np.allclose(p.sum(1), 1.0, rtol=0.0, atol=1e-5)):
         raise ValueError("Warehouse core tree needs valid masked training distributions")

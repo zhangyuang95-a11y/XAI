@@ -105,6 +105,11 @@ def test_illegal_or_unnormalized_training_targets_are_rejected():
     with pytest.raises(ValueError, match="provenance"):
         fit_core_tree(x, mask, target, episodes,
                       target_provenance="unknown", config=_SMALL)
+    altered_features = x.copy()
+    altered_features[0, -len(ACTIONS):] = 1.0 - mask[0]
+    with pytest.raises(ValueError, match="masked training distributions"):
+        fit_core_tree(altered_features, mask, target, episodes,
+                      target_provenance="public_teacher_one_hot", config=_SMALL)
 
 
 def _empty_tree(node_count: int, leaf_count: int, left: np.ndarray,
@@ -160,6 +165,8 @@ def test_fitted_arrays_cannot_be_mutated_after_content_hash():
         result.leaf_logits[0, 0] += 1.0
     with pytest.raises(ValueError):
         result.core_mask[0] = not result.core_mask[0]
+    with pytest.raises(ValueError):
+        result.split_weights.flags.writeable = True
     assert result.content_sha256() == original
 
 

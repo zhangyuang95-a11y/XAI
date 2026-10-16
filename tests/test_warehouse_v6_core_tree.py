@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 import backend.training.warehouse_v6_core_tree as core_tree_module
+from backend.training import warehouse_v6_runner
 from backend.training.warehouse_v6_core_tree import (
     CoreTreeConfig, CoreTreeResult, _insert_legality_splits, _leaf_metrics,
     evaluate_core_tree, fit_core_tree,
@@ -33,6 +35,13 @@ _SMALL = CoreTreeConfig(
     min_split_rows=(10,), tree_shapes=((2, 4), (4, 8)),
     include_sparse_projections=False,
 )
+
+
+def test_core_tree_implementation_is_in_training_source_closure():
+    source = Path(core_tree_module.__file__).resolve()
+    relative = "backend/training/warehouse_v6_core_tree.py"
+    assert warehouse_v6_runner.source_closure_files_sha256()[relative] == (
+        sha256(source.read_bytes()).hexdigest())
 
 
 def test_core_tree_uses_public_sparse_nodes_and_structural_legality():

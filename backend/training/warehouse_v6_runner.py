@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import deque
 from copy import deepcopy
+from dataclasses import asdict
 from hashlib import sha256
 import argparse
 import base64
@@ -23,6 +24,9 @@ from torch.distributions import Categorical
 
 from experiments.warehouse.protocol import (
     FINAL_PROGRAM_SPLIT_COUNTS, REGISTERED_BC_RECIPE_VERSION, REGISTERED_BC_SPEC,
+    REGISTERED_BC_SPEC_SHA256, PROGRAM_FIT_METHOD_CANDIDATES,
+    REGISTERED_RISK_DUAL_CONFIG, REGISTERED_RISK_DUAL_CONFIG_SHA256,
+    bc_data_seed_schedule, bc_report_valid,
     SCENARIO_BLOCK_STEPS, online_program_cohorts_valid,
     scenario_seed, scenario_schedule_sha256,
 )
@@ -42,7 +46,8 @@ from .warehouse_v6_actor import (
     policy_features_torch, role_hashes,
 )
 from .warehouse_v6_program import (
-    WarehouseV6Program, fit_program, audit_frozen_program, current_actor_fidelity,
+    ACTOR_SPARSE_TOPOLOGY_METHOD, AXIS_TREE_METHOD, WarehouseV6Program,
+    fit_program, audit_frozen_program, current_actor_fidelity,
 )
 from .warehouse_v6_shutdown_cost import (
     RiskDualConfig, ShutdownRiskDual, shutdown_cost_gae,
@@ -51,7 +56,7 @@ from .warehouse_v6_shutdown_cost import (
 from .warehouse_v6_teacher_lookahead import public_lookahead_teacher
 
 
-RUNNER_VERSION = "warehouse-v6-paired-complete-event-cost-ppo.v7"
+RUNNER_VERSION = "warehouse-v6-paired-complete-event-cost-ppo.v8-candidate-protocol"
 PROGRAM_LAMBDA = 0.01
 PROGRAM_START_FRACTION = 0.80
 PROGRAM_RAMP_FRACTION = 0.05
@@ -74,29 +79,29 @@ DEFAULT_DAGGER_EPOCHS = REGISTERED_BC_SPEC["dagger_epochs"]
 # variant starts. Every data seed and stage is fixed by the pair seed. The
 # offline teacher and learned collision critic are absent from execution.
 BC_RECIPE_VERSION = REGISTERED_BC_RECIPE_VERSION
-BC_INITIAL_TEACHER_EPISODES = 100
-BC_INITIAL_EPOCHS = 20
-BC_INITIAL_DAGGER_ROUNDS = 2
-BC_INITIAL_DAGGER_EPISODES = 40
-BC_INITIAL_DAGGER_EPOCHS = 10
-BC_RISK_TEACHER_EPISODES = 40
-BC_RISK_VISIT_EPISODES = 80
-BC_LARGE_TEACHER_EPISODES = 200
-BC_LARGE_VISIT_EPISODES = 120
-BC_DEEP_TEACHER_EPISODES = 200
-BC_DEEP_DAGGER_ROUNDS = 4
-BC_DEEP_DAGGER_EPISODES = 100
-BC_RISK_EPOCHS = 8
-BC_DEEP_EPOCHS = 6
-BC_BATCH_SIZE = 128
-BC_RISK_WEIGHT = 2.0
-BC_MARGIN_GAP = 3.0
-BC_MARGIN_WEIGHT = 0.03
-BC_NEAR_INCREMENT = 2.0
-BC_LOW_RETURN_INCREMENT = 8.0
-BC_SAMPLED_COLLISION_INCREMENT = 3.0
-BC_ARGMAX_COLLISION_INCREMENT = 5.0
-BC_DUPLICATE_COLLISION_CAP = 8
+BC_INITIAL_TEACHER_EPISODES = REGISTERED_BC_SPEC["bc_episodes"]
+BC_INITIAL_EPOCHS = REGISTERED_BC_SPEC["bc_epochs"]
+BC_INITIAL_DAGGER_ROUNDS = REGISTERED_BC_SPEC["dagger_rounds"]
+BC_INITIAL_DAGGER_EPISODES = REGISTERED_BC_SPEC["dagger_episodes"]
+BC_INITIAL_DAGGER_EPOCHS = REGISTERED_BC_SPEC["dagger_epochs"]
+BC_RISK_TEACHER_EPISODES = REGISTERED_BC_SPEC["risk_teacher_episodes"]
+BC_RISK_VISIT_EPISODES = REGISTERED_BC_SPEC["risk_visit_episodes"]
+BC_LARGE_TEACHER_EPISODES = REGISTERED_BC_SPEC["large_teacher_episodes"]
+BC_LARGE_VISIT_EPISODES = REGISTERED_BC_SPEC["large_visit_episodes"]
+BC_DEEP_TEACHER_EPISODES = REGISTERED_BC_SPEC["deep_teacher_episodes"]
+BC_DEEP_DAGGER_ROUNDS = REGISTERED_BC_SPEC["deep_dagger_rounds"]
+BC_DEEP_DAGGER_EPISODES = REGISTERED_BC_SPEC["deep_dagger_episodes"]
+BC_RISK_EPOCHS = REGISTERED_BC_SPEC["risk_epochs"]
+BC_DEEP_EPOCHS = REGISTERED_BC_SPEC["deep_epochs"]
+BC_BATCH_SIZE = REGISTERED_BC_SPEC["batch_size"]
+BC_RISK_WEIGHT = REGISTERED_BC_SPEC["risk_weight"]
+BC_MARGIN_GAP = REGISTERED_BC_SPEC["margin_gap"]
+BC_MARGIN_WEIGHT = REGISTERED_BC_SPEC["margin_weight"]
+BC_NEAR_INCREMENT = REGISTERED_BC_SPEC["near_increment"]
+BC_LOW_RETURN_INCREMENT = REGISTERED_BC_SPEC["low_return_increment"]
+BC_SAMPLED_COLLISION_INCREMENT = REGISTERED_BC_SPEC["sampled_collision_increment"]
+BC_ARGMAX_COLLISION_INCREMENT = REGISTERED_BC_SPEC["argmax_collision_increment"]
+BC_DUPLICATE_COLLISION_CAP = REGISTERED_BC_SPEC["duplicate_collision_cap"]
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[2]
 _SOURCE_FILES = (
@@ -171,10 +176,14 @@ def _scientific_run_spec_sha256(spec: Mapping) -> str:
         release_id=spec["release_id"],
         scenario_namespace=spec["scenario_namespace"],
         checkpoint_seeds=tuple(spec["checkpoint_seeds"]),
+        program_fit_method=spec["program_fit_method"],
+        bc_recipe_sha256=spec["bc_recipe_sha256"],
+        risk_dual_config_sha256=spec["risk_dual_config_sha256"],
+        bc_data_seed_schedule_sha256=spec["bc_data_seed_schedule_sha256"],
     )
-    if (registered.to_mapping()["final_program_fit_seed_schedule"] !=
-            spec["final_program_fit_seed_schedule"]):
-        raise RuntimeError("Warehouse canonical run spec program schedule drifted")
+    canonical = registered.to_mapping()
+    if _digest_json({key: spec.get(key) for key in canonical}) != _digest_json(canonical):
+        raise RuntimeError("Warehouse canonical run spec or schedule drifted")
     if _training_config_sha256(spec) != registered.training_config_sha256(
             spec["source_closure_sha256"]):
         raise RuntimeError("Warehouse registered BC config hash drifted")
@@ -210,6 +219,8 @@ def _checked_spec(run_spec: Mapping) -> dict:
             BUDGETS, DEVELOPMENT_PAIR_SEEDS, DEVELOPMENT_SELECTION_SEEDS,
             FORMAL_PAIR_SEEDS, FORMAL_SELECTION_SEEDS,
             REGISTERED_ARCHITECTURE_MODE, REGISTERED_BC_RECIPE_VERSION,
+            REGISTERED_BC_SPEC_SHA256, PROGRAM_FIT_METHOD_CANDIDATES,
+            REGISTERED_RISK_DUAL_CONFIG_SHA256,
             final_program_fit_seed_schedule, online_program_extraction_steps,
         )
         if result["joint_steps"] not in BUDGETS:
@@ -229,14 +240,22 @@ def _checked_spec(run_spec: Mapping) -> dict:
                                              expected_extractions)
         if (run_spec.get("architecture_mode", REGISTERED_ARCHITECTURE_MODE) !=
                 REGISTERED_ARCHITECTURE_MODE
+                or run_spec.get("program_fit_method") not in
+                PROGRAM_FIT_METHOD_CANDIDATES
                 or run_spec.get("bc_recipe_version", REGISTERED_BC_RECIPE_VERSION) !=
                 REGISTERED_BC_RECIPE_VERSION
+                or run_spec.get("bc_recipe_sha256") != REGISTERED_BC_SPEC_SHA256
+                or run_spec.get("risk_dual_config_sha256") !=
+                REGISTERED_RISK_DUAL_CONFIG_SHA256
                 or not isinstance(requested_extractions, (list, tuple))
                 or tuple(requested_extractions) != expected_extractions
                 or any(type(step) is not int for step in requested_extractions)):
             raise ValueError("Warehouse v6 registered architecture, BC, or extraction schedule mismatch")
         result["architecture_mode"] = REGISTERED_ARCHITECTURE_MODE
+        result["program_fit_method"] = run_spec["program_fit_method"]
         result["bc_recipe_version"] = REGISTERED_BC_RECIPE_VERSION
+        result["bc_recipe_sha256"] = REGISTERED_BC_SPEC_SHA256
+        result["risk_dual_config_sha256"] = REGISTERED_RISK_DUAL_CONFIG_SHA256
         result["online_program_extraction_steps"] = list(expected_extractions)
         release_id = run_spec.get("release_id")
         if not isinstance(release_id, str):
@@ -249,11 +268,16 @@ def _checked_spec(run_spec: Mapping) -> dict:
         result["release_id"] = release_id
         result["final_program_fit_seed_schedule"] = schedule
         result["final_program_fit_seed_schedule_sha256"] = _digest_json(schedule)
+        bc_schedule = bc_data_seed_schedule(result["pair_seed"])
+        if (run_spec.get("bc_data_seed_schedule") != bc_schedule
+                or run_spec.get("bc_data_seed_schedule_sha256") !=
+                _digest_json(bc_schedule)):
+            raise ValueError("Warehouse v6 BC stage seed schedule is not preregistered")
+        result["bc_data_seed_schedule"] = bc_schedule
+        result["bc_data_seed_schedule_sha256"] = _digest_json(bc_schedule)
     if smoke:
         result["smoke"] = True
-    elif any(key in run_spec for key in (
-            "bc_episodes", "bc_epochs", "dagger_rounds",
-            "dagger_episodes", "dagger_epochs")):
+    elif any(key in run_spec for key in REGISTERED_BC_SPEC):
         raise ValueError("registered Warehouse v6 BC recipe cannot be overridden")
     for key, default in (
         ("bc_episodes", DEFAULT_BC_EPISODES), ("bc_epochs", DEFAULT_BC_EPOCHS),
@@ -270,6 +294,15 @@ def _checked_spec(run_spec: Mapping) -> dict:
     if result["dagger_rounds"] and (not result["dagger_episodes"] or
                                       not result["dagger_epochs"]):
         raise ValueError("Warehouse v6 DAgger rounds need episodes and epochs")
+    if not smoke:
+        result.update(REGISTERED_BC_SPEC)
+        if (not set(PROGRAM_FIT_METHOD_CANDIDATES) <=
+                {ACTOR_SPARSE_TOPOLOGY_METHOD}):
+            raise RuntimeError("Warehouse registered program implementation drifted")
+        if (asdict(RiskDualConfig()) != REGISTERED_RISK_DUAL_CONFIG
+                or _digest_json(asdict(RiskDualConfig())) !=
+                REGISTERED_RISK_DUAL_CONFIG_SHA256):
+            raise RuntimeError("Warehouse PPO shutdown risk-dual config drifted")
     closure = source_closure_sha256()
     if ("source_closure_sha256" in run_spec
             and run_spec["source_closure_sha256"] != closure):
@@ -325,7 +358,8 @@ def _bc_epochs(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
                *, epochs: int, generator: torch.Generator) -> float:
     encoded = policy_features_torch(obs, mask)
     for _ in range(epochs):
-        for indices in torch.randperm(len(obs), generator=generator).split(256):
+        for indices in torch.randperm(len(obs), generator=generator).split(
+                REGISTERED_BC_SPEC["initial_bc_batch_size"]):
             logits = model.outputs_encoded(encoded[indices], mask[indices])
             loss = nn.functional.cross_entropy(logits.reshape(-1, len(ACTIONS)),
                                                labels[indices].reshape(-1))
@@ -345,19 +379,22 @@ def _bc_epochs(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
                 gate_target = torch.where(easy, 0.1, 0.9).to(role_rows.dtype)
                 gate_supervision.append(nn.functional.binary_cross_entropy(
                     actor.gate_values(role_rows), gate_target))
-            loss = loss + 0.05 * torch.stack(tree_loss).mean()
+            loss = loss + REGISTERED_BC_SPEC["initial_tree_loss_weight"] * \
+                torch.stack(tree_loss).mean()
             # The gate learns when the public-state tree already predicts the
             # offline label and when the relation residual must take over.
             # Only BC/DAgger training rows supply this target, never program
             # qualification or independent evaluation episodes.
-            loss = loss + 0.3 * torch.stack(gate_supervision).mean()
+            loss = loss + REGISTERED_BC_SPEC["initial_gate_loss_weight"] * \
+                torch.stack(gate_supervision).mean()
             # Both variants inherit the same learned preference for compact
             # residual corrections. Raw receives no program gradient later.
-            loss = loss + 5e-4 * torch.stack([
+            loss = loss + REGISTERED_BC_SPEC["initial_bound_loss_weight"] * torch.stack([
                 model.actors[role].bounds().mean() for role in AGENTS]).mean()
             optimizer.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(model.actors.parameters(), 0.5)
+            nn.utils.clip_grad_norm_(model.actors.parameters(),
+                                     REGISTERED_BC_SPEC["initial_bc_gradient_clip"])
             optimizer.step()
     with torch.no_grad():
         predicted = model.outputs_encoded(encoded, mask).argmax(-1)
@@ -643,7 +680,8 @@ def _risk_bc_epochs(model: WarehouseV6Actor, critic: nn.Module,
     weights = (1.0 + near_increment * near.float()[:, None]
                + low_return_increment * low.float() + hard[:, None])
     weights /= weights.mean()
-    optimizer = torch.optim.Adam(model.actors.parameters(), lr=1e-4)
+    optimizer = torch.optim.Adam(
+        model.actors.parameters(), lr=REGISTERED_BC_SPEC["risk_bc_learning_rate"])
     generator = torch.Generator().manual_seed(generator_seed)
     last = {}
     for epoch in range(epochs):
@@ -667,7 +705,8 @@ def _risk_bc_epochs(model: WarehouseV6Actor, critic: nn.Module,
                     + BC_RISK_WEIGHT * expected_collision)
             optimizer.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(model.actors.parameters(), 0.5)
+            nn.utils.clip_grad_norm_(model.actors.parameters(),
+                                     REGISTERED_BC_SPEC["risk_bc_gradient_clip"])
             optimizer.step()
         last = {"epoch": epoch + 1,
                 "mean_batch_ce": float(ce.detach().mean()),
@@ -675,11 +714,16 @@ def _risk_bc_epochs(model: WarehouseV6Actor, critic: nn.Module,
                 "mean_batch_expected_collision": float(expected_collision.detach())}
     return {"rows": len(obs), "epochs": epochs, "batch_size": BC_BATCH_SIZE,
             "data_sha256": _bc_rows_sha256((obs, mask, labels, hard)),
+            "learning_rate": REGISTERED_BC_SPEC["risk_bc_learning_rate"],
+            "gradient_clip": REGISTERED_BC_SPEC["risk_bc_gradient_clip"],
             "near_fraction": float(near.float().mean()),
             "low_return_margin_fraction": float(low.float().mean()),
             "collision_hard_fraction": float((hard > 0).float().mean()),
             "risk_weight": BC_RISK_WEIGHT, "margin_gap": BC_MARGIN_GAP,
-            "margin_weight": margin_weight, "end": last}
+            "margin_weight": margin_weight,
+            "near_increment": near_increment,
+            "low_return_increment": low_return_increment,
+            "end": last}
 
 
 def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
@@ -695,13 +739,32 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
 
     torch.set_num_threads(2)
     torch.manual_seed(pair_seed)
+    expected_seed_blocks = bc_data_seed_schedule(pair_seed)
+    if (spec.get("bc_recipe_version") != BC_RECIPE_VERSION
+            or spec.get("bc_recipe_sha256") != REGISTERED_BC_SPEC_SHA256
+            or spec.get("bc_data_seed_schedule") != expected_seed_blocks
+            or spec.get("bc_data_seed_schedule_sha256") !=
+            _digest_json(expected_seed_blocks)
+            or spec.get("risk_dual_config_sha256") !=
+            REGISTERED_RISK_DUAL_CONFIG_SHA256):
+        raise RuntimeError("Warehouse production BC recipe or stage seed lock drifted")
     initial_hashes = role_hashes(model)
     stages: list[dict] = []
     all_seed_blocks: dict[str, list[int]] = {}
+    initial_fit_config = {
+        "learning_rate": REGISTERED_BC_SPEC["initial_bc_learning_rate"],
+        "batch_size": REGISTERED_BC_SPEC["initial_bc_batch_size"],
+        "tree_loss_weight": REGISTERED_BC_SPEC["initial_tree_loss_weight"],
+        "gate_loss_weight": REGISTERED_BC_SPEC["initial_gate_loss_weight"],
+        "bound_loss_weight": REGISTERED_BC_SPEC["initial_bound_loss_weight"],
+        "gradient_clip": REGISTERED_BC_SPEC["initial_bc_gradient_clip"],
+    }
 
     def teacher_stage(name: str, stage: int, count: int
                       ) -> tuple[torch.Tensor, ...]:
         seeds = _bc_stage_seeds(pair_seed, stage, count)
+        if expected_seed_blocks.get(name) != seeds:
+            raise RuntimeError("Warehouse public BC teacher stage seed drifted")
         all_seed_blocks[name] = seeds
         obs, mask, labels, summary = _teacher_rows(count, seeds[0])
         rows = (obs, mask, labels, torch.zeros(len(obs), dtype=torch.float32))
@@ -715,6 +778,8 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
                     collision_counts: dict[bytes, int] | None = None
                     ) -> tuple[torch.Tensor, ...]:
         seeds = _bc_stage_seeds(pair_seed, stage, count)
+        if expected_seed_blocks.get(name) != seeds:
+            raise RuntimeError("Warehouse dual-NN BC visit stage seed drifted")
         all_seed_blocks[name] = seeds
         rows, summary = _collect_bc_visits(
             model, seeds, deterministic=deterministic,
@@ -726,13 +791,16 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
     source = teacher_stage("initial_public_teacher", 10,
                            BC_INITIAL_TEACHER_EPISODES)
     tree_initialization = _initialize_public_trees(model, *source[:3])
-    optimizer = torch.optim.Adam(model.actors.parameters(), lr=3e-4)
+    optimizer = torch.optim.Adam(
+        model.actors.parameters(),
+        lr=REGISTERED_BC_SPEC["initial_bc_learning_rate"])
     generator = torch.Generator().manual_seed(pair_seed + 31)
     initial_accuracy = _bc_epochs(
         model, optimizer, *source[:3], epochs=BC_INITIAL_EPOCHS,
         generator=generator)
     stages.append({"stage": "initial_public_bc", "training_rows": len(source[0]),
                    "epochs": BC_INITIAL_EPOCHS,
+                   **initial_fit_config,
                    "public_label_accuracy": initial_accuracy,
                    "actor_role_sha256": role_hashes(model)})
 
@@ -741,7 +809,9 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
         visited = visit_stage(f"initial_nn_dagger_{number}", 10 + number,
                               BC_INITIAL_DAGGER_EPISODES)
         early_parts.append(visited)
-        optimizer = torch.optim.Adam(model.actors.parameters(), lr=3e-4)
+        optimizer = torch.optim.Adam(
+            model.actors.parameters(),
+            lr=REGISTERED_BC_SPEC["initial_bc_learning_rate"])
         obs, mask, labels = (
             torch.cat([part[index] for part in early_parts]) for index in range(3))
         accuracy = _bc_epochs(model, optimizer, obs, mask, labels,
@@ -752,11 +822,27 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
                        "training_data_sha256": _bc_rows_sha256(
                            (obs, mask, labels)),
                        "epochs": BC_INITIAL_DAGGER_EPOCHS,
+                       **initial_fit_config,
                        "public_label_accuracy": accuracy,
                        "actor_role_sha256": role_hashes(model)})
 
-    critic, critic_report = train_collision_critic(seed=pair_seed + 6200)
-    if not critic_report.get("validation_passed"):
+    critic, critic_report = train_collision_critic(
+        seed=pair_seed + 6200,
+        epochs=REGISTERED_BC_SPEC["collision_critic_epochs"],
+        batch_size=REGISTERED_BC_SPEC["collision_critic_batch_size"],
+        learning_rate=REGISTERED_BC_SPEC["collision_critic_learning_rate"],
+        positive_weight=REGISTERED_BC_SPEC["collision_critic_positive_weight"])
+    if (not critic_report.get("validation_passed")
+            or critic_report.get("version") !=
+            REGISTERED_BC_SPEC["collision_critic_version"]
+            or critic_report.get("epochs") !=
+            REGISTERED_BC_SPEC["collision_critic_epochs"]
+            or critic_report.get("batch_size") !=
+            REGISTERED_BC_SPEC["collision_critic_batch_size"]
+            or critic_report.get("learning_rate") !=
+            REGISTERED_BC_SPEC["collision_critic_learning_rate"]
+            or critic_report.get("positive_weight") !=
+            REGISTERED_BC_SPEC["collision_critic_positive_weight"]):
         raise RuntimeError("Warehouse BC real-event collision critic failed validation")
     critic.eval()
     for parameter in critic.parameters():
@@ -813,13 +899,16 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
                    "actor_role_sha256": role_hashes(model)})
 
     all_seeds = [seed for block in all_seed_blocks.values() for seed in block]
-    if len(set(all_seeds)) != len(all_seeds):
-        raise RuntimeError("Warehouse BC seed phases overlap")
+    if (all_seed_blocks != expected_seed_blocks
+            or len(set(all_seeds)) != len(all_seeds)):
+        raise RuntimeError("Warehouse BC seed phases overlap or drifted")
     obs, mask, labels = (
         torch.cat([part[index] for part in deep_parts]) for index in range(3))
     return {
         "source": "public_observation_only_offline_bc_and_dual_nn_visits",
         "bc_recipe_version": BC_RECIPE_VERSION,
+        "bc_recipe_sha256": REGISTERED_BC_SPEC_SHA256,
+        "risk_dual_config_sha256": REGISTERED_RISK_DUAL_CONFIG_SHA256,
         "source_closure_sha256": spec["source_closure_sha256"],
         "observation_version": OBSERVATION_VERSION,
         "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
@@ -1246,7 +1335,10 @@ def _resample_program_rows(actor: FrozenWarehouseV6Actor, role: str,
 
 
 def _fit_training_programs(model: WarehouseV6Actor,
-                           buffers: Mapping[str, deque]) -> tuple[dict, dict, dict]:
+                           buffers: Mapping[str, deque], *,
+                           method: str = AXIS_TREE_METHOD) -> tuple[dict, dict, dict]:
+    if method not in (AXIS_TREE_METHOD, ACTOR_SPARSE_TOPOLOGY_METHOD):
+        raise ValueError("unregistered Warehouse online program method")
     actor = FrozenWarehouseV6Actor.from_model(model)
     programs, reports, held_validation = {}, {}, {}
     split_names = tuple(FINAL_PROGRAM_SPLIT_COUNTS)
@@ -1262,6 +1354,7 @@ def _fit_training_programs(model: WarehouseV6Actor,
         if len(scenario_seeds) < PROGRAM_MIN_EPISODES:
             programs[role] = None
             reports[role] = {"error": "insufficient distinct training scenario episodes",
+                             "program_fit_method": method,
                              "episodes": len(scenario_seeds)}
             held_validation[role] = []
             continue
@@ -1288,9 +1381,15 @@ def _fit_training_programs(model: WarehouseV6Actor,
                 for name in split_names},
         }
         try:
-            program = fit_program(role, actor, *(parts[name] for name in split_names))
+            if method == AXIS_TREE_METHOD:
+                # Preserve the historical smoke and direct unit-test adapter.
+                program = fit_program(role, actor, *(parts[name] for name in split_names))
+            else:
+                program = fit_program(role, actor, *(parts[name] for name in split_names),
+                                      method=method)
             programs[role] = program
             reports[role] = {"program_sha256": program.sha256(),
+                             "program_fit_method": method,
                              "actor_role_sha256": actor.role_sha256[role],
                              **provenance,
                              "current_actor_resampled": True,
@@ -1300,6 +1399,7 @@ def _fit_training_programs(model: WarehouseV6Actor,
         except (ValueError, RuntimeError) as exc:
             programs[role] = None
             reports[role] = {"error": f"{type(exc).__name__}: {exc}",
+                             "program_fit_method": method,
                              **provenance}
     return programs, reports, held_validation
 
@@ -1477,6 +1577,8 @@ def _fresh_final_programs(model: WarehouseV6Actor,
     actor = FrozenWarehouseV6Actor.load(
         actor_artifact["path"], expected_sha256=actor_artifact["sha256"],
         expected_role_sha256=role_hashes(model))
+    if spec.get("program_fit_method") not in PROGRAM_FIT_METHOD_CANDIDATES:
+        raise RuntimeError("Warehouse frozen program method is unsupported")
     from experiments.warehouse.protocol import final_program_fit_seed_schedule
     parts = spec["final_program_fit_seed_schedule"]
     if (parts != final_program_fit_seed_schedule(spec["release_id"], spec["pair_seed"])
@@ -1508,10 +1610,14 @@ def _fresh_final_programs(model: WarehouseV6Actor,
         split = {name: split_rows[name][role] for name in split_rows}
         try:
             program = fit_program(role, actor, *(split[name] for name in
-                ("fit", "calibration", "eligibility", "validation")))
+                ("fit", "calibration", "eligibility", "validation")),
+                method=spec["program_fit_method"])
+            if program.report.get("fit_method") != spec["program_fit_method"]:
+                raise RuntimeError("Warehouse frozen program used a different method")
             programs[role] = program
             reports[role] = {
                 "status": "frozen_actor_fresh_four_part_fit",
+                "program_fit_method": spec["program_fit_method"],
                 "actor_role_sha256": actor.role_sha256[role],
                 "actor_artifact_sha256": actor.artifact_sha256,
                 "program_sha256": program.sha256(),
@@ -1524,6 +1630,7 @@ def _fresh_final_programs(model: WarehouseV6Actor,
             }
         except (ValueError, RuntimeError) as exc:
             reports[role] = {"status": "failed", "error": f"{type(exc).__name__}: {exc}",
+                             "program_fit_method": spec["program_fit_method"],
                              "release_id": spec["release_id"],
                              "actor_artifact_sha256": actor.artifact_sha256,
                              "final_fit_traces": traces,
@@ -1589,13 +1696,25 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 or saved.get("variant") != variant
                 or saved.get("initial_role_sha256") != initial_role_hashes
                 or saved.get("model_version") != MODEL_VERSION
-                or saved.get("feature_schema_sha256") != FEATURE_SCHEMA_SHA256):
+                or saved.get("feature_schema_sha256") != FEATURE_SCHEMA_SHA256
+                or (not spec.get("smoke") and (
+                    saved.get("program_fit_method") != spec["program_fit_method"]
+                    or saved.get("bc_recipe_sha256") != spec["bc_recipe_sha256"]
+                    or saved.get("bc_data_seed_schedule_sha256") !=
+                    spec["bc_data_seed_schedule_sha256"]
+                    or saved.get("risk_dual_config_sha256") !=
+                    spec["risk_dual_config_sha256"]))):
             raise RuntimeError("Warehouse v6 checkpoint identity or Actor start mismatch")
         if saved.get("complete"):
             model.load_state_dict(saved["selected_state_dict"])
             restored = {role: WarehouseV6Program.from_dict(
                 payload, actor_role_sha256=role_hashes(model)[role])
                 for role, payload in saved.get("selected_programs", {}).items()}
+            if (not spec.get("smoke") and variant == "regularized"
+                    and any(program.report.get("fit_method") !=
+                            spec["program_fit_method"]
+                            for program in restored.values())):
+                raise RuntimeError("Warehouse resumed selected program method drifted")
             return model, restored, saved["report"]
         model.load_state_dict(saved["state_dict"])
         optimizer.load_state_dict(saved["optimizer"])
@@ -1615,6 +1734,10 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 programs[role] = (WarehouseV6Program.from_dict(
                     payload, actor_role_sha256=payload["actor_role_sha256"])
                     if payload is not None else None)
+                if (not spec.get("smoke") and programs[role] is not None
+                        and programs[role].report.get("fit_method") !=
+                        spec["program_fit_method"]):
+                    raise RuntimeError("Warehouse resumed online program method drifted")
             extractions = saved["extractions"]
             program_validation_rows = saved["program_validation_rows"]
         next_extraction_index = saved["next_extraction_index"]
@@ -1673,8 +1796,13 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 used_steps == extraction_steps[next_extraction_index]):
             _assert_source_closure(spec["source_closure_sha256"])
             if programs is not None:
-                programs, extracted, program_validation_rows = _fit_training_programs(
-                    model, buffers)
+                if spec.get("smoke"):
+                    programs, extracted, program_validation_rows = \
+                        _fit_training_programs(model, buffers)
+                else:
+                    programs, extracted, program_validation_rows = \
+                        _fit_training_programs(
+                            model, buffers, method=spec["program_fit_method"])
                 for role in AGENTS:
                     extractions[role].append({
                         "joint_steps": used_steps,
@@ -1721,6 +1849,11 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 "initial_role_sha256": initial_role_hashes,
                 "model_version": MODEL_VERSION,
                 "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+                "program_fit_method": spec.get("program_fit_method"),
+                "bc_recipe_sha256": spec.get("bc_recipe_sha256"),
+                "bc_data_seed_schedule_sha256": spec.get(
+                    "bc_data_seed_schedule_sha256"),
+                "risk_dual_config_sha256": spec.get("risk_dual_config_sha256"),
                 "complete": False, "state_dict": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "generator_state": generator.get_state(),
@@ -1794,7 +1927,12 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         "training_config_sha256": spec_hash,
         "release_id": spec.get("release_id"),
         "architecture_mode": spec.get("architecture_mode", "smoke"),
+        "program_fit_method": spec.get("program_fit_method", "smoke"),
         "bc_recipe_version": spec.get("bc_recipe_version", "smoke"),
+        "bc_recipe_sha256": spec.get("bc_recipe_sha256"),
+        "bc_data_seed_schedule_sha256": spec.get(
+            "bc_data_seed_schedule_sha256"),
+        "risk_dual_config_sha256": spec.get("risk_dual_config_sha256"),
         "online_program_extraction_steps": list(extraction_steps),
         "online_program_split_block_cycle": dict(FINAL_PROGRAM_SPLIT_COUNTS),
         "online_program_cohorts_disjoint": cohorts_valid,
@@ -1855,6 +1993,10 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         "initial_role_sha256": initial_role_hashes,
         "model_version": MODEL_VERSION,
         "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+        "program_fit_method": spec.get("program_fit_method"),
+        "bc_recipe_sha256": spec.get("bc_recipe_sha256"),
+        "bc_data_seed_schedule_sha256": spec.get("bc_data_seed_schedule_sha256"),
+        "risk_dual_config_sha256": spec.get("risk_dual_config_sha256"),
         "complete": True, "selected_state_dict": model.state_dict(),
         "selected_programs": {role: program.to_dict()
                               for role, program in selected_programs.items()},
@@ -1877,20 +2019,33 @@ def train_pair(run_spec: Mapping) -> dict:
     if bc_checkpoint.is_file():
         saved = torch.load(bc_checkpoint, map_location="cpu", weights_only=False)
         if (saved.get("training_config_sha256") != spec_hash
-                or saved.get("source_closure_sha256") != spec["source_closure_sha256"]):
+                or saved.get("source_closure_sha256") != spec["source_closure_sha256"]
+                or (not spec.get("smoke") and (
+                    saved.get("bc_recipe_sha256") != spec["bc_recipe_sha256"]
+                    or saved.get("bc_data_seed_schedule_sha256") !=
+                    spec["bc_data_seed_schedule_sha256"]
+                    or saved.get("program_fit_method") !=
+                    spec["program_fit_method"]))):
             raise RuntimeError("Warehouse v6 BC checkpoint run spec mismatch")
         base.load_state_dict(saved["state_dict"])
         bc_report = saved["report"]
         if bc_report["pretrained_role_sha256"] != role_hashes(base):
             raise RuntimeError("Warehouse v6 BC checkpoint Actor hashes mismatch")
-        if (not spec.get("smoke")
-                and bc_report.get("bc_recipe_version") != BC_RECIPE_VERSION):
+        if (not spec.get("smoke") and not bc_report_valid(
+                bc_report, spec["pair_seed"], spec["source_closure_sha256"])):
             raise RuntimeError("Warehouse v6 BC checkpoint recipe mismatch")
     else:
         bc_report = pretrain_pair(base, pair_seed=spec["pair_seed"], spec=spec)
+        if (not spec.get("smoke") and not bc_report_valid(
+                bc_report, spec["pair_seed"], spec["source_closure_sha256"])):
+            raise RuntimeError("Warehouse v6 produced an invalid BC stage receipt")
         _assert_source_closure(spec["source_closure_sha256"])
         _save_checkpoint(bc_checkpoint, {"training_config_sha256": spec_hash,
                                          "source_closure_sha256": spec["source_closure_sha256"],
+                                         "program_fit_method": spec.get("program_fit_method"),
+                                         "bc_recipe_sha256": spec.get("bc_recipe_sha256"),
+                                         "bc_data_seed_schedule_sha256": spec.get(
+                                             "bc_data_seed_schedule_sha256"),
                                          "state_dict": base.state_dict(),
                                          "report": bc_report})
     initial = deepcopy(base.state_dict())
@@ -1932,6 +2087,7 @@ def train_pair(run_spec: Mapping) -> dict:
         "training_config_sha256": spec_hash,
         "release_id": spec.get("release_id"),
         "architecture_mode": spec.get("architecture_mode", "smoke"),
+        "program_fit_method": spec.get("program_fit_method", "smoke"),
         "online_program_extraction_steps": list(spec.get(
             "online_program_extraction_steps", ())),
         "online_program_split_block_cycle": dict(FINAL_PROGRAM_SPLIT_COUNTS),
@@ -1944,6 +2100,11 @@ def train_pair(run_spec: Mapping) -> dict:
         "source_closure_sha256": spec["source_closure_sha256"],
         "source_files_sha256": source_closure_files_sha256(),
         "bc_recipe_version": bc_report.get("bc_recipe_version", "smoke"),
+        "bc_recipe_sha256": spec.get("bc_recipe_sha256"),
+        "bc_data_seed_schedule": spec.get("bc_data_seed_schedule"),
+        "bc_data_seed_schedule_sha256": spec.get(
+            "bc_data_seed_schedule_sha256"),
+        "risk_dual_config_sha256": spec.get("risk_dual_config_sha256"),
         "paired_bc_checkpoint_path": str(bc_checkpoint.resolve()),
         "paired_bc_checkpoint_sha256": bc_checkpoint_sha256,
         "checkpoint_seeds": list(spec["checkpoint_seeds"]),
@@ -1970,6 +2131,8 @@ def main() -> None:
     parser.add_argument("--scenario-namespace", default="warehouse-v6-matched-120-step-blocks")
     parser.add_argument("--checkpoint-seeds", type=int, nargs="+", required=True)
     parser.add_argument("--release-id")
+    parser.add_argument("--program-fit-method",
+                        help="required for registered runs; must match the immutable protocol")
     parser.add_argument("--bc-episodes", type=int)
     parser.add_argument("--bc-epochs", type=int)
     parser.add_argument("--dagger-rounds", type=int)
@@ -1979,11 +2142,16 @@ def main() -> None:
                         help="allow a tiny non-protocol test run")
     args = parser.parse_args()
     run_spec = {key: value for key, value in vars(args).items() if value is not None}
-    if args.release_id and not args.smoke:
-        from experiments.warehouse.protocol import final_program_fit_seed_schedule
-        schedule = final_program_fit_seed_schedule(args.release_id, args.pair_seed)
-        run_spec["final_program_fit_seed_schedule"] = schedule
-        run_spec["final_program_fit_seed_schedule_sha256"] = _digest_json(schedule)
+    if not args.smoke:
+        from experiments.warehouse.protocol import PairRunSpec
+        if args.release_id is None or args.program_fit_method is None:
+            parser.error("registered runs require --release-id and --program-fit-method")
+        run_spec = PairRunSpec(
+            args.candidate_id, args.pair_seed, args.joint_steps, args.output_dir,
+            args.program_fit_method,
+            release_id=args.release_id,
+            scenario_namespace=args.scenario_namespace,
+            checkpoint_seeds=tuple(args.checkpoint_seeds)).to_mapping()
     report = train_pair(run_spec)
     print(json.dumps({"candidate_id": report["candidate_id"],
                       "pair_seed": report["pair_seed"],

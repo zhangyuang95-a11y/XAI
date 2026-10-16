@@ -11,6 +11,9 @@ import pytest
 
 from experiments.warehouse import admission as a
 from experiments.warehouse import protocol as p
+from tests.warehouse_v6_contract_fixture import bc_receipt
+
+METHOD = p.PROGRAM_FIT_METHOD_CANDIDATES[0]
 
 
 def _write(path: Path, value: object) -> str:
@@ -31,6 +34,7 @@ def _fake_online_extractions(joint_steps):
             counts[purpose] = count
             cursor += count
         rows.append({"joint_steps": step,
+                     "program_fit_method": METHOD,
                      "window_start_joint_step": 0 if index == 0 else steps[index - 1],
                      "window_end_joint_step": step,
                      "training_split_scenario_seeds": scenes,
@@ -50,7 +54,8 @@ class FakeActor:
 class FakeProgram:
     def __init__(self, role, digest):
         self.role, self.digest = role, digest
-        self.report = {"split_episode_ids": {
+        self.report = {"fit_method": METHOD,
+                       "split_episode_ids": {
             "fit": [f"fit-{i}" for i in range(50)],
             "calibration": [f"cal-{i}" for i in range(25)],
             "eligibility": [f"elig-{i}" for i in range(25)],
@@ -96,9 +101,15 @@ class FakeBackend:
                     programs[role] = {"path": str(program_path), "sha256": digest,
                                       "actor_role_sha256": chosen[role]}
             variants[variant] = {
+                "pair_seed": seed,
                 "joint_steps": budget, "actor_decisions": budget * 2,
                 "architecture_mode": p.REGISTERED_ARCHITECTURE_MODE,
+                "program_fit_method": spec["program_fit_method"],
                 "bc_recipe_version": p.REGISTERED_BC_RECIPE_VERSION,
+                "bc_recipe_sha256": spec["bc_recipe_sha256"],
+                "bc_data_seed_schedule_sha256": spec[
+                    "bc_data_seed_schedule_sha256"],
+                "risk_dual_config_sha256": spec["risk_dual_config_sha256"],
                 "online_program_extraction_steps": list(
                     spec["online_program_extraction_steps"]),
                 "online_program_split_block_cycle": p.FINAL_PROGRAM_SPLIT_COUNTS,
@@ -135,7 +146,14 @@ class FakeBackend:
         pair = {"candidate_id": spec["candidate_id"],
                 "release_id": spec["release_id"],
                 "architecture_mode": spec["architecture_mode"],
+                "program_fit_method": spec["program_fit_method"],
                 "bc_recipe_version": spec["bc_recipe_version"],
+                "bc_recipe_sha256": spec["bc_recipe_sha256"],
+                "bc_data_seed_schedule": spec["bc_data_seed_schedule"],
+                "bc_data_seed_schedule_sha256": spec[
+                    "bc_data_seed_schedule_sha256"],
+                "risk_dual_config_sha256": spec["risk_dual_config_sha256"],
+                "bc": bc_receipt(seed, self.source),
                 "final_program_fit_seed_schedule":
                 spec["final_program_fit_seed_schedule"],
                 "final_program_fit_seed_schedule_sha256":
@@ -234,6 +252,7 @@ def ready(tmp_path, monkeypatch):
                                                         (2, 2600002, 456)))
     backend = FakeBackend(tmp_path)
     admission = a.Admission(tmp_path, "warehouse-v6-test", backend=backend,
+                            program_fit_method=METHOD,
                             claim_root=tmp_path / "sealed_claims")
     assert admission.develop()["locked_budget"] == 200_000
     selection = admission.formal_train()
@@ -515,6 +534,7 @@ def test_development_advances_to_next_budget_when_programs_missing(tmp_path, mon
             return report
 
     admission = a.Admission(tmp_path, "warehouse-v6-budget-test",
+                            program_fit_method=METHOD,
                             backend=MissingAt200k(tmp_path))
     assert admission.develop()["locked_budget"] == 300_000
     for seed in p.DEVELOPMENT_PAIR_SEEDS:
@@ -545,6 +565,7 @@ def test_next_release_gets_distinct_policy_ids_and_sealed_claims(tmp_path, monke
     monkeypatch.setattr(p, "stress_schedule", lambda: ((1, 2600001, 123),))
     release_id = "policylens-three-domain-20261016.v6.1"
     admission = a.Admission(tmp_path, "warehouse-v6-next-release",
+                            program_fit_method=METHOD,
                             release_id=release_id, backend=FakeBackend(tmp_path),
                             claim_root=tmp_path / "sealed_claims")
     assert admission.policy_ids == {
@@ -559,7 +580,8 @@ def test_next_release_gets_distinct_policy_ids_and_sealed_claims(tmp_path, monke
     assert claim["seeds"] == list(p.final_audit_seeds(release_id))
     with pytest.raises(ValueError, match="canonical minor"):
         a.Admission(tmp_path, "alias", release_id=
-                    "policylens-three-domain-20261016.v6.01")
+                    "policylens-three-domain-20261016.v6.01",
+                    program_fit_method=METHOD)
 
 
 def test_sealed_seed_blocks_reject_noncanonical_release_aliases():

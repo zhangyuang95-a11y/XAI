@@ -130,18 +130,36 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
                         p.FORMAL_SELECTION_SEEDS)
     expected_spec = p.PairRunSpec(
         pair["candidate_id"], seed, steps, "/ignored-by-scientific-hash",
+        pair["program_fit_method"],
         release_id=pair["release_id"], checkpoint_seeds=checkpoint_seeds)
     expected_spec_sha = expected_spec.sha256()
     expected_training_sha = expected_spec.training_config_sha256(
         pair["source_closure_sha256"])
     expected_schedule_sha = p.scenario_schedule_sha256(namespace, seed, steps)
     variants = pair.get("variants")
+    bc_schedule = p.bc_data_seed_schedule(seed)
+    bc = pair.get("bc")
     if (not isinstance(variants, Mapping) or set(variants) != set(p.VARIANTS)
             or pair.get("run_spec_sha256") != expected_spec_sha
             or pair.get("training_config_sha256") != expected_training_sha
             or pair.get("architecture_mode") !=
             p.REGISTERED_ARCHITECTURE_MODE
+            or pair.get("program_fit_method") not in
+            p.PROGRAM_FIT_METHOD_CANDIDATES
             or pair.get("bc_recipe_version") != p.REGISTERED_BC_RECIPE_VERSION
+            or pair.get("bc_recipe_sha256") != p.REGISTERED_BC_SPEC_SHA256
+            or pair.get("risk_dual_config_sha256") !=
+            p.REGISTERED_RISK_DUAL_CONFIG_SHA256
+            or pair.get("bc_data_seed_schedule") != bc_schedule
+            or pair.get("bc_data_seed_schedule_sha256") != _digest(bc_schedule)
+            or not isinstance(bc, Mapping)
+            or bc.get("bc_recipe_version") != p.REGISTERED_BC_RECIPE_VERSION
+            or bc.get("bc_recipe_sha256") != p.REGISTERED_BC_SPEC_SHA256
+            or bc.get("bc_data_seed_blocks") != bc_schedule
+            or bc.get("bc_data_seed_schedule_sha256") != _digest(bc_schedule)
+            or bc.get("risk_dual_config_sha256") !=
+            p.REGISTERED_RISK_DUAL_CONFIG_SHA256
+            or not p.bc_report_valid(bc, seed, pair["source_closure_sha256"])
             or pair.get("assigned_scenario_schedule_sha256") !=
             expected_schedule_sha
             or pair.get("online_program_extraction_steps") !=
@@ -157,8 +175,15 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
                 or report.get("joint_steps") != steps
                 or report.get("architecture_mode") !=
                 p.REGISTERED_ARCHITECTURE_MODE
+                or report.get("program_fit_method") !=
+                pair["program_fit_method"]
                 or report.get("bc_recipe_version") !=
                 p.REGISTERED_BC_RECIPE_VERSION
+                or report.get("bc_recipe_sha256") != p.REGISTERED_BC_SPEC_SHA256
+                or report.get("bc_data_seed_schedule_sha256") !=
+                _digest(bc_schedule)
+                or report.get("risk_dual_config_sha256") !=
+                p.REGISTERED_RISK_DUAL_CONFIG_SHA256
                 or report.get("online_program_extraction_steps") !=
                 list(expected_spec.online_program_extraction_steps)
                 or report.get("online_program_split_block_cycle") !=
@@ -786,6 +811,8 @@ def _final_fit_index_claim(*, root: Path, release_id: str,
     for role in p.ROLES:
         claim = reports[role]
         if (claim.get("final_fit_traces") != traces
+                or claim.get("program_fit_method") !=
+                pair["program_fit_method"]
                 or claim.get("actor_artifact_sha256") != actor_sha
                 or claim.get("split_seeds") != schedule
                 or claim.get("split_seed_schedule_sha256") != _digest(schedule)
@@ -851,6 +878,8 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
                 return False
             continue
         if (claim.get("status") != "frozen_actor_fresh_four_part_fit"
+                or claim.get("program_fit_method") !=
+                pair["program_fit_method"]
                 or role not in programs
                 or claim.get("actor_role_sha256") != actor.role_sha256[role]
                 or claim.get("program_sha256") != programs[role]["sha256"]):
@@ -875,7 +904,9 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
                         counts.astype(int).tolist()):
                 return False
             fit_supported = set(np.flatnonzero(counts).tolist())
-        elif report.get("fit_method") is not None:
+        else:
+            return False
+        if report.get("fit_method") != pair["program_fit_method"]:
             return False
         expected_ids = {name: sorted(map(str, seeds)) for name, seeds in
                         p.final_program_fit_seed_schedule(
@@ -942,6 +973,7 @@ def _final_fit_replay_receipt(*, root: Path, release_id: str,
         "source_closure_sha256": source_closure_sha256,
         "pair_report_sha256": pair_sha256,
         "actor_sha256": trained["actor_artifact"]["sha256"],
+        "program_fit_method": pair["program_fit_method"],
         "trace_sha256": {name: index[name]["sha256"]
                          for name in p.FINAL_PROGRAM_SPLIT_COUNTS},
         "refitted_program_sha256": {
@@ -1086,6 +1118,8 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
             or receipt.get("locked_budget") not in p.BUDGETS
             or receipt.get("pair_seeds") != list(p.FORMAL_PAIR_SEEDS)
             or receipt.get("selected_pair_seed") not in p.FORMAL_PAIR_SEEDS
+            or receipt.get("program_fit_method") not in
+            p.PROGRAM_FIT_METHOD_CANDIDATES
             or receipt.get("policy_id") != _policy_ids(release_id)
             or receipt.get("joint_steps") != {variant: receipt["locked_budget"]
                                                for variant in p.VARIANTS}
@@ -1140,7 +1174,12 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
         for seed in (*p.DEVELOPMENT_PAIR_SEEDS, *p.FORMAL_PAIR_SEEDS)}
     if (lock.get("passed") is not True
             or lock.get("locked_budget") != budget
+            or lock.get("program_fit_method") !=
+            receipt["program_fit_method"]
             or lock.get("source_closure_sha256") != receipt["source_closure_sha256"]
+            or any(lock.get(key) != value for key, value in
+                   p.registered_method_lock_fields(
+                       lock.get("program_fit_method")).items())
             or lock.get("architecture_mode") !=
             p.REGISTERED_ARCHITECTURE_MODE
             or lock.get("bc_recipe_version") !=
@@ -1208,6 +1247,8 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
                     or pair.get("candidate_id") != receipt["candidate_id"]
                     or pair.get("pair_seed") != seed
                     or pair.get("release_id") != release_id
+                    or pair.get("program_fit_method") !=
+                    lock["program_fit_method"]
                     or pair.get("final_program_fit_seed_schedule") !=
                     program_schedules[str(seed)]
                     or pair.get("final_program_fit_seed_schedule_sha256") !=
@@ -1284,6 +1325,8 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
                 or formal.get("pair_report_sha256") != pair_file_sha
                 or pair.get("pair_seed") != seed
                 or pair.get("release_id") != release_id
+                or pair.get("program_fit_method") !=
+                lock["program_fit_method"]
                 or pair.get("final_program_fit_seed_schedule") !=
                 program_schedules[str(seed)]
                 or pair.get("final_program_fit_seed_schedule_sha256") !=

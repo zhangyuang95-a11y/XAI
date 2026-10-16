@@ -372,11 +372,14 @@ class Admission:
 
     def __init__(self, output_root: str | Path, candidate_id: str, *,
                  release_id: str = p.INITIAL_RELEASE_ID, backend=None,
-                 claim_root: str | Path | None = None):
+                 claim_root: str | Path | None = None,
+                 program_fit_method: str | None = None):
         if (not candidate_id or "/" in candidate_id or ".." in candidate_id
                 or "\\" in candidate_id):
             raise ValueError("candidate_id must be a simple directory name")
         p.sealed_seed_blocks(release_id)  # Validate version before any work.
+        if program_fit_method not in p.PROGRAM_FIT_METHOD_CANDIDATES:
+            raise ValueError("Warehouse candidate requires an explicit supported program method")
         minor_text = release_id.rsplit(".v6.", 1)[1]
         minor = int(minor_text)
         if minor_text != str(minor):
@@ -384,6 +387,7 @@ class Admission:
         self.output_root = Path(output_root).resolve()
         self.candidate_id = candidate_id
         self.release_id = release_id
+        self.program_fit_method = program_fit_method
         policy_version = "v6" if minor == 0 else f"v6.{minor}"
         self.policy_ids = {variant: f"warehouse-{variant}-{policy_version}"
                            for variant in p.VARIANTS}
@@ -437,7 +441,8 @@ class Admission:
                      pair_seed in p.DEVELOPMENT_PAIR_SEEDS else
                      p.FORMAL_SELECTION_SEEDS)
         return p.PairRunSpec(self.candidate_id, pair_seed, budget,
-                             str(self.output_root), release_id=self.release_id,
+                             str(self.output_root), self.program_fit_method,
+                             release_id=self.release_id,
                              checkpoint_seeds=selection)
 
     def _train(self, pair_seed: int, budget: int) -> dict:
@@ -450,7 +455,20 @@ class Admission:
                 or report.get("pair_seed") != pair_seed
                 or report.get("joint_steps") != budget
                 or report.get("architecture_mode") != spec.architecture_mode
+                or report.get("program_fit_method") != spec.program_fit_method
                 or report.get("bc_recipe_version") != spec.bc_recipe_version
+                or report.get("bc_recipe_sha256") != spec.bc_recipe_sha256
+                or report.get("risk_dual_config_sha256") !=
+                spec.risk_dual_config_sha256
+                or report.get("bc_data_seed_schedule") !=
+                expected_spec["bc_data_seed_schedule"]
+                or report.get("bc_data_seed_schedule_sha256") !=
+                spec.bc_data_seed_schedule_sha256
+                or report.get("bc", {}).get("bc_data_seed_blocks") !=
+                expected_spec["bc_data_seed_schedule"]
+                or report.get("bc", {}).get("bc_recipe_sha256") !=
+                spec.bc_recipe_sha256
+                or not p.bc_report_valid(report.get("bc", {}), pair_seed, source)
                 or report.get("checkpoint_seeds") != list(spec.checkpoint_seeds)
                 or report.get("online_program_extraction_steps") !=
                 list(spec.online_program_extraction_steps)
@@ -513,7 +531,9 @@ class Admission:
             programs[role] = self.backend.load_program(
                 artifact, actor.role_sha256[role])
             if (programs[role].role != role
-                    or programs[role].sha256() != artifact["sha256"]):
+                    or programs[role].sha256() != artifact["sha256"]
+                    or programs[role].report.get("fit_method") !=
+                    self.program_fit_method):
                 raise RuntimeError("Warehouse program role or content hash mismatch")
             try:
                 split = programs[role].report["split_episode_ids"]
@@ -567,6 +587,9 @@ class Admission:
             if (lock.get("final_program_fit_seed_schedule") != schedules
                     or lock.get("final_program_fit_seed_schedule_sha256") !=
                     _sha(schedules)
+                    or any(lock.get(key) != value for key, value in
+                           p.registered_method_lock_fields(
+                               self.program_fit_method).items())
                     or lock.get("architecture_mode") !=
                     p.REGISTERED_ARCHITECTURE_MODE
                     or lock.get("bc_recipe_version") !=
@@ -690,6 +713,7 @@ class Admission:
                 return self._new("budget.lock.json", {
                     "locked_budget": chosen, "development_pair_seeds":
                     list(p.DEVELOPMENT_PAIR_SEEDS),
+                    **p.registered_method_lock_fields(self.program_fit_method),
                     "architecture_mode": p.REGISTERED_ARCHITECTURE_MODE,
                     "bc_recipe_version": p.REGISTERED_BC_RECIPE_VERSION,
                     "online_program_extraction_steps": list(
@@ -722,6 +746,9 @@ class Admission:
         if (lock.get("final_program_fit_seed_schedule") != schedules
                 or lock.get("final_program_fit_seed_schedule_sha256") !=
                 _sha(schedules)
+                or any(lock.get(key) != value for key, value in
+                       p.registered_method_lock_fields(
+                           self.program_fit_method).items())
                 or lock.get("architecture_mode") !=
                 p.REGISTERED_ARCHITECTURE_MODE
                 or lock.get("bc_recipe_version") !=
@@ -1065,6 +1092,9 @@ class Admission:
         if (lock.get("final_program_fit_seed_schedule") != final_schedules
                 or lock.get("final_program_fit_seed_schedule_sha256") !=
                 _sha(final_schedules)
+                or any(lock.get(key) != value for key, value in
+                       p.registered_method_lock_fields(
+                           self.program_fit_method).items())
                 or lock.get("architecture_mode") !=
                 p.REGISTERED_ARCHITECTURE_MODE
                 or lock.get("bc_recipe_version") !=
@@ -1243,6 +1273,7 @@ class Admission:
             "release": self.release_id, "release_id": self.release_id,
             "domain": "warehouse",
             "locked_budget": lock["locked_budget"],
+            "program_fit_method": lock["program_fit_method"],
             "source_closure_sha256": lock["source_closure_sha256"],
             "development_receipt_path": {
                 str(budget): {str(seed): str(self._path(
@@ -1317,9 +1348,12 @@ def main() -> None:
                         help="isolated run root; preserve it with the release package")
     parser.add_argument("--candidate-id", required=True)
     parser.add_argument("--release-id", default=p.INITIAL_RELEASE_ID)
+    parser.add_argument("--program-fit-method", required=True,
+                        choices=p.PROGRAM_FIT_METHOD_CANDIDATES)
     args = parser.parse_args()
     admission = Admission(args.output_root, args.candidate_id,
-                          release_id=args.release_id)
+                          release_id=args.release_id,
+                          program_fit_method=args.program_fit_method)
     phase = args.phase.replace("-", "_")
     result = getattr(admission, phase)()
     print(json.dumps({"phase": args.phase,

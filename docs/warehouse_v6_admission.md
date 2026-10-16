@@ -10,7 +10,7 @@
 - 独立程序审计同时报告合格叶覆盖与实际动作可用覆盖：在同一冻结 NN–NN 轨迹的动作前帧记录采样动作，审计器重算绑定 Actor 的掩码后分布。解释仅计程序动作等于该帧采样 NN 动作；反馈还须采样动作等于当帧 NN 最大概率动作。训练期实际反馈另由 `feedback_rows / feedback_window_actor_rows` 报告，不能以冻结审计覆盖率替代。
 - 每个配对种子的正式程序提取另用固定、互不重叠的 50／25／25／24 个 episode 分别拟合、校准、判定叶资格、内部验证。种子列表及 SHA 写入配对配置与预算锁；候选 ID 不能改变它们。最终程序在选定 checkpoint 后重新拟合，在线程序反馈每个 PPO 更新轮次按当前 Actor 重新验证，不能把较早 Actor 的一致性证书沿用到新权重。
 - 最终程序拟合的四分集各保存一份内容寻址的双角色逐帧 JSONL，记录动作前／后公开状态、两角色观察与掩码、冻结 Actor 的分布与采样动作。打包时对全部开发与正式配对完整重放物理轨迹、以固定 Actor 重新拟合程序，并比对程序哈希。运行时首次核验全部文件哈希及打包时的重拟合收据，并对最终选中的正式配对重新完整重放轨迹、叶资格和验证统计；其他配对的逐帧重放以内容寻址的打包收据为依据。此运行时路径不依赖训练用 PyTorch。
-- 规范 `run_spec_sha256` 只对预注册配对、预算、场景和检查点种子寻址；另有 `training_config_sha256` 对纯协议模块中的固定 BC 配方及源码闭包寻址，用于 checkpoint 恢复，并由发布验收独立重算。训练源闭包 SHA 写入 checkpoint、双变体报告和配对报告。准入的所有开发与正式配对必须与锁定 SHA 相同。训练期间修改源闭包会使运行或恢复失败，不能将前后代码混合的轨迹当作完整预检。
+- 规范 `run_spec_sha256` 对预注册配对、预算、场景、检查点种子、显式程序拟合方法和 1,220 个 BC episode 的分阶段种子表寻址；`training_config_sha256` 再对固定 BC 损失、优化参数、碰撞 critic、风险乘子配置及源码闭包寻址，用于 checkpoint 恢复，并由发布验收独立重算。训练源闭包 SHA 写入 checkpoint、双变体报告和配对报告。准入的所有开发与正式配对必须与锁定 SHA 相同。训练期间修改源闭包会使运行或恢复失败，不能将前后代码混合的轨迹当作完整预检。
 - 预算按 200k、300k、400k 联合环境步递增尝试；仅锁定三个开发配对种子全部通过的最小预算。正式配对固定为 6101、6102、6103，同一预算。质量选配对只读 240048–240071，程序预审不能改选。
 - 开发质量门槛：raw 和 regularized 均交付≥5.5、碰撞≤6、停机 episode≤5%。每个角色的程序反馈与解释叶覆盖率以及实际 NN 采样动作可用覆盖率均≥30%、一致率≥93%／95%、KL≤0.25、非法原始程序动作零。正式门槛：两版本交付≥5、碰撞≤8、停机 episode≤10%；两角色程序反馈的两种覆盖率均≥20%、一致率≥85%，AI 角色解释的两种覆盖率均≥20%、一致率≥90%，KL≤0.35、非法动作零。实际覆盖率以所有独立审计帧为分母；反馈还要求采样动作等于当前 NN 分布最大概率动作。
 
@@ -36,28 +36,29 @@
 
 ## 命令
 
-在仓库根目录执行，`RUN_ROOT` 指向单独保存的实验输出根目录，`CANDIDATE` 是未使用过的候选 ID：
+在仓库根目录执行，`RUN_ROOT` 指向单独保存的实验输出根目录，`CANDIDATE` 是未使用过的候选 ID。`METHOD` 必须是该候选明确实现的程序拟合方法，由开发结果决定能否进入正式阶段；不要把探索阶段填写的名称视为已注册发布方法。119 v2 的 `actor_sparse_topology_v1` 四分程序开发预检覆盖率未达门槛，因此不能凭该预检锁定正式训练。当前 pilot 保持关闭。
 
 ```bash
 export RUN_ROOT=/absolute/path/to/warehouse-v6-runs
 export CANDIDATE=warehouse-v6-candidate-03
 export RELEASE_ID=policylens-three-domain-20261016.v6.0
+export METHOD=replace-with-implemented-candidate-method
 
 python3 -m experiments.warehouse.admission develop \
-  --output-root "$RUN_ROOT" --candidate-id "$CANDIDATE" --release-id "$RELEASE_ID"
+  --output-root "$RUN_ROOT" --candidate-id "$CANDIDATE" --release-id "$RELEASE_ID" --program-fit-method "$METHOD"
 python3 -m experiments.warehouse.admission formal-train \
-  --output-root "$RUN_ROOT" --candidate-id "$CANDIDATE" --release-id "$RELEASE_ID"
+  --output-root "$RUN_ROOT" --candidate-id "$CANDIDATE" --release-id "$RELEASE_ID" --program-fit-method "$METHOD"
 python3 -m experiments.warehouse.admission preaudit \
-  --output-root "$RUN_ROOT" --candidate-id "$CANDIDATE" --release-id "$RELEASE_ID"
+  --output-root "$RUN_ROOT" --candidate-id "$CANDIDATE" --release-id "$RELEASE_ID" --program-fit-method "$METHOD"
 python3 -m experiments.warehouse.admission final-audit \
-  --output-root "$RUN_ROOT" --candidate-id "$CANDIDATE" --release-id "$RELEASE_ID"
+  --output-root "$RUN_ROOT" --candidate-id "$CANDIDATE" --release-id "$RELEASE_ID" --program-fit-method "$METHOD"
 python3 -m experiments.warehouse.admission heldout \
-  --output-root "$RUN_ROOT" --candidate-id "$CANDIDATE" --release-id "$RELEASE_ID"
+  --output-root "$RUN_ROOT" --candidate-id "$CANDIDATE" --release-id "$RELEASE_ID" --program-fit-method "$METHOD"
 python3 -m experiments.warehouse.admission acceptance \
-  --output-root "$RUN_ROOT" --candidate-id "$CANDIDATE" --release-id "$RELEASE_ID"
+  --output-root "$RUN_ROOT" --candidate-id "$CANDIDATE" --release-id "$RELEASE_ID" --program-fit-method "$METHOD"
 ```
 
-`formal-train` 缺少通过的预算锁会拒绝；`preaudit` 缺少正式质量选择会拒绝；`final-audit` 缺少通过的预审会拒绝；`heldout` 缺少通过的最终审计会拒绝。`acceptance` 会复核全部训练、阶段收据、封存 claim、资产哈希、程序证据以及留出原始行；只有核验成功才写 `passed=true`。该收据本身不会开放 pilot。发布者还须核验 Pong、Kitchen 已有收据和迁移后的逐帧执行一致性，生成完整 v6 内容寻址发布包后才能开放研究。
+`budget.lock` 只会记录全部开发门槛通过的候选方法；后续每阶段都核对这一锁定方法及 BC 配方。`formal-train` 缺少通过的预算锁会拒绝；`preaudit` 缺少正式质量选择会拒绝；`final-audit` 缺少通过的预审会拒绝；`heldout` 缺少通过的最终审计会拒绝。`acceptance` 会复核全部训练、阶段收据、封存 claim、资产哈希、程序证据以及留出原始行；只有核验成功才写 `passed=true`。该收据本身不会开放 pilot。发布者还须核验 Pong、Kitchen 已有收据和迁移后的逐帧执行一致性，生成完整 v6 内容寻址发布包后才能开放研究。
 
 失败候选及探索运行均保留其原始输出。曾在 6110 上跨训练代码变更的 `candidate-01` 是探索诊断，不计入锁定预检。`candidate-02` 在 6110、200k 步上完成配对训练但两版本质量未过门槛；它的开发选择与程序审计种子（260300–260323、260400–260423）已使用。失败收据和探索性数值诊断分别保存在 `experiments/warehouse/evidence/warehouse-v6-candidate-02.failure.json` 与 `experiments/warehouse/evidence/warehouse-v6-candidate-02.diagnosis.md`。新候选使用上表互不重叠的开发种子；旧收据中的种子不得改写。
 

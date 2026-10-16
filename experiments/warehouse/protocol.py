@@ -38,20 +38,240 @@ SCENARIO_BLOCK_STEPS = 120
 ONLINE_PROGRAM_EXTRACTION_PERCENTAGES = (75, 84, 93)
 FINAL_PROGRAM_SPLIT_COUNTS = {"fit": 50, "calibration": 25,
                               "eligibility": 25, "validation": 24}
-REGISTERED_ARCHITECTURE_MODE = "intrinsic_certified"
-REGISTERED_BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.5-intrinsic-certified"
+REGISTERED_ARCHITECTURE_MODE = "learned_sparse_tree_256_residual.v6.10-candidate"
+# A candidate names its fitting implementation explicitly. This list is not
+# a release selection: the selected method is sealed only after development
+# quality and independent fidelity gates pass. The old axis fit is excluded.
+PROGRAM_FIT_METHOD_CANDIDATES = ("actor_sparse_topology_v1",)
+REGISTERED_BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.10-candidate-1220"
+# These are the actual production stages, loss coefficients and critic settings
+# used by the successful, unregistered 119 full-BC screen. They are part of
+# the formal scientific run identity, rather than CLI defaults.
 REGISTERED_BC_SPEC = {
-    "bc_episodes": 200,
-    "bc_epochs": 30,
-    "dagger_rounds": 4,
-    "dagger_episodes": 80,
+    "bc_episodes": 100,
+    "bc_epochs": 20,
+    "dagger_rounds": 2,
+    "dagger_episodes": 40,
     "dagger_epochs": 10,
+    "risk_teacher_episodes": 40,
+    "risk_visit_episodes": 80,
+    "large_teacher_episodes": 200,
+    "large_visit_episodes": 120,
+    "deep_teacher_episodes": 200,
+    "deep_dagger_rounds": 4,
+    "deep_dagger_episodes": 100,
+    "risk_epochs": 8,
+    "deep_epochs": 6,
+    "batch_size": 128,
+    "risk_weight": 2.0,
+    "margin_gap": 3.0,
+    "margin_weight": 0.03,
+    "near_increment": 2.0,
+    "low_return_increment": 8.0,
+    "sampled_collision_increment": 3.0,
+    "argmax_collision_increment": 5.0,
+    "duplicate_collision_cap": 8,
+    "initial_bc_learning_rate": 0.0003,
+    "risk_bc_learning_rate": 0.0001,
+    "initial_bc_batch_size": 256,
+    "initial_tree_loss_weight": 0.05,
+    "initial_gate_loss_weight": 0.3,
+    "initial_bound_loss_weight": 0.0005,
+    "initial_bc_gradient_clip": 0.5,
+    "risk_bc_gradient_clip": 0.5,
+    "collision_critic_version": "warehouse-v6-collision-critic.v1",
+    "collision_critic_epochs": 80,
+    "collision_critic_batch_size": 256,
+    "collision_critic_learning_rate": 0.001,
+    "collision_critic_positive_weight": 3.0,
+}
+REGISTERED_RISK_DUAL_CONFIG = {
+    "target": 0.04, "window_episodes": 128, "minimum_episodes": 64,
+    "confidence": 0.90, "release_upper": 0.025,
+    "ascent_gain": 2.0, "descent_gain": 1.0,
+    "max_ascent_per_update": 0.10, "max_descent_per_update": 0.05,
+    "max_multiplier": 20.0, "initial_multiplier": 1.0,
 }
 
 
 def _hash_json(value: object) -> str:
     return sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
                              allow_nan=False).encode()).hexdigest()
+
+
+REGISTERED_BC_SPEC_SHA256 = _hash_json(REGISTERED_BC_SPEC)
+REGISTERED_RISK_DUAL_CONFIG_SHA256 = _hash_json(REGISTERED_RISK_DUAL_CONFIG)
+
+
+def bc_data_seed_schedule(pair_seed: int) -> dict[str, list[int]]:
+    """The exact 1,220 public BC episode seeds, with no adaptive stage sizes."""
+    if pair_seed not in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS):
+        raise ValueError("unregistered Warehouse v6 pair seed")
+    counts = {
+        "initial_public_teacher": (10, REGISTERED_BC_SPEC["bc_episodes"]),
+        **{f"initial_nn_dagger_{index}":
+           (10 + index, REGISTERED_BC_SPEC["dagger_episodes"])
+           for index in range(1, REGISTERED_BC_SPEC["dagger_rounds"] + 1)},
+        "risk_public_teacher": (20, REGISTERED_BC_SPEC["risk_teacher_episodes"]),
+        "risk_nn_visitation": (21, REGISTERED_BC_SPEC["risk_visit_episodes"]),
+        "large_public_teacher": (30, REGISTERED_BC_SPEC["large_teacher_episodes"]),
+        "large_nn_visitation": (31, REGISTERED_BC_SPEC["large_visit_episodes"]),
+        "deep_public_teacher": (40, REGISTERED_BC_SPEC["deep_teacher_episodes"]),
+    }
+    for index in range(1, REGISTERED_BC_SPEC["deep_dagger_rounds"] + 1):
+        for kind, offset in (("sampled", -1), ("argmax", 0)):
+            counts[f"deep_{index}_{kind}"] = (
+                40 + 2 * index + offset,
+                REGISTERED_BC_SPEC["deep_dagger_episodes"] // 2)
+    schedule = {name: [pair_seed * 100_000 + stage * 1_000 + index
+                       for index in range(count)]
+                for name, (stage, count) in counts.items()}
+    flattened = [seed for values in schedule.values() for seed in values]
+    if len(flattened) != 1_220 or len(set(flattened)) != len(flattened):
+        raise RuntimeError("Warehouse registered BC stage seed schedule drifted")
+    return schedule
+
+
+def registered_method_lock_fields(program_fit_method: str) -> dict:
+    """Method and paired BC seed commitments for a development budget lock."""
+    if (_hash_json(REGISTERED_BC_SPEC) != REGISTERED_BC_SPEC_SHA256
+            or _hash_json(REGISTERED_RISK_DUAL_CONFIG) !=
+            REGISTERED_RISK_DUAL_CONFIG_SHA256):
+        raise RuntimeError("Warehouse registered BC or risk recipe mutated")
+    if program_fit_method not in PROGRAM_FIT_METHOD_CANDIDATES:
+        raise ValueError("Warehouse candidate program method is unsupported")
+    return {
+        "program_fit_method": program_fit_method,
+        "bc_recipe_sha256": REGISTERED_BC_SPEC_SHA256,
+        "risk_dual_config_sha256": REGISTERED_RISK_DUAL_CONFIG_SHA256,
+        "bc_data_seed_schedule_sha256": {
+            str(seed): _hash_json(bc_data_seed_schedule(seed))
+            for seed in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS)},
+    }
+
+
+def bc_stage_receipt_shape() -> tuple[tuple[str, int | None], ...]:
+    """Ordered production data and fit stages; None marks a data stage."""
+    stages: list[tuple[str, int | None]] = [
+        ("initial_public_teacher", None),
+        ("initial_public_bc", REGISTERED_BC_SPEC["bc_epochs"]),
+    ]
+    for index in range(1, REGISTERED_BC_SPEC["dagger_rounds"] + 1):
+        stages += [
+            (f"initial_nn_dagger_{index}", None),
+            (f"initial_nn_dagger_{index}_fit",
+             REGISTERED_BC_SPEC["dagger_epochs"]),
+        ]
+    stages += [
+        ("risk_public_teacher", None), ("risk_nn_visitation", None),
+        ("risk_public_bc_fit", REGISTERED_BC_SPEC["risk_epochs"]),
+        ("large_public_teacher", None), ("large_nn_visitation", None),
+        ("large_public_bc_fit", REGISTERED_BC_SPEC["risk_epochs"]),
+        ("deep_public_teacher", None),
+    ]
+    for index in range(1, REGISTERED_BC_SPEC["deep_dagger_rounds"] + 1):
+        stages += [
+            (f"deep_{index}_sampled", None),
+            (f"deep_{index}_argmax", None),
+            (f"deep_dagger_{index}_fit", REGISTERED_BC_SPEC["deep_epochs"]),
+        ]
+    stages.append(("final_standard_margin_calibration",
+                   REGISTERED_BC_SPEC["deep_epochs"]))
+    return tuple(stages)
+
+
+def bc_report_valid(report: Mapping, pair_seed: int,
+                    source_closure_sha256: str) -> bool:
+    """Recompute production BC stage counts and hyperparameters from a receipt."""
+    if not isinstance(report, Mapping):
+        return False
+    try:
+        if (_hash_json(REGISTERED_BC_SPEC) != REGISTERED_BC_SPEC_SHA256
+                or _hash_json(REGISTERED_RISK_DUAL_CONFIG) !=
+                REGISTERED_RISK_DUAL_CONFIG_SHA256):
+            return False
+        schedule = bc_data_seed_schedule(pair_seed)
+        if (report.get("bc_recipe_version") != REGISTERED_BC_RECIPE_VERSION
+                or report.get("bc_recipe_sha256") != REGISTERED_BC_SPEC_SHA256
+                or report.get("risk_dual_config_sha256") !=
+                REGISTERED_RISK_DUAL_CONFIG_SHA256
+                or report.get("source_closure_sha256") != source_closure_sha256
+                or report.get("bc_data_seed_blocks") != schedule
+                or report.get("bc_data_seed_schedule_sha256") !=
+                _hash_json(schedule)
+                or report.get("teacher_uses_hidden_goal_or_route_state") is not False
+                or report.get("offline_critic_used_at_execution") is not False):
+            return False
+        critic = report.get("collision_critic")
+        if (not isinstance(critic, Mapping)
+                or critic.get("version") !=
+                REGISTERED_BC_SPEC["collision_critic_version"]
+                or critic.get("epochs") !=
+                REGISTERED_BC_SPEC["collision_critic_epochs"]
+                or critic.get("batch_size") !=
+                REGISTERED_BC_SPEC["collision_critic_batch_size"]
+                or critic.get("learning_rate") !=
+                REGISTERED_BC_SPEC["collision_critic_learning_rate"]
+                or critic.get("positive_weight") !=
+                REGISTERED_BC_SPEC["collision_critic_positive_weight"]
+                or critic.get("seed") != pair_seed + 6_200
+                or critic.get("validation_passed") is not True):
+            return False
+        stages = report.get("bc_stages")
+        if not isinstance(stages, list):
+            return False
+        expected = bc_stage_receipt_shape()
+        if len(stages) != len(expected):
+            return False
+        for row, (name, epochs) in zip(stages, expected, strict=True):
+            if not isinstance(row, Mapping) or row.get("stage") != name:
+                return False
+            if epochs is None:
+                if (row.get("episode_seeds") != schedule[name]
+                        or row.get("kind") != ("public_teacher" if "teacher" in name
+                                              else "dual_nn_visitation")):
+                    return False
+            elif name.startswith("initial_"):
+                if (row.get("epochs") != epochs
+                        or row.get("learning_rate") !=
+                        REGISTERED_BC_SPEC["initial_bc_learning_rate"]
+                        or row.get("batch_size") !=
+                        REGISTERED_BC_SPEC["initial_bc_batch_size"]
+                        or row.get("tree_loss_weight") !=
+                        REGISTERED_BC_SPEC["initial_tree_loss_weight"]
+                        or row.get("gate_loss_weight") !=
+                        REGISTERED_BC_SPEC["initial_gate_loss_weight"]
+                        or row.get("bound_loss_weight") !=
+                        REGISTERED_BC_SPEC["initial_bound_loss_weight"]
+                        or row.get("gradient_clip") !=
+                        REGISTERED_BC_SPEC["initial_bc_gradient_clip"]):
+                    return False
+            else:
+                fit = row.get("fit")
+                initial_risk = name == "risk_public_bc_fit"
+                if (not isinstance(fit, Mapping) or fit.get("epochs") != epochs
+                        or fit.get("batch_size") !=
+                        REGISTERED_BC_SPEC["batch_size"]
+                        or fit.get("learning_rate") !=
+                        REGISTERED_BC_SPEC["risk_bc_learning_rate"]
+                        or fit.get("gradient_clip") !=
+                        REGISTERED_BC_SPEC["risk_bc_gradient_clip"]
+                        or fit.get("risk_weight") !=
+                        REGISTERED_BC_SPEC["risk_weight"]
+                        or fit.get("margin_gap") !=
+                        REGISTERED_BC_SPEC["margin_gap"]
+                        or fit.get("margin_weight") !=
+                        (0.0 if initial_risk else
+                         REGISTERED_BC_SPEC["margin_weight"])
+                        or fit.get("near_increment") !=
+                        (0.0 if initial_risk else
+                         REGISTERED_BC_SPEC["near_increment"])
+                        or fit.get("low_return_increment") !=
+                        REGISTERED_BC_SPEC["low_return_increment"]):
+                    return False
+        return True
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def scenario_seed(namespace: str, pair_seed: int, joint_step: int) -> int:
@@ -205,14 +425,22 @@ class PairRunSpec:
     pair_seed: int
     joint_steps: int
     output_dir: str
+    program_fit_method: str
     release_id: str = INITIAL_RELEASE_ID
     scenario_namespace: str = "warehouse-v6-matched-120-step-blocks"
     checkpoint_seeds: tuple[int, ...] = ()
     online_program_extraction_steps: tuple[int, ...] = ()
     architecture_mode: str = REGISTERED_ARCHITECTURE_MODE
     bc_recipe_version: str = REGISTERED_BC_RECIPE_VERSION
+    bc_recipe_sha256: str = REGISTERED_BC_SPEC_SHA256
+    risk_dual_config_sha256: str = REGISTERED_RISK_DUAL_CONFIG_SHA256
+    bc_data_seed_schedule_sha256: str = ""
 
     def __post_init__(self) -> None:
+        if (_hash_json(REGISTERED_BC_SPEC) != REGISTERED_BC_SPEC_SHA256
+                or _hash_json(REGISTERED_RISK_DUAL_CONFIG) !=
+                REGISTERED_RISK_DUAL_CONFIG_SHA256):
+            raise RuntimeError("Warehouse registered BC or risk recipe mutated")
         if not self.candidate_id or "/" in self.candidate_id or ".." in self.candidate_id:
             raise ValueError("candidate_id must be a simple, nonempty identifier")
         if self.pair_seed not in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS):
@@ -227,8 +455,18 @@ class PairRunSpec:
         if self.checkpoint_seeds != required:
             raise ValueError("Warehouse v6 checkpoint seeds do not match phase")
         if (self.architecture_mode != REGISTERED_ARCHITECTURE_MODE
-                or self.bc_recipe_version != REGISTERED_BC_RECIPE_VERSION):
-            raise ValueError("Warehouse registered Actor or BC recipe mismatch")
+                or self.program_fit_method not in PROGRAM_FIT_METHOD_CANDIDATES
+                or self.bc_recipe_version != REGISTERED_BC_RECIPE_VERSION
+                or self.bc_recipe_sha256 != REGISTERED_BC_SPEC_SHA256
+                or self.risk_dual_config_sha256 !=
+                REGISTERED_RISK_DUAL_CONFIG_SHA256):
+            raise ValueError("Warehouse registered Actor, program, BC or risk recipe mismatch")
+        bc_schedule_sha = _hash_json(bc_data_seed_schedule(self.pair_seed))
+        if self.bc_data_seed_schedule_sha256:
+            if self.bc_data_seed_schedule_sha256 != bc_schedule_sha:
+                raise ValueError("Warehouse registered BC stage seed schedule mismatch")
+        else:
+            object.__setattr__(self, "bc_data_seed_schedule_sha256", bc_schedule_sha)
         scheduled = online_program_extraction_steps(self.joint_steps)
         if self.online_program_extraction_steps:
             if self.online_program_extraction_steps != scheduled:
@@ -240,6 +478,7 @@ class PairRunSpec:
 
     def to_mapping(self) -> dict:
         row = asdict(self)
+        row["bc_data_seed_schedule"] = bc_data_seed_schedule(self.pair_seed)
         schedule = final_program_fit_seed_schedule(self.release_id, self.pair_seed)
         row["final_program_fit_seed_schedule"] = schedule
         row["final_program_fit_seed_schedule_sha256"] = _hash_json(schedule)
@@ -405,10 +644,19 @@ def paired_training_pass(variants: Mapping, *, joint_steps: int) -> bool:
         return False
     extraction_steps = list(online_program_extraction_steps(joint_steps))
     for report in (raw, regularized):
+        seed = report.get("pair_seed")
         if (report.get("joint_steps") != joint_steps or
+                seed not in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS) or
                 report.get("actor_decisions") != joint_steps * len(ROLES) or
                 report.get("architecture_mode") != REGISTERED_ARCHITECTURE_MODE or
+                report.get("program_fit_method") not in
+                PROGRAM_FIT_METHOD_CANDIDATES or
                 report.get("bc_recipe_version") != REGISTERED_BC_RECIPE_VERSION or
+                report.get("bc_recipe_sha256") != REGISTERED_BC_SPEC_SHA256 or
+                report.get("risk_dual_config_sha256") !=
+                REGISTERED_RISK_DUAL_CONFIG_SHA256 or
+                report.get("bc_data_seed_schedule_sha256") !=
+                _hash_json(bc_data_seed_schedule(seed)) or
                 report.get("online_program_extraction_steps") != extraction_steps or
                 report.get("online_program_split_block_cycle") !=
                 FINAL_PROGRAM_SPLIT_COUNTS or
@@ -436,6 +684,8 @@ def paired_training_pass(variants: Mapping, *, joint_steps: int) -> bool:
                     not _finite(change) or change <= 0):
                 return False
     if (raw.get("initial_role_sha256") != regularized.get("initial_role_sha256")
+            or raw.get("program_fit_method") !=
+            regularized.get("program_fit_method")
             or not raw.get("scenario_schedule_sha256")
             or raw.get("scenario_schedule_sha256") !=
             regularized.get("scenario_schedule_sha256")):
@@ -446,6 +696,11 @@ def paired_training_pass(variants: Mapping, *, joint_steps: int) -> bool:
     if not online_program_cohorts_valid(
             regularized.get("program_extractions"), joint_steps=joint_steps,
             training_episodes=regularized.get("training_episodes")):
+        return False
+    if any(extraction.get("program_fit_method") !=
+           regularized["program_fit_method"]
+           for role in ROLES
+           for extraction in regularized["program_extractions"][role]):
         return False
     for report, should_be_positive in ((raw, False), (regularized, True)):
         rows = report.get("feedback_rows")

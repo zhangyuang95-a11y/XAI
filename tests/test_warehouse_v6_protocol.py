@@ -5,6 +5,8 @@ import pytest
 
 from experiments.warehouse import protocol as p
 
+METHOD = p.PROGRAM_FIT_METHOD_CANDIDATES[0]
+
 
 def _quality(deliveries=6.0, collisions=5.0, shutdown=.02):
     return {"mean_deliveries": deliveries, "mean_collisions": collisions,
@@ -32,6 +34,7 @@ def _online_extractions(joint_steps):
             counts[purpose] = count
             cursor += count
         rows.append({"joint_steps": step,
+                     "program_fit_method": METHOD,
                      "window_start_joint_step": 0 if index == 0 else steps[index - 1],
                      "window_end_joint_step": step,
                      "training_split_scenario_seeds": scenes,
@@ -40,14 +43,20 @@ def _online_extractions(joint_steps):
     return {role: deepcopy(rows) for role in p.ROLES}
 
 
-def _paired_training(joint_steps=200_000):
+def _paired_training(joint_steps=200_000, pair_seed=p.DEVELOPMENT_PAIR_SEEDS[0]):
     initial = {"robot_1": "a" * 64, "robot_2": "b" * 64}
     variants = {}
     for variant in p.VARIANTS:
         variants[variant] = {
+            "pair_seed": pair_seed,
             "joint_steps": joint_steps, "actor_decisions": 2 * joint_steps,
             "architecture_mode": p.REGISTERED_ARCHITECTURE_MODE,
+            "program_fit_method": METHOD,
             "bc_recipe_version": p.REGISTERED_BC_RECIPE_VERSION,
+            "bc_recipe_sha256": p.REGISTERED_BC_SPEC_SHA256,
+            "bc_data_seed_schedule_sha256": p._hash_json(
+                p.bc_data_seed_schedule(pair_seed)),
+            "risk_dual_config_sha256": p.REGISTERED_RISK_DUAL_CONFIG_SHA256,
             "online_program_extraction_steps": list(
                 p.online_program_extraction_steps(joint_steps)),
             "online_program_split_block_cycle": p.FINAL_PROGRAM_SPLIT_COUNTS,
@@ -78,7 +87,7 @@ def _paired_training(joint_steps=200_000):
 
 
 def _development_report(pair_seed, budget):
-    training = _paired_training(budget)
+    training = _paired_training(budget, pair_seed)
     return {"pair_seed": pair_seed, "budget": budget,
             "training": training,
             "stress_episodes": len(p.stress_schedule()),
@@ -114,9 +123,9 @@ def test_seed_blocks_and_stress_streams_are_sealed_and_disjoint():
     assert not set(next_blocks["heldout"]) & set(next_blocks["final_program_audit"])
     assert set(p.heldout_schedule("policylens-three-domain-20261016.v6.1")[1]) == {
         p.task_scenario_seed(seed, 1) for seed in next_blocks["heldout"]}
-    spec = p.PairRunSpec("warehouse-v6-c1", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000, "/tmp/run-a",
+    spec = p.PairRunSpec("warehouse-v6-c1", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000, "/tmp/run-a", METHOD,
                          checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS)
-    moved = p.PairRunSpec("warehouse-v6-c1", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000, "/tmp/run-b",
+    moved = p.PairRunSpec("warehouse-v6-c1", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000, "/tmp/run-b", METHOD,
                           checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS)
     assert spec.sha256() == moved.sha256()
     assert spec.online_program_extraction_steps == (150_000, 168_000, 186_000)
@@ -127,11 +136,11 @@ def test_seed_blocks_and_stress_streams_are_sealed_and_disjoint():
     assert p.online_program_extraction_steps(400_000) == (300_000, 336_000, 372_000)
     with pytest.raises(ValueError, match="extraction schedule"):
         p.PairRunSpec("warehouse-v6-c1", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000,
-                      "/tmp/run-a", checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS,
+                      "/tmp/run-a", METHOD, checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS,
                       online_program_extraction_steps=(150_000, 170_000, 186_000))
-    with pytest.raises(ValueError, match="Actor or BC recipe"):
+    with pytest.raises(ValueError, match="Actor, program, BC or risk recipe"):
         p.PairRunSpec("warehouse-v6-c1", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000,
-                      "/tmp/run-a", checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS,
+                      "/tmp/run-a", METHOD, checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS,
                       architecture_mode="none")
     scheduled = spec.to_mapping()["final_program_fit_seed_schedule"]
     assert {name: len(rows) for name, rows in scheduled.items()} == \
@@ -139,14 +148,14 @@ def test_seed_blocks_and_stress_streams_are_sealed_and_disjoint():
     assert scheduled == p.final_program_fit_seed_schedule(
         p.INITIAL_RELEASE_ID, p.DEVELOPMENT_PAIR_SEEDS[0])
     renamed = p.PairRunSpec("different-directory-name", p.DEVELOPMENT_PAIR_SEEDS[0],
-                            200_000, "/tmp/run-a",
+                            200_000, "/tmp/run-a", METHOD,
                             checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS)
     assert renamed.to_mapping()["final_program_fit_seed_schedule"] == scheduled
     successor = p.final_program_fit_seed_schedule(
         "policylens-three-domain-20261016.v6.1", p.DEVELOPMENT_PAIR_SEEDS[0])
     assert not set(sum(scheduled.values(), [])) & set(sum(successor.values(), []))
     with pytest.raises(ValueError, match="checkpoint seeds"):
-        p.PairRunSpec("warehouse-v6-c1", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000, "/tmp/run-a",
+        p.PairRunSpec("warehouse-v6-c1", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000, "/tmp/run-a", METHOD,
                       checkpoint_seeds=p.FORMAL_SELECTION_SEEDS)
 
 

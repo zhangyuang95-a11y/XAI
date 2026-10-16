@@ -11,6 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import math
 from pathlib import Path
 from typing import Sequence
 
@@ -210,11 +211,18 @@ def _joint_action_onehot(actions: np.ndarray) -> torch.Tensor:
     return torch.cat((first, second), -1).to(torch.float32)
 
 
-def train_collision_critic(seed: int, *, epochs: int = 80
+def train_collision_critic(seed: int, *, epochs: int = 80,
+                           batch_size: int = 256,
+                           learning_rate: float = 1e-3,
+                           positive_weight: float = 3.0
                            ) -> tuple[CollisionCritic, dict]:
     """Fit a training-only critic; return model and reproducibility receipt."""
-    if not isinstance(seed, int) or seed < 0 or not isinstance(epochs, int) or epochs < 1:
-        raise ValueError("collision critic seed and epochs must be positive integers")
+    if (not isinstance(seed, int) or seed < 0
+            or not isinstance(epochs, int) or epochs < 1
+            or not isinstance(batch_size, int) or batch_size < 1
+            or not math.isfinite(learning_rate) or learning_rate <= 0
+            or not math.isfinite(positive_weight) or positive_weight <= 0):
+        raise ValueError("collision critic training parameters must be positive")
     source_files = _source_hashes()
     rows = _enumerate_event_rows(seed)
     training, validation = _partition_position_pairs(rows.position_pairs, seed)
@@ -228,14 +236,15 @@ def train_collision_critic(seed: int, *, epochs: int = 80
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(seed)
         critic = CollisionCritic()
-    optimizer = torch.optim.Adam(critic.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(critic.parameters(), lr=learning_rate)
     generator = torch.Generator().manual_seed(seed + 1)
     for _ in range(epochs):
-        for batch in torch.randperm(len(train_indices), generator=generator).split(256):
+        for batch in torch.randperm(len(train_indices), generator=generator).split(batch_size):
             indices = train_indices[batch]
             logits = critic(observations[indices], actions[indices])
             loss = nn.functional.binary_cross_entropy_with_logits(
-                logits, labels[indices], pos_weight=logits.new_tensor(3.0))
+                logits, labels[indices],
+                pos_weight=logits.new_tensor(positive_weight))
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -278,9 +287,10 @@ def train_collision_critic(seed: int, *, epochs: int = 80
         "labels_source": "env.step_robot_collision_events_delta",
         "seed": seed,
         "epochs": epochs,
+        "batch_size": batch_size,
         "dependencies": {"torch": torch.__version__, "numpy": np.__version__},
-        "learning_rate": 1e-3,
-        "positive_weight": 3.0,
+        "learning_rate": learning_rate,
+        "positive_weight": positive_weight,
         "validation_group_fraction_target": 0.25,
         "data_sha256": _hash_arrays(
             observations=rows.observations, masks=rows.masks,

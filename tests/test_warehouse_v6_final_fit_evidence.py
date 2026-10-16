@@ -61,6 +61,7 @@ def fit_proof(tmp_path, monkeypatch):
         index[split] = _bundle(tmp_path, Path(traces[split]["path"]))
     reports = {role: {
         "status": "failed", "release_id": RELEASE,
+        "program_fit_method": p.PROGRAM_FIT_METHOD_CANDIDATES[0],
         "actor_artifact_sha256": artifact["sha256"],
         "final_fit_traces": traces,
         "split_seeds": SCHEDULE,
@@ -80,6 +81,7 @@ def fit_proof(tmp_path, monkeypatch):
     return {
         "root": tmp_path, "release_id": RELEASE, "index": index,
         "pair": {"pair_seed": 6101, "release_id": RELEASE,
+                 "program_fit_method": p.PROGRAM_FIT_METHOD_CANDIDATES[0],
                  "variants": {"regularized": trained}},
         "assets": {"regularized": {"actor": actor_asset, "programs": {}}},
     }

@@ -7,6 +7,7 @@ from backend.training.warehouse_v6_runner import (
     SCENARIO_BLOCK_STEPS, scenario_schedule_sha256, scenario_seed)
 from experiments.warehouse import protocol as p
 from experiments.warehouse.acceptance import _digest, _paired_schedule_evidence
+from tests.warehouse_v6_contract_fixture import bc_receipt
 
 
 def _resets(pair_seed: int, steps: int, *, split_first: bool) -> list[dict]:
@@ -33,7 +34,9 @@ def _pair() -> dict:
     pair_seed, steps = p.DEVELOPMENT_PAIR_SEEDS[0], p.BUDGETS[0]
     namespace = "warehouse-v6-matched-120-step-blocks"
     spec = p.PairRunSpec("schedule-test", pair_seed, steps, "/unused",
+                         p.PROGRAM_FIT_METHOD_CANDIDATES[0],
                          checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS)
+    bc_schedule = p.bc_data_seed_schedule(pair_seed)
     closure = "7" * 64
     config_hash = spec.training_config_sha256(closure)
     digest = scenario_schedule_sha256(namespace, pair_seed, steps)
@@ -44,7 +47,11 @@ def _pair() -> dict:
         variants[variant] = {
             "variant": variant, "pair_seed": pair_seed, "joint_steps": steps,
             "architecture_mode": spec.architecture_mode,
+            "program_fit_method": spec.program_fit_method,
             "bc_recipe_version": spec.bc_recipe_version,
+            "bc_recipe_sha256": spec.bc_recipe_sha256,
+            "bc_data_seed_schedule_sha256": spec.bc_data_seed_schedule_sha256,
+            "risk_dual_config_sha256": spec.risk_dual_config_sha256,
             "online_program_extraction_steps": list(
                 spec.online_program_extraction_steps),
             "online_program_split_block_cycle": p.FINAL_PROGRAM_SPLIT_COUNTS,
@@ -60,12 +67,18 @@ def _pair() -> dict:
         "candidate_id": spec.candidate_id, "release_id": spec.release_id,
         "pair_seed": pair_seed, "joint_steps": steps,
         "architecture_mode": spec.architecture_mode,
+        "program_fit_method": spec.program_fit_method,
         "online_program_extraction_steps": list(
             spec.online_program_extraction_steps),
         "run_spec_sha256": spec.sha256(),
         "training_config_sha256": config_hash,
         "source_closure_sha256": closure,
         "bc_recipe_version": p.REGISTERED_BC_RECIPE_VERSION,
+        "bc_recipe_sha256": spec.bc_recipe_sha256,
+        "bc_data_seed_schedule": bc_schedule,
+        "bc_data_seed_schedule_sha256": spec.bc_data_seed_schedule_sha256,
+        "risk_dual_config_sha256": spec.risk_dual_config_sha256,
+        "bc": bc_receipt(pair_seed, closure),
         "checkpoint_seeds": list(spec.checkpoint_seeds),
         "assigned_scenario_schedule_sha256": digest,
         "actual_episode_reset_count": {variant: len(row["actual_episode_resets"])

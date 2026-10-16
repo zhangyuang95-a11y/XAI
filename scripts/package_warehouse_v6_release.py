@@ -325,7 +325,20 @@ def _verify_training_package(receipt: dict, evidence: dict) -> None:
             pair = _read(ROOT / pair_asset["path"])
             if (pair.get("candidate_id") != receipt["candidate_id"]
                     or pair.get("pair_seed") != int(seed)
-                    or pair.get("joint_steps") != budget):
+                    or pair.get("joint_steps") != budget
+                    or pair.get("program_fit_method") !=
+                    receipt.get("program_fit_method")
+                    or pair.get("program_fit_method") not in
+                    p.PROGRAM_FIT_METHOD_CANDIDATES
+                    or pair.get("bc_recipe_sha256") !=
+                    p.REGISTERED_BC_SPEC_SHA256
+                    or pair.get("risk_dual_config_sha256") !=
+                    p.REGISTERED_RISK_DUAL_CONFIG_SHA256
+                    or pair.get("bc_data_seed_schedule_sha256") !=
+                    p._hash_json(p.bc_data_seed_schedule(int(seed)))
+                    or not p.bc_report_valid(
+                        pair.get("bc", {}), int(seed),
+                        pair.get("source_closure_sha256", ""))):
                 raise ValueError("Warehouse packaged pair identity mismatch")
             if development is not None:
                 dev = _read(ROOT / development[seed]["path"])
@@ -334,6 +347,13 @@ def _verify_training_package(receipt: dict, evidence: dict) -> None:
                     raise ValueError("Warehouse development training receipt mismatch")
             for variant in p.VARIANTS:
                 trained = pair["variants"][variant]
+                if (trained.get("program_fit_method") !=
+                        pair["program_fit_method"]
+                        or trained.get("bc_recipe_sha256") !=
+                        p.REGISTERED_BC_SPEC_SHA256
+                        or trained.get("risk_dual_config_sha256") !=
+                        p.REGISTERED_RISK_DUAL_CONFIG_SHA256):
+                    raise ValueError("Warehouse packaged training method mismatch")
                 packaged = assets[seed][variant]
                 if (packaged["actor"]["sha256"] !=
                         trained["actor_artifact"]["sha256"]
@@ -354,6 +374,9 @@ def _verify_training_package(receipt: dict, evidence: dict) -> None:
                         actor_role_sha256=actor.role_sha256[role])
                     if loaded.role != role:
                         raise ValueError("Warehouse packaged program role mismatch")
+                    if (loaded.report.get("fit_method") !=
+                            pair["program_fit_method"]):
+                        raise ValueError("Warehouse package rejects axis program")
 
 
 def _offline_replay_final_fit(receipt: dict, evidence: dict,
@@ -402,7 +425,8 @@ def _offline_replay_final_fit(receipt: dict, evidence: dict,
                 try:
                     program = fit_program(
                         role, actor, *(samples[role][name] for name in
-                                       p.FINAL_PROGRAM_SPLIT_COUNTS))
+                                       p.FINAL_PROGRAM_SPLIT_COUNTS),
+                        method=pair["program_fit_method"])
                 except (ValueError, RuntimeError) as exc:
                     if regularized["final_fresh_program_reports"][role].get(
                             "status") != "failed":
@@ -411,7 +435,9 @@ def _offline_replay_final_fit(receipt: dict, evidence: dict,
                     fitted[role] = None
                 else:
                     expected = regularized["program_artifacts"][role]["sha256"]
-                    if (program.sha256() != expected
+                    if (program.report.get("fit_method") !=
+                            pair["program_fit_method"]
+                            or program.sha256() != expected
                             or regularized["final_fresh_program_reports"][role].get(
                                 "program_sha256") != expected):
                         raise ValueError("Warehouse final program refit changed bytes")
@@ -425,6 +451,7 @@ def _offline_replay_final_fit(receipt: dict, evidence: dict,
                 "source_closure_sha256": receipt["source_closure_sha256"],
                 "pair_report_sha256": item["sha256"],
                 "actor_sha256": actor.artifact_sha256,
+                "program_fit_method": pair["program_fit_method"],
                 "trace_sha256": {name: traces[seed][name]["sha256"]
                                  for name in p.FINAL_PROGRAM_SPLIT_COUNTS},
                 "refitted_program_sha256": fitted,

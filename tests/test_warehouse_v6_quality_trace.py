@@ -17,6 +17,7 @@ from experiments.warehouse.protocol import (
     SCENARIO_BLOCK_STEPS,
     scenario_schedule_sha256, scenario_seed,
 )
+from tests.warehouse_v6_contract_fixture import bc_receipt
 
 
 def test_frozen_quality_trace_keeps_both_nn_actions_and_binding(tmp_path):
@@ -46,9 +47,12 @@ def test_frozen_quality_trace_keeps_both_nn_actions_and_binding(tmp_path):
 def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path):
     spec = PairRunSpec(
         candidate_id="hash-contract", pair_seed=6120, joint_steps=200_000,
-        output_dir=str(tmp_path), checkpoint_seeds=DEVELOPMENT_SELECTION_SEEDS)
+        output_dir=str(tmp_path),
+        program_fit_method="actor_sparse_topology_v1",
+        checkpoint_seeds=DEVELOPMENT_SELECTION_SEEDS)
     checked = _checked_spec(spec.to_mapping())
     assert checked["architecture_mode"] == spec.architecture_mode
+    assert checked["program_fit_method"] == spec.program_fit_method
     assert checked["bc_recipe_version"] == spec.bc_recipe_version
     assert checked["online_program_extraction_steps"] == list(
         spec.online_program_extraction_steps)
@@ -58,6 +62,7 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
     assert _training_config_sha256(checked) == spec.training_config_sha256(
         checked["source_closure_sha256"])
     for field, value in (("architecture_mode", "unregistered"),
+                         ("program_fit_method", "axis_tree_v1"),
                          ("bc_recipe_version", "unregistered"),
                          ("online_program_extraction_steps", [150_000, 170_000, 186_000])):
         with pytest.raises(ValueError, match="registered architecture"):
@@ -74,11 +79,16 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
         })
     schedule_sha = scenario_schedule_sha256(
         spec.scenario_namespace, spec.pair_seed, spec.joint_steps)
+    bc_schedule = spec.to_mapping()["bc_data_seed_schedule"]
     variants = {variant: {
         "variant": variant, "pair_seed": spec.pair_seed,
         "joint_steps": spec.joint_steps,
         "architecture_mode": spec.architecture_mode,
+        "program_fit_method": spec.program_fit_method,
         "bc_recipe_version": spec.bc_recipe_version,
+        "bc_recipe_sha256": spec.bc_recipe_sha256,
+        "bc_data_seed_schedule_sha256": spec.bc_data_seed_schedule_sha256,
+        "risk_dual_config_sha256": spec.risk_dual_config_sha256,
         "online_program_extraction_steps": list(
             spec.online_program_extraction_steps),
         "online_program_split_block_cycle": FINAL_PROGRAM_SPLIT_COUNTS,
@@ -94,12 +104,18 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
         "candidate_id": spec.candidate_id, "release_id": spec.release_id,
         "pair_seed": spec.pair_seed, "joint_steps": spec.joint_steps,
         "architecture_mode": spec.architecture_mode,
+        "program_fit_method": spec.program_fit_method,
         "online_program_extraction_steps": list(
             spec.online_program_extraction_steps),
         "run_spec_sha256": scientific,
         "training_config_sha256": _training_config_sha256(checked),
         "source_closure_sha256": checked["source_closure_sha256"],
         "bc_recipe_version": spec.bc_recipe_version,
+        "bc_recipe_sha256": spec.bc_recipe_sha256,
+        "bc_data_seed_schedule": bc_schedule,
+        "bc_data_seed_schedule_sha256": spec.bc_data_seed_schedule_sha256,
+        "risk_dual_config_sha256": spec.risk_dual_config_sha256,
+        "bc": bc_receipt(spec.pair_seed, checked["source_closure_sha256"]),
         "assigned_scenario_schedule_sha256": schedule_sha,
         "checkpoint_seeds": list(spec.checkpoint_seeds),
         "variants": variants,

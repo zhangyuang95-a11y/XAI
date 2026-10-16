@@ -11,6 +11,8 @@ import math
 from pathlib import Path
 from typing import Mapping, Sequence
 
+import numpy as np
+
 from . import protocol as p
 
 
@@ -826,7 +828,9 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
     from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor
     from backend.training.warehouse_v6_program import (
         WarehouseV6Program, _eligible, _metrics, _passes,
-        FEEDBACK_AGREEMENT, EXPLANATION_AGREEMENT, MAX_COVERED_KL)
+        _sample_arrays, actor_sparse_topology_matches,
+        ACTOR_SPARSE_TOPOLOGY_METHOD, FEEDBACK_AGREEMENT,
+        EXPLANATION_AGREEMENT, MAX_COVERED_KL)
 
     samples = verified_samples if verified_samples is not None else \
         _final_fit_verified_rows(
@@ -859,6 +863,20 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
         if (trained["selected_program_reports"].get(role) != report
                 or claim.get("validation") != report.get("validation")):
             return False
+        fit_supported = None
+        if report.get("fit_method") == ACTOR_SPARSE_TOPOLOGY_METHOD:
+            if not actor_sparse_topology_matches(program, actor.roles[role]):
+                return False
+            fit_x, _ = _sample_arrays(samples[role]["fit"], "final program fit")
+            fit_leaves = program.leaf_indices(fit_x)
+            counts = np.bincount(fit_leaves, minlength=len(program.leaf_logits))
+            if (not np.array_equal(fit_leaves, actor.roles[role].leaf(fit_x))
+                    or report.get("fit_leaf_row_counts") !=
+                        counts.astype(int).tolist()):
+                return False
+            fit_supported = set(np.flatnonzero(counts).tolist())
+        elif report.get("fit_method") is not None:
+            return False
         expected_ids = {name: sorted(map(str, seeds)) for name, seeds in
                         p.final_program_fit_seed_schedule(
                             release_id, pair["pair_seed"]).items()}
@@ -882,7 +900,8 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
                                     samples[role]["eligibility"], {leaf}, purpose)
                 if not _same_recomputed(metrics.get(purpose), measured):
                     return False
-                if _eligible(measured, threshold):
+                if ((fit_supported is None or leaf in fit_supported)
+                        and _eligible(measured, threshold)):
                     selected[purpose].add(leaf)
         if (selected["feedback"] != set(program.feedback_leaves)
                 or selected["explanation"] != set(program.explanation_leaves)):

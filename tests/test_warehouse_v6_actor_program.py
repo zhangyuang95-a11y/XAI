@@ -14,7 +14,8 @@ from backend.training.warehouse_v6_actor import (
 )
 from backend.training.warehouse_v6_program import (
     FEATURE_DIM, WarehouseV6Program, _metrics, fit_program, audit_frozen_program,
-    current_actor_fidelity,
+    current_actor_fidelity, actor_sparse_topology_matches,
+    ACTOR_SPARSE_TOPOLOGY_METHOD,
 )
 from backend.training.warehouse_v6_runner import (
     _program_feedback, audit_programs, collect_program_audit_rows,
@@ -155,6 +156,107 @@ def test_program_fit_targets_masked_nn_distribution_not_sampled_labels():
     np.testing.assert_array_equal(original.split_weights, changed.split_weights)
     np.testing.assert_array_equal(original.split_bias, changed.split_bias)
     np.testing.assert_array_equal(original.leaf_logits, changed.leaf_logits)
+
+
+def test_program_can_extract_sparse_actor_topology_without_copying_leaf_actions():
+    torch.manual_seed(453)
+    model = WarehouseV6Actor()
+    actor = FrozenWarehouseV6Actor.from_model(model)
+    fit, calibration, eligibility, validation = _split_rows(actor)
+    program = fit_program(
+        "robot_1", actor, fit, calibration, eligibility, validation,
+        method=ACTOR_SPARSE_TOPOLOGY_METHOD)
+    assert actor_sparse_topology_matches(program, actor.roles["robot_1"])
+    assert program.report["fit_method"] == ACTOR_SPARSE_TOPOLOGY_METHOD
+    assert len(program.leaf_logits) <= 16
+    assert program.report["max_depth"] <= 5
+    assert np.count_nonzero(program.split_weights, axis=1).max(initial=0) <= 3
+    assert sum(program.report["fit_leaf_row_counts"]) == len(fit)
+    supported = {i for i, count in enumerate(
+        program.report["fit_leaf_row_counts"]) if count}
+    assert program.feedback_leaves <= supported
+    assert program.explanation_leaves <= supported
+
+    # The sampled label cannot influence the full-distribution fit. The
+    # program topology is copied, while leaf logits come from complete NN
+    # probabilities on fit rows rather than the Actor tree's stored actions.
+    changed_fit = [{**row, "sampled_action": "WAIT"} for row in fit]
+    changed = fit_program(
+        "robot_1", actor, changed_fit, calibration, eligibility, validation,
+        method=ACTOR_SPARSE_TOPOLOGY_METHOD)
+    np.testing.assert_array_equal(program.leaf_logits, changed.leaf_logits)
+    np.testing.assert_array_equal(program.split_weights, changed.split_weights)
+    tampered = program.split_weights.copy()
+    tampered[0, int(np.flatnonzero(tampered[0])[0])] += 0.25
+    assert not actor_sparse_topology_matches(
+        replace(program, split_weights=tampered), actor.roles["robot_1"])
+    with pytest.raises(RuntimeError, match="topology differs"):
+        audit_frozen_program(
+            replace(program, split_weights=tampered), actor, validation)
+
+    # The exact sparse route is shared by the extracted program, frozen NumPy
+    # Actor, and Torch training Actor away from floating-point ambiguity.
+    x = encode_policy_features(
+        np.stack([row["obs"] for row in fit]),
+        np.stack([row["mask"] for row in fit]))
+    root_weights = program.split_weights[0]
+    first = int(np.flatnonzero(root_weights)[0])
+    boundary = np.zeros(FEATURE_DIM, dtype=np.float32)
+    boundary[first] = -program.split_bias[0] / root_weights[first]
+    near = np.stack([boundary.copy(), boundary.copy()])
+    near[0, first] -= 0.01
+    near[1, first] += 0.01
+    x = np.concatenate((x, near), axis=0)
+    expected = actor.roles["robot_1"].leaf(x)
+    np.testing.assert_array_equal(program.leaf_indices(x), expected)
+    with torch.no_grad():
+        trained = model.actors["robot_1"].tree.path(
+            torch.from_numpy(x)).argmax(-1).numpy()
+    np.testing.assert_array_equal(trained, expected)
+
+
+def test_unfitted_actor_leaf_cannot_become_eligible_from_later_splits(monkeypatch):
+    from backend.training import warehouse_v6_program as module
+    torch.manual_seed(455)
+    actor = FrozenWarehouseV6Actor.from_model(WarehouseV6Actor())
+    fit, calibration, eligibility, validation = _split_rows(actor)
+    # Deliberately make the two later-stage checks permissive: a leaf with no
+    # fit data must remain ineligible regardless of subsequent observations.
+    monkeypatch.setattr(module, "_eligible", lambda _metric, _threshold: True)
+    program = fit_program(
+        "robot_1", actor, fit, calibration, eligibility, validation,
+        method=ACTOR_SPARSE_TOPOLOGY_METHOD)
+    counts = program.report["fit_leaf_row_counts"]
+    assert 0 in counts
+    supported = {index for index, count in enumerate(counts) if count}
+    assert program.feedback_leaves == supported
+    assert program.explanation_leaves == supported
+
+
+def test_audit_pass_requires_explanation_for_robot_1(monkeypatch):
+    from backend.training import warehouse_v6_program as module
+    torch.manual_seed(454)
+    actor = FrozenWarehouseV6Actor.from_model(WarehouseV6Actor())
+    program = fit_program("robot_1", actor, *_split_rows(actor))
+    report = {**program.report, "validation": {
+        **program.report["validation"],
+        "feedback_passed": True, "explanation_passed": True}}
+    program = replace(program, report=report)
+    fresh = [{**row, "episode": f"fresh-{row['episode']}",
+              "base_seed": int(row["base_seed"]) + 1000}
+             for row in _split_rows(actor)[-1]]
+
+    def metric(_program, _actor, _rows, _leaves, purpose):
+        return {"coverage": 0.4 if purpose == "feedback" else 0.0,
+                "actionable_coverage": 0.35 if purpose == "feedback" else 0.0,
+                "agreement": 0.98, "kl": 0.1, "illegal_count": 0,
+                "rows": 20, "actionable_rows": 18, "sample_count": len(_rows)}
+
+    monkeypatch.setattr(module, "_metrics", metric)
+    receipt = audit_frozen_program(program, actor, fresh)
+    assert receipt["feedback_eligible"] is True
+    assert receipt["explanation_eligible"] is False
+    assert receipt["passed"] is False
 
 
 def test_actionable_coverage_uses_actual_nn_sample_and_raw_legality():

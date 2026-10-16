@@ -8,6 +8,7 @@ from copy import deepcopy
 
 import pytest
 
+from backend.training.warehouse_v6_actor import MODEL_VERSION, FEATURE_SCHEMA_SHA256
 from experiments.warehouse import protocol as p
 from study_v3 import release_catalog as catalog
 
@@ -108,9 +109,8 @@ def _synthetic_package(root: Path) -> dict:
         programs = row["programs"]
         entries[variant] = {
             "policy_id": f"warehouse-{variant}-v6",
-            "model_version": "warehouse-dual-actor.v6.1",
-            "feature_schema_sha256":
-            "1ba9702c1d70b3375eb12f4c0569393ed480995265a4c4ca3aaec37167ff1346",
+            "model_version": MODEL_VERSION,
+            "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
             "actor_path": row["actor"]["path"],
             "actor_sha256": row["actor"]["sha256"],
             "training_report_path": row["training_report"]["path"],

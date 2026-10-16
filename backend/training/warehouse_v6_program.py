@@ -25,6 +25,8 @@ from .warehouse_v6_actor import FrozenWarehouseV6Actor, FrozenWarehouseV6Role
 
 
 PROGRAM_VERSION = "warehouse-role-program.v6.2"
+AXIS_TREE_METHOD = "axis_tree_v1"
+ACTOR_SPARSE_TOPOLOGY_METHOD = "actor_sparse_topology_v1"
 PROGRAM_MAX_DEPTH = 5
 PROGRAM_MAX_LEAVES = 16
 PROGRAM_MAX_INTERNAL_NODES = PROGRAM_MAX_LEAVES - 1
@@ -213,9 +215,18 @@ class WarehouseV6Program:
 
     def _leaf_encoded(self, encoded: np.ndarray) -> tuple[int, list[dict]]:
         node, path = int(self.root_ref), []
+        # The extracted Actor topology must use the same float32 reduction and
+        # tie direction as frozen NumPy inference, including boundary states.
+        actor_scores = None
+        if self.report.get("fit_method") == ACTOR_SPARSE_TOPOLOGY_METHOD:
+            values = np.asarray(encoded, dtype=np.float32).reshape(1, FEATURE_DIM)
+            actor_scores = np.einsum(
+                "nf,kf->nk", values, self.split_weights, optimize=False)[0]
+            actor_scores += self.split_bias
         while node >= 0:
             weights = self.split_weights[node]
-            value = float(encoded @ weights + self.split_bias[node])
+            value = (float(actor_scores[node]) if actor_scores is not None else
+                     float(encoded @ weights + self.split_bias[node]))
             nonzero = np.flatnonzero(weights != 0.0)
             path.append({
                 "features": [{
@@ -457,9 +468,68 @@ def _fit_sparse_tree(role: str, actor: FrozenWarehouseV6Role,
     return structure, report
 
 
+def _actor_sparse_topology(actor: FrozenWarehouseV6Role) -> tuple[dict, dict]:
+    """Copy only the frozen Actor's public, hard, three-feature tree structure.
+
+    Leaf action logits are deliberately excluded: they must be fitted against
+    the *complete* masked NN distribution on separate fit episodes.
+    """
+    weights = actor.weights
+    nodes = int(weights["tree.node_count"][0])
+    leaves = int(weights["tree.leaf_count"][0])
+    structure = {
+        "root_ref": 0 if nodes else -1,
+        "split_weights": np.asarray(
+            weights["tree.split.weight"][:nodes], dtype=np.float32).copy(),
+        "split_bias": np.asarray(
+            weights["tree.split.bias"][:nodes], dtype=np.float32).copy(),
+        "left_refs": np.asarray(
+            weights["tree.left_refs"][:nodes], dtype=np.int64).copy(),
+        "right_refs": np.asarray(
+            weights["tree.right_refs"][:nodes], dtype=np.int64).copy(),
+        "leaf_count": leaves,
+    }
+    digest = sha256(json.dumps({
+        "root_ref": structure["root_ref"],
+        "leaf_count": leaves,
+        "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+        "split_weights": structure["split_weights"].tolist(),
+        "split_bias": structure["split_bias"].tolist(),
+        "left_refs": structure["left_refs"].tolist(),
+        "right_refs": structure["right_refs"].tolist(),
+    }, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    return structure, {
+        "topology_origin": "frozen_actor_public_tree",
+        "actor_tree_structure_sha256": digest,
+        "actor_role_sha256": actor.role_sha256,
+    }
+
+
+def actor_sparse_topology_matches(program: WarehouseV6Program,
+                                  actor: FrozenWarehouseV6Role) -> bool:
+    """Check a claimed extracted program against its bound frozen Actor."""
+    if program.report.get("fit_method") != ACTOR_SPARSE_TOPOLOGY_METHOD:
+        return False
+    structure, origin = _actor_sparse_topology(actor)
+    report = program.report.get("fit_tree", {})
+    return bool(
+        program.actor_role_sha256 == actor.role_sha256
+        and report.get("topology_origin") == origin["topology_origin"]
+        and report.get("actor_tree_structure_sha256") ==
+            origin["actor_tree_structure_sha256"]
+        and report.get("actor_role_sha256") == actor.role_sha256
+        and program.root_ref == structure["root_ref"]
+        and np.array_equal(program.split_weights, structure["split_weights"])
+        and np.array_equal(program.split_bias, structure["split_bias"])
+        and np.array_equal(program.left_refs, structure["left_refs"])
+        and np.array_equal(program.right_refs, structure["right_refs"])
+        and len(program.leaf_logits) == structure["leaf_count"])
+
+
 def _fit_leaf_logits(actor: FrozenWarehouseV6Role, features: np.ndarray,
                      masks: np.ndarray, leaf_ids: np.ndarray,
-                     leaf_count: int) -> np.ndarray:
+                     leaf_count: int, *,
+                     empty_leaf_logits: np.ndarray | None = None) -> np.ndarray:
     # Fitting runs in the training environment. Frozen program inference and
     # validation remain importable in the NumPy-only study runtime.
     import torch
@@ -469,7 +539,12 @@ def _fit_leaf_logits(actor: FrozenWarehouseV6Role, features: np.ndarray,
     for leaf in range(leaf_count):
         selected = leaf_ids == leaf
         if not np.any(selected):
-            raise RuntimeError("Warehouse program fit leaf has no fit samples")
+            if empty_leaf_logits is None:
+                raise RuntimeError("Warehouse program fit leaf has no fit samples")
+            # This placeholder is never certified. Calibration and eligibility
+            # cannot turn a leaf unseen in fit into program evidence.
+            learned[leaf] = empty_leaf_logits[leaf]
+            continue
         prior = torch.from_numpy(np.log(np.maximum(target[selected].mean(0), 1e-8))
                                  .astype(np.float32))
         candidate = torch.nn.Parameter(prior.clone())
@@ -490,10 +565,13 @@ def _fit_leaf_logits(actor: FrozenWarehouseV6Role, features: np.ndarray,
 
 def _calibrate_leaf_logits(logits: np.ndarray, actor: FrozenWarehouseV6Role,
                            x: np.ndarray, masks: np.ndarray,
-                           leaves: np.ndarray) -> np.ndarray:
+                           leaves: np.ndarray, *,
+                           fitted_leaves: frozenset[int] | None = None) -> np.ndarray:
     target = _masked_probabilities(actor.logits_encoded(x), masks)
     result = logits.copy()
     for leaf in range(len(logits)):
+        if fitted_leaves is not None and leaf not in fitted_leaves:
+            continue
         selected = leaves == leaf
         if not np.any(selected):
             continue
@@ -516,9 +594,12 @@ def _calibrate_leaf_logits(logits: np.ndarray, actor: FrozenWarehouseV6Role,
 def fit_program(role: str, actor: FrozenWarehouseV6Actor,
                 fit: Sequence[Mapping], calibration: Sequence[Mapping],
                 eligibility: Sequence[Mapping],
-                validation: Sequence[Mapping]) -> WarehouseV6Program:
+                validation: Sequence[Mapping], *,
+                method: str = AXIS_TREE_METHOD) -> WarehouseV6Program:
     if role not in AGENTS:
         raise ValueError("invalid Warehouse program role")
+    if method not in (AXIS_TREE_METHOD, ACTOR_SPARSE_TOPOLOGY_METHOD):
+        raise ValueError("unknown Warehouse program fitting method")
     parts = {"fit": list(fit), "calibration": list(calibration),
              "eligibility": list(eligibility), "validation": list(validation)}
     episode_ids = {name: {str(row["episode"]) for row in rows}
@@ -540,8 +621,11 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         raise ValueError("Warehouse program scenario seed splits overlap")
     role_actor = actor.roles[role]
     fit_x, fit_masks = _sample_arrays(parts["fit"], "fit")
-    structure, tree_report = _fit_sparse_tree(role, role_actor, parts["fit"],
-                                               fit_x, fit_masks)
+    if method == ACTOR_SPARSE_TOPOLOGY_METHOD:
+        structure, tree_report = _actor_sparse_topology(role_actor)
+    else:
+        structure, tree_report = _fit_sparse_tree(role, role_actor, parts["fit"],
+                                                  fit_x, fit_masks)
     split_hashes = {
         name: sha256(json.dumps(sorted(ids), separators=(",", ":")).encode()).hexdigest()
         for name, ids in episode_ids.items()
@@ -562,6 +646,8 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         "leaf_eligibility": {}, "validation": {},
         "certificate_kind": "independent_empirical_audit_only",
     }
+    if method == ACTOR_SPARSE_TOPOLOGY_METHOD:
+        report["fit_method"] = method
     provisional = WarehouseV6Program(
         role, role_actor.role_sha256, structure["root_ref"],
         structure["split_weights"], structure["split_bias"],
@@ -570,11 +656,24 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         frozenset(), frozenset(), report)
     report["max_depth"] = provisional._structure()[2]
     fit_leaves = provisional.leaf_indices(fit_x)
+    fit_counts = np.bincount(fit_leaves, minlength=structure["leaf_count"])
+    fitted_leaves = frozenset(np.flatnonzero(fit_counts).tolist())
+    if method == ACTOR_SPARSE_TOPOLOGY_METHOD:
+        # Even though structure came from the Actor, the program's path must
+        # agree with frozen inference on every fit row before fitting logits.
+        if not np.array_equal(fit_leaves, role_actor.leaf(fit_x)):
+            raise RuntimeError("extracted Warehouse Actor tree route mismatch")
+        report["fit_leaf_row_counts"] = fit_counts.astype(int).tolist()
     learned = _fit_leaf_logits(role_actor, fit_x, fit_masks, fit_leaves,
-                               structure["leaf_count"])
+                               structure["leaf_count"],
+                               empty_leaf_logits=(role_actor.weights[
+                                   "tree.leaf_logits"][:structure["leaf_count"]]
+                                   if method == ACTOR_SPARSE_TOPOLOGY_METHOD else None))
     cal_x, cal_masks = _sample_arrays(parts["calibration"], "calibration")
     calibrated = _calibrate_leaf_logits(
-        learned, role_actor, cal_x, cal_masks, provisional.leaf_indices(cal_x))
+        learned, role_actor, cal_x, cal_masks, provisional.leaf_indices(cal_x),
+        fitted_leaves=(fitted_leaves if method == ACTOR_SPARSE_TOPOLOGY_METHOD
+                       else None))
     provisional = WarehouseV6Program(
         role, role_actor.role_sha256, structure["root_ref"],
         structure["split_weights"], structure["split_bias"],
@@ -587,9 +686,9 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         f = _metrics(provisional, role_actor, parts["eligibility"], {leaf}, "feedback")
         e = _metrics(provisional, role_actor, parts["eligibility"], {leaf}, "explanation")
         report["leaf_eligibility"][str(leaf)] = {"feedback": f, "explanation": e}
-        if _eligible(f, FEEDBACK_AGREEMENT):
+        if leaf in fitted_leaves and _eligible(f, FEEDBACK_AGREEMENT):
             feedback.add(leaf)
-        if _eligible(e, EXPLANATION_AGREEMENT):
+        if leaf in fitted_leaves and _eligible(e, EXPLANATION_AGREEMENT):
             explanation.add(leaf)
     program = WarehouseV6Program(
         role, role_actor.role_sha256, structure["root_ref"],
@@ -646,6 +745,10 @@ def audit_frozen_program(program: WarehouseV6Program,
                          rows: Sequence[Mapping]) -> dict:
     if actor.role_sha256[program.role] != program.actor_role_sha256:
         raise RuntimeError("Warehouse program Actor binding mismatch")
+    if (program.report.get("fit_method") == ACTOR_SPARSE_TOPOLOGY_METHOD
+            and not actor_sparse_topology_matches(
+                program, actor.roles[program.role])):
+        raise RuntimeError("Warehouse extracted program topology differs from Actor")
     ids = {str(row["episode"]) for row in rows}
     prior = program.report["split_episode_ids"]
     if any(ids & set(used) for used in prior.values()):
@@ -678,8 +781,7 @@ def audit_frozen_program(program: WarehouseV6Program,
         "feedback": feedback, "explanation": explanation,
         "feedback_eligible": feedback_passed,
         "explanation_eligible": explanation_passed,
-        "passed": bool(feedback_passed
-                       and (program.role != "robot_2" or explanation_passed)),
+        "passed": bool(feedback_passed and explanation_passed),
     }
 
 

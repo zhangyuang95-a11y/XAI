@@ -21,3 +21,14 @@ still names the dedicated Task 2 deployment branch. The Warehouse Render
 service still tracks research v3, and the live branch needs its deployment
 references checked before retirement. Those branches remain available until
 their external uses are resolved.
+
+On 2026-10-16, a fresh read-only check found exactly six GitHub heads:
+`main` (`f7a4893`), `core` (`bd08939`), Task 2 (`4eecd7d`), research v3
+(`b7ccfcf`), `live` (`cd63f02`), and the v6 release branch (`95faf64`).
+GitHub reported no open pull requests, Deployments, or environments. Render's
+Production environment directly showed Warehouse building from research v3
+and Kitchen building from `main`. The account-wide Render service list could
+not be reliably enumerated, so `live` remains untouched. Task 2 remains
+referenced by its preview deployment instructions. Retire either branch only
+after verifying all external service references, archiving its exact tip, and
+rechecking that tip immediately before a leased deletion. `core` remains.

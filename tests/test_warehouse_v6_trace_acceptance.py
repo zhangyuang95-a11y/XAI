@@ -16,6 +16,7 @@ from backend.training.warehouse_v6_program import WarehouseV6Program
 from backend.training.warehouse_v6_runner import audit_programs
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.public_observation_v6 import FEATURE_DIM
+from experiments.warehouse import acceptance
 from experiments.warehouse.acceptance import _verify_program_trace
 from experiments.warehouse.admission import NativeBackend
 
@@ -57,7 +58,8 @@ def _program(role: str, actor: FrozenWarehouseV6Actor) -> WarehouseV6Program:
         report=report)
 
 
-def test_packaged_trace_recomputes_nn_draws_and_rejects_forged_rows(tmp_path):
+def test_packaged_trace_recomputes_nn_draws_and_rejects_forged_rows(
+        tmp_path, monkeypatch):
     torch.manual_seed(6291)
     source = tmp_path / "source"
     source.mkdir()
@@ -117,6 +119,28 @@ def test_packaged_trace_recomputes_nn_draws_and_rejects_forged_rows(tmp_path):
     changed_audits[role]["trace_path"] = str(forged)
     assert not _verify_program_trace(**{**proof, "index": changed_index,
                                         "audits": changed_audits})
+
+    # The replay gate folds earlier public decisions into the current Actor
+    # input independently of the environment's cached history fields.  A
+    # forged public previous action must fail even when every saved trace row,
+    # Actor artifact and RNG draw is otherwise authentic.
+    original_frame = acceptance._public_frame_for_trace
+
+    def forged_public_history(state, previous_actions):
+        frame = original_frame(state, previous_actions)
+        if previous_actions is not None:
+            previous = deepcopy(frame["previous_joint_actions"])
+            actual = previous["human"]["proposed"]
+            previous["human"]["proposed"] = next(
+                action.lower() for action in ACTIONS
+                if action.lower() != actual)
+            frame["previous_joint_actions"] = previous
+        return frame
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(acceptance, "_public_frame_for_trace",
+                          forged_public_history)
+        assert not _verify_program_trace(**proof)
     assert not verifier.verify_program_trace(
         actor=actor, programs=programs,
         trace_bytes_by_role={**local_traces, role: forged.read_bytes()},

@@ -367,6 +367,46 @@ def _replay_environment(seed: int):
     return environment
 
 
+def _public_frame_for_trace(state, previous_actions: Mapping | None) -> dict:
+    """Project a replay state onto the fields available in a v6 public frame.
+
+    The history fold below must not read AgentState's cached action, battery,
+    or position summaries.  The only previous decisions come from the prior
+    physical transition, just as they do in an exported participant frame.
+    """
+    from env.warehouse.layouts import STUDY_MAP_LAYOUT
+    from env.warehouse.public_observation_v6 import FEATURE_SCHEMA_SHA256
+
+    roles = {"human": "robot_1", "ai": "robot_2"}
+    frame = {
+        "turn": int(state.frame),
+        "episode_id": int(state.episode_id),
+        "map_id": STUDY_MAP_LAYOUT.layout_id,
+        "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+        "previous_joint_actions": previous_actions,
+        "previous_collision_kind": (state.last_robot_collision_kind
+                                    if state.frame else None),
+        "same_target_collision_streak": int(state.same_target_collision_streak),
+        "orders": [{
+            "id": task.task_id,
+            "pickup": [task.pickup_position[1], task.pickup_position[0]],
+            "dropoff": [task.delivery_position[1], task.delivery_position[0]],
+            "status": task.status,
+            "carrier": next((role for role, agent_id in roles.items()
+                             if agent_id == task.carrier_agent_id), None),
+        } for task in state.tasks],
+    }
+    for role, agent_id in roles.items():
+        agent = state.by_id(agent_id)
+        frame[role] = {
+            "x": int(agent.position[1]), "y": int(agent.position[0]),
+            "battery": float(agent.battery),
+            "carrying": agent.carrying_task_id,
+            "active": bool(agent.active), "heading": agent.heading.lower(),
+        }
+    return frame
+
+
 def _verify_program_trace_rows(*, actor, programs: Mapping,
                                trace_bytes_by_role: Mapping[str, bytes],
                                audits: Mapping,
@@ -385,7 +425,8 @@ def _verify_program_trace_rows(*, actor, programs: Mapping,
     from env.warehouse.public_observation_v6 import (
         OBSERVATION_DIM, action_masks, encode_policy_features,
         encode_public_observation, public_pre_action_snapshot,
-        rebuild_public_pre_action_state)
+        rebuild_public_pre_action_state,
+        rebuild_public_pre_action_state_from_frames)
 
     if (set(programs) != set(p.ROLES)
             or set(trace_bytes_by_role) != set(p.ROLES)
@@ -492,6 +533,8 @@ def _verify_program_trace_rows(*, actor, programs: Mapping,
     cursor = 0
     for seed in expected_seeds:
         env = _replay_environment(int(seed))
+        public_frames = []
+        previous_actions = None
         while not (env.state.terminated or env.state.truncated):
             if cursor >= len(identities["robot_1"]):
                 return False
@@ -500,6 +543,12 @@ def _verify_program_trace_rows(*, actor, programs: Mapping,
                 return False
             pre = public_pre_action_snapshot(env.state)
             obs, masks = encode_public_observation(env.state), action_masks(env.state)
+            public_frames.append(_public_frame_for_trace(
+                env.state, previous_actions))
+            from_frames = rebuild_public_pre_action_state_from_frames(public_frames)
+            if (not np.array_equal(obs, encode_public_observation(from_frames))
+                    or not np.array_equal(masks, action_masks(from_frames))):
+                return False
             actions, distributions = actor.act(env.state, base_seed=int(seed))
             for index_role, role in enumerate(p.ROLES):
                 row = records[role][cursor]
@@ -517,6 +566,14 @@ def _verify_program_trace_rows(*, actor, programs: Mapping,
             if (info["proposed_actions"] != actions
                     or info["action_override_agents"]):
                 return False
+            previous_actions = {
+                ui_role: {
+                    "proposed": actions[agent_id].lower(),
+                    "executed": info["executed_actions"][agent_id].lower(),
+                }
+                for ui_role, agent_id in (("human", "robot_1"),
+                                          ("ai", "robot_2"))
+            }
             post = public_pre_action_snapshot(env.state)
             if any(records[role][cursor]["post_state_public"] != post
                    for role in p.ROLES):

@@ -129,6 +129,7 @@ _SOURCE_FILES = (
     "experiments/__init__.py", "experiments/warehouse/__init__.py",
     "experiments/warehouse/protocol.py", "experiments/warehouse/admission.py",
     "experiments/warehouse/acceptance.py", "experiments/warehouse/quality_replay.py",
+    "experiments/warehouse/stage2_evidence.py",
     "domains/warehouse/neural_turnbased.py", "domains/warehouse/turnbased.py",
     "study_v3/policies.py", "study_v3/registry.py", "study_v3/release_catalog.py",
     "study_v3/store.py", "study_v3/qa.py", "study_v3/domain_contracts.py", "study_v3/__init__.py",

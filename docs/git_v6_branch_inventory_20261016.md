@@ -27,8 +27,18 @@ On 2026-10-16, a fresh read-only check found exactly six GitHub heads:
 (`b7ccfcf`), `live` (`cd63f02`), and the v6 release branch (`95faf64`).
 GitHub reported no open pull requests, Deployments, or environments. Render's
 Production environment directly showed Warehouse building from research v3
-and Kitchen building from `main`. The account-wide Render service list could
-not be reliably enumerated, so `live` remains untouched. Task 2 remains
-referenced by its preview deployment instructions. Retire either branch only
-after verifying all external service references, archiving its exact tip, and
-rechecking that tip immediately before a leased deletion. `core` remains.
+and Kitchen building from `main`. The account-wide Render service list was
+initially unavailable. A subsequent inspection found one visible workspace,
+one project, one Production environment, and exactly those two services; no
+service used `live`. Task 2 remains referenced by its preview deployment
+instructions. `core` remains.
+
+The historical `live` tip `cd63f02ef21e3c79d2b6972c1d2909e1903e3ac8`
+was archived in the pushed annotated tag
+`archive/branches/three-domain-study-live-20260920-20261016`. The remote tag's
+peeled commit matched that exact tip. With zero open PRs/GitHub Deployments,
+no active checkout, and no current Render service reference in the inspected
+account, the remote branch was deleted with an explicit tip lease. A fresh
+`git ls-remote --heads` returned no matching branch; the archive tag remains.
+The local alias remains for historical access. Task 2 and research v3 remain
+because their external deployment references have not been retired.

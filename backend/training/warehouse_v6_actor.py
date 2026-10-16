@@ -51,6 +51,8 @@ _MOVE = np.asarray([MOVE_DELTAS.get(action, (0, 0)) for action in ACTIONS],
                        [max(1, STUDY_MAP_LAYOUT.rows - 1),
                         max(1, STUDY_MAP_LAYOUT.cols - 1)], dtype=np.float32)
 TREE_GRADIENT_SCALE = 4.0
+HARD_SPLIT_ROUTING_VERSION = "fp64-left-tie-1e-10.v1"
+HARD_SPLIT_TIE_EPSILON = 1.0e-10
 MASK_GRADIENT_TEMPERATURE = 0.05
 _TENSOR_NAMES = (
     "tree.split.weight", "tree.split.bias", "tree.leaf_logits",
@@ -222,8 +224,12 @@ class FrozenWarehouseV6Role:
         selected = np.argsort(-np.abs(weight), axis=-1, kind="stable")[:, :MAX_SPLIT_FEATURES]
         sparse = np.zeros_like(weight)
         np.put_along_axis(sparse, selected, 1.0, axis=-1)
-        split = np.einsum("nf,kf->nk", flat, weight * sparse, optimize=False)
-        split += self.weights["tree.split.bias"]
+        # A float32 GEMM can change the sign of a threshold score depending
+        # on batch size. Route with the same float64 arithmetic and explicit
+        # left tie used by the training Actor's hard path.
+        split = np.einsum("nf,kf->nk", flat.astype(np.float64),
+                          (weight * sparse).astype(np.float64), optimize=False)
+        split += self.weights["tree.split.bias"].astype(np.float64)
         refs = np.full(len(flat), 0 if int(self.weights["tree.node_count"][0]) else -1,
                        dtype=np.int64)
         left = self.weights["tree.left_refs"].astype(np.int64)
@@ -234,7 +240,7 @@ class FrozenWarehouseV6Role:
                 break
             rows = np.flatnonzero(active)
             nodes = refs[rows]
-            go_right = split[rows, nodes] > 0
+            go_right = split[rows, nodes] > HARD_SPLIT_TIE_EPSILON
             refs[rows] = np.where(go_right, right[nodes], left[nodes])
         if np.any(refs >= 0):
             raise RuntimeError("Warehouse v6 irregular tree did not terminate")
@@ -342,6 +348,8 @@ class FrozenWarehouseV6Actor:
                        ACTION_PHYSICS_CONFIG_SHA256
                     or metadata.get("gate_width") != GATE_WIDTH):
                 raise RuntimeError("Warehouse v6 Actor artifact contract mismatch")
+            if metadata.get("hard_split_routing_version") != HARD_SPLIT_ROUTING_VERSION:
+                raise RuntimeError("Warehouse v6 Actor routing contract mismatch")
             roles = {role: FrozenWarehouseV6Role({
                 name: np.asarray(archive[f"{role}.{name}"], dtype=np.float32)
                 for name in _TENSOR_NAMES}) for role in AGENTS}

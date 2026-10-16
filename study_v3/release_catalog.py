@@ -86,28 +86,33 @@ def warehouse_runtime_source_closure_sha256() -> str:
         if (len(values) != 1 or not isinstance(values[0], ast.Tuple)
                 or len(values[0].elts) < 3):
             raise ValueError("Warehouse source file list unavailable")
-        # Parse only the two literal, reviewable globs used by the trainer.
+        # Parse only the three literal, reviewable globs used by the trainer.
         # Do not execute trainer code or accept a substring containing a glob:
         # either could turn a changed closure into an accepted release hash.
-        dynamic_roots = ("warehouse", "warehouse_legacy_v3")
-        for index, directory in enumerate(dynamic_roots):
-            candidate = values[0].elts[index]
+        dynamic_roots = (("env", "warehouse"),
+                         ("env", "warehouse_legacy_v3"),
+                         ("study_v3",))
+        dynamic_nodes = (values[0].elts[0], values[0].elts[1],
+                         *(node for node in values[0].elts[2:]
+                           if isinstance(node, ast.Starred)))
+        if len(dynamic_nodes) != len(dynamic_roots):
+            raise ValueError("Warehouse dynamic source file list changed")
+        for candidate, parts in zip(dynamic_nodes, dynamic_roots, strict=True):
+            root = "_SOURCE_ROOT" + "".join(f' / "{part}"' for part in parts)
             template = ast.parse(
                 '(*(path.relative_to(_SOURCE_ROOT).as_posix() '
-                'for path in sorted((_SOURCE_ROOT / "env" / '
-                f'"{directory}").glob("*.py"))),)',
+                f'for path in sorted(({root}).glob("*.py"))),)',
                 mode="eval",
             ).body.elts[0]
             if ast.dump(candidate, include_attributes=False) != ast.dump(
                     template, include_attributes=False):
                 raise ValueError("Warehouse dynamic source file list changed")
-        if any(isinstance(node, ast.Starred) for node in values[0].elts[2:]):
-            raise ValueError("Warehouse dynamic source file list changed")
-        static_paths = tuple(ast.literal_eval(node) for node in values[0].elts[2:])
+        static_paths = tuple(ast.literal_eval(node) for node in values[0].elts[2:]
+                             if not isinstance(node, ast.Starred))
         dynamic_groups = tuple(
             tuple(path.relative_to(ROOT).as_posix()
-                  for path in sorted((ROOT / "env" / directory).glob("*.py")))
-            for directory in dynamic_roots
+                  for path in sorted(ROOT.joinpath(*parts).glob("*.py")))
+            for parts in dynamic_roots
         )
         if any(not group for group in dynamic_groups):
             raise ValueError("Warehouse dynamic source directory empty")

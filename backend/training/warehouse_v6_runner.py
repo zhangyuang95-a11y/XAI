@@ -26,7 +26,8 @@ from torch import nn
 from torch.distributions import Categorical
 
 from experiments.warehouse.protocol import (
-    FINAL_PROGRAM_SPLIT_COUNTS, REGISTERED_BC_RECIPE_VERSION, REGISTERED_BC_SPEC,
+    EXPLORATORY_PAIR_SEEDS, FINAL_PROGRAM_SPLIT_COUNTS,
+    REGISTERED_BC_RECIPE_VERSION, REGISTERED_BC_SPEC,
     REGISTERED_BC_SPEC_SHA256, REGISTERED_RISK_DUAL_CONFIG_SHA256,
     bc_critic_reset_schedule, bc_data_seed_schedule,
     SCENARIO_BLOCK_STEPS, online_program_cohorts_valid,
@@ -1374,9 +1375,9 @@ def _bc_stage_seeds(pair_seed: int, stage: int, count: int) -> list[int]:
 
 
 def exploratory_stage1_bc_seed_schedule(pair_seed: int) -> dict[str, list[int]]:
-    """Local, review-only 12469 lock schedule; never adds a formal seed."""
-    if pair_seed != 12469:
-        raise ValueError("Warehouse v6.14 exploratory Stage1 seed is not 12469")
+    """Candidate-only BC schedule; never registers a formal pair seed."""
+    if pair_seed not in EXPLORATORY_PAIR_SEEDS:
+        raise ValueError("Warehouse v6.14 exploratory Stage1 seed is not registered")
     counts = {
         "initial_public_teacher": (10, BC_INITIAL_TEACHER_EPISODES),
         **{f"initial_nn_dagger_{index}":

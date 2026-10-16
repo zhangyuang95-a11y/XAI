@@ -32,6 +32,7 @@ from .warehouse_v6_actor import (
     CORE_BOUND_MODE,
     GATE_WIDTH, GEOMETRY_DIM,
     _POSITION_COLUMNS, _MOVE, TREE_GRADIENT_SCALE,
+    HARD_SPLIT_ROUTING_VERSION, HARD_SPLIT_TIE_EPSILON,
     _TENSOR_NAMES, _role_arrays, role_sha256,
 )
 
@@ -79,7 +80,14 @@ class SparseHardTree(nn.Module):
 
     def path(self, encoded: torch.Tensor) -> torch.Tensor:
         values = encoded.reshape(-1, FEATURE_DIM)
-        split = nn.functional.linear(values, self.effective_weights(), self.split.bias)
+        weights = self.effective_weights()
+        split = nn.functional.linear(values, weights, self.split.bias)
+        # The hard route must not depend on float32 GEMM batch shape. Keep
+        # the existing float32 surrogate for gradients through the split.
+        hard_split = nn.functional.linear(
+            values.detach().to(torch.float64),
+            weights.detach().to(torch.float64),
+            self.split.bias.detach().to(torch.float64))
         node_count = int(self.node_count[0])
         leaf_count = int(self.leaf_count[0])
         visited: set[int] = set()
@@ -100,7 +108,7 @@ class SparseHardTree(nn.Module):
             left = subtree(int(self.left_refs[ref]), depth + 1)
             right = subtree(int(self.right_refs[ref]), depth + 1)
             score = split[:, ref]
-            hard_left = (score <= 0).to(values.dtype)
+            hard_left = (hard_split[:, ref] <= HARD_SPLIT_TIE_EPSILON).to(values.dtype)
             soft_left = torch.sigmoid(-TREE_GRADIENT_SCALE * score)
             gate = hard_left + (soft_left - soft_left.detach())
             return gate[:, None] * left + (1.0 - gate)[:, None] * right
@@ -400,6 +408,7 @@ def export_actor(model: WarehouseV6Actor, path: str | Path, *, pair_seed: int,
         "relation_geometry_dim": GEOMETRY_DIM,
         "action_feature_dim": ACTION_FEATURE_DIM,
         "gate_width": GATE_WIDTH,
+        "hard_split_routing_version": HARD_SPLIT_ROUTING_VERSION,
         "role_sha256": role_digests, "pair_seed": pair_seed,
         "variant": variant, "candidate_id": candidate_id,
     }

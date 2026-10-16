@@ -13,6 +13,20 @@ from env.warehouse.reset_audit_v614 import (
 from experiments.warehouse import protocol
 
 
+def test_exploratory_successor_bc_and_critic_seeds_are_fresh():
+    old = {seed for rows in runner.exploratory_stage1_bc_seed_schedule(12469).values()
+           for seed in rows}
+    next_pair = {seed for rows in runner.exploratory_stage1_bc_seed_schedule(
+        12470).values() for seed in rows}
+    old_critic = protocol.bc_critic_reset_schedule(12469,
+                                                   protocol.INITIAL_RELEASE_ID)["seed"]
+    next_critic = protocol.bc_critic_reset_schedule(12470,
+                                                    protocol.INITIAL_RELEASE_ID)["seed"]
+    assert len(old) == len(next_pair) == 1_394
+    assert not (old | {12469, old_critic}) & (
+        next_pair | {12470, next_critic})
+
+
 def _checked_spec(output_dir: Path) -> tuple[dict, protocol.PairRunSpec]:
     pair = protocol.PairRunSpec(
         candidate_id="v614-static-formal-lock", pair_seed=protocol.DEVELOPMENT_PAIR_SEEDS[0],

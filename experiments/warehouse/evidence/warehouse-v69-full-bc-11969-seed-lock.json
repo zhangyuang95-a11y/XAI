@@ -1,0 +1,49 @@
+{
+  "version": "warehouse-v69-public-history-full-bc-exploration-seeds.v1",
+  "status": "prelocked_unregistered_full_length_bc_exploration",
+  "purpose": "Rebuild the entire paired public BC and dual-NN DAgger start with the v6.1 public-history observation and trainable sparse hard tree; diagnose sampled dual-Actor quality before any program fitting or self-play PPO",
+  "pair_seed": 11969,
+  "scenario_namespace": "warehouse-v69-full-bc-unregistered-11969",
+  "source_closure_sha256_at_lock": "79feb6da1514d51579e7c21339a62bea4804ef8926aad32edd7815ee98f38ab9",
+  "model_version_at_lock": "warehouse-dual-actor.v6.9-exploratory",
+  "feature_schema_sha256_at_lock": "f1cb243f1903f4c3462f9de78ed6df5e6d0b5ade7ebfc2a56d9966fa337f99c7",
+  "training": {
+    "entrypoint": "backend.training.warehouse_v6_runner.pretrain_pair",
+    "mode": "production_bc_only_without_ppo_or_program",
+    "bc_stage_seed_rule": "_bc_stage_seeds(pair_seed, stage, count) = pair_seed * 100000 + stage * 1000 + index",
+    "public_teacher_actions": "offline labels only; both self-visit actions sampled from the respective current NNs",
+    "collision_critic": "trained from real env.step collision events; gradient used only before self-play",
+    "raw_regularized_start": "one shared dual-Actor BC model; no variant fork in this diagnostic"
+  },
+  "first_quality": {
+    "base_seeds": {"first": 1190000, "last_inclusive": 1190031, "count": 32},
+    "task_ids": [1, 2, 3],
+    "scenario_seed_formula": "base_seed * 10 + task_id",
+    "action_seed": "same_as_scenario_seed",
+    "episodes": 96,
+    "quality_screen": {"mean_deliveries_min": 5.5, "mean_collisions_max": 6.0, "shutdown_episode_rate_max": 0.05},
+    "interpretation": "Exploratory BC quality screen only; failure halts program fitting for this source snapshot but does not prove longer self-play cannot improve"
+  },
+  "reserved_pressure_only_after_first_quality": {
+    "base_seeds": {"first": 1190100, "last_inclusive": 1190131, "count": 32},
+    "task_ids": [1, 2, 3],
+    "scenario_seed_formula": "base_seed * 10 + task_id",
+    "action_seed_offsets": [0, 1000000, 2000000],
+    "episodes": 288
+  },
+  "stop_before": [
+    "program_fit",
+    "regularized_self_play",
+    "registered_development_6120_6122",
+    "one_time_program_audit",
+    "sealed_heldout_250000_250099",
+    "v69_fresh_confirmation_118"
+  ],
+  "separation": [
+    "The 117 short-screen training and evaluation scenes are not reused.",
+    "The v6.9 118 confirmation remains reserved and untouched.",
+    "BC stage seeds, 119 first quality, and 119 pressure are pairwise disjoint.",
+    "The source snapshot and all training/evaluation scripts must be content hashed before execution.",
+    "The model's formal production version and source closure are locked only after method-level independent evidence; this unregistered run cannot open pilot."
+  ]
+}

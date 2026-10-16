@@ -20,6 +20,16 @@ from study_v3.release_catalog import (RELEASE_ID, UPSTREAM_RELEASE_ID,
 from study_v3.store import Store, StudyError
 
 
+def test_warehouse_pilot_allocation_is_separate_from_sealed_model_holdout():
+    from experiments.warehouse.protocol import heldout_base_seeds
+    from study_v3.registry import scenario_config
+
+    config = scenario_config("warehouse")
+    assert config["pilot_scenario_seeds"] == list(range(1000, 1024))
+    assert "heldout_seeds" not in config
+    assert set(config["pilot_scenario_seeds"]).isdisjoint(heldout_base_seeds())
+
+
 @pytest.mark.parametrize("domain", ("pong", "kitchen"))
 @pytest.mark.parametrize("variant", ("raw", "regularized"))
 def test_accepted_v5_assets_are_byte_identical_in_v6_package(domain, variant):

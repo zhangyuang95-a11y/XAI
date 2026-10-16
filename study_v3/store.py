@@ -322,7 +322,10 @@ class Store:
             if not instance:
                 iid=uid()
                 config=scenario_config(domain)
-                seeds=config.get('heldout_seeds') or config['held_out_seeds']
+                # A pilot allocation is distinct from a one-use model test set.
+                # Historical domain configs retain their older key.
+                seeds=(config.get('pilot_scenario_seeds') or
+                       config.get('heldout_seeds') or config['held_out_seeds'])
                 allocations=db.all('SELECT scenario_seed,group_code,COUNT(*) AS n FROM pl3_instances WHERE domain=? AND mode=? AND release_id=? GROUP BY scenario_seed,group_code',(domain,mode,RELEASE_ID))
                 usage={(r['scenario_seed'],r['group_code']):r['n'] for r in allocations}
                 groups=('A','B','C')

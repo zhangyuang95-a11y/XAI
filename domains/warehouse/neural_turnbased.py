@@ -90,7 +90,7 @@ def _v6_config():
             or config.get("observation_version") != V6_OBSERVATION_VERSION
             or config.get("feature_schema_sha256") != V6_FEATURE_SCHEMA_SHA256
             or config.get("release_id") != V6_RELEASE_ID
-            or config.get("heldout_seeds") != list(range(1000, 1024))
+            or config.get("pilot_scenario_seeds") != list(range(1000, 1024))
             or {row.get("policy_id") for row in config.get("variants", {}).values()}
                != set(_V6_POLICY_IDS)):
         raise RuntimeError("Warehouse v6 policy configuration schema mismatch")

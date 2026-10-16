@@ -115,7 +115,8 @@ _SIMULATED_SEED_START = {"pong": 9_731_100, "kitchen": 9_002_000,
 def _simulated_scenario_config(domain):
     """Keep flow tests off accepted research holdouts."""
     config = dict(scenario_config(domain))
-    key = "heldout_seeds" if "heldout_seeds" in config else "held_out_seeds"
+    key = next(name for name in ("pilot_scenario_seeds", "heldout_seeds",
+                                 "held_out_seeds") if name in config)
     config[key] = list(range(_SIMULATED_SEED_START[domain],
                              _SIMULATED_SEED_START[domain] + 24))
     return config
@@ -549,7 +550,7 @@ def test_unsupported_release_can_start_fresh_without_changing_archived_rows(stor
 
 
 @pytest.mark.parametrize("domain", BOUND_DOMAINS)
-def test_enrollment_preserves_consent_language_assignment_and_heldout_scenario(
+def test_enrollment_preserves_consent_language_assignment_and_scenario(
         store, domain, monkeypatch):
     # This test inspects the allocation without starting a task. All rollout
     # tests retain the synthetic seed block installed by the store fixture.
@@ -562,7 +563,9 @@ def test_enrollment_preserves_consent_language_assignment_and_heldout_scenario(
     assert enrollment["consent"] == 1 and enrollment["initial_language"] == "en"
     assert enrollment["assignment_source"] == "researcher_override"
     assert enrollment["scenario_version"] == frozen.get("scenario_version", frozen["version"])
-    assert instance["scenario_seed"] in (frozen.get("heldout_seeds") or frozen["held_out_seeds"])
+    assert instance["scenario_seed"] in (frozen.get("pilot_scenario_seeds") or
+                                         frozen.get("heldout_seeds") or
+                                         frozen["held_out_seeds"])
     flow.command("language", language="zh")
     assert flow.view["language"] == "zh"
     assert store.export()["enrollments"][0] == enrollment

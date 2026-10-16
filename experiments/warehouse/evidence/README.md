@@ -17,6 +17,14 @@ formal paired run, final independent program audit, or held-out test.
 | v6.6 static topology screen | [Seed lock](warehouse-v66-unregistered-seed-lock.json), [failure](warehouse-v66-static-topology-11166-failure.md) | Fit-only CV estimated sampled-action coverage of 28.86% and 29.68%; the reserved four-part, audit and pressure blocks were not used. |
 | v6.6 distance-progress screen | [Failure](warehouse-v66-delta-11266-failure.md) | Replacing equivalent absolute split inputs with public action-distance deltas reduced fit-only CV actionable coverage to 19.95% and 23.22%; no reserved four-part, audit, pressure, or formal seeds were used. |
 | v6.6 joint Actor exploration | [New seed lock](warehouse-v66-joint-actor-seed-lock.json) | Fresh unregistered cohorts reserved for jointly training the tree and full Actor; no result or admission claim. |
+| v6.7 trainable soft route | [Failure](warehouse-v67-soft-hard-11367-failure.md) | Hard-tree validation yielded 5.18% and 0% expected actionable coverage; the method stopped before paired PPO. |
+| v6.8 fixed old topology | [Failure](warehouse-v68-old-topology-fitonly-113-failure.md) | Bounded updates did not make the old tree's mixed leaves certifiable. |
+| v6.9 public BC | [First quality](warehouse-v69-full-bc-11969-first-quality.md), [pressure](warehouse-v69-frozen-bc-11969-pressure.md) | The frozen dual NN passed exploratory quality and pressure screens; these were not paired PPO or program acceptance. |
+| v6.9 program extraction | [Four-part failure](warehouse-v69-program-precheck-11969-v2-failure.md) | Actor-topology programs were faithful inside selected leaves, but both roles lacked the required coverage. The earlier [v1 failure](warehouse-v69-program-precheck-11969-v1-failure.md) is retained separately. |
+| v6.10 bounded core Actor | [Quality failure](warehouse-v610-core-12069-quality-failure.md), [root cause](warehouse-v610-core-12069-root-cause.md) | A frozen 96-episode screen exposed repeated collisions and insufficient task quality; later reserved phases were not used. |
+| v6.11 public-teacher core refit | [Internal failure](warehouse-v611-refit-core-12169-internal-failure.md) | Four-purpose validation found too little certified core mass after 306 BC resets; the remaining seed blocks were retired. |
+| v6.12 masked-NN core refit | [Parity failure](warehouse-v612-masked-core-12269-parity-failure.md) | A batched role-index shape error stopped the locked run after 306 BC resets, before tree fitting or quality evaluation. |
+| v6.13 corrected masked-NN refit | [Internal failure](warehouse-v613-role-parity-12369-core-failure.md) | Torch/frozen target parity passed, but role validation coverage was 0% and 11.97%; no quality, PPO, formal, audit, or held-out phase ran. |
 
 The [coverage and shutdown design note](warehouse-v6-coverage-objective-design.md)
 records the unregistered failure analysis, a pointwise Actor/tree margin

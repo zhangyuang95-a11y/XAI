@@ -318,7 +318,8 @@ def test_defaults_and_shared_task_endpoint_constraints() -> None:
                 for delta in MOVE_DELTAS.values()
             )
 
-    with pytest.raises(ValueError, match="movement battery cost of 2"):
+    assert WarehouseConfig(move_battery_cost=3.0).move_battery_cost == 3.0
+    with pytest.raises(ValueError, match="movement battery cost must be 2 or 3"):
         WarehouseConfig(move_battery_cost=1.0)
 
 

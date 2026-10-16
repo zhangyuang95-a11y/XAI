@@ -1,10 +1,14 @@
 """A trained tree must route identically in single, batched, and frozen inference."""
 
+from hashlib import sha256
+import json
+
 import numpy as np
 import torch
+import pytest
 
 from backend.training.warehouse_v6_actor import (
-    FEATURE_DIM, FrozenWarehouseV6Actor, WarehouseV6Actor,
+    FEATURE_DIM, FrozenWarehouseV6Actor, WarehouseV6Actor, export_actor,
 )
 from env.warehouse.pure_nn import AGENTS
 
@@ -35,3 +39,19 @@ def test_hard_split_tie_is_batch_invariant_and_matches_frozen_actor():
         np.testing.assert_array_equal(single, batched)
         np.testing.assert_array_equal(batched, deployed)
         assert deployed[0] != deployed[-1]
+
+
+def test_pre_routing_contract_artifact_is_rejected(tmp_path):
+    source = tmp_path / "current.npz"
+    export_actor(WarehouseV6Actor(), source, pair_seed=1,
+                 variant="raw", candidate_id="routing-contract-test")
+    with np.load(source, allow_pickle=False) as archive:
+        arrays = {name: archive[name] for name in archive.files}
+    metadata = json.loads(str(arrays["metadata_json"].item()))
+    metadata.pop("hard_split_routing_version")
+    arrays["metadata_json"] = np.asarray(json.dumps(metadata, sort_keys=True))
+    old = tmp_path / "pre-routing-contract.npz"
+    np.savez_compressed(old, **arrays)
+    with pytest.raises(RuntimeError, match="routing contract mismatch"):
+        FrozenWarehouseV6Actor.load(
+            old, expected_sha256=sha256(old.read_bytes()).hexdigest())

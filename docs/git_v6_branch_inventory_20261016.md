@@ -40,5 +40,6 @@ peeled commit matched that exact tip. With zero open PRs/GitHub Deployments,
 no active checkout, and no current Render service reference in the inspected
 account, the remote branch was deleted with an explicit tip lease. A fresh
 `git ls-remote --heads` returned no matching branch; the archive tag remains.
-The local alias remains for historical access. Task 2 and research v3 remain
-because their external deployment references have not been retired.
+The merged local alias was also removed with `git branch -d`. Task 2 and
+research v3 remain because their external deployment references have not been
+retired.

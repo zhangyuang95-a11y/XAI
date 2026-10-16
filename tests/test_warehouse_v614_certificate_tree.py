@@ -16,6 +16,7 @@ from backend.training.warehouse_v614_certificate_tree import (
     MAX_NODE_FEATURES, SparseProgramTree, fit_certificate_tree,
     refit_frozen_topology_fit_only, _masked_probabilities,
 )
+from backend.training.warehouse_v6_tree_routing import certified_mask_branches, unit_interval_indices
 
 
 ACTOR_SHA = "a" * 64
@@ -60,6 +61,46 @@ def synthetic_fit(width: int):
 
 
 class CertificateTreeTests(unittest.TestCase):
+    def test_oblique_public_condition_proves_physical_legality(self) -> None:
+        names = list(schema_for(171).feature_names)
+        names[0] = "self_column"
+        schema = FeatureSchema(tuple(names), ACTIONS)
+        weights = np.zeros((MAX_LEAVES - 1, schema.feature_dim), dtype=np.float32)
+        weights[0, schema.mask_feature_indices[0]] = 1.0
+        weights[0, names.index("self_column")] = 1.0
+        bias = np.zeros(MAX_LEAVES - 1, dtype=np.float32)
+        bias[0] = np.float32(-1.4)
+        left = np.zeros(MAX_LEAVES - 1, dtype=np.int64)
+        right = np.zeros(MAX_LEAVES - 1, dtype=np.int64)
+        left[0], right[0] = -1, -2
+        logits = np.zeros((MAX_LEAVES, len(ACTIONS)), dtype=np.float32)
+        logits[1, 0] = 2.0
+        core = np.zeros(MAX_LEAVES, dtype=np.bool_)
+        core[1] = True
+        candidate = SparseProgramTree(schema, weights, bias, left, right, 1, 2,
+                                      logits, core, {}, frozenset())
+        proof = certified_mask_branches(
+            weights[0], float(bias[0]), schema.mask_feature_indices,
+            unit_interval_indices(schema.feature_names))
+        self.assertIn(0, proof[1])
+        for mask in (0.0, 1.0):
+            for coordinate in np.linspace(0.0, 1.0, 101):
+                row = np.zeros((1, schema.feature_dim), dtype=np.float32)
+                row[0, schema.mask_feature_indices[0]] = mask
+                row[0, names.index("self_column")] = coordinate
+                if candidate.leaf_indices(row)[0] == 1:
+                    self.assertEqual(mask, 1.0)
+        out_of_domain = np.zeros((1, schema.feature_dim), dtype=np.float32)
+        out_of_domain[0, names.index("self_column")] = 1.1
+        with self.assertRaisesRegex(ValueError, "outside proven domain"):
+            candidate.leaf_indices(out_of_domain)
+        # An unconstrained public value cannot stand in for a physical mask.
+        weights[0, names.index("self_column")] = 0.0
+        weights[0, names.index("public_1")] = 1.0
+        with self.assertRaisesRegex(ValueError, "legality proof"):
+            SparseProgramTree(schema, weights, bias, left, right, 1, 2,
+                              logits, core, {}, frozenset())
+
     def test_dynamic_mask_indices_and_complete_distribution(self) -> None:
         for width in (146, 171):
             with self.subTest(width=width):

@@ -28,7 +28,9 @@ from env.warehouse.public_action_features_v614 import (
     encode_actor_tree_features,
 )
 from .warehouse_v6_tree_routing import (
-    HARD_SPLIT_ROUTING_VERSION, leaf_indices as hard_tree_leaf_indices,
+    HARD_SPLIT_ROUTING_VERSION, certified_mask_branches,
+    leaf_indices as hard_tree_leaf_indices, unit_interval_indices,
+    validate_certification_domain,
 )
 
 
@@ -133,9 +135,10 @@ class FrozenWarehouseV6Role:
     def _validate_core_action_legality(self) -> None:
         """Prove every core leaf's unmasked top action legal on its full path.
 
-        WAIT is universally legal.  A movement action needs an exact binary
-        physical-mask gate on the route to the leaf.  Learned leaf logits may
-        change during BC/PPO, so this check runs on the final frozen weights.
+        WAIT is universally legal. A movement action needs a route predicate
+        that proves its physical mask bit is one for every bounded public
+        feature value. Learned leaf logits may change during BC/PPO, so this
+        check runs on the final frozen weights.
         """
         values = self.weights
         nodes = int(values["tree.node_count"][0])
@@ -145,7 +148,8 @@ class FrozenWarehouseV6Role:
         left = values["tree.left_refs"].astype(np.int64)
         right = values["tree.right_refs"].astype(np.int64)
         logits = values["tree.leaf_logits"]
-        mask_start = TREE_MASK_START
+        mask_indices = tuple(range(TREE_MASK_START, TREE_MASK_START + len(ACTIONS)))
+        unit_indices = unit_interval_indices(tuple(FEATURE_NAMES))
 
         def walk(ref: int, proven: frozenset[int]) -> None:
             if ref < 0:
@@ -153,19 +157,10 @@ class FrozenWarehouseV6Role:
                 if core[leaf] > 0.5 and int(np.argmax(logits[leaf])) not in proven:
                     raise ValueError("Warehouse core leaf raw action lacks path legality proof")
                 return
-            used = np.flatnonzero(weights[ref])
-            left_proven = proven
-            right_proven = proven
-            if (len(used) == 1 and mask_start <= used[0] <
-                    mask_start + len(ACTIONS)):
-                feature = int(used[0])
-                action = feature - mask_start
-                threshold = -float(bias[ref]) / float(weights[ref, feature])
-                if 1.0e-6 < threshold < 1.0 - 1.0e-6:
-                    if weights[ref, feature] > 0:
-                        right_proven = proven | {action}
-                    else:
-                        left_proven = proven | {action}
+            left_actions, right_actions = certified_mask_branches(
+                weights[ref], float(bias[ref]), mask_indices, unit_indices)
+            left_proven = proven | left_actions
+            right_proven = proven | right_actions
             walk(int(left[ref]), left_proven)
             walk(int(right[ref]), right_proven)
 
@@ -221,6 +216,9 @@ class FrozenWarehouseV6Role:
         if data.shape[-1:] != (FEATURE_DIM,):
             raise ValueError("Warehouse v6 role feature dimension mismatch")
         flat = data.reshape(-1, FEATURE_DIM)
+        validate_certification_domain(
+            flat, tuple(range(TREE_MASK_START, TREE_MASK_START + len(ACTIONS))),
+            unit_interval_indices(tuple(FEATURE_NAMES)))
         weight = self.weights["tree.split.weight"]
         selected = np.argsort(-np.abs(weight), axis=-1, kind="stable")[:, :MAX_SPLIT_FEATURES]
         sparse = np.zeros_like(weight)

@@ -13,7 +13,10 @@ import json
 from typing import Sequence
 
 import numpy as np
-from .warehouse_v6_tree_routing import leaf_indices as hard_tree_leaf_indices
+from .warehouse_v6_tree_routing import (
+    certified_mask_branches, leaf_indices as hard_tree_leaf_indices,
+    unit_interval_indices, validate_certification_domain,
+)
 
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.public_action_features_v614 import (
@@ -143,6 +146,8 @@ class CoreTreeResult:
         x = np.asarray(encoded, dtype=np.float32)
         if x.ndim != 2 or x.shape[1] != FEATURE_DIM or not np.isfinite(x).all():
             raise ValueError("invalid Warehouse core tree public features")
+        validate_certification_domain(
+            x, _MASK_INDICES, unit_interval_indices(tuple(FEATURE_NAMES)))
         leaves = hard_tree_leaf_indices(
             x, self.split_weights, self.split_bias,
             self.left_refs, self.right_refs, self.node_count, MAX_DEPTH)
@@ -379,18 +384,13 @@ def _structural_legal_actions(result: CoreTreeResult) -> tuple[dict[int, set[int
             depths[leaf] = depth
             return
         weights = result.split_weights[ref]
-        used = np.flatnonzero(weights)
         left_legal = set(known_legal)
         right_legal = set(known_legal)
-        if len(used) == 1 and int(used[0]) in _MASK_INDICES:
-            feature = int(used[0])
-            action = _MASK_INDICES.index(feature)
-            threshold = -float(result.split_bias[ref]) / float(weights[feature])
-            if 1e-6 < threshold < 1.0 - 1e-6:
-                if weights[feature] > 0:
-                    right_legal.add(action)
-                else:
-                    left_legal.add(action)
+        left_cert, right_cert = certified_mask_branches(
+            weights, float(result.split_bias[ref]), _MASK_INDICES,
+            unit_interval_indices(tuple(FEATURE_NAMES)))
+        left_legal.update(left_cert)
+        right_legal.update(right_cert)
         visit(int(result.left_refs[ref]), depth + 1, left_legal)
         visit(int(result.right_refs[ref]), depth + 1, right_legal)
 

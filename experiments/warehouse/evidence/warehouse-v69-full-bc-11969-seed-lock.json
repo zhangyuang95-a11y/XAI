@@ -4,7 +4,12 @@
   "purpose": "Rebuild the entire paired public BC and dual-NN DAgger start with the v6.1 public-history observation and trainable sparse hard tree; diagnose sampled dual-Actor quality before any program fitting or self-play PPO",
   "pair_seed": 11969,
   "scenario_namespace": "warehouse-v69-full-bc-unregistered-11969",
-  "source_closure_sha256_at_lock": "79feb6da1514d51579e7c21339a62bea4804ef8926aad32edd7815ee98f38ab9",
+  "source_closure_sha256_at_lock": "8569cdf9dcca314d5ec738a62c962bbbc51ea5c3125b3f37677ebb0b6b330be9",
+  "invalidated_preflight": {
+    "source_closure_sha256": "79feb6da1514d51579e7c21339a62bea4804ef8926aad32edd7815ee98f38ab9",
+    "reason": "The isolated preflight omitted imported legacy Warehouse source, v5 compatibility modules, and three historical configurations.",
+    "training_or_evaluation_seeds_used": false
+  },
   "model_version_at_lock": "warehouse-dual-actor.v6.9-exploratory",
   "feature_schema_sha256_at_lock": "f1cb243f1903f4c3462f9de78ed6df5e6d0b5ade7ebfc2a56d9966fa337f99c7",
   "training": {

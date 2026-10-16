@@ -1,0 +1,130 @@
+{
+  "files": {
+    "contracts.py": {
+      "commit": "af97df8",
+      "sha256": "32ef122c774ed23e2ee787184c65cfadaaa9de8ea3959bf9aa290c537455161d",
+      "source": "env/warehouse/contracts.py"
+    },
+    "coordination.py": {
+      "commit": "af97df8",
+      "sha256": "1d95b4d19008bf1f184c2bcf5e6cdbf0f12f7d682764f94416d976917e6a1d57",
+      "source": "env/warehouse/coordination.py"
+    },
+    "coordination_goals.py": {
+      "commit": "af97df8",
+      "sha256": "5aff7dfcab87a85c3fc3bf49ca330ab95527d3dad5dd510c25aad7bbf2cba1cb",
+      "source": "env/warehouse/coordination_goals.py"
+    },
+    "coordination_plan.py": {
+      "commit": "af97df8",
+      "sha256": "11d95894d32ffb8f586e1c024d38863e154340477200c57b479d4684816f9d27",
+      "source": "env/warehouse/coordination_plan.py"
+    },
+    "coordination_priority.py": {
+      "commit": "af97df8",
+      "sha256": "3b3187dfd65e891cd73d1f3101c6bca65f2d839189f7745545c18815e99febff",
+      "source": "env/warehouse/coordination_priority.py"
+    },
+    "coordination_reservations.py": {
+      "commit": "af97df8",
+      "sha256": "7e552c8d68572b1029fd7ef8bdaba0673cb9b845ba0528743f07c14b356bf657",
+      "source": "env/warehouse/coordination_reservations.py"
+    },
+    "credit_assignment.py": {
+      "commit": "af97df8",
+      "sha256": "994ea2ed6e3af3c9946c6c6d2a2ef8821b8118457adfdfc4fbab005dfe3e99ce",
+      "source": "env/warehouse/credit_assignment.py"
+    },
+    "decision_protocol.py": {
+      "commit": "af97df8",
+      "sha256": "9027bdcca993e1ab4656a9451ef96a2dd202f353a339788a00b9d7e5ab3021ff",
+      "source": "env/warehouse/decision_protocol.py"
+    },
+    "domain.py": {
+      "commit": "af97df8",
+      "sha256": "1cc29c4e748bf040ec00a157e4c46fe748a6c6f604dd99e080d42aad884ecd00",
+      "source": "env/warehouse/domain.py"
+    },
+    "energy_management.py": {
+      "commit": "af97df8",
+      "sha256": "654f370c78dbb0a4b7e1f129d24955194bd21c4e6bd2aa312f907b53264da444",
+      "source": "env/warehouse/energy_management.py"
+    },
+    "environment.py": {
+      "commit": "fed9234",
+      "sha256": "411c999ba42188e2456ce229f02bf26314da299b2fc80f77d9d66b4632d9d1da",
+      "source": "env/warehouse/environment.py"
+    },
+    "frozen_missions.py": {
+      "commit": "af97df8",
+      "sha256": "62e8c136b6adaf4ea552a1a718e15dfc1db68d00bc328f9783ad54883c3009e8",
+      "source": "env/warehouse/frozen_missions.py"
+    },
+    "goal_management.py": {
+      "commit": "af97df8",
+      "sha256": "7ac4529fda9a301f2abc88a2c7d2e7ee1b12f08d6418024c72001cdffdb35b65",
+      "source": "env/warehouse/goal_management.py"
+    },
+    "historical_sep2_coordination.py": {
+      "commit": "849a5f4",
+      "sha256": "ebcbf38c6365752a73b2175ab44750f3231da369421424f5cccd4aada23729c8",
+      "source": "env/warehouse/historical_sep2_coordination.py"
+    },
+    "layouts.py": {
+      "commit": "af97df8",
+      "sha256": "687cf6b0c60d6d51bf11e230cf37a5ef8e61df7cff576dddf894278b86f9d90f",
+      "source": "env/warehouse/layouts.py"
+    },
+    "navigation.py": {
+      "commit": "af97df8",
+      "sha256": "497fabb65c05ad7f4578faf670463659927093cf61e1967156d78bb5ff454789",
+      "source": "env/warehouse/navigation.py"
+    },
+    "numpy_policy.py": {
+      "commit": "cf63acc",
+      "sha256": "279111d53645ef2336588d43504370a8efba08db4132ae7c084c48792344988a",
+      "source": "env/warehouse/numpy_policy.py"
+    },
+    "observations.py": {
+      "commit": "af97df8",
+      "sha256": "d1a86e86664ec375f38d75fb666ab6a858b9acf5c67b3ccc02a58557c2d09671",
+      "source": "env/warehouse/observations.py"
+    },
+    "rewards.py": {
+      "commit": "af97df8",
+      "sha256": "7691126a368cadf8f9071615daf1e85cd8bb9ef0e506018e47f28a8c61f36fcb",
+      "source": "env/warehouse/rewards.py"
+    },
+    "route_goals.py": {
+      "commit": "af97df8",
+      "sha256": "e63075c7e335c3bb7c83fb27de574a2d4e865ca8ce22d1d62afa2a8312537917",
+      "source": "env/warehouse/route_goals.py"
+    },
+    "state_support.py": {
+      "commit": "af97df8",
+      "sha256": "4a0ef97fbb996aa5b08220375c28a2b934a9972fc056b01a25ba8ee2375c202d",
+      "source": "env/warehouse/state_support.py"
+    },
+    "teacher_efficiency.py": {
+      "commit": "af97df8",
+      "sha256": "23f50404540ab9017ba681c407e1f2cd4b84c2116d240c8e27f20f2ee492f9d9",
+      "source": "env/warehouse/teacher_efficiency.py"
+    },
+    "temporal_audit.py": {
+      "commit": "af97df8",
+      "sha256": "1c98f97669c576315366af7b485aec13b9dc4e194655d11781e7949bb278eefc",
+      "source": "env/warehouse/temporal_audit.py"
+    },
+    "transition_audit.py": {
+      "commit": "af97df8",
+      "sha256": "f3d286a8b2d58d271348636cd14d3e34fdbda3f73ca58ecf0ef55b64e7a93bd5",
+      "source": "env/warehouse/transition_audit.py"
+    },
+    "transition_outcome.py": {
+      "commit": "af97df8",
+      "sha256": "0afeb14c45e0dfe64ece3c5c0a6e5bbe053a9466e9097a0af6dd1371f7677c3b",
+      "source": "env/warehouse/transition_outcome.py"
+    }
+  },
+  "format": "warehouse-v3-source-closure.v1"
+}

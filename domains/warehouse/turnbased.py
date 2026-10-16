@@ -12,19 +12,21 @@ from math import ceil
 import json
 from pathlib import Path
 
-from env.warehouse.domain import AgentState, DeliveryTask, WarehouseState, participant_study_config
-from env.warehouse.environment import WarehouseMultiAgentEnv
-from env.warehouse.layouts import STUDY_MAP_LAYOUT
-from env.warehouse.numpy_policy import NumpyWarehousePolicy
-from env.warehouse.navigation import ACTIONS, MOVE_DELTAS, shortest_path_distance
-from env.warehouse.decision_protocol import distribution_decision_metadata
-from env.warehouse.energy_management import charge_release_evidence
-from env.warehouse.frozen_missions import frozen_training_missions
-from env.warehouse import historical_sep2_coordination as historical
+from env.warehouse_legacy_v3.domain import AgentState, DeliveryTask, WarehouseState, participant_study_config
+from env.warehouse_legacy_v3.environment import WarehouseMultiAgentEnv
+from env.warehouse_legacy_v3.layouts import STUDY_MAP_LAYOUT
+from env.warehouse_legacy_v3.numpy_policy import NumpyWarehousePolicy
+from env.warehouse_legacy_v3.navigation import ACTIONS, MOVE_DELTAS, shortest_path_distance
+from env.warehouse_legacy_v3.decision_protocol import distribution_decision_metadata
+from env.warehouse_legacy_v3.energy_management import charge_release_evidence
+from env.warehouse_legacy_v3.frozen_missions import frozen_training_missions
+from env.warehouse_legacy_v3 import historical_sep2_coordination as historical
 
 DOMAIN = "warehouse"
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = json.loads((ROOT / "configs/study_v3_warehouse.json").read_text())
+LEGACY_SOURCE_ROOT = ROOT / "env/warehouse_legacy_v3"
+LEGACY_MANIFEST_SHA256 = "5c583d2efd297f6afcd403799f788d2ed201a7b63e7dd57795b36825ba0f71b1"
 VERSION = CONFIG["version"]
 WIDTH, HEIGHT = STUDY_MAP_LAYOUT.cols, STUDY_MAP_LAYOUT.rows
 CHARGER = tuple(reversed(STUDY_MAP_LAYOUT.charger_position))
@@ -63,10 +65,29 @@ def _unpack(value):
 
 @lru_cache(maxsize=1)
 def _actor():
+    # The v3 config keeps its original source paths and digests. Replay checks
+    # those bytes in the isolated historical package, not the evolving v6
+    # runtime at env/warehouse.
+    manifest_bytes = (LEGACY_SOURCE_ROOT / "source_manifest.json").read_bytes()
+    if sha256(manifest_bytes).hexdigest() != LEGACY_MANIFEST_SHA256:
+        raise RuntimeError("Warehouse historical source manifest mismatch")
+    manifest = json.loads(manifest_bytes)
+    if manifest.get("format") != "warehouse-v3-source-closure.v1":
+        raise RuntimeError("Warehouse historical source manifest mismatch")
+    for name, evidence in manifest["files"].items():
+        if sha256((LEGACY_SOURCE_ROOT / name).read_bytes()).hexdigest() != evidence["sha256"]:
+            raise RuntimeError("Warehouse historical source mismatch: " + name)
     for relative, expected in CONFIG["source_sha256"].items():
-        if sha256((ROOT / relative).read_bytes()).hexdigest() != expected:
+        if sha256(_legacy_source_path(relative).read_bytes()).hexdigest() != expected:
             raise RuntimeError("Warehouse frozen source or actor mismatch: " + relative)
     return NumpyWarehousePolicy.load(ROOT / "output/deployment/warehouse_mappo_v68_6x7_actor.npz")
+
+
+def _legacy_source_path(relative: str) -> Path:
+    prefix = "env/warehouse/"
+    if relative.startswith(prefix):
+        return LEGACY_SOURCE_ROOT / relative[len(prefix):]
+    return ROOT / relative
 
 
 def _snapshot(env):

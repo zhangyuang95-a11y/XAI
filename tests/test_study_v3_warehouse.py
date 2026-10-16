@@ -10,16 +10,16 @@ import types
 import pytest
 
 from domains.warehouse import turnbased as w
-from env.warehouse.domain import participant_study_config
-from env.warehouse.environment import WarehouseMultiAgentEnv
-from env.warehouse.decision_protocol import distribution_decision_metadata
-from env.warehouse.navigation import ACTIONS
+from env.warehouse_legacy_v3.domain import participant_study_config
+from env.warehouse_legacy_v3.environment import WarehouseMultiAgentEnv
+from env.warehouse_legacy_v3.decision_protocol import distribution_decision_metadata
+from env.warehouse_legacy_v3.navigation import ACTIONS
 
 
 def historic_from_git():
     raw = subprocess.check_output(["git", "show", w.CONFIG["controller_commit"] + ":env/warehouse/runtime_coordination.py"], cwd=w.ROOT)
-    module = types.ModuleType("env.warehouse.independent_history_test")
-    module.__package__ = "env.warehouse"
+    module = types.ModuleType("env.warehouse_legacy_v3.independent_history_test")
+    module.__package__ = "env.warehouse_legacy_v3"
     exec(compile(raw, "git:de16551:runtime_coordination", "exec"), module.__dict__)
     return raw, module
 
@@ -47,12 +47,29 @@ def old_step(env, history, seed, human):
 
 def test_exact_history_module_actor_and_dependencies_are_pinned():
     raw, _ = historic_from_git()
-    assert raw == (w.ROOT / "env/warehouse/historical_sep2_coordination.py").read_bytes()
+    assert raw == w._legacy_source_path("env/warehouse/historical_sep2_coordination.py").read_bytes()
     assert sha256(raw).hexdigest() == "ebcbf38c6365752a73b2175ab44750f3231da369421424f5cccd4aada23729c8"
     assert w._actor().artifact_sha256 == "96762a46f59abd24a10b1abedf8dc325d72c85f3af39424c33e2dcba4ef5ffd3"
     for path, digest in w.CONFIG["source_sha256"].items():
-        assert sha256((w.ROOT / path).read_bytes()).hexdigest() == digest
+        assert sha256(w._legacy_source_path(path).read_bytes()).hexdigest() == digest
+    manifest_bytes = (w.LEGACY_SOURCE_ROOT / "source_manifest.json").read_bytes()
+    assert sha256(manifest_bytes).hexdigest() == w.LEGACY_MANIFEST_SHA256
+    manifest = json.loads(manifest_bytes)
+    assert len(manifest["files"]) == 25
+    for name, evidence in manifest["files"].items():
+        historical = subprocess.check_output(
+            ["git", "show", f"{evidence['commit']}:{evidence['source']}"], cwd=w.ROOT)
+        assert historical == (w.LEGACY_SOURCE_ROOT / name).read_bytes()
+        assert sha256(historical).hexdigest() == evidence["sha256"]
     assert w.CONFIG["historical_deployment_timestamp_verified"] is False
+
+
+def test_legacy_replay_and_v6_neural_runtime_use_distinct_physics():
+    from domains.warehouse import neural_turnbased
+
+    assert w.WarehouseMultiAgentEnv is not neural_turnbased.WarehouseMultiAgentEnv
+    assert w.WarehouseMultiAgentEnv.__module__ == "env.warehouse_legacy_v3.environment"
+    assert neural_turnbased.WarehouseMultiAgentEnv.__module__ == "env.warehouse.environment"
 
 
 @pytest.mark.parametrize("task", (1, 2, 3))

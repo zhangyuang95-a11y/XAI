@@ -13,6 +13,7 @@ import json
 from typing import Sequence
 
 import numpy as np
+from .warehouse_v6_tree_routing import leaf_indices as hard_tree_leaf_indices
 
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.public_action_features_v614 import (
@@ -142,22 +143,9 @@ class CoreTreeResult:
         x = np.asarray(encoded, dtype=np.float32)
         if x.ndim != 2 or x.shape[1] != FEATURE_DIM or not np.isfinite(x).all():
             raise ValueError("invalid Warehouse core tree public features")
-        if self.node_count == 0:
-            return np.zeros(len(x), dtype=np.int64)
-        refs = np.full(len(x), 0 if self.node_count else -1, dtype=np.int64)
-        score = np.einsum("nf,kf->nk", x, self.split_weights[:self.node_count],
-                          optimize=False)
-        score += self.split_bias[:self.node_count]
-        for _ in range(MAX_DEPTH):
-            active = np.flatnonzero(refs >= 0)
-            if not len(active):
-                break
-            nodes = refs[active]
-            go_right = score[active, nodes] > 0.0
-            refs[active] = np.where(go_right, self.right_refs[nodes], self.left_refs[nodes])
-        if np.any(refs >= 0):
-            raise RuntimeError("Warehouse sparse core tree exceeded depth five")
-        leaves = -1 - refs
+        leaves = hard_tree_leaf_indices(
+            x, self.split_weights, self.split_bias,
+            self.left_refs, self.right_refs, self.node_count, MAX_DEPTH)
         if np.any(leaves >= self.leaf_count):
             raise RuntimeError("Warehouse sparse core tree reached invalid leaf")
         return leaves

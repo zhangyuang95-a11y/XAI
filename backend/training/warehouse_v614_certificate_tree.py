@@ -17,6 +17,11 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.special import logsumexp
 
+from .warehouse_v6_tree_routing import (
+    HARD_SPLIT_TIE_EPSILON, leaf_indices as hard_tree_leaf_indices,
+    split_scores as hard_tree_split_scores,
+)
+
 
 MAX_DEPTH = 5
 MAX_LEAVES = 16
@@ -190,20 +195,9 @@ class SparseProgramTree:
         x = np.asarray(encoded, dtype=np.float32)
         if x.ndim != 2 or x.shape[1] != self.schema.feature_dim or not np.isfinite(x).all():
             raise ValueError("invalid pre-action features for certificate sparse tree")
-        refs = np.zeros(len(x), dtype=np.int64) if self.node_count else np.full(
-            len(x), -1, dtype=np.int64)
-        for _ in range(MAX_DEPTH):
-            active = np.flatnonzero(refs >= 0)
-            if not len(active):
-                break
-            nodes = refs[active]
-            scores = np.sum(x[active] * self.split_weights[nodes], axis=1)
-            scores += self.split_bias[nodes]
-            refs[active] = np.where(scores > 0.0,
-                                    self.right_refs[nodes], self.left_refs[nodes])
-        if np.any(refs >= 0):
-            raise RuntimeError("certificate sparse tree route exceeded depth")
-        return -1 - refs
+        return hard_tree_leaf_indices(
+            x, self.split_weights, self.split_bias, self.left_refs,
+            self.right_refs, self.node_count, MAX_DEPTH)
 
     def content_sha256(self) -> str:
         digest = sha256(self.schema.sha256().encode())
@@ -481,8 +475,9 @@ def _candidate_splits(
             action: int | None = None,
             allow_small_residual: bool = False) -> None:
         bias = np.float32(-threshold)
-        scores = np.sum(x[rows] * weight[None, :], axis=1) + bias
-        right = scores > 0.0
+        scores = hard_tree_split_scores(
+            x[rows], weight[None, :], np.asarray([bias], dtype=np.float32))[:, 0]
+        right = scores > HARD_SPLIT_TIE_EPSILON
         left_rows, right_rows = rows[~right], rows[right]
         if not len(left_rows) or not len(right_rows):
             return

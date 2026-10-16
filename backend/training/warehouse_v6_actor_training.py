@@ -32,8 +32,11 @@ from .warehouse_v6_actor import (
     CORE_BOUND_MODE,
     GATE_WIDTH, GEOMETRY_DIM,
     _POSITION_COLUMNS, _MOVE, TREE_GRADIENT_SCALE,
-    HARD_SPLIT_ROUTING_VERSION, HARD_SPLIT_TIE_EPSILON,
     _TENSOR_NAMES, _role_arrays, role_sha256,
+)
+from .warehouse_v6_tree_routing import (
+    HARD_SPLIT_ROUTING_VERSION, HARD_SPLIT_TIE_EPSILON,
+    split_scores as hard_tree_split_scores,
 )
 
 def policy_features_torch(obs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -82,12 +85,13 @@ class SparseHardTree(nn.Module):
         values = encoded.reshape(-1, FEATURE_DIM)
         weights = self.effective_weights()
         split = nn.functional.linear(values, weights, self.split.bias)
-        # The hard route must not depend on float32 GEMM batch shape. Keep
-        # the existing float32 surrogate for gradients through the split.
-        hard_split = nn.functional.linear(
-            values.detach().to(torch.float64),
-            weights.detach().to(torch.float64),
-            self.split.bias.detach().to(torch.float64))
+        # Route from the exact same detached split score function used by
+        # frozen Actor inference and certificate programs. The float32 score
+        # above remains the straight-through surrogate for gradients.
+        hard_split = torch.as_tensor(hard_tree_split_scores(
+            values.detach().cpu().numpy(),
+            weights.detach().cpu().numpy(),
+            self.split.bias.detach().cpu().numpy()), device=values.device)
         node_count = int(self.node_count[0])
         leaf_count = int(self.leaf_count[0])
         visited: set[int] = set()

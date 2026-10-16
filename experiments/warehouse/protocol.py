@@ -21,7 +21,7 @@ DEVELOPMENT_PAIR_SEEDS = (6120, 6121, 6122)
 FORMAL_PAIR_SEEDS = (6101, 6102, 6103)
 # Candidate-only development seed. PairRunSpec and release acceptance continue
 # to admit only the registered three development and three formal pairs.
-EXPLORATORY_PAIR_SEEDS = (12469, 12470)
+EXPLORATORY_PAIR_SEEDS = (12469, 12470, 12471)
 DEVELOPMENT_SELECTION_SEEDS = tuple(range(261_100, 261_124))
 DEVELOPMENT_STRESS_BASE_SEEDS = tuple(range(261_200, 261_456))
 DEVELOPMENT_PROGRAM_AUDIT_SEEDS = tuple(range(261_500, 261_524))

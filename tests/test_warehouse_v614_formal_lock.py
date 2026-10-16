@@ -14,17 +14,16 @@ from experiments.warehouse import protocol
 
 
 def test_exploratory_successor_bc_and_critic_seeds_are_fresh():
-    old = {seed for rows in runner.exploratory_stage1_bc_seed_schedule(12469).values()
-           for seed in rows}
-    next_pair = {seed for rows in runner.exploratory_stage1_bc_seed_schedule(
-        12470).values() for seed in rows}
-    old_critic = protocol.bc_critic_reset_schedule(12469,
-                                                   protocol.INITIAL_RELEASE_ID)["seed"]
-    next_critic = protocol.bc_critic_reset_schedule(12470,
-                                                    protocol.INITIAL_RELEASE_ID)["seed"]
-    assert len(old) == len(next_pair) == 1_394
-    assert not (old | {12469, old_critic}) & (
-        next_pair | {12470, next_critic})
+    seen: set[int] = set()
+    for pair_seed in protocol.EXPLORATORY_PAIR_SEEDS:
+        bc = {seed for rows in runner.exploratory_stage1_bc_seed_schedule(
+            pair_seed).values() for seed in rows}
+        critic = protocol.bc_critic_reset_schedule(
+            pair_seed, protocol.INITIAL_RELEASE_ID)["seed"]
+        current = bc | {pair_seed, critic}
+        assert len(bc) == 1_394
+        assert not seen & current
+        seen.update(current)
 
 
 def _checked_spec(output_dir: Path) -> tuple[dict, protocol.PairRunSpec]:

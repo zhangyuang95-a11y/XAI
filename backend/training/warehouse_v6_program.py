@@ -25,6 +25,9 @@ from .warehouse_v6_actor import (
     FEATURE_DIM, FEATURE_NAMES, FEATURE_SCHEMA_SHA256,
     FrozenWarehouseV6Actor, FrozenWarehouseV6Role,
 )
+from .warehouse_v6_tree_routing import (
+    HARD_SPLIT_TIE_EPSILON, split_scores as hard_tree_split_scores,
+)
 
 
 PROGRAM_VERSION = "warehouse-role-program.v6.14-public-affordance-exploratory"
@@ -218,18 +221,15 @@ class WarehouseV6Program:
 
     def _leaf_encoded(self, encoded: np.ndarray) -> tuple[int, list[dict]]:
         node, path = int(self.root_ref), []
-        # The extracted Actor topology must use the same float32 reduction and
-        # tie direction as frozen NumPy inference, including boundary states.
-        actor_scores = None
-        if self.report.get("fit_method") == ACTOR_SPARSE_TOPOLOGY_METHOD:
-            values = np.asarray(encoded, dtype=np.float32).reshape(1, FEATURE_DIM)
-            actor_scores = np.einsum(
-                "nf,kf->nk", values, self.split_weights, optimize=False)[0]
-            actor_scores += self.split_bias
+        # One routing contract is shared by the Actor, core refit, and
+        # explanatory program, including exact threshold boundary states.
+        scores = hard_tree_split_scores(
+            np.asarray(encoded, dtype=np.float32).reshape(1, FEATURE_DIM),
+            self.split_weights, self.split_bias)[0]
         while node >= 0:
             weights = self.split_weights[node]
-            value = (float(actor_scores[node]) if actor_scores is not None else
-                     float(encoded @ weights + self.split_bias[node]))
+            value = float(scores[node])
+            go_right = value > HARD_SPLIT_TIE_EPSILON
             nonzero = np.flatnonzero(weights != 0.0)
             path.append({
                 "features": [{
@@ -238,9 +238,9 @@ class WarehouseV6Program:
                     "observed": float(encoded[index]),
                 } for index in nonzero],
                 "bias": float(self.split_bias[node]), "value": value,
-                "branch": "left" if value <= 0.0 else "right",
+                "branch": "right" if go_right else "left",
             })
-            node = int(self.left_refs[node] if value <= 0.0 else self.right_refs[node])
+            node = int(self.right_refs[node] if go_right else self.left_refs[node])
         return -1 - node, path
 
     def leaf_indices(self, encoded: np.ndarray) -> np.ndarray:

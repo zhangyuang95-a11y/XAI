@@ -27,6 +27,9 @@ from env.warehouse.public_action_features_v614 import (
     TREE_FEATURE_NAMES, TREE_MASK_START, action_features_from_tree_encoded,
     encode_actor_tree_features,
 )
+from .warehouse_v6_tree_routing import (
+    HARD_SPLIT_ROUTING_VERSION, leaf_indices as hard_tree_leaf_indices,
+)
 
 
 MODEL_VERSION = "warehouse-dual-actor.v6.14-public-affordance-exploratory"
@@ -51,8 +54,6 @@ _MOVE = np.asarray([MOVE_DELTAS.get(action, (0, 0)) for action in ACTIONS],
                        [max(1, STUDY_MAP_LAYOUT.rows - 1),
                         max(1, STUDY_MAP_LAYOUT.cols - 1)], dtype=np.float32)
 TREE_GRADIENT_SCALE = 4.0
-HARD_SPLIT_ROUTING_VERSION = "fp64-left-tie-1e-10.v1"
-HARD_SPLIT_TIE_EPSILON = 1.0e-10
 MASK_GRADIENT_TEMPERATURE = 0.05
 _TENSOR_NAMES = (
     "tree.split.weight", "tree.split.bias", "tree.leaf_logits",
@@ -224,27 +225,11 @@ class FrozenWarehouseV6Role:
         selected = np.argsort(-np.abs(weight), axis=-1, kind="stable")[:, :MAX_SPLIT_FEATURES]
         sparse = np.zeros_like(weight)
         np.put_along_axis(sparse, selected, 1.0, axis=-1)
-        # A float32 GEMM can change the sign of a threshold score depending
-        # on batch size. Route with the same float64 arithmetic and explicit
-        # left tie used by the training Actor's hard path.
-        split = np.einsum("nf,kf->nk", flat.astype(np.float64),
-                          (weight * sparse).astype(np.float64), optimize=False)
-        split += self.weights["tree.split.bias"].astype(np.float64)
-        refs = np.full(len(flat), 0 if int(self.weights["tree.node_count"][0]) else -1,
-                       dtype=np.int64)
-        left = self.weights["tree.left_refs"].astype(np.int64)
-        right = self.weights["tree.right_refs"].astype(np.int64)
-        for _ in range(TREE_DEPTH):
-            active = refs >= 0
-            if not np.any(active):
-                break
-            rows = np.flatnonzero(active)
-            nodes = refs[rows]
-            go_right = split[rows, nodes] > HARD_SPLIT_TIE_EPSILON
-            refs[rows] = np.where(go_right, right[nodes], left[nodes])
-        if np.any(refs >= 0):
-            raise RuntimeError("Warehouse v6 irregular tree did not terminate")
-        return (-1 - refs).reshape(data.shape[:-1])
+        leaves = hard_tree_leaf_indices(
+            flat, weight * sparse, self.weights["tree.split.bias"],
+            self.weights["tree.left_refs"], self.weights["tree.right_refs"],
+            int(self.weights["tree.node_count"][0]), TREE_DEPTH)
+        return leaves.reshape(data.shape[:-1])
 
     def components_encoded(self, encoded: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         data = np.asarray(encoded, dtype=np.float32)

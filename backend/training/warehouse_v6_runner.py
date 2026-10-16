@@ -173,6 +173,7 @@ _SOURCE_FILES = (
     "backend/training/warehouse_sparse_v5.py",
     "backend/inference/__init__.py", "backend/inference/warehouse_structured_v5.py",
     "backend/training/warehouse_v6_actor.py", "backend/training/warehouse_v6_actor_training.py",
+    "backend/training/warehouse_v6_tree_routing.py",
     "backend/training/warehouse_v6_collision_critic.py", "backend/training/warehouse_v6_program.py",
     "backend/training/warehouse_v6_core_tree.py",
     "backend/training/warehouse_v6_core_intrinsic.py",

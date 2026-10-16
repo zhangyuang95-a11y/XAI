@@ -9,6 +9,7 @@ from copy import deepcopy
 import pytest
 
 from backend.training.warehouse_v6_actor import MODEL_VERSION, FEATURE_SCHEMA_SHA256
+from env.warehouse.public_action_features_v614 import ACTION_PHYSICS_CONFIG_SHA256
 from experiments.warehouse import protocol as p
 from study_v3 import release_catalog as catalog
 
@@ -111,6 +112,7 @@ def _synthetic_package(root: Path) -> dict:
             "policy_id": f"warehouse-{variant}-v6",
             "model_version": MODEL_VERSION,
             "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+            "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
             "actor_path": row["actor"]["path"],
             "actor_sha256": row["actor"]["sha256"],
             "training_report_path": row["training_report"]["path"],
@@ -194,7 +196,9 @@ def test_acceptance_proof_is_reused_only_for_unchanged_evidence(tmp_path, monkey
                "program_hashes": {path: entry["program_sha256"][role]
                                   for role, path in zip(p.ROLES, entry["program_paths"])},
                "actor_model_version": entry["model_version"],
-               "feature_schema_sha256": entry["feature_schema_sha256"]}
+               "feature_schema_sha256": entry["feature_schema_sha256"],
+               "action_physics_config_sha256": entry[
+                   "action_physics_config_sha256"]}
     calls = []
     monkeypatch.setattr(verifier, "validate_acceptance",
                         lambda *args, **kwargs: calls.append(True) or True)
@@ -239,7 +243,9 @@ def test_catalog_replacement_during_acceptance_cannot_cache_old_proof(
                "program_hashes": {path: entry["program_sha256"][role]
                                   for role, path in zip(p.ROLES, entry["program_paths"])},
                "actor_model_version": entry["model_version"],
-               "feature_schema_sha256": entry["feature_schema_sha256"]}
+               "feature_schema_sha256": entry["feature_schema_sha256"],
+               "action_physics_config_sha256": entry[
+                   "action_physics_config_sha256"]}
 
     changed = deepcopy(json.loads(catalog_path.read_text()))
     payload = b"semantically-invalid-new-budget-receipt"

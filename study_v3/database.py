@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS pl3_policy_bindings (
 );
 CREATE TABLE IF NOT EXISTS pl3_policy_binding_metadata (
  instance_id TEXT PRIMARY KEY, actor_model_version TEXT NOT NULL,
- feature_schema_sha256 TEXT NOT NULL, created DOUBLE PRECISION NOT NULL
+ feature_schema_sha256 TEXT NOT NULL, created DOUBLE PRECISION NOT NULL,
+ action_physics_config_sha256 TEXT
 );
 CREATE TABLE IF NOT EXISTS pl3_runs (
  id TEXT PRIMARY KEY, instance_id TEXT NOT NULL, task INTEGER NOT NULL,
@@ -252,11 +253,27 @@ class Database:
                 for sql in SCHEMA.split(';'):
                     if sql.strip():
                         db.execute(sql)
+                self._upgrade_binding_physics_metadata(db)
                 if self.postgres:
                     self._upgrade_timestamp_precision(db)
         except BaseException:
             self.close()
             raise
+
+    @staticmethod
+    def _upgrade_binding_physics_metadata(db):
+        """Add the v6.14 physics binding without rewriting historical rows."""
+        if db.postgres:
+            rows = db.all("""SELECT column_name FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                AND table_name = 'pl3_policy_binding_metadata'""")
+            names = {row['column_name'] for row in rows}
+        else:
+            names = {row['name'] for row in db.all(
+                'PRAGMA table_info(pl3_policy_binding_metadata)')}
+        if 'action_physics_config_sha256' not in names:
+            db.execute('ALTER TABLE pl3_policy_binding_metadata '
+                       'ADD COLUMN action_physics_config_sha256 TEXT')
 
     @staticmethod
     def _upgrade_timestamp_precision(db):

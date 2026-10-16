@@ -240,10 +240,18 @@ def reconstruct_public_history(frames: list[dict] | tuple[dict, ...],
     collision_kind = None
     same_target_streak = 0
     episode_id = frames[0].get("episode_id")
+    # Historical v6 frames carry the public-observation digest; the v6.14
+    # Actor binds its larger action-affordance schema in the same public field.
+    # A prefix must use one schema throughout, including when replayed later.
+    from .public_action_features_v614 import ACTOR_FEATURE_SCHEMA_SHA256
+    frame_schema = frames[0].get("feature_schema_sha256")
+    if frame_schema not in (FEATURE_SCHEMA_SHA256,
+                            ACTOR_FEATURE_SCHEMA_SHA256):
+        raise ValueError("public Warehouse frame feature schema is unknown")
     for index, frame in enumerate(frames):
         if (frame.get("turn") != index or frame.get("episode_id") != episode_id
                 or frame.get("map_id") != STUDY_MAP_LAYOUT.layout_id
-                or frame.get("feature_schema_sha256") != FEATURE_SCHEMA_SHA256):
+                or frame.get("feature_schema_sha256") != frame_schema):
             raise ValueError("public Warehouse frames must start at turn zero and be consecutive")
         previous = frame.get("previous_joint_actions")
         kind = frame.get("previous_collision_kind")

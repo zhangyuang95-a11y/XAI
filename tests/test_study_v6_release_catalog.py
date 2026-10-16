@@ -180,7 +180,9 @@ def test_warehouse_v6_binding_metadata_is_required_on_restore(tmp_path, monkeypa
             with pytest.raises(StudyError, match="policy_binding_metadata_missing"):
                 store._binding(db, instance)
         with store.db.transaction() as db:
-            db.execute("INSERT INTO pl3_policy_binding_metadata VALUES(?,?,?,?)",
+            db.execute("INSERT INTO pl3_policy_binding_metadata "
+                       "(instance_id,actor_model_version,feature_schema_sha256,created) "
+                       "VALUES(?,?,?,?)",
                        (instance["id"], "warehouse-dual-actor.v6.1", "d" * 64, 1.0))
         with store.db.transaction(read_only=True) as db:
             restored = store._binding(db, instance)

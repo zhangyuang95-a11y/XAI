@@ -52,6 +52,7 @@ def bound_v6(tmp_path, monkeypatch):
             "policy_id": f"warehouse-{variant}-v6",
             "model_version": warehouse.V6_MODEL_VERSION,
             "feature_schema_sha256": warehouse.V6_FEATURE_SCHEMA_SHA256,
+            "action_physics_config_sha256": warehouse.ACTION_PHYSICS_CONFIG_SHA256,
             "actor_path": path.name, "actor_sha256": artifact["sha256"],
             "role_sha256": {"human": artifact["role_sha256"]["robot_1"],
                             "ai": artifact["role_sha256"]["robot_2"]},

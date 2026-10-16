@@ -132,7 +132,8 @@ class Store:
         except (TypeError, ValueError) as exc:
             raise StudyError('policy_binding_mismatch', 503) from exc
         if row['domain'] == 'warehouse':
-            metadata = db.one('SELECT actor_model_version,feature_schema_sha256 '
+            metadata = db.one('SELECT actor_model_version,feature_schema_sha256,'
+                              'action_physics_config_sha256 '
                               'FROM pl3_policy_binding_metadata WHERE instance_id=?',
                               (instance['id'],))
             if (metadata is None or not metadata['actor_model_version']
@@ -365,8 +366,11 @@ class Store:
                     schema = binding.get('feature_schema_sha256')
                     if not model_version or not schema:
                         raise StudyError('policy_binding_metadata_missing',503)
-                    db.execute('INSERT INTO pl3_policy_binding_metadata VALUES(?,?,?,?)',
-                        (iid,model_version,schema,time.time()))
+                    db.execute('INSERT INTO pl3_policy_binding_metadata '
+                               '(instance_id,actor_model_version,feature_schema_sha256,'
+                               'created,action_physics_config_sha256) VALUES(?,?,?,?,?)',
+                        (iid,model_version,schema,time.time(),
+                         binding.get('action_physics_config_sha256')))
                 assignment='researcher_override' if requested_group else 'randomized_balanced'
                 db.execute('INSERT INTO pl3_enrollments VALUES(?,?,?,?,?,?)',(iid,1,language,assignment,config.get('scenario_version',config['version']),time.time()))
                 db.execute('INSERT INTO pl3_reward_settings VALUES(?,?)',(iid,encode(rewards.policy(domain))))

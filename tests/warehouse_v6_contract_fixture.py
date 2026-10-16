@@ -5,6 +5,7 @@ from experiments.warehouse import protocol as p
 
 def bc_receipt(pair_seed: int, source_closure_sha256: str) -> dict:
     schedule = p.bc_data_seed_schedule(pair_seed)
+    critic_resets = p.bc_critic_reset_schedule(pair_seed, p.INITIAL_RELEASE_ID)
     stages = []
     for name, epochs in p.bc_stage_receipt_shape():
         if epochs is None:
@@ -47,6 +48,8 @@ def bc_receipt(pair_seed: int, source_closure_sha256: str) -> dict:
         "source_closure_sha256": source_closure_sha256,
         "bc_data_seed_blocks": schedule,
         "bc_data_seed_schedule_sha256": p._hash_json(schedule),
+        "bc_critic_reset_schedule": critic_resets,
+        "bc_critic_reset_schedule_sha256": p._hash_json(critic_resets),
         "teacher_uses_hidden_goal_or_route_state": False,
         "offline_critic_used_at_execution": False,
         "collision_critic": {
@@ -58,7 +61,10 @@ def bc_receipt(pair_seed: int, source_closure_sha256: str) -> dict:
                 "collision_critic_learning_rate"],
             "positive_weight": p.REGISTERED_BC_SPEC[
                 "collision_critic_positive_weight"],
-            "seed": pair_seed + 6_200, "validation_passed": True,
+            "seed": critic_resets["seed"],
+            "environment_reset_seed": critic_resets["seed"],
+            "environment_reset_count": critic_resets["environment_reset_count"],
+            "validation_passed": True,
         },
         "bc_stages": stages,
     }

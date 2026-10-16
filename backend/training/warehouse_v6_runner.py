@@ -26,7 +26,7 @@ from experiments.warehouse.protocol import (
     FINAL_PROGRAM_SPLIT_COUNTS, REGISTERED_BC_RECIPE_VERSION, REGISTERED_BC_SPEC,
     REGISTERED_BC_SPEC_SHA256, PROGRAM_FIT_METHOD_CANDIDATES,
     REGISTERED_RISK_DUAL_CONFIG, REGISTERED_RISK_DUAL_CONFIG_SHA256,
-    bc_data_seed_schedule, bc_report_valid,
+    bc_data_seed_schedule, bc_critic_reset_schedule, bc_report_valid,
     SCENARIO_BLOCK_STEPS, online_program_cohorts_valid,
     scenario_seed, scenario_schedule_sha256,
 )
@@ -180,6 +180,8 @@ def _scientific_run_spec_sha256(spec: Mapping) -> str:
         bc_recipe_sha256=spec["bc_recipe_sha256"],
         risk_dual_config_sha256=spec["risk_dual_config_sha256"],
         bc_data_seed_schedule_sha256=spec["bc_data_seed_schedule_sha256"],
+        bc_critic_reset_schedule_sha256=spec[
+            "bc_critic_reset_schedule_sha256"],
     )
     canonical = registered.to_mapping()
     if _digest_json({key: spec.get(key) for key in canonical}) != _digest_json(canonical):
@@ -275,6 +277,13 @@ def _checked_spec(run_spec: Mapping) -> dict:
             raise ValueError("Warehouse v6 BC stage seed schedule is not preregistered")
         result["bc_data_seed_schedule"] = bc_schedule
         result["bc_data_seed_schedule_sha256"] = _digest_json(bc_schedule)
+        critic_resets = bc_critic_reset_schedule(result["pair_seed"], release_id)
+        if (run_spec.get("bc_critic_reset_schedule") != critic_resets
+                or run_spec.get("bc_critic_reset_schedule_sha256") !=
+                _digest_json(critic_resets)):
+            raise ValueError("Warehouse v6 critic reset schedule is not preregistered")
+        result["bc_critic_reset_schedule"] = critic_resets
+        result["bc_critic_reset_schedule_sha256"] = _digest_json(critic_resets)
     if smoke:
         result["smoke"] = True
     elif any(key in run_spec for key in REGISTERED_BC_SPEC):
@@ -740,11 +749,16 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
     torch.set_num_threads(2)
     torch.manual_seed(pair_seed)
     expected_seed_blocks = bc_data_seed_schedule(pair_seed)
+    expected_critic_resets = bc_critic_reset_schedule(
+        pair_seed, spec["release_id"])
     if (spec.get("bc_recipe_version") != BC_RECIPE_VERSION
             or spec.get("bc_recipe_sha256") != REGISTERED_BC_SPEC_SHA256
             or spec.get("bc_data_seed_schedule") != expected_seed_blocks
             or spec.get("bc_data_seed_schedule_sha256") !=
             _digest_json(expected_seed_blocks)
+            or spec.get("bc_critic_reset_schedule") != expected_critic_resets
+            or spec.get("bc_critic_reset_schedule_sha256") !=
+            _digest_json(expected_critic_resets)
             or spec.get("risk_dual_config_sha256") !=
             REGISTERED_RISK_DUAL_CONFIG_SHA256):
         raise RuntimeError("Warehouse production BC recipe or stage seed lock drifted")
@@ -827,7 +841,7 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
                        "actor_role_sha256": role_hashes(model)})
 
     critic, critic_report = train_collision_critic(
-        seed=pair_seed + 6200,
+        seed=expected_critic_resets["seed"],
         epochs=REGISTERED_BC_SPEC["collision_critic_epochs"],
         batch_size=REGISTERED_BC_SPEC["collision_critic_batch_size"],
         learning_rate=REGISTERED_BC_SPEC["collision_critic_learning_rate"],
@@ -842,7 +856,11 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
             or critic_report.get("learning_rate") !=
             REGISTERED_BC_SPEC["collision_critic_learning_rate"]
             or critic_report.get("positive_weight") !=
-            REGISTERED_BC_SPEC["collision_critic_positive_weight"]):
+            REGISTERED_BC_SPEC["collision_critic_positive_weight"]
+            or critic_report.get("environment_reset_seed") !=
+            expected_critic_resets["seed"]
+            or critic_report.get("environment_reset_count") !=
+            expected_critic_resets["environment_reset_count"]):
         raise RuntimeError("Warehouse BC real-event collision critic failed validation")
     critic.eval()
     for parameter in critic.parameters():
@@ -918,6 +936,8 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
         "collision_critic": critic_report,
         "bc_data_seed_blocks": all_seed_blocks,
         "bc_data_seed_schedule_sha256": _digest_json(all_seed_blocks),
+        "bc_critic_reset_schedule": expected_critic_resets,
+        "bc_critic_reset_schedule_sha256": _digest_json(expected_critic_resets),
         "bc_stages": stages,
         "final_bc_training_reliability": _bc_reliability(model, obs, mask, labels),
         "training_dependencies": {
@@ -1652,6 +1672,51 @@ def _role_weight_change(initial: Mapping[str, torch.Tensor],
     return result
 
 
+def _state_dict_sha256(state: Mapping[str, torch.Tensor]) -> str:
+    """Hash every parameter and buffer independently of torch serialization."""
+    digest = sha256()
+    for name, tensor in sorted(state.items()):
+        if not isinstance(name, str) or not isinstance(tensor, torch.Tensor):
+            raise RuntimeError("Warehouse checkpoint contains a non-tensor state")
+        array = tensor.detach().cpu().contiguous().numpy()
+        digest.update(name.encode())
+        digest.update(str(array.dtype).encode())
+        digest.update(np.asarray(array.shape, dtype="<i8").tobytes())
+        digest.update(array.tobytes())
+    return digest.hexdigest()
+
+
+_RESUME_PROGRESS_FIELDS = (
+    "used_steps", "episode_number", "histories", "updates", "development",
+    "next_eval", "next_extraction_index", "last_extraction_step",
+    "risk_dual_snapshot", "extractions",
+)
+
+
+def _resume_progress_sha256(checkpoint: Mapping) -> str:
+    return _digest_json({name: checkpoint[name] for name in
+                         _RESUME_PROGRESS_FIELDS})
+
+
+def _verify_episode_progress(histories: Sequence[Mapping], used_steps: int,
+                             episode_number: int) -> None:
+    """A resumed trajectory must cover exactly the reported joint steps."""
+    if (type(used_steps) is not int or used_steps < 0
+            or type(episode_number) is not int
+            or episode_number != len(histories)):
+        raise RuntimeError("Warehouse checkpoint episode count or steps changed")
+    cursor = 0
+    for index, row in enumerate(histories):
+        steps = row.get("joint_steps")
+        if (type(steps) is not int or steps <= 0
+                or row.get("start_joint_step") != cursor
+                or row.get("episode_index") != index):
+            raise RuntimeError("Warehouse checkpoint episode trajectory changed")
+        cursor += steps
+    if cursor != used_steps:
+        raise RuntimeError("Warehouse checkpoint episode steps changed")
+
+
 def _save_checkpoint(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -1698,7 +1763,10 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 or saved.get("model_version") != MODEL_VERSION
                 or saved.get("feature_schema_sha256") != FEATURE_SCHEMA_SHA256
                 or (not spec.get("smoke") and (
-                    saved.get("program_fit_method") != spec["program_fit_method"]
+                    saved.get("run_spec_sha256") != run_spec_sha256
+                    or saved.get("pair_seed") != spec["pair_seed"]
+                    or saved.get("joint_steps") != spec["joint_steps"]
+                    or saved.get("program_fit_method") != spec["program_fit_method"]
                     or saved.get("bc_recipe_sha256") != spec["bc_recipe_sha256"]
                     or saved.get("bc_data_seed_schedule_sha256") !=
                     spec["bc_data_seed_schedule_sha256"]
@@ -1706,7 +1774,47 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                     spec["risk_dual_config_sha256"]))):
             raise RuntimeError("Warehouse v6 checkpoint identity or Actor start mismatch")
         if saved.get("complete"):
+            if not spec.get("smoke"):
+                selected = saved.get("selected_state_dict")
+                report = saved.get("report")
+                if (not isinstance(selected, Mapping)
+                        or not isinstance(report, Mapping)
+                        or saved.get("selected_state_sha256") !=
+                        _state_dict_sha256(selected)
+                        or saved.get("report_sha256") != _digest_json(report)
+                        or saved.get("selected_programs_sha256") !=
+                        _digest_json(saved.get("selected_programs"))
+                        or report.get("run_spec_sha256") != run_spec_sha256
+                        or report.get("training_config_sha256") != spec_hash
+                        or report.get("source_closure_sha256") !=
+                        spec["source_closure_sha256"]
+                        or report.get("pair_seed") != spec["pair_seed"]
+                        or report.get("variant") != variant
+                        or report.get("joint_steps") != spec["joint_steps"]
+                        or report.get("actor_decisions") !=
+                        2 * spec["joint_steps"]
+                        or report.get("program_fit_method") !=
+                        spec["program_fit_method"]
+                        or report.get("bc_recipe_sha256") !=
+                        spec["bc_recipe_sha256"]
+                        or report.get("bc_data_seed_schedule_sha256") !=
+                        spec["bc_data_seed_schedule_sha256"]
+                        or report.get("risk_dual_config_sha256") !=
+                        spec["risk_dual_config_sha256"]
+                        or report.get("actual_episode_resets_sha256") !=
+                        _digest_json(report.get("actual_episode_resets"))):
+                    raise RuntimeError("Warehouse completed checkpoint evidence changed")
+                _verify_episode_progress(report.get("training_episodes", ()),
+                                         report["joint_steps"],
+                                         len(report.get("training_episodes", ())))
+                if (not report.get("updates")
+                        or report["updates"][-1].get("joint_steps") !=
+                        spec["joint_steps"]):
+                    raise RuntimeError("Warehouse completed checkpoint updates changed")
             model.load_state_dict(saved["selected_state_dict"])
+            if (not spec.get("smoke") and
+                    report["selected_role_sha256"] != role_hashes(model)):
+                raise RuntimeError("Warehouse completed checkpoint Actor hash changed")
             restored = {role: WarehouseV6Program.from_dict(
                 payload, actor_role_sha256=role_hashes(model)[role])
                 for role, payload in saved.get("selected_programs", {}).items()}
@@ -1716,6 +1824,28 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                             for program in restored.values())):
                 raise RuntimeError("Warehouse resumed selected program method drifted")
             return model, restored, saved["report"]
+        if not spec.get("smoke"):
+            state = saved.get("state_dict")
+            best_saved = saved.get("best")
+            if (not isinstance(state, Mapping)
+                    or saved.get("state_sha256") != _state_dict_sha256(state)
+                    or saved.get("resume_progress_sha256") !=
+                    _resume_progress_sha256(saved)
+                    or saved.get("best_state_sha256") !=
+                    (_state_dict_sha256(best_saved["state_dict"])
+                     if best_saved is not None else None)
+                    or type(saved.get("used_steps")) is not int
+                    or not 0 <= saved["used_steps"] <= spec["joint_steps"]
+                    or type(saved.get("next_extraction_index")) is not int
+                    or not 0 <= saved["next_extraction_index"] <=
+                    len(extraction_steps)):
+                raise RuntimeError("Warehouse partial checkpoint evidence changed")
+            _verify_episode_progress(saved.get("histories", ()),
+                                     saved["used_steps"], saved.get("episode_number"))
+            if (not saved.get("updates") or
+                    saved["updates"][-1].get("joint_steps") !=
+                    saved["used_steps"]):
+                raise RuntimeError("Warehouse partial checkpoint updates changed")
         model.load_state_dict(saved["state_dict"])
         optimizer.load_state_dict(saved["optimizer"])
         generator.set_state(saved["generator_state"])
@@ -1843,9 +1973,12 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                                       for role in AGENTS} if programs is not None else {}),
                         "selected_update_index": len(updates)}
             next_eval += interval
-            _save_checkpoint(checkpoint, {
+            checkpoint_payload = {
                 "training_config_sha256": spec_hash, "variant": variant,
                 "source_closure_sha256": spec["source_closure_sha256"],
+                "run_spec_sha256": run_spec_sha256,
+                "pair_seed": spec["pair_seed"],
+                "joint_steps": spec["joint_steps"],
                 "initial_role_sha256": initial_role_hashes,
                 "model_version": MODEL_VERSION,
                 "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
@@ -1872,7 +2005,14 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                               for role in AGENTS} if programs is not None else {}),
                 "program_validation_rows": program_validation_rows,
                 "extractions": extractions,
-            })
+            }
+            checkpoint_payload["state_sha256"] = _state_dict_sha256(
+                checkpoint_payload["state_dict"])
+            checkpoint_payload["best_state_sha256"] = (
+                _state_dict_sha256(best["state_dict"]) if best is not None else None)
+            checkpoint_payload["resume_progress_sha256"] = \
+                _resume_progress_sha256(checkpoint_payload)
+            _save_checkpoint(checkpoint, checkpoint_payload)
     if best is None:
         raise RuntimeError("Warehouse v6 training produced no selected checkpoint")
     if variant == "regularized" and spec.get("smoke", False):
@@ -1932,6 +2072,9 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         "bc_recipe_sha256": spec.get("bc_recipe_sha256"),
         "bc_data_seed_schedule_sha256": spec.get(
             "bc_data_seed_schedule_sha256"),
+        "bc_critic_reset_schedule": spec.get("bc_critic_reset_schedule"),
+        "bc_critic_reset_schedule_sha256": spec.get(
+            "bc_critic_reset_schedule_sha256"),
         "risk_dual_config_sha256": spec.get("risk_dual_config_sha256"),
         "online_program_extraction_steps": list(extraction_steps),
         "online_program_split_block_cycle": dict(FINAL_PROGRAM_SPLIT_COUNTS),
@@ -1987,9 +2130,12 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
     }
     if variant == "raw" and (any(feedback_rows.values()) or any(gradient_norm.values())):
         raise RuntimeError("Warehouse v6 raw baseline received a program gradient")
-    _save_checkpoint(checkpoint, {
+    completed_checkpoint = {
         "training_config_sha256": spec_hash, "variant": variant,
         "source_closure_sha256": spec["source_closure_sha256"],
+        "run_spec_sha256": run_spec_sha256,
+        "pair_seed": spec["pair_seed"],
+        "joint_steps": spec["joint_steps"],
         "initial_role_sha256": initial_role_hashes,
         "model_version": MODEL_VERSION,
         "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
@@ -2001,7 +2147,13 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         "selected_programs": {role: program.to_dict()
                               for role, program in selected_programs.items()},
         "report": report,
-    })
+    }
+    completed_checkpoint["selected_state_sha256"] = _state_dict_sha256(
+        completed_checkpoint["selected_state_dict"])
+    completed_checkpoint["selected_programs_sha256"] = _digest_json(
+        completed_checkpoint["selected_programs"])
+    completed_checkpoint["report_sha256"] = _digest_json(report)
+    _save_checkpoint(checkpoint, completed_checkpoint)
     return model, selected_programs, report
 
 
@@ -2013,6 +2165,7 @@ def train_pair(run_spec: Mapping) -> dict:
     directory.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(spec["pair_seed"])
     base = WarehouseV6Actor()
+    fresh_initial_role_hashes = role_hashes(base)
     bc_checkpoint = directory / "paired_bc.checkpoint.pt"
     spec_hash = _training_config_sha256(spec)
     run_spec_sha256 = _scientific_run_spec_sha256(spec)
@@ -2021,15 +2174,30 @@ def train_pair(run_spec: Mapping) -> dict:
         if (saved.get("training_config_sha256") != spec_hash
                 or saved.get("source_closure_sha256") != spec["source_closure_sha256"]
                 or (not spec.get("smoke") and (
-                    saved.get("bc_recipe_sha256") != spec["bc_recipe_sha256"]
+                    saved.get("run_spec_sha256") != run_spec_sha256
+                    or saved.get("pair_seed") != spec["pair_seed"]
+                    or saved.get("joint_steps") != spec["joint_steps"]
+                    or saved.get("risk_dual_config_sha256") !=
+                    spec["risk_dual_config_sha256"]
+                    or saved.get("model_version") != MODEL_VERSION
+                    or saved.get("bc_recipe_sha256") != spec["bc_recipe_sha256"]
                     or saved.get("bc_data_seed_schedule_sha256") !=
                     spec["bc_data_seed_schedule_sha256"]
                     or saved.get("program_fit_method") !=
                     spec["program_fit_method"]))):
             raise RuntimeError("Warehouse v6 BC checkpoint run spec mismatch")
+        if (not spec.get("smoke") and (
+                saved.get("state_sha256") !=
+                _state_dict_sha256(saved.get("state_dict", {}))
+                or saved.get("report_sha256") !=
+                _digest_json(saved.get("report")))):
+            raise RuntimeError("Warehouse v6 BC checkpoint evidence changed")
         base.load_state_dict(saved["state_dict"])
         bc_report = saved["report"]
-        if bc_report["pretrained_role_sha256"] != role_hashes(base):
+        if (bc_report["pretrained_role_sha256"] != role_hashes(base)
+                or (not spec.get("smoke") and
+                    bc_report.get("initial_role_sha256") !=
+                    fresh_initial_role_hashes)):
             raise RuntimeError("Warehouse v6 BC checkpoint Actor hashes mismatch")
         if (not spec.get("smoke") and not bc_report_valid(
                 bc_report, spec["pair_seed"], spec["source_closure_sha256"])):
@@ -2040,14 +2208,22 @@ def train_pair(run_spec: Mapping) -> dict:
                 bc_report, spec["pair_seed"], spec["source_closure_sha256"])):
             raise RuntimeError("Warehouse v6 produced an invalid BC stage receipt")
         _assert_source_closure(spec["source_closure_sha256"])
-        _save_checkpoint(bc_checkpoint, {"training_config_sha256": spec_hash,
-                                         "source_closure_sha256": spec["source_closure_sha256"],
-                                         "program_fit_method": spec.get("program_fit_method"),
-                                         "bc_recipe_sha256": spec.get("bc_recipe_sha256"),
-                                         "bc_data_seed_schedule_sha256": spec.get(
-                                             "bc_data_seed_schedule_sha256"),
-                                         "state_dict": base.state_dict(),
-                                         "report": bc_report})
+        bc_payload = {
+            "training_config_sha256": spec_hash,
+            "run_spec_sha256": run_spec_sha256,
+            "pair_seed": spec["pair_seed"], "joint_steps": spec["joint_steps"],
+            "source_closure_sha256": spec["source_closure_sha256"],
+            "model_version": MODEL_VERSION,
+            "program_fit_method": spec.get("program_fit_method"),
+            "bc_recipe_sha256": spec.get("bc_recipe_sha256"),
+            "bc_data_seed_schedule_sha256": spec.get(
+                "bc_data_seed_schedule_sha256"),
+            "risk_dual_config_sha256": spec.get("risk_dual_config_sha256"),
+            "state_dict": base.state_dict(), "report": bc_report,
+        }
+        bc_payload["state_sha256"] = _state_dict_sha256(bc_payload["state_dict"])
+        bc_payload["report_sha256"] = _digest_json(bc_report)
+        _save_checkpoint(bc_checkpoint, bc_payload)
     initial = deepcopy(base.state_dict())
     bc_checkpoint_sha256 = sha256(bc_checkpoint.read_bytes()).hexdigest()
     variants = {}
@@ -2104,9 +2280,14 @@ def train_pair(run_spec: Mapping) -> dict:
         "bc_data_seed_schedule": spec.get("bc_data_seed_schedule"),
         "bc_data_seed_schedule_sha256": spec.get(
             "bc_data_seed_schedule_sha256"),
+        "bc_critic_reset_schedule": spec.get("bc_critic_reset_schedule"),
+        "bc_critic_reset_schedule_sha256": spec.get(
+            "bc_critic_reset_schedule_sha256"),
         "risk_dual_config_sha256": spec.get("risk_dual_config_sha256"),
         "paired_bc_checkpoint_path": str(bc_checkpoint.resolve()),
         "paired_bc_checkpoint_sha256": bc_checkpoint_sha256,
+        "bc_provenance_evidence_scope":
+        "runner_receipt_and_checkpoint_consistency_not_independent_execution_proof",
         "checkpoint_seeds": list(spec["checkpoint_seeds"]),
         "assigned_scenario_schedule_sha256": variants["raw"]["scenario_schedule_sha256"],
         "actual_episode_resets_equal": bool(

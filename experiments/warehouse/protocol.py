@@ -6,6 +6,7 @@ provide training feedback and audited evidence, never an executed action.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from hashlib import sha256
 import json
 import os
@@ -43,7 +44,17 @@ REGISTERED_ARCHITECTURE_MODE = "learned_sparse_tree_256_residual.v6.10-candidate
 # a release selection: the selected method is sealed only after development
 # quality and independent fidelity gates pass. The old axis fit is excluded.
 PROGRAM_FIT_METHOD_CANDIDATES = ("actor_sparse_topology_v1",)
-REGISTERED_BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.10-candidate-1220"
+# The failed 11969 v2 screen does not retire its extractor algorithm: a new
+# Actor may reuse that implementation. Its concrete frozen Actor and source
+# identities must never be promoted as a new registered training result.
+RETIRED_119_ACTOR_SHA256 = "c4080edeaff2b633fbb274db709a0685ce70692978e5fc710c22c8553792584f"
+RETIRED_119_SOURCE_CLOSURE_SHA256 = frozenset({
+    "8569cdf9dcca314d5ec738a62c962bbbc51ea5c3125b3f37677ebb0b6b330be9",
+    "1430c59278e28a672c636682225bb94d9ecfae655ccb937c26f6cee0df14642e",
+})
+RETIRED_119_MODEL_VERSION = "warehouse-dual-actor.v6.9-exploratory"
+REGISTERED_BC_RECIPE_VERSION = (
+    "warehouse-public-dual-bc.v6.10-candidate-1220-plus2criticresets")
 # These are the actual production stages, loss coefficients and critic settings
 # used by the successful, unregistered 119 full-BC screen. They are part of
 # the formal scientific run identity, rather than CLI defaults.
@@ -84,6 +95,8 @@ REGISTERED_BC_SPEC = {
     "collision_critic_batch_size": 256,
     "collision_critic_learning_rate": 0.001,
     "collision_critic_positive_weight": 3.0,
+    "collision_critic_seed_offset": 6_200,
+    "collision_critic_environment_reset_count": 2,
 }
 REGISTERED_RISK_DUAL_CONFIG = {
     "target": 0.04, "window_episodes": 128, "minimum_episodes": 64,
@@ -104,7 +117,7 @@ REGISTERED_RISK_DUAL_CONFIG_SHA256 = _hash_json(REGISTERED_RISK_DUAL_CONFIG)
 
 
 def bc_data_seed_schedule(pair_seed: int) -> dict[str, list[int]]:
-    """The exact 1,220 public BC episode seeds, with no adaptive stage sizes."""
+    """The 1,220 teacher/visit episodes; critic resets are separately bound."""
     if pair_seed not in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS):
         raise ValueError("unregistered Warehouse v6 pair seed")
     counts = {
@@ -132,6 +145,49 @@ def bc_data_seed_schedule(pair_seed: int) -> dict[str, list[int]]:
     return schedule
 
 
+@lru_cache(maxsize=None)
+def _reserved_critic_reset_seeds(release_id: str) -> frozenset[int]:
+    sealed = sealed_seed_blocks(release_id)
+    reserved = set((*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS,
+                    *DEVELOPMENT_SELECTION_SEEDS,
+                    *DEVELOPMENT_STRESS_BASE_SEEDS,
+                    *DEVELOPMENT_PROGRAM_AUDIT_SEEDS,
+                    *FORMAL_SELECTION_SEEDS,
+                    *FORMAL_PROGRAM_PREAUDIT_SEEDS))
+    reserved.update(seed for _, scenario, action in stress_schedule()
+                    for seed in (scenario, action))
+    for minor in range(int(release_id.rsplit(".v6.", 1)[1]) + 1):
+        previous = sealed_seed_blocks(
+            f"policylens-three-domain-20261016.v6.{minor}")
+        reserved.update(previous["final_program_audit"])
+        reserved.update(previous["heldout"])
+        reserved.update(task_scenario_seed(seed, task)
+                        for seed in previous["heldout"] for task in TASKS)
+    for seed in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS):
+        reserved.update(item for block in bc_data_seed_schedule(seed).values()
+                        for item in block)
+        reserved.update(item for block in
+                        final_program_fit_seed_schedule(release_id, seed).values()
+                        for item in block)
+        reserved.update(scenario_seed(
+            "warehouse-v6-matched-120-step-blocks", seed, step)
+            for step in range(0, max(BUDGETS), SCENARIO_BLOCK_STEPS))
+    reserved.update(sealed["final_program_audit"])
+    return frozenset(reserved)
+
+
+def bc_critic_reset_schedule(pair_seed: int, release_id: str) -> dict[str, int]:
+    """Two real env.reset calls used by the offline critic event enumerator."""
+    if pair_seed not in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS):
+        raise ValueError("unregistered Warehouse v6 pair seed")
+    seed = pair_seed + REGISTERED_BC_SPEC["collision_critic_seed_offset"]
+    if seed in _reserved_critic_reset_seeds(release_id):
+        raise RuntimeError("Warehouse collision critic reset seed overlaps protocol")
+    return {"seed": seed,
+            "environment_reset_count": REGISTERED_BC_SPEC[
+                "collision_critic_environment_reset_count"]}
+
+
 def registered_method_lock_fields(program_fit_method: str) -> dict:
     """Method and paired BC seed commitments for a development budget lock."""
     if (_hash_json(REGISTERED_BC_SPEC) != REGISTERED_BC_SPEC_SHA256
@@ -146,6 +202,10 @@ def registered_method_lock_fields(program_fit_method: str) -> dict:
         "risk_dual_config_sha256": REGISTERED_RISK_DUAL_CONFIG_SHA256,
         "bc_data_seed_schedule_sha256": {
             str(seed): _hash_json(bc_data_seed_schedule(seed))
+            for seed in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS)},
+        "bc_critic_reset_schedule_sha256": {
+            str(seed): _hash_json(bc_critic_reset_schedule(
+                seed, INITIAL_RELEASE_ID))
             for seed in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS)},
     }
 
@@ -191,6 +251,7 @@ def bc_report_valid(report: Mapping, pair_seed: int,
                 REGISTERED_RISK_DUAL_CONFIG_SHA256):
             return False
         schedule = bc_data_seed_schedule(pair_seed)
+        critic_resets = bc_critic_reset_schedule(pair_seed, INITIAL_RELEASE_ID)
         if (report.get("bc_recipe_version") != REGISTERED_BC_RECIPE_VERSION
                 or report.get("bc_recipe_sha256") != REGISTERED_BC_SPEC_SHA256
                 or report.get("risk_dual_config_sha256") !=
@@ -199,6 +260,9 @@ def bc_report_valid(report: Mapping, pair_seed: int,
                 or report.get("bc_data_seed_blocks") != schedule
                 or report.get("bc_data_seed_schedule_sha256") !=
                 _hash_json(schedule)
+                or report.get("bc_critic_reset_schedule") != critic_resets
+                or report.get("bc_critic_reset_schedule_sha256") !=
+                _hash_json(critic_resets)
                 or report.get("teacher_uses_hidden_goal_or_route_state") is not False
                 or report.get("offline_critic_used_at_execution") is not False):
             return False
@@ -214,7 +278,11 @@ def bc_report_valid(report: Mapping, pair_seed: int,
                 REGISTERED_BC_SPEC["collision_critic_learning_rate"]
                 or critic.get("positive_weight") !=
                 REGISTERED_BC_SPEC["collision_critic_positive_weight"]
-                or critic.get("seed") != pair_seed + 6_200
+                or critic.get("seed") != critic_resets["seed"]
+                or critic.get("environment_reset_seed") !=
+                critic_resets["seed"]
+                or critic.get("environment_reset_count") !=
+                critic_resets["environment_reset_count"]
                 or critic.get("validation_passed") is not True):
             return False
         stages = report.get("bc_stages")
@@ -435,6 +503,7 @@ class PairRunSpec:
     bc_recipe_sha256: str = REGISTERED_BC_SPEC_SHA256
     risk_dual_config_sha256: str = REGISTERED_RISK_DUAL_CONFIG_SHA256
     bc_data_seed_schedule_sha256: str = ""
+    bc_critic_reset_schedule_sha256: str = ""
 
     def __post_init__(self) -> None:
         if (_hash_json(REGISTERED_BC_SPEC) != REGISTERED_BC_SPEC_SHA256
@@ -467,6 +536,14 @@ class PairRunSpec:
                 raise ValueError("Warehouse registered BC stage seed schedule mismatch")
         else:
             object.__setattr__(self, "bc_data_seed_schedule_sha256", bc_schedule_sha)
+        critic_schedule_sha = _hash_json(bc_critic_reset_schedule(
+            self.pair_seed, self.release_id))
+        if self.bc_critic_reset_schedule_sha256:
+            if self.bc_critic_reset_schedule_sha256 != critic_schedule_sha:
+                raise ValueError("Warehouse collision critic reset schedule mismatch")
+        else:
+            object.__setattr__(self, "bc_critic_reset_schedule_sha256",
+                               critic_schedule_sha)
         scheduled = online_program_extraction_steps(self.joint_steps)
         if self.online_program_extraction_steps:
             if self.online_program_extraction_steps != scheduled:
@@ -479,6 +556,8 @@ class PairRunSpec:
     def to_mapping(self) -> dict:
         row = asdict(self)
         row["bc_data_seed_schedule"] = bc_data_seed_schedule(self.pair_seed)
+        row["bc_critic_reset_schedule"] = bc_critic_reset_schedule(
+            self.pair_seed, self.release_id)
         schedule = final_program_fit_seed_schedule(self.release_id, self.pair_seed)
         row["final_program_fit_seed_schedule"] = schedule
         row["final_program_fit_seed_schedule_sha256"] = _hash_json(schedule)

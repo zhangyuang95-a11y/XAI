@@ -464,8 +464,14 @@ class Admission:
                 expected_spec["bc_data_seed_schedule"]
                 or report.get("bc_data_seed_schedule_sha256") !=
                 spec.bc_data_seed_schedule_sha256
+                or report.get("bc_critic_reset_schedule") !=
+                expected_spec["bc_critic_reset_schedule"]
+                or report.get("bc_critic_reset_schedule_sha256") !=
+                spec.bc_critic_reset_schedule_sha256
                 or report.get("bc", {}).get("bc_data_seed_blocks") !=
                 expected_spec["bc_data_seed_schedule"]
+                or report.get("bc", {}).get("bc_critic_reset_schedule") !=
+                expected_spec["bc_critic_reset_schedule"]
                 or report.get("bc", {}).get("bc_recipe_sha256") !=
                 spec.bc_recipe_sha256
                 or not p.bc_report_valid(report.get("bc", {}), pair_seed, source)
@@ -517,7 +523,10 @@ class Admission:
             entry = pair["variants"][variant]
             path = Path(entry["training_report_path"]).resolve()
             if (not path.is_relative_to(self.directory)
-                    or _file_sha(path) != entry["training_report_sha256"]):
+                    or _file_sha(path) != entry["training_report_sha256"]
+                    or _read(path) != {key: value for key, value in entry.items()
+                                       if key not in ("training_report_path",
+                                                      "training_report_sha256")}):
                 raise RuntimeError("Warehouse selected training report hash mismatch")
 
     def _load_programs(self, report: Mapping, actor) -> dict:
@@ -573,30 +582,185 @@ class Admission:
                 "schedule_sha256": _sha(p.stress_schedule()),
                 "actor_sha256": actor.artifact_sha256}
 
+    def _verified_development_pair(self, budget: int, pair_seed: int) -> dict:
+        """Rebuild a development decision from its saved training and trace bytes.
+
+        This is used both while developing and before the first formal seed.
+        A budget lock alone is never evidence that the development gates ran.
+        """
+        row = self._required(f"development.{budget}.{pair_seed}.json")
+        pair = _read(self.directory / f"pair_{pair_seed}_steps_{budget}" /
+                     "pair.training.json")
+        spec = self._pair_spec(pair_seed, budget)
+        source = self.backend.source_closure_sha256()
+        expected = spec.to_mapping()
+        if (row.get("pair_seed") != pair_seed
+                or row.get("budget") != budget
+                or row.get("pair_report_sha256") != _sha(pair)
+                or row.get("source_closure_sha256") != source
+                or row.get("training") != pair.get("variants")
+                or row.get("program_audit_seeds") !=
+                list(p.DEVELOPMENT_PROGRAM_AUDIT_SEEDS)
+                or row.get("stress_schedule_sha256") != _sha(p.stress_schedule())
+                or pair.get("candidate_id") != self.candidate_id
+                or pair.get("release_id") != self.release_id
+                or pair.get("pair_seed") != pair_seed
+                or pair.get("joint_steps") != budget
+                or pair.get("source_closure_sha256") != source
+                or pair.get("run_spec_sha256") != spec.sha256()
+                or pair.get("training_config_sha256") !=
+                spec.training_config_sha256(source)
+                or pair.get("architecture_mode") != spec.architecture_mode
+                or pair.get("program_fit_method") != self.program_fit_method
+                or pair.get("bc_recipe_version") != spec.bc_recipe_version
+                or pair.get("bc_recipe_sha256") != spec.bc_recipe_sha256
+                or pair.get("risk_dual_config_sha256") !=
+                spec.risk_dual_config_sha256
+                or pair.get("bc_data_seed_schedule") !=
+                expected["bc_data_seed_schedule"]
+                or pair.get("bc_data_seed_schedule_sha256") !=
+                spec.bc_data_seed_schedule_sha256
+                or pair.get("bc_critic_reset_schedule") !=
+                expected["bc_critic_reset_schedule"]
+                or pair.get("bc_critic_reset_schedule_sha256") !=
+                spec.bc_critic_reset_schedule_sha256
+                or pair.get("checkpoint_seeds") != list(spec.checkpoint_seeds)
+                or pair.get("online_program_extraction_steps") !=
+                list(spec.online_program_extraction_steps)
+                or pair.get("final_program_fit_seed_schedule") !=
+                expected["final_program_fit_seed_schedule"]
+                or pair.get("final_program_fit_seed_schedule_sha256") !=
+                expected["final_program_fit_seed_schedule_sha256"]
+                or not p.bc_report_valid(pair.get("bc"), pair_seed, source)):
+            raise RuntimeError("Warehouse development pair or BC evidence changed")
+        if source in p.RETIRED_119_SOURCE_CLOSURE_SHA256:
+            raise RuntimeError("Warehouse failed 119 source identity is retired")
+        variants = pair.get("variants")
+        if not isinstance(variants, Mapping) or set(variants) != set(p.VARIANTS):
+            raise RuntimeError("Warehouse development paired variants missing")
+        for variant in p.VARIANTS:
+            trained = variants[variant]
+            actor = trained.get("actor_artifact", {})
+            if (trained.get("program_fit_method") != self.program_fit_method
+                    or trained.get("source_closure_sha256") != source
+                    or trained.get("run_spec_sha256") != spec.sha256()
+                    or trained.get("training_config_sha256") !=
+                    spec.training_config_sha256(source)
+                    or actor.get("sha256") == p.RETIRED_119_ACTOR_SHA256
+                    or actor.get("model_version") ==
+                    p.RETIRED_119_MODEL_VERSION):
+                raise RuntimeError("Warehouse failed 119 Actor or training identity is retired")
+        self._verify_selected_assets(pair)
+        training_passed = p.paired_training_pass(variants, joint_steps=budget)
+        if not training_passed:
+            if (row.get("passed") is not False
+                    or not row.get("gate_failure")
+                    or row.get("stress") != {}
+                    or row.get("program_audit") != {}
+                    or row.get("evaluation") != {}
+                    or row.get("stress_episodes") != 0):
+                raise RuntimeError("Warehouse failed training gate receipt changed")
+            return row
+        if row.get("gate_failure") is not None:
+            raise RuntimeError("Warehouse passing training has a failure receipt")
+        stress = row.get("stress")
+        if (not isinstance(stress, Mapping)
+                or set(stress) != set(p.VARIANTS)
+                or row.get("stress_episodes") != len(p.stress_schedule())
+                or not isinstance(row.get("evaluation"), Mapping)):
+            raise RuntimeError("Warehouse development stress evidence missing")
+        for variant in p.VARIANTS:
+            if (not _verify_stress(stress[variant])
+                    or stress[variant].get("actor_sha256") !=
+                    variants[variant]["actor_artifact"]["sha256"]
+                    or stress[variant].get("summary") !=
+                    row["evaluation"].get(variant)):
+                raise RuntimeError("Warehouse development stress evidence changed")
+        actor = self._load_variant(pair, "regularized")
+        programs = {}
+        try:
+            programs = self._load_programs(pair, actor)
+        except RuntimeError as exc:
+            if ("lacks both role programs" not in str(exc)
+                    or row.get("program_error") != str(exc)
+                    or row.get("program_audit") != {}):
+                raise RuntimeError("Warehouse development program evidence changed") from exc
+        else:
+            if row.get("program_error") is not None:
+                raise RuntimeError("Warehouse development program failure was fabricated")
+        audit_valid = False
+        if programs:
+            audits = row.get("program_audit")
+            trace_root = (self.directory / "traces" /
+                          f"development.{budget}.{pair_seed}").resolve()
+            if not isinstance(audits, Mapping) or set(audits) != set(p.ROLES):
+                raise RuntimeError("Warehouse development program audit missing")
+            trace_bytes = {}
+            for role in p.ROLES:
+                trace_path = Path(audits[role]["trace_path"]).resolve()
+                if not trace_path.is_relative_to(trace_root):
+                    raise RuntimeError("Warehouse development trace escaped run")
+                trace_bytes[role] = trace_path.read_bytes()
+            if self.backend.verify_program_trace(
+                    actor=actor, programs=programs,
+                    trace_bytes_by_role=trace_bytes, audits=audits,
+                    seeds=p.DEVELOPMENT_PROGRAM_AUDIT_SEEDS) is not True:
+                raise RuntimeError("Warehouse development program trace invalid")
+            audit_valid = _audit_valid(
+                audits, actor, programs, p.DEVELOPMENT_PROGRAM_AUDIT_SEEDS,
+                development=True)
+        computed = (p.development_pair_pass(row) and bool(programs)
+                    and audit_valid)
+        if row.get("passed") is not computed:
+            raise RuntimeError("Warehouse development gate result changed")
+        return row
+
+    def _verified_development_lock(self, lock: Mapping) -> dict[int, list[dict]]:
+        """Recheck the complete ordered development history before formal use."""
+        budget = lock.get("locked_budget")
+        if budget not in p.BUDGETS or lock.get("passed") is not True:
+            raise RuntimeError("Warehouse development budget is not locked")
+        source = self.backend.source_closure_sha256()
+        schedules = {str(seed): p.final_program_fit_seed_schedule(
+            self.release_id, seed)
+            for seed in (*p.DEVELOPMENT_PAIR_SEEDS, *p.FORMAL_PAIR_SEEDS)}
+        if (lock.get("source_closure_sha256") != source
+                or source in p.RETIRED_119_SOURCE_CLOSURE_SHA256
+                or lock.get("development_pair_seeds") !=
+                list(p.DEVELOPMENT_PAIR_SEEDS)
+                or lock.get("final_program_fit_seed_schedule") != schedules
+                or lock.get("final_program_fit_seed_schedule_sha256") !=
+                _sha(schedules)
+                or any(lock.get(key) != value for key, value in
+                       p.registered_method_lock_fields(
+                           self.program_fit_method).items())
+                or lock.get("architecture_mode") !=
+                p.REGISTERED_ARCHITECTURE_MODE
+                or lock.get("bc_recipe_version") !=
+                p.REGISTERED_BC_RECIPE_VERSION
+                or lock.get("online_program_extraction_steps") !=
+                list(p.online_program_extraction_steps(budget))):
+            raise RuntimeError("Warehouse development seed lock changed or source retired")
+        rows = {}
+        for candidate_budget in p.BUDGETS[:p.BUDGETS.index(budget) + 1]:
+            rows[candidate_budget] = [self._verified_development_pair(
+                candidate_budget, seed) for seed in p.DEVELOPMENT_PAIR_SEEDS]
+        selected_hashes = {str(seed): _file_sha(self._path(
+            f"development.{budget}.{seed}.json"))
+            for seed in p.DEVELOPMENT_PAIR_SEEDS}
+        if (lock.get("development_receipt_sha256") != selected_hashes
+                or p.choose_development_budget(rows) != budget
+                or not all(row["passed"] for row in rows[budget])):
+            raise RuntimeError("Warehouse development lock lacks a passing minimal budget")
+        return rows
+
     def develop(self) -> dict:
         """Try registered budgets in order; lock the smallest fully passing one."""
         self._ensure_open()
         lock_path = self._path("budget.lock.json")
         if lock_path.exists():
             lock = self._required("budget.lock.json")
-            if lock.get("source_closure_sha256") != self.backend.source_closure_sha256():
-                raise RuntimeError("Warehouse development source closure changed after lock")
-            schedules = {str(seed): p.final_program_fit_seed_schedule(
-                self.release_id, seed)
-                for seed in (*p.DEVELOPMENT_PAIR_SEEDS, *p.FORMAL_PAIR_SEEDS)}
-            if (lock.get("final_program_fit_seed_schedule") != schedules
-                    or lock.get("final_program_fit_seed_schedule_sha256") !=
-                    _sha(schedules)
-                    or any(lock.get(key) != value for key, value in
-                           p.registered_method_lock_fields(
-                               self.program_fit_method).items())
-                    or lock.get("architecture_mode") !=
-                    p.REGISTERED_ARCHITECTURE_MODE
-                    or lock.get("bc_recipe_version") !=
-                    p.REGISTERED_BC_RECIPE_VERSION
-                    or lock.get("online_program_extraction_steps") !=
-                    list(p.online_program_extraction_steps(lock["locked_budget"]))):
-                raise RuntimeError("Warehouse final-program seed lock changed")
+            self._verified_development_lock(lock)
             return lock
         if self._path("development.failed.json").exists():
             return self._required("development.failed.json")
@@ -672,36 +836,10 @@ class Admission:
                     self._record_failure(phase, exc)
                     raise
             reports_by_budget[budget] = rows
-            for row in rows:
-                pair_seed = row["pair_seed"]
-                pair = _read(self.directory /
-                             f"pair_{pair_seed}_steps_{budget}" / "pair.training.json")
-                if (row.get("training") != pair.get("variants")
-                        or row.get("program_audit_seeds") !=
-                        list(p.DEVELOPMENT_PROGRAM_AUDIT_SEEDS)
-                        or row.get("source_closure_sha256") !=
-                        self.backend.source_closure_sha256()
-                        or row.get("pair_report_sha256") != _sha(pair)):
-                    raise RuntimeError("Warehouse development raw evidence mismatch")
-                if row["passed"]:
-                    actor = self._load_variant(pair, "regularized")
-                    programs = self._load_programs(pair, actor)
-                    if (set(row.get("stress", {})) != set(p.VARIANTS)
-                            or not all(_verify_stress(row["stress"][variant])
-                                       and row["stress"][variant]["summary"] ==
-                                       row["evaluation"][variant]
-                                       for variant in p.VARIANTS)
-                            or not p.development_pair_pass(row)
-                            or not _audit_valid(
-                                row["program_audit"], actor, programs,
-                                p.DEVELOPMENT_PROGRAM_AUDIT_SEEDS,
-                                development=True)):
-                        raise RuntimeError("Warehouse passing development evidence changed")
-                elif row.get("stress") and (set(row["stress"]) != set(p.VARIANTS)
-                                                  or not all(_verify_stress(
-                                                      row["stress"][variant])
-                                                      for variant in p.VARIANTS)):
-                    raise RuntimeError("Warehouse failed development stress evidence changed")
+            verified = [self._verified_development_pair(budget, seed)
+                        for seed in p.DEVELOPMENT_PAIR_SEEDS]
+            if verified != rows:
+                raise RuntimeError("Warehouse development receipt changed during verification")
             proposed = p.choose_development_budget(reports_by_budget)
             chosen = (proposed if proposed is not None and all(
                 row["passed"] for row in reports_by_budget[proposed]) else None)
@@ -734,28 +872,11 @@ class Admission:
         """Select one pair by fixed development quality, before any preaudit."""
         self._ensure_open()
         if self._path("formal.selection.json").exists():
-            return self._required("formal.selection.json")
+            selection = self._required("formal.selection.json")
+            self._selected_pair()
+            return selection
         lock = self._required("budget.lock.json")
-        if lock.get("passed") is not True:
-            raise RuntimeError("Warehouse development budget is not locked")
-        if lock.get("source_closure_sha256") != self.backend.source_closure_sha256():
-            raise RuntimeError("Warehouse formal run source differs from locked method")
-        schedules = {str(seed): p.final_program_fit_seed_schedule(
-            self.release_id, seed)
-            for seed in (*p.DEVELOPMENT_PAIR_SEEDS, *p.FORMAL_PAIR_SEEDS)}
-        if (lock.get("final_program_fit_seed_schedule") != schedules
-                or lock.get("final_program_fit_seed_schedule_sha256") !=
-                _sha(schedules)
-                or any(lock.get(key) != value for key, value in
-                       p.registered_method_lock_fields(
-                           self.program_fit_method).items())
-                or lock.get("architecture_mode") !=
-                p.REGISTERED_ARCHITECTURE_MODE
-                or lock.get("bc_recipe_version") !=
-                p.REGISTERED_BC_RECIPE_VERSION
-                or lock.get("online_program_extraction_steps") !=
-                list(p.online_program_extraction_steps(lock["locked_budget"]))):
-            raise RuntimeError("Warehouse formal run seed lock changed")
+        self._verified_development_lock(lock)
         budget = lock["locked_budget"]
         rows = []
         for pair_seed in p.FORMAL_PAIR_SEEDS:
@@ -830,6 +951,7 @@ class Admission:
         if selection.get("passed") is not True:
             raise RuntimeError("Warehouse formal selection did not pass")
         lock = self._required("budget.lock.json")
+        self._verified_development_lock(lock)
         budget = lock.get("locked_budget")
         source = self.backend.source_closure_sha256()
         if lock.get("source_closure_sha256") != source:

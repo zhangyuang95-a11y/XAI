@@ -30,6 +30,7 @@ from env.warehouse.public_observation_v6 import (
 
 
 COLLISION_CRITIC_VERSION = "warehouse-v6-collision-critic.v1"
+COLLISION_CRITIC_ENVIRONMENT_RESETS = 2
 _POSITION_COLUMNS = tuple(OBSERVATION_FEATURE_NAMES.index(name) for name in (
     "self_row", "self_column", "partner_row", "partner_column"))
 _GEOMETRY_DIM = 4 * 2 * 3 + 2 * len(ACTIONS)
@@ -133,9 +134,10 @@ def _enumerate_event_rows(seed: int, *,
                               tuple[tuple[int, int], tuple[int, int]]] | None = None
                           ) -> _EventRows:
     """Enumerate pre-action public states and legal joint env.step events."""
-    template_env = _environment(seed)
+    environments = tuple(_environment(seed) for _ in range(
+        COLLISION_CRITIC_ENVIRONMENT_RESETS))
+    template_env, branch = environments
     template = template_env.get_state()
-    branch = _environment(seed)
     cells = STUDY_MAP_LAYOUT.passable_positions
     pairs = (position_pairs if position_pairs is not None else
              ((first, second) for first in cells for second in cells
@@ -286,6 +288,8 @@ def train_collision_critic(seed: int, *, epochs: int = 80,
         "purpose": "offline_BC_gradient_only_not_execution",
         "labels_source": "env.step_robot_collision_events_delta",
         "seed": seed,
+        "environment_reset_seed": seed,
+        "environment_reset_count": COLLISION_CRITIC_ENVIRONMENT_RESETS,
         "epochs": epochs,
         "batch_size": batch_size,
         "dependencies": {"torch": torch.__version__, "numpy": np.__version__},

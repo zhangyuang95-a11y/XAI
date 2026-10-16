@@ -75,12 +75,19 @@ class FakeBackend:
         self.evaluate_calls = []
         self.fail_final = False
         self.trace_valid = True
+        self.invalid_trace_seed_blocks = set()
 
     def source_closure_sha256(self):
         return self.source
 
     def train_pair(self, spec):
         seed, budget = spec["pair_seed"], spec["joint_steps"]
+        run_spec = p.PairRunSpec(
+            spec["candidate_id"], seed, budget, spec["output_dir"],
+            spec["program_fit_method"], release_id=spec["release_id"],
+            checkpoint_seeds=tuple(spec["checkpoint_seeds"]))
+        run_sha = run_spec.sha256()
+        training_sha = run_spec.training_config_sha256(self.source)
         directory = (Path(spec["output_dir"]) / spec["candidate_id"] /
                      f"pair_{seed}_steps_{budget}")
         initial = {"robot_1": "1" * 64, "robot_2": "2" * 64}
@@ -91,8 +98,6 @@ class FakeBackend:
             actor_path = directory / f"{variant}.actor.npz"
             actor_sha = _write(actor_path, {"seed": seed, "variant": variant})
             report_path = directory / f"{variant}.training.json"
-            report_sha = _write(report_path, {"seed": seed, "variant": variant,
-                                              "joint_steps": budget})
             programs = {}
             if variant == "regularized":
                 for role in p.ROLES:
@@ -109,6 +114,9 @@ class FakeBackend:
                 "bc_recipe_sha256": spec["bc_recipe_sha256"],
                 "bc_data_seed_schedule_sha256": spec[
                     "bc_data_seed_schedule_sha256"],
+                "bc_critic_reset_schedule": spec["bc_critic_reset_schedule"],
+                "bc_critic_reset_schedule_sha256": spec[
+                    "bc_critic_reset_schedule_sha256"],
                 "risk_dual_config_sha256": spec["risk_dual_config_sha256"],
                 "online_program_extraction_steps": list(
                     spec["online_program_extraction_steps"]),
@@ -118,6 +126,8 @@ class FakeBackend:
                 "physical_no_legal_action_rows": 0,
                 "scenario_schedule_sha256": "8" * 64,
                 "source_closure_sha256": self.source,
+                "run_spec_sha256": run_sha,
+                "training_config_sha256": training_sha,
                 "initial_role_sha256": initial,
                 "selected_role_sha256": chosen,
                 "role_weight_change_norm": dict.fromkeys(p.ROLES, 1.0),
@@ -129,8 +139,6 @@ class FakeBackend:
                                    "model_version": "warehouse-dual-actor.v6.1",
                                    "feature_schema_sha256": "9" * 64},
                 "program_artifacts": programs,
-                "training_report_path": str(report_path),
-                "training_report_sha256": report_sha,
             }
             if variant == "regularized":
                 extractions = _fake_online_extractions(budget)
@@ -143,6 +151,9 @@ class FakeBackend:
                     for purpose, seeds in row["training_split_scenario_seeds"].items()
                     for scenario_seed, episode in zip(
                         seeds, row["training_split_episode_ids"][purpose], strict=True)]
+            report_sha = _write(report_path, variants[variant])
+            variants[variant]["training_report_path"] = str(report_path)
+            variants[variant]["training_report_sha256"] = report_sha
         pair = {"candidate_id": spec["candidate_id"],
                 "release_id": spec["release_id"],
                 "architecture_mode": spec["architecture_mode"],
@@ -152,6 +163,9 @@ class FakeBackend:
                 "bc_data_seed_schedule": spec["bc_data_seed_schedule"],
                 "bc_data_seed_schedule_sha256": spec[
                     "bc_data_seed_schedule_sha256"],
+                "bc_critic_reset_schedule": spec["bc_critic_reset_schedule"],
+                "bc_critic_reset_schedule_sha256": spec[
+                    "bc_critic_reset_schedule_sha256"],
                 "risk_dual_config_sha256": spec["risk_dual_config_sha256"],
                 "bc": bc_receipt(seed, self.source),
                 "final_program_fit_seed_schedule":
@@ -164,6 +178,8 @@ class FakeBackend:
                     spec["online_program_extraction_steps"]),
                 "checkpoint_seeds": list(spec["checkpoint_seeds"]),
                 "source_closure_sha256": self.source,
+                "run_spec_sha256": run_sha,
+                "training_config_sha256": training_sha,
                 "initial_role_sha256": initial, "variants": variants}
         _write(directory / "pair.training.json", pair)
         return pair
@@ -241,7 +257,7 @@ class FakeBackend:
                              audits, seeds):
         # Pure orchestration fixture: actual NN/physics trace recomputation is
         # exercised by test_warehouse_v6_trace_acceptance.py.
-        return self.trace_valid
+        return self.trace_valid and tuple(seeds) not in self.invalid_trace_seed_blocks
 
 
 @pytest.fixture
@@ -280,6 +296,40 @@ def test_budget_lock_rejects_online_program_schedule_change(ready):
     path.write_text(json.dumps(lock))
     with pytest.raises(RuntimeError, match="seed lock changed"):
         admission.develop()
+
+
+def test_formal_refuses_forged_budget_lock_before_any_formal_pair(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(p, "stress_schedule", lambda: ((1, 2600001, 123),))
+    admission = a.Admission(tmp_path, "forged-budget-lock",
+                            backend=FakeBackend(tmp_path),
+                            program_fit_method=METHOD)
+    assert admission.develop()["locked_budget"] == 200_000
+    lock_path = admission._path("budget.lock.json")
+    lock = json.loads(lock_path.read_text())
+    lock["development_receipt_sha256"][str(p.DEVELOPMENT_PAIR_SEEDS[0])] = "0" * 64
+    lock_path.write_text(json.dumps(lock))
+    with pytest.raises(RuntimeError, match="development lock"):
+        admission.formal_train()
+    assert not (admission.directory / "pair_6101_steps_200000").exists()
+
+
+def test_formal_refuses_tampered_development_training_report(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(p, "stress_schedule", lambda: ((1, 2600001, 123),))
+    admission = a.Admission(tmp_path, "tampered-development-report",
+                            backend=FakeBackend(tmp_path),
+                            program_fit_method=METHOD)
+    assert admission.develop()["locked_budget"] == 200_000
+    seed = p.DEVELOPMENT_PAIR_SEEDS[0]
+    path = (admission.directory / f"pair_{seed}_steps_200000" /
+            "regularized.training.json")
+    report = json.loads(path.read_text())
+    report["feedback_rows"]["robot_1"] = 0
+    path.write_text(json.dumps(report))
+    with pytest.raises(RuntimeError, match="training report hash"):
+        admission.formal_train()
+    assert not (admission.directory / "pair_6101_steps_200000").exists()
 
 
 def test_final_audit_claim_is_one_use_and_failure_closes_candidate(ready):
@@ -388,7 +438,7 @@ def test_packaged_acceptance_recomputes_actionable_coverage():
 def test_source_change_before_sealed_phase_rejects_without_claim(ready):
     admission, backend = ready
     backend.source = "a" * 64
-    with pytest.raises(RuntimeError, match="source closure"):
+    with pytest.raises(RuntimeError, match="source"):
         admission.final_audit()
     assert not admission.claim_root.exists()
 
@@ -422,7 +472,7 @@ def test_preaudit_mutation_rejects_before_final_seed_claim(ready, change):
 
 def test_rejected_local_trace_rejects_before_final_seed_claim(ready):
     admission, backend = ready
-    backend.trace_valid = False
+    backend.invalid_trace_seed_blocks.add(p.FORMAL_PROGRAM_PREAUDIT_SEEDS)
     with pytest.raises(RuntimeError, match="prerequisite trace invalid"):
         admission.final_audit()
     assert not admission._claim_path("final_program_audit").exists()
@@ -498,7 +548,7 @@ def test_final_audit_mutation_rejects_before_heldout_seed_claim(ready, change):
 def test_rejected_final_trace_rejects_before_heldout_seed_claim(ready):
     admission, backend = ready
     admission.final_audit()
-    backend.trace_valid = False
+    backend.invalid_trace_seed_blocks.add(p.final_audit_seeds())
     calls_before = len(backend.evaluate_calls)
     with pytest.raises(RuntimeError, match="prerequisite trace invalid"):
         admission.heldout()
@@ -526,7 +576,13 @@ def test_development_advances_to_next_budget_when_programs_missing(tmp_path, mon
         def train_pair(self, spec):
             report = super().train_pair(spec)
             if spec["joint_steps"] == 200_000:
-                report["variants"]["regularized"]["program_artifacts"] = {}
+                trained = report["variants"]["regularized"]
+                trained["program_artifacts"] = {}
+                training_path = Path(trained["training_report_path"])
+                trained["training_report_sha256"] = _write(
+                    training_path, {key: value for key, value in trained.items()
+                                    if key not in ("training_report_path",
+                                                   "training_report_sha256")})
                 path = (Path(spec["output_dir"]) / spec["candidate_id"] /
                         f"pair_{spec['pair_seed']}_steps_{spec['joint_steps']}" /
                         "pair.training.json")

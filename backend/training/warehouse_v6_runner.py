@@ -187,8 +187,8 @@ _SOURCE_FILES = (
     "experiments/warehouse/acceptance.py", "experiments/warehouse/quality_replay.py",
     "experiments/warehouse/stage2_evidence.py",
     "domains/warehouse/neural_turnbased.py", "domains/warehouse/turnbased.py",
-    "study_v3/policies.py", "study_v3/registry.py", "study_v3/release_catalog.py",
-    "study_v3/store.py", "study_v3/qa.py", "study_v3/domain_contracts.py", "study_v3/__init__.py",
+    *(path.relative_to(_SOURCE_ROOT).as_posix()
+      for path in sorted((_SOURCE_ROOT / "study_v3").glob("*.py"))),
     "scripts/package_warehouse_v6_release.py", "scripts/start_warehouse_v6_candidate_release.py",
     "configs/study_v3_warehouse.json", "configs/study_v3_warehouse_neural.json",
     "configs/study_v3_warehouse_neural_v5.json", "configs/study_v3_warehouse_neural_v6.json",

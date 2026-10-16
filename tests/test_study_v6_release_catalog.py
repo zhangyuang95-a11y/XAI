@@ -260,6 +260,36 @@ def test_lightweight_warehouse_source_closure_matches_training_contract():
     assert warehouse_runtime_source_closure_sha256() == source_closure_sha256()
 
 
+@pytest.mark.parametrize("mutation", (
+    lambda source: source.replace('.glob("*.py")', '.glob("warehouse*.py")', 1),
+    lambda source: source.replace('"warehouse_legacy_v3"',
+                                  '"warehouse_legacy_v3_unreviewed"', 1),
+    lambda source: source.replace(
+        '    "core/__init__.py", "core/policy_contracts.py",',
+        '    *(path.relative_to(_SOURCE_ROOT).as_posix() '
+        'for path in sorted((_SOURCE_ROOT / "backend").glob("*.py"))),\n'
+        '    "core/__init__.py", "core/policy_contracts.py",', 1),
+))
+def test_warehouse_source_closure_rejects_changed_dynamic_globs(monkeypatch, mutation):
+    import study_v3.release_catalog as catalog_module
+
+    trainer = catalog_module.ROOT / "backend/training/warehouse_v6_runner.py"
+    original_read_text = catalog_module.Path.read_text
+    original = original_read_text(trainer)
+    changed = mutation(original)
+    assert changed != original
+
+    def tampered_read_text(path, *args, **kwargs):
+        if path == trainer:
+            return changed
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(catalog_module.Path, "read_text", tampered_read_text)
+    with pytest.raises(ReleaseAssetUnavailable,
+                       match="warehouse_source_closure_unavailable"):
+        warehouse_runtime_source_closure_sha256()
+
+
 def test_future_warehouse_release_addresses_separate_package_without_activation():
     current = warehouse_release_spec()
     future = warehouse_release_spec("policylens-three-domain-20261016.v6.1")

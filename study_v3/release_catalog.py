@@ -84,20 +84,39 @@ def warehouse_runtime_source_closure_sha256() -> str:
                   and any(isinstance(target, ast.Name) and target.id == "_SOURCE_FILES"
                           for target in node.targets)]
         if (len(values) != 1 or not isinstance(values[0], ast.Tuple)
-                or not values[0].elts
-                or not isinstance(values[0].elts[0], ast.Starred)):
+                or len(values[0].elts) < 3):
             raise ValueError("Warehouse source file list unavailable")
-        dynamic = ast.get_source_segment(source, values[0].elts[0].value) or ""
-        if ('.glob("*.py")' not in dynamic
-                or '_SOURCE_ROOT / "env" / "warehouse"' not in dynamic
-                or any(isinstance(node, ast.Starred)
-                       for node in values[0].elts[1:])):
+        # Parse only the two literal, reviewable globs used by the trainer.
+        # Do not execute trainer code or accept a substring containing a glob:
+        # either could turn a changed closure into an accepted release hash.
+        dynamic_roots = ("warehouse", "warehouse_legacy_v3")
+        for index, directory in enumerate(dynamic_roots):
+            candidate = values[0].elts[index]
+            template = ast.parse(
+                '(*(path.relative_to(_SOURCE_ROOT).as_posix() '
+                'for path in sorted((_SOURCE_ROOT / "env" / '
+                f'"{directory}").glob("*.py"))),)',
+                mode="eval",
+            ).body.elts[0]
+            if ast.dump(candidate, include_attributes=False) != ast.dump(
+                    template, include_attributes=False):
+                raise ValueError("Warehouse dynamic source file list changed")
+        if any(isinstance(node, ast.Starred) for node in values[0].elts[2:]):
             raise ValueError("Warehouse dynamic source file list changed")
-        static_paths = tuple(ast.literal_eval(node) for node in values[0].elts[1:])
-        dynamic_paths = tuple(path.relative_to(ROOT).as_posix()
-                              for path in sorted((ROOT / "env" / "warehouse").glob("*.py")))
+        static_paths = tuple(ast.literal_eval(node) for node in values[0].elts[2:])
+        dynamic_groups = tuple(
+            tuple(path.relative_to(ROOT).as_posix()
+                  for path in sorted((ROOT / "env" / directory).glob("*.py")))
+            for directory in dynamic_roots
+        )
+        if any(not group for group in dynamic_groups):
+            raise ValueError("Warehouse dynamic source directory empty")
+        dynamic_paths = tuple(path for group in dynamic_groups for path in group)
         paths = dynamic_paths + static_paths
-        if any(not isinstance(path, str) or not (path.endswith(".py")
+        if len(paths) != len(set(paths)):
+            raise ValueError("Warehouse source file list duplicated")
+        if any(not isinstance(path, str) or not path or path.startswith("/")
+               or ".." in Path(path).parts or not (path.endswith(".py")
                or path.endswith(".json")
                or path == "requirements-warehouse-v6-training.txt") for path in paths):
             raise ValueError("Warehouse source file list invalid")

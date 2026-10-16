@@ -6,6 +6,7 @@ from hashlib import sha256
 import numpy as np
 import pytest
 
+import backend.training.warehouse_v6_core_tree as core_tree_module
 from backend.training.warehouse_v6_core_tree import (
     CoreTreeConfig, CoreTreeResult, _insert_legality_splits, _leaf_metrics,
     evaluate_core_tree, fit_core_tree,
@@ -107,13 +108,16 @@ def test_illegal_or_unnormalized_training_targets_are_rejected():
 
 
 def _empty_tree(node_count: int, leaf_count: int, left: np.ndarray,
-                right: np.ndarray, *, core_action: str | None = None) -> CoreTreeResult:
+                right: np.ndarray, *, core_action: str | None = None,
+                top_action: str | None = None) -> CoreTreeResult:
     weights = np.zeros((15, FEATURE_DIM), dtype=np.float32)
     bias = np.zeros(15, dtype=np.float32)
     weights[:node_count, 0] = 4.0
     bias[:node_count] = -2.0
     logits = np.zeros((16, len(ACTIONS)), dtype=np.float32)
     core = np.zeros(16, dtype=np.bool_)
+    if top_action is not None:
+        logits[0, ACTIONS.index(top_action)] = 3.0
     if core_action is not None:
         logits[0, ACTIONS.index(core_action)] = 3.0
         core[0] = True
@@ -133,8 +137,7 @@ def test_empty_root_can_insert_legal_bit_and_unproven_core_is_rejected():
     x, mask, _, episodes = _synthetic_rows()
     labels = np.where(mask[:, 0] > 0.5, 0, ACTIONS.index("WAIT"))
     target = np.eye(len(ACTIONS), dtype=np.float32)[labels]
-    starter = _empty_tree(0, 1, left, right)
-    starter.leaf_logits[0, 0] = 2.0
+    starter = _empty_tree(0, 1, left, right, top_action="UP")
     grown = _insert_legality_splits(starter, x, mask, target,
                                     np.asarray(episodes), _SMALL)
     assert grown.node_count >= 1 and grown.leaf_count >= 2
@@ -145,6 +148,47 @@ def test_empty_root_can_insert_legal_bit_and_unproven_core_is_rejected():
     assert protected.any()
     assert all(detail["raw_action_legal_by_tree_path"]
                for detail in details if detail["core_eligible"])
+
+
+def test_fitted_arrays_cannot_be_mutated_after_content_hash():
+    x, mask, target, episodes = _synthetic_rows()
+    result = fit_core_tree(x, mask, target, episodes,
+                           target_provenance="public_teacher_one_hot", config=_SMALL)
+    original = result.content_sha256()
+    assert original == result.report["tree_content_sha256"]
+    with pytest.raises(ValueError):
+        result.leaf_logits[0, 0] += 1.0
+    with pytest.raises(ValueError):
+        result.core_mask[0] = not result.core_mask[0]
+    assert result.content_sha256() == original
+
+
+def test_one_float32_route_mismatch_rejects_candidate_without_aborting_search(monkeypatch):
+    x, mask, target, episodes = _synthetic_rows()
+    original = core_tree_module._convert_tree
+    calls = 0
+
+    def first_candidate_has_drift(*args, **kwargs):
+        nonlocal calls
+        candidate = original(*args, **kwargs)
+        calls += 1
+        if calls != 1 or not candidate.node_count:
+            return candidate
+        shifted = candidate.split_bias.copy()
+        shifted[0] += 1_000.0
+        return CoreTreeResult(candidate.split_weights, shifted,
+                              candidate.left_refs, candidate.right_refs,
+                              candidate.node_count, candidate.leaf_count,
+                              candidate.leaf_logits, candidate.core_mask,
+                              candidate.report, frozenset())
+
+    monkeypatch.setattr(core_tree_module, "_convert_tree", first_candidate_has_drift)
+    result = fit_core_tree(x, mask, target, episodes,
+                           target_provenance="public_teacher_one_hot", config=_SMALL)
+    assert calls > 1
+    assert any(item["reason"] == "float32_export_route_mismatch"
+               for item in result.report["rejected_candidate_diagnostics"])
+    assert result.report["chosen_candidate"]["core_training_coverage"] >= 0.30
 
 
 def test_depth_five_and_full_sixteen_leaf_budgets_are_enforced():

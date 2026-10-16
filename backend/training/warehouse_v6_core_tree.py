@@ -112,13 +112,24 @@ class CoreTreeResult:
         if any(int(np.argmax(self.leaf_logits[leaf])) not in certificates[leaf]
                for leaf in range(self.leaf_count) if self.core_mask[leaf]):
             raise ValueError("Warehouse core leaf has no structural action legality proof")
+        # A frozen dataclass alone does not protect the arrays it contains.
+        # Copy them so neither a caller's source array nor a later write can
+        # change the selected topology after its content hash is recorded.
+        for name in ("split_weights", "split_bias", "left_refs", "right_refs",
+                     "leaf_logits", "core_mask"):
+            sealed = np.array(getattr(self, name), copy=True)
+            sealed.flags.writeable = False
+            object.__setattr__(self, name, sealed)
 
     def content_sha256(self) -> str:
         digest = sha256()
-        for item in (self.split_weights, self.split_bias, self.left_refs,
-                     self.right_refs, self.leaf_logits, self.core_mask):
+        for item, dtype in (
+            (self.split_weights, "<f4"), (self.split_bias, "<f4"),
+            (self.left_refs, "<i8"), (self.right_refs, "<i8"),
+            (self.leaf_logits, "<f4"), (self.core_mask, "u1"),
+        ):
             digest.update(np.asarray(item.shape, dtype="<i8").tobytes())
-            digest.update(np.ascontiguousarray(item).tobytes())
+            digest.update(np.ascontiguousarray(item, dtype=dtype).tobytes())
         digest.update(np.asarray((self.node_count, self.leaf_count),
                                  dtype="<i8").tobytes())
         return digest.hexdigest()
@@ -502,6 +513,7 @@ def fit_core_tree(encoded: np.ndarray, masks: np.ndarray,
     seed = int.from_bytes(sha256(_data_sha(x, masks, target, episodes).encode()).digest()[:4],
                           "little")
     fitted = []
+    rejected = []
     for input_kind, features, basis in _candidate_inputs(x, target, config):
         for min_split in config.min_split_rows:
             for maximum_depth, maximum_leaves in config.tree_shapes:
@@ -522,15 +534,30 @@ def fit_core_tree(encoded: np.ndarray, masks: np.ndarray,
                     candidate = _convert_tree(learner.tree_, basis, x, masks, target)
                     source_leaves = learner.apply(features)
                     map_to_leaf = candidate.report["source_leaf_map"]
+                    fitted_logits = candidate.leaf_logits.copy()
                     for source, leaf in map_to_leaf.items():
                         rows = source_leaves == source
                         if not np.any(rows):
                             raise RuntimeError("Warehouse core candidate contains empty source leaf")
-                        candidate.leaf_logits[leaf] = _fit_leaf_logits(target[rows], masks[rows])
+                        fitted_logits[leaf] = _fit_leaf_logits(target[rows], masks[rows])
+                    candidate = CoreTreeResult(
+                        candidate.split_weights, candidate.split_bias,
+                        candidate.left_refs, candidate.right_refs,
+                        candidate.node_count, candidate.leaf_count,
+                        fitted_logits, candidate.core_mask,
+                        candidate.report, frozenset())
                     if not np.array_equal(
                             candidate.leaf_indices(x),
                             np.asarray([map_to_leaf[int(value)] for value in source_leaves])):
-                        raise RuntimeError("Warehouse sparse core route changed after export")
+                        rejected.append({
+                            "input_kind": input_kind,
+                            "min_samples_leaf": min_split,
+                            "family": family,
+                            "fitted_max_depth": maximum_depth,
+                            "fitted_max_leaves": maximum_leaves,
+                            "reason": "float32_export_route_mismatch",
+                        })
+                        continue
                     candidate = _insert_legality_splits(
                         candidate, x, masks, target, episodes, config)
                     details, core, summary = _leaf_metrics(
@@ -541,6 +568,8 @@ def fit_core_tree(encoded: np.ndarray, masks: np.ndarray,
                                 "node_count": candidate.node_count,
                                 "leaf_count": candidate.leaf_count, **summary}
                     fitted.append((candidate, core, details, identity))
+    if not fitted:
+        raise RuntimeError("all Warehouse sparse core candidates changed route after export")
     # No qualification set enters this ranking.  The full masked target is
     # used for every leaf, including leaves that never become protected.
     choice = max(fitted, key=lambda item: (
@@ -567,6 +596,7 @@ def fit_core_tree(encoded: np.ndarray, masks: np.ndarray,
         "config": config_json,
         "chosen_candidate": identity,
         "candidate_diagnostics": [item[3] for item in fitted],
+        "rejected_candidate_diagnostics": rejected,
         "leaf_diagnostics": details,
         "execution_action_selection": False,
         "program_qualification_episodes_used": False,

@@ -142,6 +142,8 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
     if (not isinstance(variants, Mapping) or set(variants) != set(p.VARIANTS)
             or pair.get("run_spec_sha256") != expected_spec_sha
             or pair.get("training_config_sha256") != expected_training_sha
+            or pair.get("action_physics_config_sha256") !=
+            p.REGISTERED_BC_SPEC["action_physics_config_sha256"]
             or pair.get("architecture_mode") !=
             p.REGISTERED_ARCHITECTURE_MODE
             or pair.get("program_fit_method") not in
@@ -173,6 +175,8 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
                 or report.get("variant") != variant
                 or report.get("pair_seed") != seed
                 or report.get("joint_steps") != steps
+                or report.get("action_physics_config_sha256") !=
+                p.REGISTERED_BC_SPEC["action_physics_config_sha256"]
                 or report.get("architecture_mode") !=
                 p.REGISTERED_ARCHITECTURE_MODE
                 or report.get("program_fit_method") !=
@@ -383,8 +387,11 @@ def _replay_environment(seed: int):
     """Recreate the exact neutral NN–NN study state without trainer imports."""
     from env.warehouse.domain import participant_study_config
     from env.warehouse.environment import WarehouseMultiAgentEnv
+    from env.warehouse.public_action_features_v614 import validate_study_action_physics
 
-    environment = WarehouseMultiAgentEnv(participant_study_config())
+    config = participant_study_config()
+    validate_study_action_physics(config)
+    environment = WarehouseMultiAgentEnv(config)
     environment.reset(seed=seed)
     # The trainer's state restoration also refreshes public navigation state.
     # A direct field assignment would not reproduce the recorded pre-state.
@@ -449,8 +456,9 @@ def _verify_program_trace_rows(*, actor, programs: Mapping,
     from env.warehouse.decision_protocol import (
         canonical_sha256, independent_agent_seed)
     from env.warehouse.navigation import ACTIONS
+    from env.warehouse.public_action_features_v614 import encode_actor_tree_features
     from env.warehouse.public_observation_v6 import (
-        OBSERVATION_DIM, action_masks, encode_policy_features,
+        OBSERVATION_DIM, action_masks,
         encode_public_observation, public_pre_action_snapshot,
         rebuild_public_pre_action_state,
         rebuild_public_pre_action_state_from_frames)
@@ -501,7 +509,7 @@ def _verify_program_trace_rows(*, actor, programs: Mapping,
                     or np.any((mask != 0.0) & (mask != 1.0))
                     or mask.sum() < 1):
                 return False
-            encoded = encode_policy_features(obs, mask)
+            encoded = encode_actor_tree_features(obs, mask)
             logits = actor.roles[role].logits_encoded(encoded[None])[0]
             masked = np.where(mask > .5, logits, -1.0e9)
             probabilities = np.exp(masked - masked.max())
@@ -1120,6 +1128,8 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
             or receipt.get("selected_pair_seed") not in p.FORMAL_PAIR_SEEDS
             or receipt.get("program_fit_method") not in
             p.PROGRAM_FIT_METHOD_CANDIDATES
+            or receipt.get("action_physics_config_sha256") !=
+            p.REGISTERED_BC_SPEC["action_physics_config_sha256"]
             or receipt.get("policy_id") != _policy_ids(release_id)
             or receipt.get("joint_steps") != {variant: receipt["locked_budget"]
                                                for variant in p.VARIANTS}
@@ -1133,6 +1143,8 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
                           "ai": receipt["role_sha256"][variant]["robot_2"]}
         if (entry.get("policy_id") != receipt["policy_id"][variant]
                 or entry.get("actor_sha256") != receipt["artifact_sha256"][variant]
+                or entry.get("action_physics_config_sha256") !=
+                receipt["action_physics_config_sha256"]
                 or entry.get("training_report_sha256") !=
                 receipt["training_report_sha256"][variant]
                 or entry.get("role_sha256") != expected_roles

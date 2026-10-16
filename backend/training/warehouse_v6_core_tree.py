@@ -15,12 +15,16 @@ from typing import Sequence
 import numpy as np
 
 from env.warehouse.navigation import ACTIONS
-from env.warehouse.public_observation_v6 import FEATURE_DIM
+from env.warehouse.public_action_features_v614 import (
+    TREE_FEATURE_DIM as FEATURE_DIM, TREE_FEATURE_NAMES as FEATURE_NAMES,
+)
 
 
 MAX_DEPTH = 5
 MAX_LEAVES = 16
 MAX_NODE_FEATURES = 3
+_MASK_INDICES = tuple(FEATURE_NAMES.index(f"legal_{action.lower()}")
+                      for action in ACTIONS)
 _EPS = 1.0e-9
 
 
@@ -174,7 +178,7 @@ def _validated_rows(encoded: np.ndarray, masks: np.ndarray,
             or not np.isfinite(p).all()
             or np.any((m != 0.0) & (m != 1.0))
             or np.any(m.sum(1) < 1.0)
-            or not np.array_equal(x[:, -len(ACTIONS):], m)
+            or not np.array_equal(x[:, _MASK_INDICES], m)
             or np.any(p < -1e-7) or np.any(p * (1.0 - m) > 1e-6)
             or not np.allclose(p.sum(1), 1.0, rtol=0.0, atol=1e-5)):
         raise ValueError("Warehouse core tree needs valid masked training distributions")
@@ -390,9 +394,9 @@ def _structural_legal_actions(result: CoreTreeResult) -> tuple[dict[int, set[int
         used = np.flatnonzero(weights)
         left_legal = set(known_legal)
         right_legal = set(known_legal)
-        if len(used) == 1 and used[0] >= FEATURE_DIM - len(ACTIONS):
+        if len(used) == 1 and int(used[0]) in _MASK_INDICES:
             feature = int(used[0])
-            action = feature - (FEATURE_DIM - len(ACTIONS))
+            action = _MASK_INDICES.index(feature)
             threshold = -float(result.split_bias[ref]) / float(weights[feature])
             if 1e-6 < threshold < 1.0 - 1e-6:
                 if weights[feature] > 0:
@@ -475,7 +479,7 @@ def _insert_legality_splits(candidate: CoreTreeResult, x: np.ndarray,
         new_leaf = leaf_count
         node_count += 1
         leaf_count += 1
-        weights[new_node, FEATURE_DIM - len(ACTIONS) + action] = 4.0
+        weights[new_node, _MASK_INDICES[action]] = 4.0
         bias[new_node] = -2.0
         left[new_node] = -1 - new_leaf
         right[new_node] = old_ref

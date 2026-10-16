@@ -14,10 +14,11 @@ from experiments.warehouse.admission import _quality_trace_valid, _validated_epi
 from experiments.warehouse.acceptance import _digest, _paired_schedule_evidence
 from experiments.warehouse.protocol import (
     DEVELOPMENT_SELECTION_SEEDS, FINAL_PROGRAM_SPLIT_COUNTS, PairRunSpec,
-    SCENARIO_BLOCK_STEPS,
+    REGISTERED_BC_SPEC, SCENARIO_BLOCK_STEPS,
     scenario_schedule_sha256, scenario_seed,
 )
 from tests.warehouse_v6_contract_fixture import bc_receipt
+from tests.warehouse_v614_test_scopes import isolated_evaluation_scope
 
 
 def test_frozen_quality_trace_keeps_both_nn_actions_and_binding(tmp_path):
@@ -28,7 +29,8 @@ def test_frozen_quality_trace_keeps_both_nn_actions_and_binding(tmp_path):
     frozen = FrozenWarehouseV6Actor.load(
         artifact["path"], expected_sha256=artifact["sha256"],
         expected_role_sha256=artifact["role_sha256"])
-    measured = evaluate(frozen, [1013001], action_seed_offset=4, trace=True)
+    with isolated_evaluation_scope():
+        measured = evaluate(frozen, [1013001], action_seed_offset=4, trace=True)
     row = _validated_episodes(
         measured, [1013001], require_trace=True,
         actor_sha256=artifact["sha256"], action_seed_offset=4)[0]
@@ -50,7 +52,13 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
         output_dir=str(tmp_path),
         program_fit_method="actor_sparse_topology_v1",
         checkpoint_seeds=DEVELOPMENT_SELECTION_SEEDS)
-    checked = _checked_spec(spec.to_mapping())
+    run_spec = {
+        **spec.to_mapping(),
+        "warmup_actor_path": str(tmp_path / "warmup.actor.npz"),
+        "final_bc_actor_path": str(tmp_path / "final-bc.actor.npz"),
+        "final_bc_precheck_receipt_path": str(tmp_path / "precheck.json"),
+    }
+    checked = _checked_spec(run_spec)
     assert checked["architecture_mode"] == spec.architecture_mode
     assert checked["program_fit_method"] == spec.program_fit_method
     assert checked["bc_recipe_version"] == spec.bc_recipe_version
@@ -61,12 +69,14 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
     assert scientific != _training_config_sha256(checked)
     assert _training_config_sha256(checked) == spec.training_config_sha256(
         checked["source_closure_sha256"])
-    for field, value in (("architecture_mode", "unregistered"),
-                         ("program_fit_method", "axis_tree_v1"),
-                         ("bc_recipe_version", "unregistered"),
-                         ("online_program_extraction_steps", [150_000, 170_000, 186_000])):
-        with pytest.raises(ValueError, match="registered architecture"):
-            _checked_spec({**spec.to_mapping(), field: value})
+    for field, value, message in (
+            ("architecture_mode", "unregistered", "registered architecture"),
+            ("program_fit_method", "axis_tree_v1", "not registered"),
+            ("bc_recipe_version", "unregistered", "registered architecture"),
+            ("online_program_extraction_steps", [150_000, 170_000, 186_000],
+             "registered architecture")):
+        with pytest.raises(ValueError, match=message):
+            _checked_spec({**run_spec, field: value})
 
     resets = []
     for index, start in enumerate(range(0, spec.joint_steps, SCENARIO_BLOCK_STEPS)):
@@ -87,6 +97,8 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
         "program_fit_method": spec.program_fit_method,
         "bc_recipe_version": spec.bc_recipe_version,
         "bc_recipe_sha256": spec.bc_recipe_sha256,
+        "action_physics_config_sha256": REGISTERED_BC_SPEC[
+            "action_physics_config_sha256"],
         "bc_data_seed_schedule_sha256": spec.bc_data_seed_schedule_sha256,
         "risk_dual_config_sha256": spec.risk_dual_config_sha256,
         "online_program_extraction_steps": list(
@@ -112,6 +124,8 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
         "source_closure_sha256": checked["source_closure_sha256"],
         "bc_recipe_version": spec.bc_recipe_version,
         "bc_recipe_sha256": spec.bc_recipe_sha256,
+        "action_physics_config_sha256": REGISTERED_BC_SPEC[
+            "action_physics_config_sha256"],
         "bc_data_seed_schedule": bc_schedule,
         "bc_data_seed_schedule_sha256": spec.bc_data_seed_schedule_sha256,
         "risk_dual_config_sha256": spec.risk_dual_config_sha256,

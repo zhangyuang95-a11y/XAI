@@ -12,15 +12,31 @@ from backend.training.warehouse_v6_shutdown_cost import (
     ShutdownRiskDual, episode_balanced_cost_critic_loss,
     joint_shutdown_surrogate, shutdown_cost_gae,
 )
-from env.warehouse.public_observation_v6 import OBSERVATION_DIM
+from env.warehouse.domain import AgentState, DeliveryTask, WarehouseState
+from env.warehouse.layouts import STUDY_MAP_LAYOUT
+from env.warehouse.pure_nn import action_masks
+from env.warehouse.public_observation_v6 import encode_public_observation
+
+
+def _preaction(frame: int = 0) -> tuple[np.ndarray, np.ndarray]:
+    """Real study-map observation and physical masks without reset."""
+    state = WarehouseState(
+        episode_id=100, frame=frame,
+        agents=[AgentState("robot_1", STUDY_MAP_LAYOUT.robot_start_positions[0],
+                           70.0),
+                AgentState("robot_2", STUDY_MAP_LAYOUT.robot_start_positions[1],
+                           70.0)],
+        tasks=[DeliveryTask("task_0", (0, 3), (3, 2)),
+               DeliveryTask("task_1", (1, 0), (3, 1))], next_task_index=2)
+    return encode_public_observation(state), action_masks(state)
 
 
 def _episode(*, cost: float, complete: bool, baseline: float = 0.2):
     records = []
     for frame in range(2):
+        obs, mask = _preaction(frame)
         records.append({
-            "obs": np.zeros((2, OBSERVATION_DIM), dtype=np.float32),
-            "mask": np.ones((2, 5), dtype=np.float32),
+            "obs": obs, "mask": mask,
             "action": np.zeros(2, dtype=np.int64),
             "logp": np.zeros(2, dtype=np.float32),
             "reward": np.zeros(2, dtype=np.float32),
@@ -78,8 +94,9 @@ def test_cost_critic_updates_for_safe_complete_episode_not_fragment():
     torch.manual_seed(10)
     model = WarehouseV6Actor()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    obs = torch.zeros((2, OBSERVATION_DIM), dtype=torch.float32)
-    mask = torch.ones((2, 5), dtype=torch.float32)
+    pre_obs, pre_mask = _preaction()
+    obs = torch.from_numpy(pre_obs)
+    mask = torch.from_numpy(pre_mask)
     with torch.no_grad():
         policy = Categorical(logits=model.outputs(obs[None], mask[None])[0])
         action = torch.tensor([0, 0])

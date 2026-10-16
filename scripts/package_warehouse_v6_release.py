@@ -265,6 +265,9 @@ def _policies(receipt: dict, evidence: dict, output_root: Path,
     for variant in p.VARIANTS:
         trained = pair["variants"][variant]
         artifact = trained["actor_artifact"]
+        if artifact.get("action_physics_config_sha256") != receipt.get(
+                "action_physics_config_sha256"):
+            raise ValueError("Warehouse selected Actor physics config differs from acceptance")
         actor = _bundle(artifact["path"], artifact["sha256"], output_root,
                         assets_root=assets_root)
         report = _bundle(trained["training_report_path"],
@@ -290,6 +293,8 @@ def _policies(receipt: dict, evidence: dict, output_root: Path,
             "policy_id": receipt["policy_id"][variant],
             "model_version": receipt["actor_model_version"],
             "feature_schema_sha256": receipt["feature_schema_sha256"],
+            "action_physics_config_sha256": receipt[
+                "action_physics_config_sha256"],
             "actor_path": actor["path"], "actor_sha256": actor["sha256"],
             "role_sha256": {"human": artifact["role_sha256"]["robot_1"],
                             "ai": artifact["role_sha256"]["robot_2"]},
@@ -326,6 +331,8 @@ def _verify_training_package(receipt: dict, evidence: dict) -> None:
             if (pair.get("candidate_id") != receipt["candidate_id"]
                     or pair.get("pair_seed") != int(seed)
                     or pair.get("joint_steps") != budget
+                    or pair.get("action_physics_config_sha256") !=
+                    p.REGISTERED_BC_SPEC["action_physics_config_sha256"]
                     or pair.get("program_fit_method") !=
                     receipt.get("program_fit_method")
                     or pair.get("program_fit_method") not in
@@ -340,6 +347,19 @@ def _verify_training_package(receipt: dict, evidence: dict) -> None:
                         pair.get("bc", {}), int(seed),
                         pair.get("source_closure_sha256", ""))):
                 raise ValueError("Warehouse packaged pair identity mismatch")
+            # The pair report embeds the full final-BC internal result, but
+            # Stage 1 also wrote it independently before any PPO reset. Verify
+            # those exact original bytes and the frozen BC Actor now; the
+            # release pair report itself later preserves their identities.
+            internal = pair["bc"]["final_bc_internal_precheck"]
+            independent = pair["bc"]["final_bc_internal_precheck_receipt"]
+            final_actor = internal["final_bc_actor"]
+            if (not Path(independent["path"]).is_file()
+                    or _sha(Path(independent["path"])) != independent["sha256"]
+                    or _read(Path(independent["path"])) != internal
+                    or not Path(final_actor["path"]).is_file()
+                    or _sha(Path(final_actor["path"])) != final_actor["sha256"]):
+                raise ValueError("Warehouse final BC independent evidence changed")
             if development is not None:
                 dev = _read(ROOT / development[seed]["path"])
                 if (dev.get("pair_report_sha256") != pair_asset["sha256"]
@@ -349,6 +369,8 @@ def _verify_training_package(receipt: dict, evidence: dict) -> None:
                 trained = pair["variants"][variant]
                 if (trained.get("program_fit_method") !=
                         pair["program_fit_method"]
+                        or trained.get("action_physics_config_sha256") !=
+                        p.REGISTERED_BC_SPEC["action_physics_config_sha256"]
                         or trained.get("bc_recipe_sha256") !=
                         p.REGISTERED_BC_SPEC_SHA256
                         or trained.get("risk_dual_config_sha256") !=
@@ -623,6 +645,8 @@ def package(acceptance_path: str | Path,
                        "ai_actor_sha256": entry["role_sha256"]["ai"],
                        "actor_model_version": entry["model_version"],
                        "feature_schema_sha256": entry["feature_schema_sha256"],
+                       "action_physics_config_sha256": entry[
+                           "action_physics_config_sha256"],
                        "program_hashes": {path: sha
                                           for path, sha in zip(
                                               entry["program_paths"],

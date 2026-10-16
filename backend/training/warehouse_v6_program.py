@@ -17,14 +17,17 @@ import numpy as np
 
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.pure_nn import AGENTS
-from env.warehouse.public_observation_v6 import (
-    FEATURE_DIM, FEATURE_NAMES, FEATURE_SCHEMA_SHA256, OBSERVATION_DIM,
-    encode_policy_features,
+from env.warehouse.public_observation_v6 import OBSERVATION_DIM
+from env.warehouse.public_action_features_v614 import (
+    ACTION_PHYSICS_CONFIG_SHA256, encode_actor_tree_features,
 )
-from .warehouse_v6_actor import FrozenWarehouseV6Actor, FrozenWarehouseV6Role
+from .warehouse_v6_actor import (
+    FEATURE_DIM, FEATURE_NAMES, FEATURE_SCHEMA_SHA256,
+    FrozenWarehouseV6Actor, FrozenWarehouseV6Role,
+)
 
 
-PROGRAM_VERSION = "warehouse-role-program.v6.2"
+PROGRAM_VERSION = "warehouse-role-program.v6.14-public-affordance-exploratory"
 AXIS_TREE_METHOD = "axis_tree_v1"
 ACTOR_SPARSE_TOPOLOGY_METHOD = "actor_sparse_topology_v1"
 PROGRAM_MAX_DEPTH = 5
@@ -51,7 +54,7 @@ def _sample_arrays(rows: Sequence[Mapping], name: str) -> tuple[np.ndarray, np.n
             or np.any((masks != 0.0) & (masks != 1.0))
             or np.any(masks.sum(axis=-1) < 1.0)):
         raise ValueError(f"{name} has invalid Warehouse public rows")
-    return encode_policy_features(obs, masks), masks
+    return encode_actor_tree_features(obs, masks), masks
 
 
 def _sampled_indices(rows: Sequence[Mapping]) -> np.ndarray:
@@ -246,7 +249,7 @@ class WarehouseV6Program:
                           ).reshape(encoded.shape[:-1])
 
     def _leaf(self, sample: Mapping) -> tuple[int, list[dict]]:
-        encoded = encode_policy_features(np.asarray(sample["obs"], dtype=np.float32),
+        encoded = encode_actor_tree_features(np.asarray(sample["obs"], dtype=np.float32),
                                          np.asarray(sample["mask"], dtype=np.float32))
         return self._leaf_encoded(encoded)
 
@@ -302,6 +305,7 @@ class WarehouseV6Program:
             "version": PROGRAM_VERSION, "role": self.role,
             "actor_role_sha256": self.actor_role_sha256,
             "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+            "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
             "root_ref": int(self.root_ref),
             "split_weights": self.split_weights.tolist(),
             "split_bias": self.split_bias.tolist(),
@@ -328,6 +332,8 @@ class WarehouseV6Program:
     def from_dict(cls, data: Mapping, *, actor_role_sha256: str) -> "WarehouseV6Program":
         if (data.get("version") != PROGRAM_VERSION
                 or data.get("feature_schema_sha256") != FEATURE_SCHEMA_SHA256
+                or data.get("action_physics_config_sha256") !=
+                   ACTION_PHYSICS_CONFIG_SHA256
                 or data.get("role") not in AGENTS
                 or data.get("actor_role_sha256") != actor_role_sha256):
             raise RuntimeError("Warehouse program version, schema, role or Actor hash mismatch")
@@ -634,6 +640,7 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         "version": PROGRAM_VERSION, "role": role,
         "actor_role_sha256": role_actor.role_sha256,
         "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+        "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
         "max_depth": PROGRAM_MAX_DEPTH,
         "leaf_count": structure["leaf_count"],
         "max_features_per_node": MAX_SPLIT_FEATURES,

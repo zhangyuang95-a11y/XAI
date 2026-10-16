@@ -47,6 +47,8 @@ def _pair() -> dict:
         variants[variant] = {
             "variant": variant, "pair_seed": pair_seed, "joint_steps": steps,
             "architecture_mode": spec.architecture_mode,
+            "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
+                "action_physics_config_sha256"],
             "program_fit_method": spec.program_fit_method,
             "bc_recipe_version": spec.bc_recipe_version,
             "bc_recipe_sha256": spec.bc_recipe_sha256,
@@ -67,6 +69,8 @@ def _pair() -> dict:
         "candidate_id": spec.candidate_id, "release_id": spec.release_id,
         "pair_seed": pair_seed, "joint_steps": steps,
         "architecture_mode": spec.architecture_mode,
+        "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
+            "action_physics_config_sha256"],
         "program_fit_method": spec.program_fit_method,
         "online_program_extraction_steps": list(
             spec.online_program_extraction_steps),

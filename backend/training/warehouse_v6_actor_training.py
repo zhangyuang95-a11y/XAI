@@ -17,13 +17,20 @@ from env.warehouse.layouts import STUDY_MAP_LAYOUT
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.pure_nn import AGENTS
 from env.warehouse.public_observation_v6 import (
-    FEATURE_DIM, OBSERVATION_DIM, OBSERVATION_VERSION, FEATURE_SCHEMA_SHA256,
-    encode_policy_features,
+    OBSERVATION_DIM, OBSERVATION_VERSION,
+)
+from env.warehouse.public_action_features_v614 import (
+    ACTION_FEATURE_DIM, ACTION_PHYSICS_CONFIG_SHA256,
+    action_features_from_tree_encoded,
+    encode_actor_tree_features,
 )
 from .warehouse_v6_actor import (
     FrozenWarehouseV6Actor, FrozenWarehouseV6Role, MODEL_VERSION,
+    FEATURE_DIM, FEATURE_SCHEMA_SHA256,
     TREE_DEPTH, TREE_LEAVES, TREE_NODES, MAX_SPLIT_FEATURES, RESIDUAL_WIDTH,
-    MIN_RESIDUAL_BOUND, MAX_RESIDUAL_BOUND, GATE_WIDTH, GEOMETRY_DIM,
+    MIN_RESIDUAL_BOUND, MAX_RESIDUAL_BOUND, CORE_LOW_GATE_BOUND,
+    CORE_BOUND_MODE,
+    GATE_WIDTH, GEOMETRY_DIM,
     _POSITION_COLUMNS, _MOVE, TREE_GRADIENT_SCALE,
     _TENSOR_NAMES, _role_arrays, role_sha256,
 )
@@ -32,7 +39,12 @@ def policy_features_torch(obs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor
     if (obs.shape[-1:] != (OBSERVATION_DIM,)
             or mask.shape != obs.shape[:-1] + (len(ACTIONS),)):
         raise ValueError("Warehouse v6 Actor observation or mask dimension mismatch")
-    return torch.cat((obs, mask), dim=-1)
+    # Public map distances have no trainable parameters.  Both Torch training
+    # and frozen NumPy inference call the same deterministic pre-action
+    # encoder, avoiding a second implementation of shortest-path features.
+    encoded = encode_actor_tree_features(obs.detach().cpu().numpy(),
+                                         mask.detach().cpu().numpy())
+    return torch.as_tensor(encoded, dtype=obs.dtype, device=obs.device)
 
 
 class SparseHardTree(nn.Module):
@@ -176,11 +188,15 @@ class RoleActor(nn.Module):
             nn.Linear(GATE_WIDTH, 1),
         )
         self.action_residual = nn.Sequential(
-            nn.Linear(FEATURE_DIM + GEOMETRY_DIM + len(ACTIONS), RESIDUAL_WIDTH),
+            nn.Linear(FEATURE_DIM + GEOMETRY_DIM + len(ACTIONS)
+                      + ACTION_FEATURE_DIM, RESIDUAL_WIDTH),
             nn.ReLU(), nn.Linear(RESIDUAL_WIDTH, RESIDUAL_WIDTH), nn.ReLU(),
             nn.Linear(RESIDUAL_WIDTH, 1),
         )
         self.leaf_bound_logits = nn.Parameter(torch.full((TREE_LEAVES,), -0.9))
+        # A public-training-data core is an Actor tensor, not a runtime action
+        # rule. Its bound is applied inside the NN forward pass for both arms.
+        self.register_buffer("core_leaf_mask", torch.zeros(TREE_LEAVES))
         nn.init.zeros_(self.gate[-1].weight)
         nn.init.constant_(self.gate[-1].bias, -0.7)
         nn.init.normal_(self.action_residual[-1].weight, mean=0.0, std=0.01)
@@ -194,9 +210,68 @@ class RoleActor(nn.Module):
         fraction = np.clip((desired - MIN_RESIDUAL_BOUND) /
                            (MAX_RESIDUAL_BOUND - MIN_RESIDUAL_BOUND), 1e-4, 1-1e-4)
         with torch.no_grad():
+            self.core_leaf_mask.zero_()
             self.leaf_bound_logits.copy_(torch.from_numpy(
                 np.log(fraction / (1.0 - fraction)).astype(np.float32)))
         return report
+
+    def initialize_tree_from_core_result(self, result) -> dict:
+        """Install a fit-only public sparse tree and hashed core-leaf mask."""
+        arrays = {
+            "split_weights": (TREE_NODES, FEATURE_DIM),
+            "split_bias": (TREE_NODES,),
+            "left_refs": (TREE_NODES,),
+            "right_refs": (TREE_NODES,),
+            "leaf_logits": (TREE_LEAVES, len(ACTIONS)),
+            "core_mask": (TREE_LEAVES,),
+        }
+        values = {name: np.asarray(getattr(result, name)) for name in arrays}
+        if any(values[name].shape != shape or not np.isfinite(values[name]).all()
+               for name, shape in arrays.items()):
+            raise ValueError("Warehouse core tree result tensor shape/value mismatch")
+        nodes, leaves = int(result.node_count), int(result.leaf_count)
+        if not 1 <= leaves <= TREE_LEAVES or nodes != leaves - 1:
+            raise ValueError("Warehouse core tree result size mismatch")
+        core = values["core_mask"].astype(np.float32)
+        if (np.any((core != 0.0) & (core != 1.0))
+                or np.any(core[leaves:] != 0.0)):
+            raise ValueError("Warehouse core tree result mask invalid")
+        with torch.no_grad():
+            self.tree.split.weight.copy_(torch.from_numpy(np.array(
+                values["split_weights"], dtype=np.float32, copy=True)))
+            self.tree.split.bias.copy_(torch.from_numpy(np.array(
+                values["split_bias"], dtype=np.float32, copy=True)))
+            self.tree.left_refs.copy_(torch.from_numpy(np.array(
+                values["left_refs"], dtype=np.int64, copy=True)))
+            self.tree.right_refs.copy_(torch.from_numpy(np.array(
+                values["right_refs"], dtype=np.int64, copy=True)))
+            self.tree.node_count[0] = nodes
+            self.tree.leaf_count[0] = leaves
+            self.tree.leaf_logits.copy_(torch.from_numpy(np.array(
+                values["leaf_logits"], dtype=np.float32, copy=True)))
+            self.core_leaf_mask.copy_(torch.from_numpy(core))
+            # Every leaf retains a learned residual budget. In core leaves a
+            # learned pre-action gate makes the effective budget small in
+            # ordinary states and can release it in conflict states.
+            desired = np.full(TREE_LEAVES, 6.0, dtype=np.float32)
+            upper = np.full(TREE_LEAVES, MAX_RESIDUAL_BOUND, dtype=np.float32)
+            fraction = np.clip((desired - MIN_RESIDUAL_BOUND) /
+                               (upper - MIN_RESIDUAL_BOUND), 1e-4, 1 - 1e-4)
+            self.leaf_bound_logits.copy_(torch.from_numpy(
+                np.log(fraction / (1.0 - fraction)).astype(np.float32)))
+        # Core legality is certified by path predicates.  Keep those split
+        # predicates fixed after public-data fitting; leaf logits, gate,
+        # bounds, and the 256-unit residual remain trainable.
+        self.tree.split.weight.requires_grad_(False)
+        self.tree.split.bias.requires_grad_(False)
+        # Exact topology, sparsity, and role hash validation is shared with
+        # deployed NumPy inference; no separate train-only interpretation.
+        FrozenWarehouseV6Role(_role_arrays(self))
+        return {"node_count": nodes, "leaf_count": leaves,
+                "core_leaf_count": int(core.sum()),
+                "split_frozen_after_public_fit": True,
+                "core_result_report": getattr(result, "report", None),
+                "core_mask_sha256": sha256(core.tobytes()).hexdigest()}
 
     def bounds(self) -> torch.Tensor:
         return MIN_RESIDUAL_BOUND + (MAX_RESIDUAL_BOUND - MIN_RESIDUAL_BOUND) * torch.sigmoid(
@@ -215,13 +290,23 @@ class RoleActor(nn.Module):
                                                  (len(ACTIONS), FEATURE_DIM))
         eye = torch.eye(len(ACTIONS), dtype=encoded.dtype, device=encoded.device)
         action = eye.expand(encoded.shape[:-1] + (len(ACTIONS), len(ACTIONS)))
-        return gate_input, torch.cat((repeated, geometry, action), dim=-1)
+        candidate = action_features_from_tree_encoded(
+            encoded.detach().cpu().numpy())
+        candidate_torch = torch.as_tensor(candidate, dtype=encoded.dtype,
+                                          device=encoded.device)
+        return gate_input, torch.cat((repeated, geometry, action,
+                                      candidate_torch), dim=-1)
 
     def components(self, encoded: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         tree_logits, path = self.tree(encoded)
-        bound = path @ self.bounds()
+        learned_bound = path @ self.bounds()
         gate_input, relation = self._relation_features(encoded)
         gate = torch.sigmoid(self.gate(gate_input).squeeze(-1))
+        core = (path.detach() @ self.core_leaf_mask) > 0.5
+        bound = torch.where(core,
+                            CORE_LOW_GATE_BOUND + gate * (
+                                learned_bound - CORE_LOW_GATE_BOUND),
+                            learned_bound)
         score = self.action_residual(relation).squeeze(-1)
         bounded_residual = (gate * bound).unsqueeze(-1) * torch.tanh(score)
         return tree_logits, bounded_residual, bound
@@ -264,9 +349,26 @@ class WarehouseV6Actor(nn.Module):
         return self.outputs_encoded(policy_features_torch(obs, mask), mask)
 
     def role_logits(self, role: str, obs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """Return [batch, action] logits.
+
+        Joint inputs have [batch, 2, observation] shape.  An input with
+        [batch, observation] shape is already role-specific.  Use a leading
+        batch dimension for a single joint frame to avoid ambiguity with a
+        two-row batch of role-specific observations.
+        """
         if role not in AGENTS:
             raise ValueError("unknown Warehouse v6 role")
         encoded = policy_features_torch(obs, mask)
+        # A joint pre-action batch has [rows, role, feature] shape.  Select
+        # the requested role for both logits and the physical mask; applying
+        # a single RoleActor to the whole joint tensor produces [rows, 2, 5]
+        # and falsely treats the partner's observation as this role's own.
+        if encoded.ndim >= 3:
+            if (encoded.shape[-2] != len(AGENTS)
+                    or mask.shape[-2] != len(AGENTS)):
+                raise ValueError("Warehouse v6 joint observation requires two roles")
+            index = AGENTS.index(role)
+            encoded, mask = encoded[..., index, :], mask[..., index, :]
         return self.actors[role](encoded).masked_fill(mask <= 0.5, -1.0e9)
 
 
@@ -286,13 +388,17 @@ def export_actor(model: WarehouseV6Actor, path: str | Path, *, pair_seed: int,
         "model_version": MODEL_VERSION, "observation_version": OBSERVATION_VERSION,
         "observation_dim": OBSERVATION_DIM, "feature_dim": FEATURE_DIM,
         "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+        "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
         "map_layout_id": STUDY_MAP_LAYOUT.layout_id,
         "agent_ids": list(AGENTS), "action_names": list(ACTIONS),
         "tree_depth": TREE_DEPTH, "tree_leaves": TREE_LEAVES,
         "max_split_features": MAX_SPLIT_FEATURES,
         "minimum_residual_bound": MIN_RESIDUAL_BOUND,
         "maximum_residual_bound": MAX_RESIDUAL_BOUND,
+        "core_low_gate_bound": CORE_LOW_GATE_BOUND,
+        "core_bound_mode": CORE_BOUND_MODE,
         "relation_geometry_dim": GEOMETRY_DIM,
+        "action_feature_dim": ACTION_FEATURE_DIM,
         "gate_width": GATE_WIDTH,
         "role_sha256": role_digests, "pair_seed": pair_seed,
         "variant": variant, "candidate_id": candidate_id,
@@ -306,4 +412,5 @@ def export_actor(model: WarehouseV6Actor, path: str | Path, *, pair_seed: int,
                                          expected_role_sha256=role_digests)
     return {"path": str(target), "sha256": digest, "role_sha256": frozen.role_sha256,
             "model_version": MODEL_VERSION,
-            "feature_schema_sha256": FEATURE_SCHEMA_SHA256}
+            "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+            "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256}

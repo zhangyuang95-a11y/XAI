@@ -12,9 +12,33 @@ from backend.training.warehouse_v6_actor import (
     FEATURE_DIM, MODEL_VERSION, TREE_DEPTH, TREE_LEAVES, FrozenWarehouseV6Actor,
     FrozenWarehouseV6Role, WarehouseV6Actor, _role_arrays, export_actor,
 )
+from env.warehouse.domain import AgentState, DeliveryTask, WarehouseState
+from env.warehouse.layouts import STUDY_MAP_LAYOUT
 from env.warehouse.navigation import ACTIONS
-from env.warehouse.public_observation_v6 import OBSERVATION_DIM
-from env.warehouse.pure_nn import AGENTS
+from env.warehouse.public_action_features_v614 import encode_actor_tree_features
+from env.warehouse.public_observation_v6 import encode_public_observation
+from env.warehouse.pure_nn import AGENTS, action_masks
+
+
+SELF_ROW_INDEX = 45
+
+
+def _public_state(frame: int, position: tuple[int, int]) -> WarehouseState:
+    """Valid study-map pre-action state, built without a scenario reset."""
+    return WarehouseState(
+        episode_id=69, frame=frame,
+        agents=[AgentState("robot_1", position, 70.0),
+                AgentState("robot_2", STUDY_MAP_LAYOUT.robot_start_positions[1],
+                           70.0)],
+        tasks=[DeliveryTask("task_0", (0, 3), (3, 2)),
+               DeliveryTask("task_1", (1, 0), (3, 1))], next_task_index=2)
+
+
+def _public_rows() -> tuple[np.ndarray, np.ndarray]:
+    states = (_public_state(10, (1, 0)), _public_state(80, (1, 0)),
+              _public_state(80, (5, 2)))
+    return (np.stack([encode_public_observation(state) for state in states]),
+            np.stack([action_masks(state) for state in states]))
 
 
 def _classifier() -> SimpleNamespace:
@@ -28,7 +52,7 @@ def _classifier() -> SimpleNamespace:
         tree_=SimpleNamespace(
             children_left=np.asarray([1, -1, 3, -1, -1]),
             children_right=np.asarray([2, -1, 4, -1, -1]),
-            feature=np.asarray([0, -2, 1, -2, -2]),
+            feature=np.asarray([0, -2, SELF_ROW_INDEX, -2, -2]),
             threshold=np.asarray([0.4, -2, 0.6, -2, -2]),
             value=values,
             weighted_n_node_samples=np.asarray([30, 10, 20, 10, 10]),
@@ -45,9 +69,9 @@ def _irregular_model() -> WarehouseV6Actor:
 
 
 def _encoded_rows() -> np.ndarray:
-    rows = np.zeros((3, FEATURE_DIM), dtype=np.float32)
-    rows[:, 0] = [0.1, 0.8, 0.8]
-    rows[:, 1] = [0.0, 0.2, 0.9]
+    obs, mask = _public_rows()
+    rows = encode_actor_tree_features(obs[:, 0], mask[:, 0])
+    assert rows.shape == (3, FEATURE_DIM)
     return rows
 
 
@@ -77,7 +101,7 @@ def test_visited_split_parameters_receive_gradients_with_hard_forward():
     assert tree.split.weight.requires_grad and tree.split.bias.requires_grad
     rows = _encoded_rows()
     rows[0, 0] = 0.4
-    rows[1, 1] = 0.6
+    rows[1, SELF_ROW_INDEX] = 0.6
     encoded = torch.from_numpy(rows)
     logits, path = tree(encoded)
     np.testing.assert_array_equal(path.detach().numpy().sum(axis=-1), [1, 1, 1])
@@ -85,7 +109,7 @@ def test_visited_split_parameters_receive_gradients_with_hard_forward():
     weight_grad, bias_grad = torch.autograd.grad(
         logits[:, 1].sum(), (tree.split.weight, tree.split.bias))
     assert weight_grad[0, 0].abs() > 0
-    assert weight_grad[1, 1].abs() > 0
+    assert weight_grad[1, SELF_ROW_INDEX].abs() > 0
     assert bias_grad[:2].abs().min() > 0
     assert torch.count_nonzero(weight_grad[2:]) == 0
 
@@ -95,7 +119,7 @@ def test_equal_leaf_logits_cancel_split_gradients():
     tree = model.actors[AGENTS[0]].tree
     rows = _encoded_rows()
     rows[0, 0] = 0.4
-    rows[1, 1] = 0.6
+    rows[1, SELF_ROW_INDEX] = 0.6
     encoded = torch.from_numpy(rows)
     with torch.no_grad():
         tree.leaf_logits[:] = torch.arange(len(ACTIONS), dtype=torch.float32)
@@ -115,7 +139,7 @@ def test_equal_leaf_logits_cancel_split_gradients():
     weight_grad, bias_grad = torch.autograd.grad(
         distinct_logits[:, 0].sum(), (tree.split.weight, tree.split.bias))
     assert weight_grad[0, 0].abs() > 0
-    assert weight_grad[1, 1].abs() > 0
+    assert weight_grad[1, SELF_ROW_INDEX].abs() > 0
     assert bias_grad[:2].abs().min() > 0
     assert torch.count_nonzero(weight_grad[2:]) == 0
 
@@ -187,8 +211,11 @@ def test_shallow_and_depth_five_paths_match_frozen_leaves_and_logits():
             tree.right_refs[index] = index + 1 if index < 4 else -6
             tree.leaf_logits[index, 0] = float(index)
         tree.leaf_logits[5, 0] = 5.0
-    rows = np.zeros((6, FEATURE_DIM), dtype=np.float32)
-    rows[:, 0] = [0.05, 0.15, 0.25, 0.35, 0.45, 0.6]
+    states = [_public_state(frame, (1, 0))
+              for frame in (6, 18, 30, 42, 54, 72)]
+    rows = encode_actor_tree_features(
+        np.stack([encode_public_observation(state)[0] for state in states]),
+        np.stack([action_masks(state)[0] for state in states]))
     with torch.no_grad():
         path = tree.path(torch.from_numpy(rows)).numpy()
         expected = actor(torch.from_numpy(rows)).numpy()
@@ -223,13 +250,11 @@ def test_export_load_hashes_and_full_torch_frozen_parity(tmp_path):
     frozen = FrozenWarehouseV6Actor.load(
         path, expected_sha256=artifact["sha256"],
         expected_role_sha256=artifact["role_sha256"])
-    obs = np.zeros((3, len(AGENTS), OBSERVATION_DIM), dtype=np.float32)
-    obs[:, :, 0] = _encoded_rows()[:, None, 0]
-    obs[:, :, 1] = _encoded_rows()[:, None, 1]
-    mask = np.ones((3, len(AGENTS), len(ACTIONS)), dtype=np.float32)
+    obs, mask = _public_rows()
     with torch.no_grad():
         expected = model.outputs(torch.from_numpy(obs), torch.from_numpy(mask)).numpy()
-    np.testing.assert_allclose(frozen.logits(obs, mask), expected, atol=1e-4, rtol=0)
+    np.testing.assert_allclose(np.where(mask > 0.5, frozen.logits(obs, mask),
+                                        -1e9), expected, atol=1e-4, rtol=0)
     with pytest.raises(RuntimeError, match="artifact hash mismatch"):
         FrozenWarehouseV6Actor.load(path, expected_sha256="0" * 64)
 

@@ -51,6 +51,8 @@ def _paired_training(joint_steps=200_000, pair_seed=p.DEVELOPMENT_PAIR_SEEDS[0])
             "pair_seed": pair_seed,
             "joint_steps": joint_steps, "actor_decisions": 2 * joint_steps,
             "architecture_mode": p.REGISTERED_ARCHITECTURE_MODE,
+            "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
+                "action_physics_config_sha256"],
             "program_fit_method": METHOD,
             "bc_recipe_version": p.REGISTERED_BC_RECIPE_VERSION,
             "bc_recipe_sha256": p.REGISTERED_BC_SPEC_SHA256,

@@ -8,14 +8,17 @@ programs never enter the environment action path.
 from __future__ import annotations
 
 from collections import deque
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import asdict
 from hashlib import sha256
 import argparse
 import base64
 import json
+import os
 from pathlib import Path
-from typing import Mapping, Sequence
+import sys
+from typing import Callable, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -24,9 +27,8 @@ from torch.distributions import Categorical
 
 from experiments.warehouse.protocol import (
     FINAL_PROGRAM_SPLIT_COUNTS, REGISTERED_BC_RECIPE_VERSION, REGISTERED_BC_SPEC,
-    REGISTERED_BC_SPEC_SHA256, PROGRAM_FIT_METHOD_CANDIDATES,
-    REGISTERED_RISK_DUAL_CONFIG, REGISTERED_RISK_DUAL_CONFIG_SHA256,
-    bc_data_seed_schedule, bc_critic_reset_schedule, bc_report_valid,
+    REGISTERED_BC_SPEC_SHA256, REGISTERED_RISK_DUAL_CONFIG_SHA256,
+    bc_critic_reset_schedule, bc_data_seed_schedule,
     SCENARIO_BLOCK_STEPS, online_program_cohorts_valid,
     scenario_seed, scenario_schedule_sha256,
 )
@@ -36,19 +38,35 @@ from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.pure_nn import AGENTS, action_masks
 from env.warehouse.public_observation_v6 import (
-    FEATURE_SCHEMA_SHA256, OBSERVATION_DIM, OBSERVATION_VERSION,
+    OBSERVATION_DIM, OBSERVATION_VERSION,
     OBSERVATION_FEATURE_NAMES,
     encode_public_observation, public_pre_action_snapshot,
     rebuild_public_pre_action_state,
 )
+from env.warehouse.public_action_features_v614 import (
+    ACTION_PHYSICS_CONFIG, ACTION_PHYSICS_CONFIG_SHA256, TREE_FEATURE_NAMES,
+    encode_actor_tree_features, validate_study_action_physics,
+)
+from env.warehouse.reset_audit_v614 import (
+    capture_stage1_resets, stage1_reset_phase,
+)
 from .warehouse_v6_actor import (
-    MODEL_VERSION, FrozenWarehouseV6Actor, WarehouseV6Actor, export_actor,
-    policy_features_torch, role_hashes,
+    MODEL_VERSION, FEATURE_SCHEMA_SHA256, FrozenWarehouseV6Actor,
+    WarehouseV6Actor, export_actor,
+    policy_features_torch, role_hashes, role_sha256,
+    CORE_LOW_GATE_BOUND, CORE_BOUND_MODE,
 )
 from .warehouse_v6_program import (
-    ACTOR_SPARSE_TOPOLOGY_METHOD, AXIS_TREE_METHOD, WarehouseV6Program,
-    fit_program, audit_frozen_program, current_actor_fidelity,
+    WarehouseV6Program, fit_program, audit_frozen_program, current_actor_fidelity,
+    ACTOR_SPARSE_TOPOLOGY_METHOD,
 )
+from .warehouse_v6_core_intrinsic import core_intrinsic_loss
+from .warehouse_v6_core_tree import CoreTreeConfig, fit_core_tree, _masked_probabilities
+from .warehouse_v614_certificate_tree import (
+    CertificateSearchConfig, FeatureSchema, fit_certificate_tree,
+    to_current_core_tree_result, frozen_actor_topology,
+)
+from .warehouse_v614_masked_refit import EpisodeRows, RefitConfig, fit_episode_separated_core
 from .warehouse_v6_shutdown_cost import (
     RiskDualConfig, ShutdownRiskDual, shutdown_cost_gae,
     joint_shutdown_surrogate, episode_balanced_cost_critic_loss,
@@ -56,7 +74,28 @@ from .warehouse_v6_shutdown_cost import (
 from .warehouse_v6_teacher_lookahead import public_lookahead_teacher
 
 
-RUNNER_VERSION = "warehouse-v6-paired-complete-event-cost-ppo.v8-candidate-protocol"
+RUNNER_VERSION = "warehouse-v6-public-affordance-core-exploratory.v14"
+FORMAL_TRAINING_DISABLED = True
+_LOCKED_BC_MARKER = object()
+_LOCKED_EVALUATION_MARKER = object()
+_LOCKED_FORMAL_MARKER = object()
+_ACTIVE_LOCKED_EXECUTION: ContextVar[object | None] = ContextVar(
+    "warehouse_v614_locked_execution", default=None)
+_LOCKED_EXECUTION_USED_IN_PROCESS = False
+
+
+def _require_locked_execution(*, allow_evaluation: bool = False) -> None:
+    active = _ACTIVE_LOCKED_EXECUTION.get()
+    if (FORMAL_TRAINING_DISABLED and active is not _LOCKED_BC_MARKER
+            and active is not _LOCKED_FORMAL_MARKER
+            and not (allow_evaluation and active is _LOCKED_EVALUATION_MARKER)):
+        raise RuntimeError("Warehouse v6.14 integrated draft is review-only")
+CORE_BC_WEIGHTS = {"tree_ce": 0.15, "full_to_tree_kl": 0.08,
+                   "tree_to_full_kl": 0.08, "gate": 0.005,
+                   "cert_margin": 0.01}
+CORE_PPO_WEIGHTS = {"tree_ce": 0.0, "full_to_tree_kl": 0.08,
+                    "tree_to_full_kl": 0.08, "gate": 0.005,
+                    "cert_margin": 0.01}
 PROGRAM_LAMBDA = 0.01
 PROGRAM_START_FRACTION = 0.80
 PROGRAM_RAMP_FRACTION = 0.05
@@ -78,30 +117,44 @@ DEFAULT_DAGGER_EPOCHS = REGISTERED_BC_SPEC["dagger_epochs"]
 # A single, replayable offline BC recipe is completed before either PPO
 # variant starts. Every data seed and stage is fixed by the pair seed. The
 # offline teacher and learned collision critic are absent from execution.
-BC_RECIPE_VERSION = REGISTERED_BC_RECIPE_VERSION
-BC_INITIAL_TEACHER_EPISODES = REGISTERED_BC_SPEC["bc_episodes"]
-BC_INITIAL_EPOCHS = REGISTERED_BC_SPEC["bc_epochs"]
-BC_INITIAL_DAGGER_ROUNDS = REGISTERED_BC_SPEC["dagger_rounds"]
-BC_INITIAL_DAGGER_EPISODES = REGISTERED_BC_SPEC["dagger_episodes"]
-BC_INITIAL_DAGGER_EPOCHS = REGISTERED_BC_SPEC["dagger_epochs"]
-BC_RISK_TEACHER_EPISODES = REGISTERED_BC_SPEC["risk_teacher_episodes"]
-BC_RISK_VISIT_EPISODES = REGISTERED_BC_SPEC["risk_visit_episodes"]
-BC_LARGE_TEACHER_EPISODES = REGISTERED_BC_SPEC["large_teacher_episodes"]
-BC_LARGE_VISIT_EPISODES = REGISTERED_BC_SPEC["large_visit_episodes"]
-BC_DEEP_TEACHER_EPISODES = REGISTERED_BC_SPEC["deep_teacher_episodes"]
-BC_DEEP_DAGGER_ROUNDS = REGISTERED_BC_SPEC["deep_dagger_rounds"]
-BC_DEEP_DAGGER_EPISODES = REGISTERED_BC_SPEC["deep_dagger_episodes"]
-BC_RISK_EPOCHS = REGISTERED_BC_SPEC["risk_epochs"]
-BC_DEEP_EPOCHS = REGISTERED_BC_SPEC["deep_epochs"]
-BC_BATCH_SIZE = REGISTERED_BC_SPEC["batch_size"]
-BC_RISK_WEIGHT = REGISTERED_BC_SPEC["risk_weight"]
-BC_MARGIN_GAP = REGISTERED_BC_SPEC["margin_gap"]
-BC_MARGIN_WEIGHT = REGISTERED_BC_SPEC["margin_weight"]
-BC_NEAR_INCREMENT = REGISTERED_BC_SPEC["near_increment"]
-BC_LOW_RETURN_INCREMENT = REGISTERED_BC_SPEC["low_return_increment"]
-BC_SAMPLED_COLLISION_INCREMENT = REGISTERED_BC_SPEC["sampled_collision_increment"]
-BC_ARGMAX_COLLISION_INCREMENT = REGISTERED_BC_SPEC["argmax_collision_increment"]
-BC_DUPLICATE_COLLISION_CAP = REGISTERED_BC_SPEC["duplicate_collision_cap"]
+BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.14-public-affordance-exploratory"
+BC_INITIAL_TEACHER_EPISODES = 100
+BC_INITIAL_EPOCHS = 20
+BC_INITIAL_DAGGER_ROUNDS = 2
+BC_INITIAL_DAGGER_EPISODES = 40
+BC_INITIAL_DAGGER_EPOCHS = 10
+BC_RISK_TEACHER_EPISODES = 40
+BC_RISK_VISIT_EPISODES = 80
+BC_LARGE_TEACHER_EPISODES = 200
+BC_LARGE_VISIT_EPISODES = 120
+BC_DEEP_TEACHER_EPISODES = 200
+BC_DEEP_DAGGER_ROUNDS = 4
+BC_DEEP_DAGGER_EPISODES = 100
+BC_RISK_EPOCHS = 8
+BC_DEEP_EPOCHS = 6
+BC_BATCH_SIZE = 128
+BC_RISK_WEIGHT = 2.0
+BC_MARGIN_GAP = 3.0
+BC_MARGIN_WEIGHT = 0.03
+BC_NEAR_INCREMENT = 2.0
+BC_LOW_RETURN_INCREMENT = 8.0
+BC_SAMPLED_COLLISION_INCREMENT = 3.0
+BC_ARGMAX_COLLISION_INCREMENT = 5.0
+BC_DUPLICATE_COLLISION_CAP = 8
+BC_GATE_SUPERVISION_WEIGHT = 0.20
+BC_GATE_TARGET_LOW = 0.10
+BC_GATE_TARGET_CORRECTION = 0.90
+BC_TOPOLOGY_STAGE_COUNTS = {
+    "fit_sampled": (60, 25), "fit_argmax": (61, 25),
+}
+BC_FINAL_CORE_STAGE_COUNTS = {
+    "fit_sampled": (70, 25), "fit_argmax": (71, 25),
+    "calibration_sampled": (72, 13), "calibration_argmax": (73, 12),
+    "eligibility_sampled": (74, 13), "eligibility_argmax": (75, 12),
+    "validation_sampled": (76, 12), "validation_argmax": (77, 12),
+}
+BC_REFIT_EPOCHS = 8
+BC_REFIT_WARMUP_KL_WEIGHT = 0.0
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[2]
 _SOURCE_FILES = (
@@ -119,8 +172,11 @@ _SOURCE_FILES = (
     "backend/training/warehouse_sparse_v5.py",
     "backend/inference/__init__.py", "backend/inference/warehouse_structured_v5.py",
     "backend/training/warehouse_v6_actor.py", "backend/training/warehouse_v6_actor_training.py",
-    "backend/training/warehouse_v6_collision_critic.py", "backend/training/warehouse_v6_core_tree.py",
-    "backend/training/warehouse_v6_program.py",
+    "backend/training/warehouse_v6_collision_critic.py", "backend/training/warehouse_v6_program.py",
+    "backend/training/warehouse_v6_core_tree.py",
+    "backend/training/warehouse_v6_core_intrinsic.py",
+    "backend/training/warehouse_v614_certificate_tree.py",
+    "backend/training/warehouse_v614_masked_refit.py",
     "backend/training/warehouse_v6_runner.py", "backend/training/warehouse_v6_shutdown_cost.py",
     "backend/training/warehouse_v6_teacher.py", "backend/training/warehouse_v6_teacher_lookahead.py",
     "core/__init__.py", "core/policy_contracts.py", "core/policy_program_regularizer.py",
@@ -136,8 +192,90 @@ _SOURCE_FILES = (
     "scripts/package_warehouse_v6_release.py", "scripts/start_warehouse_v6_candidate_release.py",
     "configs/study_v3_warehouse.json", "configs/study_v3_warehouse_neural.json",
     "configs/study_v3_warehouse_neural_v5.json", "configs/study_v3_warehouse_neural_v6.json",
+    "configs/warehouse_v614_exploratory_recipe.json",
     "requirements-warehouse-v6-training.txt",
 )
+
+
+def v614_executable_recipe() -> dict:
+    """Return the candidate's exact scientific BC and Actor settings."""
+    return {
+        "version": BC_RECIPE_VERSION,
+        "actor_model_version": MODEL_VERSION,
+        "observation_version": OBSERVATION_VERSION,
+        "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+        "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
+        "program_fit_method": ACTOR_SPARSE_TOPOLOGY_METHOD,
+        "core_bound_mode": CORE_BOUND_MODE,
+        "core_low_gate_bound": CORE_LOW_GATE_BOUND,
+        "certificate_tree_search": asdict(CertificateSearchConfig()),
+        "episode_separated_refit": asdict(RefitConfig()),
+        "topology_stage_counts": BC_TOPOLOGY_STAGE_COUNTS,
+        "final_bc_internal_precheck_stage_counts": BC_FINAL_CORE_STAGE_COUNTS,
+        "post_refit_bc_epochs": BC_REFIT_EPOCHS,
+        "post_refit_warmup_masked_kl_weight": BC_REFIT_WARMUP_KL_WEIGHT,
+        "topology_target": "one_frozen_warmup_full_nn_complete_masked_distribution",
+        "topology_fit_inputs": "warmup_nn_visits_only_no_warmup_teacher_episodes",
+        "topology_purpose_at_warmup": "fit_only",
+        "final_bc_internal_precheck_purposes": [
+            "fit", "calibration", "eligibility", "validation"],
+        "final_bc_internal_precheck_source": "one_final_frozen_full_bc_actor",
+        "final_program_topology": "selected_final_frozen_full_actor_tree",
+        "warmup_freeze_after": "initial_nn_dagger_2_fit",
+        "warmup_quality_prequalified": False,
+        "gate_supervision_weight": BC_GATE_SUPERVISION_WEIGHT,
+        "gate_target_low": BC_GATE_TARGET_LOW,
+        "gate_target_correction": BC_GATE_TARGET_CORRECTION,
+        "gate_correction_conditions": ["public_teacher_tree_disagreement",
+                                       "previous_public_same_target_collision",
+                                       "real_training_collision_event"],
+        "core_bc_weights": CORE_BC_WEIGHTS,
+        "core_ppo_weights": CORE_PPO_WEIGHTS,
+        "core_intrinsic_stable_conditions": {
+            "same_target_collision_streak_capped_max": 0.0,
+            "robots_shortest_distance_min": 2.0,
+            "self_charger_return_margin_min": 4.0,
+            "bc_tree_ce_all_training_rows": True,
+            "full_to_tree_includes_unqualified_leaves": True,
+            "reverse_kl_and_margin_requires_bc_teacher_or_ppo_full_top_agreement": True,
+            "program_or_validation_rows_used_for_loss": False,
+        },
+        "initial_teacher_episodes": BC_INITIAL_TEACHER_EPISODES,
+        "initial_bc_epochs": BC_INITIAL_EPOCHS,
+        "initial_dagger_rounds": BC_INITIAL_DAGGER_ROUNDS,
+        "initial_dagger_episodes": BC_INITIAL_DAGGER_EPISODES,
+        "initial_dagger_epochs": BC_INITIAL_DAGGER_EPOCHS,
+        "risk_teacher_episodes": BC_RISK_TEACHER_EPISODES,
+        "risk_visit_episodes": BC_RISK_VISIT_EPISODES,
+        "large_teacher_episodes": BC_LARGE_TEACHER_EPISODES,
+        "large_visit_episodes": BC_LARGE_VISIT_EPISODES,
+        "deep_teacher_episodes": BC_DEEP_TEACHER_EPISODES,
+        "deep_dagger_rounds": BC_DEEP_DAGGER_ROUNDS,
+        "deep_dagger_episodes": BC_DEEP_DAGGER_EPISODES,
+        "risk_epochs": BC_RISK_EPOCHS,
+        "deep_epochs": BC_DEEP_EPOCHS,
+        "batch_size": BC_BATCH_SIZE,
+        "risk_weight": BC_RISK_WEIGHT,
+        "margin_gap": BC_MARGIN_GAP,
+        "margin_weight": BC_MARGIN_WEIGHT,
+        "near_increment": BC_NEAR_INCREMENT,
+        "low_return_increment": BC_LOW_RETURN_INCREMENT,
+        "sampled_collision_increment": BC_SAMPLED_COLLISION_INCREMENT,
+        "argmax_collision_increment": BC_ARGMAX_COLLISION_INCREMENT,
+        "duplicate_collision_cap": BC_DUPLICATE_COLLISION_CAP,
+        "training_reward_overrides": TRAINING_REWARD_OVERRIDES,
+        "shutdown_risk_dual": asdict(RiskDualConfig()),
+    }
+
+
+def validate_v614_exploratory_recipe() -> str:
+    raw = (_SOURCE_ROOT / "configs" /
+           "warehouse_v614_exploratory_recipe.json").read_bytes()
+    declared = json.loads(raw)
+    expected = json.loads(json.dumps(v614_executable_recipe()))
+    if declared != expected:
+        raise RuntimeError("Warehouse v6.14 executable training recipe drifted")
+    return sha256(raw).hexdigest()
 
 
 def source_closure_files_sha256() -> dict[str, str]:
@@ -156,15 +294,245 @@ def _assert_source_closure(expected: str) -> None:
         raise RuntimeError("Warehouse v6 source closure changed during training")
 
 
+def _verify_locked_stage1_authorization(
+        model: WarehouseV6Actor, *, pair_seed: int, spec: Mapping,
+        authorization_receipt_path: str | Path,
+        stage1_callback: Callable[[dict], Mapping]) -> tuple[Path, Path, list[dict]]:
+    """Check a sealed script's one-call capability before any environment use."""
+    if not FORMAL_TRAINING_DISABLED or _LOCKED_EXECUTION_USED_IN_PROCESS:
+        raise RuntimeError("Warehouse v6.14 locked Stage1 capability is unavailable")
+    receipt_path = Path(authorization_receipt_path).resolve(strict=True)
+    authorization = json.loads(receipt_path.read_text())
+    main_path_value = getattr(sys.modules["__main__"], "__file__", None)
+    if not isinstance(main_path_value, str):
+        raise RuntimeError("Warehouse locked Stage1 requires a saved entry script")
+    main_path = Path(main_path_value).resolve(strict=True)
+    from experiments.warehouse.protocol import bc_data_seed_schedule
+    declared_schedule = exploratory_stage1_bc_seed_schedule(pair_seed)
+    if bc_data_seed_schedule(pair_seed) != declared_schedule:
+        raise RuntimeError("Warehouse exploratory runner and protocol BC schedules differ")
+    declared_critic_schedule = {
+        "seed": pair_seed + REGISTERED_BC_SPEC["collision_critic_seed_offset"],
+        "environment_reset_count": REGISTERED_BC_SPEC[
+            "collision_critic_environment_reset_count"],
+    }
+    if not callable(stage1_callback) or not hasattr(stage1_callback, "__code__"):
+        raise RuntimeError("Warehouse Stage1 callback must be defined in the sealed script")
+    callback_path = Path(stage1_callback.__code__.co_filename).resolve(strict=True)
+    if callback_path != main_path:
+        raise RuntimeError("Warehouse Stage1 callback is outside the hashed lock script")
+    external_reserved = spec.get("reserved_external_scenario_seeds")
+    external_sequence = spec.get("stage1_expected_reset_sequence")
+    audit_path_value = spec.get("reset_audit_path")
+    journal_path_value = spec.get("reset_audit_journal_path")
+    if (not isinstance(external_sequence, list)
+            or not external_sequence
+            or any(not isinstance(row, dict) or
+                   set(row) != {"phase", "seed"} or
+                   row["phase"] not in ("quality", "pressure", "program") or
+                   type(row["seed"]) is not int or row["seed"] < 0
+                   for row in external_sequence)
+            or [row["phase"] for row in external_sequence] != sorted(
+                (row["phase"] for row in external_sequence),
+                key={"quality": 0, "pressure": 1, "program": 2}.get)
+            or not all(any(row["phase"] == phase for row in external_sequence)
+                       for phase in ("quality", "pressure", "program"))
+            or not isinstance(audit_path_value, str) or not audit_path_value
+            or not isinstance(journal_path_value, str) or not journal_path_value):
+        raise RuntimeError("Warehouse Stage1 external reset schedule is malformed")
+    audit_path = Path(audit_path_value).resolve()
+    journal_path = Path(journal_path_value).resolve()
+    if (audit_path == journal_path or audit_path.exists() or journal_path.exists()
+            or not audit_path.parent.is_dir() or not journal_path.parent.is_dir()):
+        raise RuntimeError("Warehouse Stage1 reset audit path is unavailable")
+    if (not isinstance(spec, Mapping)
+            or spec.get("pair_seed") != pair_seed
+            or spec.get("bc_data_seed_schedule") != declared_schedule
+            or spec.get("bc_data_seed_schedule_sha256") !=
+               _digest_json(declared_schedule)
+            or spec.get("source_closure_sha256") != source_closure_sha256()
+            or spec.get("bc_critic_reset_schedule") != declared_critic_schedule
+            or spec.get("bc_critic_reset_schedule_sha256") !=
+               _digest_json(declared_critic_schedule)
+            or not isinstance(external_reserved, (list, tuple))
+            or not external_reserved
+            or any(not isinstance(seed, int) or seed < 0
+                   for seed in external_reserved)
+            or len(set(external_reserved)) != len(external_reserved)
+            or not {row["seed"] for row in external_sequence} <=
+                   set(external_reserved)
+            or set(external_reserved) & {
+                seed for block in declared_schedule.values() for seed in block}):
+        raise RuntimeError("Warehouse locked Stage1 spec or seed schedule drifted")
+    required = {
+        "authorization_kind": "warehouse-v614-stage1-locked-run-v1",
+        "candidate_id": spec.get("candidate_id"),
+        "pair_seed": pair_seed,
+        "run_spec_sha256": _digest_json(spec),
+        "source_closure_sha256": spec["source_closure_sha256"],
+        "bc_recipe_sha256": REGISTERED_BC_SPEC_SHA256,
+        "executable_recipe_file_sha256": validate_v614_exploratory_recipe(),
+        "bc_data_seed_schedule_sha256": spec["bc_data_seed_schedule_sha256"],
+        "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
+        "initial_role_sha256": role_hashes(model),
+        "stage1_expected_reset_sequence_sha256": _digest_json(external_sequence),
+        "reset_audit_path": str(audit_path),
+        "reset_audit_journal_path": str(journal_path),
+        "lock_script_path": str(main_path),
+        "lock_script_sha256": sha256(main_path.read_bytes()).hexdigest(),
+    }
+    if any(authorization.get(key) != value for key, value in required.items()):
+        raise RuntimeError("Warehouse locked Stage1 script or receipt identity drifted")
+    return audit_path, journal_path, external_sequence
+
+
+def run_locked_stage1(model: WarehouseV6Actor, *, pair_seed: int,
+                      spec: Mapping, authorization_receipt_path: str | Path,
+                      stage1_callback: Callable[[dict], Mapping]) -> dict:
+    """One sealed-script BC→quality→pressure→program call with reset audit."""
+    global _LOCKED_EXECUTION_USED_IN_PROCESS
+    audit_path, journal_path, external_sequence = _verify_locked_stage1_authorization(
+        model, pair_seed=pair_seed, spec=spec,
+        authorization_receipt_path=authorization_receipt_path,
+        stage1_callback=stage1_callback)
+    _LOCKED_EXECUTION_USED_IN_PROCESS = True
+    expected_bc = []
+    declared = exploratory_stage1_bc_seed_schedule(pair_seed)
+    for name, block in declared.items():
+        expected_bc.extend({"phase": "bc", "seed": seed} for seed in block)
+        if name == "topology_fit_argmax":
+            expected_bc.extend({"phase": "bc", "seed":
+                spec["bc_critic_reset_schedule"]["seed"]} for _ in range(2))
+    expected_sequence = expected_bc + external_sequence
+    status, error, bc_report, callback_result = "failed", None, None, None
+    failed_stage = None
+    with capture_stage1_resets(journal_path) as actual_rows:
+        token = _ACTIVE_LOCKED_EXECUTION.set(_LOCKED_BC_MARKER)
+        try:
+            with stage1_reset_phase("bc"):
+                bc_report = _pretrain_pair_production(
+                    model, pair_seed=pair_seed, spec=spec)
+            token_evaluation = _ACTIVE_LOCKED_EXECUTION.set(
+                _LOCKED_EVALUATION_MARKER)
+            try:
+                callback_result = stage1_callback(bc_report)
+            finally:
+                _ACTIVE_LOCKED_EXECUTION.reset(token_evaluation)
+            final_actor_sha256 = bc_report["final_bc_internal_precheck"][
+                "final_bc_actor"]["sha256"]
+            if (not isinstance(callback_result, Mapping)
+                    or callback_result.get("final_bc_actor_sha256") !=
+                       final_actor_sha256
+                    or any(callback_result.get(key) is not True for key in (
+                        "quality_passed", "pressure_passed", "program_passed"))):
+                raise RuntimeError("Warehouse Stage1 callback quality or identity failed")
+            _digest_json(callback_result)
+            observed = [{"phase": row["phase"], "seed": row["seed"]}
+                        for row in actual_rows]
+            if observed != expected_sequence:
+                raise RuntimeError("Warehouse Stage1 actual reset sequence differs from lock")
+            if any(
+                row["map_layout_id"] != ACTION_PHYSICS_CONFIG["map_layout_id"]
+                or row["move_battery_cost"] !=
+                   ACTION_PHYSICS_CONFIG["move_battery_cost"]
+                or row["charge_per_wait"] !=
+                   ACTION_PHYSICS_CONFIG["charge_per_wait"]
+                for row in actual_rows):
+                raise RuntimeError("Warehouse Stage1 reset physics differs from Actor schema")
+            status = "passed"
+        except BaseException as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            named_stage = getattr(exc, "stage1_phase", None)
+            if named_stage in ("bc", "quality", "pressure", "program"):
+                failed_stage = named_stage
+            raise
+        finally:
+            observed = [{"phase": row["phase"], "seed": row["seed"]}
+                        for row in actual_rows]
+            prefix_matches = observed == expected_sequence[:len(observed)]
+            payload = {
+                "status": status,
+                "error": error,
+                "failed_phase": (failed_stage or
+                                 (observed[-1]["phase"] if observed else "before_reset")),
+                "candidate_id": spec["candidate_id"],
+                "pair_seed": pair_seed,
+                "authorization_receipt_sha256": sha256(Path(
+                    authorization_receipt_path).read_bytes()).hexdigest(),
+                "source_closure_sha256": spec["source_closure_sha256"],
+                "bc_recipe_sha256": REGISTERED_BC_SPEC_SHA256,
+                "executable_recipe_file_sha256":
+                    validate_v614_exploratory_recipe(),
+                "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
+                "final_bc_actor_sha256": (bc_report[
+                    "final_bc_internal_precheck"]["final_bc_actor"]["sha256"]
+                    if bc_report is not None else None),
+                "final_bc_role_sha256": (bc_report["pretrained_role_sha256"]
+                                          if bc_report is not None else None),
+                "callback_result": (dict(callback_result)
+                                    if status == "passed" else None),
+                "expected_reset_sequence_sha256": _digest_json(expected_sequence),
+                "actual_reset_sequence_sha256": _digest_json(observed),
+                "actual_reset_rows": list(actual_rows),
+                "actual_reset_count": len(actual_rows),
+                "reset_journal_path": str(journal_path),
+                "reset_journal_sha256": sha256(journal_path.read_bytes()).hexdigest(),
+                "exact_prefix_matches": prefix_matches,
+                "exact_full_sequence_matches": observed == expected_sequence,
+            }
+            try:
+                with audit_path.open("x") as handle:
+                    json.dump(payload, handle, sort_keys=True, allow_nan=False)
+                    handle.write("\n")
+            finally:
+                _ACTIVE_LOCKED_EXECUTION.reset(token)
+    return {"bc": bc_report, "stage1": dict(callback_result),
+            "reset_audit_path": str(audit_path),
+            "reset_audit_sha256": sha256(audit_path.read_bytes()).hexdigest(),
+            "reset_journal_path": str(journal_path),
+            "reset_journal_sha256": sha256(journal_path.read_bytes()).hexdigest()}
+
+
 def _digest_json(value: object) -> str:
     return sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
                              allow_nan=False).encode()).hexdigest()
 
 
 def _training_config_sha256(spec: Mapping) -> str:
-    """Include BC recipe and source closure for exact checkpoint resumption."""
-    return _digest_json({key: value for key, value in spec.items()
-                         if key != "output_dir"})
+    """Bind formal checkpoints to the canonical scientific method identity.
+
+    Artifact output paths are checked separately by checkpoint loading; they
+    cannot change the scientific run or the registered BC recipe digest.
+    """
+    if spec.get("smoke"):
+        return _digest_json({key: value for key, value in spec.items()
+                             if key != "output_dir"})
+    from experiments.warehouse.protocol import PairRunSpec
+    registered = PairRunSpec(
+        candidate_id=spec["candidate_id"], pair_seed=spec["pair_seed"],
+        joint_steps=spec["joint_steps"], output_dir=spec["output_dir"],
+        program_fit_method=spec["program_fit_method"],
+        release_id=spec["release_id"],
+        scenario_namespace=spec["scenario_namespace"],
+        checkpoint_seeds=tuple(spec["checkpoint_seeds"]),
+    )
+    for key, expected in {**registered.to_mapping(),
+                          **REGISTERED_BC_SPEC}.items():
+        if key in spec and _digest_json(spec[key]) != _digest_json(expected):
+            raise RuntimeError(f"Warehouse registered training field {key} drifted")
+    if (spec.get("bc_recipe_sha256", REGISTERED_BC_SPEC_SHA256) !=
+            REGISTERED_BC_SPEC_SHA256 or
+            spec.get("risk_dual_config_sha256",
+                     REGISTERED_RISK_DUAL_CONFIG_SHA256) !=
+            REGISTERED_RISK_DUAL_CONFIG_SHA256 or
+            spec.get("executable_recipe_file_sha256",
+                     validate_v614_exploratory_recipe()) !=
+            validate_v614_exploratory_recipe() or
+            spec.get("action_physics_config_sha256",
+                     ACTION_PHYSICS_CONFIG_SHA256) !=
+            ACTION_PHYSICS_CONFIG_SHA256):
+        raise RuntimeError("Warehouse registered recipe or physics hash drifted")
+    return registered.training_config_sha256(spec["source_closure_sha256"])
 
 
 def _scientific_run_spec_sha256(spec: Mapping) -> str:
@@ -175,19 +543,14 @@ def _scientific_run_spec_sha256(spec: Mapping) -> str:
     registered = PairRunSpec(
         candidate_id=spec["candidate_id"], pair_seed=spec["pair_seed"],
         joint_steps=spec["joint_steps"], output_dir=spec["output_dir"],
+        program_fit_method=spec["program_fit_method"],
         release_id=spec["release_id"],
         scenario_namespace=spec["scenario_namespace"],
         checkpoint_seeds=tuple(spec["checkpoint_seeds"]),
-        program_fit_method=spec["program_fit_method"],
-        bc_recipe_sha256=spec["bc_recipe_sha256"],
-        risk_dual_config_sha256=spec["risk_dual_config_sha256"],
-        bc_data_seed_schedule_sha256=spec["bc_data_seed_schedule_sha256"],
-        bc_critic_reset_schedule_sha256=spec[
-            "bc_critic_reset_schedule_sha256"],
     )
-    canonical = registered.to_mapping()
-    if _digest_json({key: spec.get(key) for key in canonical}) != _digest_json(canonical):
-        raise RuntimeError("Warehouse canonical run spec or schedule drifted")
+    if (registered.to_mapping()["final_program_fit_seed_schedule"] !=
+            spec["final_program_fit_seed_schedule"]):
+        raise RuntimeError("Warehouse canonical run spec program schedule drifted")
     if _training_config_sha256(spec) != registered.training_config_sha256(
             spec["source_closure_sha256"]):
         raise RuntimeError("Warehouse registered BC config hash drifted")
@@ -200,6 +563,11 @@ def _checked_spec(run_spec: Mapping) -> dict:
     if not isinstance(run_spec, Mapping) or not required <= set(run_spec):
         raise ValueError("Warehouse v6 run spec is missing required fields")
     result = {key: run_spec[key] for key in required}
+    from experiments.warehouse.protocol import PROGRAM_FIT_METHOD_CANDIDATES
+    program_fit_method = run_spec.get("program_fit_method")
+    if program_fit_method not in PROGRAM_FIT_METHOD_CANDIDATES:
+        raise ValueError("Warehouse v6.14 program fit method is not registered")
+    result["program_fit_method"] = program_fit_method
     smoke = run_spec.get("smoke") is True
     if (not isinstance(result["candidate_id"], str)
             or not result["candidate_id"]
@@ -219,12 +587,26 @@ def _checked_spec(run_spec: Mapping) -> dict:
         raise ValueError("Warehouse v6 checkpoint seeds must be distinct integers")
     result["checkpoint_seeds"] = list(seeds)
     if not smoke:
+        for key in ("warmup_actor_path", "final_bc_actor_path",
+                    "final_bc_precheck_receipt_path"):
+            path = run_spec.get(key)
+            if not isinstance(path, str) or not path:
+                raise ValueError(f"Warehouse v6.14 requires {key}")
+            result[key] = path
+        paths = [Path(result[key]).resolve() for key in
+                 ("warmup_actor_path", "final_bc_actor_path",
+                  "final_bc_precheck_receipt_path")]
+        if len(set(paths)) != len(paths):
+            raise ValueError("Warehouse BC Actor and precheck receipt paths overlap")
+        if "topology_failure_receipt_path" in run_spec:
+            value = run_spec["topology_failure_receipt_path"]
+            if not isinstance(value, str) or not value:
+                raise ValueError("invalid Warehouse topology failure receipt path")
+            result["topology_failure_receipt_path"] = value
         from experiments.warehouse.protocol import (
             BUDGETS, DEVELOPMENT_PAIR_SEEDS, DEVELOPMENT_SELECTION_SEEDS,
             FORMAL_PAIR_SEEDS, FORMAL_SELECTION_SEEDS,
             REGISTERED_ARCHITECTURE_MODE, REGISTERED_BC_RECIPE_VERSION,
-            REGISTERED_BC_SPEC_SHA256, PROGRAM_FIT_METHOD_CANDIDATES,
-            REGISTERED_RISK_DUAL_CONFIG_SHA256,
             final_program_fit_seed_schedule, online_program_extraction_steps,
         )
         if result["joint_steps"] not in BUDGETS:
@@ -244,11 +626,10 @@ def _checked_spec(run_spec: Mapping) -> dict:
                                              expected_extractions)
         if (run_spec.get("architecture_mode", REGISTERED_ARCHITECTURE_MODE) !=
                 REGISTERED_ARCHITECTURE_MODE
-                or run_spec.get("program_fit_method") not in
-                PROGRAM_FIT_METHOD_CANDIDATES
                 or run_spec.get("bc_recipe_version", REGISTERED_BC_RECIPE_VERSION) !=
                 REGISTERED_BC_RECIPE_VERSION
-                or run_spec.get("bc_recipe_sha256") != REGISTERED_BC_SPEC_SHA256
+                or run_spec.get("bc_recipe_sha256") !=
+                REGISTERED_BC_SPEC_SHA256
                 or run_spec.get("risk_dual_config_sha256") !=
                 REGISTERED_RISK_DUAL_CONFIG_SHA256
                 or not isinstance(requested_extractions, (list, tuple))
@@ -256,7 +637,6 @@ def _checked_spec(run_spec: Mapping) -> dict:
                 or any(type(step) is not int for step in requested_extractions)):
             raise ValueError("Warehouse v6 registered architecture, BC, or extraction schedule mismatch")
         result["architecture_mode"] = REGISTERED_ARCHITECTURE_MODE
-        result["program_fit_method"] = run_spec["program_fit_method"]
         result["bc_recipe_version"] = REGISTERED_BC_RECIPE_VERSION
         result["bc_recipe_sha256"] = REGISTERED_BC_SPEC_SHA256
         result["risk_dual_config_sha256"] = REGISTERED_RISK_DUAL_CONFIG_SHA256
@@ -276,19 +656,22 @@ def _checked_spec(run_spec: Mapping) -> dict:
         if (run_spec.get("bc_data_seed_schedule") != bc_schedule
                 or run_spec.get("bc_data_seed_schedule_sha256") !=
                 _digest_json(bc_schedule)):
-            raise ValueError("Warehouse v6 BC stage seed schedule is not preregistered")
+            raise ValueError("Warehouse v6.14 BC data seed schedule is not predeclared")
         result["bc_data_seed_schedule"] = bc_schedule
         result["bc_data_seed_schedule_sha256"] = _digest_json(bc_schedule)
-        critic_resets = bc_critic_reset_schedule(result["pair_seed"], release_id)
-        if (run_spec.get("bc_critic_reset_schedule") != critic_resets
-                or run_spec.get("bc_critic_reset_schedule_sha256") !=
-                _digest_json(critic_resets)):
-            raise ValueError("Warehouse v6 critic reset schedule is not preregistered")
-        result["bc_critic_reset_schedule"] = critic_resets
-        result["bc_critic_reset_schedule_sha256"] = _digest_json(critic_resets)
+        critic_schedule = bc_critic_reset_schedule(result["pair_seed"], release_id)
+        if (run_spec.get("bc_critic_reset_schedule") !=
+                critic_schedule or
+                run_spec.get("bc_critic_reset_schedule_sha256") !=
+                _digest_json(critic_schedule)):
+            raise ValueError("Warehouse v6.14 collision critic reset schedule drifted")
+        result["bc_critic_reset_schedule"] = critic_schedule
+        result["bc_critic_reset_schedule_sha256"] = _digest_json(critic_schedule)
     if smoke:
         result["smoke"] = True
-    elif any(key in run_spec for key in REGISTERED_BC_SPEC):
+    elif any(key in run_spec for key in (
+            "bc_episodes", "bc_epochs", "dagger_rounds",
+            "dagger_episodes", "dagger_epochs")):
         raise ValueError("registered Warehouse v6 BC recipe cannot be overridden")
     for key, default in (
         ("bc_episodes", DEFAULT_BC_EPISODES), ("bc_epochs", DEFAULT_BC_EPOCHS),
@@ -305,15 +688,6 @@ def _checked_spec(run_spec: Mapping) -> dict:
     if result["dagger_rounds"] and (not result["dagger_episodes"] or
                                       not result["dagger_epochs"]):
         raise ValueError("Warehouse v6 DAgger rounds need episodes and epochs")
-    if not smoke:
-        result.update(REGISTERED_BC_SPEC)
-        if (not set(PROGRAM_FIT_METHOD_CANDIDATES) <=
-                {ACTOR_SPARSE_TOPOLOGY_METHOD}):
-            raise RuntimeError("Warehouse registered program implementation drifted")
-        if (asdict(RiskDualConfig()) != REGISTERED_RISK_DUAL_CONFIG
-                or _digest_json(asdict(RiskDualConfig())) !=
-                REGISTERED_RISK_DUAL_CONFIG_SHA256):
-            raise RuntimeError("Warehouse PPO shutdown risk-dual config drifted")
     closure = source_closure_sha256()
     if ("source_closure_sha256" in run_spec
             and run_spec["source_closure_sha256"] != closure):
@@ -322,9 +696,319 @@ def _checked_spec(run_spec: Mapping) -> dict:
     return result
 
 
+def _formal_bc_reset_sequence(spec: Mapping) -> list[dict]:
+    expected = []
+    for name, seeds in spec["bc_data_seed_schedule"].items():
+        expected.extend({"phase": "formal_bc", "seed": seed} for seed in seeds)
+        if name == "topology_fit_argmax":
+            critic = spec["bc_critic_reset_schedule"]
+            expected.extend({"phase": "formal_bc", "seed": critic["seed"]}
+                            for _ in range(critic["environment_reset_count"]))
+    return expected
+
+
+def _formal_reset_projection(row: Mapping) -> dict:
+    projected = {"phase": row["phase"], "seed": row["seed"]}
+    if row["phase"] in ("formal_raw_rollout", "formal_regularized_rollout"):
+        projected.update(start_joint_step=row.get("start_joint_step"),
+                         episode_index=row.get("episode_index"))
+    return projected
+
+
+def _formal_expected_reset_sequence(spec: Mapping, pair_report: Mapping) -> list[dict]:
+    """Derive every formal reset from the true per-variant episode receipts."""
+    from experiments.warehouse.protocol import SCENARIO_BLOCK_STEPS
+
+    if (pair_report.get("pair_seed") != spec["pair_seed"]
+            or pair_report.get("joint_steps") != spec["joint_steps"]
+            or pair_report.get("source_closure_sha256") !=
+               spec["source_closure_sha256"]
+            or pair_report.get("run_spec_sha256") !=
+               _scientific_run_spec_sha256(spec)
+            or pair_report.get("training_config_sha256") !=
+               _training_config_sha256(spec)
+            or pair_report.get("program_fit_method") !=
+               spec["program_fit_method"]
+            or pair_report.get("bc", {}).get("bc_data_seed_blocks") !=
+               spec["bc_data_seed_schedule"]):
+        raise RuntimeError("Warehouse formal pair report identity drifted")
+    expected = _formal_bc_reset_sequence(spec)
+    variants = pair_report.get("variants")
+    if not isinstance(variants, Mapping) or set(variants) != {"raw", "regularized"}:
+        raise RuntimeError("Warehouse formal pair report needs both variants")
+    if (variants["raw"].get("initial_role_sha256") !=
+            variants["regularized"].get("initial_role_sha256") or
+            variants["raw"].get("initial_role_sha256") !=
+            pair_report["bc"].get("pretrained_role_sha256") or
+            variants["raw"].get("scenario_schedule_sha256") !=
+            variants["regularized"].get("scenario_schedule_sha256") or
+            pair_report.get("actual_episode_resets_equal") is not (
+                variants["raw"].get("actual_episode_resets") ==
+                variants["regularized"].get("actual_episode_resets"))):
+        raise RuntimeError("Warehouse formal paired Actor start or scenario receipt drifted")
+    for variant in ("raw", "regularized"):
+        report = variants[variant]
+        rows = report.get("actual_episode_resets")
+        milestones = report.get("development")
+        if (not isinstance(rows, list) or not rows
+                or not isinstance(milestones, list) or not milestones
+                or report.get("actual_episode_resets_sha256") != _digest_json(rows)
+                or report.get("scenario_schedule_sha256") !=
+                   scenario_schedule_sha256(spec["scenario_namespace"],
+                                            spec["pair_seed"], spec["joint_steps"])
+                or report.get("checkpoint_seeds") != spec["checkpoint_seeds"]):
+            raise RuntimeError("Warehouse formal episode or selection receipt drifted")
+        cursor = milestone_index = 0
+        for index, row in enumerate(rows):
+            limit = min(SCENARIO_BLOCK_STEPS - cursor % SCENARIO_BLOCK_STEPS,
+                        spec["joint_steps"] - cursor)
+            if (not isinstance(row, Mapping) or
+                    row.get("episode_index") != index or
+                    row.get("start_joint_step") != cursor or
+                    row.get("seed") != scenario_seed(
+                        spec["scenario_namespace"], spec["pair_seed"], cursor) or
+                    row.get("episode_key") != f'{row.get("seed")}:{index}' or
+                    type(row.get("joint_steps")) is not int or
+                    not 1 <= row["joint_steps"] <= limit or
+                    type(row.get("complete")) is not bool or
+                    type(row.get("shutdown_episode")) is not bool or
+                    (not row["complete"] and row["joint_steps"] != limit)):
+                raise RuntimeError("Warehouse formal actual episode seed/block drifted")
+            expected.append({"phase": f"formal_{variant}_rollout",
+                             "seed": row["seed"], "start_joint_step": cursor,
+                             "episode_index": index})
+            cursor += row["joint_steps"]
+            if (milestone_index < len(milestones) and
+                    cursor == milestones[milestone_index].get("joint_steps")):
+                expected.extend({"phase": f"formal_{variant}_selection", "seed": seed}
+                                for seed in spec["checkpoint_seeds"])
+                milestone_index += 1
+            elif (milestone_index < len(milestones) and
+                  cursor > milestones[milestone_index].get("joint_steps", -1)):
+                raise RuntimeError("Warehouse formal selection reset milestone drifted")
+        if cursor != spec["joint_steps"] or milestone_index != len(milestones):
+            raise RuntimeError("Warehouse formal episode budget or selection count drifted")
+    schedule = spec["final_program_fit_seed_schedule"]
+    expected.extend({"phase": "formal_regularized_program", "seed": seed}
+                    for name in ("fit", "calibration", "eligibility", "validation")
+                    for seed in schedule[name])
+    return expected
+
+
+def _formal_partial_reset_prefix(spec: Mapping, observed: Sequence[Mapping]) -> bool:
+    """On interruption, verify the static BC and permitted dynamic reset prefix."""
+    bc = _formal_bc_reset_sequence(spec)
+    projected = [_formal_reset_projection(row) for row in observed]
+    common = min(len(projected), len(bc))
+    if projected[:common] != bc[:common]:
+        return False
+    if len(projected) <= len(bc):
+        return True
+    phases = ("formal_raw_rollout", "formal_raw_selection",
+              "formal_regularized_rollout", "formal_regularized_selection",
+              "formal_regularized_program")
+    phase_rank = {phase: index for index, phase in enumerate(phases)}
+    current_variant = None
+    next_episode = {"raw": 0, "regularized": 0}
+    last_start = {"raw": -1, "regularized": -1}
+    selection_count = {"raw": 0, "regularized": 0}
+    program_seeds = [seed for purpose in (
+        "fit", "calibration", "eligibility", "validation")
+        for seed in spec["final_program_fit_seed_schedule"][purpose]]
+    program_index = 0
+    prior_rank = -1
+    for row in projected[len(bc):]:
+        phase = row["phase"]
+        if phase not in phase_rank:
+            return False
+        rank = phase_rank[phase]
+        if rank < prior_rank and not (
+                rank in (0, 2) and prior_rank == rank + 1):
+            return False
+        if (rank >= 2 and selection_count["raw"] == 0) or (
+                rank >= 4 and selection_count["regularized"] == 0):
+            return False
+        if rank > prior_rank and prior_rank in (1, 3) and (
+                selection_count["raw" if prior_rank == 1 else "regularized"] %
+                len(spec["checkpoint_seeds"])):
+            return False
+        prior_rank = rank
+        if phase.endswith("_rollout"):
+            variant = "raw" if phase == "formal_raw_rollout" else "regularized"
+            start = row.get("start_joint_step")
+            if (type(start) is not int or start <= last_start[variant] or
+                    start >= spec["joint_steps"] or
+                    row.get("episode_index") != next_episode[variant] or
+                    row["seed"] != scenario_seed(
+                        spec["scenario_namespace"], spec["pair_seed"], start)):
+                return False
+            last_start[variant] = start
+            next_episode[variant] += 1
+            current_variant = variant
+        elif phase.endswith("_selection"):
+            variant = "raw" if phase == "formal_raw_selection" else "regularized"
+            position = selection_count[variant] % len(spec["checkpoint_seeds"])
+            if current_variant != variant or row["seed"] != spec[
+                    "checkpoint_seeds"][position]:
+                return False
+            selection_count[variant] += 1
+        else:
+            if (program_index >= len(program_seeds) or
+                    row["seed"] != program_seeds[program_index]):
+                return False
+            program_index += 1
+    return True
+
+
+def run_locked_formal_pair(run_spec: Mapping, *,
+                           authorization_receipt_path: str | Path) -> dict:
+    """One SHA-locked registered pair run; ordinary train_pair stays closed."""
+    global _LOCKED_EXECUTION_USED_IN_PROCESS
+    if not FORMAL_TRAINING_DISABLED or _LOCKED_EXECUTION_USED_IN_PROCESS:
+        raise RuntimeError("Warehouse formal locked capability is unavailable")
+    spec = _checked_spec(run_spec)
+    if spec.get("smoke"):
+        raise RuntimeError("Warehouse formal locked capability excludes smoke runs")
+    directory = (Path(spec["output_dir"]).resolve() / spec["candidate_id"] /
+                 f"pair_{spec['pair_seed']}_steps_{spec['joint_steps']}")
+    if directory.exists() or not directory.parent.parent.is_dir():
+        raise RuntimeError("Warehouse formal pair output is not isolated and new")
+    artifact_paths = {key: str(Path(spec[key]).resolve()) for key in (
+        "warmup_actor_path", "final_bc_actor_path",
+        "final_bc_precheck_receipt_path")}
+    if (any(not Path(path).is_relative_to(directory)
+            for path in artifact_paths.values()) or
+            len(set(artifact_paths.values())) != len(artifact_paths)):
+        raise RuntimeError("Warehouse formal BC artifacts must stay in pair output")
+    authorization_path = Path(authorization_receipt_path).resolve(strict=True)
+    authorization = json.loads(authorization_path.read_text())
+    main_value = getattr(sys.modules["__main__"], "__file__", None)
+    if not isinstance(main_value, str):
+        raise RuntimeError("Warehouse formal pair requires a saved main script")
+    main_path = Path(main_value).resolve(strict=True)
+    audit_value = authorization.get("reset_audit_path")
+    journal_value = authorization.get("reset_audit_journal_path")
+    if (not isinstance(audit_value, str) or not isinstance(journal_value, str)
+            or not audit_value or not journal_value):
+        raise RuntimeError("Warehouse formal reset audit paths are missing")
+    audit_path, journal_path = Path(audit_value).resolve(), Path(journal_value).resolve()
+    if (audit_path == journal_path or audit_path.exists() or journal_path.exists()
+            or not audit_path.parent.is_dir() or not journal_path.parent.is_dir()
+            or directory == audit_path or directory == journal_path):
+        raise RuntimeError("Warehouse formal reset audit paths are not new")
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(spec["pair_seed"])
+        initial_role_sha256 = role_hashes(WarehouseV6Actor())
+    required = {
+        "authorization_kind": "warehouse-v614-formal-pair-locked-run-v1",
+        "candidate_id": spec["candidate_id"],
+        "pair_seed": spec["pair_seed"],
+        "joint_steps": spec["joint_steps"],
+        "run_spec_sha256": _scientific_run_spec_sha256(spec),
+        "training_config_sha256": _training_config_sha256(spec),
+        "source_closure_sha256": spec["source_closure_sha256"],
+        "bc_recipe_sha256": REGISTERED_BC_SPEC_SHA256,
+        "executable_recipe_file_sha256": validate_v614_exploratory_recipe(),
+        "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
+        "bc_data_seed_schedule_sha256": spec["bc_data_seed_schedule_sha256"],
+        "bc_critic_reset_schedule_sha256": spec["bc_critic_reset_schedule_sha256"],
+        "scenario_schedule_sha256": scenario_schedule_sha256(
+            spec["scenario_namespace"], spec["pair_seed"], spec["joint_steps"]),
+        "final_program_fit_seed_schedule_sha256": spec[
+            "final_program_fit_seed_schedule_sha256"],
+        "initial_role_sha256": initial_role_sha256,
+        "output_directory": str(directory),
+        "artifact_paths_sha256": _digest_json(artifact_paths),
+        "reset_audit_path": str(audit_path),
+        "reset_audit_journal_path": str(journal_path),
+        "lock_script_path": str(main_path),
+        "lock_script_sha256": sha256(main_path.read_bytes()).hexdigest(),
+    }
+    if any(authorization.get(key) != value for key, value in required.items()):
+        raise RuntimeError("Warehouse formal authorization identity drifted")
+    _LOCKED_EXECUTION_USED_IN_PROCESS = True
+    status, error, pair_report, expected = "failed", None, None, None
+    with capture_stage1_resets(journal_path) as actual_rows:
+        token = _ACTIVE_LOCKED_EXECUTION.set(_LOCKED_FORMAL_MARKER)
+        try:
+            # train_pair validates the original registered request itself.
+            # The expanded checked mapping contains derived BC fields that
+            # deliberately are not accepted as caller overrides.
+            pair_report = train_pair(run_spec)
+            expected = _formal_expected_reset_sequence(spec, pair_report)
+            observed = [_formal_reset_projection(row) for row in actual_rows]
+            if observed != expected:
+                raise RuntimeError("Warehouse formal actual reset sequence differs from receipts")
+            if any(
+                row["map_layout_id"] != ACTION_PHYSICS_CONFIG["map_layout_id"]
+                or row["move_battery_cost"] !=
+                   ACTION_PHYSICS_CONFIG["move_battery_cost"]
+                or row["charge_per_wait"] !=
+                   ACTION_PHYSICS_CONFIG["charge_per_wait"]
+                for row in actual_rows):
+                raise RuntimeError("Warehouse formal reset physics differs from Actor schema")
+            if sha256(main_path.read_bytes()).hexdigest() != required[
+                    "lock_script_sha256"]:
+                raise RuntimeError("Warehouse formal lock script changed during execution")
+            status = "passed"
+        except BaseException as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            observed = [_formal_reset_projection(row) for row in actual_rows]
+            receipt = {
+                "status": status, "error": error,
+                "candidate_id": spec["candidate_id"],
+                "pair_seed": spec["pair_seed"],
+                "joint_steps": spec["joint_steps"],
+                "authorization_receipt_sha256": sha256(
+                    authorization_path.read_bytes()).hexdigest(),
+                "run_spec_sha256": required["run_spec_sha256"],
+                "training_config_sha256": required["training_config_sha256"],
+                "source_closure_sha256": required["source_closure_sha256"],
+                "bc_recipe_sha256": REGISTERED_BC_SPEC_SHA256,
+                "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
+                "pair_report_sha256": (sha256((directory / "pair.training.json")
+                    .read_bytes()).hexdigest() if (directory / "pair.training.json")
+                    .is_file() else None),
+                "bc_actor_role_sha256": (pair_report.get("bc", {}).get(
+                    "pretrained_role_sha256") if pair_report is not None else None),
+                "selected_actor_role_sha256": ({variant: pair_report[
+                    "variants"][variant].get("selected_role_sha256")
+                    for variant in ("raw", "regularized")}
+                    if pair_report is not None else None),
+                "actual_reset_rows": list(actual_rows),
+                "actual_reset_count": len(actual_rows),
+                "actual_reset_sequence_sha256": _digest_json(observed),
+                "declared_prefix_matches": _formal_partial_reset_prefix(
+                    spec, actual_rows),
+                "expected_reset_sequence_sha256": (
+                    _digest_json(expected) if expected is not None else None),
+                "exact_full_sequence_matches": (
+                    expected is not None and observed == expected),
+                "reset_journal_path": str(journal_path),
+                "reset_journal_sha256": sha256(journal_path.read_bytes()).hexdigest(),
+            }
+            try:
+                with audit_path.open("x") as handle:
+                    json.dump(receipt, handle, sort_keys=True, allow_nan=False)
+                    handle.write("\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            finally:
+                _ACTIVE_LOCKED_EXECUTION.reset(token)
+    return {"pair": pair_report,
+            "reset_audit_path": str(audit_path),
+            "reset_audit_sha256": sha256(audit_path.read_bytes()).hexdigest(),
+            "reset_journal_path": str(journal_path),
+            "reset_journal_sha256": sha256(journal_path.read_bytes()).hexdigest()}
+
+
 def _environment(*, training_reward: bool) -> WarehouseMultiAgentEnv:
+    _require_locked_execution(allow_evaluation=True)
     config = participant_study_config(**TRAINING_REWARD_OVERRIDES) if training_reward else \
         participant_study_config()
+    validate_study_action_physics(config)
     return WarehouseMultiAgentEnv(config)
 
 
@@ -336,6 +1020,7 @@ def _set_dual_nn_mode(env: WarehouseMultiAgentEnv) -> None:
 
 def _teacher_rows(episodes: int, seed: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict]:
     observations, masks, labels, summaries = [], [], [], []
+    row_episode_ids, row_scenario_seeds = [], []
     for episode in range(episodes):
         env = _environment(training_reward=False)
         env.reset(seed=seed + episode)
@@ -348,6 +1033,8 @@ def _teacher_rows(episodes: int, seed: int) -> tuple[torch.Tensor, torch.Tensor,
             observations.append(obs)
             masks.append(mask)
             labels.append(chosen)
+            row_episode_ids.append(f"public-teacher:{seed + episode}")
+            row_scenario_seeds.append(seed + episode)
             _, _, _, _, info = env.step(actions)
             if info["proposed_actions"] != actions or info["action_override_agents"]:
                 raise RuntimeError("Warehouse offline BC teacher action was rewritten")
@@ -361,19 +1048,38 @@ def _teacher_rows(episodes: int, seed: int) -> tuple[torch.Tensor, torch.Tensor,
             {"episodes": episodes, "rows": len(labels),
              "teacher_mean_deliveries": float(metrics[0]),
              "teacher_mean_collisions": float(metrics[1]),
-             "teacher_shutdown_episode_rate": float(metrics[2])})
+             "teacher_shutdown_episode_rate": float(metrics[2]),
+             "row_episode_ids": row_episode_ids,
+             "row_scenario_seeds": row_scenario_seeds})
 
 
 def _bc_epochs(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
                obs: torch.Tensor, mask: torch.Tensor, labels: torch.Tensor,
-               *, epochs: int, generator: torch.Generator) -> float:
+               *, epochs: int, generator: torch.Generator,
+               warmup_target_probs: torch.Tensor | None = None,
+               warmup_kl_weight: float = 0.0) -> float:
     encoded = policy_features_torch(obs, mask)
+    if warmup_target_probs is not None:
+        if (warmup_target_probs.shape != mask.shape or
+                not torch.isfinite(warmup_target_probs).all() or
+                torch.any(warmup_target_probs < 0) or
+                torch.any(warmup_target_probs[mask <= 0.5] > 1e-8) or
+                not torch.allclose(warmup_target_probs.sum(-1),
+                                   torch.ones_like(mask[..., 0]), atol=1e-5)):
+            raise ValueError("Warehouse post-refit warmup target is invalid")
+    if warmup_kl_weight < 0 or (warmup_target_probs is None and warmup_kl_weight):
+        raise ValueError("Warehouse post-refit warmup KL configuration invalid")
     for _ in range(epochs):
-        for indices in torch.randperm(len(obs), generator=generator).split(
-                REGISTERED_BC_SPEC["initial_bc_batch_size"]):
+        for indices in torch.randperm(len(obs), generator=generator).split(256):
             logits = model.outputs_encoded(encoded[indices], mask[indices])
             loss = nn.functional.cross_entropy(logits.reshape(-1, len(ACTIONS)),
                                                labels[indices].reshape(-1))
+            if warmup_target_probs is not None:
+                target = warmup_target_probs[indices]
+                source_log = torch.log(target.clamp_min(1e-9))
+                new_log = nn.functional.log_softmax(logits, dim=-1)
+                masked_kl = (target * (source_log - new_log)).sum(-1).mean()
+                loss = loss + warmup_kl_weight * masked_kl
             tree_loss, gate_supervision = [], []
             for index, role in enumerate(AGENTS):
                 role_rows = encoded[indices, index]
@@ -383,29 +1089,36 @@ def _bc_epochs(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
                     tree_logits.masked_fill(mask[indices, index] <= 0.5, -1e9),
                     labels[indices, index]))
                 with torch.no_grad():
-                    tree_prob = torch.softmax(tree_logits.masked_fill(
-                        mask[indices, index] <= 0.5, -1e9), -1)
-                    easy = (tree_prob.argmax(-1) == labels[indices, index]) & (
-                        tree_prob.max(-1).values >= 0.9)
-                gate_target = torch.where(easy, 0.1, 0.9).to(role_rows.dtype)
+                    tree_choice = tree_logits.masked_fill(
+                        mask[indices, index] <= 0.5, -1e9).argmax(-1)
+                    history = role_rows[:, OBSERVATION_FEATURE_NAMES.index(
+                        "same_target_collision_streak_capped")] > 0
+                    requires_correction = ((tree_choice != labels[indices, index])
+                                           | history)
+                gate_target = torch.where(requires_correction,
+                                          BC_GATE_TARGET_CORRECTION,
+                                          BC_GATE_TARGET_LOW).to(
+                    role_rows.dtype)
                 gate_supervision.append(nn.functional.binary_cross_entropy(
                     actor.gate_values(role_rows), gate_target))
-            loss = loss + REGISTERED_BC_SPEC["initial_tree_loss_weight"] * \
-                torch.stack(tree_loss).mean()
+            loss = loss + 0.05 * torch.stack(tree_loss).mean()
             # The gate learns when the public-state tree already predicts the
             # offline label and when the relation residual must take over.
             # Only BC/DAgger training rows supply this target, never program
             # qualification or independent evaluation episodes.
-            loss = loss + REGISTERED_BC_SPEC["initial_gate_loss_weight"] * \
-                torch.stack(gate_supervision).mean()
+            loss = loss + BC_GATE_SUPERVISION_WEIGHT * torch.stack(
+                gate_supervision).mean()
             # Both variants inherit the same learned preference for compact
             # residual corrections. Raw receives no program gradient later.
-            loss = loss + REGISTERED_BC_SPEC["initial_bound_loss_weight"] * torch.stack([
+            loss = loss + 5e-4 * torch.stack([
                 model.actors[role].bounds().mean() for role in AGENTS]).mean()
+            intrinsic, _ = core_intrinsic_loss(
+                model, encoded[indices], mask[indices], labels=labels[indices],
+                weights=CORE_BC_WEIGHTS, full_logits=logits)
+            loss = loss + intrinsic
             optimizer.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(model.actors.parameters(),
-                                     REGISTERED_BC_SPEC["initial_bc_gradient_clip"])
+            nn.utils.clip_grad_norm_(model.actors.parameters(), 0.5)
             optimizer.step()
     with torch.no_grad():
         predicted = model.outputs_encoded(encoded, mask).argmax(-1)
@@ -452,8 +1165,69 @@ def _bc_reliability(model: WarehouseV6Actor, obs: torch.Tensor,
             "near_and_low_margin": describe(near & low_margin)}
 
 
+def _training_core_diagnostics(model: WarehouseV6Actor,
+                               rows: tuple[torch.Tensor, ...]) -> dict:
+    """Describe core behavior on training rows; never an independent audit."""
+    obs, masks, labels, hard = rows[:4]
+    encoded = policy_features_torch(obs, masks)
+    history_column = OBSERVATION_FEATURE_NAMES.index(
+        "same_target_collision_streak_capped")
+    result = {}
+    with torch.no_grad():
+        for index, role in enumerate(AGENTS):
+            actor = model.actors[role]
+            summaries = {name: {"rows": 0, "core_rows": 0,
+                                "tree_teacher_agreement_sum": 0.0,
+                                "full_teacher_agreement_sum": 0.0,
+                                "tree_full_agreement_sum": 0.0,
+                                "teacher_action_probability_sum": 0.0,
+                                "gate_sum": 0.0, "effective_bound_sum": 0.0}
+                         for name in ("all", "public_conflict_history_or_event",
+                                      "ordinary")}
+            for begin in range(0, len(obs), 512):
+                end = min(begin + 512, len(obs))
+                features = encoded[begin:end, index]
+                mask = masks[begin:end, index]
+                tree, residual, effective_bound = actor.components(features)
+                full = (tree + residual).masked_fill(mask <= 0.5, -1e9)
+                masked_tree = tree.masked_fill(mask <= 0.5, -1e9)
+                path = actor.tree.path(features)
+                core = (path @ actor.core_leaf_mask) > 0.5
+                conflict = ((features[:, history_column] > 0)
+                            | (hard[begin:end] > 0))
+                tree_top, full_top = masked_tree.argmax(-1), full.argmax(-1)
+                p_teacher = torch.softmax(full, -1).gather(
+                    -1, labels[begin:end, index][:, None]).squeeze(-1)
+                gates = actor.gate_values(features)
+                for name, chosen in (("all", torch.ones_like(core)),
+                                     ("public_conflict_history_or_event", conflict),
+                                     ("ordinary", ~conflict)):
+                    row = summaries[name]
+                    row["rows"] += int(chosen.sum().item())
+                    row["core_rows"] += int((core & chosen).sum().item())
+                    row["tree_teacher_agreement_sum"] += float((
+                        (tree_top == labels[begin:end, index]) & chosen).sum())
+                    row["full_teacher_agreement_sum"] += float((
+                        (full_top == labels[begin:end, index]) & chosen).sum())
+                    row["tree_full_agreement_sum"] += float((
+                        (tree_top == full_top) & chosen).sum())
+                    row["teacher_action_probability_sum"] += float(
+                        p_teacher[chosen].sum())
+                    row["gate_sum"] += float(gates[chosen].sum())
+                    row["effective_bound_sum"] += float(
+                        effective_bound[chosen].sum())
+            result[role] = {name: {
+                "rows": item["rows"], "core_rows": item["core_rows"],
+                "core_fraction": item["core_rows"] / max(1, item["rows"]),
+                **{key.removesuffix("_sum"): item[key] / max(1, item["rows"])
+                   for key in item if key.endswith("_sum")},
+            } for name, item in summaries.items()}
+    return result
+
+
 def _initialize_public_trees(model: WarehouseV6Actor, obs: torch.Tensor,
-                             mask: torch.Tensor, labels: torch.Tensor) -> dict:
+                             mask: torch.Tensor, labels: torch.Tensor,
+                             *, episode_ids: Sequence[str] | None = None) -> dict:
     """Fit both sparse Actor branches before residual BC from public rows."""
     import sklearn
     from sklearn.tree import DecisionTreeClassifier
@@ -461,11 +1235,28 @@ def _initialize_public_trees(model: WarehouseV6Actor, obs: torch.Tensor,
     features = policy_features_torch(obs, mask).numpy()
     reports = {}
     for index, role in enumerate(AGENTS):
-        classifier = DecisionTreeClassifier(
-            max_depth=5, max_leaf_nodes=16, min_samples_leaf=32,
-            random_state=19 + index)
-        classifier.fit(features[:, index], labels[:, index].numpy())
-        detail = model.actors[role].initialize_tree_from_classifier(classifier)
+        if episode_ids is None:
+            classifier = DecisionTreeClassifier(
+                max_depth=5, max_leaf_nodes=16, min_samples_leaf=32,
+                random_state=19 + index)
+            classifier.fit(features[:, index], labels[:, index].numpy())
+            detail = model.actors[role].initialize_tree_from_classifier(classifier)
+        else:
+            if len(episode_ids) != len(features):
+                raise RuntimeError("Warehouse core fit episode provenance missing")
+            target = np.eye(len(ACTIONS), dtype=np.float32)[
+                labels[:, index].numpy()]
+            fitted = fit_core_tree(
+                features[:, index], mask[:, index].numpy(), target,
+                episode_ids, target_provenance="public_teacher_one_hot")
+            detail = model.actors[role].initialize_tree_from_core_result(fitted)
+            detail["core_tree_content_sha256"] = fitted.content_sha256()
+            detail["core_fit_train_episode_ids_sha256"] = _digest_json(
+                sorted(fitted.train_episode_ids))
+            frozen_role = FrozenWarehouseV6Actor.from_model(model).roles[role]
+            if not np.array_equal(frozen_role.leaf(features[:, index]),
+                                  fitted.leaf_indices(features[:, index])):
+                raise RuntimeError("Warehouse core tree Torch/NumPy route mismatch")
         with torch.no_grad():
             tree_logits, path = model.actors[role].tree(
                 torch.from_numpy(features[:, index]))
@@ -474,8 +1265,10 @@ def _initialize_public_trees(model: WarehouseV6Actor, obs: torch.Tensor,
         reports[role] = {**detail,
                          "sklearn_version": sklearn.__version__,
                          "fitting_rows": len(features),
-                         "split_frozen_during_bc_and_ppo": False,
-                         "split_training_method": "exact_hard_forward_sparse_STE",
+                         "split_frozen_during_bc_and_ppo": episode_ids is not None,
+                         "split_training_method": (
+                             "public_fit_then_frozen_certified_path" if episode_ids is not None
+                             else "exact_hard_forward_sparse_STE"),
                          "tree_initialization_sha256": _digest_json({
                              "split_weight": model.actors[role].tree.split.weight.detach().tolist(),
                              "split_bias": model.actors[role].tree.split.bias.detach().tolist(),
@@ -497,6 +1290,8 @@ def _pretrain_pair_smoke(model: WarehouseV6Actor, *, pair_seed: int,
     torch.manual_seed(pair_seed)
     initial_hashes = role_hashes(model)
     obs, mask, labels, teacher = _teacher_rows(spec["bc_episodes"], pair_seed + 10000)
+    teacher.pop("row_episode_ids")
+    teacher.pop("row_scenario_seeds")
     tree_initialization = _initialize_public_trees(model, obs, mask, labels)
     optimizer = torch.optim.Adam(model.actors.parameters(), lr=3e-4)
     generator = torch.Generator().manual_seed(pair_seed + 31)
@@ -578,6 +1373,40 @@ def _bc_stage_seeds(pair_seed: int, stage: int, count: int) -> list[int]:
             for index in range(count)]
 
 
+def exploratory_stage1_bc_seed_schedule(pair_seed: int) -> dict[str, list[int]]:
+    """Local, review-only 12469 lock schedule; never adds a formal seed."""
+    if pair_seed != 12469:
+        raise ValueError("Warehouse v6.14 exploratory Stage1 seed is not 12469")
+    counts = {
+        "initial_public_teacher": (10, BC_INITIAL_TEACHER_EPISODES),
+        **{f"initial_nn_dagger_{index}":
+           (10 + index, BC_INITIAL_DAGGER_EPISODES)
+           for index in range(1, BC_INITIAL_DAGGER_ROUNDS + 1)},
+        **{f"topology_{name}": item
+           for name, item in BC_TOPOLOGY_STAGE_COUNTS.items()},
+        "risk_public_teacher": (20, BC_RISK_TEACHER_EPISODES),
+        "risk_nn_visitation": (21, BC_RISK_VISIT_EPISODES),
+        "large_public_teacher": (30, BC_LARGE_TEACHER_EPISODES),
+        "large_nn_visitation": (31, BC_LARGE_VISIT_EPISODES),
+        "deep_public_teacher": (40, BC_DEEP_TEACHER_EPISODES),
+    }
+    for index in range(1, BC_DEEP_DAGGER_ROUNDS + 1):
+        counts[f"deep_{index}_sampled"] = (
+            40 + 2 * index - 1, BC_DEEP_DAGGER_EPISODES // 2)
+        counts[f"deep_{index}_argmax"] = (
+            40 + 2 * index, BC_DEEP_DAGGER_EPISODES // 2)
+    counts.update({f"final_bc_precheck_{name}": item
+                   for name, item in BC_FINAL_CORE_STAGE_COUNTS.items()})
+    if len(counts) != 26 or sum(count for _, count in counts.values()) != 1394:
+        raise RuntimeError("Warehouse v6.14 exploratory BC stage table drifted")
+    schedule = {name: _bc_stage_seeds(pair_seed, stage, count)
+                for name, (stage, count) in counts.items()}
+    flattened = [seed for block in schedule.values() for seed in block]
+    if len(flattened) != len(set(flattened)):
+        raise RuntimeError("Warehouse exploratory BC schedule contains duplicate resets")
+    return schedule
+
+
 def _bc_rows_sha256(rows: tuple[torch.Tensor, ...]) -> str:
     digest = sha256()
     for item in rows:
@@ -600,6 +1429,7 @@ def _collect_bc_visits(model: WarehouseV6Actor, seeds: Sequence[int], *,
     """
     actor = FrozenWarehouseV6Actor.from_model(model)
     obs_rows, mask_rows, labels, hard_rows = [], [], [], []
+    row_episode_ids, row_scenario_seeds = [], []
     outcomes, joint_teacher_probability = [], []
     repeated_collision_frames = cross_episode_skips = 0
     collision_rows_kept = 0
@@ -645,6 +1475,8 @@ def _collect_bc_visits(model: WarehouseV6Actor, seeds: Sequence[int], *,
                 obs_rows.append(obs)
                 mask_rows.append(mask)
                 labels.append(label)
+                row_episode_ids.append(f"nn-visit:{int(seed)}")
+                row_scenario_seeds.append(int(seed))
                 hard_rows.append(
                     BC_ARGMAX_COLLISION_INCREMENT if collided and deterministic
                     else BC_SAMPLED_COLLISION_INCREMENT if collided else 0.0)
@@ -655,12 +1487,15 @@ def _collect_bc_visits(model: WarehouseV6Actor, seeds: Sequence[int], *,
     rows = (torch.from_numpy(np.stack(obs_rows)),
             torch.from_numpy(np.stack(mask_rows)),
             torch.from_numpy(np.stack(labels)).long(),
-            torch.tensor(hard_rows, dtype=torch.float32))
+            torch.tensor(hard_rows, dtype=torch.float32),
+            tuple(row_episode_ids), tuple(row_scenario_seeds))
     mean = np.mean(np.asarray(outcomes, dtype=np.float64), axis=0)
     return rows, {
         "episode_seeds": list(map(int, seeds)), "episodes": len(seeds),
         "rows_kept_for_training": len(obs_rows),
-        "data_sha256": _bc_rows_sha256(rows),
+        "data_sha256": _bc_rows_sha256(rows[:4]),
+        "row_episode_ids_sha256": _digest_json(row_episode_ids),
+        "row_scenario_seeds_sha256": _digest_json(row_scenario_seeds),
         "training_only_argmax_visits": bool(deterministic),
         "mean_deliveries": float(mean[0]), "mean_collisions": float(mean[1]),
         "shutdown_episode_rate": float(mean[2]),
@@ -691,8 +1526,7 @@ def _risk_bc_epochs(model: WarehouseV6Actor, critic: nn.Module,
     weights = (1.0 + near_increment * near.float()[:, None]
                + low_return_increment * low.float() + hard[:, None])
     weights /= weights.mean()
-    optimizer = torch.optim.Adam(
-        model.actors.parameters(), lr=REGISTERED_BC_SPEC["risk_bc_learning_rate"])
+    optimizer = torch.optim.Adam(model.actors.parameters(), lr=1e-4)
     generator = torch.Generator().manual_seed(generator_seed)
     last = {}
     for epoch in range(epochs):
@@ -714,27 +1548,108 @@ def _risk_bc_epochs(model: WarehouseV6Actor, critic: nn.Module,
             ).sum((1, 2)).mean()
             loss = ((ce * weights[indices]).mean() + margin_weight * margin
                     + BC_RISK_WEIGHT * expected_collision)
+            gate_losses = []
+            for role_index, role in enumerate(AGENTS):
+                role_rows = encoded[indices, role_index]
+                actor = model.actors[role]
+                tree_logits, _ = actor.tree(role_rows)
+                with torch.no_grad():
+                    tree_choice = tree_logits.masked_fill(
+                        mask[indices, role_index] <= 0.5, -1e9).argmax(-1)
+                    collision_history = role_rows[:, OBSERVATION_FEATURE_NAMES.index(
+                        "same_target_collision_streak_capped")] > 0
+                    requires_correction = ((tree_choice != label[:, role_index])
+                                           | collision_history | (hard[indices] > 0))
+                    gate_target = torch.where(requires_correction,
+                                              BC_GATE_TARGET_CORRECTION,
+                                              BC_GATE_TARGET_LOW).to(
+                        role_rows.dtype)
+                gate_losses.append(nn.functional.binary_cross_entropy(
+                    actor.gate_values(role_rows), gate_target))
+            gate_loss = torch.stack(gate_losses).mean()
+            loss = loss + BC_GATE_SUPERVISION_WEIGHT * gate_loss
+            intrinsic, intrinsic_report = core_intrinsic_loss(
+                model, encoded[indices], mask[indices], labels=label,
+                weights=CORE_BC_WEIGHTS, full_logits=logits)
+            loss = loss + intrinsic
             optimizer.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(model.actors.parameters(),
-                                     REGISTERED_BC_SPEC["risk_bc_gradient_clip"])
+            nn.utils.clip_grad_norm_(model.actors.parameters(), 0.5)
             optimizer.step()
         last = {"epoch": epoch + 1,
                 "mean_batch_ce": float(ce.detach().mean()),
                 "mean_batch_margin": float(margin.detach()),
-                "mean_batch_expected_collision": float(expected_collision.detach())}
+                "mean_batch_expected_collision": float(expected_collision.detach()),
+                "mean_batch_gate_supervision": float(gate_loss.detach()),
+                "mean_batch_intrinsic_loss": float(intrinsic.detach()),
+                "core_intrinsic": intrinsic_report}
     return {"rows": len(obs), "epochs": epochs, "batch_size": BC_BATCH_SIZE,
             "data_sha256": _bc_rows_sha256((obs, mask, labels, hard)),
-            "learning_rate": REGISTERED_BC_SPEC["risk_bc_learning_rate"],
-            "gradient_clip": REGISTERED_BC_SPEC["risk_bc_gradient_clip"],
             "near_fraction": float(near.float().mean()),
             "low_return_margin_fraction": float(low.float().mean()),
             "collision_hard_fraction": float((hard > 0).float().mean()),
             "risk_weight": BC_RISK_WEIGHT, "margin_gap": BC_MARGIN_GAP,
-            "margin_weight": margin_weight,
-            "near_increment": near_increment,
-            "low_return_increment": low_return_increment,
-            "end": last}
+            "margin_weight": margin_weight, "end": last}
+
+
+def _warmup_role_targets(model: WarehouseV6Actor, frozen_role, role: str,
+                         obs: torch.Tensor, mask: torch.Tensor
+                         ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    """Recompute one role's masked source policy from one frozen warmup Actor.
+
+    This boundary is shared by fit, calibration, eligibility, and validation.
+    All rows must be joint pre-action observations, while the returned policy
+    and physical mask must each have exactly one action row per observation.
+    """
+    if (role not in AGENTS or obs.ndim != 3
+            or obs.shape[1:] != (len(AGENTS), OBSERVATION_DIM)
+            or mask.shape != (len(obs), len(AGENTS), len(ACTIONS))
+            or len(obs) == 0):
+        raise ValueError("Warehouse warmup target requires nonempty joint rows")
+    if (role_sha256(frozen_role.weights) != frozen_role.role_sha256
+            or role_hashes(model)[role] != frozen_role.role_sha256):
+        raise RuntimeError("Warehouse warmup source role weights changed")
+    index = AGENTS.index(role)
+    features = policy_features_torch(obs, mask)[:, index].detach().cpu().numpy()
+    role_mask = mask[:, index].detach().cpu().numpy()
+    logits = frozen_role.logits_encoded(features)
+    frozen_masked = np.where(role_mask > 0.5, logits, -1e9)
+    with torch.no_grad():
+        torch_masked = np.concatenate([
+            model.role_logits(role, obs[start:start + 512],
+                              mask[start:start + 512]).detach().cpu().numpy()
+            for start in range(0, len(obs), 512)
+        ], axis=0)
+    expected_shape = (len(obs), len(ACTIONS))
+    if (logits.shape != expected_shape
+            or frozen_masked.shape != expected_shape
+            or torch_masked.shape != expected_shape
+            or role_mask.shape != expected_shape):
+        raise RuntimeError("Warehouse warmup target role/action shape drifted")
+    valid = role_mask > 0.5
+    if not valid.any(axis=1).all():
+        raise RuntimeError("Warehouse warmup target has an empty physical mask")
+    if (not np.isfinite(torch_masked[valid]).all()
+            or not np.isfinite(frozen_masked[valid]).all()
+            or np.any(torch_masked[~valid] > -1e8)):
+        raise RuntimeError("Warehouse warmup masked logits are not finite/legal")
+    max_error = float(np.max(np.abs(torch_masked[valid] - frozen_masked[valid])))
+    same_argmax = bool(np.array_equal(
+        torch_masked.argmax(1), frozen_masked.argmax(1)))
+    if max_error > 2e-4 or not same_argmax:
+        raise RuntimeError("Warehouse warmup Torch/Frozen NN target parity failed")
+    target = _masked_probabilities(logits, role_mask)
+    if target.shape != expected_shape or not np.isfinite(target).all():
+        raise RuntimeError("Warehouse warmup masked target shape or value drifted")
+    receipt = {
+        "rows": len(obs), "max_valid_logit_abs_error": max_error,
+        "masked_argmax_all_match": same_argmax,
+        "torch_masked_logits_sha256": sha256(np.ascontiguousarray(
+            torch_masked, dtype="<f4").tobytes()).hexdigest(),
+        "frozen_masked_logits_sha256": sha256(np.ascontiguousarray(
+            frozen_masked, dtype="<f4").tobytes()).hexdigest(),
+    }
+    return features, role_mask, target, receipt
 
 
 def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
@@ -746,47 +1661,47 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
     current dual NN. The learned critic receives true env.step collision
     events and supplies gradients only before PPO self-play begins.
     """
+    _require_locked_execution()
     from .warehouse_v6_collision_critic import train_collision_critic
 
+    executable_recipe_file_sha256 = validate_v614_exploratory_recipe()
+    warmup_actor_path = spec.get("warmup_actor_path")
+    final_bc_actor_path = spec.get("final_bc_actor_path")
+    final_bc_precheck_receipt_path = spec.get("final_bc_precheck_receipt_path")
+    if not isinstance(warmup_actor_path, str) or not warmup_actor_path:
+        raise ValueError("Warehouse v6.14 requires an explicit warmup Actor path")
+    if Path(warmup_actor_path).exists():
+        raise FileExistsError("Warehouse v6.14 warmup Actor path already exists")
+    if not isinstance(final_bc_actor_path, str) or not final_bc_actor_path:
+        raise ValueError("Warehouse v6.14 requires an explicit final BC Actor path")
+    if Path(final_bc_actor_path).exists():
+        raise FileExistsError("Warehouse v6.14 final BC Actor path already exists")
+    if (not isinstance(final_bc_precheck_receipt_path, str)
+            or not final_bc_precheck_receipt_path):
+        raise ValueError("Warehouse v6.14 requires a final BC precheck receipt path")
+    if Path(final_bc_precheck_receipt_path).exists():
+        raise FileExistsError("Warehouse v6.14 final BC precheck receipt path already exists")
     torch.set_num_threads(2)
     torch.manual_seed(pair_seed)
-    expected_seed_blocks = bc_data_seed_schedule(pair_seed)
-    expected_critic_resets = bc_critic_reset_schedule(
-        pair_seed, spec["release_id"])
-    if (spec.get("bc_recipe_version") != BC_RECIPE_VERSION
-            or spec.get("bc_recipe_sha256") != REGISTERED_BC_SPEC_SHA256
-            or spec.get("bc_data_seed_schedule") != expected_seed_blocks
-            or spec.get("bc_data_seed_schedule_sha256") !=
-            _digest_json(expected_seed_blocks)
-            or spec.get("bc_critic_reset_schedule") != expected_critic_resets
-            or spec.get("bc_critic_reset_schedule_sha256") !=
-            _digest_json(expected_critic_resets)
-            or spec.get("risk_dual_config_sha256") !=
-            REGISTERED_RISK_DUAL_CONFIG_SHA256):
-        raise RuntimeError("Warehouse production BC recipe or stage seed lock drifted")
     initial_hashes = role_hashes(model)
     stages: list[dict] = []
     all_seed_blocks: dict[str, list[int]] = {}
-    initial_fit_config = {
-        "learning_rate": REGISTERED_BC_SPEC["initial_bc_learning_rate"],
-        "batch_size": REGISTERED_BC_SPEC["initial_bc_batch_size"],
-        "tree_loss_weight": REGISTERED_BC_SPEC["initial_tree_loss_weight"],
-        "gate_loss_weight": REGISTERED_BC_SPEC["initial_gate_loss_weight"],
-        "bound_loss_weight": REGISTERED_BC_SPEC["initial_bound_loss_weight"],
-        "gradient_clip": REGISTERED_BC_SPEC["initial_bc_gradient_clip"],
-    }
 
     def teacher_stage(name: str, stage: int, count: int
                       ) -> tuple[torch.Tensor, ...]:
         seeds = _bc_stage_seeds(pair_seed, stage, count)
-        if expected_seed_blocks.get(name) != seeds:
-            raise RuntimeError("Warehouse public BC teacher stage seed drifted")
         all_seed_blocks[name] = seeds
         obs, mask, labels, summary = _teacher_rows(count, seeds[0])
-        rows = (obs, mask, labels, torch.zeros(len(obs), dtype=torch.float32))
+        episode_ids = summary.pop("row_episode_ids")
+        row_seeds = summary.pop("row_scenario_seeds")
+        rows = (obs, mask, labels, torch.zeros(len(obs), dtype=torch.float32),
+                tuple(episode_ids), tuple(row_seeds))
         stages.append({"stage": name, "kind": "public_teacher",
                        "episode_seeds": seeds, "rows": len(obs),
-                       "data_sha256": _bc_rows_sha256(rows), **summary})
+                       "data_sha256": _bc_rows_sha256(rows[:4]),
+                       "row_episode_ids_sha256": _digest_json(episode_ids),
+                       "row_scenario_seeds_sha256": _digest_json(row_seeds),
+                       **summary})
         return rows
 
     def visit_stage(name: str, stage: int, count: int, *,
@@ -794,8 +1709,6 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
                     collision_counts: dict[bytes, int] | None = None
                     ) -> tuple[torch.Tensor, ...]:
         seeds = _bc_stage_seeds(pair_seed, stage, count)
-        if expected_seed_blocks.get(name) != seeds:
-            raise RuntimeError("Warehouse dual-NN BC visit stage seed drifted")
         all_seed_blocks[name] = seeds
         rows, summary = _collect_bc_visits(
             model, seeds, deterministic=deterministic,
@@ -806,17 +1719,51 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
 
     source = teacher_stage("initial_public_teacher", 10,
                            BC_INITIAL_TEACHER_EPISODES)
-    tree_initialization = _initialize_public_trees(model, *source[:3])
-    optimizer = torch.optim.Adam(
-        model.actors.parameters(),
-        lr=REGISTERED_BC_SPEC["initial_bc_learning_rate"])
+    warmup_tree_initialization = _initialize_public_trees(model, *source[:3])
+    core_stage_checks: list[dict] = []
+    initial_split_hashes: dict[str, str] = {}
+
+    def record_core(stage: str) -> None:
+        # Frozen NumPy validates depth, sparsity, and every core leaf's raw
+        # action legality on its exact public-mask path after each fit stage.
+        frozen = FrozenWarehouseV6Actor.from_model(model)
+        roles = {}
+        for role in AGENTS:
+            actor = model.actors[role]
+            split_hash = _digest_json({
+                "weight": actor.tree.split.weight.detach().tolist(),
+                "bias": actor.tree.split.bias.detach().tolist()})
+            if split_hash != initial_split_hashes[role]:
+                raise RuntimeError("Warehouse certified core path changed during BC")
+            weights = frozen.roles[role].weights
+            count = int(weights["tree.leaf_count"][0])
+            core = weights["core_leaf_mask"][:count] > 0.5
+            logits = weights["tree.leaf_logits"][:count]
+            margins = np.sort(logits, axis=-1)[:, -1] - np.sort(logits, axis=-1)[:, -2]
+            roles[role] = {
+                "role_sha256": frozen.roles[role].role_sha256,
+                "split_sha256": split_hash,
+                "core_leaf_count": int(core.sum()),
+                "core_raw_actions": {
+                    str(leaf): ACTIONS[int(np.argmax(logits[leaf]))]
+                    for leaf in np.flatnonzero(core)},
+                "core_raw_margin_min": float(margins[core].min()) if core.any() else None,
+                "core_leaf_parameter_bound_max": float(
+                    actor.bounds().detach().cpu().numpy()[:count][core].max())
+                    if core.any() else None,
+                "core_low_gate_bound": CORE_LOW_GATE_BOUND,
+                "core_bound_mode": CORE_BOUND_MODE,
+                "core_path_legality_verified": True,
+            }
+        core_stage_checks.append({"stage": stage, "roles": roles})
+
+    optimizer = torch.optim.Adam(model.actors.parameters(), lr=3e-4)
     generator = torch.Generator().manual_seed(pair_seed + 31)
     initial_accuracy = _bc_epochs(
         model, optimizer, *source[:3], epochs=BC_INITIAL_EPOCHS,
         generator=generator)
     stages.append({"stage": "initial_public_bc", "training_rows": len(source[0]),
                    "epochs": BC_INITIAL_EPOCHS,
-                   **initial_fit_config,
                    "public_label_accuracy": initial_accuracy,
                    "actor_role_sha256": role_hashes(model)})
 
@@ -825,9 +1772,7 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
         visited = visit_stage(f"initial_nn_dagger_{number}", 10 + number,
                               BC_INITIAL_DAGGER_EPISODES)
         early_parts.append(visited)
-        optimizer = torch.optim.Adam(
-            model.actors.parameters(),
-            lr=REGISTERED_BC_SPEC["initial_bc_learning_rate"])
+        optimizer = torch.optim.Adam(model.actors.parameters(), lr=3e-4)
         obs, mask, labels = (
             torch.cat([part[index] for part in early_parts]) for index in range(3))
         accuracy = _bc_epochs(model, optimizer, obs, mask, labels,
@@ -838,31 +1783,190 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
                        "training_data_sha256": _bc_rows_sha256(
                            (obs, mask, labels)),
                        "epochs": BC_INITIAL_DAGGER_EPOCHS,
-                       **initial_fit_config,
                        "public_label_accuracy": accuracy,
                        "actor_role_sha256": role_hashes(model)})
 
-    critic, critic_report = train_collision_critic(
-        seed=expected_critic_resets["seed"],
-        epochs=REGISTERED_BC_SPEC["collision_critic_epochs"],
-        batch_size=REGISTERED_BC_SPEC["collision_critic_batch_size"],
-        learning_rate=REGISTERED_BC_SPEC["collision_critic_learning_rate"],
-        positive_weight=REGISTERED_BC_SPEC["collision_critic_positive_weight"])
-    if (not critic_report.get("validation_passed")
-            or critic_report.get("version") !=
-            REGISTERED_BC_SPEC["collision_critic_version"]
-            or critic_report.get("epochs") !=
-            REGISTERED_BC_SPEC["collision_critic_epochs"]
-            or critic_report.get("batch_size") !=
-            REGISTERED_BC_SPEC["collision_critic_batch_size"]
-            or critic_report.get("learning_rate") !=
-            REGISTERED_BC_SPEC["collision_critic_learning_rate"]
-            or critic_report.get("positive_weight") !=
-            REGISTERED_BC_SPEC["collision_critic_positive_weight"]
-            or critic_report.get("environment_reset_seed") !=
-            expected_critic_resets["seed"]
-            or critic_report.get("environment_reset_count") !=
-            expected_critic_resets["environment_reset_count"]):
+    warmup_split_training = {}
+    for role in AGENTS:
+        warmup_split_training[role] = {
+            "split_weight_gradient_enabled": bool(
+                model.actors[role].tree.split.weight.requires_grad),
+            "split_bias_gradient_enabled": bool(
+                model.actors[role].tree.split.bias.requires_grad),
+            "split_sha256_after_dagger": _digest_json({
+                "weight": model.actors[role].tree.split.weight.detach().tolist(),
+                "bias": model.actors[role].tree.split.bias.detach().tolist()}),
+        }
+
+    warmup_export = export_actor(
+        model, warmup_actor_path, pair_seed=pair_seed, variant="raw",
+        candidate_id="v614-frozen-warmup-before-tree-initialization")
+    warmup_export["frozen_after_stage"] = "initial_nn_dagger_2_fit"
+    warmup_export["quality_prequalified"] = False
+    warmup_frozen = FrozenWarehouseV6Actor.load(
+        warmup_actor_path, expected_sha256=warmup_export["sha256"],
+        expected_role_sha256=warmup_export["role_sha256"])
+    if warmup_export["role_sha256"] != role_hashes(model):
+        raise RuntimeError("Warehouse warmup Actor changed during frozen export")
+    if (warmup_frozen.artifact_sha256 != warmup_export["sha256"]
+            or any(role_sha256(warmup_frozen.roles[role].weights) !=
+                   warmup_export["role_sha256"][role] for role in AGENTS)):
+        raise RuntimeError("Warehouse loaded warmup Actor weights changed")
+
+    # This is only an Actor tree initialization during BC.  Topology is fitted
+    # to the frozen warmup full-NN distribution on fresh fit-purpose visits.
+    # The final frozen Actor's independent program fit/calibration/eligibility/
+    # validation occur later, after checkpoint selection, on their own scenes.
+    topology_parts: dict[str, list[tuple[torch.Tensor, ...]]] = {"fit": []}
+    topology_visits: dict[str, dict] = {}
+    for purpose in topology_parts:
+        collision_counts: dict[bytes, int] = {}
+        for visit_kind in ("sampled", "argmax"):
+            name = f"{purpose}_{visit_kind}"
+            stage, count = BC_TOPOLOGY_STAGE_COUNTS[name]
+            part = visit_stage(f"topology_{name}", stage, count,
+                               deterministic=visit_kind == "argmax",
+                               collision_counts=collision_counts)
+            if role_hashes(model) != warmup_frozen.role_sha256:
+                raise RuntimeError("Warehouse four-purpose NN visitation changed warmup Actor")
+            topology_parts[purpose].append(part)
+            topology_visits[name] = {
+                "stage": stage, "scenario_seeds": all_seed_blocks[f"topology_{name}"],
+                "rows": len(part[0]),
+                "collision_rows": int((part[3] > 0).sum().item()),
+                "row_episode_ids_sha256": _digest_json(part[4]),
+                "row_scenario_seeds_sha256": _digest_json(part[5]),
+                "data_sha256": _bc_rows_sha256(part[:4]),
+            }
+
+    # Warmup teacher episodes trained the source NN; topology fit uses fresh
+    # frozen-NN visitation episodes and does not see later program purposes.
+    topology_fit_parts = topology_parts["fit"]
+    topology_groups = {}
+    for purpose, parts in topology_parts.items():
+        selected_parts = topology_fit_parts if purpose == "fit" else parts
+        obs, mask, labels, hard = (
+            torch.cat([part[index] for part in selected_parts])
+            for index in range(4))
+        episode_ids = tuple(identifier for part in selected_parts
+                            for identifier in part[4])
+        actual_seeds = tuple(seed for part in selected_parts for seed in part[5])
+        topology_groups[purpose] = (obs, mask, labels, hard, episode_ids,
+                                    actual_seeds)
+    topology_scene_groups = {
+        purpose: set(group[5])
+        for purpose, group in topology_groups.items()}
+    if any(topology_scene_groups[a] & topology_scene_groups[b]
+           for index, a in enumerate(topology_groups)
+           for b in tuple(topology_groups)[index + 1:]):
+        raise RuntimeError("Warehouse BC topology scene purposes overlap")
+
+    # Cache both roles' full masked warmup-NN fit targets before installing
+    # either certificate-first tree. Installation cannot change that source.
+    topology_rows_by_role: dict[str, dict[str, EpisodeRows]] = {}
+    topology_source_nn_role_sha256: dict[str, dict[str, str]] = {
+        purpose: {} for purpose in topology_groups}
+    topology_torch_frozen_parity: dict[str, dict[str, dict]] = {
+        purpose: {} for purpose in topology_groups}
+    for index, role in enumerate(AGENTS):
+        groups: dict[str, EpisodeRows] = {}
+        frozen_role = warmup_frozen.roles[role]
+        for purpose, (obs, mask, labels, hard, episode_ids,
+                      actual_seeds) in topology_groups.items():
+            features, role_mask, target, parity = _warmup_role_targets(
+                model, frozen_role, role, obs, mask)
+            topology_torch_frozen_parity[purpose][role] = parity
+            groups[purpose] = EpisodeRows(
+                features, role_mask, labels[:, index].numpy(),
+                target, (hard > 0).numpy(), episode_ids, actual_seeds,
+                frozen_role.role_sha256)
+            topology_source_nn_role_sha256[purpose][role] = (
+                frozen_role.role_sha256)
+        topology_rows_by_role[role] = groups
+    if (sha256(Path(warmup_actor_path).read_bytes()).hexdigest() !=
+            warmup_export["sha256"]
+            or any(role_sha256(warmup_frozen.roles[role].weights) !=
+                   warmup_export["role_sha256"][role] for role in AGENTS)):
+        raise RuntimeError("Warehouse warmup Actor changed during target caching")
+
+    tree_initialization = {}
+    def write_topology_failure(status: str, failed_roles: list[str],
+                               error: str | None = None) -> None:
+        diagnostic_path = spec.get("topology_failure_receipt_path")
+        if diagnostic_path is None:
+            return
+        payload = {
+            "status": status, "failed_roles": failed_roles, "error": error,
+            "warmup_frozen_nn_actor": warmup_export,
+            "topology_source_nn_role_sha256": topology_source_nn_role_sha256,
+            "topology_torch_frozen_parity": topology_torch_frozen_parity,
+            "topology_target_probs_sha256": {
+                purpose: {role: topology_rows_by_role[role][purpose].target_sha256()
+                          for role in AGENTS}
+                for purpose in topology_groups},
+            "topology_episode_parts": topology_visits,
+            "bc_stage_seed_blocks_consumed": all_seed_blocks,
+            "tree_initialization": tree_initialization,
+            "topology_purpose_scenario_sha256": {
+                purpose: _digest_json(sorted(seeds))
+                for purpose, seeds in topology_scene_groups.items()},
+            "source_closure_sha256": spec["source_closure_sha256"],
+            "bc_recipe_sha256": REGISTERED_BC_SPEC_SHA256,
+            "executable_recipe_file_sha256": executable_recipe_file_sha256,
+        }
+        with Path(diagnostic_path).open("x") as handle:
+            json.dump(payload, handle, sort_keys=True, allow_nan=False)
+            handle.write("\n")
+
+    for index, role in enumerate(AGENTS):
+        groups = topology_rows_by_role[role]
+        try:
+            fit_rows = groups["fit"]
+            fitted_sparse = fit_certificate_tree(
+                fit_rows.encoded, fit_rows.masks,
+                fit_rows.frozen_nn_masked_probs, fit_rows.episode_ids,
+                schema=FeatureSchema(tuple(TREE_FEATURE_NAMES), tuple(ACTIONS)),
+                frozen_actor_sha256=warmup_frozen.roles[role].role_sha256,
+                config=CertificateSearchConfig())
+            fitted = to_current_core_tree_result(fitted_sparse)
+        except Exception as error:
+            write_topology_failure(
+                "v614_certificate_fit_error", [role],
+                f"{type(error).__name__}: {error}")
+            raise
+        tree_initialization[role] = model.actors[role].initialize_tree_from_core_result(fitted)
+        tree_initialization[role]["core_tree_content_sha256"] = fitted.content_sha256()
+        tree_initialization[role]["certificate_fit"] = fitted_sparse.report
+        tree_initialization[role]["sklearn_version"] = (
+            warmup_tree_initialization[role]["sklearn_version"])
+        initial_split_hashes[role] = _digest_json({
+            "weight": model.actors[role].tree.split.weight.detach().tolist(),
+            "bias": model.actors[role].tree.split.bias.detach().tolist()})
+        frozen_role = FrozenWarehouseV6Actor.from_model(model).roles[role]
+        features = groups["fit"].encoded
+        if not np.array_equal(frozen_role.leaf(features), fitted.leaf_indices(features)):
+            raise RuntimeError("Warehouse core refit Torch/NumPy route mismatch")
+    # Warmup fit is a topology initialization, not a final qualification.
+    # The full BC continuation must be allowed to align the complete Actor.
+    record_core("certificate_first_fit_only_tree_initialization")
+    optimizer = torch.optim.Adam(model.actors.parameters(), lr=1e-4)
+    obs, mask, labels = (topology_groups["fit"][index] for index in range(3))
+    refit_accuracy = _bc_epochs(
+        model, optimizer, obs, mask, labels, epochs=BC_REFIT_EPOCHS,
+        generator=generator)
+    stages.append({"stage": "post_refit_public_bc", "training_rows": len(obs),
+                   "training_data_sha256": _bc_rows_sha256((obs, mask, labels)),
+                   "epochs": BC_REFIT_EPOCHS,
+                   "warmup_masked_kl_weight": BC_REFIT_WARMUP_KL_WEIGHT,
+                   "warmup_target_sha256": _digest_json({
+                       role: topology_rows_by_role[role]["fit"].target_sha256()
+                       for role in AGENTS}),
+                   "public_label_accuracy": refit_accuracy,
+                   "actor_role_sha256": role_hashes(model)})
+    record_core("post_refit_public_bc")
+
+    critic, critic_report = train_collision_critic(seed=pair_seed + 6200)
+    if not critic_report.get("validation_passed"):
         raise RuntimeError("Warehouse BC real-event collision critic failed validation")
     critic.eval()
     for parameter in critic.parameters():
@@ -873,27 +1977,32 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
     risk_visit = visit_stage("risk_nn_visitation", 21,
                              BC_RISK_VISIT_EPISODES)
     risk_fit = _risk_bc_epochs(
-        model, critic, (risk_teacher, risk_visit), epochs=BC_RISK_EPOCHS,
+        model, critic, (risk_teacher, risk_visit, *topology_parts["fit"]),
+        epochs=BC_RISK_EPOCHS,
         generator_seed=pair_seed + 201,
         margin_weight=0.0, near_increment=0.0,
         low_return_increment=BC_LOW_RETURN_INCREMENT)
     stages.append({"stage": "risk_public_bc_fit", "fit": risk_fit,
                    "actor_role_sha256": role_hashes(model)})
+    record_core("risk_public_bc_fit")
 
     large_teacher = teacher_stage("large_public_teacher", 30,
                                   BC_LARGE_TEACHER_EPISODES)
     large_visit = visit_stage("large_nn_visitation", 31,
                               BC_LARGE_VISIT_EPISODES)
     large_fit = _risk_bc_epochs(
-        model, critic, (large_teacher, large_visit), epochs=BC_RISK_EPOCHS,
+        model, critic, (large_teacher, large_visit, *topology_parts["fit"]),
+        epochs=BC_RISK_EPOCHS,
         generator_seed=pair_seed + 301,
         margin_weight=BC_MARGIN_WEIGHT, near_increment=BC_NEAR_INCREMENT,
         low_return_increment=BC_LOW_RETURN_INCREMENT)
     stages.append({"stage": "large_public_bc_fit", "fit": large_fit,
                    "actor_role_sha256": role_hashes(model)})
+    record_core("large_public_bc_fit")
 
     deep_parts = [teacher_stage("deep_public_teacher", 40,
-                                BC_DEEP_TEACHER_EPISODES)]
+                                BC_DEEP_TEACHER_EPISODES),
+                  *topology_parts["fit"]]
     for number in range(1, BC_DEEP_DAGGER_ROUNDS + 1):
         counts: dict[bytes, int] = {}
         sampled = visit_stage(f"deep_{number}_sampled", 40 + 2 * number - 1,
@@ -910,6 +2019,7 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
             low_return_increment=BC_LOW_RETURN_INCREMENT)
         stages.append({"stage": f"deep_dagger_{number}_fit", "fit": fit,
                        "actor_role_sha256": role_hashes(model)})
+        record_core(f"deep_dagger_{number}_fit")
     final_fit = _risk_bc_epochs(
         model, critic, deep_parts, epochs=BC_DEEP_EPOCHS,
         generator_seed=pair_seed + 499,
@@ -917,31 +2027,166 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
         low_return_increment=BC_LOW_RETURN_INCREMENT)
     stages.append({"stage": "final_standard_margin_calibration", "fit": final_fit,
                    "actor_role_sha256": role_hashes(model)})
+    record_core("final_standard_margin_calibration")
+
+    # Freeze the *complete* BC Actor before any internal program-purpose row
+    # is collected.  These four sets are distinct from warmup topology fit
+    # and from the selected post-PPO program schedule.
+    final_bc_role_sha256 = role_hashes(model)
+    final_bc_export = export_actor(
+        model, final_bc_actor_path, pair_seed=pair_seed, variant="raw",
+        candidate_id="v614-final-full-bc-internal-precheck")
+    final_bc_frozen = FrozenWarehouseV6Actor.load(
+        final_bc_actor_path, expected_sha256=final_bc_export["sha256"],
+        expected_role_sha256=final_bc_role_sha256)
+    if final_bc_export["role_sha256"] != final_bc_role_sha256:
+        raise RuntimeError("Warehouse final BC Actor changed during export")
+    final_parts: dict[str, list[tuple[torch.Tensor, ...]]] = {
+        name: [] for name in ("fit", "calibration", "eligibility", "validation")}
+    final_visits: dict[str, dict] = {}
+    for purpose in final_parts:
+        collision_counts: dict[bytes, int] = {}
+        for visit_kind in ("sampled", "argmax"):
+            name = f"{purpose}_{visit_kind}"
+            stage, count = BC_FINAL_CORE_STAGE_COUNTS[name]
+            part = visit_stage(f"final_bc_precheck_{name}", stage, count,
+                               deterministic=visit_kind == "argmax",
+                               collision_counts=collision_counts)
+            if role_hashes(model) != final_bc_role_sha256:
+                raise RuntimeError("Warehouse final BC precheck visitation changed Actor")
+            final_parts[purpose].append(part)
+            final_visits[name] = {
+                "stage": stage,
+                "scenario_seeds": all_seed_blocks[f"final_bc_precheck_{name}"],
+                "rows": len(part[0]),
+                "row_episode_ids_sha256": _digest_json(part[4]),
+                "row_scenario_seeds_sha256": _digest_json(part[5]),
+                "data_sha256": _bc_rows_sha256(part[:4]),
+            }
+    final_groups = {}
+    for purpose, parts in final_parts.items():
+        final_groups[purpose] = (
+            *(torch.cat([part[index] for part in parts]) for index in range(4)),
+            tuple(identifier for part in parts for identifier in part[4]),
+            tuple(seed for part in parts for seed in part[5]),
+        )
+    final_scene_sets = {purpose: set(group[5])
+                        for purpose, group in final_groups.items()}
+    final_bc_scenes = set().union(*final_scene_sets.values())
+    warmup_scenes = set().union(*topology_scene_groups.values())
+    later_program_scenes = set(spec["reserved_external_scenario_seeds"])
+    if (any(final_scene_sets[left] & final_scene_sets[right]
+            for index, left in enumerate(final_scene_sets)
+            for right in tuple(final_scene_sets)[index + 1:])
+            or final_bc_scenes & warmup_scenes
+            or final_bc_scenes & later_program_scenes):
+        raise RuntimeError("Warehouse final BC precheck scenes overlap another purpose")
+    final_precheck_roles: dict[str, dict] = {}
+    for index, role in enumerate(AGENTS):
+        frozen_role = final_bc_frozen.roles[role]
+        role_groups: dict[str, EpisodeRows] = {}
+        parity: dict[str, dict] = {}
+        for purpose, (obs, mask, labels, hard, episode_ids,
+                      actual_seeds) in final_groups.items():
+            features, role_mask, target, parity[purpose] = _warmup_role_targets(
+                model, frozen_role, role, obs, mask)
+            role_groups[purpose] = EpisodeRows(
+                features, role_mask, labels[:, index].numpy(), target,
+                (hard > 0).numpy(), episode_ids, actual_seeds,
+                frozen_role.role_sha256)
+        topology = frozen_actor_topology(
+            frozen_role.weights,
+            schema=FeatureSchema(tuple(TREE_FEATURE_NAMES), tuple(ACTIONS)),
+            frozen_actor_sha256=frozen_role.role_sha256)
+        _, report = fit_episode_separated_core(
+            role_groups, frozen_role=frozen_role, config=RefitConfig(),
+            expected_topology_sha256=topology.topology_sha256())
+        final_precheck_roles[role] = {
+            "actor_role_sha256": frozen_role.role_sha256,
+            "frozen_actor_topology_sha256": topology.topology_sha256(),
+            "target_parity": parity,
+            "refit_report": report,
+        }
+    final_bc_precheck = {
+        "purpose": "development_internal_precheck_after_complete_bc",
+        "final_bc_actor": final_bc_export,
+        "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
+        "warmup_actor_sha256": warmup_export["sha256"],
+        "warmup_topology_fit_seed_schedule_sha256": _digest_json({
+            name: all_seed_blocks[f"topology_{name}"]
+            for name in BC_TOPOLOGY_STAGE_COUNTS}),
+        "final_bc_stage_counts": BC_FINAL_CORE_STAGE_COUNTS,
+        "final_bc_visits": final_visits,
+        "final_bc_scenario_sets_sha256": {
+            name: _digest_json(sorted(values))
+            for name, values in final_scene_sets.items()},
+        "final_bc_seed_schedule_sha256": _digest_json({
+            name: all_seed_blocks[f"final_bc_precheck_{name}"]
+            for name in BC_FINAL_CORE_STAGE_COUNTS}),
+        "reserved_external_scenario_seeds_sha256": _digest_json(
+            sorted(later_program_scenes)),
+        "roles": final_precheck_roles,
+        "passed": all(row["refit_report"]["validation_passed"]
+                      for row in final_precheck_roles.values()),
+    }
+    if sha256(Path(final_bc_actor_path).read_bytes()).hexdigest() != final_bc_export["sha256"]:
+        raise RuntimeError("Warehouse final BC Actor artifact changed during precheck")
+    with Path(final_bc_precheck_receipt_path).open("x") as handle:
+        json.dump(final_bc_precheck, handle, sort_keys=True, allow_nan=False)
+        handle.write("\n")
+    if not final_bc_precheck["passed"]:
+        raise RuntimeError("Warehouse final BC four-purpose internal precheck failed")
 
     all_seeds = [seed for block in all_seed_blocks.values() for seed in block]
-    if (all_seed_blocks != expected_seed_blocks
-            or len(set(all_seeds)) != len(all_seeds)):
-        raise RuntimeError("Warehouse BC seed phases overlap or drifted")
+    if len(set(all_seeds)) != len(all_seeds):
+        raise RuntimeError("Warehouse BC seed phases overlap")
+    if (all_seed_blocks != spec["bc_data_seed_schedule"]
+            or _digest_json(all_seed_blocks) != spec["bc_data_seed_schedule_sha256"]):
+        raise RuntimeError("Warehouse actual BC reset schedule differs from preregistration")
     obs, mask, labels = (
         torch.cat([part[index] for part in deep_parts]) for index in range(3))
     return {
         "source": "public_observation_only_offline_bc_and_dual_nn_visits",
         "bc_recipe_version": BC_RECIPE_VERSION,
         "bc_recipe_sha256": REGISTERED_BC_SPEC_SHA256,
+        "executable_recipe_file_sha256": executable_recipe_file_sha256,
         "risk_dual_config_sha256": REGISTERED_RISK_DUAL_CONFIG_SHA256,
+        "bc_critic_reset_schedule": spec["bc_critic_reset_schedule"],
+        "bc_critic_reset_schedule_sha256": spec["bc_critic_reset_schedule_sha256"],
         "source_closure_sha256": spec["source_closure_sha256"],
         "observation_version": OBSERVATION_VERSION,
         "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+        "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
         "initial_role_sha256": initial_hashes,
         "pretrained_role_sha256": role_hashes(model),
+        "warmup_tree_initialization": warmup_tree_initialization,
+        "warmup_split_training": warmup_split_training,
+        "warmup_frozen_nn_actor": warmup_export,
+        "topology_source_nn_role_sha256": topology_source_nn_role_sha256,
+        "topology_torch_frozen_parity": topology_torch_frozen_parity,
         "tree_initialization": tree_initialization,
+        "topology_episode_parts": topology_visits,
+        "topology_target_probs_sha256": {
+            purpose: {role: topology_rows_by_role[role][purpose].target_sha256()
+                      for role in AGENTS}
+            for purpose in topology_groups},
+        "topology_purpose_scenario_sha256": {
+            purpose: _digest_json(sorted(seeds))
+            for purpose, seeds in topology_scene_groups.items()},
+        "final_bc_internal_precheck": final_bc_precheck,
+        "final_bc_internal_precheck_receipt": {
+            "path": str(Path(final_bc_precheck_receipt_path).resolve()),
+            "sha256": sha256(Path(final_bc_precheck_receipt_path).read_bytes()).hexdigest(),
+        },
+        "topology_calibration_eligibility_validation_used_for_bc_updates": False,
+        "core_stage_checks": core_stage_checks,
         "collision_critic": critic_report,
         "bc_data_seed_blocks": all_seed_blocks,
         "bc_data_seed_schedule_sha256": _digest_json(all_seed_blocks),
-        "bc_critic_reset_schedule": expected_critic_resets,
-        "bc_critic_reset_schedule_sha256": _digest_json(expected_critic_resets),
         "bc_stages": stages,
         "final_bc_training_reliability": _bc_reliability(model, obs, mask, labels),
+        "final_bc_training_core_diagnostics": _training_core_diagnostics(
+            model, topology_groups["fit"]),
         "training_dependencies": {
             "torch": torch.__version__, "numpy": np.__version__,
             "sklearn": tree_initialization[AGENTS[0]]["sklearn_version"]},
@@ -952,6 +2197,7 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
 
 def pretrain_pair(model: WarehouseV6Actor, *, pair_seed: int, spec: Mapping) -> dict:
     """Train one shared dual-NN BC start for paired raw and regularized PPO."""
+    _require_locked_execution()
     if spec.get("smoke") is True:
         return _pretrain_pair_smoke(model, pair_seed=pair_seed, spec=spec)
     return _pretrain_pair_production(model, pair_seed=pair_seed, spec=spec)
@@ -1182,6 +2428,10 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
                 - 0.005 * policy.entropy().mean()
                 + 5e-4 * torch.stack([
                     model.actors[role].bounds().mean() for role in AGENTS]).mean())
+        intrinsic, intrinsic_report = core_intrinsic_loss(
+            model, encoded, masks, labels=None, weights=CORE_PPO_WEIGHTS,
+            full_logits=logits)
+        loss = loss + intrinsic
         if programs is not None:
             for index, role in enumerate(AGENTS):
                 penalty, count, kl = _program_feedback(
@@ -1214,6 +2464,8 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
         optimizer.step()
         losses.append(float(loss.detach()))
     return {"loss": float(np.mean(losses)), "cost_multiplier": cost_multiplier,
+            "core_intrinsic_loss": float(intrinsic.detach()),
+            "core_intrinsic": intrinsic_report,
             "cost_event_rows": cost_event_rows,
             "completed_episodes_for_cost": len(complete_outcomes),
             "cost_advantage_std_raw": cost_adv_std_raw,
@@ -1340,7 +2592,7 @@ def _resample_program_rows(actor: FrozenWarehouseV6Actor, role: str,
         chunk = rows[begin:begin + 256]
         obs = np.stack([row["obs"] for row in chunk])
         masks = np.stack([row["mask"] for row in chunk])
-        encoded = np.concatenate((obs, masks), axis=-1)
+        encoded = encode_actor_tree_features(obs, masks)
         logits = np.where(masks > 0.5, actor.roles[role].logits_encoded(encoded), -1e9)
         shifted = logits - logits.max(-1, keepdims=True)
         probabilities = np.exp(shifted)
@@ -1357,10 +2609,7 @@ def _resample_program_rows(actor: FrozenWarehouseV6Actor, role: str,
 
 
 def _fit_training_programs(model: WarehouseV6Actor,
-                           buffers: Mapping[str, deque], *,
-                           method: str = AXIS_TREE_METHOD) -> tuple[dict, dict, dict]:
-    if method not in (AXIS_TREE_METHOD, ACTOR_SPARSE_TOPOLOGY_METHOD):
-        raise ValueError("unregistered Warehouse online program method")
+                           buffers: Mapping[str, deque]) -> tuple[dict, dict, dict]:
     actor = FrozenWarehouseV6Actor.from_model(model)
     programs, reports, held_validation = {}, {}, {}
     split_names = tuple(FINAL_PROGRAM_SPLIT_COUNTS)
@@ -1376,7 +2625,6 @@ def _fit_training_programs(model: WarehouseV6Actor,
         if len(scenario_seeds) < PROGRAM_MIN_EPISODES:
             programs[role] = None
             reports[role] = {"error": "insufficient distinct training scenario episodes",
-                             "program_fit_method": method,
                              "episodes": len(scenario_seeds)}
             held_validation[role] = []
             continue
@@ -1403,15 +2651,12 @@ def _fit_training_programs(model: WarehouseV6Actor,
                 for name in split_names},
         }
         try:
-            if method == AXIS_TREE_METHOD:
-                # Preserve the historical smoke and direct unit-test adapter.
-                program = fit_program(role, actor, *(parts[name] for name in split_names))
-            else:
-                program = fit_program(role, actor, *(parts[name] for name in split_names),
-                                      method=method)
+            program = fit_program(role, actor, *(parts[name] for name in split_names),
+                                  method=ACTOR_SPARSE_TOPOLOGY_METHOD)
+            if program.report.get("fit_method") != ACTOR_SPARSE_TOPOLOGY_METHOD:
+                raise RuntimeError("Warehouse online program method drifted")
             programs[role] = program
             reports[role] = {"program_sha256": program.sha256(),
-                             "program_fit_method": method,
                              "actor_role_sha256": actor.role_sha256[role],
                              **provenance,
                              "current_actor_resampled": True,
@@ -1421,7 +2666,6 @@ def _fit_training_programs(model: WarehouseV6Actor,
         except (ValueError, RuntimeError) as exc:
             programs[role] = None
             reports[role] = {"error": f"{type(exc).__name__}: {exc}",
-                             "program_fit_method": method,
                              **provenance}
     return programs, reports, held_validation
 
@@ -1599,8 +2843,6 @@ def _fresh_final_programs(model: WarehouseV6Actor,
     actor = FrozenWarehouseV6Actor.load(
         actor_artifact["path"], expected_sha256=actor_artifact["sha256"],
         expected_role_sha256=role_hashes(model))
-    if spec.get("program_fit_method") not in PROGRAM_FIT_METHOD_CANDIDATES:
-        raise RuntimeError("Warehouse frozen program method is unsupported")
     from experiments.warehouse.protocol import final_program_fit_seed_schedule
     parts = spec["final_program_fit_seed_schedule"]
     if (parts != final_program_fit_seed_schedule(spec["release_id"], spec["pair_seed"])
@@ -1633,15 +2875,17 @@ def _fresh_final_programs(model: WarehouseV6Actor,
         try:
             program = fit_program(role, actor, *(split[name] for name in
                 ("fit", "calibration", "eligibility", "validation")),
-                method=spec["program_fit_method"])
-            if program.report.get("fit_method") != spec["program_fit_method"]:
-                raise RuntimeError("Warehouse frozen program used a different method")
+                method=ACTOR_SPARSE_TOPOLOGY_METHOD)
+            if program.report.get("fit_method") != ACTOR_SPARSE_TOPOLOGY_METHOD:
+                raise RuntimeError("Warehouse final program method drifted")
             programs[role] = program
             reports[role] = {
                 "status": "frozen_actor_fresh_four_part_fit",
-                "program_fit_method": spec["program_fit_method"],
                 "actor_role_sha256": actor.role_sha256[role],
                 "actor_artifact_sha256": actor.artifact_sha256,
+                "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
+                "actor_tree_structure_sha256": program.report["fit_tree"][
+                    "actor_tree_structure_sha256"],
                 "program_sha256": program.sha256(),
                 "release_id": spec["release_id"],
                 "final_fit_traces": traces,
@@ -1652,7 +2896,6 @@ def _fresh_final_programs(model: WarehouseV6Actor,
             }
         except (ValueError, RuntimeError) as exc:
             reports[role] = {"status": "failed", "error": f"{type(exc).__name__}: {exc}",
-                             "program_fit_method": spec["program_fit_method"],
                              "release_id": spec["release_id"],
                              "actor_artifact_sha256": actor.artifact_sha256,
                              "final_fit_traces": traces,
@@ -1674,51 +2917,6 @@ def _role_weight_change(initial: Mapping[str, torch.Tensor],
     return result
 
 
-def _state_dict_sha256(state: Mapping[str, torch.Tensor]) -> str:
-    """Hash every parameter and buffer independently of torch serialization."""
-    digest = sha256()
-    for name, tensor in sorted(state.items()):
-        if not isinstance(name, str) or not isinstance(tensor, torch.Tensor):
-            raise RuntimeError("Warehouse checkpoint contains a non-tensor state")
-        array = tensor.detach().cpu().contiguous().numpy()
-        digest.update(name.encode())
-        digest.update(str(array.dtype).encode())
-        digest.update(np.asarray(array.shape, dtype="<i8").tobytes())
-        digest.update(array.tobytes())
-    return digest.hexdigest()
-
-
-_RESUME_PROGRESS_FIELDS = (
-    "used_steps", "episode_number", "histories", "updates", "development",
-    "next_eval", "next_extraction_index", "last_extraction_step",
-    "risk_dual_snapshot", "extractions",
-)
-
-
-def _resume_progress_sha256(checkpoint: Mapping) -> str:
-    return _digest_json({name: checkpoint[name] for name in
-                         _RESUME_PROGRESS_FIELDS})
-
-
-def _verify_episode_progress(histories: Sequence[Mapping], used_steps: int,
-                             episode_number: int) -> None:
-    """A resumed trajectory must cover exactly the reported joint steps."""
-    if (type(used_steps) is not int or used_steps < 0
-            or type(episode_number) is not int
-            or episode_number != len(histories)):
-        raise RuntimeError("Warehouse checkpoint episode count or steps changed")
-    cursor = 0
-    for index, row in enumerate(histories):
-        steps = row.get("joint_steps")
-        if (type(steps) is not int or steps <= 0
-                or row.get("start_joint_step") != cursor
-                or row.get("episode_index") != index):
-            raise RuntimeError("Warehouse checkpoint episode trajectory changed")
-        cursor += steps
-    if cursor != used_steps:
-        raise RuntimeError("Warehouse checkpoint episode steps changed")
-
-
 def _save_checkpoint(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -1732,10 +2930,17 @@ def _variant_checkpoint_path(directory: Path, variant: str) -> Path:
 
 def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                    spec: Mapping, directory: Path) -> tuple[WarehouseV6Actor, dict, dict]:
+    _require_locked_execution()
     if variant not in ("raw", "regularized"):
         raise ValueError("invalid Warehouse v6 training variant")
     model = WarehouseV6Actor()
     model.load_state_dict(initial)
+    # state_dict contains the fitted topology values but not requires_grad.
+    # Restore the train-only core path freeze before constructing the PPO
+    # optimizer; otherwise PPO could silently void raw-action legality proof.
+    for role in AGENTS:
+        model.actors[role].tree.split.weight.requires_grad_(False)
+        model.actors[role].tree.split.bias.requires_grad_(False)
     initial_role_hashes = role_hashes(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=3e-5)
     generator = torch.Generator().manual_seed(spec["pair_seed"] + 1)
@@ -1764,90 +2969,15 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 or saved.get("initial_role_sha256") != initial_role_hashes
                 or saved.get("model_version") != MODEL_VERSION
                 or saved.get("feature_schema_sha256") != FEATURE_SCHEMA_SHA256
-                or (not spec.get("smoke") and (
-                    saved.get("run_spec_sha256") != run_spec_sha256
-                    or saved.get("pair_seed") != spec["pair_seed"]
-                    or saved.get("joint_steps") != spec["joint_steps"]
-                    or saved.get("program_fit_method") != spec["program_fit_method"]
-                    or saved.get("bc_recipe_sha256") != spec["bc_recipe_sha256"]
-                    or saved.get("bc_data_seed_schedule_sha256") !=
-                    spec["bc_data_seed_schedule_sha256"]
-                    or saved.get("risk_dual_config_sha256") !=
-                    spec["risk_dual_config_sha256"]))):
+                or saved.get("action_physics_config_sha256") !=
+                   ACTION_PHYSICS_CONFIG_SHA256):
             raise RuntimeError("Warehouse v6 checkpoint identity or Actor start mismatch")
         if saved.get("complete"):
-            if not spec.get("smoke"):
-                selected = saved.get("selected_state_dict")
-                report = saved.get("report")
-                if (not isinstance(selected, Mapping)
-                        or not isinstance(report, Mapping)
-                        or saved.get("selected_state_sha256") !=
-                        _state_dict_sha256(selected)
-                        or saved.get("report_sha256") != _digest_json(report)
-                        or saved.get("selected_programs_sha256") !=
-                        _digest_json(saved.get("selected_programs"))
-                        or report.get("run_spec_sha256") != run_spec_sha256
-                        or report.get("training_config_sha256") != spec_hash
-                        or report.get("source_closure_sha256") !=
-                        spec["source_closure_sha256"]
-                        or report.get("pair_seed") != spec["pair_seed"]
-                        or report.get("variant") != variant
-                        or report.get("joint_steps") != spec["joint_steps"]
-                        or report.get("actor_decisions") !=
-                        2 * spec["joint_steps"]
-                        or report.get("program_fit_method") !=
-                        spec["program_fit_method"]
-                        or report.get("bc_recipe_sha256") !=
-                        spec["bc_recipe_sha256"]
-                        or report.get("bc_data_seed_schedule_sha256") !=
-                        spec["bc_data_seed_schedule_sha256"]
-                        or report.get("risk_dual_config_sha256") !=
-                        spec["risk_dual_config_sha256"]
-                        or report.get("actual_episode_resets_sha256") !=
-                        _digest_json(report.get("actual_episode_resets"))):
-                    raise RuntimeError("Warehouse completed checkpoint evidence changed")
-                _verify_episode_progress(report.get("training_episodes", ()),
-                                         report["joint_steps"],
-                                         len(report.get("training_episodes", ())))
-                if (not report.get("updates")
-                        or report["updates"][-1].get("joint_steps") !=
-                        spec["joint_steps"]):
-                    raise RuntimeError("Warehouse completed checkpoint updates changed")
             model.load_state_dict(saved["selected_state_dict"])
-            if (not spec.get("smoke") and
-                    report["selected_role_sha256"] != role_hashes(model)):
-                raise RuntimeError("Warehouse completed checkpoint Actor hash changed")
             restored = {role: WarehouseV6Program.from_dict(
                 payload, actor_role_sha256=role_hashes(model)[role])
                 for role, payload in saved.get("selected_programs", {}).items()}
-            if (not spec.get("smoke") and variant == "regularized"
-                    and any(program.report.get("fit_method") !=
-                            spec["program_fit_method"]
-                            for program in restored.values())):
-                raise RuntimeError("Warehouse resumed selected program method drifted")
             return model, restored, saved["report"]
-        if not spec.get("smoke"):
-            state = saved.get("state_dict")
-            best_saved = saved.get("best")
-            if (not isinstance(state, Mapping)
-                    or saved.get("state_sha256") != _state_dict_sha256(state)
-                    or saved.get("resume_progress_sha256") !=
-                    _resume_progress_sha256(saved)
-                    or saved.get("best_state_sha256") !=
-                    (_state_dict_sha256(best_saved["state_dict"])
-                     if best_saved is not None else None)
-                    or type(saved.get("used_steps")) is not int
-                    or not 0 <= saved["used_steps"] <= spec["joint_steps"]
-                    or type(saved.get("next_extraction_index")) is not int
-                    or not 0 <= saved["next_extraction_index"] <=
-                    len(extraction_steps)):
-                raise RuntimeError("Warehouse partial checkpoint evidence changed")
-            _verify_episode_progress(saved.get("histories", ()),
-                                     saved["used_steps"], saved.get("episode_number"))
-            if (not saved.get("updates") or
-                    saved["updates"][-1].get("joint_steps") !=
-                    saved["used_steps"]):
-                raise RuntimeError("Warehouse partial checkpoint updates changed")
         model.load_state_dict(saved["state_dict"])
         optimizer.load_state_dict(saved["optimizer"])
         generator.set_state(saved["generator_state"])
@@ -1866,10 +2996,6 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 programs[role] = (WarehouseV6Program.from_dict(
                     payload, actor_role_sha256=payload["actor_role_sha256"])
                     if payload is not None else None)
-                if (not spec.get("smoke") and programs[role] is not None
-                        and programs[role].report.get("fit_method") !=
-                        spec["program_fit_method"]):
-                    raise RuntimeError("Warehouse resumed online program method drifted")
             extractions = saved["extractions"]
             program_validation_rows = saved["program_validation_rows"]
         next_extraction_index = saved["next_extraction_index"]
@@ -1882,11 +3008,14 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
             extraction_remaining = (extraction_steps[next_extraction_index] - used_steps
                                     if next_extraction_index < len(extraction_steps) else
                                     spec["joint_steps"] - used_steps)
-            episode, summary = collect_episode(
-                model, seed=seed, generator=generator,
-                max_steps=min(block_remaining, spec["joint_steps"] - used_steps,
-                              extraction_remaining),
-                episode_index=episode_number)
+            with stage1_reset_phase(
+                    f"formal_{variant}_rollout",
+                    start_joint_step=used_steps, episode_index=episode_number):
+                episode, summary = collect_episode(
+                    model, seed=seed, generator=generator,
+                    max_steps=min(block_remaining, spec["joint_steps"] - used_steps,
+                                  extraction_remaining),
+                    episode_index=episode_number)
             if not summary["joint_steps"]:
                 raise RuntimeError("Warehouse v6 self-play rollout yielded zero steps")
             summary["start_joint_step"] = used_steps
@@ -1928,13 +3057,8 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 used_steps == extraction_steps[next_extraction_index]):
             _assert_source_closure(spec["source_closure_sha256"])
             if programs is not None:
-                if spec.get("smoke"):
-                    programs, extracted, program_validation_rows = \
-                        _fit_training_programs(model, buffers)
-                else:
-                    programs, extracted, program_validation_rows = \
-                        _fit_training_programs(
-                            model, buffers, method=spec["program_fit_method"])
+                programs, extracted, program_validation_rows = _fit_training_programs(
+                    model, buffers)
                 for role in AGENTS:
                     extractions[role].append({
                         "joint_steps": used_steps,
@@ -1947,7 +3071,8 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
             next_extraction_index += 1
         if used_steps >= next_eval or used_steps == spec["joint_steps"]:
             _assert_source_closure(spec["source_closure_sha256"])
-            measured = evaluate(model, spec["checkpoint_seeds"])
+            with stage1_reset_phase(f"formal_{variant}_selection"):
+                measured = evaluate(model, spec["checkpoint_seeds"])
             checkpoint_result = {"joint_steps": used_steps, **measured["summary"]}
             checkpoint_result["external_feedback_rows"] = {
                 role: sum(item["feedback_rows"][role] for item in updates)
@@ -1975,20 +3100,13 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                                       for role in AGENTS} if programs is not None else {}),
                         "selected_update_index": len(updates)}
             next_eval += interval
-            checkpoint_payload = {
+            _save_checkpoint(checkpoint, {
                 "training_config_sha256": spec_hash, "variant": variant,
                 "source_closure_sha256": spec["source_closure_sha256"],
-                "run_spec_sha256": run_spec_sha256,
-                "pair_seed": spec["pair_seed"],
-                "joint_steps": spec["joint_steps"],
                 "initial_role_sha256": initial_role_hashes,
                 "model_version": MODEL_VERSION,
                 "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
-                "program_fit_method": spec.get("program_fit_method"),
-                "bc_recipe_sha256": spec.get("bc_recipe_sha256"),
-                "bc_data_seed_schedule_sha256": spec.get(
-                    "bc_data_seed_schedule_sha256"),
-                "risk_dual_config_sha256": spec.get("risk_dual_config_sha256"),
+                "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
                 "complete": False, "state_dict": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "generator_state": generator.get_state(),
@@ -2007,14 +3125,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                               for role in AGENTS} if programs is not None else {}),
                 "program_validation_rows": program_validation_rows,
                 "extractions": extractions,
-            }
-            checkpoint_payload["state_sha256"] = _state_dict_sha256(
-                checkpoint_payload["state_dict"])
-            checkpoint_payload["best_state_sha256"] = (
-                _state_dict_sha256(best["state_dict"]) if best is not None else None)
-            checkpoint_payload["resume_progress_sha256"] = \
-                _resume_progress_sha256(checkpoint_payload)
-            _save_checkpoint(checkpoint, checkpoint_payload)
+            })
     if best is None:
         raise RuntimeError("Warehouse v6 training produced no selected checkpoint")
     if variant == "regularized" and spec.get("smoke", False):
@@ -2038,9 +3149,10 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
     online_selected_programs = {role: program for role, program in best["programs"].items()
                                 if program is not None}
     if variant == "regularized" and not spec.get("smoke", False):
-        selected_programs, final_program_reports = _fresh_final_programs(
-            model, spec, histories, directory=directory,
-            actor_artifact=actor_artifact)
+        with stage1_reset_phase("formal_regularized_program"):
+            selected_programs, final_program_reports = _fresh_final_programs(
+                model, spec, histories, directory=directory,
+                actor_artifact=actor_artifact)
     else:
         selected_programs, final_program_reports = {}, {}
     if variant == "regularized" and selected_programs:
@@ -2065,19 +3177,17 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         "model_version": MODEL_VERSION, "actor_model_version": MODEL_VERSION,
         "observation_version": OBSERVATION_VERSION,
         "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+        "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
         "run_spec_sha256": run_spec_sha256,
         "training_config_sha256": spec_hash,
         "release_id": spec.get("release_id"),
         "architecture_mode": spec.get("architecture_mode", "smoke"),
-        "program_fit_method": spec.get("program_fit_method", "smoke"),
+        "program_fit_method": spec.get("program_fit_method"),
         "bc_recipe_version": spec.get("bc_recipe_version", "smoke"),
-        "bc_recipe_sha256": spec.get("bc_recipe_sha256"),
+        "bc_recipe_sha256": REGISTERED_BC_SPEC_SHA256,
+        "risk_dual_config_sha256": REGISTERED_RISK_DUAL_CONFIG_SHA256,
         "bc_data_seed_schedule_sha256": spec.get(
             "bc_data_seed_schedule_sha256"),
-        "bc_critic_reset_schedule": spec.get("bc_critic_reset_schedule"),
-        "bc_critic_reset_schedule_sha256": spec.get(
-            "bc_critic_reset_schedule_sha256"),
-        "risk_dual_config_sha256": spec.get("risk_dual_config_sha256"),
         "online_program_extraction_steps": list(extraction_steps),
         "online_program_split_block_cycle": dict(FINAL_PROGRAM_SPLIT_COUNTS),
         "online_program_cohorts_disjoint": cohorts_valid,
@@ -2132,42 +3242,30 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
     }
     if variant == "raw" and (any(feedback_rows.values()) or any(gradient_norm.values())):
         raise RuntimeError("Warehouse v6 raw baseline received a program gradient")
-    completed_checkpoint = {
+    _save_checkpoint(checkpoint, {
         "training_config_sha256": spec_hash, "variant": variant,
         "source_closure_sha256": spec["source_closure_sha256"],
-        "run_spec_sha256": run_spec_sha256,
-        "pair_seed": spec["pair_seed"],
-        "joint_steps": spec["joint_steps"],
         "initial_role_sha256": initial_role_hashes,
         "model_version": MODEL_VERSION,
         "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
-        "program_fit_method": spec.get("program_fit_method"),
-        "bc_recipe_sha256": spec.get("bc_recipe_sha256"),
-        "bc_data_seed_schedule_sha256": spec.get("bc_data_seed_schedule_sha256"),
-        "risk_dual_config_sha256": spec.get("risk_dual_config_sha256"),
+        "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
         "complete": True, "selected_state_dict": model.state_dict(),
         "selected_programs": {role: program.to_dict()
                               for role, program in selected_programs.items()},
         "report": report,
-    }
-    completed_checkpoint["selected_state_sha256"] = _state_dict_sha256(
-        completed_checkpoint["selected_state_dict"])
-    completed_checkpoint["selected_programs_sha256"] = _digest_json(
-        completed_checkpoint["selected_programs"])
-    completed_checkpoint["report_sha256"] = _digest_json(report)
-    _save_checkpoint(checkpoint, completed_checkpoint)
+    })
     return model, selected_programs, report
 
 
 def train_pair(run_spec: Mapping) -> dict:
     """Train both variants from one BC start; write isolated, resumable runs."""
+    _require_locked_execution()
     spec = _checked_spec(run_spec)
     directory = (Path(spec["output_dir"]) / spec["candidate_id"] /
                  f"pair_{spec['pair_seed']}_steps_{spec['joint_steps']}")
     directory.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(spec["pair_seed"])
     base = WarehouseV6Actor()
-    fresh_initial_role_hashes = role_hashes(base)
     bc_checkpoint = directory / "paired_bc.checkpoint.pt"
     spec_hash = _training_config_sha256(spec)
     run_spec_sha256 = _scientific_run_spec_sha256(spec)
@@ -2175,57 +3273,30 @@ def train_pair(run_spec: Mapping) -> dict:
         saved = torch.load(bc_checkpoint, map_location="cpu", weights_only=False)
         if (saved.get("training_config_sha256") != spec_hash
                 or saved.get("source_closure_sha256") != spec["source_closure_sha256"]
-                or (not spec.get("smoke") and (
-                    saved.get("run_spec_sha256") != run_spec_sha256
-                    or saved.get("pair_seed") != spec["pair_seed"]
-                    or saved.get("joint_steps") != spec["joint_steps"]
-                    or saved.get("risk_dual_config_sha256") !=
-                    spec["risk_dual_config_sha256"]
-                    or saved.get("model_version") != MODEL_VERSION
-                    or saved.get("bc_recipe_sha256") != spec["bc_recipe_sha256"]
-                    or saved.get("bc_data_seed_schedule_sha256") !=
-                    spec["bc_data_seed_schedule_sha256"]
-                    or saved.get("program_fit_method") !=
-                    spec["program_fit_method"]))):
+                or saved.get("model_version") != MODEL_VERSION
+                or saved.get("feature_schema_sha256") != FEATURE_SCHEMA_SHA256
+                or saved.get("action_physics_config_sha256") !=
+                   ACTION_PHYSICS_CONFIG_SHA256):
             raise RuntimeError("Warehouse v6 BC checkpoint run spec mismatch")
-        if (not spec.get("smoke") and (
-                saved.get("state_sha256") !=
-                _state_dict_sha256(saved.get("state_dict", {}))
-                or saved.get("report_sha256") !=
-                _digest_json(saved.get("report")))):
-            raise RuntimeError("Warehouse v6 BC checkpoint evidence changed")
         base.load_state_dict(saved["state_dict"])
         bc_report = saved["report"]
-        if (bc_report["pretrained_role_sha256"] != role_hashes(base)
-                or (not spec.get("smoke") and
-                    bc_report.get("initial_role_sha256") !=
-                    fresh_initial_role_hashes)):
+        if bc_report["pretrained_role_sha256"] != role_hashes(base):
             raise RuntimeError("Warehouse v6 BC checkpoint Actor hashes mismatch")
-        if (not spec.get("smoke") and not bc_report_valid(
-                bc_report, spec["pair_seed"], spec["source_closure_sha256"])):
+        if (not spec.get("smoke")
+                and bc_report.get("bc_recipe_version") != BC_RECIPE_VERSION):
             raise RuntimeError("Warehouse v6 BC checkpoint recipe mismatch")
     else:
-        bc_report = pretrain_pair(base, pair_seed=spec["pair_seed"], spec=spec)
-        if (not spec.get("smoke") and not bc_report_valid(
-                bc_report, spec["pair_seed"], spec["source_closure_sha256"])):
-            raise RuntimeError("Warehouse v6 produced an invalid BC stage receipt")
+        with stage1_reset_phase("formal_bc"):
+            bc_report = pretrain_pair(base, pair_seed=spec["pair_seed"], spec=spec)
         _assert_source_closure(spec["source_closure_sha256"])
-        bc_payload = {
-            "training_config_sha256": spec_hash,
-            "run_spec_sha256": run_spec_sha256,
-            "pair_seed": spec["pair_seed"], "joint_steps": spec["joint_steps"],
-            "source_closure_sha256": spec["source_closure_sha256"],
-            "model_version": MODEL_VERSION,
-            "program_fit_method": spec.get("program_fit_method"),
-            "bc_recipe_sha256": spec.get("bc_recipe_sha256"),
-            "bc_data_seed_schedule_sha256": spec.get(
-                "bc_data_seed_schedule_sha256"),
-            "risk_dual_config_sha256": spec.get("risk_dual_config_sha256"),
-            "state_dict": base.state_dict(), "report": bc_report,
-        }
-        bc_payload["state_sha256"] = _state_dict_sha256(bc_payload["state_dict"])
-        bc_payload["report_sha256"] = _digest_json(bc_report)
-        _save_checkpoint(bc_checkpoint, bc_payload)
+        _save_checkpoint(bc_checkpoint, {"training_config_sha256": spec_hash,
+                                         "source_closure_sha256": spec["source_closure_sha256"],
+                                         "model_version": MODEL_VERSION,
+                                         "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+                                         "action_physics_config_sha256":
+                                             ACTION_PHYSICS_CONFIG_SHA256,
+                                         "state_dict": base.state_dict(),
+                                         "report": bc_report})
     initial = deepcopy(base.state_dict())
     bc_checkpoint_sha256 = sha256(bc_checkpoint.read_bytes()).hexdigest()
     variants = {}
@@ -2263,9 +3334,18 @@ def train_pair(run_spec: Mapping) -> dict:
         "joint_steps": spec["joint_steps"],
         "run_spec_sha256": run_spec_sha256,
         "training_config_sha256": spec_hash,
+        "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
         "release_id": spec.get("release_id"),
         "architecture_mode": spec.get("architecture_mode", "smoke"),
-        "program_fit_method": spec.get("program_fit_method", "smoke"),
+        "program_fit_method": spec.get("program_fit_method"),
+        "bc_recipe_sha256": REGISTERED_BC_SPEC_SHA256,
+        "risk_dual_config_sha256": REGISTERED_RISK_DUAL_CONFIG_SHA256,
+        "bc_data_seed_schedule": spec.get("bc_data_seed_schedule"),
+        "bc_data_seed_schedule_sha256": spec.get(
+            "bc_data_seed_schedule_sha256"),
+        "bc_critic_reset_schedule": spec.get("bc_critic_reset_schedule"),
+        "bc_critic_reset_schedule_sha256": spec.get(
+            "bc_critic_reset_schedule_sha256"),
         "online_program_extraction_steps": list(spec.get(
             "online_program_extraction_steps", ())),
         "online_program_split_block_cycle": dict(FINAL_PROGRAM_SPLIT_COUNTS),
@@ -2278,18 +3358,8 @@ def train_pair(run_spec: Mapping) -> dict:
         "source_closure_sha256": spec["source_closure_sha256"],
         "source_files_sha256": source_closure_files_sha256(),
         "bc_recipe_version": bc_report.get("bc_recipe_version", "smoke"),
-        "bc_recipe_sha256": spec.get("bc_recipe_sha256"),
-        "bc_data_seed_schedule": spec.get("bc_data_seed_schedule"),
-        "bc_data_seed_schedule_sha256": spec.get(
-            "bc_data_seed_schedule_sha256"),
-        "bc_critic_reset_schedule": spec.get("bc_critic_reset_schedule"),
-        "bc_critic_reset_schedule_sha256": spec.get(
-            "bc_critic_reset_schedule_sha256"),
-        "risk_dual_config_sha256": spec.get("risk_dual_config_sha256"),
         "paired_bc_checkpoint_path": str(bc_checkpoint.resolve()),
         "paired_bc_checkpoint_sha256": bc_checkpoint_sha256,
-        "bc_provenance_evidence_scope":
-        "runner_receipt_and_checkpoint_consistency_not_independent_execution_proof",
         "checkpoint_seeds": list(spec["checkpoint_seeds"]),
         "assigned_scenario_schedule_sha256": variants["raw"]["scenario_schedule_sha256"],
         "actual_episode_resets_equal": bool(
@@ -2314,8 +3384,10 @@ def main() -> None:
     parser.add_argument("--scenario-namespace", default="warehouse-v6-matched-120-step-blocks")
     parser.add_argument("--checkpoint-seeds", type=int, nargs="+", required=True)
     parser.add_argument("--release-id")
-    parser.add_argument("--program-fit-method",
-                        help="required for registered runs; must match the immutable protocol")
+    parser.add_argument("--warmup-actor-path")
+    parser.add_argument("--final-bc-actor-path")
+    parser.add_argument("--final-bc-precheck-receipt-path")
+    parser.add_argument("--topology-failure-receipt-path")
     parser.add_argument("--bc-episodes", type=int)
     parser.add_argument("--bc-epochs", type=int)
     parser.add_argument("--dagger-rounds", type=int)
@@ -2325,16 +3397,11 @@ def main() -> None:
                         help="allow a tiny non-protocol test run")
     args = parser.parse_args()
     run_spec = {key: value for key, value in vars(args).items() if value is not None}
-    if not args.smoke:
-        from experiments.warehouse.protocol import PairRunSpec
-        if args.release_id is None or args.program_fit_method is None:
-            parser.error("registered runs require --release-id and --program-fit-method")
-        run_spec = PairRunSpec(
-            args.candidate_id, args.pair_seed, args.joint_steps, args.output_dir,
-            args.program_fit_method,
-            release_id=args.release_id,
-            scenario_namespace=args.scenario_namespace,
-            checkpoint_seeds=tuple(args.checkpoint_seeds)).to_mapping()
+    if args.release_id and not args.smoke:
+        from experiments.warehouse.protocol import final_program_fit_seed_schedule
+        schedule = final_program_fit_seed_schedule(args.release_id, args.pair_seed)
+        run_spec["final_program_fit_seed_schedule"] = schedule
+        run_spec["final_program_fit_seed_schedule_sha256"] = _digest_json(schedule)
     report = train_pair(run_spec)
     print(json.dumps({"candidate_id": report["candidate_id"],
                       "pair_seed": report["pair_seed"],

@@ -19,6 +19,7 @@ from backend.training.warehouse_v6_runner import (
 from experiments.warehouse import protocol as p
 from experiments.warehouse.acceptance import (
     _final_fit_index_claim, _final_fit_verified_rows, _same_recomputed)
+from tests.warehouse_v614_test_scopes import isolated_evaluation_scope
 
 
 RELEASE = p.INITIAL_RELEASE_ID
@@ -48,8 +49,9 @@ def fit_proof(tmp_path, monkeypatch):
         artifact["path"], expected_sha256=artifact["sha256"],
         expected_role_sha256=artifact["role_sha256"])
     actor_asset = _bundle(tmp_path, Path(artifact["path"]))
-    collected = collect_program_audit_rows(actor, [seed for block in
-                                                  SCHEDULE.values() for seed in block])
+    with isolated_evaluation_scope():
+        collected = collect_program_audit_rows(actor, [seed for block in
+                                                      SCHEDULE.values() for seed in block])
     traces, index = {}, {}
     for split, seeds in SCHEDULE.items():
         selected = {role: [row for row in collected[role]

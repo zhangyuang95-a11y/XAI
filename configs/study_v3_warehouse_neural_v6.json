@@ -1,9 +1,10 @@
 {
-  "version": "warehouse-dual-actor.v6.9-exploratory",
+  "version": "warehouse-dual-actor.v6.14-public-affordance-exploratory",
   "scenario_version": "warehouse-dual-actor-three-tasks.v6.0",
-  "model_version": "warehouse-dual-actor.v6.9-exploratory",
+  "model_version": "warehouse-dual-actor.v6.14-public-affordance-exploratory",
   "observation_version": "warehouse-public-observation.v6.1",
-  "feature_schema_sha256": "f1cb243f1903f4c3462f9de78ed6df5e6d0b5ade7ebfc2a56d9966fa337f99c7",
+  "feature_schema_sha256": "03f16ff6a86a6c2f03f50f7422b58dd800da191b253d463e0dac8a8c1b5be36d",
+  "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
   "release_id": "policylens-three-domain-20261016.v6.0",
   "task_seed_rule": "enrollment_seed_times_10_plus_task",
   "demo_seed": 40786,

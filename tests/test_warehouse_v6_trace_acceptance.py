@@ -15,10 +15,11 @@ from backend.training.warehouse_v6_actor import (
 from backend.training.warehouse_v6_program import WarehouseV6Program
 from backend.training.warehouse_v6_runner import audit_programs
 from env.warehouse.navigation import ACTIONS
-from env.warehouse.public_observation_v6 import FEATURE_DIM
+from env.warehouse.public_action_features_v614 import TREE_FEATURE_DIM
 from experiments.warehouse import acceptance
 from experiments.warehouse.acceptance import _verify_program_trace
 from experiments.warehouse.admission import NativeBackend
+from tests.warehouse_v614_test_scopes import isolated_evaluation_scope
 
 
 RELEASE = "policylens-three-domain-20261016.v6.0"
@@ -49,7 +50,7 @@ def _program(role: str, actor: FrozenWarehouseV6Actor) -> WarehouseV6Program:
     }
     return WarehouseV6Program(
         role=role, actor_role_sha256=actor.role_sha256[role], root_ref=0,
-        split_weights=np.zeros((1, FEATURE_DIM), dtype=np.float32),
+        split_weights=np.zeros((1, TREE_FEATURE_DIM), dtype=np.float32),
         split_bias=np.zeros(1, dtype=np.float32),
         left_refs=np.asarray([-1], dtype=np.int64),
         right_refs=np.asarray([-2], dtype=np.int64),
@@ -77,8 +78,9 @@ def test_packaged_trace_recomputes_nn_draws_and_rejects_forged_rows(
         program_files[role] = _bundle(tmp_path, path)
     actor_file = _bundle(tmp_path, Path(artifact["path"]))
     seed = 999901  # unregistered; sealed and heldout blocks remain untouched
-    audits = audit_programs(actor, programs, [seed],
-                            trace_dir=source / "traces")
+    with isolated_evaluation_scope():
+        audits = audit_programs(actor, programs, [seed],
+                                trace_dir=source / "traces")
     local_traces = {role: Path(audits[role]["trace_path"]).read_bytes()
                     for role in actor.roles}
     verifier = NativeBackend()

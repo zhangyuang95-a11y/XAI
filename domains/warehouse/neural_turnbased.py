@@ -19,11 +19,14 @@ from backend.inference.warehouse_structured_v5 import (
     STRUCTURED_MODEL_VERSION,
 )
 from backend.training.warehouse_v6_actor import (
-    FrozenWarehouseV6Actor, MODEL_VERSION as V6_MODEL_VERSION,
+    FrozenWarehouseV6Actor, FEATURE_SCHEMA_SHA256 as V6_FEATURE_SCHEMA_SHA256,
+    MODEL_VERSION as V6_MODEL_VERSION,
 )
 from backend.training.warehouse_v6_program import WarehouseV6Program
+from env.warehouse.public_action_features_v614 import (
+    ACTION_PHYSICS_CONFIG_SHA256, validate_study_action_physics,
+)
 from env.warehouse.public_observation_v6 import (
-    FEATURE_SCHEMA_SHA256 as V6_FEATURE_SCHEMA_SHA256,
     OBSERVATION_VERSION as V6_OBSERVATION_VERSION,
     encode_role_observation as v6_role_observation,
 )
@@ -89,6 +92,7 @@ def _v6_config():
             or config.get("model_version") != V6_MODEL_VERSION
             or config.get("observation_version") != V6_OBSERVATION_VERSION
             or config.get("feature_schema_sha256") != V6_FEATURE_SCHEMA_SHA256
+            or config.get("action_physics_config_sha256") != ACTION_PHYSICS_CONFIG_SHA256
             or config.get("release_id") != V6_RELEASE_ID
             or config.get("pilot_scenario_seeds") != list(range(1000, 1024))
             or {row.get("policy_id") for row in config.get("variants", {}).values()}
@@ -211,6 +215,7 @@ def policy_artifacts_v6(release_id: str = V6_RELEASE_ID):
             entries and entry.get("policy_id") == policy_id
             and entry.get("model_version") == V6_MODEL_VERSION
             and entry.get("feature_schema_sha256") == V6_FEATURE_SCHEMA_SHA256
+            and entry.get("action_physics_config_sha256") == ACTION_PHYSICS_CONFIG_SHA256
             and set(roles) == {"human", "ai"}
             and all(isinstance(value, str) and len(value) == 64 for value in roles.values())
             and len(program_paths) == (2 if variant == "regularized" else 0)
@@ -235,6 +240,7 @@ def policy_artifacts_v6(release_id: str = V6_RELEASE_ID):
         result[variant] = {
             "policy_id": policy_id, "model_version": V6_MODEL_VERSION,
             "feature_schema_sha256": V6_FEATURE_SCHEMA_SHA256,
+            "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
             "actor_path": entry.get("actor_path"),
             "actor_sha256": entry.get("actor_sha256"),
             "role_sha256": roles,
@@ -344,7 +350,8 @@ def _verify_v5_artifact(policy_id):
         actor = _actor(policy_id)
         if (binding.get("actor_sha256") != actor.artifact_sha256
                 or binding.get("human_actor_sha256") != actor.role_sha256["robot_1"]
-                or binding.get("ai_actor_sha256") != actor.role_sha256["robot_2"]):
+                or binding.get("ai_actor_sha256") != actor.role_sha256["robot_2"]
+                or binding.get("action_physics_config_sha256") != ACTION_PHYSICS_CONFIG_SHA256):
             raise RuntimeError("Warehouse v6 runtime Actor binding mismatch")
         return
     variant = _variant_for_policy(policy_id)
@@ -440,7 +447,8 @@ def _restore(state):
     v6 = _v6_identity(policy_id)
     if v6 is not None and (
             state.get("release_id") != v6[1] or
-            state.get("feature_schema_sha256") != V6_FEATURE_SCHEMA_SHA256):
+            state.get("feature_schema_sha256") != V6_FEATURE_SCHEMA_SHA256 or
+            state.get("action_physics_config_sha256") != ACTION_PHYSICS_CONFIG_SHA256):
         raise RuntimeError("Warehouse v6 state release or feature binding mismatch")
     expected_version = _config_for_policy(policy_id)["version"]
     if state.get("version") != expected_version:
@@ -453,6 +461,8 @@ def _restore(state):
     for field in ("tasks", "completed_tasks"):
         raw[field] = [DeliveryTask(**item) for item in raw[field]]
     env = WarehouseMultiAgentEnv(participant_study_config())
+    if v6 is not None:
+        validate_study_action_physics(env.config)
     env.state = WarehouseState(**raw)
     env._episode_counter = int(data["episode_counter"])
     env.set_rng_state(legacy._unpack(data["rng"]))
@@ -502,6 +512,7 @@ def _state(env, task, seed, events=None, last_actions=None, charges=0, policy_id
     if v6 is not None:
         result.update(release_id=v6[1],
                       feature_schema_sha256=V6_FEATURE_SCHEMA_SHA256,
+                      action_physics_config_sha256=validate_study_action_physics(env.config),
                       **_v6_public_history(s))
     return result
 
@@ -529,6 +540,8 @@ def initial_state(seed: int, task: int, policy_id: str | None = None,
     _verify_v5_artifact(policy_id)
     _actor(policy_id)
     env = WarehouseMultiAgentEnv(participant_study_config())
+    if v6 is not None:
+        validate_study_action_physics(env.config)
     env.reset(seed=_task_seed(seed, task, policy_id))
     s = env.get_state()
     s.participant_controlled_agent_id = "robot_1"
@@ -543,6 +556,8 @@ def legal_actions(state, actor="human"):
 
 
 def _selection(env, seed, policy_id=None):
+    if _v6_identity(policy_id) is not None:
+        validate_study_action_physics(env.config)
     actions, distributions = _actor(policy_id).act(env.state, base_seed=seed)
     ai_action = actions["robot_2"]
     if action_masks(env.state, env.config.map_layout_id)[1, ACTIONS.index(ai_action)] <= 0.5:
@@ -654,7 +669,7 @@ def score(state):
 
 def public_state(state):
     env = _restore(state)
-    public = {key: deepcopy(state[key]) for key in ("domain", "version", "task", "turn", "max_turns", "terminal", "events", "policy_id", "actor_sha256", "role_sha256", "release_id", "feature_schema_sha256") if key in state}
+    public = {key: deepcopy(state[key]) for key in ("domain", "version", "task", "turn", "max_turns", "terminal", "events", "policy_id", "actor_sha256", "role_sha256", "release_id", "feature_schema_sha256", "action_physics_config_sha256") if key in state}
     public.update({key: legacy._actor_view(env.state.by_id(agent_id)) for key, agent_id in _ACTORS.items()})
     public.update(width=STUDY_MAP_LAYOUT.cols, height=STUDY_MAP_LAYOUT.rows,
         walls=[list(reversed(position)) for position in sorted(STUDY_MAP_LAYOUT.blocked_positions)],
@@ -936,6 +951,8 @@ def _demonstration_cached(policy_id, actor_sha256):
         raise RuntimeError("Warehouse demonstration Actor binding changed")
     seed = _config_for_policy(policy_id)["demo_seed"]
     env = WarehouseMultiAgentEnv(participant_study_config())
+    if _v6_identity(policy_id) is not None:
+        validate_study_action_physics(env.config)
     env.reset(seed=seed)
     if policy_id != LEGACY_POLICY_ID:
         marked = env.get_state()
@@ -972,7 +989,8 @@ def _demonstration_cached(policy_id, actor_sha256):
             "provenance": {"kind": "pure_neural_ai_ai_rollout", "seed": seed,
                            "policy_id": policy_id, "actor_sha256": actor.artifact_sha256,
                            **({"release_id": _v6_identity(policy_id)[1],
-                               "feature_schema_sha256": V6_FEATURE_SCHEMA_SHA256}
+                               "feature_schema_sha256": V6_FEATURE_SCHEMA_SHA256,
+                               "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256}
                               if _v6_identity(policy_id) is not None else {}),
                            "role_sha256": ({"human": actor.role_sha256["robot_1"], "ai": actor.role_sha256["robot_2"]}
                                            if policy_id != LEGACY_POLICY_ID else {}),

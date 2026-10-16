@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from hashlib import sha256
 import json
+from pathlib import Path
 
 import pytest
 import torch
@@ -17,15 +19,24 @@ from scripts import package_warehouse_v6_release as packaging
 from tests.warehouse_v6_contract_fixture import bc_receipt
 
 
+def _registered_mapping(spec: p.PairRunSpec) -> dict:
+    pair_dir = (Path(spec.output_dir) / spec.candidate_id /
+                f"pair_{spec.pair_seed}_steps_{spec.joint_steps}")
+    return {**spec.to_mapping(),
+            "warmup_actor_path": str(pair_dir / "warmup.actor.npz"),
+            "final_bc_actor_path": str(pair_dir / "final-bc.actor.npz"),
+            "final_bc_precheck_receipt_path": str(pair_dir / "precheck.json")}
+
+
 def test_registered_bc_schedule_and_method_are_inseparable_from_run_spec(tmp_path):
     spec = p.PairRunSpec("registered-contract", p.DEVELOPMENT_PAIR_SEEDS[0],
                          200_000, str(tmp_path),
                          p.PROGRAM_FIT_METHOD_CANDIDATES[0],
                          checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS)
     schedule = p.bc_data_seed_schedule(spec.pair_seed)
-    assert len(schedule) == 16
-    assert sum(map(len, schedule.values())) == 1_220
-    assert len(set(seed for block in schedule.values() for seed in block)) == 1_220
+    assert len(schedule) == 26
+    assert sum(map(len, schedule.values())) == 1_394
+    assert len(set(seed for block in schedule.values() for seed in block)) == 1_394
     assert spec.bc_data_seed_schedule_sha256 == p._hash_json(schedule)
     critic_resets = p.bc_critic_reset_schedule(spec.pair_seed, spec.release_id)
     assert critic_resets == {"seed": spec.pair_seed + 6_200,
@@ -33,7 +44,8 @@ def test_registered_bc_schedule_and_method_are_inseparable_from_run_spec(tmp_pat
     assert critic_resets["seed"] not in {
         seed for block in schedule.values() for seed in block}
     assert spec.bc_critic_reset_schedule_sha256 == p._hash_json(critic_resets)
-    assert _checked_spec(spec.to_mapping())["program_fit_method"] == \
+    run_spec = _registered_mapping(spec)
+    assert _checked_spec(run_spec)["program_fit_method"] == \
         p.PROGRAM_FIT_METHOD_CANDIDATES[0]
     for key, bad in (
             ("program_fit_method", "axis_tree_v1"),
@@ -42,13 +54,13 @@ def test_registered_bc_schedule_and_method_are_inseparable_from_run_spec(tmp_pat
             ("bc_data_seed_schedule_sha256", "0" * 64),
             ("bc_critic_reset_schedule_sha256", "0" * 64)):
         with pytest.raises(ValueError):
-            _checked_spec({**spec.to_mapping(), key: bad})
-        missing = spec.to_mapping()
+            _checked_spec({**run_spec, key: bad})
+        missing = dict(run_spec)
         missing.pop(key)
         with pytest.raises(ValueError):
             _checked_spec(missing)
     with pytest.raises(ValueError, match="critic reset schedule"):
-        _checked_spec({**spec.to_mapping(),
+        _checked_spec({**run_spec,
                        "bc_critic_reset_schedule": {"seed": spec.pair_seed,
                                                      "environment_reset_count": 2}})
 
@@ -67,10 +79,12 @@ def test_bc_receipt_cannot_hide_removed_stage_or_critic_drift():
     drift["collision_critic"]["learning_rate"] *= 2
     assert not p.bc_report_valid(drift, seed, closure)
     drift = deepcopy(report)
-    drift["bc_stages"][-1]["fit"]["margin_weight"] = 0.0
+    next(row for row in drift["bc_stages"] if row["stage"] ==
+         "final_standard_margin_calibration")["fit"]["margin_weight"] = 0.0
     assert not p.bc_report_valid(drift, seed, closure)
     drift = deepcopy(report)
-    drift["bc_stages"][1]["gate_loss_weight"] = 0.0
+    next(row for row in drift["bc_stages"] if row["stage"] ==
+         "post_refit_public_bc")["warmup_masked_kl_weight"] = 1.0
     assert not p.bc_report_valid(drift, seed, closure)
     moved = deepcopy(report)
     moved["bc_stages"][0]["episode_seeds"][0] += 1
@@ -85,13 +99,28 @@ def test_packaging_rejects_axis_program_even_if_file_hashes_match(
     candidate = "registered-package"
     seed = p.FORMAL_PAIR_SEEDS[0]
     source_closure = "a" * 64
+    bc = bc_receipt(seed, source_closure)
+    final_actor_path = tmp_path / "final-bc.actor.npz"
+    final_actor_path.write_bytes(b"synthetic-final-bc-actor")
+    final_actor = bc["final_bc_internal_precheck"]["final_bc_actor"]
+    final_actor["path"] = str(final_actor_path)
+    final_actor["sha256"] = sha256(final_actor_path.read_bytes()).hexdigest()
+    independent_path = tmp_path / "final-bc-precheck.json"
+    independent_path.write_text(json.dumps(
+        bc["final_bc_internal_precheck"], sort_keys=True, allow_nan=False) + "\n")
+    bc["final_bc_internal_precheck_receipt"] = {
+        "path": str(independent_path),
+        "sha256": sha256(independent_path.read_bytes()).hexdigest(),
+    }
     pair = {"candidate_id": candidate, "pair_seed": seed,
             "joint_steps": 200_000,
+            "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
+                "action_physics_config_sha256"],
             "program_fit_method": p.PROGRAM_FIT_METHOD_CANDIDATES[0],
             "bc_recipe_sha256": p.REGISTERED_BC_SPEC_SHA256,
             "risk_dual_config_sha256": p.REGISTERED_RISK_DUAL_CONFIG_SHA256,
             "source_closure_sha256": source_closure,
-            "bc": bc_receipt(seed, source_closure),
+            "bc": bc,
             "bc_data_seed_schedule_sha256": p._hash_json(
                 p.bc_data_seed_schedule(seed)),
             "variants": {}}
@@ -105,6 +134,8 @@ def test_packaging_rejects_axis_program_even_if_file_hashes_match(
         actor_sha, report_sha = "1" * 64, "2" * 64
         pair["variants"][variant] = {
             "program_fit_method": p.PROGRAM_FIT_METHOD_CANDIDATES[0],
+            "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
+                "action_physics_config_sha256"],
             "bc_recipe_sha256": p.REGISTERED_BC_SPEC_SHA256,
             "risk_dual_config_sha256": p.REGISTERED_RISK_DUAL_CONFIG_SHA256,
             "actor_artifact": {"sha256": actor_sha},
@@ -138,173 +169,37 @@ def test_packaging_rejects_axis_program_even_if_file_hashes_match(
         packaging._verify_training_package(receipt, evidence)
 
 
-def test_registered_variant_resume_rejects_method_change_before_training(tmp_path):
-    spec = _checked_spec(p.PairRunSpec(
-        "resume-method", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000,
-        str(tmp_path), p.PROGRAM_FIT_METHOD_CANDIDATES[0],
-        checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS).to_mapping())
-    model = WarehouseV6Actor()
-    payload = {
-        "training_config_sha256": runner._training_config_sha256(spec),
-        "source_closure_sha256": spec["source_closure_sha256"],
-        "variant": "raw", "initial_role_sha256": role_hashes(model),
-        "model_version": MODEL_VERSION,
-        "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
-        "program_fit_method": "axis_tree_v1",
-        "bc_recipe_sha256": spec["bc_recipe_sha256"],
-        "bc_data_seed_schedule_sha256": spec["bc_data_seed_schedule_sha256"],
-        "risk_dual_config_sha256": spec["risk_dual_config_sha256"],
-    }
-    torch.save(payload, tmp_path / "raw.checkpoint.pt")
-    with pytest.raises(RuntimeError, match="checkpoint identity"):
-        runner._train_variant(model.state_dict(), variant="raw",
-                              spec=spec, directory=tmp_path)
 
-
-def test_registered_bc_resume_rejects_method_change_before_training(tmp_path):
-    run_spec = p.PairRunSpec(
-        "resume-bc", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000,
+def test_direct_training_entrypoints_reject_unscoped_resume(tmp_path):
+    """v6.14 admits only a new, SHA-locked pair; old resume calls stay closed."""
+    registered = p.PairRunSpec(
+        "resume-closed", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000,
         str(tmp_path), p.PROGRAM_FIT_METHOD_CANDIDATES[0],
-        checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS).to_mapping()
+        checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS)
+    run_spec = _registered_mapping(registered)
     spec = _checked_spec(run_spec)
-    directory = tmp_path / spec["candidate_id"] / (
-        f"pair_{spec['pair_seed']}_steps_{spec['joint_steps']}")
-    directory.mkdir(parents=True)
-    torch.save({
-        "training_config_sha256": runner._training_config_sha256(spec),
-        "source_closure_sha256": spec["source_closure_sha256"],
-        "program_fit_method": "axis_tree_v1",
-        "bc_recipe_sha256": spec["bc_recipe_sha256"],
-        "bc_data_seed_schedule_sha256": spec["bc_data_seed_schedule_sha256"],
-    }, directory / "paired_bc.checkpoint.pt")
-    with pytest.raises(RuntimeError, match="BC checkpoint run spec mismatch"):
-        runner.train_pair(run_spec)
-
-
-@pytest.mark.parametrize("tamper", ("state", "report", "joint_steps"))
-def test_completed_resume_rechecks_selected_state_report_and_steps(tmp_path, tamper):
-    spec = _checked_spec(p.PairRunSpec(
-        "resume-complete", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000,
-        str(tmp_path), p.PROGRAM_FIT_METHOD_CANDIDATES[0],
-        checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS).to_mapping())
     model = WarehouseV6Actor()
-    state = deepcopy(model.state_dict())
-    report = {
-        "run_spec_sha256": runner._scientific_run_spec_sha256(spec),
-        "training_config_sha256": runner._training_config_sha256(spec),
-        "source_closure_sha256": spec["source_closure_sha256"],
-        "pair_seed": spec["pair_seed"], "variant": "raw",
-        "joint_steps": spec["joint_steps"],
-        "actor_decisions": 2 * spec["joint_steps"],
-        "program_fit_method": spec["program_fit_method"],
-        "bc_recipe_sha256": spec["bc_recipe_sha256"],
-        "bc_data_seed_schedule_sha256": spec["bc_data_seed_schedule_sha256"],
-        "risk_dual_config_sha256": spec["risk_dual_config_sha256"],
-        "actual_episode_resets": [],
-        "actual_episode_resets_sha256": runner._digest_json([]),
-        "selected_role_sha256": role_hashes(model),
-    }
-    payload = {
-        "training_config_sha256": runner._training_config_sha256(spec),
-        "source_closure_sha256": spec["source_closure_sha256"],
-        "variant": "raw", "initial_role_sha256": role_hashes(model),
-        "model_version": MODEL_VERSION,
-        "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
-        "run_spec_sha256": runner._scientific_run_spec_sha256(spec),
-        "pair_seed": spec["pair_seed"], "joint_steps": spec["joint_steps"],
-        "program_fit_method": spec["program_fit_method"],
-        "bc_recipe_sha256": spec["bc_recipe_sha256"],
-        "bc_data_seed_schedule_sha256": spec["bc_data_seed_schedule_sha256"],
-        "risk_dual_config_sha256": spec["risk_dual_config_sha256"],
-        "complete": True, "selected_state_dict": state,
-        "selected_programs": {}, "report": report,
-        "selected_state_sha256": runner._state_dict_sha256(state),
-        "selected_programs_sha256": runner._digest_json({}),
-        "report_sha256": runner._digest_json(report),
-    }
-    if tamper == "state":
-        first = next(iter(state))
-        state[first] = state[first].clone() + 1
-    elif tamper == "report":
-        report["bc_recipe_sha256"] = "0" * 64
-    else:
-        report["joint_steps"] = 120
-        payload["report_sha256"] = runner._digest_json(report)
-    torch.save(payload, tmp_path / "raw.checkpoint.pt")
-    with pytest.raises(RuntimeError, match="completed checkpoint"):
-        runner._train_variant(model.state_dict(), variant="raw",
-                              spec=spec, directory=tmp_path)
-
-
-def test_bc_resume_rechecks_state_and_receipt_digest(tmp_path):
-    run_spec = p.PairRunSpec(
-        "resume-bc-hash", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000,
-        str(tmp_path), p.PROGRAM_FIT_METHOD_CANDIDATES[0],
-        checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS).to_mapping()
-    spec = _checked_spec(run_spec)
-    directory = tmp_path / spec["candidate_id"] / (
-        f"pair_{spec['pair_seed']}_steps_{spec['joint_steps']}")
-    directory.mkdir(parents=True)
-    torch.manual_seed(spec["pair_seed"])
-    base = WarehouseV6Actor()
-    state = deepcopy(base.state_dict())
-    report = bc_receipt(spec["pair_seed"], spec["source_closure_sha256"])
-    report["initial_role_sha256"] = role_hashes(base)
-    report["pretrained_role_sha256"] = role_hashes(base)
-    payload = {
-        "training_config_sha256": runner._training_config_sha256(spec),
-        "run_spec_sha256": runner._scientific_run_spec_sha256(spec),
-        "pair_seed": spec["pair_seed"], "joint_steps": spec["joint_steps"],
-        "source_closure_sha256": spec["source_closure_sha256"],
-        "model_version": MODEL_VERSION,
-        "program_fit_method": spec["program_fit_method"],
-        "bc_recipe_sha256": spec["bc_recipe_sha256"],
-        "bc_data_seed_schedule_sha256": spec["bc_data_seed_schedule_sha256"],
-        "risk_dual_config_sha256": spec["risk_dual_config_sha256"],
-        "state_dict": state, "report": report,
-        "state_sha256": runner._state_dict_sha256(state),
-        "report_sha256": runner._digest_json(report),
-    }
-    first = next(iter(state))
-    state[first] = state[first].clone() + 1
-    torch.save(payload, directory / "paired_bc.checkpoint.pt")
-    with pytest.raises(RuntimeError, match="BC checkpoint evidence changed"):
+    pair_dir = (tmp_path / registered.candidate_id /
+                f"pair_{registered.pair_seed}_steps_{registered.joint_steps}")
+    pair_dir.mkdir(parents=True)
+    (pair_dir / "paired_bc.checkpoint.pt").write_bytes(b"old checkpoint")
+    with pytest.raises(RuntimeError, match="review-only"):
         runner.train_pair(run_spec)
-
-
-def test_partial_resume_rechecks_progress_before_loading_optimizer(tmp_path):
-    spec = _checked_spec(p.PairRunSpec(
-        "resume-partial", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000,
-        str(tmp_path), p.PROGRAM_FIT_METHOD_CANDIDATES[0],
-        checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS).to_mapping())
-    model = WarehouseV6Actor()
-    state = deepcopy(model.state_dict())
-    payload = {
-        "training_config_sha256": runner._training_config_sha256(spec),
-        "source_closure_sha256": spec["source_closure_sha256"],
-        "variant": "raw", "initial_role_sha256": role_hashes(model),
-        "model_version": MODEL_VERSION,
-        "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
-        "run_spec_sha256": runner._scientific_run_spec_sha256(spec),
-        "pair_seed": spec["pair_seed"], "joint_steps": spec["joint_steps"],
-        "program_fit_method": spec["program_fit_method"],
-        "bc_recipe_sha256": spec["bc_recipe_sha256"],
-        "bc_data_seed_schedule_sha256": spec["bc_data_seed_schedule_sha256"],
-        "risk_dual_config_sha256": spec["risk_dual_config_sha256"],
-        "complete": False, "state_dict": state,
-        "used_steps": 120, "episode_number": 1,
-        "histories": [{"joint_steps": 120, "start_joint_step": 0,
-                       "episode_index": 0}],
-        "updates": [{"joint_steps": 120}], "development": [],
-        "next_eval": 20_000, "next_extraction_index": 0,
-        "last_extraction_step": 0, "risk_dual_snapshot": {},
-        "extractions": {}, "best": None,
-        "state_sha256": runner._state_dict_sha256(state),
-        "best_state_sha256": None,
-    }
-    payload["resume_progress_sha256"] = runner._resume_progress_sha256(payload)
-    payload["used_steps"] = 121
-    torch.save(payload, tmp_path / "raw.checkpoint.pt")
-    with pytest.raises(RuntimeError, match="partial checkpoint"):
+    with pytest.raises(RuntimeError, match="review-only"):
         runner._train_variant(model.state_dict(), variant="raw",
-                              spec=spec, directory=tmp_path)
+                              spec=spec, directory=pair_dir)
+
+
+def test_locked_formal_pair_refuses_preexisting_checkpoint_directory(tmp_path):
+    registered = p.PairRunSpec(
+        "fresh-only", p.DEVELOPMENT_PAIR_SEEDS[0], 200_000,
+        str(tmp_path), p.PROGRAM_FIT_METHOD_CANDIDATES[0],
+        checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS)
+    run_spec = _registered_mapping(registered)
+    pair_dir = (tmp_path / registered.candidate_id /
+                f"pair_{registered.pair_seed}_steps_{registered.joint_steps}")
+    pair_dir.mkdir(parents=True)
+    (pair_dir / "paired_bc.checkpoint.pt").write_bytes(b"old checkpoint")
+    with pytest.raises(RuntimeError, match="output is not isolated and new"):
+        runner.run_locked_formal_pair(
+            run_spec, authorization_receipt_path=tmp_path / "missing-auth.json")

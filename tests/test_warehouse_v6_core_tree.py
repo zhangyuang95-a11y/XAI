@@ -13,18 +13,40 @@ from backend.training.warehouse_v6_core_tree import (
     CoreTreeConfig, CoreTreeResult, _insert_legality_splits, _leaf_metrics,
     evaluate_core_tree, fit_core_tree,
 )
+from env.warehouse.domain import AgentState, DeliveryTask, WarehouseState
+from env.warehouse.layouts import STUDY_MAP_LAYOUT
 from env.warehouse.navigation import ACTIONS
-from env.warehouse.public_observation_v6 import FEATURE_DIM
+from env.warehouse.pure_nn import action_masks
+from env.warehouse.public_action_features_v614 import (
+    TREE_FEATURE_DIM as FEATURE_DIM, TREE_MASK_START,
+    encode_actor_tree_features,
+)
+from env.warehouse.public_observation_v6 import encode_public_observation
 
 
 def _synthetic_rows(*, seed: int = 3, count: int = 240, prefix: str = "train"):
     rng = np.random.default_rng(seed)
-    encoded = np.zeros((count, FEATURE_DIM), dtype=np.float32)
-    encoded[:, 0] = rng.random(count)
-    masks = np.ones((count, len(ACTIONS)), dtype=np.float32)
-    masks[:, 0] = (rng.random(count) < 0.8).astype(np.float32)
-    encoded[:, -len(ACTIONS):] = masks
-    labels = np.where((encoded[:, 0] < 0.5) & (masks[:, 0] > 0.5), 0, 1)
+    observations, physical_masks = [], []
+    # Restored pre-action study states exercise the real map and mask encoding
+    # without consuming a scenario seed or calling environment.reset().
+    for index in range(count):
+        position = (1, 0) if index % 5 == 0 else (5, 2)
+        state = WarehouseState(
+            episode_id=seed * 10_000 + index // 24,
+            frame=int(rng.integers(0, 120)),
+            agents=[AgentState("robot_1", position, 70.0),
+                    AgentState("robot_2",
+                               STUDY_MAP_LAYOUT.robot_start_positions[1], 70.0)],
+            tasks=[DeliveryTask("task_0", (0, 3), (3, 2)),
+                   DeliveryTask("task_1", (1, 0), (3, 1))],
+            next_task_index=2)
+        observations.append(encode_public_observation(state)[0])
+        physical_masks.append(action_masks(state)[0])
+    obs = np.stack(observations)
+    masks = np.stack(physical_masks)
+    encoded = encode_actor_tree_features(obs, masks)
+    labels = np.where((encoded[:, 0] < 0.5) & (masks[:, 0] > 0.5),
+                      0, ACTIONS.index("WAIT"))
     targets = np.eye(len(ACTIONS), dtype=np.float32)[labels]
     episodes = [f"{prefix}-{index // 24}" for index in range(count)]
     return encoded, masks, targets, episodes
@@ -115,7 +137,8 @@ def test_illegal_or_unnormalized_training_targets_are_rejected():
         fit_core_tree(x, mask, target, episodes,
                       target_provenance="unknown", config=_SMALL)
     altered_features = x.copy()
-    altered_features[0, -len(ACTIONS):] = 1.0 - mask[0]
+    altered_features[0, TREE_MASK_START:TREE_MASK_START + len(ACTIONS)] = (
+        1.0 - mask[0])
     with pytest.raises(ValueError, match="masked training distributions"):
         fit_core_tree(altered_features, mask, target, episodes,
                       target_provenance="public_teacher_one_hot", config=_SMALL)
@@ -155,7 +178,7 @@ def test_empty_root_can_insert_legal_bit_and_unproven_core_is_rejected():
     grown = _insert_legality_splits(starter, x, mask, target,
                                     np.asarray(episodes), _SMALL)
     assert grown.node_count >= 1 and grown.leaf_count >= 2
-    assert grown.split_weights[0, FEATURE_DIM - len(ACTIONS)] == 4.0
+    assert grown.split_weights[0, TREE_MASK_START] == 4.0
     assert grown.split_bias[0] == -2.0
     details, protected, _ = _leaf_metrics(grown, x, mask, target,
                                           np.asarray(episodes), _SMALL)

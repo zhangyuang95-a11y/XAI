@@ -114,11 +114,14 @@ def _binding_from_entry(domain: str, variant: str, entry: dict, ident: str,
     if (domain == 'warehouse' and
             ident == warehouse_release_spec(release_id).policy_ids[variant]):
         from backend.training.warehouse_v6_actor import MODEL_VERSION, FEATURE_SCHEMA_SHA256
+        from env.warehouse.public_action_features_v614 import ACTION_PHYSICS_CONFIG_SHA256
         if (entry.get('model_version') != MODEL_VERSION
-                or entry.get('feature_schema_sha256') != FEATURE_SCHEMA_SHA256):
+                or entry.get('feature_schema_sha256') != FEATURE_SCHEMA_SHA256
+                or entry.get('action_physics_config_sha256') != ACTION_PHYSICS_CONFIG_SHA256):
             raise PolicyUnavailable('warehouse_v6_actor_schema_mismatch')
         binding['actor_model_version'] = MODEL_VERSION
         binding['feature_schema_sha256'] = FEATURE_SCHEMA_SHA256
+        binding['action_physics_config_sha256'] = ACTION_PHYSICS_CONFIG_SHA256
         try:
             _validated_v6_actor(str(_path(binding['actor_path'])), binding['actor_sha256'],
                                 binding['human_actor_sha256'], binding['ai_actor_sha256'])
@@ -202,7 +205,8 @@ def verify_binding(binding: dict, release_id: str = RELEASE_ID) -> dict:
                    binding_for_group(domain, group, release_id=release_id))
     for key in ('policy_id', 'actor_path', 'actor_sha256',
                 'human_actor_sha256', 'ai_actor_sha256', 'program_hashes',
-                'actor_model_version', 'feature_schema_sha256'):
+                'actor_model_version', 'feature_schema_sha256',
+                'action_physics_config_sha256'):
         if current.get(key) != binding.get(key):
             raise PolicyUnavailable('saved_policy_changed')
     return current
@@ -740,6 +744,8 @@ def _accepted_warehouse_v6(entry: dict, binding: dict,
                 or entry.get('model_version') != binding['actor_model_version']
                 or entry.get('feature_schema_sha256') !=
                 binding['feature_schema_sha256']
+                or entry.get('action_physics_config_sha256') !=
+                binding.get('action_physics_config_sha256')
                 or _digest(entry['training_report_path']) !=
                 entry['training_report_sha256']
                 or _digest(entry['acceptance_path']) !=

@@ -228,6 +228,7 @@ def warehouse_policy_artifacts(release_id: str = RELEASE_ID) -> dict:
     A pending catalog or a single missing asset leaves the entire pair closed.
     """
     from backend.training.warehouse_v6_actor import FEATURE_SCHEMA_SHA256, MODEL_VERSION
+    from env.warehouse.public_action_features_v614 import ACTION_PHYSICS_CONFIG_SHA256
 
     spec = warehouse_release_spec(release_id)
     catalog = _catalog(release_id)
@@ -242,7 +243,9 @@ def warehouse_policy_artifacts(release_id: str = RELEASE_ID) -> dict:
         if (not isinstance(entry, dict)
                 or entry.get("policy_id") != spec.policy_ids[variant]
                 or entry.get("model_version") != MODEL_VERSION
-                or entry.get("feature_schema_sha256") != FEATURE_SCHEMA_SHA256):
+                or entry.get("feature_schema_sha256") != FEATURE_SCHEMA_SHA256
+                or entry.get("action_physics_config_sha256") !=
+                ACTION_PHYSICS_CONFIG_SHA256):
             raise ReleaseAssetUnavailable("warehouse_policy_identity_mismatch")
         for path_key, hash_key in (("actor_path", "actor_sha256"),
                                    ("training_report_path", "training_report_sha256"),

@@ -112,6 +112,8 @@ class FakeBackend:
                 "program_fit_method": spec["program_fit_method"],
                 "bc_recipe_version": p.REGISTERED_BC_RECIPE_VERSION,
                 "bc_recipe_sha256": spec["bc_recipe_sha256"],
+                "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
+                    "action_physics_config_sha256"],
                 "bc_data_seed_schedule_sha256": spec[
                     "bc_data_seed_schedule_sha256"],
                 "bc_critic_reset_schedule": spec["bc_critic_reset_schedule"],
@@ -136,8 +138,13 @@ class FakeBackend:
                     p.ROLES, 0.0 if variant == "raw" else .5),
                 "actor_artifact": {"path": str(actor_path), "sha256": actor_sha,
                                    "role_sha256": chosen,
-                                   "model_version": "warehouse-dual-actor.v6.1",
-                                   "feature_schema_sha256": "9" * 64},
+                                   "model_version": p.REGISTERED_BC_SPEC[
+                                       "actor_model_version"],
+                                   "feature_schema_sha256": p.REGISTERED_BC_SPEC[
+                                       "feature_schema_sha256"],
+                                   "action_physics_config_sha256":
+                                       p.REGISTERED_BC_SPEC[
+                                           "action_physics_config_sha256"]},
                 "program_artifacts": programs,
             }
             if variant == "regularized":
@@ -160,6 +167,8 @@ class FakeBackend:
                 "program_fit_method": spec["program_fit_method"],
                 "bc_recipe_version": spec["bc_recipe_version"],
                 "bc_recipe_sha256": spec["bc_recipe_sha256"],
+                "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
+                    "action_physics_config_sha256"],
                 "bc_data_seed_schedule": spec["bc_data_seed_schedule"],
                 "bc_data_seed_schedule_sha256": spec[
                     "bc_data_seed_schedule_sha256"],
@@ -780,6 +789,8 @@ def test_full_packaged_acceptance_chain_and_tampered_evidence(ready, tmp_path,
         assert report["sha256"] == receipt["training_report_sha256"][variant]
         entry = {"policy_id": receipt["policy_id"][variant],
                  "actor_path": actor["path"], "actor_sha256": actor["sha256"],
+                 "action_physics_config_sha256": receipt[
+                     "action_physics_config_sha256"],
                  "training_report_path": report["path"],
                  "training_report_sha256": report["sha256"],
                  "role_sha256": {

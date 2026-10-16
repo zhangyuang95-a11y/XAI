@@ -22,6 +22,7 @@ from .goal_management import (
     synchronize_persistent_goals, update_route_commitments,
 )
 from .temporal_audit import transition_temporal_violations
+from .reset_audit_v614 import record_successful_reset
 from .layouts import get_map_layout
 from .navigation import (
     ACTIONS,
@@ -263,12 +264,18 @@ class WarehouseMultiAgentEnv:
                 reset_reason="episode_reset",
                 coordination_plan=initial_plan,
             )
-        return self.observations(), environment_info(
+        observations = self.observations()
+        info = environment_info(
             self,
             reward_breakdown=None,
             collisions=(),
             shutdowns=(),
         )
+        record_successful_reset(seed, self.state.episode_id,
+                                self.config.map_layout_id,
+                                self.config.move_battery_cost,
+                                self.config.charge_per_wait)
+        return observations, info
 
     def _sample_delivery_job(
         self,

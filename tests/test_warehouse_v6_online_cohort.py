@@ -1,22 +1,38 @@
-"""Real NN rollout smoke for exact online extraction and scene isolation."""
+"""Reset-free training cohort tests for exact extraction and scene isolation."""
 from __future__ import annotations
 
 from collections import deque
+from contextlib import nullcontext
 from copy import deepcopy
 
 import torch
 
 from backend.training import warehouse_v6_runner as runner
 from backend.training.warehouse_v6_actor import WarehouseV6Actor
-from env.warehouse.pure_nn import AGENTS
+from env.warehouse.domain import AgentState, DeliveryTask, WarehouseState
+from env.warehouse.layouts import STUDY_MAP_LAYOUT
+from env.warehouse.public_observation_v6 import encode_public_observation
+from env.warehouse.pure_nn import AGENTS, action_masks
+
+
+def _public_preaction(frame: int):
+    state = WarehouseState(
+        episode_id=1301, frame=frame,
+        agents=[AgentState("robot_1", STUDY_MAP_LAYOUT.robot_start_positions[0],
+                           70.0),
+                AgentState("robot_2", STUDY_MAP_LAYOUT.robot_start_positions[1],
+                           70.0)],
+        tasks=[DeliveryTask("task_0", (0, 3), (3, 2)),
+               DeliveryTask("task_1", (1, 0), (3, 1))], next_task_index=2)
+    return encode_public_observation(state), action_masks(state)
 
 
 def test_online_extractions_stop_at_boundaries_and_never_reuse_scenes(
         monkeypatch, tmp_path):
-    """Use real Warehouse NN–NN transitions with a tiny synthetic split cycle.
+    """Use valid pre-action rows with a tiny synthetic split cycle.
 
-    The smaller cycle exercises the exact 120-step barriers without claiming
-    that four scenarios are enough for a scientific program validation.
+    No environment is created or reset. The smaller cycle exercises exact
+    120-step barriers without claiming scientific program validation.
     """
     purposes = {"fit": 1, "calibration": 1, "eligibility": 1, "validation": 1}
     monkeypatch.setattr(runner, "FINAL_PROGRAM_SPLIT_COUNTS", purposes)
@@ -45,11 +61,43 @@ def test_online_extractions_stop_at_boundaries_and_never_reuse_scenes(
         return {"summary": {"quality": 1.0, "formal_quality_passed": True,
                             "development_quality_passed": True}}
 
+    public_rows = [_public_preaction(frame) for frame in range(120)]
+
+    def episode(_model, *, seed, generator, max_steps, episode_index):
+        records = []
+        for frame, (obs, mask) in enumerate(public_rows[:max_steps]):
+            records.append({
+                "obs": obs, "mask": mask,
+                "action": torch.tensor([4, 4]).numpy(),
+                "logp": torch.zeros(2).numpy(),
+                "reward_value": torch.zeros(2).numpy(),
+                "cost_value": 0.0, "reward": torch.zeros(2).numpy(),
+                "shutdown_cost": 0.0, "seed": seed, "frame": frame,
+                "episode_id": 1301, "episode_key": f"{seed}:{episode_index}",
+            })
+        complete = max_steps == 120
+        summary = {"seed": seed, "episode_index": episode_index,
+                   "episode_key": f"{seed}:{episode_index}",
+                   "joint_steps": len(records), "actor_decisions": 2 * len(records),
+                   "post_policy_interventions": 0, "deliveries": 0,
+                   "collisions": 0, "shutdown_episode": False,
+                   "complete": complete}
+        return ({"records": records,
+                 "reward_bootstrap": torch.zeros(2).numpy(),
+                 "cost_bootstrap": 0.0, "complete": complete,
+                 "shutdown_episode": False}, summary)
+
     monkeypatch.setattr(runner, "_fit_training_programs", extract)
     monkeypatch.setattr(runner, "ppo_update", no_update)
     monkeypatch.setattr(runner, "evaluate", quality)
-    # Admission is edited concurrently in this repository and belongs to the
-    # real source closure. This test isolates the rollout boundary contract.
+    monkeypatch.setattr(runner, "collect_episode", episode)
+    monkeypatch.setattr(runner, "_require_locked_execution", lambda: None)
+    monkeypatch.setattr(runner, "stage1_reset_phase",
+                        lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(runner, "_environment", lambda **_kwargs:
+                        (_ for _ in ()).throw(AssertionError("unexpected env creation")))
+    # Admission is edited concurrently; keep this test on the reset-free
+    # boundary and cohort contract.
     monkeypatch.setattr(runner, "_assert_source_closure", lambda _expected: None)
     torch.manual_seed(1301)
     initial = deepcopy(WarehouseV6Actor().state_dict())
@@ -78,7 +126,8 @@ def test_online_extractions_stop_at_boundaries_and_never_reuse_scenes(
 def test_online_program_split_uses_exact_scenario_quota_and_keeps_resets_together(
         monkeypatch):
     class StubProgram:
-        report = {"validation": {"feedback_passed": False}}
+        report = {"fit_method": runner.ACTOR_SPARSE_TOPOLOGY_METHOD,
+                  "validation": {"feedback_passed": False}}
 
         def sha256(self):
             return "1" * 64
@@ -86,7 +135,8 @@ def test_online_program_split_uses_exact_scenario_quota_and_keeps_resets_togethe
     observed = {}
 
     def fit(role, _actor, fit_rows, calibration_rows,
-            eligibility_rows, validation_rows):
+            eligibility_rows, validation_rows, *, method):
+        assert method == runner.ACTOR_SPARSE_TOPOLOGY_METHOD
         observed[role] = (fit_rows, calibration_rows, eligibility_rows,
                           validation_rows)
         return StubProgram()

@@ -193,12 +193,14 @@ def test_warehouse_v6_binding_metadata_is_required_on_restore(tmp_path, monkeypa
 def test_warehouse_catalog_rejects_development_paths_even_with_correct_hash(monkeypatch):
     import study_v3.release_catalog as catalog_module
     from backend.training.warehouse_v6_actor import MODEL_VERSION, FEATURE_SCHEMA_SHA256
+    from env.warehouse.public_action_features_v614 import ACTION_PHYSICS_CONFIG_SHA256
 
     source = "configs/study_v3_pong.json"
     digest = sha256((kitchen.ROOT / source).read_bytes()).hexdigest()
     entry = {"policy_id": "warehouse-raw-v6",
              "model_version": MODEL_VERSION,
              "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+             "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
              "actor_path": source, "actor_sha256": digest,
              "training_report_path": source, "training_report_sha256": digest,
              "acceptance_path": source, "acceptance_sha256": digest,

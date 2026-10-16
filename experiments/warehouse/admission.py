@@ -516,7 +516,11 @@ class Admission:
         if (artifacts["raw"].get("model_version") !=
                 artifacts["regularized"].get("model_version")
                 or artifacts["raw"].get("feature_schema_sha256") !=
-                artifacts["regularized"].get("feature_schema_sha256")):
+                artifacts["regularized"].get("feature_schema_sha256")
+                or artifacts["raw"].get("action_physics_config_sha256") !=
+                p.REGISTERED_BC_SPEC["action_physics_config_sha256"]
+                or artifacts["regularized"].get("action_physics_config_sha256") !=
+                p.REGISTERED_BC_SPEC["action_physics_config_sha256"]):
             raise RuntimeError("Warehouse paired Actor architecture differs")
         for variant in p.VARIANTS:
             self._load_variant(pair, variant)
@@ -1338,7 +1342,11 @@ class Admission:
         if (artifacts["raw"].get("model_version") !=
                 artifacts["regularized"].get("model_version")
                 or artifacts["raw"].get("feature_schema_sha256") !=
-                artifacts["regularized"].get("feature_schema_sha256")):
+                artifacts["regularized"].get("feature_schema_sha256")
+                or artifacts["raw"].get("action_physics_config_sha256") !=
+                p.REGISTERED_BC_SPEC["action_physics_config_sha256"]
+                or artifacts["regularized"].get("action_physics_config_sha256") !=
+                p.REGISTERED_BC_SPEC["action_physics_config_sha256"]):
             raise RuntimeError("Warehouse paired Actor architecture differs")
         for variant in p.VARIANTS:
             self._load_variant(pair, variant)
@@ -1457,6 +1465,8 @@ class Admission:
             "actor_model_version": artifacts["regularized"]["model_version"],
             "feature_schema_sha256": artifacts["regularized"][
                 "feature_schema_sha256"],
+            "action_physics_config_sha256": artifacts["regularized"][
+                "action_physics_config_sha256"],
             "passed": True,
         }
         return self._new("warehouse_v6_acceptance.json", acceptance)

@@ -9,17 +9,34 @@ from backend.training.warehouse_v6_actor import WarehouseV6Actor
 from backend.training.warehouse_v6_runner import (
     _bc_epochs, _initialize_public_trees, ppo_update,
 )
-from env.warehouse.public_observation_v6 import OBSERVATION_DIM
-from env.warehouse.pure_nn import AGENTS
+from env.warehouse.domain import AgentState, DeliveryTask, WarehouseState
+from env.warehouse.public_observation_v6 import encode_public_observation
+from env.warehouse.pure_nn import AGENTS, action_masks
 
 
 def _public_rows(count: int = 128):
-    random = np.random.default_rng(690117)
-    obs = torch.from_numpy(random.normal(
-        size=(count, len(AGENTS), OBSERVATION_DIM)).astype(np.float32))
-    mask = torch.ones((count, len(AGENTS), 5), dtype=torch.float32)
-    labels = (obs[..., 0] + 0.25 * obs[..., 1] > 0).long()
-    return obs, mask, labels
+    # The action-geodesic encoder now checks the public map, coordinates, and
+    # physical mask. Build two legal pre-action states without an env reset.
+    positions = (((1, 0), (5, 2)), ((5, 2), (1, 0)))
+    observations, masks, labels = [], [], []
+    for index in range(count):
+        own, partner = positions[index % 2]
+        state = WarehouseState(
+            episode_id=690117, frame=2,
+            agents=[AgentState("robot_1", own, 70.0),
+                    AgentState("robot_2", partner, 70.0)],
+            tasks=[DeliveryTask("task_0", (0, 3), (3, 2)),
+                   DeliveryTask("task_1", (1, 0), (3, 1))],
+            next_task_index=2)
+        observations.append(encode_public_observation(state))
+        masks.append(action_masks(state))
+        # RIGHT at (1, 0); UP at (5, 2). Both are physically legal.
+        labels.append((3, 0) if index % 2 == 0 else (0, 3))
+    obs = torch.from_numpy(np.stack(observations))
+    mask = torch.from_numpy(np.stack(masks))
+    targets = torch.tensor(labels, dtype=torch.long)
+    assert torch.all(mask.gather(-1, targets[..., None]) > 0)
+    return obs, mask, targets
 
 
 def _split_weights(model):
@@ -49,7 +66,7 @@ def test_both_hard_role_splits_receive_bc_and_ppo_gradients():
             frame_obs, frame_mask = obs[frame], mask[frame]
             policy = Categorical(logits=model.outputs(
                 frame_obs[None], frame_mask[None])[0])
-            action = torch.tensor([frame % 2, (frame + 1) % 2])
+            action = labels[frame]
             flat = frame_obs.flatten()[None]
             records.append({
                 "obs": frame_obs.numpy().copy(),

@@ -15,6 +15,7 @@ from backend.training.warehouse_v6_runner import (
 from env.warehouse.decision_protocol import canonical_sha256
 from experiments.warehouse.stage2_evidence import (
     replay_program_split_trace, verify_pressure_receipt_identity)
+from tests.warehouse_v614_test_scopes import isolated_evaluation_scope
 
 
 def _sha(path: Path) -> str:
@@ -40,7 +41,8 @@ def program_trace(tmp_path):
         artifact["path"], expected_sha256=artifact["sha256"],
         expected_role_sha256=artifact["role_sha256"])
     seed = 700019
-    rows = collect_program_audit_rows(actor, [seed])
+    with isolated_evaluation_scope():
+        rows = collect_program_audit_rows(actor, [seed])
     trace = _write_final_fit_trace(
         rows, split="fit", seeds=[seed], trace_root=tmp_path / "traces",
         actor_sha256=actor.artifact_sha256)

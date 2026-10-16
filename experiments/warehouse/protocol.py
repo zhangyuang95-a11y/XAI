@@ -19,6 +19,9 @@ INITIAL_RELEASE_ID = "policylens-three-domain-20261016.v6.0"
 BUDGETS = (200_000, 300_000, 400_000)
 DEVELOPMENT_PAIR_SEEDS = (6120, 6121, 6122)
 FORMAL_PAIR_SEEDS = (6101, 6102, 6103)
+# Candidate-only development seed. PairRunSpec and release acceptance continue
+# to admit only the registered three development and three formal pairs.
+EXPLORATORY_PAIR_SEEDS = (12469,)
 DEVELOPMENT_SELECTION_SEEDS = tuple(range(261_100, 261_124))
 DEVELOPMENT_STRESS_BASE_SEEDS = tuple(range(261_200, 261_456))
 DEVELOPMENT_PROGRAM_AUDIT_SEEDS = tuple(range(261_500, 261_524))
@@ -39,7 +42,7 @@ SCENARIO_BLOCK_STEPS = 120
 ONLINE_PROGRAM_EXTRACTION_PERCENTAGES = (75, 84, 93)
 FINAL_PROGRAM_SPLIT_COUNTS = {"fit": 50, "calibration": 25,
                               "eligibility": 25, "validation": 24}
-REGISTERED_ARCHITECTURE_MODE = "learned_sparse_tree_256_residual.v6.10-candidate"
+REGISTERED_ARCHITECTURE_MODE = "public_affordance_certificate_tree_256_residual.v6.14-candidate"
 # A candidate names its fitting implementation explicitly. This list is not
 # a release selection: the selected method is sealed only after development
 # quality and independent fidelity gates pass. The old axis fit is excluded.
@@ -54,10 +57,10 @@ RETIRED_119_SOURCE_CLOSURE_SHA256 = frozenset({
 })
 RETIRED_119_MODEL_VERSION = "warehouse-dual-actor.v6.9-exploratory"
 REGISTERED_BC_RECIPE_VERSION = (
-    "warehouse-public-dual-bc.v6.10-candidate-1220-plus2criticresets")
-# These are the actual production stages, loss coefficients and critic settings
-# used by the successful, unregistered 119 full-BC screen. They are part of
-# the formal scientific run identity, rather than CLI defaults.
+    "warehouse-public-dual-bc.v6.14-public-affordance-exploratory")
+# The v6.14 candidate's training identity. The executable recipe JSON is
+# separately byte-hashed below, then compared with the runner's constants
+# before Stage 1 can create an environment.
 REGISTERED_BC_SPEC = {
     "bc_episodes": 100,
     "bc_epochs": 20,
@@ -86,7 +89,7 @@ REGISTERED_BC_SPEC = {
     "risk_bc_learning_rate": 0.0001,
     "initial_bc_batch_size": 256,
     "initial_tree_loss_weight": 0.05,
-    "initial_gate_loss_weight": 0.3,
+    "initial_gate_loss_weight": 0.2,
     "initial_bound_loss_weight": 0.0005,
     "initial_bc_gradient_clip": 0.5,
     "risk_bc_gradient_clip": 0.5,
@@ -97,6 +100,29 @@ REGISTERED_BC_SPEC = {
     "collision_critic_positive_weight": 3.0,
     "collision_critic_seed_offset": 6_200,
     "collision_critic_environment_reset_count": 2,
+    # A certificate-first fit to one frozen warmup NN initializes the
+    # trainable Actor tree. It is not a program qualification set.
+    "warmup_fit_sampled_episodes": 25,
+    "warmup_fit_argmax_episodes": 25,
+    "post_refit_bc_epochs": 8,
+    "post_refit_warmup_masked_kl_weight": 0.0,
+    # Only after all BC updates are complete, freeze the full Actor and
+    # collect four disjoint internal development-purpose blocks.
+    "final_fit_sampled_episodes": 25,
+    "final_fit_argmax_episodes": 25,
+    "final_calibration_sampled_episodes": 13,
+    "final_calibration_argmax_episodes": 12,
+    "final_eligibility_sampled_episodes": 13,
+    "final_eligibility_argmax_episodes": 12,
+    "final_validation_sampled_episodes": 12,
+    "final_validation_argmax_episodes": 12,
+    "warmup_fit_source": "frozen_warmup_full_nn_masked_distribution",
+    "final_internal_source": "one_final_frozen_full_bc_actor",
+    "program_fit_method": "actor_sparse_topology_v1",
+    "actor_model_version": "warehouse-dual-actor.v6.14-public-affordance-exploratory",
+    "feature_schema_sha256": "03f16ff6a86a6c2f03f50f7422b58dd800da191b253d463e0dac8a8c1b5be36d",
+    "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
+    "executable_recipe_file_sha256": "fc45da901a8267175b051ba31ea10cedf327033b48fb9cbcec575b6c617c8ccb",
 }
 REGISTERED_RISK_DUAL_CONFIG = {
     "target": 0.04, "window_episodes": 128, "minimum_episodes": 64,
@@ -117,8 +143,14 @@ REGISTERED_RISK_DUAL_CONFIG_SHA256 = _hash_json(REGISTERED_RISK_DUAL_CONFIG)
 
 
 def bc_data_seed_schedule(pair_seed: int) -> dict[str, list[int]]:
-    """The 1,220 teacher/visit episodes; critic resets are separately bound."""
-    if pair_seed not in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS):
+    """All 1,394 BC data episodes; critic resets are separately bound.
+
+    The 50 warmup fit episodes train the Actor tree. The 124 final BC
+    internal episodes have four distinct purposes and are never training rows.
+    Their identities also differ from the 372 post-PPO program episodes.
+    """
+    if pair_seed not in (*EXPLORATORY_PAIR_SEEDS,
+                         *DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS):
         raise ValueError("unregistered Warehouse v6 pair seed")
     counts = {
         "initial_public_teacher": (10, REGISTERED_BC_SPEC["bc_episodes"]),
@@ -136,11 +168,34 @@ def bc_data_seed_schedule(pair_seed: int) -> dict[str, list[int]]:
             counts[f"deep_{index}_{kind}"] = (
                 40 + 2 * index + offset,
                 REGISTERED_BC_SPEC["deep_dagger_episodes"] // 2)
+    counts.update({
+        "topology_fit_sampled":
+            (60, REGISTERED_BC_SPEC["warmup_fit_sampled_episodes"]),
+        "topology_fit_argmax":
+            (61, REGISTERED_BC_SPEC["warmup_fit_argmax_episodes"]),
+        "final_bc_precheck_fit_sampled":
+            (70, REGISTERED_BC_SPEC["final_fit_sampled_episodes"]),
+        "final_bc_precheck_fit_argmax":
+            (71, REGISTERED_BC_SPEC["final_fit_argmax_episodes"]),
+        "final_bc_precheck_calibration_sampled":
+            (72, REGISTERED_BC_SPEC["final_calibration_sampled_episodes"]),
+        "final_bc_precheck_calibration_argmax":
+            (73, REGISTERED_BC_SPEC["final_calibration_argmax_episodes"]),
+        "final_bc_precheck_eligibility_sampled":
+            (74, REGISTERED_BC_SPEC["final_eligibility_sampled_episodes"]),
+        "final_bc_precheck_eligibility_argmax":
+            (75, REGISTERED_BC_SPEC["final_eligibility_argmax_episodes"]),
+        "final_bc_precheck_validation_sampled":
+            (76, REGISTERED_BC_SPEC["final_validation_sampled_episodes"]),
+        "final_bc_precheck_validation_argmax":
+            (77, REGISTERED_BC_SPEC["final_validation_argmax_episodes"]),
+    })
     schedule = {name: [pair_seed * 100_000 + stage * 1_000 + index
                        for index in range(count)]
                 for name, (stage, count) in counts.items()}
     flattened = [seed for values in schedule.values() for seed in values]
-    if len(flattened) != 1_220 or len(set(flattened)) != len(flattened):
+    if (len(counts) != 26 or len(flattened) != 1_394
+            or len(set(flattened)) != len(flattened)):
         raise RuntimeError("Warehouse registered BC stage seed schedule drifted")
     return schedule
 
@@ -148,7 +203,8 @@ def bc_data_seed_schedule(pair_seed: int) -> dict[str, list[int]]:
 @lru_cache(maxsize=None)
 def _reserved_critic_reset_seeds(release_id: str) -> frozenset[int]:
     sealed = sealed_seed_blocks(release_id)
-    reserved = set((*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS,
+    reserved = set((*EXPLORATORY_PAIR_SEEDS,
+                    *DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS,
                     *DEVELOPMENT_SELECTION_SEEDS,
                     *DEVELOPMENT_STRESS_BASE_SEEDS,
                     *DEVELOPMENT_PROGRAM_AUDIT_SEEDS,
@@ -163,9 +219,11 @@ def _reserved_critic_reset_seeds(release_id: str) -> frozenset[int]:
         reserved.update(previous["heldout"])
         reserved.update(task_scenario_seed(seed, task)
                         for seed in previous["heldout"] for task in TASKS)
-    for seed in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS):
+    for seed in (*EXPLORATORY_PAIR_SEEDS,
+                 *DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS):
         reserved.update(item for block in bc_data_seed_schedule(seed).values()
                         for item in block)
+    for seed in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS):
         reserved.update(item for block in
                         final_program_fit_seed_schedule(release_id, seed).values()
                         for item in block)
@@ -178,7 +236,8 @@ def _reserved_critic_reset_seeds(release_id: str) -> frozenset[int]:
 
 def bc_critic_reset_schedule(pair_seed: int, release_id: str) -> dict[str, int]:
     """Two real env.reset calls used by the offline critic event enumerator."""
-    if pair_seed not in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS):
+    if pair_seed not in (*EXPLORATORY_PAIR_SEEDS,
+                         *DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS):
         raise ValueError("unregistered Warehouse v6 pair seed")
     seed = pair_seed + REGISTERED_BC_SPEC["collision_critic_seed_offset"]
     if seed in _reserved_critic_reset_seeds(release_id):
@@ -211,7 +270,7 @@ def registered_method_lock_fields(program_fit_method: str) -> dict:
 
 
 def bc_stage_receipt_shape() -> tuple[tuple[str, int | None], ...]:
-    """Ordered production data and fit stages; None marks a data stage."""
+    """Ordered v6.14 BC data, fit and internal precheck receipt stages."""
     stages: list[tuple[str, int | None]] = [
         ("initial_public_teacher", None),
         ("initial_public_bc", REGISTERED_BC_SPEC["bc_epochs"]),
@@ -222,6 +281,11 @@ def bc_stage_receipt_shape() -> tuple[tuple[str, int | None], ...]:
             (f"initial_nn_dagger_{index}_fit",
              REGISTERED_BC_SPEC["dagger_epochs"]),
         ]
+    stages += [
+        ("topology_fit_sampled", None),
+        ("topology_fit_argmax", None),
+        ("post_refit_public_bc", REGISTERED_BC_SPEC["post_refit_bc_epochs"]),
+    ]
     stages += [
         ("risk_public_teacher", None), ("risk_nn_visitation", None),
         ("risk_public_bc_fit", REGISTERED_BC_SPEC["risk_epochs"]),
@@ -237,12 +301,19 @@ def bc_stage_receipt_shape() -> tuple[tuple[str, int | None], ...]:
         ]
     stages.append(("final_standard_margin_calibration",
                    REGISTERED_BC_SPEC["deep_epochs"]))
+    for purpose in ("fit", "calibration", "eligibility", "validation"):
+        stages += [(f"final_bc_precheck_{purpose}_sampled", None),
+                   (f"final_bc_precheck_{purpose}_argmax", None)]
     return tuple(stages)
 
 
 def bc_report_valid(report: Mapping, pair_seed: int,
                     source_closure_sha256: str) -> bool:
-    """Recompute production BC stage counts and hyperparameters from a receipt."""
+    """Verify the actual 26-block BC receipt and independent internal audit.
+
+    This is a pure receipt check. The release packager separately validates
+    artifact bytes and the source closure; this function never opens a model.
+    """
     if not isinstance(report, Mapping):
         return False
     try:
@@ -254,9 +325,15 @@ def bc_report_valid(report: Mapping, pair_seed: int,
         critic_resets = bc_critic_reset_schedule(pair_seed, INITIAL_RELEASE_ID)
         if (report.get("bc_recipe_version") != REGISTERED_BC_RECIPE_VERSION
                 or report.get("bc_recipe_sha256") != REGISTERED_BC_SPEC_SHA256
+                or report.get("executable_recipe_file_sha256") !=
+                REGISTERED_BC_SPEC["executable_recipe_file_sha256"]
                 or report.get("risk_dual_config_sha256") !=
                 REGISTERED_RISK_DUAL_CONFIG_SHA256
                 or report.get("source_closure_sha256") != source_closure_sha256
+                or report.get("feature_schema_sha256") !=
+                REGISTERED_BC_SPEC["feature_schema_sha256"]
+                or report.get("action_physics_config_sha256") !=
+                REGISTERED_BC_SPEC["action_physics_config_sha256"]
                 or report.get("bc_data_seed_blocks") != schedule
                 or report.get("bc_data_seed_schedule_sha256") !=
                 _hash_json(schedule)
@@ -264,7 +341,10 @@ def bc_report_valid(report: Mapping, pair_seed: int,
                 or report.get("bc_critic_reset_schedule_sha256") !=
                 _hash_json(critic_resets)
                 or report.get("teacher_uses_hidden_goal_or_route_state") is not False
-                or report.get("offline_critic_used_at_execution") is not False):
+                or report.get("offline_critic_used_at_execution") is not False
+                or report.get(
+                    "topology_calibration_eligibility_validation_used_for_bc_updates")
+                is not False):
             return False
         critic = report.get("collision_critic")
         if (not isinstance(critic, Mapping)
@@ -283,6 +363,10 @@ def bc_report_valid(report: Mapping, pair_seed: int,
                 critic_resets["seed"]
                 or critic.get("environment_reset_count") !=
                 critic_resets["environment_reset_count"]
+                or critic.get("purpose") != "offline_BC_gradient_only_not_execution"
+                or critic.get("labels_source") !=
+                "env.step_robot_collision_events_delta"
+                or critic.get("legal_actions_rewritten_by_environment") != 0
                 or critic.get("validation_passed") is not True):
             return False
         stages = report.get("bc_stages")
@@ -297,22 +381,19 @@ def bc_report_valid(report: Mapping, pair_seed: int,
             if epochs is None:
                 if (row.get("episode_seeds") != schedule[name]
                         or row.get("kind") != ("public_teacher" if "teacher" in name
-                                              else "dual_nn_visitation")):
+                                              else "dual_nn_visitation")
+                        or row.get("post_policy_interventions", 0) != 0
+                        or ("argmax" in name and row.get(
+                            "training_only_argmax_visits") is not True)
+                        or ("sampled" in name and row.get(
+                            "training_only_argmax_visits") is not False)):
                     return False
-            elif name.startswith("initial_"):
-                if (row.get("epochs") != epochs
-                        or row.get("learning_rate") !=
-                        REGISTERED_BC_SPEC["initial_bc_learning_rate"]
-                        or row.get("batch_size") !=
-                        REGISTERED_BC_SPEC["initial_bc_batch_size"]
-                        or row.get("tree_loss_weight") !=
-                        REGISTERED_BC_SPEC["initial_tree_loss_weight"]
-                        or row.get("gate_loss_weight") !=
-                        REGISTERED_BC_SPEC["initial_gate_loss_weight"]
-                        or row.get("bound_loss_weight") !=
-                        REGISTERED_BC_SPEC["initial_bound_loss_weight"]
-                        or row.get("gradient_clip") !=
-                        REGISTERED_BC_SPEC["initial_bc_gradient_clip"]):
+            elif name.startswith("initial_") or name == "post_refit_public_bc":
+                if row.get("epochs") != epochs:
+                    return False
+                if (name == "post_refit_public_bc" and
+                        row.get("warmup_masked_kl_weight") !=
+                        REGISTERED_BC_SPEC["post_refit_warmup_masked_kl_weight"]):
                     return False
             else:
                 fit = row.get("fit")
@@ -320,25 +401,72 @@ def bc_report_valid(report: Mapping, pair_seed: int,
                 if (not isinstance(fit, Mapping) or fit.get("epochs") != epochs
                         or fit.get("batch_size") !=
                         REGISTERED_BC_SPEC["batch_size"]
-                        or fit.get("learning_rate") !=
-                        REGISTERED_BC_SPEC["risk_bc_learning_rate"]
-                        or fit.get("gradient_clip") !=
-                        REGISTERED_BC_SPEC["risk_bc_gradient_clip"]
                         or fit.get("risk_weight") !=
                         REGISTERED_BC_SPEC["risk_weight"]
                         or fit.get("margin_gap") !=
                         REGISTERED_BC_SPEC["margin_gap"]
                         or fit.get("margin_weight") !=
                         (0.0 if initial_risk else
-                         REGISTERED_BC_SPEC["margin_weight"])
-                        or fit.get("near_increment") !=
-                        (0.0 if initial_risk else
-                         REGISTERED_BC_SPEC["near_increment"])
-                        or fit.get("low_return_increment") !=
-                        REGISTERED_BC_SPEC["low_return_increment"]):
+                         REGISTERED_BC_SPEC["margin_weight"])):
                     return False
+        warmup = report.get("warmup_frozen_nn_actor")
+        final = report.get("final_bc_internal_precheck")
+        final_receipt = report.get("final_bc_internal_precheck_receipt")
+        roles = report.get("pretrained_role_sha256")
+        if (not isinstance(warmup, Mapping) or not isinstance(final, Mapping)
+                or not isinstance(final_receipt, Mapping)
+                or not isinstance(roles, Mapping) or set(roles) != set(ROLES)
+                or not isinstance(warmup.get("role_sha256"), Mapping)
+                or set(warmup["role_sha256"]) != set(ROLES)
+                or final.get("purpose") !=
+                "development_internal_precheck_after_complete_bc"
+                or final.get("passed") is not True
+                or not isinstance(final.get("final_bc_actor"), Mapping)
+                or final["final_bc_actor"].get("role_sha256") != roles
+                or final.get("action_physics_config_sha256") !=
+                REGISTERED_BC_SPEC["action_physics_config_sha256"]
+                or final.get("warmup_actor_sha256") != warmup.get("sha256")
+                or not isinstance(final_receipt.get("path"), str)
+                or not Path(final_receipt["path"]).is_absolute()
+                or not isinstance(final_receipt.get("sha256"), str)
+                or final_receipt["sha256"] != sha256(
+                    (json.dumps(final, sort_keys=True, allow_nan=False)
+                     + "\n").encode("utf-8")).hexdigest()):
+            return False
+        warmup_schedule = {name.removeprefix("topology_"): schedule[name]
+                           for name in schedule if name.startswith("topology_")}
+        final_schedule = {name.removeprefix("final_bc_precheck_"): schedule[name]
+                          for name in schedule if name.startswith("final_bc_precheck_")}
+        if (final.get("warmup_topology_fit_seed_schedule_sha256") !=
+                _hash_json(warmup_schedule)
+                or final.get("final_bc_seed_schedule_sha256") !=
+                _hash_json(final_schedule)):
+            return False
+        topology_visits = report.get("topology_episode_parts")
+        final_visits = final.get("final_bc_visits")
+        if (not isinstance(topology_visits, Mapping)
+                or set(topology_visits) != set(warmup_schedule)
+                or not isinstance(final_visits, Mapping)
+                or set(final_visits) != set(final_schedule)):
+            return False
+        for name, seeds in warmup_schedule.items():
+            if topology_visits[name].get("scenario_seeds") != seeds:
+                return False
+        for name, seeds in final_schedule.items():
+            if final_visits[name].get("scenario_seeds") != seeds:
+                return False
+        if (not isinstance(final.get("roles"), Mapping)
+                or set(final["roles"]) != set(ROLES)):
+            return False
+        for role in ROLES:
+            if (final["roles"][role].get("actor_role_sha256") != roles[role]
+                    or final["roles"][role].get("refit_report", {}).get(
+                        "validation_passed") is not True
+                    or report.get("topology_source_nn_role_sha256", {}).get(
+                        "fit", {}).get(role) != warmup["role_sha256"][role]):
+                return False
         return True
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, AttributeError, TypeError, ValueError):
         return False
 
 
@@ -376,6 +504,9 @@ def _require_disjoint() -> None:
                 raise RuntimeError(f"Warehouse v6 seed blocks overlap: {first}, {second}")
     if set(DEVELOPMENT_PAIR_SEEDS) & set(FORMAL_PAIR_SEEDS):
         raise RuntimeError("Warehouse v6 development and formal pair seeds overlap")
+    if set(EXPLORATORY_PAIR_SEEDS) & set((*DEVELOPMENT_PAIR_SEEDS,
+                                          *FORMAL_PAIR_SEEDS)):
+        raise RuntimeError("Warehouse exploratory pair seed entered formal protocol")
 
 
 _require_disjoint()
@@ -727,6 +858,8 @@ def paired_training_pass(variants: Mapping, *, joint_steps: int) -> bool:
         if (report.get("joint_steps") != joint_steps or
                 seed not in (*DEVELOPMENT_PAIR_SEEDS, *FORMAL_PAIR_SEEDS) or
                 report.get("actor_decisions") != joint_steps * len(ROLES) or
+                report.get("action_physics_config_sha256") !=
+                REGISTERED_BC_SPEC["action_physics_config_sha256"] or
                 report.get("architecture_mode") != REGISTERED_ARCHITECTURE_MODE or
                 report.get("program_fit_method") not in
                 PROGRAM_FIT_METHOD_CANDIDATES or

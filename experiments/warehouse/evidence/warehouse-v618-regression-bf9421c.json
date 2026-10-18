@@ -1,0 +1,15 @@
+{
+  "command": "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -m pytest -q tests/test_warehouse_v6*.py tests/test_study_runtime_no_torch.py tests/test_study_v6_warehouse_frame_invariants.py tests/test_study_v6_pong_kitchen_frames.py --disable-warnings --maxfail=1",
+  "elapsed_seconds": 82.34,
+  "exit_code": 0,
+  "git_commit": "bf9421c",
+  "kind": "engineering_regression_not_model_acceptance",
+  "log_path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v618_diagnostics/regression-bf9421c.log",
+  "log_sha256": "881d25634e852d63376457ae4a18bcc9d77e024c8a5f371a496154152289cb61",
+  "model_acceptance": false,
+  "passed": 284,
+  "publishable": false,
+  "source_closure_sha256": "b75de21512f9f69cbea6c3edd4cb1d8d1a99c68bcbfd51a84de2940b56ed89ae",
+  "subtests_passed": 2,
+  "version": "warehouse-v618-regression.v1"
+}

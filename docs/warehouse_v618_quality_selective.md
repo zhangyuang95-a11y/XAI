@@ -82,6 +82,94 @@ Actor 参数。三组固定初始化/搜索预算使用 fit episode；搜索计�
 - 第一轮工程后修复了 v6.18 稀疏权重 STE 的浮点运算顺序，并修正独立程序
   final-fit 收据字段；后续运行使用各自独立源码 SHA，不改写第一轮结果。
 
+## 2026-10-18 已完成的开发测量
+
+下列三项运行绑定 commit `3838054bc26c3fb59486873d9c10a64381776303`、
+源码闭包 `863fa8016c2d125b059aac9ec3b30de0a69b8ef86d798efce4b9fa0120a9ddaf`。
+收据核对了该 commit 中全部 151 个闭包文件的实际 SHA，与工程运行保存的
+源码清单完全一致。后续 BC-only 能力使用新的源码身份，不能套用本组结果。
+
+### 历史冻结 NN 的匹配任务对照
+
+同一组 24 个已用开发 base scene（263100–263123），每个 scene 展开三个
+task、三个固定动作随机流，共 **216 条轨迹/模型**。分母保留全部物理帧。
+
+| 历史模型 | 平均配送 | 平均碰撞 | 停机 episode | 独立回放物理帧 |
+| --- | ---: | ---: | ---: | ---: |
+| v6.14 最终 BC | 12.9074 | 4.7130 | 6/216（2.78%） | 25,720 |
+| v6.17 失败候选最终 BC | 0.8241 | 35.7639 | 2/216（0.93%） | 25,817 |
+
+两个模型的冻结 NN 动作及物理状态链均通过独立回放。v6.14 的本组质量点估计
+满足开发质量数值要求，说明有可供参照的任务策略；这不构成 v6.18 准入。
+两者来自不同历史训练，匹配评估不能单独确定哪项架构或训练改动导致差异。
+不确定性按 24 个 base scene 聚类，不能把逐帧、task 和动作流当作独立样本。
+
+紧凑收据：
+[`warehouse-v618-matched-baseline-01.json`](../experiments/warehouse/evidence/warehouse-v618-matched-baseline-01.json)。
+该文件绑定原始 comparison、两个完整结果、Actor、场景清单和回放 SHA；
+完整大模型及逐局记录留在各自 run 目录。
+
+### 固定 v6.14 NN 的独立程序可行性
+
+NN 权重始终不变。fit/calibration/eligibility/validation 分别使用
+50/25/25/24 个不重叠自然采样 episode（263600–263723），程序锁定后，
+再用独立的 24 个开发 episode（263800–263823）诊断；不使用封存集。
+validation 共 2,821 帧，固定诊断共 2,818 帧，两角色均没有删帧。
+
+| 数据 | 角色 | 合格叶覆盖 | 预计反馈覆盖 | 实际反馈可用覆盖 | 解释可用覆盖 | 过滤前动作一致率 | 合格区域 KL |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| validation | robot_1 | 19.43% | 18.70% | 18.72% | 18.93% | 97.81% | 0.0557 |
+| validation | robot_2 | 18.36% | 16.98% | 16.87% | 16.98% | 96.53% | 0.1113 |
+| 固定开发诊断 | robot_1 | 19.80% | 19.14% | 19.20% | 19.30% | 98.21% | 0.0535 |
+| 固定开发诊断 | robot_2 | 17.32% | 16.15% | 15.83% | 15.83% | 96.72% | 0.1050 |
+
+“实际反馈可用覆盖”是冻结评估帧中满足反馈动作条件的比例，**不是实际训练
+产生的反馈量**。一致率与 KL 在已合格区域统计，但先于逐帧动作匹配过滤；
+覆盖率分母是全部物理帧。
+
+合格反馈/解释区域的非法程序动作均为零，不能据此声称整棵树非法动作零。
+robot_2 在固定诊断的全部帧上有 **36/2,818（1.28%）** 个原始非法程序动作，
+均在未合格区域；其 eligibility 和 validation 分别有 44 个。robot_1 的
+各分集及固定诊断整树原始非法动作均为零。程序没有改选执行动作。
+
+两棵树均深度 5，分别 14/16 叶，每节点最多 3 项特征。当前有界搜索找到了
+保真较好的局部区域，但两个角色都未达到 35%/30% BC 程序预检或 30% 开发
+覆盖要求，robot_2 也未满足整树原始非法零要求。因此**尚未解决程序准入**。
+该结果不能证明所有满足复杂度限制的程序都不可行，也不评价尚未完整训练的
+v6.18 Actor。
+
+收据：
+[`warehouse-v618-fixed-v614-program-01.json`](../experiments/warehouse/evidence/warehouse-v618-fixed-v614-program-01.json)；
+整树与叶级失败范围见
+[`warehouse-v618-v614-program-coverage-diagnosis.json`](../experiments/warehouse/evidence/warehouse-v618-v614-program-coverage-diagnosis.json)。
+收据绑定程序文件、四分轨迹、固定审计轨迹及完整结果的实际文件 SHA。
+
+### 第二轮工程短跑与代码回归
+
+第二轮工程短跑仍为每臂 600 联合步，配对起点和场景一致。冻结加载、开发
+评估、两臂各 222 帧独立质量回放、四分程序拟合、独立程序轨迹验证，以及
+completed checkpoint 恢复均执行完成；恢复新增 rollout 为零。训练与选择
+阶段记录 28 次 reset。该短跑两臂均为配送 0、碰撞 7.5、停机 100%，程序
+反馈均为零，不能用于声称新方法质量提升或完整训练正反馈达标。
+
+收据：
+[`warehouse-v618-engineering-smoke-02.json`](../experiments/warehouse/evidence/warehouse-v618-engineering-smoke-02.json)。
+第一轮 smoke-01 收据保持原样；两轮源码和资产哈希分别保留。
+
+该 commit 的相关全回归结果为 **278 passed、2 subtests passed，85.44 秒**。
+原 pytest 输出仅存在执行工具记录，未保存原始日志文件；对应收据明确记录
+这一局限，原始日志 SHA 为空，没有把转述的执行记录伪装成已哈希日志。
+收据保存确切命令及该 commit 中测试模块的实际文件 SHA：
+[`warehouse-v618-regression-3838054.json`](../experiments/warehouse/evidence/warehouse-v618-regression-3838054.json)。
+
+Pong/Kitchen 已另行只读重核既有验收、双 Actor、程序及训练资产：49 个唯一
+文件的 65 次 SHA 核对均匹配。Kitchen 的 300/300 代理完成仍仅为离线代理
+结果。底层收据和原始 checkpoint 的完整发布归档仍有待办，见
+[`warehouse-v618-pong-kitchen-existing-assets.json`](../experiments/warehouse/evidence/warehouse-v618-pong-kitchen-existing-assets.json)。
+
+这些证据完成了工程链路和开发诊断，**尚无 v6.18 候选完整训练的验收结果**。
+封存程序审计、留出集和 pilot 继续关闭。
+
 ## 执行与发布
 
 独立评估必须绑定源码闭包、冻结资产及双角色哈希，并核对真实 reset 清单。

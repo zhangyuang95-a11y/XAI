@@ -18,7 +18,9 @@ M1/M2 搜索最大 8 个不同初始拓扑，每角色整次拟合合计最多 3
 
 旧数据路线没有余量时，先做共同 BC 结构学习，再考虑新验收数据。内部树和 256 NN 分支使用既有相同前向计算，不新增硬残差上限。训练目标为公开教师的完整 Actor CE、0.20 内部树 CE、0.20 stop-gradient 完整 NN 到树 KL，加上仅在树首选动作等于公开教师时的稠密残差软惩罚。gamma 只试 0.01、0.03，最多两份 BC 配方。
 
-这不是未合格外部程序反馈。BC 辅助目标不能进入 raw PPO。后续 raw/regularized 使用相同架构、完全相同的共同 BC 双 Actor 起点和场景序列。新的初始化、场景和动作 RNG 必须经过种子台账核验；提议中的 6160–6163 尚未获运行授权。
+这不是未合格外部程序反馈。BC 辅助目标不能进入 raw PPO。后续 raw/regularized 使用相同架构、完全相同的共同 BC 双 Actor 起点和场景序列。新的初始化、场景和动作 RNG 必须经过种子台账核验。
+
+状态更新（2026-10-19，Asia/Shanghai）：6160 的两份共同 BC 和已用 124 场景比较均已完成，选中 γ=0.03 与 M2。root 出具的受限清场仅授权该固定模型、源码、配方和精确种子表对应的新 275 预检，以及同一固定模型／程序通过内部预检后才能执行的条件 216 draw。当前冻结入口已完成 275 预检，两角色覆盖门槛均失败，候选已关闭；条件 216 未启动。6161–6163、PPO、后续开发配对预算、正式训练、封存审计、留出测试及 participant pilot 均继续关闭。详见 [已完成结果与当前状态](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/docs/warehouse_v620_results.md) 与 [精确受限清场收据](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_ledger/cleared-frozen6160-01/clearance.json)（SHA256 `ffaff9e8dc0dad5f726aa67f4b8818a291acddf8c02042163526acacd7ad6941`）。
 
 ## 后续准入顺序
 

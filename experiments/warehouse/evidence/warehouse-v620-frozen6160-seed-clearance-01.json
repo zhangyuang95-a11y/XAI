@@ -1,0 +1,34 @@
+{
+  "PPO_joint_steps": 0,
+  "actor": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/warehouse-v620-01-shared-bc-pilot/pair-6160-gamma-003/final-bc.actor.npz",
+    "role_sha256": {
+      "robot_1": "7aee44859397b8cbe1bb9cd3b8541e82f2a080d884c83404fe1e4fd2a998eaf0",
+      "robot_2": "17f2f75877421854c680fab07557f031389800a9503b14f060db5ff4f862fcf0"
+    },
+    "sha256": "1b6310f6d93309fb17e64516519a71680ad3c30e73f222be27df4dff10da81ec"
+  },
+  "audit_scope": [
+    "Four declared roots metadata/registered traces and complete source-bound pilot metadata; not a global freshness proof.",
+    "Opaque model inventory was name/stat only; selected actor was separately rehashed and is loaded by native binding validation.",
+    "Twenty-six prior numeric matches were excluded only with full MT-state structure and hashed producer evidence, not arbitrary rng field names.",
+    "216 draws and same-trajectory integrity replays occur only after both-role 275 internal gates pass; a failed or interrupted gate closes this candidate."
+  ],
+  "candidate_id": "warehouse-v620-01",
+  "clearance": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_ledger/cleared-frozen6160-01/clearance.json",
+    "sha256": "ffaff9e8dc0dad5f726aa67f4b8818a291acddf8c02042163526acacd7ad6941"
+  },
+  "conditional_same_trajectory_replays": 216,
+  "independent_conditional_draws": 216,
+  "output_directory": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_frozen/warehouse-v620-01-gamma003-precheck-01",
+  "pilot_opened": false,
+  "precheck_episodes": 275,
+  "program_method": "episode_robust_explanation_tree_v1",
+  "publishable": false,
+  "reset_contract_semantic_sha256": "0a1483845168da8a5e8a95fdc624ffd5532955f02cac4929aae9694864d5ef14",
+  "schema": "warehouse-v620-frozen6160-seed-clearance-evidence.v1",
+  "seed_plan_semantic_sha256": "a31ea8196b6fac9a86dfe35ae630e0167c1e51be6dc14ed82299d45f85a2e728",
+  "selected_gamma": 0.03,
+  "source_closure_sha256": "4fba3c172feeaefa11e4c0c2b435e21457f4f27c60c11e5b2cd0c24c618f229c"
+}

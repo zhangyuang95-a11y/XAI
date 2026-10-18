@@ -1,0 +1,175 @@
+{
+  "PPO_joint_steps": 0,
+  "all_four_independent_checks_passed": true,
+  "evidence_scope": "Spent v619124 scene schedule; old24 natural NN-NN quality trajectories with same-trajectory physical replay. Development only.",
+  "fresh_precheck_started": false,
+  "gammas": {
+    "gamma-001": {
+      "actual_resets": 148,
+      "program_profile": {
+        "maximum_qualified_kl": 0.05523103103041649,
+        "minimum_normalized_consistency_margin": 1.0433654558932544,
+        "minimum_role_expected_feedback": 0.1913701742887497,
+        "minimum_role_explanation_coverage": 0.19722222222222222,
+        "program_consistency_pass": true
+      },
+      "programs": {
+        "robot_1": {
+          "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/comparison-01/gamma-001/programs/robot_1.program.json",
+          "sha256": "b9407fa126c357dfd56988bcd112973ce612dd97847035f31a8af9e8cfbfb9bd"
+        },
+        "robot_2": {
+          "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/comparison-01/gamma-001/programs/robot_2.program.json",
+          "sha256": "1a0394df4c8e5b3e19db1c44c516c9f0473c27a52a370ad7495547418aa30b1b"
+        }
+      },
+      "quality": {
+        "mean_collisions": 1.875,
+        "mean_deliveries": 15.666666666666666,
+        "quality_passed": true,
+        "quality_score": 15.197916666666666,
+        "shutdown_episode_rate": 0.0
+      },
+      "result": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/comparison-01/gamma-001/result.json",
+        "sha256": "131358750069dfd4c4cc4425554492f93c11fa07da560bb2d25caf771d8c2249"
+      },
+      "role_metrics": {
+        "robot_1": {
+          "explanation": {
+            "agreement": 0.9911971830985915,
+            "coverage": 0.19722222222222222,
+            "expected_actionable_coverage": 0.1915711760520935,
+            "kl": 0.05523103103041649,
+            "whole_tree_path_uncertified_count": 0,
+            "whole_tree_raw_illegal_count": 0
+          },
+          "feedback": {
+            "agreement": 0.9911971830985915,
+            "coverage": 0.19722222222222222,
+            "expected_actionable_coverage": 0.1913701742887497,
+            "kl": 0.05523103103041649,
+            "whole_tree_path_uncertified_count": 0,
+            "whole_tree_raw_illegal_count": 0
+          }
+        },
+        "robot_2": {
+          "explanation": {
+            "agreement": 0.9956958393113343,
+            "coverage": 0.2420138888888889,
+            "expected_actionable_coverage": 0.23831160366535187,
+            "kl": 0.02936609461903572,
+            "whole_tree_path_uncertified_count": 0,
+            "whole_tree_raw_illegal_count": 0
+          },
+          "feedback": {
+            "agreement": 0.9956958393113343,
+            "coverage": 0.2420138888888889,
+            "expected_actionable_coverage": 0.2381720244884491,
+            "kl": 0.02936609461903572,
+            "whole_tree_path_uncertified_count": 0,
+            "whole_tree_raw_illegal_count": 0
+          }
+        }
+      },
+      "statistical_quality_episodes": 24
+    },
+    "gamma-003": {
+      "actual_resets": 148,
+      "program_profile": {
+        "maximum_qualified_kl": 0.051279664039611816,
+        "minimum_normalized_consistency_margin": 1.0433162552398696,
+        "minimum_role_expected_feedback": 0.23233966529369354,
+        "minimum_role_explanation_coverage": 0.23983020870180402,
+        "program_consistency_pass": true
+      },
+      "programs": {
+        "robot_1": {
+          "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/comparison-01/gamma-003/programs/robot_1.program.json",
+          "sha256": "3024d273e5fba4c098f1f34b92252761bcc94f775735b5b5420be4337596ad47"
+        },
+        "robot_2": {
+          "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/comparison-01/gamma-003/programs/robot_2.program.json",
+          "sha256": "79c096551121729ff7a0e6d3cd74a5c907a903b1e5683b1bbf7b5fc2370ef06e"
+        }
+      },
+      "quality": {
+        "mean_collisions": 3.25,
+        "mean_deliveries": 15.333333333333334,
+        "quality_passed": true,
+        "quality_score": 14.3125,
+        "shutdown_episode_rate": 0.041666666666666664
+      },
+      "result": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/comparison-01/gamma-003/result.json",
+        "sha256": "5761c4e6154383bed09e625eb2ee1ff4e15131f10d99d32f47dd2901e0f95b91"
+      },
+      "role_metrics": {
+        "robot_1": {
+          "explanation": {
+            "agreement": 0.9927431059506531,
+            "coverage": 0.24372125928546162,
+            "expected_actionable_coverage": 0.23795706033706665,
+            "kl": 0.04328308627009392,
+            "whole_tree_path_uncertified_count": 0,
+            "whole_tree_raw_illegal_count": 0
+          },
+          "feedback": {
+            "agreement": 0.9906666666666667,
+            "coverage": 0.26529890343119916,
+            "expected_actionable_coverage": 0.25817498564720154,
+            "kl": 0.051279664039611816,
+            "whole_tree_path_uncertified_count": 0,
+            "whole_tree_raw_illegal_count": 0
+          }
+        },
+        "robot_2": {
+          "explanation": {
+            "agreement": 0.9911504424778761,
+            "coverage": 0.23983020870180402,
+            "expected_actionable_coverage": 0.23273971676826477,
+            "kl": 0.04918612167239189,
+            "whole_tree_path_uncertified_count": 0,
+            "whole_tree_raw_illegal_count": 0
+          },
+          "feedback": {
+            "agreement": 0.9911504424778761,
+            "coverage": 0.23983020870180402,
+            "expected_actionable_coverage": 0.23233966529369354,
+            "kl": 0.04918612167239189,
+            "whole_tree_path_uncertified_count": 0,
+            "whole_tree_raw_illegal_count": 0
+          }
+        }
+      },
+      "statistical_quality_episodes": 24
+    }
+  },
+  "independent_checker": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/independent-01/check_pilot.py",
+    "sha256": "c76bc5cb38845803762b3ef98bb30a4dd7890ef45ba6b8dd65c4bbdd2f0757f9"
+  },
+  "independent_complete_check": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/independent-01/reports/all-four.summary.json",
+    "sha256": "ce9009b5799cd6b55a7ecb2b8c7f1e252969eef609e14dee888f9c37fc62cc75"
+  },
+  "independent_diagnostics_and_ranking": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/independent-01/reports/independent-ranking-and-diagnostic.summary.json",
+    "sha256": "cb71e4c7ee99dc899520f2be5d042a95f4903646cde2885aaae02fdd9f71a348"
+  },
+  "model_method_lock": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/comparison-01/model-method.lock.json",
+    "sha256": "635e878a325a4794c8ef6da8db8444daad457374c8f26fbd2bcbc5125f6f1a17"
+  },
+  "new_programs_required_for_fresh_precheck": true,
+  "pilot_opened": false,
+  "publishable": false,
+  "schema": "warehouse-v620-common-bc-development-comparison-evidence.v1",
+  "selected_gamma": 0.03,
+  "selected_method": "episode_robust_explanation_tree_v1",
+  "selection": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/comparison-01/gamma.lock.json",
+    "sha256": "339f6a2e44c73c9636bec0d822dffc44483b40b622cd0ed94475b3affc355ad3"
+  },
+  "source_closure_sha256": "4fba3c172feeaefa11e4c0c2b435e21457f4f27c60c11e5b2cd0c24c618f229c"
+}

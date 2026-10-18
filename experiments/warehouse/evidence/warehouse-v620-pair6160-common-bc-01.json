@@ -1,0 +1,58 @@
+{
+  "NN_visitation_rows_may_differ": true,
+  "PPO_joint_steps": 0,
+  "admission_evidence": false,
+  "gamma_runs": {
+    "001": {
+      "actor": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/warehouse-v620-01-shared-bc-pilot/pair-6160-gamma-001/final-bc.actor.npz",
+        "sha256": "3782112af2a8c0936eef977ff83d06ead5682b6e6560c3a6ead9cb4a18d09ef3"
+      },
+      "actual_resets": 1272,
+      "elapsed_seconds": 1170.68,
+      "initial_role_sha256": {
+        "robot_1": "16602e1c7d333db9dd52a7fba2eef7f591bfd29600d53e4c972b745a2e74cd0e",
+        "robot_2": "496bad7baff20f1da4a10cab536665b1c49a63302fe807d89009bc645f8b3fc2"
+      },
+      "receipt": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/warehouse-v620-01-shared-bc-pilot/pair-6160-gamma-001/bc-pilot.receipt.json",
+        "sha256": "08aedec25f3e188bb545bdbedd9619b65a2963560cbd3e3c138af1523918d248"
+      },
+      "report": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/warehouse-v620-01-shared-bc-pilot/pair-6160-gamma-001/bc-pilot.training.json",
+        "sha256": "aff74a5b06bf3af649e8ff5f5cc6255b2065d3ddd2225fa29a3dccfe1bfbffc3"
+      },
+      "status": "bc_completed_not_admitted"
+    },
+    "003": {
+      "actor": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/warehouse-v620-01-shared-bc-pilot/pair-6160-gamma-003/final-bc.actor.npz",
+        "sha256": "1b6310f6d93309fb17e64516519a71680ad3c30e73f222be27df4dff10da81ec"
+      },
+      "actual_resets": 1272,
+      "elapsed_seconds": 1179.56,
+      "initial_role_sha256": {
+        "robot_1": "16602e1c7d333db9dd52a7fba2eef7f591bfd29600d53e4c972b745a2e74cd0e",
+        "robot_2": "496bad7baff20f1da4a10cab536665b1c49a63302fe807d89009bc645f8b3fc2"
+      },
+      "receipt": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/warehouse-v620-01-shared-bc-pilot/pair-6160-gamma-003/bc-pilot.receipt.json",
+        "sha256": "3f7893f63fc4c10239665dd2f22de2bde219458a92143a4fdf13a712c8ab8488"
+      },
+      "report": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/warehouse-v620-01-shared-bc-pilot/pair-6160-gamma-003/bc-pilot.training.json",
+        "sha256": "3e58f171877caad050dd2ab0bd44e3f77baaf2ff64c98ba0fc17add41dc485fb"
+      },
+      "status": "bc_completed_not_admitted"
+    }
+  },
+  "git_commit": "7090b38",
+  "model_quality_evaluation_complete": false,
+  "pilot_opened": false,
+  "program_fidelity_evaluation_complete": false,
+  "publishable": false,
+  "same_assigned_scene_rng_and_budget": true,
+  "same_initial_dual_Actor": true,
+  "schema": "warehouse-v620-paired-common-bc-completion.v1",
+  "source_closure_sha256": "4fba3c172feeaefa11e4c0c2b435e21457f4f27c60c11e5b2cd0c24c618f229c"
+}

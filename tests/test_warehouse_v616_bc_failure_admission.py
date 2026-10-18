@@ -48,6 +48,11 @@ def _failed_locked_bc_child(argv, *, quality_failure=False, **kwargs) -> SimpleN
         roles[role] = {
             "actor_role_sha256": actor_receipt["role_sha256"][role],
             "refit_report": {"method": "fit_episode_separated_core", "validation_passed": passing},
+            "validation": {purpose: {
+                "whole_tree_raw_illegal_count": 0,
+                "whole_tree_path_uncertified_count": 0,
+                "path_uncertified_count": 0}
+                for purpose in ("feedback", "explanation")},
             "program_qualification": {
                 "method": p.REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD,
                 "validation_passed": passing,

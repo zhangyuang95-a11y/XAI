@@ -62,7 +62,7 @@ from .warehouse_v6_actor import (
 from .warehouse_v6_program import (
     WarehouseV6Program, fit_program, audit_frozen_program, current_actor_fidelity,
     ACTOR_SPARSE_TOPOLOGY_METHOD, JOINT_CERTIFIED_TOPOLOGY_METHOD,
-    INDEPENDENT_SELECTIVE_METHOD,
+    INDEPENDENT_SELECTIVE_METHOD, _whole_tree_raw_legality_passed,
 )
 from .warehouse_v617_risk_tree import fit_risk_tree, RISK_TREE_RECIPE
 from .warehouse_v6_core_tree import CoreTreeConfig, CoreTreeResult, fit_core_tree, _masked_probabilities
@@ -201,6 +201,7 @@ _SOURCE_FILES = (
     "scripts/run_warehouse_v617_locked_pair.py",
     "scripts/run_warehouse_v618_locked_pair.py",
     "scripts/run_warehouse_v618_bc_preflight.py",
+    "scripts/refit_warehouse_v618_cached_programs.py",
     "scripts/diagnose_warehouse_v618_baseline.py",
     "scripts/diagnose_warehouse_v618_program_feasibility.py",
     "scripts/run_warehouse_v618_engineering_smoke.py",
@@ -2583,6 +2584,7 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
         passed = (mass >= .35 and expected >= .30
                   and all(value["agreement"] >= (.93 if purpose == "feedback" else .95)
                           and value["kl"] <= .25 and value["illegal_count"] == 0
+                          and _whole_tree_raw_legality_passed(value)
                           for purpose, value in (("feedback", feedback), ("explanation", explanation))))
         program_hash = program.sha256()
         final_precheck_roles[role] = {

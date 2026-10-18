@@ -156,7 +156,17 @@ def bc_receipt(pair_seed: int, source_closure_sha256: str) -> dict:
             "final_bc_visits": {name: {"scenario_seeds": seeds, "rows": 10, "physical_frames": 10, "excluded_frames": 0}
                                 for name, seeds in final_schedule.items()},
             "roles": {role: {"actor_role_sha256": actor_roles[role],
-                             "refit_report": {"validation_passed": True},
+                             "refit_report": {"validation_passed": True,
+                                 "validation": {purpose: {
+                                     "whole_tree_raw_illegal_count": 0,
+                                     "whole_tree_path_uncertified_count": 0,
+                                     "path_uncertified_count": 0}
+                                     for purpose in ("feedback", "explanation")}},
+                             "validation": {purpose: {
+                                 "whole_tree_raw_illegal_count": 0,
+                                 "whole_tree_path_uncertified_count": 0,
+                                 "path_uncertified_count": 0}
+                                 for purpose in ("feedback", "explanation")},
                              "program_sha256": sha256((role+":program").encode()).hexdigest(),
                              "qualification_changes_actor": False,
                              "program_qualification": {

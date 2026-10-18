@@ -216,6 +216,21 @@ def _metrics(program: "WarehouseV6Program", actor: FrozenWarehouseV6Role,
                        "expected_actionable_coverage": 0.,
                        "expected_actionable_rows": 0.,
                        "per_nn_action": {}, "public_strata": {}})
+    if independent:
+        # These counts describe every raw tree output before physical masking,
+        # eligibility selection or per-frame action matching. Local eligibility
+        # remains selective; its illegal_count keeps the historical meaning.
+        all_raw_actions = program.leaf_logits[leaves].argmax(-1)
+        all_raw_legal = masks[np.arange(len(rows)), all_raw_actions] > .5
+        certificates = certified_program_actions(program)
+        all_path_proven = np.fromiter(
+            (int(action) in certificates[int(leaf)]
+             for action, leaf in zip(all_raw_actions, leaves, strict=True)),
+            dtype=np.bool_, count=len(rows))
+        result.update({
+            "whole_tree_raw_illegal_count": int(np.sum(~all_raw_legal)),
+            "whole_tree_path_uncertified_count": int(np.sum(~all_path_proven)),
+        })
     if not count:
         return result
     x, m, leaf, actions = x[selected], masks[selected], leaves[selected], sampled[selected]
@@ -316,13 +331,29 @@ def _eligible(metric: Mapping, required_agreement: float) -> bool:
                 and metric.get("path_uncertified_count", 0) == 0)
 
 
+def _whole_tree_raw_legality_passed(metric: Mapping) -> bool:
+    """Require global raw legality; unqualified path proofs stay diagnostic.
+
+    The qualified path count must still be zero. Missing new fields cannot
+    inherit the old selected-only interpretation on a new admission path.
+    """
+    return (isinstance(metric, Mapping)
+            and type(metric.get("whole_tree_raw_illegal_count")) is int
+            and metric["whole_tree_raw_illegal_count"] == 0
+            and type(metric.get("whole_tree_path_uncertified_count")) is int
+            and metric["whole_tree_path_uncertified_count"] >= 0
+            and type(metric.get("path_uncertified_count")) is int
+            and metric["path_uncertified_count"] == 0)
+
+
 def _passes(metric: Mapping, required_agreement: float, *,
-            development: bool = False) -> bool:
+            development: bool = False, require_whole_tree_zero: bool = False) -> bool:
     minimum = 0.30 if development else MIN_COVERAGE
     agreement = (0.93 if required_agreement == FEEDBACK_AGREEMENT else 0.95
                  ) if development else required_agreement
     maximum_kl = 0.25 if development else MAX_COVERED_KL
-    return bool(metric["coverage"] >= minimum
+    return bool((not require_whole_tree_zero or _whole_tree_raw_legality_passed(metric))
+                and metric["coverage"] >= minimum
                 and metric["actionable_coverage"] >= minimum
                 and metric["agreement"] >= agreement
                 and metric["kl"] is not None and metric["kl"] <= maximum_kl
@@ -493,6 +524,10 @@ class WarehouseV6Program:
                 or tuple(actor_role.feature_names) != tuple(self.feature_names)):
             return None
         leaves = self.feedback_leaves if purpose == "feedback" else self.explanation_leaves
+        if (self.report.get("fit_method") == INDEPENDENT_SELECTIVE_METHOD
+                and not _whole_tree_raw_legality_passed(
+                    self.report.get("validation", {}).get(purpose, {}))):
+            return None
         if not self.report["validation"][purpose + "_passed"]:
             return None
         evidence = self.lookup(sample)
@@ -1046,20 +1081,28 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
             and feedback_metric["kl"] is not None
             and feedback_metric["kl"] <= MAX_COVERED_KL
             and feedback_metric["illegal_count"] == 0
-            and feedback_metric["path_uncertified_count"] == 0),
+            and feedback_metric["path_uncertified_count"] == 0
+            and (method != INDEPENDENT_SELECTIVE_METHOD or
+                 _whole_tree_raw_legality_passed(feedback_metric))),
         "explanation_online_passed": bool(
             explanation_metric["rows"] > 0
             and explanation_metric["agreement"] >= EXPLANATION_AGREEMENT
             and explanation_metric["kl"] is not None
             and explanation_metric["kl"] <= MAX_COVERED_KL
             and explanation_metric["illegal_count"] == 0
-            and explanation_metric["path_uncertified_count"] == 0),
-        "feedback_passed": _passes(feedback_metric, FEEDBACK_AGREEMENT),
-        "explanation_passed": _passes(explanation_metric, EXPLANATION_AGREEMENT),
+            and explanation_metric["path_uncertified_count"] == 0
+            and (method != INDEPENDENT_SELECTIVE_METHOD or
+                 _whole_tree_raw_legality_passed(explanation_metric))),
+        "feedback_passed": _passes(feedback_metric, FEEDBACK_AGREEMENT,
+            require_whole_tree_zero=method == INDEPENDENT_SELECTIVE_METHOD),
+        "explanation_passed": _passes(explanation_metric, EXPLANATION_AGREEMENT,
+            require_whole_tree_zero=method == INDEPENDENT_SELECTIVE_METHOD),
         "development_feedback_passed": _passes(
-            feedback_metric, FEEDBACK_AGREEMENT, development=True),
+            feedback_metric, FEEDBACK_AGREEMENT, development=True,
+            require_whole_tree_zero=method == INDEPENDENT_SELECTIVE_METHOD),
         "development_explanation_passed": _passes(
-            explanation_metric, EXPLANATION_AGREEMENT, development=True),
+            explanation_metric, EXPLANATION_AGREEMENT, development=True,
+            require_whole_tree_zero=method == INDEPENDENT_SELECTIVE_METHOD),
     }
     return program
 
@@ -1082,8 +1125,11 @@ def current_actor_fidelity(program: WarehouseV6Program,
     metric["passed"] = bool(
         topology_matches
         and program.report["validation"][purpose + "_passed"]
+        and (program.report.get("fit_method") != INDEPENDENT_SELECTIVE_METHOD or
+             _whole_tree_raw_legality_passed(program.report["validation"].get(purpose, {})))
         and _passes(metric, FEEDBACK_AGREEMENT if purpose == "feedback"
-                    else EXPLANATION_AGREEMENT, development=True))
+                    else EXPLANATION_AGREEMENT, development=True,
+                    require_whole_tree_zero=program.report.get("fit_method") == INDEPENDENT_SELECTIVE_METHOD))
     return metric
 
 
@@ -1115,11 +1161,16 @@ def audit_frozen_program(program: WarehouseV6Program,
                         set(program.feedback_leaves), "feedback")
     explanation = _metrics(program, role_actor, rows,
                            set(program.explanation_leaves), "explanation")
+    independent = program.report.get("fit_method") == INDEPENDENT_SELECTIVE_METHOD
     feedback_passed = bool(program.report["validation"]["feedback_passed"]
-                           and _passes(feedback, FEEDBACK_AGREEMENT))
+        and (not independent or _whole_tree_raw_legality_passed(
+            program.report["validation"].get("feedback", {})))
+        and _passes(feedback, FEEDBACK_AGREEMENT, require_whole_tree_zero=independent))
     explanation_passed = bool(
         program.report["validation"]["explanation_passed"]
-        and _passes(explanation, EXPLANATION_AGREEMENT))
+        and (not independent or _whole_tree_raw_legality_passed(
+            program.report["validation"].get("explanation", {})))
+        and _passes(explanation, EXPLANATION_AGREEMENT, require_whole_tree_zero=independent))
     return {
         "audit_version": "warehouse-role-program-independent.v6.2",
         "role": program.role, "actor_role_sha256": program.actor_role_sha256,

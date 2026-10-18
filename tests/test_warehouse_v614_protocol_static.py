@@ -515,7 +515,10 @@ class WarehouseV614StaticProtocolTest(unittest.TestCase):
                        "actionable_coverage": minimum_coverage,
                        "agreement": agreement, "kl": maximum_kl,
                        "rows": 100, "actionable_rows": 20,
-                       "illegal_count": 0}
+                       "illegal_count": 0,
+                       "path_uncertified_count": 0,
+                       "whole_tree_raw_illegal_count": 0,
+                       "whole_tree_path_uncertified_count": 0}
                 self.assertTrue(p.program_pass(row, purpose=purpose,
                                                development=development))
                 for key, worse in (("coverage", minimum_coverage - .001),

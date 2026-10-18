@@ -600,6 +600,9 @@ def bc_report_valid(report: Mapping, pair_seed: int,
                         or not isinstance(program_hash, str)
                         or not re.fullmatch(r"[0-9a-f]{64}", program_hash)
                         or item.get("qualification_changes_actor") is not False
+                        or any(not _whole_tree_legality_metric_valid(
+                            item.get("validation", item.get("refit_report", {}).get("validation", {})).get(
+                                purpose, {})) for purpose in ("feedback", "explanation"))
                         or type(coverage) not in (int, float)
                         or not math.isfinite(coverage) or not 0.35 <= coverage <= 1
                         or type(actionable) not in (int, float)
@@ -969,9 +972,22 @@ def _finite(value: float) -> bool:
     return value == value and value not in (float("inf"), float("-inf"))
 
 
-def program_pass(metrics: Mapping, *, purpose: str, development: bool) -> bool:
+def _whole_tree_legality_metric_valid(metrics: Mapping) -> bool:
+    return (isinstance(metrics, Mapping)
+            and type(metrics.get("whole_tree_raw_illegal_count")) is int
+            and metrics["whole_tree_raw_illegal_count"] == 0
+            and type(metrics.get("whole_tree_path_uncertified_count")) is int
+            and metrics["whole_tree_path_uncertified_count"] >= 0
+            and type(metrics.get("path_uncertified_count")) is int
+            and metrics["path_uncertified_count"] == 0)
+
+
+def program_pass(metrics: Mapping, *, purpose: str, development: bool,
+                 method: str = REGISTERED_PROGRAM_FIT_METHOD) -> bool:
     if purpose not in ("feedback", "explanation"):
         raise ValueError("unknown Warehouse program audit purpose")
+    if method == REGISTERED_PROGRAM_FIT_METHOD and not _whole_tree_legality_metric_valid(metrics):
+        return False
     minimum_coverage = 0.30 if development else 0.20
     minimum_agreement = ((0.93 if purpose == "feedback" else 0.95)
                          if development else

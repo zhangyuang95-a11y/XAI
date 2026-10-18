@@ -30,6 +30,7 @@ SEARCH_VARIANTS = (
 SEARCH_BUDGET = {"beam_width": 2, "exact_candidates_per_round": 20,
                  "axis_features": 18, "candidates_per_leaf": 10}
 _EPS = 1.e-9
+_SEARCH_GAIN_EPSILON = 1.e-7
 
 
 def source_feature_cost(weights: np.ndarray, feature_names: Sequence[str]) -> int:
@@ -77,6 +78,8 @@ class _Leaf:
     qualified_mass: float
     potential: float
     kl_sum: float
+    raw_action: int
+    nonlegality_qualified: bool
 
 
 @dataclass
@@ -92,6 +95,32 @@ class _State:
         potential = sum(leaf.potential for leaf in self.leaves)
         kl = sum(leaf.kl_sum for leaf in self.leaves)
         return (mass if final else mass + .20*potential, -kl, -len(self.leaves))
+
+
+def _quick_partition_score(rows, legal, target):
+    if not len(rows):
+        return 0.
+    raw = int(np.argmax(target[rows].mean(0)))
+    purity = float(np.mean(target[rows].argmax(-1) == raw))
+    return len(rows)*purity**3*(1. if raw in legal else .65)
+
+
+def _quick_split_gain(parent_rows, left_rows, right_rows,
+                      parent_legal, right_legal, target):
+    """Comparable split benefit; pure parent mass is not an improvement."""
+    return (_quick_partition_score(left_rows, parent_legal, target)
+            + _quick_partition_score(right_rows, right_legal, target)
+            - _quick_partition_score(parent_rows, parent_legal, target))
+
+
+def _state_key(state):
+    digest = sha256()
+    for weight in state.weights:
+        digest.update(np.ascontiguousarray(weight, dtype="<f4").tobytes())
+    for values, dtype in ((state.bias, "<f4"), (state.left, "<i8"),
+                          (state.right, "<i8")):
+        digest.update(np.asarray(values, dtype=dtype).tobytes())
+    return digest.digest()
 
 
 def fit_independent_structure(
@@ -135,7 +164,7 @@ def fit_independent_structure(
             cache[key] = fit_leaf_distribution(p[rows], m[rows])
         z = cache[key]
         if not len(rows):
-            return _Leaf(rows, depth, legal, z, 0., 0., 0.)
+            return _Leaf(rows, depth, legal, z, 0., 0., 0., int(z.argmax()), False)
         q = masked_probabilities(z[None], m[rows])
         qtop = q.argmax(-1)
         raw = int(z.argmax())
@@ -145,22 +174,20 @@ def fit_independent_structure(
         _, counts = np.unique(episode[rows], return_counts=True)
         supported = (len(rows) >= 80 and len(counts) >= 8
                      and counts.max()/len(rows) <= .20)
-        qualified = (supported and raw in legal and m[rows, raw].all()
-                     and matching.mean() >= .95 and kl.mean() <= .25)
+        nonlegality_qualified = bool(supported and matching.mean() >= .95
+                                    and kl.mean() <= .25)
+        qualified = (nonlegality_qualified and raw in legal and m[rows, raw].all())
         expected = p[rows, raw] * matching
-        mass = float(expected.sum()) if qualified else 0.
+        # Accumulate float32 probabilities in float64 so the same covered
+        # rows have identical mass before/after a purely distributional split.
+        # Otherwise regrouping roundoff can outrank a real KL improvement.
+        mass = float(np.sum(expected, dtype=np.float64)) if qualified else 0.
         purity = np.bincount(top[rows], minlength=len(actions)).max()/len(rows)
         can_gate = raw in legal or depth < MAX_DEPTH
         potential = (0. if qualified or not can_gate else
                      float(len(rows)*purity**3*np.exp(-max(0., kl.mean()))))
-        return _Leaf(rows, depth, legal, z, mass, potential, float(kl.sum()))
-
-    def quick(rows, legal):
-        if not len(rows):
-            return 0.
-        raw = int(np.argmax(p[rows].mean(0)))
-        purity = float(np.mean(top[rows] == raw))
-        return len(rows)*purity**3*(1. if raw in legal else .65)
+        return _Leaf(rows, depth, legal, z, mass, potential, float(np.sum(kl, dtype=np.float64)),
+                     raw, nonlegality_qualified)
 
     def candidates(part, variant):
         rows = part.rows
@@ -178,12 +205,20 @@ def fit_independent_structure(
                 return
             if action is not None and len(c) < 80:
                 return
+            if action is not None and not len(a):
+                # Empty physical-mask fallbacks are sometimes necessary to
+                # prove a movement already faithful on the fit cohort. They
+                # are not extra partitions of a qualified WAIT-only region.
+                if (part.qualified_mass > 0 or action != part.raw_action
+                        or action in part.legal or not part.nonlegality_qualified
+                        or not np.all(m[rows, action] > .5)):
+                    return
             key = (right.tobytes(), action)
             if key in seen:
                 return
             seen.add(key)
             legal = part.legal | (frozenset({action}) if action is not None else frozenset())
-            score = quick(a, part.legal) + quick(c, legal)
+            score = _quick_split_gain(rows, a, c, part.legal, legal, p)
             result.append((score, label, weight, float(b), a, c, legal, action))
 
         for action, index in enumerate(mask_indices):
@@ -242,12 +277,21 @@ def fit_independent_structure(
         run_best = root
         history = []
         explored = 1
+        attempted = set()
+        seen_states = {_state_key(root)}
         for round_index in range(MAX_LEAVES-1):
             proposals = []
             for state_index, state in enumerate(beam):
+                state_key = _state_key(state)
+                if len(state.leaves) >= MAX_LEAVES:
+                    continue
                 for index, part in enumerate(state.leaves):
                     for candidate in candidates(part, variant):
-                        proposals.append((candidate[0], state_index, index, candidate, state))
+                        transition = (state_key, index, candidate[2].tobytes(),
+                                      np.float32(candidate[3]).tobytes())
+                        if transition not in attempted:
+                            proposals.append((candidate[0], state_index, index,
+                                              candidate, state, transition))
             if not proposals:
                 break
             # Reserve half the exact-fit budget for informative state splits;
@@ -262,7 +306,8 @@ def fit_independent_structure(
                                key=lambda c: (-c[0], c[1], c[2], c[3][1]))
             chosen += remaining[:budget-len(chosen)]
             next_states = []
-            for _, _, index, c, state in chosen:
+            for _, _, index, c, state, transition in chosen:
+                attempted.add(transition)
                 _, _, weight, bias, a, b, legal, _ = c
                 old = state.leaves[index]
                 weights, biases = state.weights.copy(), state.bias.copy()
@@ -281,22 +326,41 @@ def fit_independent_structure(
                 right.append(-1-new_leaf)
                 parts[index] = leaf(a, old.depth+1, old.legal)
                 parts.append(leaf(b, old.depth+1, legal))
+                # Qualified regions can still be refined when their full
+                # distribution or actionable mass improves. Roundoff or a
+                # redundant guard alone cannot consume more of the budget.
+                if old.qualified_mass > 0:
+                    tolerance = max(1.e-6, len(old.rows)*_SEARCH_GAIN_EPSILON)
+                    mass_gain = parts[index].qualified_mass + parts[-1].qualified_mass-old.qualified_mass
+                    kl_gain = old.kl_sum-parts[index].kl_sum-parts[-1].kl_sum
+                    if mass_gain <= tolerance and kl_gain <= tolerance:
+                        continue
                 expanded = _State(weights, biases, left, right, parts)
+                key = _state_key(expanded)
+                if key in seen_states:
+                    continue
+                seen_states.add(key)
                 explored += 1
                 next_states.append(expanded)
                 if expanded.score(final=True) > run_best.score(final=True):
                     run_best = expanded
-            if not next_states:
-                break
-            beam = sorted(next_states, key=lambda s: s.score(), reverse=True)[:SEARCH_BUDGET["beam_width"]]
+            # Stopping is a genuine search choice. Retain existing candidates
+            # alongside growth; attempted transitions prevent re-evaluating a
+            # retained parent's same split every round. Intermediate semantic
+            # splits may still bridge to a later legal guard.
+            pool = {_state_key(state): state for state in (*beam, *next_states, run_best)}
+            previous = {_state_key(state) for state in beam}
+            beam = sorted(pool.values(), key=lambda s: s.score(), reverse=True)[:SEARCH_BUDGET["beam_width"]]
             history.append({"round": round_index+1, "proposals": len(proposals),
-                            "exact_fits": len(next_states),
+                            "exact_fits": len(chosen), "accepted_expansions": len(next_states),
+                            "retained_stopping_candidates": sum(_state_key(s) in previous for s in beam),
                             "best_fit_expected_feedback_mass": run_best.score(final=True)[0]/len(x)})
         if best is None or run_best.score(final=True) > best.score(final=True):
             best = run_best
         runs.append({"initialization": variant["initialization"],
                      "quantiles": list(variant["quantiles"]), "rounds": history,
                      "explored_topologies": explored,
+                     "exact_transition_evaluations": len(attempted),
                      "fit_expected_feedback_mass": run_best.score(final=True)[0]/len(x),
                      "fit_masked_kl": -run_best.score(final=True)[1]/len(x)})
     assert best is not None
@@ -314,6 +378,10 @@ def fit_independent_structure(
               "fit_rows": len(x), "fit_episode_count": len(set(episode)),
               "fit_target_sha256": sha256(np.ascontiguousarray(p, dtype="<f4").tobytes()).hexdigest(),
               "search_budget": dict(SEARCH_BUDGET), "search_runs": runs,
+              "candidate_score": "child_proxy_minus_parent_proxy.v2",
+              "empty_guard_rule": "unqualified_faithful_movement_missing_only_its_path_proof.v2",
+              "qualified_leaf_growth_rule": "strict_positive_actionable_mass_or_distribution_gain.v2",
+              "stopping_candidates_retained": True,
               "topology_uses_fit_only": True,
               "calibration_eligibility_validation_used": False,
               "fit_only_not_independent_certificate": True,

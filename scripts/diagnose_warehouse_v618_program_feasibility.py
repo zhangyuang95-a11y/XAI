@@ -65,6 +65,10 @@ def metric_gates(feedback, explanation):
         metric["rows"] > 0 and metric["agreement"] >= threshold
         and metric["kl"] is not None and metric["kl"] <= .25
         and metric["illegal_count"] == 0 and metric.get("path_uncertified_count", 0) == 0
+        and type(metric.get("whole_tree_raw_illegal_count")) is int
+        and metric["whole_tree_raw_illegal_count"] == 0
+        and type(metric.get("whole_tree_path_uncertified_count")) is int
+        and metric["whole_tree_path_uncertified_count"] >= 0
         for metric, threshold in ((feedback, .93), (explanation, .95)))
     return {"bc_precheck_35_30": {
                 "qualified_leaf_coverage": qualified,
@@ -73,8 +77,8 @@ def metric_gates(feedback, explanation):
             "development_30_realized": {
                 "feedback_actionable_coverage": feedback["actionable_coverage"],
                 "explanation_actionable_coverage": explanation["actionable_coverage"],
-                "passed": bool(_passes(feedback, FEEDBACK_AGREEMENT, development=True)
-                               and _passes(explanation, EXPLANATION_AGREEMENT, development=True))},
+                "passed": bool(_passes(feedback, FEEDBACK_AGREEMENT, development=True, require_whole_tree_zero=True)
+                               and _passes(explanation, EXPLANATION_AGREEMENT, development=True, require_whole_tree_zero=True))},
             "feedback": feedback, "explanation": explanation}
 
 

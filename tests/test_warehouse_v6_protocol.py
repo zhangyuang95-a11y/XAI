@@ -20,7 +20,10 @@ def _program(coverage=.35, agreement=.97, kl=.10, actionable_coverage=None):
     return {"rows": 1_000, "coverage": coverage, "agreement": agreement,
             "actionable_rows": 900,
             "actionable_coverage": actionable_coverage,
-            "kl": kl, "illegal_count": 0}
+            "kl": kl, "illegal_count": 0,
+            "path_uncertified_count": 0,
+            "whole_tree_raw_illegal_count": 0,
+            "whole_tree_path_uncertified_count": 0}
 
 
 def _online_extractions(joint_steps):

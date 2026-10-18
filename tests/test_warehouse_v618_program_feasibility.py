@@ -36,7 +36,9 @@ def test_bc_expected_coverage_does_not_count_as_realized_development_coverage():
     feedback = {"coverage": .36, "actionable_coverage": .29,
                 "expected_actionable_coverage": .31, "rows": 100,
                 "agreement": .94, "kl": .20, "illegal_count": 0,
-                "path_uncertified_count": 0}
+                "path_uncertified_count": 0,
+                "whole_tree_raw_illegal_count": 0,
+                "whole_tree_path_uncertified_count": 0}
     explanation = {**feedback, "agreement": .96, "actionable_coverage": .33}
     result = metric_gates(feedback, explanation)
     assert result["bc_precheck_35_30"]["passed"]
@@ -50,7 +52,9 @@ def test_no_qualified_rows_reports_failure_without_inventing_kl():
     metric = {"coverage": 0., "actionable_coverage": 0.,
               "expected_actionable_coverage": 0., "rows": 0,
               "agreement": 0., "kl": None, "illegal_count": 0,
-              "path_uncertified_count": 0}
+              "path_uncertified_count": 0,
+              "whole_tree_raw_illegal_count": 0,
+              "whole_tree_path_uncertified_count": 0}
     result = metric_gates(metric, metric)
     assert not result["bc_precheck_35_30"]["passed"]
     assert not result["development_30_realized"]["passed"]

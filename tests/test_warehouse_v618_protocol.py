@@ -133,7 +133,9 @@ def test_bc_program_evidence_is_bound_and_never_installed_into_actor():
 
 def test_program_illegal_action_count_cannot_be_rounded_down():
     metrics = {'coverage': .5, 'actionable_coverage': .4, 'agreement': .99,
-               'kl': .01, 'rows': 100, 'actionable_rows': 40, 'illegal_count': 0}
+               'kl': .01, 'rows': 100, 'actionable_rows': 40, 'illegal_count': 0,
+               'whole_tree_raw_illegal_count': 0, 'whole_tree_path_uncertified_count': 0,
+               'path_uncertified_count': 0}
     assert p.program_pass(metrics, purpose='feedback', development=True)
     assert not p.program_pass({**metrics, 'illegal_count': .1},
                               purpose='feedback', development=True)

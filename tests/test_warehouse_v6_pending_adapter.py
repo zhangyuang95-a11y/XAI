@@ -148,7 +148,10 @@ def test_audited_explanation_supplies_the_bound_frozen_ai_role(monkeypatch, tmp_
             "explanation_eligible": True, "max_depth": 5,
             "leaf_count": 16, "max_features_per_node": 3,
             "explanation": {"coverage": .31, "actionable_coverage": .30,
-                            "agreement": .96, "kl": .10, "illegal_count": 0},
+                            "agreement": .96, "kl": .10, "illegal_count": 0,
+                            "path_uncertified_count": 0,
+                            "whole_tree_raw_illegal_count": 0,
+                            "whole_tree_path_uncertified_count": 0},
         }},
     }
     report = {"selected_role_sha256": {"robot_2": "ai-sha"}}

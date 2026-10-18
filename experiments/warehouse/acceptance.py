@@ -1046,10 +1046,17 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
                 and measured["kl"] is not None
                 and measured["kl"] <= MAX_COVERED_KL
                 and measured["illegal_count"] == 0
-                and measured["path_uncertified_count"] == 0)
-            validation[purpose + "_passed"] = _passes(measured, threshold)
+                and measured["path_uncertified_count"] == 0
+                and (method != INDEPENDENT_SELECTIVE_METHOD or (
+                    type(measured.get("whole_tree_raw_illegal_count")) is int
+                    and measured["whole_tree_raw_illegal_count"] == 0
+                    and type(measured.get("whole_tree_path_uncertified_count")) is int
+                    and measured["whole_tree_path_uncertified_count"] >= 0)))
+            validation[purpose + "_passed"] = _passes(measured, threshold,
+                require_whole_tree_zero=method == INDEPENDENT_SELECTIVE_METHOD)
             validation["development_" + purpose + "_passed"] = _passes(
-                measured, threshold, development=True)
+                measured, threshold, development=True,
+                require_whole_tree_zero=method == INDEPENDENT_SELECTIVE_METHOD)
         if not _same_recomputed(report.get("validation"), validation):
             return False
     return True

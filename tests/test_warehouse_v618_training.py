@@ -71,7 +71,11 @@ def _programs(model):
         leaf_logits=np.array([[0., 0., 0., 0., 5.]], np.float32),
         feedback_leaves=frozenset({0}), explanation_leaves=frozenset({0}),
         report={'fit_method': INDEPENDENT_SELECTIVE_METHOD,
-                'validation': {'feedback_passed': True, 'explanation_passed': True}},
+                'validation': {'feedback_passed': True, 'explanation_passed': True,
+                    'feedback': {'whole_tree_raw_illegal_count': 0,
+                                 'whole_tree_path_uncertified_count': 0, 'path_uncertified_count': 0},
+                    'explanation': {'whole_tree_raw_illegal_count': 0,
+                                    'whole_tree_path_uncertified_count': 0, 'path_uncertified_count': 0}}},
     ) for role in AGENTS}
 
 

@@ -251,6 +251,9 @@ class FakeBackend:
         metrics = {"coverage": .50, "actionable_coverage": .40,
                    "agreement": .98, "kl": .04,
                    "illegal_count": 0, "rows": 1000, "actionable_rows": 800,
+                   "path_uncertified_count": 0,
+                   "whole_tree_raw_illegal_count": 0,
+                   "whole_tree_path_uncertified_count": 0,
                    "sample_count": 2000,
                    "certified_rows": 900}
         directory = Path(trace_dir) if trace_dir is not None else self.root / "fake_traces"
@@ -446,7 +449,10 @@ def test_packaged_acceptance_recomputes_actionable_coverage():
 
     metric = {"sample_count": 2000, "rows": 1000, "coverage": .5,
               "actionable_rows": 800, "actionable_coverage": .4,
-              "agreement": .98, "kl": .04, "illegal_count": 0}
+              "agreement": .98, "kl": .04, "illegal_count": 0,
+              "path_uncertified_count": 0,
+              "whole_tree_raw_illegal_count": 0,
+              "whole_tree_path_uncertified_count": 0}
     assert _audit_metric(metric, 2000, purpose="feedback", development=True)
     for change in ({"actionable_rows": 900},
                    {"actionable_coverage": .49},

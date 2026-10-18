@@ -2,6 +2,8 @@
 
 范围：仅重读已存在的 fit / calibration / eligibility / validation / 固定诊断 audit 轨迹和冻结 NN；没有新环境 rollout、拟合、调参、源码修改或封存集使用。以下为事后开发诊断，`publishable=false`，不能替代准入收据。
 
+本文件的实现定位针对原始诊断收据绑定的源码快照。诊断完成后另获授权的搜索修正，是后续独立改动；不改变本文件记录的旧程序、旧结果，也不能反向证明修正有效。
+
 源结果：`output/warehouse_v618_diagnostics/v614-independent-program-01/result.json`。逐叶数值和资产 SHA 见同目录 `posthoc-coverage-loss-analysis.json`；紧凑、可追溯汇总见本目录同名 JSON。
 
 ## 1. 直接结论

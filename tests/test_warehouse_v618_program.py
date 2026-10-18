@@ -13,6 +13,7 @@ from backend.training.warehouse_v6_program import (
 )
 from backend.training.warehouse_v618_selective_tree import (
     fit_independent_structure, masked_probabilities, source_feature_cost,
+    _quick_split_gain, SEARCH_BUDGET,
 )
 from env.warehouse.navigation import ACTIONS
 from tests.test_warehouse_v616_joint_actor import _encoded_rows
@@ -194,6 +195,70 @@ def test_offline_topology_adapter_recognizes_new_actor_tensor_schema():
     with pytest.raises(ValueError, match="role hash mismatch"):
         frozen_actor_topology(role.weights,
             schema=topology.schema, frozen_actor_sha256="e"*64)
+
+
+def _fit_search_target(target):
+    n = len(target)
+    x = np.zeros((n, FEATURE_DIM), np.float32)
+    mask = np.ones((n, 5), np.float32)
+    for i, action in enumerate(ACTIONS):
+        x[:, FEATURE_NAMES.index(f"legal_{action.lower()}")] = mask[:, i]
+    x[:, FEATURE_NAMES.index("self_row")] = np.tile(np.arange(24)/24, n//24)
+    return fit_independent_structure(x, mask, target,
+        [f"fit:{i//24}" for i in range(n)], feature_names=FEATURE_NAMES,
+        actor_role_sha256="a"*64)
+
+
+def test_candidate_ranking_uses_gain_instead_of_large_pure_parent_mass():
+    target = np.zeros((1100, 5), np.float32)
+    target[:1000, ACTIONS.index("WAIT")] = 1.
+    target[1000:1050, ACTIONS.index("LEFT")] = 1.
+    target[1050:, ACTIONS.index("RIGHT")] = 1.
+    legal = frozenset(range(5))
+    # The old absolute proxy ranked 1000 unchanged pure rows above a useful
+    # 100-row split. Subtracting the parent's score makes them comparable.
+    pure_gain = _quick_split_gain(np.arange(1000), np.arange(500),
+        np.arange(500, 1000), legal, legal, target)
+    mixed_gain = _quick_split_gain(np.arange(1000, 1100), np.arange(1000, 1050),
+        np.arange(1050, 1100), legal, legal, target)
+    assert pure_gain == 0.
+    assert mixed_gain == pytest.approx(87.5)
+
+
+def test_wait_policy_never_spends_nodes_on_empty_movement_guards():
+    target = np.tile(np.array([.05, .05, .05, .05, .80], np.float32), (240, 1))
+    structure, report = _fit_search_target(target)
+    assert structure["leaf_count"] == 1
+    assert not len(structure["split_weights"])
+    assert report["stopping_candidates_retained"]
+    assert all(run["explored_topologies"] == 1 for run in report["search_runs"])
+
+
+def test_empty_guard_is_still_available_for_faithful_uncertified_movement():
+    target = np.tile(np.array([.025, .025, .025, .90, .025], np.float32), (240, 1))
+    structure, report = _fit_search_target(target)
+    assert structure["leaf_count"] == 2
+    weight = structure["split_weights"][0]
+    assert np.flatnonzero(weight).tolist() == [FEATURE_NAMES.index("legal_right")]
+    assert structure["split_bias"][0] == -.5
+    # Only three fixed initializations and the existing exact-fit/beam budget
+    # are used; adding stopping choices must not increase the search budget.
+    assert report["search_budget"] == SEARCH_BUDGET
+    assert all(run["exact_transition_evaluations"] <= 15*SEARCH_BUDGET["exact_candidates_per_round"]
+               for run in report["search_runs"])
+
+
+def test_qualified_wait_leaf_can_refine_when_full_distribution_really_improves():
+    wait = np.where(np.tile(np.arange(24), 10) < 12, .60, .95).astype(np.float32)
+    target = np.repeat(((1-wait)/4)[:, None], 5, axis=1)
+    target[:, 4] = wait
+    structure, report = _fit_search_target(target)
+    assert structure["leaf_count"] == 2
+    assert np.flatnonzero(structure["split_weights"][0]).tolist() == [FEATURE_NAMES.index("self_row")]
+    probabilities = masked_probabilities(structure["initial_leaf_logits"], np.ones((2, 5)))
+    np.testing.assert_allclose(sorted(probabilities[:, 4]), [.60, .95], atol=.001)
+    assert any(row["retained_stopping_candidates"] > 0
+               for run in report["search_runs"] for row in run["rounds"])
 
 
 def test_selective_program_roundtrips_and_audits_real_legacy_npz(tmp_path):

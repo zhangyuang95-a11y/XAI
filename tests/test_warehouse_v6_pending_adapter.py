@@ -34,7 +34,8 @@ def test_legacy_pending_config_remains_readable_without_promoting_old_actor(
     assert warehouse._v6_config()["model_version"] == current["model_version"]
 
     successor = {**current, "version": warehouse.V6_MODEL_VERSION,
-                 "model_version": warehouse.V6_MODEL_VERSION}
+                 "model_version": warehouse.V6_MODEL_VERSION,
+                 "feature_schema_sha256": warehouse.V6_FEATURE_SCHEMA_SHA256}
     successor_path = tmp_path / "v616.json"
     successor_path.write_text(json.dumps(successor))
     monkeypatch.setattr(warehouse, "V6_CONFIG_PATH", successor_path)
@@ -51,7 +52,8 @@ def test_v6_runtime_rejects_artifact_model_version_drift(monkeypatch):
     entry = {"readiness": True, "actor_path": "unused.npz",
              "actor_sha256": "a" * 64,
              "role_sha256": {"human": "b" * 64, "ai": "c" * 64},
-             "model_version": warehouse.V6_MODEL_VERSION}
+             "model_version": warehouse.V6_MODEL_VERSION,
+                 "feature_schema_sha256": warehouse.V6_FEATURE_SCHEMA_SHA256}
     monkeypatch.setattr(warehouse, "policy_artifacts_v6",
                         lambda _: {"raw": entry})
     monkeypatch.setattr(warehouse.FrozenWarehouseV6Actor, "load",

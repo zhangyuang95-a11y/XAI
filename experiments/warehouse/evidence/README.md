@@ -39,3 +39,6 @@ development, formal, independent audit, and held-out seed blocks separate.
 The sealed v6.0 independent program audit and held-out blocks have not been
 used. A later candidate may use a new sealed block only under a new `v6.n`
 release ID after the current candidate is closed.
+
+
+- `warehouse-v617-risk-capacity-diagnostic.json`: retired 6120 scenes only; large structural protection regions but untrained transplant fails delivery/collision/shutdown quality. Not joint-training or admission evidence.

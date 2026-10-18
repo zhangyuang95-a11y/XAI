@@ -21,10 +21,12 @@ from backend.inference.warehouse_structured_v5 import (
 from backend.training.warehouse_v6_actor import (
     FrozenWarehouseV6Actor, FEATURE_SCHEMA_SHA256 as V6_FEATURE_SCHEMA_SHA256,
     LEGACY_MODEL_VERSION as V6_LEGACY_MODEL_VERSION,
+    V616_MODEL_VERSION,
     MODEL_VERSION as V6_MODEL_VERSION,
 )
 from backend.training.warehouse_v6_program import WarehouseV6Program
 from env.warehouse.public_action_features_v614 import (
+    ACTOR_FEATURE_SCHEMA_SHA256 as LEGACY_V6_FEATURE_SCHEMA_SHA256,
     ACTION_PHYSICS_CONFIG_SHA256, validate_study_action_physics,
 )
 from env.warehouse.public_observation_v6 import (
@@ -91,9 +93,9 @@ def _v6_config():
         raise RuntimeError("Warehouse v6 policy configuration unavailable") from exc
     if (config.get("version") != config.get("model_version")
             or config.get("model_version") not in
-               (V6_LEGACY_MODEL_VERSION, V6_MODEL_VERSION)
+               (V6_LEGACY_MODEL_VERSION, V616_MODEL_VERSION, V6_MODEL_VERSION)
             or config.get("observation_version") != V6_OBSERVATION_VERSION
-            or config.get("feature_schema_sha256") != V6_FEATURE_SCHEMA_SHA256
+            or config.get("feature_schema_sha256") != (V6_FEATURE_SCHEMA_SHA256 if config.get("model_version") == V6_MODEL_VERSION else LEGACY_V6_FEATURE_SCHEMA_SHA256)
             or config.get("action_physics_config_sha256") != ACTION_PHYSICS_CONFIG_SHA256
             or config.get("release_id") != V6_RELEASE_ID
             or config.get("pilot_scenario_seeds") != list(range(1000, 1024))

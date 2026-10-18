@@ -27,7 +27,7 @@ from backend.training.warehouse_v6_actor import (
     FrozenWarehouseV6Role, role_sha256,
 )
 from env.warehouse.navigation import ACTIONS
-from env.warehouse.public_action_features_v614 import (
+from env.warehouse.public_action_features_v617 import (
     TREE_FEATURE_DIM as FEATURE_DIM, TREE_FEATURE_NAMES as FEATURE_NAMES,
 )
 
@@ -43,9 +43,7 @@ _EPISODE_PATTERN = re.compile(r"^(public-teacher|nn-visit):([0-9]+)$")
 
 def _bound_role_sha256(role: FrozenWarehouseV6Role) -> str:
     """Recompute the hash under the loaded Actor's original action semantics."""
-    version = (MODEL_VERSION if role.core_bound_mode == CORE_BOUND_MODE
-               else LEGACY_MODEL_VERSION)
-    return role_sha256(role.weights, model_version=version)
+    return role_sha256(role.weights, model_version=role.model_version)
 
 
 @dataclass(frozen=True)
@@ -106,7 +104,7 @@ class EpisodeRows:
         y = np.asarray(self.teacher_actions)
         p = np.asarray(self.frozen_nn_masked_probs)
         c = np.asarray(self.actual_collision)
-        if (x.ndim != 2 or x.shape[1] != FEATURE_DIM
+        if (x.ndim != 2 or x.shape[1] not in (FEATURE_DIM, 171)
                 or m.shape != (len(x), len(ACTIONS))
                 or y.shape != (len(x),)
                 or p.shape != (len(x), len(ACTIONS))
@@ -373,7 +371,7 @@ def fit_episode_separated_core(groups: Mapping[str, EpisodeRows], *,
     fit = groups["fit"]
     indices, balancing = _balanced_fit_indices(fit, config)
     target = fit.frozen_nn_masked_probs[indices]
-    schema = FeatureSchema(tuple(FEATURE_NAMES), tuple(ACTIONS))
+    schema = FeatureSchema(tuple(frozen_role.feature_names), tuple(ACTIONS))
     extracted = frozen_actor_topology(
         frozen_role.weights, schema=schema,
         frozen_actor_sha256=frozen_role.role_sha256)
@@ -383,6 +381,24 @@ def fit_episode_separated_core(groups: Mapping[str, EpisodeRows], *,
         frozen_actor_sha256=frozen_role.role_sha256,
         expected_topology_sha256=expected_topology_sha256)
     candidate = to_current_core_tree_result(refitted)
+    if frozen_role.model_version == MODEL_VERSION:
+        from .warehouse_v617_risk_tree import fit_boxed_logits
+        from .warehouse_v614_certificate_tree import _leaf_stats
+        leaves = candidate.leaf_indices(fit.encoded[indices])
+        logits = candidate.leaf_logits.copy()
+        core = np.zeros_like(candidate.core_mask)
+        proven = frozen_role.certified_actions()
+        for leaf in range(candidate.leaf_count):
+            own = np.flatnonzero(leaves == leaf)
+            if not len(own) or frozen_role.weights["protected_leaf_mask"][leaf] <= 0.5:
+                continue
+            logits[leaf] = fit_boxed_logits(target[own], fit.masks[indices][own],
+                                           frozen_role.weights["tree.leaf_logits"][leaf])
+            stats = _leaf_stats(own, logits[leaf], proven[leaf], 5,
+                fit.encoded[indices], fit.masks[indices], target,
+                np.asarray(fit.episode_ids)[indices], schema)
+            core[leaf] = stats.core
+        candidate = _replace(candidate, logits, core, dict(candidate.report))
     cal = groups["calibration"]
     cal_leaves = candidate.leaf_indices(cal.encoded)
     temperatures = {}
@@ -401,6 +417,11 @@ def fit_episode_separated_core(groups: Mapping[str, EpisodeRows], *,
     scale = np.minimum(1.0, config.maximum_raw_logit_span /
                        np.maximum(span, 1e-8))
     logits *= scale[:, None]
+    if frozen_role.model_version == MODEL_VERSION:
+        from .warehouse_v617_risk_tree import project_logit_box
+        for leaf in range(candidate.leaf_count):
+            if frozen_role.weights["protected_leaf_mask"][leaf] > 0.5:
+                logits[leaf] = project_logit_box(logits[leaf], frozen_role.weights["tree.leaf_logits"][leaf])
     # Leaf fitting and calibration may change the unmasked top action. The
     # topology certificate must therefore be rechecked against these final
     # logits before a core leaf can enter any later eligibility split.
@@ -514,7 +535,7 @@ def qualify_actor_core(
 
     topology = frozen_actor_topology(
         frozen_role.weights,
-        schema=FeatureSchema(tuple(FEATURE_NAMES), tuple(ACTIONS)),
+        schema=FeatureSchema(tuple(frozen_role.feature_names), tuple(ACTIONS)),
         frozen_actor_sha256=frozen_role.role_sha256)
     topology_hash = topology.topology_sha256()
     if (expected_topology_sha256 is not None
@@ -535,7 +556,9 @@ def qualify_actor_core(
         action = int(np.argmax(extracted.leaf_logits[leaf]))
         candidate_mask[leaf] = bool(
             action in proven[leaf] and fit_visits[leaf] > 0
-            and calibration_visits[leaf] > 0)
+            and calibration_visits[leaf] > 0
+            and (frozen_role.model_version != MODEL_VERSION or
+                 frozen_role.weights["protected_leaf_mask"][leaf] > 0.5))
     candidate = _replace(extracted, extracted.leaf_logits,
                          candidate_mask, dict(extracted.report))
     fit_report, _ = _metrics(
@@ -557,7 +580,8 @@ def qualify_actor_core(
         and all(detail["qualified"] for detail in validation_report["details"]
                 if selected[detail["leaf"]]))
     report = {
-        "method": "actor_joint_core_qualification_v2",
+        "method": ("actor_risk_protected_core_qualification_v3" if
+                   frozen_role.model_version == MODEL_VERSION else "actor_joint_core_qualification_v2"),
         "frozen_role_sha256": frozen_role.role_sha256,
         "actor_topology_sha256": topology_hash,
         "actor_tree_logits_sha256": sha256(np.ascontiguousarray(

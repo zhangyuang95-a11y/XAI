@@ -28,7 +28,7 @@ from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.public_observation_v6 import encode_public_observation
 from env.warehouse.pure_nn import action_masks
-from env.warehouse.public_action_features_v614 import encode_actor_tree_features
+from env.warehouse.public_action_features_v617 import encode_actor_tree_features
 
 
 def _manual_program(*, oblique: bool = False) -> WarehouseV6Program:
@@ -99,8 +99,10 @@ def test_recalibrated_leaf_action_is_recertified_before_eligibility(monkeypatch)
 
     class Role:
         role_sha256 = "b" * 64
+        feature_dim = FEATURE_DIM
+        feature_names = FEATURE_NAMES
         def __init__(self):
-            self.weights = weights
+            self.weights = {**weights, "protected_leaf_mask": np.ones(2, np.float32)}
         def leaf(self, encoded):
             return (encoded[:, mask_index] > 0.5).astype(np.int64)
         def logits_encoded(self, encoded):
@@ -222,7 +224,7 @@ def test_actor_core_qualification_uses_current_logits_and_disjoint_purposes():
         min_internal_expected_actionable_mass=0.0)
     mask, report = qualify_actor_core(groups, frozen_role=role, config=config)
     assert mask.shape == (16,)
-    assert report["method"] == "actor_joint_core_qualification_v2"
+    assert report["method"] == "actor_risk_protected_core_qualification_v3"
     assert report["target_parity_max_abs_error"]["fit"] <= 1e-7
     assert report["actor_tree_logits_sha256"]
     proofs = certified_actor_actions(role)

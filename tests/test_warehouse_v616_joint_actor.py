@@ -25,7 +25,7 @@ from backend.training import warehouse_v6_runner as runner
 from env.warehouse.domain import AgentState, DeliveryTask, WarehouseState
 from env.warehouse.layouts import STUDY_MAP_LAYOUT
 from env.warehouse.navigation import ACTIONS
-from env.warehouse.public_action_features_v614 import (
+from env.warehouse.public_action_features_v617 import (
     TREE_MASK_START, encode_actor_tree_features,
 )
 from env.warehouse.public_observation_v6 import encode_public_observation
@@ -65,6 +65,8 @@ def _guarded_role():
         actor.tree.guard_node_mask.zero_()
         actor.tree.guard_node_mask[0] = True
     actor.refresh_sparse_support()
+    with torch.no_grad():
+        actor.protected_leaf_mask[:2] = 1
     actor.install_certified_core_mask(np.asarray([1, 1] + [0] * (
         TREE_LEAVES - 2), dtype=np.float32))
     return actor
@@ -113,7 +115,7 @@ def test_public_core_initializer_keeps_guard_fixed_and_other_nodes_trainable():
         left_refs=source["tree.left_refs"].astype(np.int64),
         right_refs=source["tree.right_refs"].astype(np.int64),
         leaf_logits=source["tree.leaf_logits"],
-        core_mask=source["core_leaf_mask"],
+        core_mask=source["protected_leaf_mask"],
         node_count=1, leaf_count=2, report={"test": True})
     fresh = WarehouseV6Actor().actors[AGENTS[1]]
     report = fresh.initialize_tree_from_core_result(result)
@@ -137,6 +139,7 @@ def test_core_install_rejects_move_without_explicit_mask_and_refresh_invalidates
     with pytest.raises(ValueError, match="path legality proof"):
         actor.install_certified_core_mask(np.asarray([0, 1] + [0] * (
             TREE_LEAVES - 2), dtype=np.float32))
+    actor.prune_unproven_core_leaves()
     actor.install_certified_core_mask(np.zeros(TREE_LEAVES, dtype=np.float32))
 
 
@@ -435,10 +438,20 @@ def test_legacy_bound_mode_is_dispatched_from_metadata(tmp_path):
     metadata = json.loads(str(arrays["metadata_json"].item()))
     assert metadata["model_version"] == MODEL_VERSION
     assert metadata["core_bound_mode"] == CORE_BOUND_MODE
+    from env.warehouse.public_action_features_v614 import ACTOR_FEATURE_SCHEMA_SHA256
+    from backend.training.warehouse_v6_actor import _LEGACY_TENSOR_NAMES
     metadata["model_version"] = LEGACY_MODEL_VERSION
     metadata["core_bound_mode"] = LEGACY_CORE_BOUND_MODE
+    metadata["feature_dim"] = 171
+    metadata["feature_schema_sha256"] = ACTOR_FEATURE_SCHEMA_SHA256
+    for role in AGENTS:
+        arrays[f"{role}.core_leaf_mask"] = arrays.pop(f"{role}.protected_leaf_mask")
+        arrays[f"{role}.tree.split.weight"] = arrays[f"{role}.tree.split.weight"][:, :171]
+        for name in ("gate.0.weight", "action_residual.0.weight"):
+            value = arrays[f"{role}.{name}"]
+            arrays[f"{role}.{name}"] = np.concatenate((value[:, :171], value[:, 173:]), axis=1)
     metadata["role_sha256"] = {role: role_sha256({
-        name: arrays[f"{role}.{name}"] for name in _TENSOR_NAMES},
+        name: arrays[f"{role}.{name}"] for name in _LEGACY_TENSOR_NAMES},
         model_version=LEGACY_MODEL_VERSION) for role in AGENTS}
     arrays["metadata_json"] = np.asarray(json.dumps(metadata, sort_keys=True))
     legacy_path = tmp_path / "v614.npz"

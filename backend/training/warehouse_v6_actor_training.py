@@ -19,7 +19,7 @@ from env.warehouse.pure_nn import AGENTS
 from env.warehouse.public_observation_v6 import (
     OBSERVATION_DIM, OBSERVATION_VERSION,
 )
-from env.warehouse.public_action_features_v614 import (
+from env.warehouse.public_action_features_v617 import (
     ACTION_FEATURE_DIM, ACTION_PHYSICS_CONFIG_SHA256,
     action_features_from_tree_encoded,
     encode_actor_tree_features,
@@ -29,7 +29,7 @@ from .warehouse_v6_actor import (
     FEATURE_DIM, FEATURE_SCHEMA_SHA256,
     TREE_DEPTH, TREE_LEAVES, TREE_NODES, MAX_SPLIT_FEATURES, RESIDUAL_WIDTH,
     MIN_RESIDUAL_BOUND, MAX_RESIDUAL_BOUND, CORE_LOW_GATE_BOUND,
-    CORE_BOUND_MODE, CORE_MARGIN_FLOOR,
+    CORE_BOUND_MODE, CORE_MARGIN_FLOOR, PROTECTED_RESIDUAL_CAP,
     GATE_WIDTH, GEOMETRY_DIM,
     _POSITION_COLUMNS, _MOVE, TREE_GRADIENT_SCALE,
     _TENSOR_NAMES, _role_arrays, role_sha256,
@@ -40,6 +40,7 @@ from .warehouse_v6_tree_routing import (
     split_scores as hard_tree_split_scores,
 )
 from env.warehouse.public_action_features_v614 import TREE_MASK_START
+from env.warehouse.public_action_features_v617 import CONTEXT_INDEX
 
 def policy_features_torch(obs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     if (obs.shape[-1:] != (OBSERVATION_DIM,)
@@ -107,12 +108,22 @@ class SparseHardTree(nn.Module):
                                       strict, missing_keys, unexpected_keys,
                                       error_msgs)
 
-    def effective_weights(self) -> torch.Tensor:
-        weights = self.split.weight
+    @staticmethod
+    def sparse_support(weights: torch.Tensor) -> torch.Tensor:
+        """A derived risk bit costs its two underlying public features."""
         selected = torch.argsort(-weights.abs(), dim=-1, stable=True)[
             :, :MAX_SPLIT_FEATURES]
-        dynamic = torch.zeros_like(weights, dtype=torch.bool).scatter_(
+        support = torch.zeros_like(weights, dtype=torch.bool).scatter_(
             -1, selected, True)
+        costly = support[:, CONTEXT_INDEX] & (weights[:, CONTEXT_INDEX] != 0)
+        drop = torch.where(selected[:, -1] == CONTEXT_INDEX,
+                           selected[:, -2], selected[:, -1])
+        support[torch.arange(len(weights), device=weights.device)[costly], drop[costly]] = False
+        return support
+
+    def effective_weights(self) -> torch.Tensor:
+        weights = self.split.weight
+        dynamic = self.sparse_support(weights)
         hard = torch.where(self.support_fixed[0], self.support_mask,
                            dynamic).to(weights.dtype)
         # Exactly three features affect hard routing. A deterministic local
@@ -124,10 +135,7 @@ class SparseHardTree(nn.Module):
     def refresh_sparse_support(self) -> dict:
         """Lock the current top-three support without discarding alternatives."""
         with torch.no_grad():
-            selected = torch.argsort(-self.split.weight.abs(), dim=-1,
-                                     stable=True)[:, :MAX_SPLIT_FEATURES]
-            support = torch.zeros_like(self.support_mask).scatter_(
-                -1, selected, True)
+            support = self.sparse_support(self.split.weight)
             self.support_mask.copy_(support)
             self.support_fixed[0] = True
             mask_indices = tuple(range(TREE_MASK_START,
@@ -282,6 +290,7 @@ class RoleActor(nn.Module):
         # A public-training-data core is an Actor tensor, not a runtime action
         # rule. Its bound is applied inside the NN forward pass for both arms.
         self.register_buffer("core_leaf_mask", torch.zeros(TREE_LEAVES))
+        self.register_buffer("protected_leaf_mask", torch.zeros(TREE_LEAVES))
         # Only the certified rows are locked at the 75% topology freeze. Keep
         # the hook attached across checkpoint loads; the runner restores the
         # phase with set_certified_core_logits_trainable().
@@ -301,6 +310,7 @@ class RoleActor(nn.Module):
                            (MAX_RESIDUAL_BOUND - MIN_RESIDUAL_BOUND), 1e-4, 1-1e-4)
         with torch.no_grad():
             self.core_leaf_mask.zero_()
+            self.protected_leaf_mask.zero_()
             self.leaf_bound_logits.copy_(torch.from_numpy(
                 np.log(fraction / (1.0 - fraction)).astype(np.float32)))
         return report
@@ -340,6 +350,7 @@ class RoleActor(nn.Module):
             self.tree.leaf_logits.copy_(torch.from_numpy(np.array(
                 values["leaf_logits"], dtype=np.float32, copy=True)))
             self.core_leaf_mask.zero_()
+            self.protected_leaf_mask.copy_(torch.from_numpy(core).to(self.protected_leaf_mask.device))
             # Every leaf retains a learned residual budget. In core leaves a
             # learned pre-action gate makes the effective budget small in
             # ordinary states and can release it in conflict states.
@@ -359,7 +370,9 @@ class RoleActor(nn.Module):
                 if lhs or rhs:
                     self.tree.guard_node_mask[node] = True
         support = self.tree.refresh_sparse_support()
-        self.install_certified_core_mask(core)
+        for node in getattr(result, "report", {}).get("fixed_node_ids", []):
+            self.tree.guard_node_mask[node] = True
+        self.install_certified_core_mask(np.zeros_like(core))
         self.tree.set_topology_trainable(True)
         return {"node_count": nodes, "leaf_count": leaves,
                 "core_leaf_count": int(core.sum()),
@@ -376,7 +389,7 @@ class RoleActor(nn.Module):
     def _core_leaf_logit_gradient(self, gradient: torch.Tensor) -> torch.Tensor:
         if self._certified_core_logits_trainable:
             return gradient
-        return gradient.masked_fill(self.core_leaf_mask[:, None] > 0.5, 0.0)
+        return gradient.masked_fill(self.protected_leaf_mask[:, None] > 0.5, 0.0)
 
     def set_certified_core_logits_trainable(self, enabled: bool) -> dict:
         """Lock certified leaf outputs after topology freeze, not other leaves.
@@ -389,7 +402,7 @@ class RoleActor(nn.Module):
         self._certified_core_logits_trainable = bool(enabled)
         return {"certified_core_logits_trainable": bool(enabled),
                 "frozen_leaf_count": (0 if enabled else
-                                      int(self.core_leaf_mask.sum().item()))}
+                                      int(self.protected_leaf_mask.sum().item()))}
 
     def refresh_sparse_support(self) -> dict:
         """Select top-three supports and invalidate all prior core claims."""
@@ -408,9 +421,9 @@ class RoleActor(nn.Module):
                 or np.any((core != 0.0) & (core != 1.0))
                 or np.any(core[leaves:] != 0.0)):
             raise ValueError("Warehouse certified core mask invalid")
-        weights = _role_arrays(self)
-        weights["core_leaf_mask"] = core.copy()
-        frozen = FrozenWarehouseV6Role(weights)
+        frozen = FrozenWarehouseV6Role(_role_arrays(self))
+        if np.any(core > self.protected_leaf_mask.detach().cpu().numpy()):
+            raise ValueError("Warehouse qualified core is not a protected subset")
         with torch.no_grad():
             self.core_leaf_mask.copy_(torch.from_numpy(core).to(
                 self.core_leaf_mask.device))
@@ -428,8 +441,8 @@ class RoleActor(nn.Module):
         rejecting any unpruned invalid certificate.
         """
         weights = _role_arrays(self)
-        original = weights["core_leaf_mask"].copy()
-        weights["core_leaf_mask"] = np.zeros_like(original)
+        original = weights["protected_leaf_mask"].copy()
+        weights["protected_leaf_mask"] = np.zeros_like(original)
         proven = FrozenWarehouseV6Role(weights).certified_actions()
         raw_action = np.argmax(weights["tree.leaf_logits"], axis=-1)
         invalid = [leaf for leaf in range(len(proven))
@@ -437,6 +450,7 @@ class RoleActor(nn.Module):
         if invalid:
             with torch.no_grad():
                 self.core_leaf_mask[invalid] = 0.0
+                self.protected_leaf_mask[invalid] = 0.0
         # This also checks the unmodified core leaves and the deployed tree.
         FrozenWarehouseV6Role(_role_arrays(self))
         return len(invalid)
@@ -514,14 +528,15 @@ class RoleActor(nn.Module):
         learned_bound = path @ self.bounds()
         gate_input, relation = self._relation_features(encoded)
         gate = torch.sigmoid(self.gate(gate_input).squeeze(-1))
-        core = (path.detach() @ self.core_leaf_mask) > 0.5
+        core = (path.detach() @ self.protected_leaf_mask) > 0.5
         physical = encoded[..., TREE_MASK_START:TREE_MASK_START + len(ACTIONS)]
         masked_tree = tree_logits.masked_fill(physical <= 0.5, -1.0e9)
         top_two = masked_tree.topk(2, dim=-1).values
         margin_cap = ((top_two[..., 0] - top_two[..., 1] -
                        CORE_MARGIN_FLOOR) / 2.0).clamp_min(0.0)
         effective = torch.where(core,
-                                torch.minimum(gate * learned_bound, margin_cap),
+                                torch.minimum(torch.minimum(gate * learned_bound, margin_cap),
+                                              torch.full_like(margin_cap, PROTECTED_RESIDUAL_CAP)),
                                 gate * learned_bound)
         score = self.action_residual(relation).squeeze(-1)
         bounded_residual = effective.unsqueeze(-1) * torch.tanh(score)
@@ -614,6 +629,7 @@ def export_actor(model: WarehouseV6Actor, path: str | Path, *, pair_seed: int,
         "core_low_gate_bound": CORE_LOW_GATE_BOUND,
         "core_bound_mode": CORE_BOUND_MODE,
         "core_margin_floor": CORE_MARGIN_FLOOR,
+        "protected_residual_cap": PROTECTED_RESIDUAL_CAP,
         "relation_geometry_dim": GEOMETRY_DIM,
         "action_feature_dim": ACTION_FEATURE_DIM,
         "gate_width": GATE_WIDTH,

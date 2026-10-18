@@ -19,14 +19,14 @@ from typing import Mapping, Sequence
 
 INITIAL_RELEASE_ID = "policylens-three-domain-20261016.v6.0"
 BUDGETS = (200_000, 300_000, 400_000)
-DEVELOPMENT_PAIR_SEEDS = (6120, 6121, 6122)
+DEVELOPMENT_PAIR_SEEDS = (6130, 6131, 6132)
 FORMAL_PAIR_SEEDS = (6101, 6102, 6103)
 # Candidate-only development seed. PairRunSpec and release acceptance continue
 # to admit only the registered three development and three formal pairs.
 EXPLORATORY_PAIR_SEEDS = (12469, 12470, 12471)
-DEVELOPMENT_SELECTION_SEEDS = tuple(range(261_100, 261_124))
-DEVELOPMENT_STRESS_BASE_SEEDS = tuple(range(261_200, 261_456))
-DEVELOPMENT_PROGRAM_AUDIT_SEEDS = tuple(range(261_500, 261_524))
+DEVELOPMENT_SELECTION_SEEDS = tuple(range(262_100, 262_124))
+DEVELOPMENT_STRESS_BASE_SEEDS = tuple(range(262_200, 262_456))
+DEVELOPMENT_PROGRAM_AUDIT_SEEDS = tuple(range(262_500, 262_524))
 DEVELOPMENT_ACTION_STREAMS = (0, 1, 2)
 FORMAL_SELECTION_SEEDS = tuple(range(240_048, 240_072))
 FORMAL_PROGRAM_PREAUDIT_SEEDS = tuple(range(240_072, 240_096))
@@ -47,13 +47,13 @@ TOPOLOGY_REFRESH_PERCENTAGES = (24, 48, 72)
 TOPOLOGY_FREEZE_PERCENTAGE = 75
 FINAL_PROGRAM_SPLIT_COUNTS = {"fit": 50, "calibration": 25,
                               "eligibility": 25, "validation": 24}
-REGISTERED_CANDIDATE_ID = "warehouse-v616-joint-certified-01"
-REGISTERED_ARCHITECTURE_MODE = "public_affordance_joint_certified_tree_256_residual.v6.16-candidate"
+REGISTERED_CANDIDATE_ID = "warehouse-v617-risk-protected-01"
+REGISTERED_ARCHITECTURE_MODE = "risk_stratified_protected_tree_256_residual.v6.17-candidate"
 # A candidate names its fitting implementation explicitly. This list is not
 # a release selection: the selected method is sealed only after development
 # quality and independent fidelity gates pass. The old axis fit is excluded.
-REGISTERED_PROGRAM_FIT_METHOD = "actor_joint_certified_topology_v2"
-REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD = "actor_joint_core_qualification_v2"
+REGISTERED_PROGRAM_FIT_METHOD = "actor_risk_stratified_protected_topology_v3"
+REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD = "actor_risk_protected_core_qualification_v3"
 PROGRAM_FIT_METHOD_CANDIDATES = (REGISTERED_PROGRAM_FIT_METHOD,)
 # The failed 11969 v2 screen does not retire its extractor algorithm: a new
 # Actor may reuse that implementation. Its concrete frozen Actor and source
@@ -65,7 +65,7 @@ RETIRED_119_SOURCE_CLOSURE_SHA256 = frozenset({
 })
 RETIRED_119_MODEL_VERSION = "warehouse-dual-actor.v6.9-exploratory"
 REGISTERED_BC_RECIPE_VERSION = (
-    "warehouse-public-dual-bc.v6.16-joint-certified")
+    "warehouse-public-dual-bc.v6.17-risk-protected")
 LEGACY_V614_BC_RECIPE_VERSION = (
     "warehouse-public-dual-bc.v6.14-public-affordance-exploratory")
 LEGACY_V614_BC_SPEC_SHA256 = (
@@ -133,17 +133,17 @@ REGISTERED_BC_SPEC = {
     "warmup_fit_source": "frozen_warmup_full_nn_masked_distribution",
     "final_internal_source": "one_final_frozen_full_bc_actor",
     "program_fit_method": REGISTERED_PROGRAM_FIT_METHOD,
-    "actor_model_version": "warehouse-dual-actor.v6.16-joint-certified",
-    "core_bound_mode": "certified_margin_cap_v2",
+    "actor_model_version": "warehouse-dual-actor.v6.17-risk-protected",
+    "core_bound_mode": "fit_protected_margin_cap_v3",
     "actor_topology_refresh": {
         "bc": "after_each_fit_stage",
         "certificate_invalidation": "each_refresh",
         "freeze_percentage": TOPOLOGY_FREEZE_PERCENTAGE,
         "ppo_percentages": list(TOPOLOGY_REFRESH_PERCENTAGES),
     },
-    "feature_schema_sha256": "03f16ff6a86a6c2f03f50f7422b58dd800da191b253d463e0dac8a8c1b5be36d",
+    "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
     "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
-    "executable_recipe_file_sha256": "f6547a33cd2905a803d1f436743c1d8a7744e5d8b3d1d5b6cab82eb9315b398b",
+    "executable_recipe_file_sha256": "db2ba32d33a28b76ddae1a1da4eabad4827e971c7bcbc0f263c886f7e3e842bd",
 }
 REGISTERED_RISK_DUAL_CONFIG = {
     "target": 0.04, "window_episodes": 128, "minimum_episodes": 64,
@@ -538,6 +538,9 @@ def bc_report_valid(report: Mapping, pair_seed: int,
                 return False
         if (not isinstance(final.get("roles"), Mapping)
                 or set(final["roles"]) != set(ROLES)):
+            return False
+        if not legacy_v614 and (final.get("quality_screen_seeds") != report.get("quality_screen_seeds")
+                or not quality_pass(final.get("quality_screen", {}).get("summary", {}), development=True)):
             return False
         for role in ROLES:
             actor_core = final["roles"][role].get("actor_core_qualification")

@@ -72,7 +72,7 @@ class CoreTreeResult:
     train_episode_ids: frozenset[str]
 
     def __post_init__(self) -> None:
-        if (self.split_weights.shape != (MAX_LEAVES - 1, FEATURE_DIM)
+        if (self.split_weights.shape not in ((MAX_LEAVES - 1, FEATURE_DIM), (MAX_LEAVES - 1, 173))
                 or self.split_bias.shape != (MAX_LEAVES - 1,)
                 or self.left_refs.shape != (MAX_LEAVES - 1,)
                 or self.right_refs.shape != (MAX_LEAVES - 1,)
@@ -144,10 +144,10 @@ class CoreTreeResult:
 
     def leaf_indices(self, encoded: np.ndarray) -> np.ndarray:
         x = np.asarray(encoded, dtype=np.float32)
-        if x.ndim != 2 or x.shape[1] != FEATURE_DIM or not np.isfinite(x).all():
+        if x.ndim != 2 or x.shape[1] != self.split_weights.shape[1] or not np.isfinite(x).all():
             raise ValueError("invalid Warehouse core tree public features")
         validate_certification_domain(
-            x, _MASK_INDICES, certified_feature_bounds(tuple(FEATURE_NAMES)))
+            x, _MASK_INDICES, certified_feature_bounds(tuple(FEATURE_NAMES[:x.shape[1]])))
         leaves = hard_tree_leaf_indices(
             x, self.split_weights, self.split_bias,
             self.left_refs, self.right_refs, self.node_count, MAX_DEPTH)

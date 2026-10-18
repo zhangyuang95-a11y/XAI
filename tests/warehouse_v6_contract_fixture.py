@@ -176,6 +176,12 @@ def bc_receipt(pair_seed: int, source_closure_sha256: str) -> dict:
         "final_bc_internal_precheck_receipt": {
             "path": "/tmp/candidate/final-bc-precheck.json", "sha256": ""},
     }
+    result["quality_screen_seeds"] = list(p.DEVELOPMENT_SELECTION_SEEDS)
+    result["final_bc_internal_precheck"]["quality_screen_seeds"] = list(p.DEVELOPMENT_SELECTION_SEEDS)
+    result["final_bc_internal_precheck"]["quality_screen"] = {"summary": {
+        "mean_deliveries": 6.0, "mean_collisions": 2.0,
+        "shutdown_episode_rate": 0.0}}
+
     result["final_bc_internal_precheck_receipt"]["sha256"] = sha256(
         (json.dumps(result["final_bc_internal_precheck"],
                     sort_keys=True, allow_nan=False) + "\n").encode()).hexdigest()

@@ -244,9 +244,10 @@ def reconstruct_public_history(frames: list[dict] | tuple[dict, ...],
     # Actor binds its larger action-affordance schema in the same public field.
     # A prefix must use one schema throughout, including when replayed later.
     from .public_action_features_v614 import ACTOR_FEATURE_SCHEMA_SHA256
+    from .public_action_features_v617 import ACTOR_FEATURE_SCHEMA_SHA256 as V617_FEATURE_SCHEMA
     frame_schema = frames[0].get("feature_schema_sha256")
     if frame_schema not in (FEATURE_SCHEMA_SHA256,
-                            ACTOR_FEATURE_SCHEMA_SHA256):
+                            ACTOR_FEATURE_SCHEMA_SHA256, V617_FEATURE_SCHEMA):
         raise ValueError("public Warehouse frame feature schema is unknown")
     for index, frame in enumerate(frames):
         if (frame.get("turn") != index or frame.get("episode_id") != episode_id

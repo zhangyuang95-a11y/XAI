@@ -21,7 +21,8 @@ from env.warehouse.pure_nn import AGENTS, action_masks
 from env.warehouse.public_observation_v6 import (
     OBSERVATION_DIM, OBSERVATION_VERSION, encode_public_observation,
 )
-from env.warehouse.public_action_features_v614 import (
+from env.warehouse import public_action_features_v614 as legacy_features
+from env.warehouse.public_action_features_v617 import (
     ACTION_FEATURE_DIM, ACTION_PHYSICS_CONFIG_SHA256,
     ACTOR_FEATURE_SCHEMA_SHA256, TREE_FEATURE_DIM,
     TREE_FEATURE_NAMES, TREE_MASK_START, action_features_from_tree_encoded,
@@ -35,7 +36,8 @@ from .warehouse_v6_tree_routing import (
 
 
 LEGACY_MODEL_VERSION = "warehouse-dual-actor.v6.14-public-affordance-exploratory"
-MODEL_VERSION = "warehouse-dual-actor.v6.16-joint-certified"
+V616_MODEL_VERSION = "warehouse-dual-actor.v6.16-joint-certified"
+MODEL_VERSION = "warehouse-dual-actor.v6.17-risk-protected"
 FEATURE_DIM = TREE_FEATURE_DIM
 FEATURE_NAMES = TREE_FEATURE_NAMES
 FEATURE_SCHEMA_SHA256 = ACTOR_FEATURE_SCHEMA_SHA256
@@ -48,8 +50,10 @@ MIN_RESIDUAL_BOUND = 0.05
 MAX_RESIDUAL_BOUND = 8.05
 CORE_LOW_GATE_BOUND = 0.12
 LEGACY_CORE_BOUND_MODE = "public_state_gate_conditioned_escape_v1"
-CORE_BOUND_MODE = "certified_margin_cap_v2"
+V616_CORE_BOUND_MODE = "certified_margin_cap_v2"
+CORE_BOUND_MODE = "fit_protected_margin_cap_v3"
 CORE_MARGIN_FLOOR = 0.26
+PROTECTED_RESIDUAL_CAP = 0.08
 GATE_WIDTH = 64
 GEOMETRY_DIM = 6
 _POSITION_COLUMNS = tuple(FEATURE_NAMES.index(name) for name in (
@@ -60,7 +64,7 @@ _MOVE = np.asarray([MOVE_DELTAS.get(action, (0, 0)) for action in ACTIONS],
                         max(1, STUDY_MAP_LAYOUT.cols - 1)], dtype=np.float32)
 TREE_GRADIENT_SCALE = 4.0
 MASK_GRADIENT_TEMPERATURE = 0.05
-_TENSOR_NAMES = (
+_LEGACY_TENSOR_NAMES = (
     "tree.split.weight", "tree.split.bias", "tree.leaf_logits",
     "tree.left_refs", "tree.right_refs", "tree.node_count", "tree.leaf_count",
     "gate.0.weight", "gate.0.bias", "gate.2.weight", "gate.2.bias",
@@ -69,6 +73,7 @@ _TENSOR_NAMES = (
     "action_residual.4.weight", "action_residual.4.bias",
     "leaf_bound_logits", "core_leaf_mask",
 )
+_TENSOR_NAMES = (*_LEGACY_TENSOR_NAMES[:-1], "protected_leaf_mask")
 
 
 def _role_arrays(actor: RoleActor) -> dict[str, np.ndarray]:
@@ -82,17 +87,19 @@ def _role_arrays(actor: RoleActor) -> dict[str, np.ndarray]:
 
 def role_sha256(weights: Mapping[str, np.ndarray], *,
                 model_version: str = MODEL_VERSION) -> str:
-    if set(weights) != set(_TENSOR_NAMES):
+    names = _TENSOR_NAMES if model_version == MODEL_VERSION else _LEGACY_TENSOR_NAMES
+    if set(weights) != set(names):
         raise ValueError("Warehouse v6 role tensor keys mismatch")
-    if model_version not in (MODEL_VERSION, LEGACY_MODEL_VERSION):
+    if model_version not in (MODEL_VERSION, V616_MODEL_VERSION, LEGACY_MODEL_VERSION):
         raise ValueError("Warehouse v6 role hash model version mismatch")
     digest = sha256()
-    if model_version == MODEL_VERSION:
+    if model_version != LEGACY_MODEL_VERSION:
         # The same tensors have different action semantics under the v6.14
         # learned escape bound and the v6.16 certified margin cap.
-        digest.update(MODEL_VERSION.encode("ascii"))
-        digest.update(CORE_BOUND_MODE.encode("ascii"))
-    for name in _TENSOR_NAMES:
+        digest.update(model_version.encode("ascii"))
+        digest.update((CORE_BOUND_MODE if model_version == MODEL_VERSION else
+                       V616_CORE_BOUND_MODE).encode("ascii"))
+    for name in names:
         value = np.ascontiguousarray(weights[name], dtype="<f4")
         digest.update(name.encode("ascii"))
         digest.update(np.asarray(value.shape, dtype="<i8").tobytes())
@@ -103,25 +110,33 @@ def role_sha256(weights: Mapping[str, np.ndarray], *,
 class FrozenWarehouseV6Role:
     def __init__(self, weights: Mapping[str, np.ndarray], *,
                  core_bound_mode: str = CORE_BOUND_MODE):
-        if core_bound_mode not in (CORE_BOUND_MODE, LEGACY_CORE_BOUND_MODE):
+        if core_bound_mode not in (CORE_BOUND_MODE, V616_CORE_BOUND_MODE, LEGACY_CORE_BOUND_MODE):
             raise ValueError("Warehouse v6 unknown core bound mode")
         self.core_bound_mode = core_bound_mode
+        self.model_version = {CORE_BOUND_MODE: MODEL_VERSION,
+                              V616_CORE_BOUND_MODE: V616_MODEL_VERSION,
+                              LEGACY_CORE_BOUND_MODE: LEGACY_MODEL_VERSION}[core_bound_mode]
+        self.feature_names = (FEATURE_NAMES if core_bound_mode == CORE_BOUND_MODE
+                              else legacy_features.TREE_FEATURE_NAMES)
+        self.feature_dim = len(self.feature_names)
+        self.protection_key = ("protected_leaf_mask" if core_bound_mode == CORE_BOUND_MODE
+                               else "core_leaf_mask")
         self.weights = {name: np.asarray(value, dtype=np.float32)
                         for name, value in weights.items()}
         expected = {
-            "tree.split.weight": (TREE_NODES, FEATURE_DIM),
+            "tree.split.weight": (TREE_NODES, self.feature_dim),
             "tree.split.bias": (TREE_NODES,),
             "tree.leaf_logits": (TREE_LEAVES, len(ACTIONS)),
             "tree.left_refs": (TREE_NODES,),
             "tree.right_refs": (TREE_NODES,),
             "tree.node_count": (1,),
             "tree.leaf_count": (1,),
-            "gate.0.weight": (GATE_WIDTH, FEATURE_DIM + 4),
+            "gate.0.weight": (GATE_WIDTH, self.feature_dim + 4),
             "gate.0.bias": (GATE_WIDTH,),
             "gate.2.weight": (1, GATE_WIDTH),
             "gate.2.bias": (1,),
             "action_residual.0.weight": (
-                RESIDUAL_WIDTH, FEATURE_DIM + GEOMETRY_DIM + len(ACTIONS)
+                RESIDUAL_WIDTH, self.feature_dim + GEOMETRY_DIM + len(ACTIONS)
                 + ACTION_FEATURE_DIM),
             "action_residual.0.bias": (RESIDUAL_WIDTH,),
             "action_residual.2.weight": (RESIDUAL_WIDTH, RESIDUAL_WIDTH),
@@ -129,7 +144,7 @@ class FrozenWarehouseV6Role:
             "action_residual.4.weight": (1, RESIDUAL_WIDTH),
             "action_residual.4.bias": (1,),
             "leaf_bound_logits": (TREE_LEAVES,),
-            "core_leaf_mask": (TREE_LEAVES,),
+            self.protection_key: (TREE_LEAVES,),
         }
         if (set(self.weights) != set(expected)
                 or any(self.weights[name].shape != shape
@@ -137,14 +152,13 @@ class FrozenWarehouseV6Role:
                        for name, shape in expected.items())):
             raise ValueError("Warehouse v6 role tensor shape or value mismatch")
         self._validate_tree()
-        core = self.weights["core_leaf_mask"]
+        core = self.weights[self.protection_key]
         if (np.any((core != 0.0) & (core != 1.0))
                 or np.any(core[int(self.weights["tree.leaf_count"][0]):] != 0.0)):
             raise ValueError("Warehouse core leaf mask invalid")
         self._validate_core_action_legality()
         self.role_sha256 = role_sha256(
-            self.weights, model_version=(MODEL_VERSION if
-                core_bound_mode == CORE_BOUND_MODE else LEGACY_MODEL_VERSION))
+            self.weights, model_version=self.model_version)
 
     def _validate_core_action_legality(self) -> None:
         """Prove every core leaf's unmasked top action legal on its full path.
@@ -162,11 +176,11 @@ class FrozenWarehouseV6Role:
             values["tree.split.weight"], values["tree.split.bias"],
             values["tree.left_refs"].astype(np.int64),
             values["tree.right_refs"].astype(np.int64), nodes, leaves,
-            mask_indices, explicit=self.core_bound_mode == CORE_BOUND_MODE,
-            feature_bounds=certified_feature_bounds(tuple(FEATURE_NAMES)),
+            mask_indices, explicit=self.core_bound_mode != LEGACY_CORE_BOUND_MODE,
+            feature_bounds=certified_feature_bounds(tuple(self.feature_names)),
             wait_action=ACTIONS.index("WAIT"))
         for leaf, actions in enumerate(proven):
-            if (values["core_leaf_mask"][leaf] > 0.5
+            if (values[self.protection_key][leaf] > 0.5
                     and int(np.argmax(values["tree.leaf_logits"][leaf])) not in actions):
                 raise ValueError("Warehouse core leaf raw action lacks path legality proof")
 
@@ -180,8 +194,8 @@ class FrozenWarehouseV6Role:
             int(values["tree.node_count"][0]),
             int(values["tree.leaf_count"][0]),
             tuple(range(TREE_MASK_START, TREE_MASK_START + len(ACTIONS))),
-            explicit=self.core_bound_mode == CORE_BOUND_MODE,
-            feature_bounds=certified_feature_bounds(tuple(FEATURE_NAMES)),
+            explicit=self.core_bound_mode != LEGACY_CORE_BOUND_MODE,
+            feature_bounds=certified_feature_bounds(tuple(self.feature_names)),
             wait_action=ACTIONS.index("WAIT"))
 
     def _validate_tree(self) -> None:
@@ -206,6 +220,12 @@ class FrozenWarehouseV6Role:
         if np.any(np.count_nonzero(weights["tree.split.weight"], axis=-1)
                   > MAX_SPLIT_FEATURES):
             raise ValueError("Warehouse v6 irregular tree split exceeds feature limit")
+        if self.model_version == MODEL_VERSION:
+            from env.warehouse.public_action_features_v617 import CONTEXT_INDEX
+            source_cost = np.count_nonzero(weights["tree.split.weight"], axis=-1)
+            source_cost += (weights["tree.split.weight"][:, CONTEXT_INDEX] != 0)
+            if np.any(source_cost > MAX_SPLIT_FEATURES):
+                raise ValueError("Warehouse derived context exceeds source-feature budget")
 
         seen_nodes: set[int] = set()
         seen_leaves: set[int] = set()
@@ -231,12 +251,12 @@ class FrozenWarehouseV6Role:
 
     def leaf(self, encoded: np.ndarray) -> np.ndarray:
         data = np.asarray(encoded, dtype=np.float32)
-        if data.shape[-1:] != (FEATURE_DIM,):
+        if data.shape[-1:] != (self.feature_dim,):
             raise ValueError("Warehouse v6 role feature dimension mismatch")
-        flat = data.reshape(-1, FEATURE_DIM)
+        flat = data.reshape(-1, self.feature_dim)
         validate_certification_domain(
             flat, tuple(range(TREE_MASK_START, TREE_MASK_START + len(ACTIONS))),
-            certified_feature_bounds(tuple(FEATURE_NAMES)))
+            certified_feature_bounds(tuple(self.feature_names)))
         weight = self.weights["tree.split.weight"]
         selected = np.argsort(-np.abs(weight), axis=-1, kind="stable")[:, :MAX_SPLIT_FEATURES]
         sparse = np.zeros_like(weight)
@@ -249,14 +269,14 @@ class FrozenWarehouseV6Role:
 
     def components_encoded(self, encoded: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         data = np.asarray(encoded, dtype=np.float32)
-        if data.shape[-1:] != (FEATURE_DIM,) or not np.isfinite(data).all():
+        if data.shape[-1:] != (self.feature_dim,) or not np.isfinite(data).all():
             raise ValueError("invalid Warehouse v6 role features")
-        flat = data.reshape(-1, FEATURE_DIM)
+        flat = data.reshape(-1, self.feature_dim)
         leaves = self.leaf(data).reshape(-1)
         w = self.weights
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             tree = w["tree.leaf_logits"][leaves]
-            core = w["core_leaf_mask"][leaves] > 0.5
+            core = w[self.protection_key][leaves] > 0.5
             learned_bound = MIN_RESIDUAL_BOUND + (
                 MAX_RESIDUAL_BOUND - MIN_RESIDUAL_BOUND) / (
                 1.0 + np.exp(-w["leaf_bound_logits"][leaves]))
@@ -268,7 +288,7 @@ class FrozenWarehouseV6Role:
                                      w["gate.0.bias"], 0)
             gate = 1.0 / (1.0 + np.exp(-(
                 gate_hidden @ w["gate.2.weight"].T + w["gate.2.bias"])))
-            if self.core_bound_mode == CORE_BOUND_MODE:
+            if self.core_bound_mode != LEGACY_CORE_BOUND_MODE:
                 bound = learned_bound[:, None]
                 physical = flat[:, TREE_MASK_START:TREE_MASK_START + len(ACTIONS)]
                 masked_tree = np.where(physical > 0.5, tree, -1.0e9)
@@ -278,6 +298,9 @@ class FrozenWarehouseV6Role:
                 effective = np.where(core[:, None],
                                      np.minimum(gate * bound, margin_cap[:, None]),
                                      gate * bound)
+                if self.core_bound_mode == CORE_BOUND_MODE:
+                    effective = np.where(core[:, None],
+                                         np.minimum(effective, PROTECTED_RESIDUAL_CAP), effective)
             else:
                 bound = np.where(core[:, None],
                                  CORE_LOW_GATE_BOUND + gate * (
@@ -289,10 +312,12 @@ class FrozenWarehouseV6Role:
                 np.broadcast_to(relative[:, None, :], target_gap.shape),
                 target_gap, np.abs(target_gap)), axis=-1)
             repeated = np.broadcast_to(flat[:, None, :],
-                                       (len(flat), len(ACTIONS), FEATURE_DIM))
+                                       (len(flat), len(ACTIONS), self.feature_dim))
             action = np.broadcast_to(np.eye(len(ACTIONS), dtype=np.float32)[None],
                                      (len(flat), len(ACTIONS), len(ACTIONS)))
-            candidate_features = action_features_from_tree_encoded(flat)
+            encoder = (action_features_from_tree_encoded if self.model_version == MODEL_VERSION
+                       else legacy_features.action_features_from_tree_encoded)
+            candidate_features = encoder(flat)
             relation = np.concatenate((repeated, geometry, action,
                                        candidate_features), axis=-1)
             hidden = np.maximum(relation @ w["action_residual.0.weight"].T +
@@ -340,13 +365,16 @@ class FrozenWarehouseV6Actor:
         with np.load(path, allow_pickle=False) as archive:
             metadata = json.loads(str(archive["metadata_json"].item()))
             model_version = metadata.get("model_version")
-            core_bound_mode = (CORE_BOUND_MODE if model_version == MODEL_VERSION
-                               else LEGACY_CORE_BOUND_MODE)
-            if (model_version not in (MODEL_VERSION, LEGACY_MODEL_VERSION)
+            core_bound_mode = {MODEL_VERSION: CORE_BOUND_MODE,
+                               V616_MODEL_VERSION: V616_CORE_BOUND_MODE,
+                               LEGACY_MODEL_VERSION: LEGACY_CORE_BOUND_MODE}.get(model_version)
+            feature_dim = FEATURE_DIM if model_version == MODEL_VERSION else legacy_features.TREE_FEATURE_DIM
+            schema = FEATURE_SCHEMA_SHA256 if model_version == MODEL_VERSION else legacy_features.ACTOR_FEATURE_SCHEMA_SHA256
+            if (core_bound_mode is None
                     or metadata.get("observation_version") != OBSERVATION_VERSION
                     or metadata.get("observation_dim") != OBSERVATION_DIM
-                    or metadata.get("feature_dim") != FEATURE_DIM
-                    or metadata.get("feature_schema_sha256") != FEATURE_SCHEMA_SHA256
+                    or metadata.get("feature_dim") != feature_dim
+                    or metadata.get("feature_schema_sha256") != schema
                     or metadata.get("map_layout_id") != STUDY_MAP_LAYOUT.layout_id
                     or metadata.get("agent_ids") != list(AGENTS)
                     or metadata.get("action_names") != list(ACTIONS)
@@ -357,8 +385,10 @@ class FrozenWarehouseV6Actor:
                     or metadata.get("maximum_residual_bound") != MAX_RESIDUAL_BOUND
                     or metadata.get("core_low_gate_bound") != CORE_LOW_GATE_BOUND
                     or metadata.get("core_bound_mode") != core_bound_mode
-                    or (model_version == MODEL_VERSION and
+                    or (model_version != LEGACY_MODEL_VERSION and
                         metadata.get("core_margin_floor") != CORE_MARGIN_FLOOR)
+                    or (model_version == MODEL_VERSION and
+                        metadata.get("protected_residual_cap") != PROTECTED_RESIDUAL_CAP)
                     or metadata.get("relation_geometry_dim") != GEOMETRY_DIM
                     or metadata.get("action_feature_dim") != ACTION_FEATURE_DIM
                     or metadata.get("action_physics_config_sha256") !=
@@ -369,7 +399,7 @@ class FrozenWarehouseV6Actor:
                 raise RuntimeError("Warehouse v6 Actor routing contract mismatch")
             roles = {role: FrozenWarehouseV6Role({
                 name: np.asarray(archive[f"{role}.{name}"], dtype=np.float32)
-                for name in _TENSOR_NAMES}, core_bound_mode=core_bound_mode)
+                for name in (_TENSOR_NAMES if model_version == MODEL_VERSION else _LEGACY_TENSOR_NAMES)}, core_bound_mode=core_bound_mode)
                 for role in AGENTS}
         result = cls(roles, digest, model_version=model_version)
         if metadata.get("role_sha256") != result.role_sha256:
@@ -379,8 +409,10 @@ class FrozenWarehouseV6Actor:
         return result
 
     def logits(self, obs: np.ndarray, masks: np.ndarray) -> np.ndarray:
-        encoded = encode_actor_tree_features(obs, masks)
-        if encoded.shape[-2:] != (len(AGENTS), FEATURE_DIM):
+        encoder = (encode_actor_tree_features if self.model_version == MODEL_VERSION
+                   else legacy_features.encode_actor_tree_features)
+        encoded = encoder(obs, masks)
+        if encoded.shape[-2:] != (len(AGENTS), self.roles[AGENTS[0]].feature_dim):
             raise ValueError("Warehouse v6 Actor needs both role rows")
         return np.stack([self.roles[role].logits_encoded(encoded[..., index, :])
                          for index, role in enumerate(AGENTS)], axis=-2)

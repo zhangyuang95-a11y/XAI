@@ -25,7 +25,7 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, sort_keys=True, allow_nan=False) + "\n")
 
 
-def _failed_locked_bc_child(argv, **kwargs) -> SimpleNamespace:
+def _failed_locked_bc_child(argv, *, quality_failure=False, **kwargs) -> SimpleNamespace:
     """Write the same pre-PPO artifacts as the locked runner failure path."""
     run_spec = json.loads(Path(argv[argv.index("--spec") + 1]).read_bytes())
     authorization_path = Path(argv[argv.index("--authorization") + 1])
@@ -44,10 +44,10 @@ def _failed_locked_bc_child(argv, **kwargs) -> SimpleNamespace:
     }
     roles = {}
     for index, role in enumerate(p.ROLES):
-        passing = index == 1
+        passing = quality_failure or index == 1
         roles[role] = {
             "actor_role_sha256": actor_receipt["role_sha256"][role],
-            "refit_report": {"method": "fit_episode_separated_core"},
+            "refit_report": {"method": "fit_episode_separated_core", "validation_passed": passing},
             "actor_core_qualification": {
                 "method": p.REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD,
                 "validation_passed": passing,
@@ -69,6 +69,21 @@ def _failed_locked_bc_child(argv, **kwargs) -> SimpleNamespace:
             for name, seeds in final_schedule.items()},
         "roles": roles,
     }
+    if quality_failure:
+        episodes = [{"seed": seed, "deliveries": 0, "collisions": 0,
+                     "shutdown_episode": False,
+                     "quality_trace": {
+                         "schema": "warehouse-quality-trace.v1", "scenario_seed": seed,
+                         "action_seed": seed, "episode_id": seed, "frame_count": 1,
+                         "action_encoding": "base64-u8-a1-times-5-plus-a2",
+                         "actions_b64": "GA==", "actor_sha256": actor_receipt["sha256"],
+                         "actor_role_sha256": actor_receipt["role_sha256"],
+                         "initial_pre_state_sha256": "1"*64,
+                         "final_post_state_sha256": "2"*64, "chain_sha256": "3"*64}}
+                    for seed in run_spec["checkpoint_seeds"]]
+        precheck["quality_screen_seeds"] = run_spec["checkpoint_seeds"]
+        precheck["quality_screen"] = {"episodes": episodes, "summary": {
+            "mean_deliveries": 0.0, "mean_collisions": 0.0, "shutdown_episode_rate": 0.0}}
     _write_json(Path(run_spec["final_bc_precheck_receipt_path"]), precheck)
 
     # The runner's registered final program and selection scenes are kept
@@ -80,7 +95,7 @@ def _failed_locked_bc_child(argv, **kwargs) -> SimpleNamespace:
         | set(run_spec["checkpoint_seeds"]))
     assert not reserved & {seed for block in schedule.values() for seed in block}
 
-    expected = runner._formal_bc_reset_sequence(checked)
+    expected = runner._formal_bc_reset_sequence(checked, include_quality_screen=quality_failure)
     physics = runner.ACTION_PHYSICS_CONFIG
     actual_rows = [
         {**row, "episode_id": index,
@@ -222,3 +237,19 @@ def test_interrupted_claimed_formal_pair_closes_candidate_with_immutable_evidenc
                 f'pair_{p.FORMAL_PAIR_SEEDS[1]}_steps_{p.BUDGETS[0]}').exists()
     with pytest.raises(RuntimeError, match="candidate is closed"):
         admission.formal_train()
+
+
+def test_passing_program_but_failed_bc_quality_never_starts_ppo(tmp_path, monkeypatch):
+    def child(argv, **kwargs):
+        return _failed_locked_bc_child(argv, quality_failure=True, **kwargs)
+    monkeypatch.setattr(a.subprocess, "run", child)
+    admission = a.Admission(tmp_path, p.REGISTERED_CANDIDATE_ID,
+        backend=a.NativeBackend(), claim_root=tmp_path / "claims",
+        program_fit_method=p.REGISTERED_PROGRAM_FIT_METHOD)
+    failed = admission.develop()
+    assert failed["passed"] is False
+    row = a._read(admission._path(f"development.{p.BUDGETS[0]}.{p.DEVELOPMENT_PAIR_SEEDS[0]}.json"))
+    assert row["bc_precheck_failure"]["failed_roles"] == list(p.ROLES)
+    assert row["bc_precheck_failure"]["quality_screen_failed"] is True
+    assert row["training"] == {} and row["evaluation"] == {}
+    assert not admission._path("budget.lock.json").exists()

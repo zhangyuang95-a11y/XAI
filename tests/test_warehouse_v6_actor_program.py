@@ -26,7 +26,7 @@ from env.warehouse.environment import WarehouseMultiAgentEnv
 from env.warehouse.layouts import STUDY_MAP_LAYOUT
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.pure_nn import action_masks
-from env.warehouse.public_action_features_v614 import encode_actor_tree_features
+from env.warehouse.public_action_features_v617 import encode_actor_tree_features
 from env.warehouse.public_observation_v6 import (
     encode_public_observation,
 )
@@ -302,6 +302,10 @@ def test_explanation_requires_the_current_frozen_actor_role():
                     explanation_leaves=frozenset(range(len(program.leaf_logits))))
     sample = {"obs": rows[-1][0]["obs"],
               "mask": rows[-1][0]["mask"]}
+    # Keep this test independent of random tensor shapes and raw legality.
+    legal_logits = np.zeros_like(bound.leaf_logits)
+    legal_logits[:, ACTIONS.index("WAIT")] = 3.0
+    bound = replace(bound, leaf_logits=legal_logits)
     selected = bound.lookup(sample)["action"]
     evidence = bound.covered(sample, actor_action=selected,
                              purpose="explanation",

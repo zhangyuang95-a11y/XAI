@@ -803,12 +803,13 @@ def to_current_core_tree_result(tree: SparseProgramTree):
     """Adapter for the copied v6.14 Actor tree, never registered here."""
     from backend.training.warehouse_v6_core_tree import CoreTreeResult
     from env.warehouse.navigation import ACTIONS
-    from env.warehouse.public_action_features_v614 import (
+    from env.warehouse.public_action_features_v617 import (
         TREE_FEATURE_DIM, TREE_FEATURE_NAMES, TREE_MASK_START,
     )
+    from env.warehouse import public_action_features_v614 as legacy_features
 
-    if (tree.schema.feature_dim != TREE_FEATURE_DIM
-            or tree.schema.feature_names != tuple(TREE_FEATURE_NAMES)
+    if (tree.schema.feature_dim not in (TREE_FEATURE_DIM, legacy_features.TREE_FEATURE_DIM)
+            or tree.schema.feature_names not in (tuple(TREE_FEATURE_NAMES), tuple(legacy_features.TREE_FEATURE_NAMES))
             or tree.schema.actions != tuple(ACTIONS)
             or tree.schema.mask_feature_indices != tuple(
                 range(TREE_MASK_START, TREE_MASK_START + len(ACTIONS)))):
@@ -830,14 +831,13 @@ def frozen_actor_topology(
     for offline program refit only and never changes the runtime Actor.
     """
     from backend.training.warehouse_v6_actor import (
-        LEGACY_MODEL_VERSION, MODEL_VERSION, role_sha256,
+        LEGACY_MODEL_VERSION, V616_MODEL_VERSION, MODEL_VERSION, role_sha256,
     )
 
-    if (_SHA.fullmatch(frozen_actor_sha256) is None
-            or frozen_actor_sha256 not in {
-                role_sha256(role_weights, model_version=MODEL_VERSION),
-                role_sha256(role_weights, model_version=LEGACY_MODEL_VERSION),
-            }):
+    versions = ((MODEL_VERSION,) if "protected_leaf_mask" in role_weights else
+                (V616_MODEL_VERSION, LEGACY_MODEL_VERSION))
+    if (_SHA.fullmatch(frozen_actor_sha256) is None or frozen_actor_sha256 not in {
+            role_sha256(role_weights, model_version=version) for version in versions}):
         raise ValueError("final frozen Actor role hash mismatch")
     keys = ("tree.split.weight", "tree.split.bias", "tree.left_refs",
             "tree.right_refs", "tree.node_count", "tree.leaf_count",

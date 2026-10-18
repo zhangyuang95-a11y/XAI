@@ -15,7 +15,7 @@ from backend.training.warehouse_v6_actor import (
 from env.warehouse.domain import AgentState, DeliveryTask, WarehouseState
 from env.warehouse.layouts import STUDY_MAP_LAYOUT
 from env.warehouse.navigation import ACTIONS
-from env.warehouse.public_action_features_v614 import encode_actor_tree_features
+from env.warehouse.public_action_features_v617 import encode_actor_tree_features
 from env.warehouse.public_observation_v6 import encode_public_observation
 from env.warehouse.pure_nn import AGENTS, action_masks
 

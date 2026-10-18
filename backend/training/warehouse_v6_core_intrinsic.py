@@ -15,7 +15,7 @@ _STREAK = OBSERVATION_FEATURE_NAMES.index("same_target_collision_streak_capped")
 _DISTANCE = OBSERVATION_FEATURE_NAMES.index("robots_shortest_distance")
 _RETURN_MARGIN = OBSERVATION_FEATURE_NAMES.index("self_charger_return_margin")
 _WEIGHTS = {"tree_ce", "full_to_tree_kl", "tree_to_full_kl", "gate", "cert_margin"}
-_MARGIN_DELTA = 0.26
+_MARGIN_DELTA = 3.0
 _MARGIN_TEMPERATURE = 0.25
 
 
@@ -24,13 +24,11 @@ def core_intrinsic_loss(model, encoded: torch.Tensor, masks: torch.Tensor,
                         weights: Mapping[str, float],
                         full_logits: torch.Tensor | None = None
                         ) -> tuple[torch.Tensor, dict]:
-    """Recruit stable training states even when the old core mask is empty.
+    """Align protected fit regions before independent qualification.
 
-    Public labels supervise the tree on *all* BC rows.  Detached complete-NN
-    probabilities teach the tree on stable pre-action rows, including mixed
-    leaves.  Reverse KL and a tree-margin/gate objective act only where the
-    tree's current action is compatible with the public BC label (BC) or the
-    full Actor's current top action (PPO).  PPO supplies no teacher label.
+    Public labels supervise the tree on all BC rows. Both directions of
+    masked-distribution KL and the margin objective train every protected
+    row, including disagreements. PPO supplies no teacher label.
     Independent eligibility/validation/program rows never enter this loss.
     """
     if (set(weights) != _WEIGHTS or
@@ -80,13 +78,11 @@ def core_intrinsic_loss(model, encoded: torch.Tensor, masks: torch.Tensor,
             summary["tree_ce"][role] = 0.0
             summary["bc_tree_rows"][role] = 0
 
-        # Only pre-action public measurements gate this *training loss*.
-        # Core qualification is intentionally absent: a zero-core tree still
-        # receives gradients.  Close/conflict/low-return rows keep residual
-        # flexibility for the reward and true-event cost objectives.
-        candidate = (raw_legal & (row[:, _STREAK] <= 0)
-                     & (row[:, _DISTANCE] * 42 > 2)
-                     & (row[:, _RETURN_MARGIN] * 50 > 4))
+        # Fit-only Actor protection is present before any external audit.
+        # Every protected row receives distribution alignment, including
+        # disagreement rows and near-robot regions.
+        _, path = actor.tree(row)
+        candidate = raw_legal & ((path.detach() @ actor.protected_leaf_mask) > 0.5)
         summary["candidate_rows"][role] = int(candidate.sum())
         summary["candidate_fraction"][role] = float(candidate.float().mean())
         if bool(candidate.any()):
@@ -99,8 +95,7 @@ def core_intrinsic_loss(model, encoded: torch.Tensor, masks: torch.Tensor,
         else:
             summary["full_to_tree_kl"][role] = 0.0
 
-        aligned = candidate & (tree_top == (labels[:, index] if labels is not None
-                                            else full_top))
+        aligned = candidate
         summary["aligned_rows"][role] = int(aligned.sum())
         if bool(aligned.any()):
             t, f = tree[aligned], full[aligned]
@@ -117,7 +112,7 @@ def core_intrinsic_loss(model, encoded: torch.Tensor, masks: torch.Tensor,
             margin = torch.where((physical[aligned] > 0.5).sum(-1) > 1,
                                  margin, torch.full_like(margin, 1e9))
             margin_loss = (_MARGIN_TEMPERATURE * nn.functional.softplus(
-                (2 * gate * bound + _MARGIN_DELTA - margin) /
+                (_MARGIN_DELTA - margin) /
                 _MARGIN_TEMPERATURE)).mean()
             role_loss = (role_loss + float(weights["tree_to_full_kl"]) * t2f
                          + float(weights["gate"]) * gate.mean()

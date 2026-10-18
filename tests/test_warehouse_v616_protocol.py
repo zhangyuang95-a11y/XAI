@@ -167,7 +167,7 @@ def test_native_backend_creates_sha_bound_authorization_without_direct_training(
         raise AssertionError("ordinary train_pair must remain closed")
 
     def fake_run(argv, **kwargs):
-        assert Path(argv[1]).name == "run_warehouse_v616_locked_pair.py"
+        assert Path(argv[1]).name == "run_warehouse_v617_locked_pair.py"
         spec_path = Path(argv[argv.index("--spec") + 1])
         authorization_path = Path(argv[argv.index("--authorization") + 1])
         run_spec = json.loads(spec_path.read_bytes())

@@ -13,6 +13,7 @@ HARD_SPLIT_TIE_EPSILON = 1.0e-10
 UNIT_INTERVAL_FEATURE_NAMES = frozenset({
     "self_row", "self_column", "partner_row", "partner_column",
     "self_battery_fraction",
+    "public_hard_risk_context", "public_near_robots_context",
     *(f"{role}_recent_position_{index}_{axis}"
       for role in ("self", "partner") for index in range(3)
       for axis in ("row", "column")),

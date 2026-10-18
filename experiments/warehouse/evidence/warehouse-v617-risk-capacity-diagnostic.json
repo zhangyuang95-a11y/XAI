@@ -1,0 +1,114 @@
+{
+  "conclusion": "Structure can create large agreement regions. Transplant without joint training fails task quality and cannot be admitted.",
+  "diagnostic_script_sha256": "41d87598a20a83072ccbdad84fc693003b4b36179ca09ba8b8d623280dc9932b",
+  "joint_training_effect_measured": false,
+  "purpose": "retired_scenes_design_diagnostic_not_admission",
+  "retired_actor_sha256": "d3f0ee01fff90d78e7ffb84697deb203162cd7c73a73026d653e51bfc8d5f7fe",
+  "roles": {
+    "robot_1": {
+      "fit_tree": {
+        "fit_only_not_independent_certificate": true,
+        "fit_protected_mass": 0.7444276856041562,
+        "fixed_node_ids": [
+          0,
+          1,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "method": "actor_risk_stratified_protected_topology_v3",
+        "protected_leaf_ids": [
+          1,
+          2,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "risk_rows": 335,
+        "rows": 5967,
+        "target_probs_sha256": "17f503ffdd51fedfb8046c5c824821edd1c9279409a2e316714069b0e9a94aeb",
+        "version": "warehouse-risk-stratified-tree.v6.17"
+      },
+      "validation": {
+        "protected_actor_probe": {
+          "agreement": 1.0,
+          "expected_actionable": 0.66233891248703,
+          "masked_kl": 0.00025607255520299077,
+          "protected_coverage": 0.7075208913649025
+        },
+        "retired_nn": {
+          "agreement": 0.43061023622047245,
+          "expected_actionable": 0.2796267569065094,
+          "masked_kl": 1.9135240316390991,
+          "protected_coverage": 0.7075208913649025
+        }
+      }
+    },
+    "robot_2": {
+      "fit_tree": {
+        "fit_only_not_independent_certificate": true,
+        "fit_protected_mass": 0.6939835763365175,
+        "fixed_node_ids": [
+          0,
+          1,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "method": "actor_risk_stratified_protected_topology_v3",
+        "protected_leaf_ids": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          7,
+          8
+        ],
+        "risk_rows": 345,
+        "rows": 5967,
+        "target_probs_sha256": "d473c9b604053f13334bff325ee601bd298eb9499087f0982a4d8ddb1f2021c9",
+        "version": "warehouse-risk-stratified-tree.v6.17"
+      },
+      "validation": {
+        "protected_actor_probe": {
+          "agreement": 1.0,
+          "expected_actionable": 0.643811047077179,
+          "masked_kl": 0.00022851282847113907,
+          "protected_coverage": 0.6824512534818942
+        },
+        "retired_nn": {
+          "agreement": 0.5903061224489796,
+          "expected_actionable": 0.36915820837020874,
+          "masked_kl": 1.2653696537017822,
+          "protected_coverage": 0.6824512534818942
+        }
+      }
+    }
+  },
+  "same_scene_quality": {
+    "retired_actor": {
+      "episodes": 24,
+      "mean_collisions": 10.625,
+      "mean_deliveries": 10.833333333333334,
+      "shutdown_episode_rate": 0.041666666666666664
+    },
+    "untrained_protected_probe": {
+      "episodes": 24,
+      "mean_collisions": 26.791666666666668,
+      "mean_deliveries": 2.4166666666666665,
+      "shutdown_episode_rate": 0.4583333333333333
+    }
+  },
+  "sealed_seeds_used": false,
+  "source_report_path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v617_diagnostics/retired-6120-capacity-v1.json",
+  "source_report_sha256": "f83e8fb376a22b624f61b486a51dfae57cf67cfd733fca1992dd03ad75f162fe"
+}

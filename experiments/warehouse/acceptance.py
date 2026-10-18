@@ -520,7 +520,7 @@ def _verify_program_trace_rows(*, actor, programs: Mapping,
                     or np.any((mask != 0.0) & (mask != 1.0))
                     or mask.sum() < 1):
                 return False
-            encoded = encode_actor_tree_features(obs, mask)
+            encoded = programs[role].encode(obs, mask)
             logits = actor.roles[role].logits_encoded(encoded[None])[0]
             masked = np.where(mask > .5, logits, -1.0e9)
             probabilities = np.exp(masked - masked.max())

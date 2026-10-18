@@ -15,7 +15,7 @@ from backend.training.warehouse_v6_actor import (
 from backend.training.warehouse_v6_program import WarehouseV6Program
 from backend.training.warehouse_v6_runner import audit_programs
 from env.warehouse.navigation import ACTIONS
-from env.warehouse.public_action_features_v614 import TREE_FEATURE_DIM
+from env.warehouse.public_action_features_v617 import TREE_FEATURE_DIM
 from experiments.warehouse import acceptance
 from experiments.warehouse.acceptance import _verify_program_trace
 from experiments.warehouse.admission import NativeBackend

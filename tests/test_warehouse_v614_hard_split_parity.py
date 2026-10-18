@@ -15,7 +15,7 @@ from backend.training.warehouse_v614_certificate_tree import (
 )
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.pure_nn import AGENTS
-from env.warehouse.public_action_features_v614 import TREE_FEATURE_NAMES
+from env.warehouse.public_action_features_v617 import TREE_FEATURE_NAMES
 
 
 def test_hard_split_tie_is_batch_invariant_and_matches_frozen_actor():
@@ -53,7 +53,7 @@ def test_hard_split_tie_is_batch_invariant_and_matches_frozen_actor():
             int(weights["tree.node_count"][0]),
             int(weights["tree.leaf_count"][0]),
             weights["tree.leaf_logits"],
-            weights["core_leaf_mask"].astype(np.bool_),
+            weights["protected_leaf_mask"].astype(np.bool_),
             {}, frozenset(),
         )
         np.testing.assert_array_equal(certificate.leaf_indices(rows), deployed)

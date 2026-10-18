@@ -445,13 +445,22 @@ class NativeBackend:
                         or not 0 <= actionable <= mass <= 1):
                     return None
                 role_pass = bool(qualification["validation_passed"]
+                                 and refit.get("validation_passed") is True
                                  and installed and mass >= .35
                                  and actionable >= .30)
                 computed_pass &= role_pass
                 if not role_pass:
                     failed_roles.append(role)
-            if computed_pass or not failed_roles:
-                return None
+            if computed_pass:
+                quality = precheck.get("quality_screen")
+                if (not isinstance(quality, Mapping) or
+                        precheck.get("quality_screen_seeds") != list(run_spec["checkpoint_seeds"])):
+                    return None
+                _validated_episodes(quality, run_spec["checkpoint_seeds"], require_trace=True,
+                                    actor_sha256=actor_receipt["sha256"])
+                if p.quality_pass(quality["summary"], development=True):
+                    return None
+                failed_roles.extend(p.ROLES)
             authorization = _read(authorization_path)
             audit = _read(audit_path)
             raw_journal = journal_path.read_bytes()
@@ -462,9 +471,9 @@ class NativeBackend:
             # resets. Its input JSON is key-sorted, so iterating that raw
             # mapping would give a different (alphabetical) reset order.
             expected_resets = runner._formal_bc_reset_sequence(
-                runner._checked_spec(run_spec))
+                runner._checked_spec(run_spec), include_quality_screen="quality_screen" in precheck)
             if (authorization.get("authorization_kind") !=
-                    "warehouse-v616-registered-pair-locked-run-v1"
+                    "warehouse-v617-registered-pair-locked-run-v1"
                     or authorization.get("run_spec_sha256") !=
                     runner._scientific_run_spec_sha256(run_spec)
                     or authorization.get("training_config_sha256") !=
@@ -525,6 +534,7 @@ class NativeBackend:
                 "training_log_sha256": _file_sha(log_path),
                 "subprocess_returncode": returncode,
                 "failed_roles": failed_roles,
+                "quality_screen_failed": computed_pass,
             }
         except (KeyError, TypeError, ValueError, OSError, RuntimeError,
                 OverflowError, UnicodeError):
@@ -562,7 +572,7 @@ class NativeBackend:
                 raise RuntimeError("Warehouse formal budget differs from development lock")
         source = runner.source_closure_sha256()
         lock_script = (PROJECT_ROOT / "scripts" /
-                       "run_warehouse_v616_locked_pair.py").resolve(strict=True)
+                       "run_warehouse_v617_locked_pair.py").resolve(strict=True)
         lock_dir = candidate_root / "admission" / "locked-pairs"
         lock_dir.mkdir(parents=True, exist_ok=True)
         stem = f"pair_{pair_seed}_steps_{budget}"
@@ -585,7 +595,7 @@ class NativeBackend:
             torch.manual_seed(pair_seed)
             initial_roles = role_hashes(WarehouseV6Actor())
         authorization = {
-            "authorization_kind": "warehouse-v616-registered-pair-locked-run-v1",
+            "authorization_kind": "warehouse-v617-registered-pair-locked-run-v1",
             "candidate_id": spec["candidate_id"],
             "pair_seed": pair_seed, "joint_steps": budget,
             "run_spec_sha256": runner._scientific_run_spec_sha256(run_spec),

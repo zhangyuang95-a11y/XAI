@@ -133,6 +133,10 @@ def _receipt(pair_seed: int = 12469) -> dict:
         "final_bc_internal_precheck_receipt": {
             "path": "/tmp/candidate/final-bc-precheck.json", "sha256": ""},
     }
+    result["quality_screen_seeds"] = list(p.DEVELOPMENT_SELECTION_SEEDS)
+    result["final_bc_internal_precheck"]["quality_screen_seeds"] = list(p.DEVELOPMENT_SELECTION_SEEDS)
+    result["final_bc_internal_precheck"]["quality_screen"] = {"summary": {
+        "mean_deliveries": 6.0, "mean_collisions": 2.0, "shutdown_episode_rate": 0.0}}
     result["final_bc_internal_precheck_receipt"]["sha256"] = sha256(
         (json.dumps(result["final_bc_internal_precheck"],
                     sort_keys=True, allow_nan=False) + "\n").encode()).hexdigest()
@@ -532,9 +536,9 @@ class WarehouseV614StaticProtocolTest(unittest.TestCase):
                          p.REGISTERED_BC_RECIPE_VERSION)
         self.assertEqual(MODEL_VERSION,
                          p.REGISTERED_BC_SPEC["actor_model_version"])
-        self.assertEqual(runner.validate_v616_joint_certified_recipe(),
+        self.assertEqual(runner.validate_v617_risk_protected_recipe(),
                          p.REGISTERED_BC_SPEC["executable_recipe_file_sha256"])
-        recipe = runner.v616_executable_recipe()
+        recipe = runner.v617_executable_recipe()
         self.assertEqual(recipe["initial_teacher_episodes"],
                          p.REGISTERED_BC_SPEC["bc_episodes"])
         self.assertEqual(recipe["initial_bc_epochs"],

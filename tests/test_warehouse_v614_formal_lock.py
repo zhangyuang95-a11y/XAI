@@ -80,7 +80,7 @@ def test_formal_spec_hashes_and_full_dynamic_reset_reconciliation(tmp_path):
         spec["source_closure_sha256"])
     expected = runner._formal_expected_reset_sequence(
         spec, _fake_pair_receipt(spec, pair))
-    assert len(expected) == 4_902
+    assert len(expected) == 4_902 + len(spec["checkpoint_seeds"])
     assert [row["phase"] for row in expected[:1_396]] == ["formal_bc"] * 1_396
     assert runner._formal_partial_reset_prefix(spec, expected)
     assert runner._formal_partial_reset_prefix(spec, expected[:1_397])

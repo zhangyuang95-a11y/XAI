@@ -1,0 +1,82 @@
+{
+  "PPO_joint_steps_authorized": 0,
+  "additional_initialization_seeds_authorized": [],
+  "approved_for_shared_bc": true,
+  "candidate_id": "warehouse-v620-01-shared-bc-pilot",
+  "clearance_file": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_ledger/cleared-pilot6160-01/clearance.json",
+    "sha256": "2d16176e0b061d75986af543680fd3e3b5ea56d5137d2add9c02dfe21054effa"
+  },
+  "conflict_count": 0,
+  "contextual_numeric_matches": {
+    "optimizer_counters": 16,
+    "source_backed_training_and_pair_indices": 22
+  },
+  "coverage_limitations": [
+    "Recorded whitelisted metadata and registered traces from the four named accessible worktrees only.",
+    "Model weight contents were excluded; names and stat and initialization path hints were checked.",
+    "No global, external-system or unrecorded-run freshness claim.",
+    "Shared matched gamma use is deliberate and is not independent evidence."
+  ],
+  "exact_seed_contract_tests": {
+    "elapsed_seconds": 8.36,
+    "log": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/exact-seed-contract-verification-01.log",
+      "sha256": "8f7076addc4dd6b900981d4c36c16ff8c512f2ec62101fc8ae4ee0fe1fe35764"
+    },
+    "passed": 135
+  },
+  "exact_uses": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_ledger/cleared-pilot6160-01/exact-uses.json",
+    "sha256": "95c60463734c559dd97a16cbe7bb18570b89b063e31eca955dd498d6d6968bfb"
+  },
+  "final_delta": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_ledger/pilot6160-final-delta-02/delta.json",
+    "sha256": "4c863ba31f3ef483fd24d5853614b8ba1c2bb06dcffdaa07258724e37cab711c"
+  },
+  "fixed_controls_not_claimed_fresh": true,
+  "formal_training_authorized": false,
+  "fresh_275_or_216_authorized": false,
+  "independent_readonly_review": "Second agent rechecked all evidence hashes, original38 references, full19-file delta content and source producer hashes. Root independently verified the complete exact-reference set, file identities and source closure.",
+  "manual_exact_index_review": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_ledger/pilot6160-limited-review-03/original-index-context-review.json",
+    "sha256": "d59950bd07518577a8b91710c33881cee9561907700d4a436346ea4107eabe31"
+  },
+  "new_metadata_content_review": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_ledger/pilot6160-limited-review-03/final-delta-content-audit.json",
+    "sha256": "57de42c6cb18e28ab832a7f4c43e3742e10be79a52f22fcf301f1314c5e88f2e"
+  },
+  "only_source_change_since614_test_regression": "configs/warehouse_v620_shared_bc_seed_plan.json",
+  "paired_seed_plan": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/configs/warehouse_v620_shared_bc_seed_plan.json",
+    "sha256": "0af1733038b943616d4bcc8d67fb080124b8da8d199e2a80c09deebc3a72676a"
+  },
+  "parsed_metadata_records": 4176,
+  "permitted_output_directories": [
+    "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/warehouse-v620-01-shared-bc-pilot/pair-6160-gamma-001",
+    "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/warehouse-v620-01-shared-bc-pilot/pair-6160-gamma-003"
+  ],
+  "pilot_opened": false,
+  "publishable": false,
+  "remaining_conflicts": [],
+  "reviewed_at_utc": "2026-10-18T17:52:05.208811+00:00",
+  "reviewed_evidence_manifest": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_ledger/pilot6160-limited-review-03/evidence-manifest.json",
+    "sha256": "1aa06160c6b864b728219714375eed15ebce46926781d0a46fbda9a15825e794"
+  },
+  "scan_roots": [
+    "/Users/zhangyuang/Desktop/ICLR/XAI",
+    "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3",
+    "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration",
+    "/Users/zhangyuang/Desktop/ICLR/XAI-v6-recovery-20261015T165508Z"
+  ],
+  "schema": "warehouse-v620-bc-seed-clearance.v1",
+  "scope": "Exact registered pair6160 shared BC only, gamma0.01 and0.03 once each, same scenes/RNG and initial dual Actor; 1270 training episodes plus2 critic resets per gamma.",
+  "seed_binding_sha256": "e9c1af49fa278b60b0e7cd4913f9ac1923b6aef93920fa21ee17effb8f760413",
+  "source_closure_sha256": "4fba3c172feeaefa11e4c0c2b435e21457f4f27c60c11e5b2cd0c24c618f229c",
+  "source_manifest": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_ledger/cleared-pilot6160-01/source-files.json",
+    "sha256": "60b3e8b8e4cacd805c0f7e14144a924f7187a3160acade209421b739501bc825"
+  },
+  "unresolved": []
+}

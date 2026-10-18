@@ -103,6 +103,7 @@ class CertificateSearchConfig:
     max_exact_candidates_per_leaf: int = 12
     min_noncore_child_rows: int = 20
     quantiles: tuple[float, ...] = (0.25, 0.50, 0.75)
+    pure_movement_gates_only: bool = False
 
     def __post_init__(self) -> None:
         if (self.beam_width < 1
@@ -527,32 +528,33 @@ def _candidate_splits(
     # For x in [lo, hi], (hi-t)*mask + x-hi > 0 implies mask=1
     # and x>t; (t-lo)*mask - x+lo > 0 implies mask=1 and x<t.
     # The shared interval checker validates stored float32 coefficients.
-    for action in range(schema.action_count):
-        if action in state.legal[leaf]:
-            continue
-        mask_index = schema.mask_feature_indices[action]
-        legal_rows = rows[masks[rows, action] > 0.5]
-        if len(legal_rows) < FIT_MIN_LEAF_ROWS:
-            continue
-        for feature, (lower, upper) in sorted(
-                certified_feature_bounds(schema.feature_names).items()):
-            values = x[legal_rows, feature]
-            if float(np.max(values) - np.min(values)) < 1.0e-5:
+    if not config.pure_movement_gates_only:
+        for action in range(schema.action_count):
+            if action in state.legal[leaf]:
                 continue
-            for quantile in config.quantiles:
-                threshold = float(np.float32(np.quantile(values, quantile)))
-                if not lower + 1.0e-5 < threshold < upper - 1.0e-5:
+            mask_index = schema.mask_feature_indices[action]
+            legal_rows = rows[masks[rows, action] > 0.5]
+            if len(legal_rows) < FIT_MIN_LEAF_ROWS:
+                continue
+            for feature, (lower, upper) in sorted(
+                    certified_feature_bounds(schema.feature_names).items()):
+                values = x[legal_rows, feature]
+                if float(np.max(values) - np.min(values)) < 1.0e-5:
                     continue
-                above = np.zeros(schema.feature_dim, dtype=np.float32)
-                above[mask_index], above[feature] = upper - threshold, 1.0
-                add(f"legal_above:{schema.actions[action]}:"
-                    f"{schema.feature_names[feature]}@{quantile:g}",
-                    above, upper, action)
-                below = np.zeros(schema.feature_dim, dtype=np.float32)
-                below[mask_index], below[feature] = threshold - lower, -1.0
-                add(f"legal_below:{schema.actions[action]}:"
-                    f"{schema.feature_names[feature]}@{quantile:g}",
-                    below, -lower, action)
+                for quantile in config.quantiles:
+                    threshold = float(np.float32(np.quantile(values, quantile)))
+                    if not lower + 1.0e-5 < threshold < upper - 1.0e-5:
+                        continue
+                    above = np.zeros(schema.feature_dim, dtype=np.float32)
+                    above[mask_index], above[feature] = upper - threshold, 1.0
+                    add(f"legal_above:{schema.actions[action]}:"
+                        f"{schema.feature_names[feature]}@{quantile:g}",
+                        above, upper, action)
+                    below = np.zeros(schema.feature_dim, dtype=np.float32)
+                    below[mask_index], below[feature] = threshold - lower, -1.0
+                    add(f"legal_below:{schema.actions[action]}:"
+                        f"{schema.feature_names[feature]}@{quantile:g}",
+                        below, -lower, action)
     pure_gates = [item for item in candidates
                   if item.label.startswith("mask_gate:")]
     guarded = sorted((item for item in candidates
@@ -647,6 +649,30 @@ def _materialize(
                              report, frozenset(episode_ids.tolist()))
 
 
+def _pure_mask_gate_actions(tree: SparseProgramTree) -> dict[int, frozenset[int]]:
+    """Return only legality proven by a dedicated binary mask-bit ancestor."""
+    proven: dict[int, frozenset[int]] = {}
+    mask_indices = tree.schema.mask_feature_indices
+    bounds = certified_feature_bounds(tree.schema.feature_names)
+
+    def visit(ref: int, legal: frozenset[int]) -> None:
+        if ref < 0:
+            proven[-1 - ref] = legal
+            return
+        weights = tree.split_weights[ref]
+        used = np.flatnonzero(weights)
+        pure = len(used) == 1 and int(used[0]) in mask_indices
+        left_cert, right_cert = (certified_mask_branches(
+            weights, float(tree.split_bias[ref]), mask_indices, bounds)
+            if pure else (frozenset(), frozenset()))
+        visit(int(tree.left_refs[ref]), legal | left_cert)
+        visit(int(tree.right_refs[ref]), legal | right_cert)
+
+    visit(0 if tree.node_count else -1,
+          frozenset({tree.schema.actions.index("WAIT")}))
+    return proven
+
+
 def fit_certificate_tree(
     encoded: np.ndarray, masks: np.ndarray, target_probs: np.ndarray,
     episode_ids: Sequence[str], *, schema: FeatureSchema,
@@ -719,6 +745,7 @@ def fit_certificate_tree(
 
     report = {
         "version": "warehouse-v6.14-certificate-tree-prototype.v1",
+        "pure_movement_gates_only": config.pure_movement_gates_only,
         "status": "review_only_unregistered",
         "target_provenance": target_provenance,
         "frozen_actor_sha256": frozen_actor_sha256,
@@ -756,6 +783,13 @@ def fit_certificate_tree(
         "execution_action_override": False,
     }
     result = _materialize(best, schema, report, episodes)
+    if config.pure_movement_gates_only:
+        pure = _pure_mask_gate_actions(result)
+        if any(int(np.argmax(result.leaf_logits[leaf])) not in pure[leaf]
+               for leaf in range(result.leaf_count) if result.core_mask[leaf]):
+            raise RuntimeError(
+                "Warehouse certified core movement lacks pure legal mask gate")
+        report["core_pure_gate_leaf_count"] = int(result.core_mask[:result.leaf_count].sum())
     # An export must route the exact fit rows to the leaves scored in search.
     routed = result.leaf_indices(x)
     for leaf, rows in enumerate(best.rows):
@@ -795,10 +829,15 @@ def frozen_actor_topology(
     The full role weight hash is checked before extraction.  This function is
     for offline program refit only and never changes the runtime Actor.
     """
-    from backend.training.warehouse_v6_actor import role_sha256
+    from backend.training.warehouse_v6_actor import (
+        LEGACY_MODEL_VERSION, MODEL_VERSION, role_sha256,
+    )
 
     if (_SHA.fullmatch(frozen_actor_sha256) is None
-            or role_sha256(role_weights) != frozen_actor_sha256):
+            or frozen_actor_sha256 not in {
+                role_sha256(role_weights, model_version=MODEL_VERSION),
+                role_sha256(role_weights, model_version=LEGACY_MODEL_VERSION),
+            }):
         raise ValueError("final frozen Actor role hash mismatch")
     keys = ("tree.split.weight", "tree.split.bias", "tree.left_refs",
             "tree.right_refs", "tree.node_count", "tree.leaf_count",

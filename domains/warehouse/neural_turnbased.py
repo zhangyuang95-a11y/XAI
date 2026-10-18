@@ -20,6 +20,7 @@ from backend.inference.warehouse_structured_v5 import (
 )
 from backend.training.warehouse_v6_actor import (
     FrozenWarehouseV6Actor, FEATURE_SCHEMA_SHA256 as V6_FEATURE_SCHEMA_SHA256,
+    LEGACY_MODEL_VERSION as V6_LEGACY_MODEL_VERSION,
     MODEL_VERSION as V6_MODEL_VERSION,
 )
 from backend.training.warehouse_v6_program import WarehouseV6Program
@@ -88,8 +89,9 @@ def _v6_config():
         config = json.loads(V6_CONFIG_PATH.read_text())
     except (OSError, ValueError) as exc:
         raise RuntimeError("Warehouse v6 policy configuration unavailable") from exc
-    if (config.get("version") != V6_MODEL_VERSION
-            or config.get("model_version") != V6_MODEL_VERSION
+    if (config.get("version") != config.get("model_version")
+            or config.get("model_version") not in
+               (V6_LEGACY_MODEL_VERSION, V6_MODEL_VERSION)
             or config.get("observation_version") != V6_OBSERVATION_VERSION
             or config.get("feature_schema_sha256") != V6_FEATURE_SCHEMA_SHA256
             or config.get("action_physics_config_sha256") != ACTION_PHYSICS_CONFIG_SHA256
@@ -401,10 +403,13 @@ def _actor(policy_id=None):
         entry = policy_artifacts_v6(v6[1])[v6[0]]
         if not entry["readiness"]:
             raise RuntimeError("Warehouse v6 Actor is not accepted")
-        return FrozenWarehouseV6Actor.load(
+        actor = FrozenWarehouseV6Actor.load(
             ROOT / entry["actor_path"], expected_sha256=entry["actor_sha256"],
             expected_role_sha256={"robot_1": entry["role_sha256"]["human"],
                                   "robot_2": entry["role_sha256"]["ai"]})
+        if actor.model_version != entry["model_version"]:
+            raise RuntimeError("Warehouse v6 Actor model version differs from release")
+        return actor
     config = _config_for_policy(policy_id)
     if config["observation_version"] != OBSERVATION_VERSION:
         raise RuntimeError("Warehouse dual NN observation configuration mismatch")

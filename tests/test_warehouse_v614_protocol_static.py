@@ -84,6 +84,21 @@ def _receipt(pair_seed: int = 12469) -> dict:
             "validation_passed": True,
         },
         "bc_stages": stages,
+        "bc_topology_refresh_history": [{
+            "stage": stage,
+            "role_tree_sha256": {role: sha256(
+                f"{role}:{stage}:tree".encode()).hexdigest() for role in p.ROLES},
+            "route_parity_passed": True,
+            "path_legality_passed": True,
+            "core_qualification_recomputed": True,
+            "roles": {role: {
+                "topology_sha256": sha256(
+                    f"{role}:{stage}:tree".encode()).hexdigest(),
+                "training_scene_count": 100,
+                "qualification": {"method":
+                    p.REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD},
+            } for role in p.ROLES},
+        } for stage in p.bc_topology_refresh_stages()],
         "pretrained_role_sha256": actor_roles,
         "warmup_frozen_nn_actor": {
             "sha256": "a" * 64, "role_sha256": warmup_roles},
@@ -95,6 +110,8 @@ def _receipt(pair_seed: int = 12469) -> dict:
             "purpose": "development_internal_precheck_after_complete_bc",
             "passed": True,
             "final_bc_actor": {"sha256": "b" * 64,
+                               "model_version": p.REGISTERED_BC_SPEC[
+                                   "actor_model_version"],
                                "role_sha256": actor_roles},
             "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
                 "action_physics_config_sha256"],
@@ -105,7 +122,12 @@ def _receipt(pair_seed: int = 12469) -> dict:
             "final_bc_visits": {name: {"scenario_seeds": seeds}
                                 for name, seeds in final_schedule.items()},
             "roles": {role: {"actor_role_sha256": actor_roles[role],
-                             "refit_report": {"validation_passed": True}}
+                             "refit_report": {"validation_passed": True},
+                             "actor_core_qualification": {
+                                 "method": p.REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD,
+                                 "validation_passed": True},
+                             "installed_core_validation_mass": 0.40,
+                             "installed_core_expected_actionable_mass": 0.35}
                       for role in p.ROLES},
         },
         "final_bc_internal_precheck_receipt": {
@@ -220,7 +242,7 @@ def _stage1_pressure_fixture(root: Path) -> dict:
            "lock_script_path": str(script),
            "lock_script_sha256": evidence._sha(script),
            "required_cwd": str(root),
-           "bc_recipe_sha256": p.REGISTERED_BC_SPEC_SHA256,
+           "bc_recipe_sha256": p.LEGACY_V614_BC_SPEC_SHA256,
            "bc_data_seed_schedule": bc_schedule,
            "bc_data_seed_schedule_sha256": evidence._digest(bc_schedule),
            "bc_critic_reset_schedule": critic,
@@ -252,7 +274,7 @@ def _stage1_pressure_fixture(root: Path) -> dict:
                      "authorization_kind": "warehouse-v614-stage1-locked-run-v1",
                      "lock_script_path": str(script),
                      "lock_script_sha256": evidence._sha(script),
-                     "bc_recipe_sha256": p.REGISTERED_BC_SPEC_SHA256,
+                     "bc_recipe_sha256": p.LEGACY_V614_BC_SPEC_SHA256,
                      "executable_recipe_file_sha256": recipe_sha,
                      "bc_data_seed_schedule_sha256": evidence._digest(bc_schedule),
                      "run_spec_sha256": evidence._digest(pre["run_spec"]),
@@ -288,6 +310,15 @@ def _stage1_pressure_fixture(root: Path) -> dict:
             "stage1_expected_reset_sequence_sha256": evidence._digest(external_sequence)}
     lock_sha = _write_json(root / "script-lock.json", lock)
     bc = _receipt()
+    bc["bc_recipe_version"] = p.LEGACY_V614_BC_RECIPE_VERSION
+    bc["bc_recipe_sha256"] = p.LEGACY_V614_BC_SPEC_SHA256
+    bc["executable_recipe_file_sha256"] = p.LEGACY_V614_RECIPE_FILE_SHA256
+    bc.pop("bc_topology_refresh_history")
+    for role in p.ROLES:
+        role_row = bc["final_bc_internal_precheck"]["roles"][role]
+        role_row.pop("actor_core_qualification")
+        role_row.pop("installed_core_validation_mass")
+        role_row.pop("installed_core_expected_actionable_mass")
     bc["source_closure_sha256"] = source_sha
     bc["final_bc_internal_precheck"]["final_bc_actor"]["sha256"] = actor_sha
     internal_path = root / "final-bc-internal-precheck.json"
@@ -501,9 +532,9 @@ class WarehouseV614StaticProtocolTest(unittest.TestCase):
                          p.REGISTERED_BC_RECIPE_VERSION)
         self.assertEqual(MODEL_VERSION,
                          p.REGISTERED_BC_SPEC["actor_model_version"])
-        self.assertEqual(runner.validate_v614_exploratory_recipe(),
+        self.assertEqual(runner.validate_v616_joint_certified_recipe(),
                          p.REGISTERED_BC_SPEC["executable_recipe_file_sha256"])
-        recipe = runner.v614_executable_recipe()
+        recipe = runner.v616_executable_recipe()
         self.assertEqual(recipe["initial_teacher_episodes"],
                          p.REGISTERED_BC_SPEC["bc_episodes"])
         self.assertEqual(recipe["initial_bc_epochs"],
@@ -570,7 +601,7 @@ class WarehouseV614StaticProtocolTest(unittest.TestCase):
 
         recipe = ROOT / "configs/warehouse_v614_exploratory_recipe.json"
         self.assertEqual(sha256(recipe.read_bytes()).hexdigest(),
-                         p.REGISTERED_BC_SPEC["executable_recipe_file_sha256"])
+                         p.LEGACY_V614_RECIPE_FILE_SHA256)
         self.assertEqual(validate_study_action_physics(
             participant_study_config()),
             p.REGISTERED_BC_SPEC["action_physics_config_sha256"])

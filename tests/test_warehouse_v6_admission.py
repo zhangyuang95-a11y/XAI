@@ -11,7 +11,7 @@ import pytest
 
 from experiments.warehouse import admission as a
 from experiments.warehouse import protocol as p
-from tests.warehouse_v6_contract_fixture import bc_receipt
+from tests.warehouse_v6_contract_fixture import bc_receipt, topology_freeze_evidence
 
 METHOD = p.PROGRAM_FIT_METHOD_CANDIDATES[0]
 
@@ -122,6 +122,17 @@ class FakeBackend:
                 "risk_dual_config_sha256": spec["risk_dual_config_sha256"],
                 "online_program_extraction_steps": list(
                     spec["online_program_extraction_steps"]),
+                "topology_refresh_steps": list(spec["topology_refresh_steps"]),
+                "topology_frozen_at_step": spec["topology_frozen_at_step"],
+                "topology_refresh_history": [{
+                    "joint_step": step,
+                    "role_tree_sha256": {"robot_1": "a" * 64,
+                                         "robot_2": "b" * 64},
+                    "route_parity_passed": True,
+                    "path_legality_passed": True,
+                    "core_qualification_recomputed": True,
+                } for step in spec["topology_refresh_steps"]],
+                **topology_freeze_evidence(budget),
                 "online_program_split_block_cycle": p.FINAL_PROGRAM_SPLIT_COUNTS,
                 "online_program_cohorts_disjoint": True,
                 "post_policy_interventions": 0,
@@ -185,6 +196,8 @@ class FakeBackend:
                 "joint_steps": budget,
                 "online_program_extraction_steps": list(
                     spec["online_program_extraction_steps"]),
+                "topology_refresh_steps": list(spec["topology_refresh_steps"]),
+                "topology_frozen_at_step": spec["topology_frozen_at_step"],
                 "checkpoint_seeds": list(spec["checkpoint_seeds"]),
                 "source_closure_sha256": self.source,
                 "run_spec_sha256": run_sha,
@@ -789,6 +802,7 @@ def test_full_packaged_acceptance_chain_and_tampered_evidence(ready, tmp_path,
         assert report["sha256"] == receipt["training_report_sha256"][variant]
         entry = {"policy_id": receipt["policy_id"][variant],
                  "actor_path": actor["path"], "actor_sha256": actor["sha256"],
+                 "model_version": p.REGISTERED_BC_SPEC["actor_model_version"],
                  "action_physics_config_sha256": receipt[
                      "action_physics_config_sha256"],
                  "training_report_path": report["path"],

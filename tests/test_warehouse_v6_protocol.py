@@ -4,6 +4,7 @@ from copy import deepcopy
 import pytest
 
 from experiments.warehouse import protocol as p
+from tests.warehouse_v6_contract_fixture import topology_freeze_evidence
 
 METHOD = p.PROGRAM_FIT_METHOD_CANDIDATES[0]
 
@@ -61,6 +62,17 @@ def _paired_training(joint_steps=200_000, pair_seed=p.DEVELOPMENT_PAIR_SEEDS[0])
             "risk_dual_config_sha256": p.REGISTERED_RISK_DUAL_CONFIG_SHA256,
             "online_program_extraction_steps": list(
                 p.online_program_extraction_steps(joint_steps)),
+            "topology_refresh_steps": list(p.topology_refresh_steps(joint_steps)),
+            "topology_frozen_at_step": p.topology_frozen_at_step(joint_steps),
+            "topology_refresh_history": [{
+                "joint_step": step,
+                "role_tree_sha256": {"robot_1": "1" * 64,
+                                     "robot_2": "2" * 64},
+                "route_parity_passed": True,
+                "path_legality_passed": True,
+                "core_qualification_recomputed": True,
+            } for step in p.topology_refresh_steps(joint_steps)],
+            **topology_freeze_evidence(joint_steps),
             "online_program_split_block_cycle": p.FINAL_PROGRAM_SPLIT_COUNTS,
             "online_program_cohorts_disjoint": True,
             "post_policy_interventions": 0, "physical_no_legal_action_rows": 0,

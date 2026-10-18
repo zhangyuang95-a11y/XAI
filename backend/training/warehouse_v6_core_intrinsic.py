@@ -15,7 +15,7 @@ _STREAK = OBSERVATION_FEATURE_NAMES.index("same_target_collision_streak_capped")
 _DISTANCE = OBSERVATION_FEATURE_NAMES.index("robots_shortest_distance")
 _RETURN_MARGIN = OBSERVATION_FEATURE_NAMES.index("self_charger_return_margin")
 _WEIGHTS = {"tree_ce", "full_to_tree_kl", "tree_to_full_kl", "gate", "cert_margin"}
-_MARGIN_DELTA = 0.10
+_MARGIN_DELTA = 0.26
 _MARGIN_TEMPERATURE = 0.25
 
 

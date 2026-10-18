@@ -16,7 +16,7 @@ from backend.training.warehouse_v6_actor import (
 from backend.training.warehouse_v6_runner import _checked_spec
 from experiments.warehouse import protocol as p
 from scripts import package_warehouse_v6_release as packaging
-from tests.warehouse_v6_contract_fixture import bc_receipt
+from tests.warehouse_v6_contract_fixture import bc_receipt, topology_freeze_evidence
 
 
 def _registered_mapping(spec: p.PairRunSpec) -> dict:
@@ -114,6 +114,8 @@ def test_packaging_rejects_axis_program_even_if_file_hashes_match(
     }
     pair = {"candidate_id": candidate, "pair_seed": seed,
             "joint_steps": 200_000,
+            "topology_refresh_steps": list(p.topology_refresh_steps(200_000)),
+            "topology_frozen_at_step": p.topology_frozen_at_step(200_000),
             "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
                 "action_physics_config_sha256"],
             "program_fit_method": p.PROGRAM_FIT_METHOD_CANDIDATES[0],
@@ -134,6 +136,17 @@ def test_packaging_rejects_axis_program_even_if_file_hashes_match(
         actor_sha, report_sha = "1" * 64, "2" * 64
         pair["variants"][variant] = {
             "program_fit_method": p.PROGRAM_FIT_METHOD_CANDIDATES[0],
+            "topology_refresh_steps": pair["topology_refresh_steps"],
+            "topology_frozen_at_step": pair["topology_frozen_at_step"],
+            "topology_refresh_history": [{
+                "joint_step": step,
+                "role_tree_sha256": {"robot_1": "a" * 64,
+                                     "robot_2": "b" * 64},
+                "route_parity_passed": True,
+                "path_legality_passed": True,
+                "core_qualification_recomputed": True,
+            } for step in pair["topology_refresh_steps"]],
+            **topology_freeze_evidence(200_000),
             "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
                 "action_physics_config_sha256"],
             "bc_recipe_sha256": p.REGISTERED_BC_SPEC_SHA256,

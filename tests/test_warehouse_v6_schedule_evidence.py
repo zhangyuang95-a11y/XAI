@@ -7,7 +7,7 @@ from backend.training.warehouse_v6_runner import (
     SCENARIO_BLOCK_STEPS, scenario_schedule_sha256, scenario_seed)
 from experiments.warehouse import protocol as p
 from experiments.warehouse.acceptance import _digest, _paired_schedule_evidence
-from tests.warehouse_v6_contract_fixture import bc_receipt
+from tests.warehouse_v6_contract_fixture import bc_receipt, topology_freeze_evidence
 
 
 def _resets(pair_seed: int, steps: int, *, split_first: bool) -> list[dict]:
@@ -56,6 +56,17 @@ def _pair() -> dict:
             "risk_dual_config_sha256": spec.risk_dual_config_sha256,
             "online_program_extraction_steps": list(
                 spec.online_program_extraction_steps),
+            "topology_refresh_steps": list(spec.topology_refresh_steps),
+            "topology_frozen_at_step": spec.topology_frozen_at_step,
+            "topology_refresh_history": [{
+                "joint_step": step,
+                "role_tree_sha256": {"robot_1": "a" * 64,
+                                     "robot_2": "b" * 64},
+                "route_parity_passed": True,
+                "path_legality_passed": True,
+                "core_qualification_recomputed": True,
+            } for step in spec.topology_refresh_steps],
+            **topology_freeze_evidence(steps),
             "online_program_split_block_cycle": p.FINAL_PROGRAM_SPLIT_COUNTS,
             "online_program_cohorts_disjoint": True,
             "run_spec_sha256": spec.sha256(),
@@ -74,6 +85,8 @@ def _pair() -> dict:
         "program_fit_method": spec.program_fit_method,
         "online_program_extraction_steps": list(
             spec.online_program_extraction_steps),
+        "topology_refresh_steps": list(spec.topology_refresh_steps),
+        "topology_frozen_at_step": spec.topology_frozen_at_step,
         "run_spec_sha256": spec.sha256(),
         "training_config_sha256": config_hash,
         "source_closure_sha256": closure,
@@ -120,6 +133,10 @@ def test_paired_schedule_allows_different_early_resets_but_rejects_forgery():
 
     forged = deepcopy(pair)
     forged["online_program_extraction_steps"][1] += 120
+    assert not _paired_schedule_evidence(forged)
+
+    forged = deepcopy(pair)
+    forged["variants"]["raw"]["final_topology_role_sha256"]["robot_2"] = "c" * 64
     assert not _paired_schedule_evidence(forged)
 
     forged = deepcopy(pair)

@@ -38,7 +38,8 @@ def test_online_extractions_stop_at_boundaries_and_never_reuse_scenes(
     monkeypatch.setattr(runner, "FINAL_PROGRAM_SPLIT_COUNTS", purposes)
     calls = []
 
-    def extract(_model, buffers):
+    def extract(_model, buffers, *, method):
+        assert method == runner.JOINT_CERTIFIED_TOPOLOGY_METHOD
         seed_lists = [list(dict.fromkeys(int(row["base_seed"]) for row in buffers[role]))
                       for role in AGENTS]
         assert seed_lists[0] == seed_lists[1]
@@ -107,6 +108,7 @@ def test_online_extractions_stop_at_boundaries_and_never_reuse_scenes(
         "scenario_namespace": "online-cohort-smoke",
         "checkpoint_seeds": [1302, 1303], "smoke": True,
         "source_closure_sha256": runner.source_closure_sha256(),
+        "program_fit_method": runner.JOINT_CERTIFIED_TOPOLOGY_METHOD,
         "online_program_extraction_steps": [480, 960, 1440],
     }
     _, _, report = runner._train_variant(
@@ -126,7 +128,7 @@ def test_online_extractions_stop_at_boundaries_and_never_reuse_scenes(
 def test_online_program_split_uses_exact_scenario_quota_and_keeps_resets_together(
         monkeypatch):
     class StubProgram:
-        report = {"fit_method": runner.ACTOR_SPARSE_TOPOLOGY_METHOD,
+        report = {"fit_method": runner.JOINT_CERTIFIED_TOPOLOGY_METHOD,
                   "validation": {"feedback_passed": False}}
 
         def sha256(self):
@@ -136,7 +138,7 @@ def test_online_program_split_uses_exact_scenario_quota_and_keeps_resets_togethe
 
     def fit(role, _actor, fit_rows, calibration_rows,
             eligibility_rows, validation_rows, *, method):
-        assert method == runner.ACTOR_SPARSE_TOPOLOGY_METHOD
+        assert method == runner.JOINT_CERTIFIED_TOPOLOGY_METHOD
         observed[role] = (fit_rows, calibration_rows, eligibility_rows,
                           validation_rows)
         return StubProgram()
@@ -154,7 +156,8 @@ def test_online_program_split_uses_exact_scenario_quota_and_keeps_resets_togethe
                             "sampled_action": "WAIT"})
     actor = WarehouseV6Actor()
     buffers = {role: deque(deepcopy(samples), maxlen=20000) for role in AGENTS}
-    programs, reports, _ = runner._fit_training_programs(actor, buffers)
+    programs, reports, _ = runner._fit_training_programs(
+        actor, buffers, method=runner.JOINT_CERTIFIED_TOPOLOGY_METHOD)
     assert all(programs.values())
     assert set(observed) == set(AGENTS)
     for role in AGENTS:

@@ -85,7 +85,8 @@ def _training_assets(variants: dict, output_root: Path, *,
         allowed = ({"robot_1", "robot_2"} if variant == "regularized" else set())
         if (set(programs) != allowed and
                 not (variant == "regularized" and
-                     allow_missing_regularized_programs and not programs)):
+                     allow_missing_regularized_programs and
+                     set(programs) < allowed)):
             raise ValueError("Warehouse role programs incomplete")
         assets[variant] = {
             "actor": _bundle(artifact["path"], artifact["sha256"], output_root,
@@ -240,6 +241,8 @@ def _evidence(receipt: dict, output_root: Path, *,
                              "development": development_final_fit_traces},
         "training_assets": {seed: _training_assets(
             _read(ROOT / item["path"])["variants"], output_root,
+            allow_missing_regularized_programs=
+            seed != str(receipt["selected_pair_seed"]),
             assets_root=assets_root)
             for seed, item in pair_reports.items()},
         "development_training_assets": {budget_key: {
@@ -337,6 +340,10 @@ def _verify_training_package(receipt: dict, evidence: dict) -> None:
                     receipt.get("program_fit_method")
                     or pair.get("program_fit_method") not in
                     p.PROGRAM_FIT_METHOD_CANDIDATES
+                    or pair.get("topology_refresh_steps") !=
+                    list(p.topology_refresh_steps(budget))
+                    or pair.get("topology_frozen_at_step") !=
+                    p.topology_frozen_at_step(budget)
                     or pair.get("bc_recipe_sha256") !=
                     p.REGISTERED_BC_SPEC_SHA256
                     or pair.get("risk_dual_config_sha256") !=
@@ -369,6 +376,14 @@ def _verify_training_package(receipt: dict, evidence: dict) -> None:
                 trained = pair["variants"][variant]
                 if (trained.get("program_fit_method") !=
                         pair["program_fit_method"]
+                        or trained.get("topology_refresh_steps") !=
+                        pair["topology_refresh_steps"]
+                        or trained.get("topology_frozen_at_step") !=
+                        pair["topology_frozen_at_step"]
+                        or not p.topology_refresh_history_valid(
+                            trained.get("topology_refresh_history"),
+                            joint_steps=budget)
+                        or not p.frozen_topology_valid(trained)
                         or trained.get("action_physics_config_sha256") !=
                         p.REGISTERED_BC_SPEC["action_physics_config_sha256"]
                         or trained.get("bc_recipe_sha256") !=
@@ -599,9 +614,18 @@ def package(acceptance_path: str | Path,
             or receipt.get("release") != release_id
             or receipt.get("release_id") != release_id
             or receipt.get("policy_id") != spec.policy_ids
+            or receipt.get("actor_model_version") !=
+            p.REGISTERED_BC_SPEC["actor_model_version"]
             or receipt.get("passed") is not True
             or receipt.get("heldout_evaluated") is not True):
         raise ValueError("Warehouse v6 acceptance is unavailable or incomplete")
+    budget = receipt.get("locked_budget")
+    if (budget not in p.BUDGETS
+            or receipt.get("topology_refresh_steps") !=
+            list(p.topology_refresh_steps(budget))
+            or receipt.get("topology_frozen_at_step") !=
+            p.topology_frozen_at_step(budget)):
+        raise ValueError("Warehouse topology training schedule is not accepted")
     if (receipt.get("source_closure_sha256") !=
             catalog_module.warehouse_runtime_source_closure_sha256()):
         raise ValueError("Warehouse source closure differs from accepted training")

@@ -22,7 +22,10 @@ from backend.training.warehouse_v614_certificate_tree import (
     FeatureSchema, frozen_actor_topology, refit_frozen_topology_fit_only,
     to_current_core_tree_result,
 )
-from backend.training.warehouse_v6_actor import FrozenWarehouseV6Role, role_sha256
+from backend.training.warehouse_v6_actor import (
+    CORE_BOUND_MODE, LEGACY_MODEL_VERSION, MODEL_VERSION,
+    FrozenWarehouseV6Role, role_sha256,
+)
 from env.warehouse.navigation import ACTIONS
 from env.warehouse.public_action_features_v614 import (
     TREE_FEATURE_DIM as FEATURE_DIM, TREE_FEATURE_NAMES as FEATURE_NAMES,
@@ -36,6 +39,13 @@ _MASK_INDICES = tuple(FEATURE_NAMES.index(f"legal_{action.lower()}")
                       for action in ACTIONS)
 _EPS = 1.0e-9
 _EPISODE_PATTERN = re.compile(r"^(public-teacher|nn-visit):([0-9]+)$")
+
+
+def _bound_role_sha256(role: FrozenWarehouseV6Role) -> str:
+    """Recompute the hash under the loaded Actor's original action semantics."""
+    version = (MODEL_VERSION if role.core_bound_mode == CORE_BOUND_MODE
+               else LEGACY_MODEL_VERSION)
+    return role_sha256(role.weights, model_version=version)
 
 
 @dataclass(frozen=True)
@@ -339,7 +349,7 @@ def fit_episode_separated_core(groups: Mapping[str, EpisodeRows], *,
         raise ValueError("Warehouse core refit needs four episode purposes")
     source_hashes = {groups[name].frozen_role_sha256 for name in required}
     if (len(source_hashes) != 1 or source_hashes != {frozen_role.role_sha256}
-            or role_sha256(frozen_role.weights) != frozen_role.role_sha256):
+            or _bound_role_sha256(frozen_role) != frozen_role.role_sha256):
         raise ValueError("Warehouse core refit purposes use different frozen NN roles")
     target_parity_max_abs_error = {}
     for name in required:
@@ -350,7 +360,7 @@ def fit_episode_separated_core(groups: Mapping[str, EpisodeRows], *,
         if not np.isfinite(error) or error > 1e-7:
             raise ValueError("Warehouse core target is not the bound frozen NN distribution")
         target_parity_max_abs_error[name] = error
-    if role_sha256(frozen_role.weights) != frozen_role.role_sha256:
+    if _bound_role_sha256(frozen_role) != frozen_role.role_sha256:
         raise RuntimeError("Warehouse frozen warmup NN weights changed during target verification")
     sets = {name: _episode_set(groups[name]) for name in required}
     if any(sets[a] & sets[b] for i, a in enumerate(required)
@@ -391,7 +401,25 @@ def fit_episode_separated_core(groups: Mapping[str, EpisodeRows], *,
     scale = np.minimum(1.0, config.maximum_raw_logit_span /
                        np.maximum(span, 1e-8))
     logits *= scale[:, None]
-    calibrated = _replace(candidate, logits, candidate.core_mask,
+    # Leaf fitting and calibration may change the unmasked top action. The
+    # topology certificate must therefore be rechecked against these final
+    # logits before a core leaf can enter any later eligibility split.
+    certificates, _ = _structural_legal_actions(candidate)
+    calibrated_core = candidate.core_mask.copy()
+    legality_details = []
+    for leaf in range(candidate.leaf_count):
+        action = int(np.argmax(logits[leaf]))
+        proven = action in certificates[leaf]
+        if not proven:
+            calibrated_core[leaf] = False
+        legality_details.append({
+            "leaf": leaf, "raw_top": ACTIONS[action],
+            "path_legal": proven,
+            "fit_core_candidate": bool(candidate.core_mask[leaf]),
+            "removed_after_calibration": bool(candidate.core_mask[leaf]
+                                              and not proven),
+        })
+    calibrated = _replace(candidate, logits, calibrated_core,
                           dict(candidate.report))
     calibration_report, _ = _metrics(
         calibrated, cal, config=config, select_leaves=False)
@@ -431,6 +459,7 @@ def fit_episode_separated_core(groups: Mapping[str, EpisodeRows], *,
                                                  temperatures.items()},
                         "selected_temperature": temperature,
                         "raw_logit_span_cap": config.maximum_raw_logit_span,
+                        "post_calibration_path_legality": legality_details,
                         "calibrated_masked_distribution": calibration_report},
         "eligibility": eligibility_report,
         "locked_eligibility": locked_eligibility_report,
@@ -448,4 +477,120 @@ def fit_episode_separated_core(groups: Mapping[str, EpisodeRows], *,
     return _replace(locked, logits, selected, report), report
 
 
-__all__ = ["RefitConfig", "EpisodeRows", "fit_episode_separated_core"]
+def qualify_actor_core(
+        groups: Mapping[str, EpisodeRows], *,
+        frozen_role: FrozenWarehouseV6Role,
+        config: RefitConfig = RefitConfig(),
+        expected_topology_sha256: str | None = None,
+        ) -> tuple[np.ndarray, dict]:
+    """Qualify the *current Actor's* tree leaves without refitting their logits.
+
+    Fit and calibration episodes establish independent visitation and report
+    fidelity. Only eligibility episodes select leaves; validation can fail the
+    selected mask but cannot change it. The returned mask may be installed in
+    the trainable Actor after a topology refresh and before residual capping.
+    """
+    required = ("fit", "calibration", "eligibility", "validation")
+    if set(groups) != set(required):
+        raise ValueError("Warehouse Actor core qualification needs four episode purposes")
+    if (_bound_role_sha256(frozen_role) != frozen_role.role_sha256
+            or any(groups[name].frozen_role_sha256 != frozen_role.role_sha256
+                   for name in required)):
+        raise ValueError("Warehouse Actor core purposes use different frozen NN roles")
+    episodes = {name: _episode_set(groups[name]) for name in required}
+    scenes = {name: _scenario_set(groups[name]) for name in required}
+    if any(episodes[a] & episodes[b] or scenes[a] & scenes[b]
+           for index, a in enumerate(required) for b in required[index + 1:]):
+        raise ValueError("Warehouse Actor core episode or scenario purposes overlap")
+    target_parity = {}
+    for name in required:
+        rows = groups[name]
+        expected = _masked_probabilities(
+            frozen_role.logits_encoded(rows.encoded), rows.masks)
+        error = float(np.max(np.abs(expected - rows.frozen_nn_masked_probs)))
+        if not np.isfinite(error) or error > 1e-7:
+            raise ValueError("Warehouse Actor core target differs from frozen NN")
+        target_parity[name] = error
+
+    topology = frozen_actor_topology(
+        frozen_role.weights,
+        schema=FeatureSchema(tuple(FEATURE_NAMES), tuple(ACTIONS)),
+        frozen_actor_sha256=frozen_role.role_sha256)
+    topology_hash = topology.topology_sha256()
+    if (expected_topology_sha256 is not None
+            and topology_hash != expected_topology_sha256):
+        raise ValueError("Warehouse Actor core topology hash mismatch")
+    extracted = to_current_core_tree_result(topology)
+    # v2 requires a dedicated legal-mask predicate, not merely an oblique
+    # interval proof that happens to imply the bit on the sampled rows.
+    from backend.training.warehouse_v6_program import certified_actor_actions
+    proven = certified_actor_actions(frozen_role)
+    fit_leaves = extracted.leaf_indices(groups["fit"].encoded)
+    calibration_leaves = extracted.leaf_indices(groups["calibration"].encoded)
+    fit_visits = np.bincount(fit_leaves, minlength=extracted.leaf_count)
+    calibration_visits = np.bincount(
+        calibration_leaves, minlength=extracted.leaf_count)
+    candidate_mask = np.zeros_like(extracted.core_mask)
+    for leaf in range(extracted.leaf_count):
+        action = int(np.argmax(extracted.leaf_logits[leaf]))
+        candidate_mask[leaf] = bool(
+            action in proven[leaf] and fit_visits[leaf] > 0
+            and calibration_visits[leaf] > 0)
+    candidate = _replace(extracted, extracted.leaf_logits,
+                         candidate_mask, dict(extracted.report))
+    fit_report, _ = _metrics(
+        candidate, groups["fit"], config=config, select_leaves=False)
+    calibration_report, _ = _metrics(
+        candidate, groups["calibration"], config=config, select_leaves=False)
+    eligibility_report, selected = _metrics(
+        candidate, groups["eligibility"], config=config,
+        select_leaves=True)
+    locked = _replace(candidate, candidate.leaf_logits,
+                      selected, dict(candidate.report))
+    validation_report, _ = _metrics(
+        locked, groups["validation"], config=config,
+        select_leaves=False)
+    validation_passed = bool(
+        validation_report["core_leaf_mass"] >= config.min_internal_core_mass
+        and validation_report["expected_feedback_actionable_mass"] >=
+            config.min_internal_expected_actionable_mass
+        and all(detail["qualified"] for detail in validation_report["details"]
+                if selected[detail["leaf"]]))
+    report = {
+        "method": "actor_joint_core_qualification_v2",
+        "frozen_role_sha256": frozen_role.role_sha256,
+        "actor_topology_sha256": topology_hash,
+        "actor_tree_logits_sha256": sha256(np.ascontiguousarray(
+            extracted.leaf_logits, dtype="<f4").tobytes()).hexdigest(),
+        "target_parity_max_abs_error": target_parity,
+        "fit": fit_report, "calibration": calibration_report,
+        "eligibility": eligibility_report,
+        "validation": validation_report,
+        "validation_passed": validation_passed,
+        "candidate_mask_sha256": sha256(candidate_mask.tobytes()).hexdigest(),
+        "core_mask_sha256": sha256(selected.tobytes()).hexdigest(),
+        "selected_core_leaf_ids": np.flatnonzero(selected).astype(int).tolist(),
+        "fit_leaf_row_counts": fit_visits.astype(int).tolist(),
+        "calibration_leaf_row_counts": calibration_visits.astype(int).tolist(),
+        "leaf_path_proof": {
+            str(leaf): {
+                "raw_top": ACTIONS[int(np.argmax(extracted.leaf_logits[leaf]))],
+                "proven_actions": [ACTIONS[action]
+                                   for action in sorted(proven[leaf])],
+                "candidate": bool(candidate_mask[leaf]),
+                "selected": bool(selected[leaf]),
+            }
+            for leaf in range(extracted.leaf_count)
+        },
+        "episode_sets_sha256": {name: sha256(json.dumps(
+            sorted(episodes[name]), separators=(",", ":")).encode()).hexdigest()
+            for name in required},
+        "scenario_sets_sha256": {name: sha256(json.dumps(
+            sorted(scenes[name]), separators=(",", ":")).encode()).hexdigest()
+            for name in required},
+    }
+    return selected.copy(), report
+
+
+__all__ = ["RefitConfig", "EpisodeRows", "fit_episode_separated_core",
+           "qualify_actor_core"]

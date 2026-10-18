@@ -29,12 +29,13 @@ from env.warehouse.public_action_features_v614 import (
 )
 from .warehouse_v6_tree_routing import (
     HARD_SPLIT_ROUTING_VERSION, certified_feature_bounds,
-    certified_mask_branches, leaf_indices as hard_tree_leaf_indices,
+    certified_leaf_actions, leaf_indices as hard_tree_leaf_indices,
     validate_certification_domain,
 )
 
 
-MODEL_VERSION = "warehouse-dual-actor.v6.14-public-affordance-exploratory"
+LEGACY_MODEL_VERSION = "warehouse-dual-actor.v6.14-public-affordance-exploratory"
+MODEL_VERSION = "warehouse-dual-actor.v6.16-joint-certified"
 FEATURE_DIM = TREE_FEATURE_DIM
 FEATURE_NAMES = TREE_FEATURE_NAMES
 FEATURE_SCHEMA_SHA256 = ACTOR_FEATURE_SCHEMA_SHA256
@@ -46,7 +47,9 @@ RESIDUAL_WIDTH = 256
 MIN_RESIDUAL_BOUND = 0.05
 MAX_RESIDUAL_BOUND = 8.05
 CORE_LOW_GATE_BOUND = 0.12
-CORE_BOUND_MODE = "public_state_gate_conditioned_escape_v1"
+LEGACY_CORE_BOUND_MODE = "public_state_gate_conditioned_escape_v1"
+CORE_BOUND_MODE = "certified_margin_cap_v2"
+CORE_MARGIN_FLOOR = 0.26
 GATE_WIDTH = 64
 GEOMETRY_DIM = 6
 _POSITION_COLUMNS = tuple(FEATURE_NAMES.index(name) for name in (
@@ -72,18 +75,23 @@ def _role_arrays(actor: RoleActor) -> dict[str, np.ndarray]:
     state = actor.state_dict()
     weights = {name: state[name].detach().cpu().numpy().astype(np.float32).copy()
                for name in _TENSOR_NAMES}
-    split = weights["tree.split.weight"]
-    selected = np.argsort(-np.abs(split), axis=-1, kind="stable")[:, :MAX_SPLIT_FEATURES]
-    sparse = np.zeros_like(split)
-    np.put_along_axis(sparse, selected, 1.0, axis=-1)
-    weights["tree.split.weight"] = split * sparse
+    weights["tree.split.weight"] = actor.tree.effective_weights().detach().cpu().numpy().astype(
+        np.float32, copy=True)
     return weights
 
 
-def role_sha256(weights: Mapping[str, np.ndarray]) -> str:
+def role_sha256(weights: Mapping[str, np.ndarray], *,
+                model_version: str = MODEL_VERSION) -> str:
     if set(weights) != set(_TENSOR_NAMES):
         raise ValueError("Warehouse v6 role tensor keys mismatch")
+    if model_version not in (MODEL_VERSION, LEGACY_MODEL_VERSION):
+        raise ValueError("Warehouse v6 role hash model version mismatch")
     digest = sha256()
+    if model_version == MODEL_VERSION:
+        # The same tensors have different action semantics under the v6.14
+        # learned escape bound and the v6.16 certified margin cap.
+        digest.update(MODEL_VERSION.encode("ascii"))
+        digest.update(CORE_BOUND_MODE.encode("ascii"))
     for name in _TENSOR_NAMES:
         value = np.ascontiguousarray(weights[name], dtype="<f4")
         digest.update(name.encode("ascii"))
@@ -93,7 +101,11 @@ def role_sha256(weights: Mapping[str, np.ndarray]) -> str:
 
 
 class FrozenWarehouseV6Role:
-    def __init__(self, weights: Mapping[str, np.ndarray]):
+    def __init__(self, weights: Mapping[str, np.ndarray], *,
+                 core_bound_mode: str = CORE_BOUND_MODE):
+        if core_bound_mode not in (CORE_BOUND_MODE, LEGACY_CORE_BOUND_MODE):
+            raise ValueError("Warehouse v6 unknown core bound mode")
+        self.core_bound_mode = core_bound_mode
         self.weights = {name: np.asarray(value, dtype=np.float32)
                         for name, value in weights.items()}
         expected = {
@@ -130,7 +142,9 @@ class FrozenWarehouseV6Role:
                 or np.any(core[int(self.weights["tree.leaf_count"][0]):] != 0.0)):
             raise ValueError("Warehouse core leaf mask invalid")
         self._validate_core_action_legality()
-        self.role_sha256 = role_sha256(self.weights)
+        self.role_sha256 = role_sha256(
+            self.weights, model_version=(MODEL_VERSION if
+                core_bound_mode == CORE_BOUND_MODE else LEGACY_MODEL_VERSION))
 
     def _validate_core_action_legality(self) -> None:
         """Prove every core leaf's unmasked top action legal on its full path.
@@ -142,29 +156,33 @@ class FrozenWarehouseV6Role:
         """
         values = self.weights
         nodes = int(values["tree.node_count"][0])
-        core = values["core_leaf_mask"]
-        weights = values["tree.split.weight"]
-        bias = values["tree.split.bias"]
-        left = values["tree.left_refs"].astype(np.int64)
-        right = values["tree.right_refs"].astype(np.int64)
-        logits = values["tree.leaf_logits"]
+        leaves = int(values["tree.leaf_count"][0])
         mask_indices = tuple(range(TREE_MASK_START, TREE_MASK_START + len(ACTIONS)))
-        feature_bounds = certified_feature_bounds(tuple(FEATURE_NAMES))
+        proven = certified_leaf_actions(
+            values["tree.split.weight"], values["tree.split.bias"],
+            values["tree.left_refs"].astype(np.int64),
+            values["tree.right_refs"].astype(np.int64), nodes, leaves,
+            mask_indices, explicit=self.core_bound_mode == CORE_BOUND_MODE,
+            feature_bounds=certified_feature_bounds(tuple(FEATURE_NAMES)),
+            wait_action=ACTIONS.index("WAIT"))
+        for leaf, actions in enumerate(proven):
+            if (values["core_leaf_mask"][leaf] > 0.5
+                    and int(np.argmax(values["tree.leaf_logits"][leaf])) not in actions):
+                raise ValueError("Warehouse core leaf raw action lacks path legality proof")
 
-        def walk(ref: int, proven: frozenset[int]) -> None:
-            if ref < 0:
-                leaf = -1 - ref
-                if core[leaf] > 0.5 and int(np.argmax(logits[leaf])) not in proven:
-                    raise ValueError("Warehouse core leaf raw action lacks path legality proof")
-                return
-            left_actions, right_actions = certified_mask_branches(
-                weights[ref], float(bias[ref]), mask_indices, feature_bounds)
-            left_proven = proven | left_actions
-            right_proven = proven | right_actions
-            walk(int(left[ref]), left_proven)
-            walk(int(right[ref]), right_proven)
-
-        walk(0 if nodes else -1, frozenset({ACTIONS.index("WAIT")}))
+    def certified_actions(self) -> tuple[frozenset[int], ...]:
+        """Actions proven legal along each current hard-tree path."""
+        values = self.weights
+        return certified_leaf_actions(
+            values["tree.split.weight"], values["tree.split.bias"],
+            values["tree.left_refs"].astype(np.int64),
+            values["tree.right_refs"].astype(np.int64),
+            int(values["tree.node_count"][0]),
+            int(values["tree.leaf_count"][0]),
+            tuple(range(TREE_MASK_START, TREE_MASK_START + len(ACTIONS))),
+            explicit=self.core_bound_mode == CORE_BOUND_MODE,
+            feature_bounds=certified_feature_bounds(tuple(FEATURE_NAMES)),
+            wait_action=ACTIONS.index("WAIT"))
 
     def _validate_tree(self) -> None:
         weights = self.weights
@@ -250,13 +268,22 @@ class FrozenWarehouseV6Role:
                                      w["gate.0.bias"], 0)
             gate = 1.0 / (1.0 + np.exp(-(
                 gate_hidden @ w["gate.2.weight"].T + w["gate.2.bias"])))
-            # A public-state learned gate can release a core leaf when its
-            # ordinary decision is wrong in a coordination or collision
-            # state. The core mask never forces an environment action.
-            bound = np.where(core[:, None],
-                             CORE_LOW_GATE_BOUND + gate * (
-                                 learned_bound[:, None] - CORE_LOW_GATE_BOUND),
-                             learned_bound[:, None])
+            if self.core_bound_mode == CORE_BOUND_MODE:
+                bound = learned_bound[:, None]
+                physical = flat[:, TREE_MASK_START:TREE_MASK_START + len(ACTIONS)]
+                masked_tree = np.where(physical > 0.5, tree, -1.0e9)
+                top_two = np.partition(masked_tree, -2, axis=-1)[:, -2:]
+                margin_cap = np.maximum(0.0, (
+                    top_two[:, 1] - top_two[:, 0] - CORE_MARGIN_FLOOR) / 2.0)
+                effective = np.where(core[:, None],
+                                     np.minimum(gate * bound, margin_cap[:, None]),
+                                     gate * bound)
+            else:
+                bound = np.where(core[:, None],
+                                 CORE_LOW_GATE_BOUND + gate * (
+                                     learned_bound[:, None] - CORE_LOW_GATE_BOUND),
+                                 learned_bound[:, None])
+                effective = gate * bound
             target_gap = own[:, None, :] + _MOVE[None] - partner[:, None, :]
             geometry = np.concatenate((
                 np.broadcast_to(relative[:, None, :], target_gap.shape),
@@ -274,7 +301,7 @@ class FrozenWarehouseV6Role:
                                 w["action_residual.2.bias"], 0)
             score = (hidden @ w["action_residual.4.weight"].T +
                      w["action_residual.4.bias"]).squeeze(-1)
-            residual = (gate * bound) * np.tanh(score)
+            residual = effective * np.tanh(score)
         if not np.isfinite(tree).all() or not np.isfinite(residual).all():
             raise RuntimeError("Warehouse v6 role produced nonfinite logits")
         shape = data.shape[:-1]
@@ -289,11 +316,13 @@ class FrozenWarehouseV6Role:
 class FrozenWarehouseV6Actor:
     """Content-addressed, NumPy-only inference for both frozen role NNs."""
 
-    def __init__(self, roles: Mapping[str, FrozenWarehouseV6Role], artifact_sha256: str):
+    def __init__(self, roles: Mapping[str, FrozenWarehouseV6Role], artifact_sha256: str,
+                 *, model_version: str = MODEL_VERSION):
         if set(roles) != set(AGENTS):
             raise ValueError("Warehouse v6 frozen Actor requires both roles")
         self.roles = dict(roles)
         self.artifact_sha256 = artifact_sha256
+        self.model_version = model_version
         self.role_sha256 = {role: item.role_sha256 for role, item in self.roles.items()}
 
     @classmethod
@@ -310,7 +339,10 @@ class FrozenWarehouseV6Actor:
             raise RuntimeError("Warehouse v6 Actor artifact hash mismatch")
         with np.load(path, allow_pickle=False) as archive:
             metadata = json.loads(str(archive["metadata_json"].item()))
-            if (metadata.get("model_version") != MODEL_VERSION
+            model_version = metadata.get("model_version")
+            core_bound_mode = (CORE_BOUND_MODE if model_version == MODEL_VERSION
+                               else LEGACY_CORE_BOUND_MODE)
+            if (model_version not in (MODEL_VERSION, LEGACY_MODEL_VERSION)
                     or metadata.get("observation_version") != OBSERVATION_VERSION
                     or metadata.get("observation_dim") != OBSERVATION_DIM
                     or metadata.get("feature_dim") != FEATURE_DIM
@@ -324,7 +356,9 @@ class FrozenWarehouseV6Actor:
                     or metadata.get("minimum_residual_bound") != MIN_RESIDUAL_BOUND
                     or metadata.get("maximum_residual_bound") != MAX_RESIDUAL_BOUND
                     or metadata.get("core_low_gate_bound") != CORE_LOW_GATE_BOUND
-                    or metadata.get("core_bound_mode") != CORE_BOUND_MODE
+                    or metadata.get("core_bound_mode") != core_bound_mode
+                    or (model_version == MODEL_VERSION and
+                        metadata.get("core_margin_floor") != CORE_MARGIN_FLOOR)
                     or metadata.get("relation_geometry_dim") != GEOMETRY_DIM
                     or metadata.get("action_feature_dim") != ACTION_FEATURE_DIM
                     or metadata.get("action_physics_config_sha256") !=
@@ -335,8 +369,9 @@ class FrozenWarehouseV6Actor:
                 raise RuntimeError("Warehouse v6 Actor routing contract mismatch")
             roles = {role: FrozenWarehouseV6Role({
                 name: np.asarray(archive[f"{role}.{name}"], dtype=np.float32)
-                for name in _TENSOR_NAMES}) for role in AGENTS}
-        result = cls(roles, digest)
+                for name in _TENSOR_NAMES}, core_bound_mode=core_bound_mode)
+                for role in AGENTS}
+        result = cls(roles, digest, model_version=model_version)
         if metadata.get("role_sha256") != result.role_sha256:
             raise RuntimeError("Warehouse v6 Actor embedded role hashes mismatch")
         if expected_role_sha256 is not None and dict(expected_role_sha256) != result.role_sha256:

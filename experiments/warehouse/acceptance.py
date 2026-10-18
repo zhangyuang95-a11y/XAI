@@ -97,7 +97,7 @@ def _training_assets(root: Path, release_id: str, index: Mapping,
                 or set(programs) != set(bundle["programs"])
                 or (set(programs) != required and not (
                     variant == "regularized" and allow_missing_programs
-                    and not programs))):
+                    and set(programs) < required))):
             return False
         for role, item in programs.items():
             if (_asset_bytes(root, release_id,
@@ -166,6 +166,10 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
             expected_schedule_sha
             or pair.get("online_program_extraction_steps") !=
             list(expected_spec.online_program_extraction_steps)
+            or pair.get("topology_refresh_steps") !=
+            list(expected_spec.topology_refresh_steps)
+            or pair.get("topology_frozen_at_step") !=
+            expected_spec.topology_frozen_at_step
             or pair.get("checkpoint_seeds") != list(checkpoint_seeds)):
         return False
     actual = {}
@@ -190,6 +194,13 @@ def _paired_schedule_evidence(pair: Mapping) -> bool:
                 p.REGISTERED_RISK_DUAL_CONFIG_SHA256
                 or report.get("online_program_extraction_steps") !=
                 list(expected_spec.online_program_extraction_steps)
+                or report.get("topology_refresh_steps") !=
+                list(expected_spec.topology_refresh_steps)
+                or report.get("topology_frozen_at_step") !=
+                expected_spec.topology_frozen_at_step
+                or not p.topology_refresh_history_valid(
+                    report.get("topology_refresh_history"), joint_steps=steps)
+                or not p.frozen_topology_valid(report)
                 or report.get("online_program_split_block_cycle") !=
                 p.FINAL_PROGRAM_SPLIT_COUNTS
                 or report.get("online_program_cohorts_disjoint") is not True
@@ -834,7 +845,8 @@ def _final_fit_index_claim(*, root: Path, release_id: str,
                     or claim.get("validation") != trained.get(
                         "selected_program_reports", {}).get(role, {}).get("validation")):
                 return False
-        elif claim.get("status") != "failed" or role in programs:
+        elif (claim.get("status") != "failed" or role in programs
+              or role in trained.get("selected_program_reports", {})):
             return False
     for split, seeds in schedule.items():
         claim, item = traces[split], index[split]
@@ -864,8 +876,10 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
     from backend.training.warehouse_v6_program import (
         WarehouseV6Program, _eligible, _metrics, _passes,
         _sample_arrays, actor_sparse_topology_matches,
-        ACTOR_SPARSE_TOPOLOGY_METHOD, FEEDBACK_AGREEMENT,
+        certified_program_actions, ACTOR_SPARSE_TOPOLOGY_METHOD,
+        JOINT_CERTIFIED_TOPOLOGY_METHOD, FEEDBACK_AGREEMENT,
         EXPLANATION_AGREEMENT, MAX_COVERED_KL)
+    from env.warehouse.navigation import ACTIONS
 
     samples = verified_samples if verified_samples is not None else \
         _final_fit_verified_rows(
@@ -901,7 +915,9 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
                 or claim.get("validation") != report.get("validation")):
             return False
         fit_supported = None
-        if report.get("fit_method") == ACTOR_SPARSE_TOPOLOGY_METHOD:
+        method = report.get("fit_method")
+        if method in (ACTOR_SPARSE_TOPOLOGY_METHOD,
+                      JOINT_CERTIFIED_TOPOLOGY_METHOD):
             if not actor_sparse_topology_matches(program, actor.roles[role]):
                 return False
             fit_x, _ = _sample_arrays(samples[role]["fit"], "final program fit")
@@ -912,6 +928,31 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
                         counts.astype(int).tolist()):
                 return False
             fit_supported = set(np.flatnonzero(counts).tolist())
+            if method == JOINT_CERTIFIED_TOPOLOGY_METHOD:
+                # The calibrated output may change a leaf's raw top action.
+                # Rebuild proofs from the saved tree and final leaf logits;
+                # empirical legal rows cannot substitute for a path proof.
+                proven = certified_program_actions(program)
+                certificates = {
+                    str(leaf): {
+                        "proven_actions": [ACTIONS[action]
+                                           for action in sorted(proven[leaf])],
+                        "raw_top_action": ACTIONS[int(np.argmax(logits))],
+                        "raw_top_path_certified":
+                            int(np.argmax(logits)) in proven[leaf],
+                    }
+                    for leaf, logits in enumerate(program.leaf_logits)
+                }
+                if (report.get("leaf_path_certificates") != certificates
+                        or report.get("path_certificate_rule") !=
+                        "pure_legal_bit_ancestor+certified_mask_branches.v2"):
+                    return False
+                for name in ("calibration", "eligibility", "validation"):
+                    encoded, _ = _sample_arrays(
+                        samples[role][name], f"final program {name}")
+                    if not np.array_equal(program.leaf_indices(encoded),
+                                          actor.roles[role].leaf(encoded)):
+                        return False
         else:
             return False
         if report.get("fit_method") != pair["program_fit_method"]:
@@ -939,7 +980,11 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
                                     samples[role]["eligibility"], {leaf}, purpose)
                 if not _same_recomputed(metrics.get(purpose), measured):
                     return False
+                path_certified = (method != JOINT_CERTIFIED_TOPOLOGY_METHOD
+                                  or certificates[leaf_text][
+                                      "raw_top_path_certified"])
                 if ((fit_supported is None or leaf in fit_supported)
+                        and path_certified
                         and _eligible(measured, threshold)):
                     selected[purpose].add(leaf)
         if (selected["feedback"] != set(program.feedback_leaves)
@@ -956,7 +1001,8 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
                 measured["rows"] > 0 and measured["agreement"] >= threshold
                 and measured["kl"] is not None
                 and measured["kl"] <= MAX_COVERED_KL
-                and measured["illegal_count"] == 0)
+                and measured["illegal_count"] == 0
+                and measured["path_uncertified_count"] == 0)
             validation[purpose + "_passed"] = _passes(measured, threshold)
             validation["development_" + purpose + "_passed"] = _passes(
                 measured, threshold, development=True)
@@ -1128,11 +1174,17 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
             or receipt.get("selected_pair_seed") not in p.FORMAL_PAIR_SEEDS
             or receipt.get("program_fit_method") not in
             p.PROGRAM_FIT_METHOD_CANDIDATES
+            or receipt.get("actor_model_version") !=
+            p.REGISTERED_BC_SPEC["actor_model_version"]
             or receipt.get("action_physics_config_sha256") !=
             p.REGISTERED_BC_SPEC["action_physics_config_sha256"]
             or receipt.get("policy_id") != _policy_ids(release_id)
             or receipt.get("joint_steps") != {variant: receipt["locked_budget"]
                                                for variant in p.VARIANTS}
+            or receipt.get("topology_refresh_steps") !=
+            list(p.topology_refresh_steps(receipt["locked_budget"]))
+            or receipt.get("topology_frozen_at_step") !=
+            p.topology_frozen_at_step(receipt["locked_budget"])
             or not _sha(receipt.get("source_closure_sha256"))
             or set(entries) != set(p.VARIANTS)):
         return False
@@ -1143,6 +1195,8 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
                           "ai": receipt["role_sha256"][variant]["robot_2"]}
         if (entry.get("policy_id") != receipt["policy_id"][variant]
                 or entry.get("actor_sha256") != receipt["artifact_sha256"][variant]
+                or entry.get("model_version") !=
+                p.REGISTERED_BC_SPEC["actor_model_version"]
                 or entry.get("action_physics_config_sha256") !=
                 receipt["action_physics_config_sha256"]
                 or entry.get("training_report_sha256") !=
@@ -1198,6 +1252,10 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
             p.REGISTERED_BC_RECIPE_VERSION
             or lock.get("online_program_extraction_steps") !=
             list(p.online_program_extraction_steps(budget))
+            or lock.get("topology_refresh_steps") !=
+            list(p.topology_refresh_steps(budget))
+            or lock.get("topology_frozen_at_step") !=
+            p.topology_frozen_at_step(budget)
             or lock.get("final_program_fit_seed_schedule") != program_schedules
             or lock.get("final_program_fit_seed_schedule_sha256") !=
             _digest(program_schedules)
@@ -1350,7 +1408,9 @@ def _validate(receipt: Mapping, *, release_id: str, entries: Mapping,
                 or not p.paired_training_pass(pair.get("variants", {}), joint_steps=budget)
                 or not _training_assets(root, release_id,
                                         training_asset_index[str(seed)],
-                                        pair["variants"])
+                                        pair["variants"],
+                                        allow_missing_programs=
+                                        seed != receipt["selected_pair_seed"])
                 or not (
                     _verify_final_fit_pair if seed == receipt["selected_pair_seed"]
                     else _final_fit_index_claim)(

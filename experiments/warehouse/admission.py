@@ -15,6 +15,8 @@ import json
 import math
 import os
 from pathlib import Path
+import subprocess
+import sys
 from typing import Mapping, Sequence
 from uuid import uuid4
 
@@ -56,6 +58,16 @@ def _exclusive_json(path: Path, value: object) -> str:
     finally:
         temporary.unlink(missing_ok=True)
     return sha256(raw).hexdigest()
+
+
+def _immutable_json(path: Path, value: object) -> str:
+    """Create a locked input once, or verify its original bytes on retry."""
+    expected = _json_bytes(value)
+    if path.exists():
+        if path.read_bytes() != expected:
+            raise RuntimeError(f"Warehouse locked input changed: {path}")
+        return sha256(expected).hexdigest()
+    return _exclusive_json(path, value)
 
 
 def _read(path: Path) -> dict:
@@ -323,12 +335,306 @@ class TrainingGateFailure(RuntimeError):
         super().__init__("Warehouse paired training provenance gate failed")
 
 
+class BCPrecheckFailure(RuntimeError):
+    """A locked development pair ended at the recorded final BC gate."""
+
+    def __init__(self, evidence: Mapping):
+        self.evidence = dict(evidence)
+        super().__init__("Warehouse final BC internal precheck failed before PPO")
+
+
 class NativeBackend:
     """Late imports keep pure receipt tests free of Torch and environment setup."""
 
+    def _failed_bc_precheck_evidence(
+            self, *, run_spec: Mapping, authorization_path: Path,
+            artifact_paths: Mapping[str, str], audit_path: Path,
+            journal_path: Path, log_path: Path, returncode: int) -> dict | None:
+        """Recognize only a completed, SHA-bound BC failure, never a crash."""
+        from backend.training import warehouse_v6_runner as runner
+        from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor
+
+        pair_dir = (Path(run_spec["output_dir"]).resolve() /
+                    run_spec["candidate_id"] /
+                    f"pair_{run_spec['pair_seed']}_steps_{run_spec['joint_steps']}")
+        precheck_path = Path(artifact_paths["final_bc_precheck_receipt_path"])
+        actor_path = Path(artifact_paths["final_bc_actor_path"])
+        failure_message = "Warehouse final BC four-purpose internal precheck failed"
+        try:
+            if (returncode == 0 or not pair_dir.is_dir()
+                    or any((pair_dir / name).exists() for name in (
+                        "pair.training.json", "paired_bc.checkpoint.pt",
+                        "raw.actor.npz", "regularized.actor.npz",
+                        "raw.training.json", "regularized.training.json"))
+                    or any(pair_dir.glob("raw.*"))
+                    or any(pair_dir.glob("regularized.*"))
+                    or not all(path.is_file() for path in (
+                        precheck_path, actor_path, authorization_path,
+                        audit_path, journal_path, log_path))
+                    or failure_message.encode() not in log_path.read_bytes()):
+                return None
+            raw_precheck = precheck_path.read_bytes()
+            precheck = json.loads(raw_precheck)
+            if (not isinstance(precheck, Mapping)
+                    or raw_precheck != (json.dumps(
+                        precheck, sort_keys=True, allow_nan=False) + "\n").encode()
+                    or precheck.get("purpose") !=
+                    "development_internal_precheck_after_complete_bc"
+                    or precheck.get("passed") is not False
+                    or precheck.get("action_physics_config_sha256") !=
+                    p.REGISTERED_BC_SPEC["action_physics_config_sha256"]):
+                return None
+            actor_receipt = precheck.get("final_bc_actor")
+            if (not isinstance(actor_receipt, Mapping)
+                    or actor_receipt.get("path") != str(actor_path)
+                    or actor_receipt.get("sha256") != _file_sha(actor_path)
+                    or actor_receipt.get("model_version") !=
+                    p.REGISTERED_BC_SPEC["actor_model_version"]
+                    or actor_receipt.get("feature_schema_sha256") !=
+                    p.REGISTERED_BC_SPEC["feature_schema_sha256"]
+                    or actor_receipt.get("action_physics_config_sha256") !=
+                    p.REGISTERED_BC_SPEC["action_physics_config_sha256"]):
+                return None
+            actor = FrozenWarehouseV6Actor.load(
+                actor_path, expected_sha256=actor_receipt["sha256"],
+                expected_role_sha256=actor_receipt.get("role_sha256"))
+            if actor.model_version != p.REGISTERED_BC_SPEC["actor_model_version"]:
+                return None
+            schedule = p.bc_data_seed_schedule(run_spec["pair_seed"])
+            final_schedule = {name.removeprefix("final_bc_precheck_"): seeds
+                              for name, seeds in schedule.items()
+                              if name.startswith("final_bc_precheck_")}
+            visits = precheck.get("final_bc_visits")
+            if (precheck.get("final_bc_seed_schedule_sha256") != _sha(final_schedule)
+                    or precheck.get("final_bc_stage_counts") != {
+                        name: list(stage) for name, stage in
+                        runner.BC_FINAL_CORE_STAGE_COUNTS.items()}
+                    or not isinstance(visits, Mapping)
+                    or set(visits) != set(final_schedule)
+                    or any(not isinstance(visits[name], Mapping)
+                           or visits[name].get("scenario_seeds") != seeds
+                           or type(visits[name].get("rows")) is not int
+                           or visits[name]["rows"] < 1
+                           for name, seeds in final_schedule.items())):
+                return None
+            roles = precheck.get("roles")
+            if not isinstance(roles, Mapping) or set(roles) != set(p.ROLES):
+                return None
+            computed_pass = True
+            failed_roles = []
+            for role in p.ROLES:
+                row = roles[role]
+                if not isinstance(row, Mapping):
+                    return None
+                qualification = row.get("actor_core_qualification")
+                refit = row.get("refit_report")
+                mass = row.get("installed_core_validation_mass")
+                actionable = row.get("installed_core_expected_actionable_mass")
+                installed = row.get("installed_core_is_newly_qualified")
+                if (row.get("actor_role_sha256") != actor.role_sha256[role]
+                        or not isinstance(refit, Mapping)
+                        or not isinstance(qualification, Mapping)
+                        or qualification.get("method") !=
+                        p.REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD
+                        or type(qualification.get("validation_passed")) is not bool
+                        or type(installed) is not bool
+                        or type(mass) not in (int, float)
+                        or type(actionable) not in (int, float)
+                        or not all(math.isfinite(float(value)) for value in
+                                   (mass, actionable))
+                        or not 0 <= actionable <= mass <= 1):
+                    return None
+                role_pass = bool(qualification["validation_passed"]
+                                 and installed and mass >= .35
+                                 and actionable >= .30)
+                computed_pass &= role_pass
+                if not role_pass:
+                    failed_roles.append(role)
+            if computed_pass or not failed_roles:
+                return None
+            authorization = _read(authorization_path)
+            audit = _read(audit_path)
+            raw_journal = journal_path.read_bytes()
+            journal_rows = [json.loads(line) for line in
+                            raw_journal.splitlines()]
+            actual = audit.get("actual_reset_rows")
+            # The locked runner canonicalizes the BC schedule before issuing
+            # resets. Its input JSON is key-sorted, so iterating that raw
+            # mapping would give a different (alphabetical) reset order.
+            expected_resets = runner._formal_bc_reset_sequence(
+                runner._checked_spec(run_spec))
+            if (authorization.get("authorization_kind") !=
+                    "warehouse-v616-registered-pair-locked-run-v1"
+                    or authorization.get("run_spec_sha256") !=
+                    runner._scientific_run_spec_sha256(run_spec)
+                    or authorization.get("training_config_sha256") !=
+                    runner._training_config_sha256(run_spec)
+                    or authorization.get("source_closure_sha256") !=
+                    runner.source_closure_sha256()
+                    or audit.get("status") != "failed"
+                    or audit.get("error") != f"RuntimeError: {failure_message}"
+                    or audit.get("candidate_id") != run_spec["candidate_id"]
+                    or audit.get("pair_seed") != run_spec["pair_seed"]
+                    or audit.get("joint_steps") != run_spec["joint_steps"]
+                    or audit.get("authorization_receipt_sha256") !=
+                    _file_sha(authorization_path)
+                    or audit.get("run_spec_sha256") !=
+                    authorization["run_spec_sha256"]
+                    or audit.get("training_config_sha256") !=
+                    authorization["training_config_sha256"]
+                    or audit.get("source_closure_sha256") !=
+                    authorization["source_closure_sha256"]
+                    or audit.get("bc_recipe_sha256") !=
+                    p.REGISTERED_BC_SPEC_SHA256
+                    or audit.get("action_physics_config_sha256") !=
+                    p.REGISTERED_BC_SPEC["action_physics_config_sha256"]
+                    or audit.get("pair_report_sha256") is not None
+                    or audit.get("selected_actor_role_sha256") is not None
+                    or audit.get("actual_reset_rows") != journal_rows
+                    or audit.get("actual_reset_count") != len(expected_resets)
+                    or audit.get("actual_reset_sequence_sha256") !=
+                    _sha(expected_resets)
+                    or audit.get("declared_prefix_matches") is not True
+                    or audit.get("reset_journal_path") != str(journal_path)
+                    or audit.get("reset_journal_sha256") !=
+                    sha256(raw_journal).hexdigest()
+                    or not isinstance(actual, list)
+                    or [{"phase": row.get("phase"), "seed": row.get("seed")}
+                        for row in actual] != expected_resets):
+                return None
+            return {
+                "candidate_id": run_spec["candidate_id"],
+                "release_id": run_spec["release_id"],
+                "pair_seed": run_spec["pair_seed"],
+                "joint_steps": run_spec["joint_steps"],
+                "run_spec_sha256": authorization["run_spec_sha256"],
+                "training_config_sha256": authorization[
+                    "training_config_sha256"],
+                "source_closure_sha256": authorization["source_closure_sha256"],
+                "authorization_receipt_path": str(authorization_path),
+                "authorization_receipt_sha256": _file_sha(authorization_path),
+                "bc_precheck_receipt_path": str(precheck_path),
+                "bc_precheck_receipt_sha256": sha256(raw_precheck).hexdigest(),
+                "final_bc_actor_path": str(actor_path),
+                "final_bc_actor_sha256": actor_receipt["sha256"],
+                "reset_audit_path": str(audit_path),
+                "reset_audit_sha256": _file_sha(audit_path),
+                "reset_journal_path": str(journal_path),
+                "reset_journal_sha256": sha256(raw_journal).hexdigest(),
+                "training_log_path": str(log_path),
+                "training_log_sha256": _file_sha(log_path),
+                "subprocess_returncode": returncode,
+                "failed_roles": failed_roles,
+            }
+        except (KeyError, TypeError, ValueError, OSError, RuntimeError,
+                OverflowError, UnicodeError):
+            return None
+
     def train_pair(self, spec: Mapping) -> dict:
-        from backend.training.warehouse_v6_runner import train_pair
-        return train_pair(spec)
+        """Launch one registered pair through the SHA-bound, one-call gate."""
+        import torch
+        from backend.training import warehouse_v6_runner as runner
+        from backend.training.warehouse_v6_actor import (
+            WarehouseV6Actor, role_hashes)
+
+        pair_seed, budget = spec["pair_seed"], spec["joint_steps"]
+        registered = p.PairRunSpec(
+            spec["candidate_id"], pair_seed, budget, spec["output_dir"],
+            spec["program_fit_method"], release_id=spec["release_id"],
+            scenario_namespace=spec["scenario_namespace"],
+            checkpoint_seeds=tuple(spec["checkpoint_seeds"]))
+        expected = registered.to_mapping()
+        if any(spec.get(key) != value for key, value in expected.items()):
+            raise RuntimeError("Warehouse locked pair spec differs from registration")
+        output_root = Path(spec["output_dir"]).resolve()
+        candidate_root = output_root / spec["candidate_id"]
+        pair_dir = candidate_root / f"pair_{pair_seed}_steps_{budget}"
+        if pair_dir.exists():
+            raise RuntimeError("Warehouse locked pair already has an output directory")
+        candidate_root.mkdir(parents=True, exist_ok=True)
+        if pair_seed in p.FORMAL_PAIR_SEEDS:
+            admission = Admission(output_root, spec["candidate_id"],
+                                  release_id=spec["release_id"], backend=self,
+                                  program_fit_method=spec["program_fit_method"])
+            admission._verified_development_lock(
+                admission._required("budget.lock.json"))
+            if budget != admission._required("budget.lock.json")["locked_budget"]:
+                raise RuntimeError("Warehouse formal budget differs from development lock")
+        source = runner.source_closure_sha256()
+        lock_script = (PROJECT_ROOT / "scripts" /
+                       "run_warehouse_v616_locked_pair.py").resolve(strict=True)
+        lock_dir = candidate_root / "admission" / "locked-pairs"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        stem = f"pair_{pair_seed}_steps_{budget}"
+        spec_path = lock_dir / f"{stem}.run-spec.json"
+        authorization_path = lock_dir / f"{stem}.authorization.json"
+        audit_path = lock_dir / f"{stem}.reset-audit.json"
+        journal_path = lock_dir / f"{stem}.reset-audit.jsonl"
+        if audit_path.exists() or journal_path.exists():
+            raise RuntimeError("Warehouse locked pair reset audit was already claimed")
+        artifact_paths = {
+            "warmup_actor_path": str((pair_dir / "warmup.actor.npz").resolve()),
+            "final_bc_actor_path": str((pair_dir / "final-bc.actor.npz").resolve()),
+            "final_bc_precheck_receipt_path": str((
+                pair_dir / "final-bc-internal-precheck.json").resolve()),
+        }
+        run_spec = {**expected, **artifact_paths,
+                    "source_closure_sha256": source}
+        spec_sha = _immutable_json(spec_path, run_spec)
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(pair_seed)
+            initial_roles = role_hashes(WarehouseV6Actor())
+        authorization = {
+            "authorization_kind": "warehouse-v616-registered-pair-locked-run-v1",
+            "candidate_id": spec["candidate_id"],
+            "pair_seed": pair_seed, "joint_steps": budget,
+            "run_spec_sha256": runner._scientific_run_spec_sha256(run_spec),
+            "training_config_sha256": runner._training_config_sha256(run_spec),
+            "source_closure_sha256": source,
+            "bc_recipe_sha256": p.REGISTERED_BC_SPEC_SHA256,
+            "executable_recipe_file_sha256": p.REGISTERED_BC_SPEC[
+                "executable_recipe_file_sha256"],
+            "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
+                "action_physics_config_sha256"],
+            "bc_data_seed_schedule_sha256": registered.bc_data_seed_schedule_sha256,
+            "bc_critic_reset_schedule_sha256":
+                registered.bc_critic_reset_schedule_sha256,
+            "scenario_schedule_sha256": p.scenario_schedule_sha256(
+                registered.scenario_namespace, pair_seed, budget),
+            "final_program_fit_seed_schedule_sha256": expected[
+                "final_program_fit_seed_schedule_sha256"],
+            "initial_role_sha256": initial_roles,
+            "output_directory": str(pair_dir),
+            "artifact_paths_sha256": _sha(artifact_paths),
+            "reset_audit_path": str(audit_path),
+            "reset_audit_journal_path": str(journal_path),
+            "lock_script_path": str(lock_script),
+            "lock_script_sha256": _file_sha(lock_script),
+            "run_spec_file_sha256": spec_sha,
+        }
+        _immutable_json(authorization_path, authorization)
+        log_path = lock_dir / f"{stem}.train.log"
+        with log_path.open("xb") as log:
+            completed = subprocess.run(
+                [sys.executable, str(lock_script), "--spec", str(spec_path),
+                 "--authorization", str(authorization_path)],
+                cwd=PROJECT_ROOT, stdout=log, stderr=subprocess.STDOUT,
+                check=False)
+        if completed.returncode:
+            failure = self._failed_bc_precheck_evidence(
+                run_spec=run_spec, authorization_path=authorization_path,
+                artifact_paths=artifact_paths, audit_path=audit_path,
+                journal_path=journal_path, log_path=log_path,
+                returncode=completed.returncode)
+            if failure is not None:
+                raise BCPrecheckFailure(failure)
+            raise RuntimeError(
+                f"Warehouse locked pair failed ({completed.returncode}); "
+                f"see {log_path}")
+        pair_report_path = pair_dir / "pair.training.json"
+        if not pair_report_path.is_file():
+            raise RuntimeError("Warehouse locked pair did not write training receipt")
+        return _read(pair_report_path)
 
     def source_closure_sha256(self) -> str:
         from backend.training.warehouse_v6_runner import source_closure_sha256
@@ -419,7 +725,7 @@ class Admission:
         _exclusive_json(self._path(name), row)
         return row
 
-    def _record_failure(self, phase: str, error: Exception) -> None:
+    def _record_failure(self, phase: str, error: BaseException) -> None:
         path = self._path(f"{phase}.failure.json")
         if not path.exists():
             _exclusive_json(path, {"candidate_id": self.candidate_id,
@@ -431,10 +737,10 @@ class Admission:
         if self._path("candidate.closed.json").exists():
             raise RuntimeError("Warehouse candidate is closed; use a new candidate and version")
 
-    def _close(self, phase: str, reason: str) -> None:
+    def _close(self, phase: str, reason: str, **evidence: object) -> None:
         if not self._path("candidate.closed.json").exists():
             self._new("candidate.closed.json", {"phase": phase, "reason": reason,
-                                                 "passed": False})
+                                                 "passed": False, **evidence})
 
     def _pair_spec(self, pair_seed: int, budget: int) -> p.PairRunSpec:
         selection = (p.DEVELOPMENT_SELECTION_SEEDS if
@@ -444,6 +750,111 @@ class Admission:
                              str(self.output_root), self.program_fit_method,
                              release_id=self.release_id,
                              checkpoint_seeds=selection)
+
+    def _verified_bc_failure_evidence(self, evidence: Mapping,
+                                      pair_seed: int, budget: int) -> None:
+        """Rebind a failed locked BC receipt to this candidate and source."""
+        source = self.backend.source_closure_sha256()
+        spec = self._pair_spec(pair_seed, budget)
+        pair_dir = self.directory / f"pair_{pair_seed}_steps_{budget}"
+        lock_dir = self.receipts / "locked-pairs"
+        stem = f"pair_{pair_seed}_steps_{budget}"
+        paths = {
+            "authorization_receipt_path": lock_dir / f"{stem}.authorization.json",
+            "bc_precheck_receipt_path": pair_dir / "final-bc-internal-precheck.json",
+            "final_bc_actor_path": pair_dir / "final-bc.actor.npz",
+            "reset_audit_path": lock_dir / f"{stem}.reset-audit.json",
+            "reset_journal_path": lock_dir / f"{stem}.reset-audit.jsonl",
+            "training_log_path": lock_dir / f"{stem}.train.log",
+        }
+        if (not isinstance(evidence, Mapping)
+                or evidence.get("candidate_id") != self.candidate_id
+                or evidence.get("release_id") != self.release_id
+                or evidence.get("pair_seed") != pair_seed
+                or evidence.get("joint_steps") != budget
+                or evidence.get("source_closure_sha256") != source
+                or evidence.get("run_spec_sha256") != spec.sha256()
+                or evidence.get("training_config_sha256") !=
+                   spec.training_config_sha256(source)
+                or type(evidence.get("subprocess_returncode")) is not int
+                or evidence["subprocess_returncode"] == 0
+                or not isinstance(evidence.get("failed_roles"), list)
+                or not evidence["failed_roles"]
+                or not set(evidence["failed_roles"]) <= set(p.ROLES)):
+            raise RuntimeError("Warehouse failed BC receipt identity changed")
+        for key, expected in paths.items():
+            digest_key = key.removesuffix("_path") + "_sha256"
+            if (evidence.get(key) != str(expected.resolve())
+                    or not expected.is_file()
+                    or evidence.get(digest_key) != _file_sha(expected)):
+                raise RuntimeError("Warehouse failed BC receipt asset changed")
+        authorization = _read(paths["authorization_receipt_path"])
+        precheck = _read(paths["bc_precheck_receipt_path"])
+        audit = _read(paths["reset_audit_path"])
+        if (authorization.get("source_closure_sha256") != source
+                or authorization.get("run_spec_sha256") != spec.sha256()
+                or authorization.get("training_config_sha256") !=
+                   spec.training_config_sha256(source)
+                or precheck.get("passed") is not False
+                or precheck.get("purpose") !=
+                   "development_internal_precheck_after_complete_bc"
+                or audit.get("status") != "failed"
+                or audit.get("authorization_receipt_sha256") !=
+                   evidence["authorization_receipt_sha256"]
+                or audit.get("source_closure_sha256") != source
+                or audit.get("pair_report_sha256") is not None
+                or (pair_dir / "pair.training.json").exists()):
+            raise RuntimeError("Warehouse failed BC receipts do not agree")
+
+    def _finish_failed_bc_precheck(self, *, pair_seed: int, budget: int,
+                                   evidence: Mapping) -> dict:
+        """Write a permanent failed development decision and close the run."""
+        self._verified_bc_failure_evidence(evidence, pair_seed, budget)
+        filename = f"development.{budget}.{pair_seed}.json"
+        row_data = {
+            "pair_seed": pair_seed, "budget": budget,
+            "failure_kind": "final_bc_internal_precheck",
+            "bc_precheck_failure": dict(evidence),
+            "source_closure_sha256": evidence["source_closure_sha256"],
+            "training": {}, "evaluation": {}, "program_audit": {},
+            "stress": {}, "stress_episodes": 0,
+            "passed": False,
+        }
+        if self._path(filename).exists():
+            row = self._required(filename)
+            if row != {"candidate_id": self.candidate_id,
+                       "release_id": self.release_id, **row_data}:
+                raise RuntimeError("Warehouse failed BC development receipt changed")
+        else:
+            row = self._new(filename, row_data)
+        row_sha = _file_sha(self._path(filename))
+        failed_data = {
+            "failure_kind": "final_bc_internal_precheck",
+            "failed_pair_seed": pair_seed,
+            "failed_budget": budget,
+            "failed_pair_receipt_sha256": row_sha,
+            "bc_precheck_receipt_sha256": evidence[
+                "bc_precheck_receipt_sha256"],
+            "source_closure_sha256": evidence["source_closure_sha256"],
+            "budgets_tried": list(p.BUDGETS[:p.BUDGETS.index(budget) + 1]),
+            "remaining_budgets_skipped": list(
+                p.BUDGETS[p.BUDGETS.index(budget) + 1:]),
+            "reason": "registered final BC precheck failed before PPO",
+            "passed": False,
+        }
+        if self._path("development.failed.json").exists():
+            failed = self._required("development.failed.json")
+            if failed != {"candidate_id": self.candidate_id,
+                          "release_id": self.release_id, **failed_data}:
+                raise RuntimeError("Warehouse failed development summary changed")
+        else:
+            failed = self._new("development.failed.json", failed_data)
+        self._close("development", failed_data["reason"],
+                    failed_pair_receipt_sha256=row_sha,
+                    bc_precheck_receipt_sha256=evidence[
+                        "bc_precheck_receipt_sha256"],
+                    source_closure_sha256=evidence["source_closure_sha256"])
+        return failed
 
     def _train(self, pair_seed: int, budget: int) -> dict:
         spec = self._pair_spec(pair_seed, budget)
@@ -478,6 +889,10 @@ class Admission:
                 or report.get("checkpoint_seeds") != list(spec.checkpoint_seeds)
                 or report.get("online_program_extraction_steps") !=
                 list(spec.online_program_extraction_steps)
+                or report.get("topology_refresh_steps") !=
+                list(spec.topology_refresh_steps)
+                or report.get("topology_frozen_at_step") !=
+                spec.topology_frozen_at_step
                 or report.get("final_program_fit_seed_schedule") !=
                 expected_spec["final_program_fit_seed_schedule"]
                 or report.get("final_program_fit_seed_schedule_sha256") !=
@@ -631,6 +1046,10 @@ class Admission:
                 or pair.get("checkpoint_seeds") != list(spec.checkpoint_seeds)
                 or pair.get("online_program_extraction_steps") !=
                 list(spec.online_program_extraction_steps)
+                or pair.get("topology_refresh_steps") !=
+                list(spec.topology_refresh_steps)
+                or pair.get("topology_frozen_at_step") !=
+                spec.topology_frozen_at_step
                 or pair.get("final_program_fit_seed_schedule") !=
                 expected["final_program_fit_seed_schedule"]
                 or pair.get("final_program_fit_seed_schedule_sha256") !=
@@ -743,7 +1162,11 @@ class Admission:
                 or lock.get("bc_recipe_version") !=
                 p.REGISTERED_BC_RECIPE_VERSION
                 or lock.get("online_program_extraction_steps") !=
-                list(p.online_program_extraction_steps(budget))):
+                list(p.online_program_extraction_steps(budget))
+                or lock.get("topology_refresh_steps") !=
+                list(p.topology_refresh_steps(budget))
+                or lock.get("topology_frozen_at_step") !=
+                p.topology_frozen_at_step(budget)):
             raise RuntimeError("Warehouse development seed lock changed or source retired")
         rows = {}
         for candidate_budget in p.BUDGETS[:p.BUDGETS.index(budget) + 1]:
@@ -767,7 +1190,18 @@ class Admission:
             self._verified_development_lock(lock)
             return lock
         if self._path("development.failed.json").exists():
-            return self._required("development.failed.json")
+            failed = self._required("development.failed.json")
+            if failed.get("failure_kind") == "final_bc_internal_precheck":
+                seed, budget = failed.get("failed_pair_seed"), failed.get(
+                    "failed_budget")
+                if (seed not in p.DEVELOPMENT_PAIR_SEEDS
+                        or budget not in p.BUDGETS):
+                    raise RuntimeError("Warehouse failed BC pair identity changed")
+                row = self._required(f"development.{budget}.{seed}.json")
+                return self._finish_failed_bc_precheck(
+                    pair_seed=seed, budget=budget,
+                    evidence=row.get("bc_precheck_failure", {}))
+            return failed
         reports_by_budget = {}
         for budget in p.BUDGETS:
             rows = []
@@ -778,12 +1212,20 @@ class Admission:
                     if (row.get("source_closure_sha256") !=
                             self.backend.source_closure_sha256()):
                         raise RuntimeError("Warehouse development source closure changed")
+                    if row.get("failure_kind") == "final_bc_internal_precheck":
+                        return self._finish_failed_bc_precheck(
+                            pair_seed=pair_seed, budget=budget,
+                            evidence=row.get("bc_precheck_failure", {}))
                     rows.append(row)
                     continue
                 phase = f"development.{budget}.{pair_seed}"
                 try:
                     try:
                         pair = self._train(pair_seed, budget)
+                    except BCPrecheckFailure as gate:
+                        return self._finish_failed_bc_precheck(
+                            pair_seed=pair_seed, budget=budget,
+                            evidence=gate.evidence)
                     except TrainingGateFailure as gate:
                         row = self._new(filename, {
                             "pair_seed": pair_seed, "budget": budget,
@@ -860,6 +1302,9 @@ class Admission:
                     "bc_recipe_version": p.REGISTERED_BC_RECIPE_VERSION,
                     "online_program_extraction_steps": list(
                         p.online_program_extraction_steps(chosen)),
+                    "topology_refresh_steps": list(
+                        p.topology_refresh_steps(chosen)),
+                    "topology_frozen_at_step": p.topology_frozen_at_step(chosen),
                     "final_program_fit_seed_schedule": final_program_schedules,
                     "final_program_fit_seed_schedule_sha256": _sha(
                         final_program_schedules),
@@ -924,10 +1369,36 @@ class Admission:
                 if not _verify_formal_row(facts, pair, lock["source_closure_sha256"]):
                     raise RuntimeError("Warehouse formal evaluation receipt invalid")
                 rows.append(self._new(filename, facts))
-            except Exception as exc:
+            except BaseException as exc:
                 self._record_failure(phase, exc)
-                if isinstance(exc, TrainingGateFailure):
-                    self._close(phase, "formal paired training provenance gate failed")
+                pair_dir = self.directory / f"pair_{pair_seed}_steps_{budget}"
+                lock_dir = self.receipts / "locked-pairs"
+                stem = f"pair_{pair_seed}_steps_{budget}"
+                claim_files = {
+                    "authorization": lock_dir / f"{stem}.authorization.json",
+                    "reset_audit": lock_dir / f"{stem}.reset-audit.json",
+                    "reset_journal": lock_dir / f"{stem}.reset-audit.jsonl",
+                    "training_log": lock_dir / f"{stem}.train.log",
+                    "pair_training": pair_dir / "pair.training.json",
+                }
+                claimed = (pair_dir.exists()
+                           or any(path.exists() for path in claim_files.values())
+                           or isinstance(exc, TrainingGateFailure))
+                if claimed:
+                    self._close(
+                        phase, "formal locked pair failed after output claim",
+                        source_closure_sha256=lock["source_closure_sha256"],
+                        budget_lock_sha256=_file_sha(self._path(
+                            "budget.lock.json")),
+                        failure_receipt_sha256=_file_sha(self._path(
+                            f"{phase}.failure.json")),
+                        claimed_pair_output_path=str(pair_dir.resolve()),
+                        claimed_pair_output_exists=pair_dir.exists(),
+                        claimed_artifact_sha256={
+                            name: _file_sha(path)
+                            for name, path in claim_files.items()
+                            if path.is_file()},
+                    )
                 raise
         try:
             selected = p.select_formal_pair(rows)
@@ -1226,7 +1697,11 @@ class Admission:
                 or lock.get("bc_recipe_version") !=
                 p.REGISTERED_BC_RECIPE_VERSION
                 or lock.get("online_program_extraction_steps") !=
-                list(p.online_program_extraction_steps(lock["locked_budget"]))):
+                list(p.online_program_extraction_steps(lock["locked_budget"]))
+                or lock.get("topology_refresh_steps") !=
+                list(p.topology_refresh_steps(lock["locked_budget"]))
+                or lock.get("topology_frozen_at_step") !=
+                p.topology_frozen_at_step(lock["locked_budget"])):
             raise RuntimeError("Warehouse frozen final-program seed schedule changed")
         development = {}
         for budget in p.BUDGETS:
@@ -1403,6 +1878,8 @@ class Admission:
             "release": self.release_id, "release_id": self.release_id,
             "domain": "warehouse",
             "locked_budget": lock["locked_budget"],
+            "topology_refresh_steps": lock["topology_refresh_steps"],
+            "topology_frozen_at_step": lock["topology_frozen_at_step"],
             "program_fit_method": lock["program_fit_method"],
             "source_closure_sha256": lock["source_closure_sha256"],
             "development_receipt_path": {

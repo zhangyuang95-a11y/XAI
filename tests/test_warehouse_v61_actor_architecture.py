@@ -12,10 +12,12 @@ from backend.training.warehouse_v6_runner import (
     _initialize_public_trees, _teacher_rows,
 )
 from env.warehouse.pure_nn import AGENTS
+from tests.warehouse_v614_test_scopes import isolated_evaluation_scope
 
 
 def test_public_label_trees_keep_sparse_independent_splits_and_frozen_parity():
-    obs, mask, labels, _ = _teacher_rows(4, 992000)
+    with isolated_evaluation_scope():
+        obs, mask, labels, _ = _teacher_rows(4, 992000)
     torch.manual_seed(29)
     model = WarehouseV6Actor()
     fitted = _initialize_public_trees(model, obs, mask, labels)

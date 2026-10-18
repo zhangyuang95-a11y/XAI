@@ -88,6 +88,72 @@ def certified_mask_branches(
     return frozenset(left), frozenset(right)
 
 
+def explicit_mask_branches(
+        weights: np.ndarray, bias: float,
+        mask_indices: tuple[int, ...],
+        ) -> tuple[frozenset[int], frozenset[int]]:
+    """Certify only a dedicated physical ``legal_ACTION`` split.
+
+    An oblique predicate may have a valid interval proof, but v6.16 requires
+    an explicit, immutable legal-bit test on a movement leaf's path.  The
+    stored float32 coefficients and the shared left-tie rule determine which
+    child implies that the bit equals one.
+    """
+    row = np.asarray(weights, dtype=np.float32)
+    used = np.flatnonzero(row)
+    if len(used) != 1 or int(used[0]) not in mask_indices:
+        return frozenset(), frozenset()
+    action = mask_indices.index(int(used[0]))
+    score_zero = float(np.float32(bias))
+    score_one = score_zero + float(row[used[0]])
+    if score_zero <= HARD_SPLIT_TIE_EPSILON < score_one:
+        return frozenset(), frozenset({action})
+    if score_one <= HARD_SPLIT_TIE_EPSILON < score_zero:
+        return frozenset({action}), frozenset()
+    return frozenset(), frozenset()
+
+
+def certified_leaf_actions(
+        split_weights: np.ndarray, split_bias: np.ndarray,
+        left_refs: np.ndarray, right_refs: np.ndarray,
+        node_count: int, leaf_count: int,
+        mask_indices: tuple[int, ...], *, explicit: bool,
+        feature_bounds: dict[int, tuple[float, float]] | None = None,
+        wait_action: int,
+        ) -> tuple[frozenset[int], ...]:
+    """Return path-proven legal actions for each leaf of an irregular tree."""
+    weights = np.asarray(split_weights, dtype=np.float32)
+    bias = np.asarray(split_bias, dtype=np.float32)
+    left = np.asarray(left_refs, dtype=np.int64)
+    right = np.asarray(right_refs, dtype=np.int64)
+    result: list[frozenset[int] | None] = [None] * leaf_count
+
+    def walk(ref: int, proven: frozenset[int]) -> None:
+        if ref < 0:
+            leaf = -1 - ref
+            if leaf < 0 or leaf >= leaf_count or result[leaf] is not None:
+                raise ValueError("Warehouse certification tree leaf invalid")
+            result[leaf] = proven
+            return
+        if ref >= node_count:
+            raise ValueError("Warehouse certification tree node invalid")
+        if explicit:
+            left_actions, right_actions = explicit_mask_branches(
+                weights[ref], float(bias[ref]), mask_indices)
+        else:
+            if feature_bounds is None:
+                raise ValueError("Warehouse certification bounds missing")
+            left_actions, right_actions = certified_mask_branches(
+                weights[ref], float(bias[ref]), mask_indices, feature_bounds)
+        walk(int(left[ref]), proven | left_actions)
+        walk(int(right[ref]), proven | right_actions)
+
+    walk(0 if node_count else -1, frozenset({wait_action}))
+    if any(actions is None for actions in result):
+        raise ValueError("Warehouse certification tree unreachable leaf")
+    return tuple(actions for actions in result if actions is not None)
+
+
 def split_scores(encoded: np.ndarray, weights: np.ndarray,
                  bias: np.ndarray) -> np.ndarray:
     """Compute every sparse split in float64 from stored float32 tensors."""

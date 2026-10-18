@@ -28,13 +28,19 @@ from env.warehouse.public_observation_v6 import (
     rebuild_public_pre_action_state,
 )
 from experiments.warehouse.protocol import (
-    INITIAL_RELEASE_ID, REGISTERED_BC_SPEC, REGISTERED_BC_SPEC_SHA256,
+    INITIAL_RELEASE_ID,
     bc_critic_reset_schedule, bc_data_seed_schedule, bc_stage_receipt_shape,
-    bc_report_valid,
+    legacy_v614_bc_report_valid,
 )
 from env.warehouse.public_action_features_v614 import (
     ACTION_PHYSICS_CONFIG, ACTION_PHYSICS_CONFIG_SHA256,
 )
+
+
+_LEGACY_V614_BC_SPEC_SHA256 = (
+    "f328512e3a2bb888892bb4366240dce8fc99d855a7591c2f0c18fdd1b3f183a6")
+_LEGACY_V614_RECIPE_FILE_SHA256 = (
+    "fc45da901a8267175b051ba31ea10cedf327033b48fb9cbcec575b6c617c8ccb")
 
 
 SPLITS = ("fit", "calibration", "eligibility", "validation")
@@ -406,8 +412,7 @@ def verify_stage1_pressure_receipt_identity(
         raise ValueError("Warehouse v6.14 source snapshot inventory differs")
     recipe_sha = _sha(paths["training-recipe.json"])
     if (recipe_sha != expected_training_recipe_sha256
-            or recipe_sha != REGISTERED_BC_SPEC[
-                "executable_recipe_file_sha256"]
+            or recipe_sha != _LEGACY_V614_RECIPE_FILE_SHA256
             or recipe_sha != _sha(source_root /
                                  "configs/warehouse_v614_exploratory_recipe.json")):
         raise ValueError("Warehouse v6.14 executable recipe bytes differ")
@@ -464,13 +469,13 @@ def verify_stage1_pressure_receipt_identity(
             or lock.get("required_cwd") != pre.get("required_cwd")
             or authorization.get("lock_script_path") != str(script_path)
             or authorization.get("lock_script_sha256") != script_sha
-            or authorization.get("bc_recipe_sha256") != REGISTERED_BC_SPEC_SHA256
+            or authorization.get("bc_recipe_sha256") != _LEGACY_V614_BC_SPEC_SHA256
             or authorization.get("executable_recipe_file_sha256") != recipe_sha
             or authorization.get("bc_data_seed_schedule_sha256") !=
                _digest(bc_data_seed_schedule(expected_pair_seed))
             or authorization.get("run_spec_sha256") !=
                _digest(pre.get("run_spec"))
-            or pre.get("bc_recipe_sha256") != REGISTERED_BC_SPEC_SHA256):
+            or pre.get("bc_recipe_sha256") != _LEGACY_V614_BC_SPEC_SHA256):
         raise ValueError("Warehouse v6.14 Stage 1 authorization differs")
     if (historical.get("schema") !=
             "warehouse-v614-12469-historical-seed-audit.v1"
@@ -507,7 +512,7 @@ def verify_stage1_pressure_receipt_identity(
     if (pressure.get("quality_result_sha256") != quality_sha
             or bc.get("final_bc_actor_sha256") != expected_actor_sha256
             or bc.get("final_bc_role_sha256") != roles
-            or not bc_report_valid(bc.get("bc_report"), expected_pair_seed,
+            or not legacy_v614_bc_report_valid(bc.get("bc_report"), expected_pair_seed,
                                    expected_source_closure_sha256)):
         raise ValueError("Warehouse v6.14 BC or quality prerequisite differs")
     internal_receipt = bc["bc_report"]["final_bc_internal_precheck_receipt"]

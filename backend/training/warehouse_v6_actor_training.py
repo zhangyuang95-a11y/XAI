@@ -29,15 +29,17 @@ from .warehouse_v6_actor import (
     FEATURE_DIM, FEATURE_SCHEMA_SHA256,
     TREE_DEPTH, TREE_LEAVES, TREE_NODES, MAX_SPLIT_FEATURES, RESIDUAL_WIDTH,
     MIN_RESIDUAL_BOUND, MAX_RESIDUAL_BOUND, CORE_LOW_GATE_BOUND,
-    CORE_BOUND_MODE,
+    CORE_BOUND_MODE, CORE_MARGIN_FLOOR,
     GATE_WIDTH, GEOMETRY_DIM,
     _POSITION_COLUMNS, _MOVE, TREE_GRADIENT_SCALE,
     _TENSOR_NAMES, _role_arrays, role_sha256,
 )
 from .warehouse_v6_tree_routing import (
     HARD_SPLIT_ROUTING_VERSION, HARD_SPLIT_TIE_EPSILON,
+    explicit_mask_branches,
     split_scores as hard_tree_split_scores,
 )
+from env.warehouse.public_action_features_v614 import TREE_MASK_START
 
 def policy_features_torch(obs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     if (obs.shape[-1:] != (OBSERVATION_DIM,)
@@ -68,18 +70,88 @@ class SparseHardTree(nn.Module):
         self.register_buffer("right_refs", right)
         self.register_buffer("node_count", torch.tensor([TREE_NODES], dtype=torch.int64))
         self.register_buffer("leaf_count", torch.tensor([TREE_LEAVES], dtype=torch.int64))
+        # New checkpoints retain the support selected at each scheduled
+        # refresh. Legacy state_dicts are populated on load below.
+        self.register_buffer("support_mask", torch.zeros(TREE_NODES, FEATURE_DIM,
+                                                         dtype=torch.bool))
+        self.register_buffer("support_fixed", torch.tensor([False]))
+        self.register_buffer("guard_node_mask", torch.zeros(TREE_NODES,
+                                                            dtype=torch.bool))
         nn.init.normal_(self.split.weight, mean=0.0, std=0.025)
         nn.init.zeros_(self.split.bias)
         nn.init.normal_(self.leaf_logits, mean=0.0, std=0.025)
-        # Training starts from public BC splits; a local straight-through
-        # surrogate below keeps their hard routing trainable.
+        self.split.weight.register_hook(self._mask_guard_weight_gradient)
+        self.split.bias.register_hook(self._mask_guard_bias_gradient)
+
+    def _mask_guard_weight_gradient(self, gradient: torch.Tensor) -> torch.Tensor:
+        return gradient.masked_fill(self.guard_node_mask[:, None], 0.0)
+
+    def _mask_guard_bias_gradient(self, gradient: torch.Tensor) -> torch.Tensor:
+        return gradient.masked_fill(self.guard_node_mask, 0.0)
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        # v6.14 checkpoints contain the same exported NN tensors but lack
+        # the v6.16 training-only support and guard buffers.
+        weight = state_dict.get(prefix + "split.weight")
+        if weight is not None:
+            selected = torch.argsort(-weight.abs(), dim=-1, stable=True)[
+                :, :MAX_SPLIT_FEATURES]
+            support = torch.zeros_like(weight, dtype=torch.bool).scatter_(
+                -1, selected, True)
+            state_dict.setdefault(prefix + "support_mask", support)
+        state_dict.setdefault(prefix + "support_fixed", torch.tensor([False]))
+        state_dict.setdefault(prefix + "guard_node_mask", torch.zeros(
+            TREE_NODES, dtype=torch.bool))
+        super()._load_from_state_dict(state_dict, prefix, local_metadata,
+                                      strict, missing_keys, unexpected_keys,
+                                      error_msgs)
 
     def effective_weights(self) -> torch.Tensor:
         weights = self.split.weight
         selected = torch.argsort(-weights.abs(), dim=-1, stable=True)[
             :, :MAX_SPLIT_FEATURES]
-        hard = torch.zeros_like(weights).scatter_(-1, selected, 1.0)
-        return weights * hard
+        dynamic = torch.zeros_like(weights, dtype=torch.bool).scatter_(
+            -1, selected, True)
+        hard = torch.where(self.support_fixed[0], self.support_mask,
+                           dynamic).to(weights.dtype)
+        # Exactly three features affect hard routing. A deterministic local
+        # straight-through surrogate reaches unselected weights, allowing a
+        # feature to enter at the next scheduled support refresh.
+        surrogate = 0.1 * weights
+        return weights * hard + surrogate - surrogate.detach()
+
+    def refresh_sparse_support(self) -> dict:
+        """Lock the current top-three support without discarding alternatives."""
+        with torch.no_grad():
+            selected = torch.argsort(-self.split.weight.abs(), dim=-1,
+                                     stable=True)[:, :MAX_SPLIT_FEATURES]
+            support = torch.zeros_like(self.support_mask).scatter_(
+                -1, selected, True)
+            self.support_mask.copy_(support)
+            self.support_fixed[0] = True
+            mask_indices = tuple(range(TREE_MASK_START,
+                                       TREE_MASK_START + len(ACTIONS)))
+            effective = (self.split.weight * support).cpu().numpy()
+            bias = self.split.bias.cpu().numpy()
+            for node in range(int(self.node_count[0])):
+                lhs, rhs = explicit_mask_branches(
+                    effective[node], float(bias[node]), mask_indices)
+                if lhs or rhs:
+                    self.guard_node_mask[node] = True
+        selected_rows = [torch.nonzero(row, as_tuple=True)[0].tolist()
+                         for row in self.support_mask[:int(self.node_count[0])]]
+        support_bytes = self.support_mask.cpu().numpy().astype(np.uint8).tobytes()
+        return {"support_sha256": sha256(support_bytes).hexdigest(),
+                "selected_features": selected_rows,
+                "guard_node_count": int(self.guard_node_mask[:int(
+                    self.node_count[0])].sum()),
+                "node_count": int(self.node_count[0]),
+                "leaf_count": int(self.leaf_count[0])}
+
+    def set_topology_trainable(self, enabled: bool) -> None:
+        self.split.weight.requires_grad_(enabled)
+        self.split.bias.requires_grad_(enabled)
 
     def path(self, encoded: torch.Tensor) -> torch.Tensor:
         values = encoded.reshape(-1, FEATURE_DIM)
@@ -183,8 +255,9 @@ class SparseHardTree(nn.Module):
             self.right_refs.copy_(torch.from_numpy(right_refs))
             self.node_count[0] = node_count
             self.leaf_count[0] = leaf_count
-        self.split.weight.requires_grad_(True)
-        self.split.bias.requires_grad_(True)
+            self.guard_node_mask.zero_()
+            self.support_fixed[0] = False
+        self.set_topology_trainable(True)
         return {"visited_source_leaves": len(occupied),
                 "node_count": node_count, "leaf_count": leaf_count,
                 "leaf_purity": purity.tolist(),
@@ -209,6 +282,11 @@ class RoleActor(nn.Module):
         # A public-training-data core is an Actor tensor, not a runtime action
         # rule. Its bound is applied inside the NN forward pass for both arms.
         self.register_buffer("core_leaf_mask", torch.zeros(TREE_LEAVES))
+        # Only the certified rows are locked at the 75% topology freeze. Keep
+        # the hook attached across checkpoint loads; the runner restores the
+        # phase with set_certified_core_logits_trainable().
+        self._certified_core_logits_trainable = True
+        self.tree.leaf_logits.register_hook(self._core_leaf_logit_gradient)
         nn.init.zeros_(self.gate[-1].weight)
         nn.init.constant_(self.gate[-1].bias, -0.7)
         nn.init.normal_(self.action_residual[-1].weight, mean=0.0, std=0.01)
@@ -261,7 +339,7 @@ class RoleActor(nn.Module):
             self.tree.leaf_count[0] = leaves
             self.tree.leaf_logits.copy_(torch.from_numpy(np.array(
                 values["leaf_logits"], dtype=np.float32, copy=True)))
-            self.core_leaf_mask.copy_(torch.from_numpy(core))
+            self.core_leaf_mask.zero_()
             # Every leaf retains a learned residual budget. In core leaves a
             # learned pre-action gate makes the effective budget small in
             # ordinary states and can release it in conflict states.
@@ -271,19 +349,141 @@ class RoleActor(nn.Module):
                                (upper - MIN_RESIDUAL_BOUND), 1e-4, 1 - 1e-4)
             self.leaf_bound_logits.copy_(torch.from_numpy(
                 np.log(fraction / (1.0 - fraction)).astype(np.float32)))
-        # Core legality is certified by path predicates.  Keep those split
-        # predicates fixed after public-data fitting; leaf logits, gate,
-        # bounds, and the 256-unit residual remain trainable.
-        self.tree.split.weight.requires_grad_(False)
-        self.tree.split.bias.requires_grad_(False)
-        # Exact topology, sparsity, and role hash validation is shared with
-        # deployed NumPy inference; no separate train-only interpretation.
-        FrozenWarehouseV6Role(_role_arrays(self))
+            self.tree.guard_node_mask.zero_()
+            mask_indices = tuple(range(TREE_MASK_START,
+                                       TREE_MASK_START + len(ACTIONS)))
+            for node in range(nodes):
+                lhs, rhs = explicit_mask_branches(
+                    values["split_weights"][node],
+                    float(values["split_bias"][node]), mask_indices)
+                if lhs or rhs:
+                    self.tree.guard_node_mask[node] = True
+        support = self.tree.refresh_sparse_support()
+        self.install_certified_core_mask(core)
+        self.tree.set_topology_trainable(True)
         return {"node_count": nodes, "leaf_count": leaves,
                 "core_leaf_count": int(core.sum()),
-                "split_frozen_after_public_fit": True,
+                "split_frozen_after_public_fit": False,
+                "explicit_guard_node_count": support["guard_node_count"],
+                "support_sha256": support["support_sha256"],
                 "core_result_report": getattr(result, "report", None),
                 "core_mask_sha256": sha256(core.tobytes()).hexdigest()}
+
+    def set_topology_trainable(self, enabled: bool) -> None:
+        """Train only the non-guard decision predicates before 75% freeze."""
+        self.tree.set_topology_trainable(enabled)
+
+    def _core_leaf_logit_gradient(self, gradient: torch.Tensor) -> torch.Tensor:
+        if self._certified_core_logits_trainable:
+            return gradient
+        return gradient.masked_fill(self.core_leaf_mask[:, None] > 0.5, 0.0)
+
+    def set_certified_core_logits_trainable(self, enabled: bool) -> dict:
+        """Lock certified leaf outputs after topology freeze, not other leaves.
+
+        Optimizer momentum for the locked rows must also be cleared when this
+        switches to False; a zero gradient alone does not stop Adam momentum.
+        """
+        if not enabled:
+            FrozenWarehouseV6Role(_role_arrays(self))
+        self._certified_core_logits_trainable = bool(enabled)
+        return {"certified_core_logits_trainable": bool(enabled),
+                "frozen_leaf_count": (0 if enabled else
+                                      int(self.core_leaf_mask.sum().item()))}
+
+    def refresh_sparse_support(self) -> dict:
+        """Select top-three supports and invalidate all prior core claims."""
+        report = self.tree.refresh_sparse_support()
+        with torch.no_grad():
+            invalidated = int(self.core_leaf_mask.sum().item())
+            self.core_leaf_mask.zero_()
+        return {**report, "invalidated_core_leaves": invalidated}
+
+    def install_certified_core_mask(self, mask: np.ndarray | torch.Tensor) -> dict:
+        """Install only leaves whose current raw action has a legal-bit path."""
+        core = np.asarray(mask.detach().cpu().numpy() if isinstance(mask, torch.Tensor)
+                          else mask, dtype=np.float32)
+        leaves = int(self.tree.leaf_count[0])
+        if (core.shape != (TREE_LEAVES,) or not np.isfinite(core).all()
+                or np.any((core != 0.0) & (core != 1.0))
+                or np.any(core[leaves:] != 0.0)):
+            raise ValueError("Warehouse certified core mask invalid")
+        weights = _role_arrays(self)
+        weights["core_leaf_mask"] = core.copy()
+        frozen = FrozenWarehouseV6Role(weights)
+        with torch.no_grad():
+            self.core_leaf_mask.copy_(torch.from_numpy(core).to(
+                self.core_leaf_mask.device))
+        return {"core_leaf_count": int(core.sum()),
+                "core_mask_sha256": sha256(core.tobytes()).hexdigest(),
+                "certified_actions": [sorted(actions) for actions in
+                                      frozen.certified_actions()]}
+
+    def prune_unproven_core_leaves(self) -> int:
+        """Revoke core claims whose *current* raw action lost path legality.
+
+        PPO may move leaf logits or, before 75%, a non-guard split. This
+        explicit post-optimizer check changes only the qualification buffer;
+        it never replaces the Actor's chosen action. Frozen inference keeps
+        rejecting any unpruned invalid certificate.
+        """
+        weights = _role_arrays(self)
+        original = weights["core_leaf_mask"].copy()
+        weights["core_leaf_mask"] = np.zeros_like(original)
+        proven = FrozenWarehouseV6Role(weights).certified_actions()
+        raw_action = np.argmax(weights["tree.leaf_logits"], axis=-1)
+        invalid = [leaf for leaf in range(len(proven))
+                   if original[leaf] > 0.5 and int(raw_action[leaf]) not in proven[leaf]]
+        if invalid:
+            with torch.no_grad():
+                self.core_leaf_mask[invalid] = 0.0
+        # This also checks the unmodified core leaves and the deployed tree.
+        FrozenWarehouseV6Role(_role_arrays(self))
+        return len(invalid)
+
+    def topology_certificate_report(self,
+                                    encoded: torch.Tensor | np.ndarray | None = None) -> dict:
+        """Check deployed tree constraints and optional Torch/NumPy parity."""
+        frozen = FrozenWarehouseV6Role(_role_arrays(self))
+        count = int(self.tree.node_count[0])
+        weights = frozen.weights["tree.split.weight"][:count]
+        mask_indices = tuple(range(TREE_MASK_START,
+                                   TREE_MASK_START + len(ACTIONS)))
+        for node in range(count):
+            lhs, rhs = explicit_mask_branches(
+                weights[node], float(frozen.weights["tree.split.bias"][node]),
+                mask_indices)
+            if (lhs or rhs) and not bool(self.tree.guard_node_mask[node]):
+                raise ValueError("Warehouse legal guard node is not immutable")
+        report = {
+            "node_count": count,
+            "leaf_count": int(self.tree.leaf_count[0]),
+            "maximum_features_per_node": int(np.count_nonzero(
+                weights, axis=-1).max(initial=0)),
+            "explicit_guard_node_count": int(self.tree.guard_node_mask[:count].sum()),
+            "core_leaf_count": int(self.core_leaf_mask.sum()),
+            "role_sha256": frozen.role_sha256,
+        }
+        if encoded is not None:
+            rows = torch.as_tensor(encoded, dtype=self.tree.split.weight.dtype,
+                                   device=self.tree.split.weight.device)
+            if rows.shape[-1:] != (FEATURE_DIM,):
+                raise ValueError("Warehouse topology audit feature dimension mismatch")
+            with torch.no_grad():
+                torch_leaves = self.tree.path(rows).argmax(-1).cpu().numpy()
+                torch_logits = self(rows).cpu().numpy()
+            numpy_rows = rows.detach().cpu().numpy()
+            numpy_leaves = frozen.leaf(numpy_rows)
+            numpy_logits = frozen.logits_encoded(numpy_rows)
+            mismatches = int(np.count_nonzero(torch_leaves != numpy_leaves))
+            maximum_delta = float(np.max(np.abs(torch_logits - numpy_logits),
+                                         initial=0.0))
+            report.update({"routing_mismatches": mismatches,
+                           "maximum_logit_abs_difference": maximum_delta,
+                           "audited_rows": int(np.prod(rows.shape[:-1]))})
+            if mismatches or maximum_delta > 1e-4:
+                raise ValueError("Warehouse topology Torch/NumPy parity failed")
+        return report
 
     def bounds(self) -> torch.Tensor:
         return MIN_RESIDUAL_BOUND + (MAX_RESIDUAL_BOUND - MIN_RESIDUAL_BOUND) * torch.sigmoid(
@@ -315,13 +515,17 @@ class RoleActor(nn.Module):
         gate_input, relation = self._relation_features(encoded)
         gate = torch.sigmoid(self.gate(gate_input).squeeze(-1))
         core = (path.detach() @ self.core_leaf_mask) > 0.5
-        bound = torch.where(core,
-                            CORE_LOW_GATE_BOUND + gate * (
-                                learned_bound - CORE_LOW_GATE_BOUND),
-                            learned_bound)
+        physical = encoded[..., TREE_MASK_START:TREE_MASK_START + len(ACTIONS)]
+        masked_tree = tree_logits.masked_fill(physical <= 0.5, -1.0e9)
+        top_two = masked_tree.topk(2, dim=-1).values
+        margin_cap = ((top_two[..., 0] - top_two[..., 1] -
+                       CORE_MARGIN_FLOOR) / 2.0).clamp_min(0.0)
+        effective = torch.where(core,
+                                torch.minimum(gate * learned_bound, margin_cap),
+                                gate * learned_bound)
         score = self.action_residual(relation).squeeze(-1)
-        bounded_residual = (gate * bound).unsqueeze(-1) * torch.tanh(score)
-        return tree_logits, bounded_residual, bound
+        bounded_residual = effective.unsqueeze(-1) * torch.tanh(score)
+        return tree_logits, bounded_residual, learned_bound
 
     def gate_values(self, encoded: torch.Tensor) -> torch.Tensor:
         gate_input, _ = self._relation_features(encoded)
@@ -409,6 +613,7 @@ def export_actor(model: WarehouseV6Actor, path: str | Path, *, pair_seed: int,
         "maximum_residual_bound": MAX_RESIDUAL_BOUND,
         "core_low_gate_bound": CORE_LOW_GATE_BOUND,
         "core_bound_mode": CORE_BOUND_MODE,
+        "core_margin_floor": CORE_MARGIN_FLOOR,
         "relation_geometry_dim": GEOMETRY_DIM,
         "action_feature_dim": ACTION_FEATURE_DIM,
         "gate_width": GATE_WIDTH,

@@ -26,13 +26,17 @@ from .warehouse_v6_actor import (
     FrozenWarehouseV6Actor, FrozenWarehouseV6Role,
 )
 from .warehouse_v6_tree_routing import (
-    HARD_SPLIT_TIE_EPSILON, split_scores as hard_tree_split_scores,
+    HARD_SPLIT_TIE_EPSILON, certified_feature_bounds,
+    certified_mask_branches, split_scores as hard_tree_split_scores,
+    validate_certification_domain,
 )
 
 
 PROGRAM_VERSION = "warehouse-role-program.v6.14-public-affordance-exploratory"
+JOINT_PROGRAM_VERSION = "warehouse-role-program.v6.16-joint-certified-topology"
 AXIS_TREE_METHOD = "axis_tree_v1"
 ACTOR_SPARSE_TOPOLOGY_METHOD = "actor_sparse_topology_v1"
+JOINT_CERTIFIED_TOPOLOGY_METHOD = "actor_joint_certified_topology_v2"
 PROGRAM_MAX_DEPTH = 5
 PROGRAM_MAX_LEAVES = 16
 PROGRAM_MAX_INTERNAL_NODES = PROGRAM_MAX_LEAVES - 1
@@ -44,6 +48,60 @@ FEEDBACK_AGREEMENT = 0.85
 EXPLANATION_AGREEMENT = 0.90
 MAX_COVERED_KL = 0.35
 _EPSILON = 1e-8
+_MASK_INDICES = tuple(FEATURE_NAMES.index(f"legal_{action.lower()}")
+                      for action in ACTIONS)
+_CERTIFICATION_BOUNDS = certified_feature_bounds(tuple(FEATURE_NAMES))
+
+
+def _certified_tree_actions(
+        split_weights: np.ndarray, split_bias: np.ndarray,
+        left_refs: np.ndarray, right_refs: np.ndarray,
+        root_ref: int, *, pure_mask_gates_only: bool) -> dict[int, frozenset[int]]:
+    certificates: dict[int, frozenset[int]] = {}
+
+    def visit(ref: int, proven: frozenset[int]) -> None:
+        if ref < 0:
+            certificates[-1 - ref] = proven
+            return
+        weights = split_weights[ref]
+        used = np.flatnonzero(weights)
+        pure_gate = (len(used) == 1 and int(used[0]) in _MASK_INDICES)
+        left, right = (certified_mask_branches(
+            weights, float(split_bias[ref]),
+            _MASK_INDICES, _CERTIFICATION_BOUNDS)
+            if not pure_mask_gates_only or pure_gate
+            else (frozenset(), frozenset()))
+        visit(int(left_refs[ref]), proven | left)
+        visit(int(right_refs[ref]), proven | right)
+
+    visit(int(root_ref), frozenset({ACTIONS.index("WAIT")}))
+    return certificates
+
+
+def certified_program_actions(program: "WarehouseV6Program") -> dict[int, frozenset[int]]:
+    """Prove each program leaf's legal actions with the Actor's path rule."""
+    program._structure()
+    return _certified_tree_actions(
+        program.split_weights, program.split_bias, program.left_refs,
+        program.right_refs, program.root_ref,
+        pure_mask_gates_only=_requires_path_certificate(program))
+
+
+def certified_actor_actions(
+        role: FrozenWarehouseV6Role) -> dict[int, frozenset[int]]:
+    """Expose the same certificate for an already validated frozen Actor role."""
+    weights = role.weights
+    nodes = int(weights["tree.node_count"][0])
+    return _certified_tree_actions(
+        weights["tree.split.weight"][:nodes],
+        weights["tree.split.bias"][:nodes],
+        weights["tree.left_refs"][:nodes].astype(np.int64),
+        weights["tree.right_refs"][:nodes].astype(np.int64),
+        0 if nodes else -1, pure_mask_gates_only=True)
+
+
+def _requires_path_certificate(program: "WarehouseV6Program") -> bool:
+    return program.report.get("fit_method") == JOINT_CERTIFIED_TOPOLOGY_METHOD
 
 
 def _sample_arrays(rows: Sequence[Mapping], name: str) -> tuple[np.ndarray, np.ndarray]:
@@ -91,6 +149,8 @@ def _metrics(program: "WarehouseV6Program", actor: FrozenWarehouseV6Role,
     if purpose not in ("feedback", "explanation"):
         raise ValueError("invalid program metric purpose")
     x, masks = _sample_arrays(rows, "program audit")
+    if _requires_path_certificate(program):
+        validate_certification_domain(x, _MASK_INDICES, _CERTIFICATION_BOUNDS)
     sampled = _sampled_indices(rows)
     leaves = program.leaf_indices(x)
     selected = np.isin(leaves, tuple(selected_leaves))
@@ -101,6 +161,7 @@ def _metrics(program: "WarehouseV6Program", actor: FrozenWarehouseV6Role,
         "actionable_coverage": 0.0, "agreement": 0.0,
         "agreement_wilson_lower_90": 0.0, "kl": None,
         "illegal_count": 0, "masked_illegal_count": 0,
+        "path_uncertified_count": 0,
         "certified_rows": 0, "distinct_episode_count": 0,
         "distinct_scenario_seed_count": 0,
         "max_episode_fraction": 0.0,
@@ -114,8 +175,14 @@ def _metrics(program: "WarehouseV6Program", actor: FrozenWarehouseV6Role,
     top = q.argmax(-1)
     nn_top = p.argmax(-1)
     raw_legal = m[np.arange(count), raw.argmax(-1)] > 0.5
+    path_certified = np.ones(count, dtype=np.bool_)
+    if _requires_path_certificate(program):
+        certificates = certified_program_actions(program)
+        path_certified = np.fromiter(
+            (int(np.argmax(raw[index])) in certificates[int(leaf[index])]
+             for index in range(count)), dtype=np.bool_, count=count)
     action_legal = m[np.arange(count), actions] > 0.5
-    matched = raw_legal & action_legal & (top == actions)
+    matched = raw_legal & path_certified & action_legal & (top == actions)
     if purpose == "feedback":
         matched &= actions == nn_top
     agreement = float(np.mean(top == nn_top))
@@ -132,6 +199,7 @@ def _metrics(program: "WarehouseV6Program", actor: FrozenWarehouseV6Role,
             np.log(np.maximum(p, _EPSILON)) - np.log(np.maximum(q, _EPSILON))), axis=-1))),
         "illegal_count": int(np.sum(~raw_legal)),
         "masked_illegal_count": int(np.sum(m[np.arange(count), top] <= 0.5)),
+        "path_uncertified_count": int(np.sum(~path_certified)),
         "distinct_episode_count": len(frequencies),
         "distinct_scenario_seed_count": len(scenario_seeds),
         "max_episode_fraction": max(frequencies.values()) / count,
@@ -150,7 +218,8 @@ def _eligible(metric: Mapping, required_agreement: float) -> bool:
                 and metric["agreement"] >= required_agreement
                 and metric["agreement_wilson_lower_90"] >= required_agreement - 0.08
                 and metric["kl"] is not None and metric["kl"] <= 0.25
-                and metric["illegal_count"] == 0)
+                and metric["illegal_count"] == 0
+                and metric.get("path_uncertified_count", 0) == 0)
 
 
 def _passes(metric: Mapping, required_agreement: float, *,
@@ -163,7 +232,8 @@ def _passes(metric: Mapping, required_agreement: float, *,
                 and metric["actionable_coverage"] >= minimum
                 and metric["agreement"] >= agreement
                 and metric["kl"] is not None and metric["kl"] <= maximum_kl
-                and metric["illegal_count"] == 0)
+                and metric["illegal_count"] == 0
+                and metric.get("path_uncertified_count", 0) == 0)
 
 
 @dataclass(frozen=True)
@@ -261,13 +331,23 @@ class WarehouseV6Program:
     def lookup(self, sample: Mapping) -> dict:
         leaf, path = self._leaf(sample)
         mask = np.asarray(sample["mask"], dtype=np.float32)
+        if _requires_path_certificate(self):
+            encoded = encode_actor_tree_features(
+                np.asarray(sample["obs"], dtype=np.float32), mask)
+            validate_certification_domain(
+                encoded.reshape(1, FEATURE_DIM), _MASK_INDICES,
+                _CERTIFICATION_BOUNDS)
         probabilities = _masked_probabilities(self.leaf_logits[leaf][None], mask[None])[0]
         action = ACTIONS[int(probabilities.argmax())]
         raw_action = ACTIONS[int(self.leaf_logits[leaf].argmax())]
+        path_certified = (ACTIONS.index(raw_action) in
+                          certified_program_actions(self)[leaf]
+                          if _requires_path_certificate(self) else False)
         return {
             "leaf_id": leaf, "path": path, "action": action,
             "raw_action": raw_action,
             "raw_action_legal": bool(mask[ACTIONS.index(raw_action)] > 0.5),
+            "raw_action_path_certified": path_certified,
             "probabilities": dict(zip(ACTIONS, map(float, probabilities), strict=True)),
             "margin_certified": False,
             "certificate_kind": "independent_empirical_audit_only",
@@ -294,6 +374,8 @@ class WarehouseV6Program:
         evidence = self.lookup(sample)
         mask = np.asarray(sample["mask"], dtype=np.float32)
         if (evidence["leaf_id"] not in leaves or not evidence["raw_action_legal"]
+                or (_requires_path_certificate(self)
+                    and not evidence["raw_action_path_certified"])
                 or evidence["action"] != actor_action
                 or mask[ACTIONS.index(actor_action)] <= 0.5):
             return None
@@ -302,7 +384,8 @@ class WarehouseV6Program:
 
     def to_dict(self) -> dict:
         return {
-            "version": PROGRAM_VERSION, "role": self.role,
+            "version": (JOINT_PROGRAM_VERSION if _requires_path_certificate(self)
+                        else PROGRAM_VERSION), "role": self.role,
             "actor_role_sha256": self.actor_role_sha256,
             "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
             "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
@@ -330,7 +413,11 @@ class WarehouseV6Program:
 
     @classmethod
     def from_dict(cls, data: Mapping, *, actor_role_sha256: str) -> "WarehouseV6Program":
-        if (data.get("version") != PROGRAM_VERSION
+        version = data.get("version")
+        method = data.get("report", {}).get("fit_method")
+        if (version not in (PROGRAM_VERSION, JOINT_PROGRAM_VERSION)
+                or (version == JOINT_PROGRAM_VERSION) !=
+                   (method == JOINT_CERTIFIED_TOPOLOGY_METHOD)
                 or data.get("feature_schema_sha256") != FEATURE_SCHEMA_SHA256
                 or data.get("action_physics_config_sha256") !=
                    ACTION_PHYSICS_CONFIG_SHA256
@@ -355,6 +442,12 @@ class WarehouseV6Program:
                 or report.get("max_features_per_node", MAX_SPLIT_FEATURES)
                     > MAX_SPLIT_FEATURES):
             raise RuntimeError("Warehouse program report complexity mismatch")
+        if _requires_path_certificate(result):
+            certificates = certified_program_actions(result)
+            selected = result.feedback_leaves | result.explanation_leaves
+            if any(int(np.argmax(result.leaf_logits[leaf])) not in certificates[leaf]
+                   for leaf in selected):
+                raise RuntimeError("Warehouse program eligible leaf lacks path legality proof")
         return result
 
     @classmethod
@@ -512,18 +605,21 @@ def _actor_sparse_topology(actor: FrozenWarehouseV6Role) -> tuple[dict, dict]:
 
 
 def actor_sparse_topology_matches(program: WarehouseV6Program,
-                                  actor: FrozenWarehouseV6Role) -> bool:
+                                  actor: FrozenWarehouseV6Role, *,
+                                  require_actor_binding: bool = True) -> bool:
     """Check a claimed extracted program against its bound frozen Actor."""
-    if program.report.get("fit_method") != ACTOR_SPARSE_TOPOLOGY_METHOD:
+    if program.report.get("fit_method") not in (
+            ACTOR_SPARSE_TOPOLOGY_METHOD, JOINT_CERTIFIED_TOPOLOGY_METHOD):
         return False
     structure, origin = _actor_sparse_topology(actor)
     report = program.report.get("fit_tree", {})
     return bool(
-        program.actor_role_sha256 == actor.role_sha256
+        (not require_actor_binding or
+         program.actor_role_sha256 == actor.role_sha256)
         and report.get("topology_origin") == origin["topology_origin"]
         and report.get("actor_tree_structure_sha256") ==
             origin["actor_tree_structure_sha256"]
-        and report.get("actor_role_sha256") == actor.role_sha256
+        and report.get("actor_role_sha256") == program.actor_role_sha256
         and program.root_ref == structure["root_ref"]
         and np.array_equal(program.split_weights, structure["split_weights"])
         and np.array_equal(program.split_bias, structure["split_bias"])
@@ -604,7 +700,8 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
                 method: str = AXIS_TREE_METHOD) -> WarehouseV6Program:
     if role not in AGENTS:
         raise ValueError("invalid Warehouse program role")
-    if method not in (AXIS_TREE_METHOD, ACTOR_SPARSE_TOPOLOGY_METHOD):
+    if method not in (AXIS_TREE_METHOD, ACTOR_SPARSE_TOPOLOGY_METHOD,
+                      JOINT_CERTIFIED_TOPOLOGY_METHOD):
         raise ValueError("unknown Warehouse program fitting method")
     parts = {"fit": list(fit), "calibration": list(calibration),
              "eligibility": list(eligibility), "validation": list(validation)}
@@ -617,7 +714,10 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         for name, rows in parts.items()
     }
     for name, rows in parts.items():
-        _sample_arrays(rows, name)
+        encoded, _ = _sample_arrays(rows, name)
+        if method == JOINT_CERTIFIED_TOPOLOGY_METHOD:
+            validate_certification_domain(
+                encoded, _MASK_INDICES, _CERTIFICATION_BOUNDS)
         _sampled_indices(rows)
     if any(episode_ids[left] & episode_ids[right]
            for left in parts for right in parts if left < right):
@@ -627,7 +727,9 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         raise ValueError("Warehouse program scenario seed splits overlap")
     role_actor = actor.roles[role]
     fit_x, fit_masks = _sample_arrays(parts["fit"], "fit")
-    if method == ACTOR_SPARSE_TOPOLOGY_METHOD:
+    actor_topology = method in (ACTOR_SPARSE_TOPOLOGY_METHOD,
+                                JOINT_CERTIFIED_TOPOLOGY_METHOD)
+    if actor_topology:
         structure, tree_report = _actor_sparse_topology(role_actor)
     else:
         structure, tree_report = _fit_sparse_tree(role, role_actor, parts["fit"],
@@ -637,7 +739,9 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         for name, ids in episode_ids.items()
     }
     report = {
-        "version": PROGRAM_VERSION, "role": role,
+        "version": (JOINT_PROGRAM_VERSION
+                    if method == JOINT_CERTIFIED_TOPOLOGY_METHOD
+                    else PROGRAM_VERSION), "role": role,
         "actor_role_sha256": role_actor.role_sha256,
         "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
         "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
@@ -653,7 +757,7 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         "leaf_eligibility": {}, "validation": {},
         "certificate_kind": "independent_empirical_audit_only",
     }
-    if method == ACTOR_SPARSE_TOPOLOGY_METHOD:
+    if actor_topology:
         report["fit_method"] = method
     provisional = WarehouseV6Program(
         role, role_actor.role_sha256, structure["root_ref"],
@@ -665,27 +769,48 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
     fit_leaves = provisional.leaf_indices(fit_x)
     fit_counts = np.bincount(fit_leaves, minlength=structure["leaf_count"])
     fitted_leaves = frozenset(np.flatnonzero(fit_counts).tolist())
-    if method == ACTOR_SPARSE_TOPOLOGY_METHOD:
+    if actor_topology:
         # Even though structure came from the Actor, the program's path must
         # agree with frozen inference on every fit row before fitting logits.
         if not np.array_equal(fit_leaves, role_actor.leaf(fit_x)):
             raise RuntimeError("extracted Warehouse Actor tree route mismatch")
+        if method == JOINT_CERTIFIED_TOPOLOGY_METHOD:
+            for name in ("calibration", "eligibility", "validation"):
+                x, _ = _sample_arrays(parts[name], name)
+                if not np.array_equal(provisional.leaf_indices(x),
+                                      role_actor.leaf(x)):
+                    raise RuntimeError(
+                        f"extracted Warehouse Actor tree route mismatch in {name}")
         report["fit_leaf_row_counts"] = fit_counts.astype(int).tolist()
     learned = _fit_leaf_logits(role_actor, fit_x, fit_masks, fit_leaves,
                                structure["leaf_count"],
                                empty_leaf_logits=(role_actor.weights[
                                    "tree.leaf_logits"][:structure["leaf_count"]]
-                                   if method == ACTOR_SPARSE_TOPOLOGY_METHOD else None))
+                                   if actor_topology else None))
     cal_x, cal_masks = _sample_arrays(parts["calibration"], "calibration")
     calibrated = _calibrate_leaf_logits(
         learned, role_actor, cal_x, cal_masks, provisional.leaf_indices(cal_x),
-        fitted_leaves=(fitted_leaves if method == ACTOR_SPARSE_TOPOLOGY_METHOD
+        fitted_leaves=(fitted_leaves if actor_topology
                        else None))
     provisional = WarehouseV6Program(
         role, role_actor.role_sha256, structure["root_ref"],
         structure["split_weights"], structure["split_bias"],
         structure["left_refs"], structure["right_refs"], calibrated,
         frozenset(), frozenset(), report)
+    path_certificates = (certified_program_actions(provisional)
+                         if method == JOINT_CERTIFIED_TOPOLOGY_METHOD else {})
+    if path_certificates:
+        report["leaf_path_certificates"] = {
+            str(leaf): {
+                "proven_actions": [ACTIONS[action] for action in sorted(actions)],
+                "raw_top_action": ACTIONS[int(np.argmax(calibrated[leaf]))],
+                "raw_top_path_certified":
+                    int(np.argmax(calibrated[leaf])) in actions,
+            }
+            for leaf, actions in path_certificates.items()
+        }
+        report["path_certificate_rule"] = (
+            "pure_legal_bit_ancestor+certified_mask_branches.v2")
     feedback, explanation = set(), set()
     # Eligibility alone locks the leaf sets. Internal validation is evaluated
     # once, after the selection, and cannot remove or add a leaf.
@@ -693,9 +818,12 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         f = _metrics(provisional, role_actor, parts["eligibility"], {leaf}, "feedback")
         e = _metrics(provisional, role_actor, parts["eligibility"], {leaf}, "explanation")
         report["leaf_eligibility"][str(leaf)] = {"feedback": f, "explanation": e}
-        if leaf in fitted_leaves and _eligible(f, FEEDBACK_AGREEMENT):
+        has_path_proof = (method != JOINT_CERTIFIED_TOPOLOGY_METHOD or
+                          int(np.argmax(calibrated[leaf])) in
+                          path_certificates[leaf])
+        if leaf in fitted_leaves and has_path_proof and _eligible(f, FEEDBACK_AGREEMENT):
             feedback.add(leaf)
-        if leaf in fitted_leaves and _eligible(e, EXPLANATION_AGREEMENT):
+        if leaf in fitted_leaves and has_path_proof and _eligible(e, EXPLANATION_AGREEMENT):
             explanation.add(leaf)
     program = WarehouseV6Program(
         role, role_actor.role_sha256, structure["root_ref"],
@@ -713,13 +841,15 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
             and feedback_metric["agreement"] >= FEEDBACK_AGREEMENT
             and feedback_metric["kl"] is not None
             and feedback_metric["kl"] <= MAX_COVERED_KL
-            and feedback_metric["illegal_count"] == 0),
+            and feedback_metric["illegal_count"] == 0
+            and feedback_metric["path_uncertified_count"] == 0),
         "explanation_online_passed": bool(
             explanation_metric["rows"] > 0
             and explanation_metric["agreement"] >= EXPLANATION_AGREEMENT
             and explanation_metric["kl"] is not None
             and explanation_metric["kl"] <= MAX_COVERED_KL
-            and explanation_metric["illegal_count"] == 0),
+            and explanation_metric["illegal_count"] == 0
+            and explanation_metric["path_uncertified_count"] == 0),
         "feedback_passed": _passes(feedback_metric, FEEDBACK_AGREEMENT),
         "explanation_passed": _passes(explanation_metric, EXPLANATION_AGREEMENT),
         "development_feedback_passed": _passes(
@@ -738,10 +868,16 @@ def current_actor_fidelity(program: WarehouseV6Program,
     leaves = (set(program.feedback_leaves) if purpose == "feedback"
               else set(program.explanation_leaves))
     metric = _metrics(program, actor.roles[program.role], rows, leaves, purpose)
+    topology_matches = (not _requires_path_certificate(program) or
+                        actor_sparse_topology_matches(
+                            program, actor.roles[program.role],
+                            require_actor_binding=False))
+    metric["current_actor_topology_matches_program"] = topology_matches
     metric["current_actor_role_sha256"] = actor.role_sha256[program.role]
     metric["program_sha256"] = program.sha256()
     metric["passed"] = bool(
-        program.report["validation"][purpose + "_passed"]
+        topology_matches
+        and program.report["validation"][purpose + "_passed"]
         and _passes(metric, FEEDBACK_AGREEMENT if purpose == "feedback"
                     else EXPLANATION_AGREEMENT, development=True))
     return metric
@@ -752,10 +888,16 @@ def audit_frozen_program(program: WarehouseV6Program,
                          rows: Sequence[Mapping]) -> dict:
     if actor.role_sha256[program.role] != program.actor_role_sha256:
         raise RuntimeError("Warehouse program Actor binding mismatch")
-    if (program.report.get("fit_method") == ACTOR_SPARSE_TOPOLOGY_METHOD
+    if (program.report.get("fit_method") in (
+            ACTOR_SPARSE_TOPOLOGY_METHOD, JOINT_CERTIFIED_TOPOLOGY_METHOD)
             and not actor_sparse_topology_matches(
                 program, actor.roles[program.role])):
         raise RuntimeError("Warehouse extracted program topology differs from Actor")
+    if _requires_path_certificate(program):
+        certificates = certified_program_actions(program)
+        if any(int(np.argmax(program.leaf_logits[leaf])) not in certificates[leaf]
+               for leaf in program.feedback_leaves | program.explanation_leaves):
+            raise RuntimeError("Warehouse program eligible leaf lacks path legality proof")
     ids = {str(row["episode"]) for row in rows}
     prior = program.report["split_episode_ids"]
     if any(ids & set(used) for used in prior.values()):
@@ -793,6 +935,8 @@ def audit_frozen_program(program: WarehouseV6Program,
 
 
 __all__ = [
-    "PROGRAM_VERSION", "WarehouseV6Program", "fit_program",
+    "PROGRAM_VERSION", "JOINT_PROGRAM_VERSION", "JOINT_CERTIFIED_TOPOLOGY_METHOD",
+    "WarehouseV6Program", "fit_program", "certified_actor_actions",
+    "certified_program_actions", "actor_sparse_topology_matches",
     "audit_frozen_program", "current_actor_fidelity",
 ]

@@ -25,6 +25,44 @@ def test_successor_policy_uses_its_own_release_and_stays_pending():
                                 release_id=release_id)
     assert warehouse.policy_artifacts_v6(release_id)["regularized"][
         "readiness"] is False
+
+
+def test_legacy_pending_config_remains_readable_without_promoting_old_actor(
+        monkeypatch, tmp_path):
+    current = json.loads(warehouse.V6_CONFIG_PATH.read_text())
+    assert current["model_version"] == warehouse.V6_LEGACY_MODEL_VERSION
+    assert warehouse._v6_config()["model_version"] == current["model_version"]
+
+    successor = {**current, "version": warehouse.V6_MODEL_VERSION,
+                 "model_version": warehouse.V6_MODEL_VERSION}
+    successor_path = tmp_path / "v616.json"
+    successor_path.write_text(json.dumps(successor))
+    monkeypatch.setattr(warehouse, "V6_CONFIG_PATH", successor_path)
+    assert warehouse._v6_config()["model_version"] == warehouse.V6_MODEL_VERSION
+
+    successor["version"] = warehouse.V6_LEGACY_MODEL_VERSION
+    successor_path.write_text(json.dumps(successor))
+    with pytest.raises(RuntimeError, match="configuration schema mismatch"):
+        warehouse._v6_config()
+
+
+def test_v6_runtime_rejects_artifact_model_version_drift(monkeypatch):
+    policy_id = "warehouse-raw-v6"
+    entry = {"readiness": True, "actor_path": "unused.npz",
+             "actor_sha256": "a" * 64,
+             "role_sha256": {"human": "b" * 64, "ai": "c" * 64},
+             "model_version": warehouse.V6_MODEL_VERSION}
+    monkeypatch.setattr(warehouse, "policy_artifacts_v6",
+                        lambda _: {"raw": entry})
+    monkeypatch.setattr(warehouse.FrozenWarehouseV6Actor, "load",
+                        lambda *_args, **_kwargs: SimpleNamespace(
+                            model_version=warehouse.V6_LEGACY_MODEL_VERSION))
+    warehouse._actor.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="model version differs from release"):
+            warehouse._actor(policy_id)
+    finally:
+        warehouse._actor.cache_clear()
 from experiments.warehouse import protocol
 from study_v3 import release_catalog
 

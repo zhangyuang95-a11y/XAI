@@ -16,9 +16,11 @@ from backend.training.warehouse_v6_actor import (
     FrozenWarehouseV6Actor, WarehouseV6Actor, export_actor)
 from backend.training.warehouse_v6_runner import (
     _write_final_fit_trace, collect_program_audit_rows)
+from backend.training.warehouse_v6_program import fit_program
 from experiments.warehouse import protocol as p
 from experiments.warehouse.acceptance import (
-    _final_fit_index_claim, _final_fit_verified_rows, _same_recomputed)
+    _final_fit_index_claim, _final_fit_verified_rows, _same_recomputed,
+    _verify_final_fit_pair)
 from tests.warehouse_v614_test_scopes import isolated_evaluation_scope
 
 
@@ -151,3 +153,81 @@ def test_unselected_pair_trace_bytes_are_hashed_and_runtime_metrics_tolerate_rou
         _final_fit_index_claim(**fit_proof)
     assert _same_recomputed({"kl": 0.1000005}, {"kl": 0.1})
     assert not _same_recomputed({"kl": 0.10001}, {"kl": 0.1})
+
+
+def test_joint_final_fit_replay_checks_post_calibration_path_proofs(fit_proof):
+    samples = _final_fit_verified_rows(**fit_proof)
+    actor_item = fit_proof["assets"]["regularized"]["actor"]
+    actor = FrozenWarehouseV6Actor.load(
+        fit_proof["root"] / actor_item["path"],
+        expected_sha256=actor_item["sha256"],
+        expected_role_sha256=fit_proof["pair"]["variants"]["regularized"][
+            "selected_role_sha256"])
+    evidence = deepcopy(fit_proof)
+    trained = evidence["pair"]["variants"]["regularized"]
+    for role in p.ROLES:
+        program = fit_program(
+            role, actor, *(samples[role][name] for name in SCHEDULE),
+            method=p.REGISTERED_PROGRAM_FIT_METHOD)
+        source = evidence["root"] / "source" / f"{role}.program.json"
+        program.save(source)
+        item = _bundle(evidence["root"], source)
+        evidence["assets"]["regularized"]["programs"][role] = item
+        trained["program_artifacts"][role] = {"sha256": item["sha256"]}
+        trained["selected_program_reports"][role] = program.report
+        trained["final_fresh_program_reports"][role].update({
+            "status": "frozen_actor_fresh_four_part_fit",
+            "actor_role_sha256": actor.role_sha256[role],
+            "program_sha256": item["sha256"],
+            "validation": program.report["validation"],
+        })
+    assert _verify_final_fit_pair(**evidence, verified_samples=samples)
+
+    changed = deepcopy(evidence)
+    role = p.ROLES[0]
+    item = changed["assets"]["regularized"]["programs"][role]
+    payload = json.loads((changed["root"] / item["path"]).read_text())
+    claimed = payload["report"]["leaf_path_certificates"]["0"]
+    claimed["raw_top_path_certified"] = not claimed["raw_top_path_certified"]
+    forged = changed["root"] / "source" / "forged.program.json"
+    forged.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    replacement = _bundle(changed["root"], forged)
+    changed["assets"]["regularized"]["programs"][role] = replacement
+    trained = changed["pair"]["variants"]["regularized"]
+    trained["program_artifacts"][role] = {"sha256": replacement["sha256"]}
+    trained["selected_program_reports"][role] = payload["report"]
+    trained["final_fresh_program_reports"][role]["program_sha256"] = replacement["sha256"]
+    assert not _verify_final_fit_pair(**changed, verified_samples=samples)
+
+
+def test_unselected_final_fit_index_keeps_one_failed_role_receipt(fit_proof):
+    samples = _final_fit_verified_rows(**fit_proof)
+    actor_item = fit_proof["assets"]["regularized"]["actor"]
+    actor = FrozenWarehouseV6Actor.load(
+        fit_proof["root"] / actor_item["path"],
+        expected_sha256=actor_item["sha256"],
+        expected_role_sha256=fit_proof["pair"]["variants"]["regularized"][
+            "selected_role_sha256"])
+    evidence = deepcopy(fit_proof)
+    role = p.ROLES[0]
+    program = fit_program(
+        role, actor, *(samples[role][name] for name in SCHEDULE),
+        method=p.REGISTERED_PROGRAM_FIT_METHOD)
+    source = evidence["root"] / "source" / f"{role}.program.json"
+    program.save(source)
+    item = _bundle(evidence["root"], source)
+    evidence["assets"]["regularized"]["programs"][role] = item
+    trained = evidence["pair"]["variants"]["regularized"]
+    trained["program_artifacts"][role] = {"sha256": item["sha256"]}
+    trained["selected_program_reports"][role] = program.report
+    trained["final_fresh_program_reports"][role].update({
+        "status": "frozen_actor_fresh_four_part_fit",
+        "actor_role_sha256": actor.role_sha256[role],
+        "program_sha256": item["sha256"],
+        "validation": program.report["validation"],
+    })
+    assert _final_fit_index_claim(**evidence)
+
+    failed_role = p.ROLES[1]
+    trained["selected_program_reports"][failed_role] = {}
+    assert not _final_fit_index_claim(**evidence)

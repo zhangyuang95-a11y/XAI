@@ -9,9 +9,11 @@ from dataclasses import asdict, dataclass
 from functools import lru_cache
 from hashlib import sha256
 import json
+import math
 import os
 from pathlib import Path
 import re
+import struct
 from typing import Mapping, Sequence
 
 
@@ -35,18 +37,24 @@ _RELEASE_PATTERN = re.compile(
 TASKS = (1, 2, 3)
 ROLES = ("robot_1", "robot_2")
 VARIANTS = ("raw", "regularized")
+CORE_MASK_LEAVES = 16
 PROGRAM_LAMBDA = 0.01
 PROGRAM_START_FRACTION = 0.80
 PROGRAM_RAMP_FRACTION = 0.05
 SCENARIO_BLOCK_STEPS = 120
 ONLINE_PROGRAM_EXTRACTION_PERCENTAGES = (75, 84, 93)
+TOPOLOGY_REFRESH_PERCENTAGES = (24, 48, 72)
+TOPOLOGY_FREEZE_PERCENTAGE = 75
 FINAL_PROGRAM_SPLIT_COUNTS = {"fit": 50, "calibration": 25,
                               "eligibility": 25, "validation": 24}
-REGISTERED_ARCHITECTURE_MODE = "public_affordance_certificate_tree_256_residual.v6.14-candidate"
+REGISTERED_CANDIDATE_ID = "warehouse-v616-joint-certified-01"
+REGISTERED_ARCHITECTURE_MODE = "public_affordance_joint_certified_tree_256_residual.v6.16-candidate"
 # A candidate names its fitting implementation explicitly. This list is not
 # a release selection: the selected method is sealed only after development
 # quality and independent fidelity gates pass. The old axis fit is excluded.
-PROGRAM_FIT_METHOD_CANDIDATES = ("actor_sparse_topology_v1",)
+REGISTERED_PROGRAM_FIT_METHOD = "actor_joint_certified_topology_v2"
+REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD = "actor_joint_core_qualification_v2"
+PROGRAM_FIT_METHOD_CANDIDATES = (REGISTERED_PROGRAM_FIT_METHOD,)
 # The failed 11969 v2 screen does not retire its extractor algorithm: a new
 # Actor may reuse that implementation. Its concrete frozen Actor and source
 # identities must never be promoted as a new registered training result.
@@ -57,8 +65,14 @@ RETIRED_119_SOURCE_CLOSURE_SHA256 = frozenset({
 })
 RETIRED_119_MODEL_VERSION = "warehouse-dual-actor.v6.9-exploratory"
 REGISTERED_BC_RECIPE_VERSION = (
+    "warehouse-public-dual-bc.v6.16-joint-certified")
+LEGACY_V614_BC_RECIPE_VERSION = (
     "warehouse-public-dual-bc.v6.14-public-affordance-exploratory")
-# The v6.14 candidate's training identity. The executable recipe JSON is
+LEGACY_V614_BC_SPEC_SHA256 = (
+    "f328512e3a2bb888892bb4366240dce8fc99d855a7591c2f0c18fdd1b3f183a6")
+LEGACY_V614_RECIPE_FILE_SHA256 = (
+    "fc45da901a8267175b051ba31ea10cedf327033b48fb9cbcec575b6c617c8ccb")
+# The v6.16 candidate's training identity. The executable recipe JSON is
 # separately byte-hashed below, then compared with the runner's constants
 # before Stage 1 can create an environment.
 REGISTERED_BC_SPEC = {
@@ -118,11 +132,18 @@ REGISTERED_BC_SPEC = {
     "final_validation_argmax_episodes": 12,
     "warmup_fit_source": "frozen_warmup_full_nn_masked_distribution",
     "final_internal_source": "one_final_frozen_full_bc_actor",
-    "program_fit_method": "actor_sparse_topology_v1",
-    "actor_model_version": "warehouse-dual-actor.v6.14-public-affordance-exploratory",
+    "program_fit_method": REGISTERED_PROGRAM_FIT_METHOD,
+    "actor_model_version": "warehouse-dual-actor.v6.16-joint-certified",
+    "core_bound_mode": "certified_margin_cap_v2",
+    "actor_topology_refresh": {
+        "bc": "after_each_fit_stage",
+        "certificate_invalidation": "each_refresh",
+        "freeze_percentage": TOPOLOGY_FREEZE_PERCENTAGE,
+        "ppo_percentages": list(TOPOLOGY_REFRESH_PERCENTAGES),
+    },
     "feature_schema_sha256": "03f16ff6a86a6c2f03f50f7422b58dd800da191b253d463e0dac8a8c1b5be36d",
     "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
-    "executable_recipe_file_sha256": "fc45da901a8267175b051ba31ea10cedf327033b48fb9cbcec575b6c617c8ccb",
+    "executable_recipe_file_sha256": "f6547a33cd2905a803d1f436743c1d8a7744e5d8b3d1d5b6cab82eb9315b398b",
 }
 REGISTERED_RISK_DUAL_CONFIG = {
     "target": 0.04, "window_episodes": 128, "minimum_episodes": 64,
@@ -307,8 +328,55 @@ def bc_stage_receipt_shape() -> tuple[tuple[str, int | None], ...]:
     return tuple(stages)
 
 
+def bc_topology_refresh_stages() -> tuple[str, ...]:
+    """Ordered BC fit boundaries at which the current Actor is recertified."""
+    return (
+        "initial_public_bc",
+        *(f"initial_nn_dagger_{index}_fit"
+          for index in range(1, REGISTERED_BC_SPEC["dagger_rounds"] + 1)),
+        "certificate_first_fit_only_tree_initialization",
+        "post_refit_public_bc", "risk_public_bc_fit", "large_public_bc_fit",
+        *(f"deep_dagger_{index}_fit"
+          for index in range(1, REGISTERED_BC_SPEC["deep_dagger_rounds"] + 1)),
+        "final_standard_margin_calibration",
+    )
+
+
+def bc_topology_refresh_history_valid(history: object) -> bool:
+    """Receipt-level check for every BC-stage topology/certificate refresh."""
+    if not isinstance(history, list):
+        return False
+    stages = bc_topology_refresh_stages()
+    if len(history) != len(stages):
+        return False
+    for row, stage in zip(history, stages, strict=True):
+        if (not isinstance(row, Mapping) or row.get("stage") != stage
+                or row.get("route_parity_passed") is not True
+                or row.get("path_legality_passed") is not True
+                or row.get("core_qualification_recomputed") is not True):
+            return False
+        roles, hashes = row.get("roles"), row.get("role_tree_sha256")
+        if (not isinstance(roles, Mapping) or set(roles) != set(ROLES)
+                or not isinstance(hashes, Mapping)
+                or set(hashes) != set(ROLES)):
+            return False
+        for role in ROLES:
+            item = roles[role]
+            if (not isinstance(item, Mapping)
+                    or item.get("topology_sha256") != hashes[role]
+                    or not isinstance(hashes[role], str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", hashes[role])
+                    or type(item.get("training_scene_count")) is not int
+                    or item["training_scene_count"] < 40
+                    or not isinstance(item.get("qualification"), Mapping)
+                    or item["qualification"].get("method") !=
+                    REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD):
+                return False
+    return True
+
+
 def bc_report_valid(report: Mapping, pair_seed: int,
-                    source_closure_sha256: str) -> bool:
+                    source_closure_sha256: str, *, legacy_v614: bool = False) -> bool:
     """Verify the actual 26-block BC receipt and independent internal audit.
 
     This is a pure receipt check. The release packager separately validates
@@ -317,16 +385,23 @@ def bc_report_valid(report: Mapping, pair_seed: int,
     if not isinstance(report, Mapping):
         return False
     try:
-        if (_hash_json(REGISTERED_BC_SPEC) != REGISTERED_BC_SPEC_SHA256
+        if ((not legacy_v614 and
+             _hash_json(REGISTERED_BC_SPEC) != REGISTERED_BC_SPEC_SHA256)
                 or _hash_json(REGISTERED_RISK_DUAL_CONFIG) !=
                 REGISTERED_RISK_DUAL_CONFIG_SHA256):
             return False
         schedule = bc_data_seed_schedule(pair_seed)
         critic_resets = bc_critic_reset_schedule(pair_seed, INITIAL_RELEASE_ID)
-        if (report.get("bc_recipe_version") != REGISTERED_BC_RECIPE_VERSION
-                or report.get("bc_recipe_sha256") != REGISTERED_BC_SPEC_SHA256
+        recipe_version = (LEGACY_V614_BC_RECIPE_VERSION if legacy_v614
+                          else REGISTERED_BC_RECIPE_VERSION)
+        recipe_sha = (LEGACY_V614_BC_SPEC_SHA256 if legacy_v614
+                      else REGISTERED_BC_SPEC_SHA256)
+        recipe_file_sha = (LEGACY_V614_RECIPE_FILE_SHA256 if legacy_v614 else
+                           REGISTERED_BC_SPEC["executable_recipe_file_sha256"])
+        if (report.get("bc_recipe_version") != recipe_version
+                or report.get("bc_recipe_sha256") != recipe_sha
                 or report.get("executable_recipe_file_sha256") !=
-                REGISTERED_BC_SPEC["executable_recipe_file_sha256"]
+                recipe_file_sha
                 or report.get("risk_dual_config_sha256") !=
                 REGISTERED_RISK_DUAL_CONFIG_SHA256
                 or report.get("source_closure_sha256") != source_closure_sha256
@@ -371,6 +446,9 @@ def bc_report_valid(report: Mapping, pair_seed: int,
             return False
         stages = report.get("bc_stages")
         if not isinstance(stages, list):
+            return False
+        if not legacy_v614 and not bc_topology_refresh_history_valid(
+                report.get("bc_topology_refresh_history")):
             return False
         expected = bc_stage_receipt_shape()
         if len(stages) != len(expected):
@@ -423,6 +501,9 @@ def bc_report_valid(report: Mapping, pair_seed: int,
                 or final.get("passed") is not True
                 or not isinstance(final.get("final_bc_actor"), Mapping)
                 or final["final_bc_actor"].get("role_sha256") != roles
+                or (not legacy_v614 and
+                    final["final_bc_actor"].get("model_version") !=
+                    REGISTERED_BC_SPEC["actor_model_version"])
                 or final.get("action_physics_config_sha256") !=
                 REGISTERED_BC_SPEC["action_physics_config_sha256"]
                 or final.get("warmup_actor_sha256") != warmup.get("sha256")
@@ -459,15 +540,38 @@ def bc_report_valid(report: Mapping, pair_seed: int,
                 or set(final["roles"]) != set(ROLES)):
             return False
         for role in ROLES:
+            actor_core = final["roles"][role].get("actor_core_qualification")
+            installed_mass = final["roles"][role].get(
+                "installed_core_validation_mass")
+            actionable_mass = final["roles"][role].get(
+                "installed_core_expected_actionable_mass")
             if (final["roles"][role].get("actor_role_sha256") != roles[role]
                     or final["roles"][role].get("refit_report", {}).get(
                         "validation_passed") is not True
+                    or (not legacy_v614 and (
+                        not isinstance(actor_core, Mapping)
+                        or actor_core.get("method") !=
+                        REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD
+                        or actor_core.get("validation_passed") is not True
+                        or type(installed_mass) not in (int, float)
+                        or not math.isfinite(installed_mass)
+                        or not 0.35 <= installed_mass <= 1.0
+                        or type(actionable_mass) not in (int, float)
+                        or not math.isfinite(actionable_mass)
+                        or not 0.30 <= actionable_mass <= installed_mass))
                     or report.get("topology_source_nn_role_sha256", {}).get(
                         "fit", {}).get(role) != warmup["role_sha256"][role]):
                 return False
         return True
     except (KeyError, AttributeError, TypeError, ValueError):
         return False
+
+
+def legacy_v614_bc_report_valid(report: Mapping, pair_seed: int,
+                                source_closure_sha256: str) -> bool:
+    """Read-only verifier for historical v6.14 receipts, never v6.16 admission."""
+    return bc_report_valid(report, pair_seed, source_closure_sha256,
+                           legacy_v614=True)
 
 
 def scenario_seed(namespace: str, pair_seed: int, joint_step: int) -> int:
@@ -618,6 +722,162 @@ def online_program_extraction_steps(joint_steps: int) -> tuple[int, ...]:
     return steps
 
 
+def topology_refresh_steps(joint_steps: int) -> tuple[int, ...]:
+    """Training-only tree refreshes precede the first online extraction."""
+    if joint_steps not in BUDGETS:
+        raise ValueError("Warehouse topology refresh budget must be preregistered")
+    numerators = tuple(joint_steps * percent
+                       for percent in TOPOLOGY_REFRESH_PERCENTAGES)
+    if any(numerator % 100 for numerator in numerators):
+        raise RuntimeError("Warehouse topology refresh percentage is not integral")
+    steps = tuple(numerator // 100 for numerator in numerators)
+    frozen = topology_frozen_at_step(joint_steps)
+    if (any(step % SCENARIO_BLOCK_STEPS for step in steps)
+            or any(not 0 < step < frozen for step in steps)
+            or tuple(sorted(set(steps))) != steps):
+        raise RuntimeError("Warehouse topology refresh crosses a scenario block")
+    return steps
+
+
+def topology_frozen_at_step(joint_steps: int) -> int:
+    """Tree structure is fixed before the first 75% program extraction."""
+    if joint_steps not in BUDGETS:
+        raise ValueError("Warehouse topology freeze budget must be preregistered")
+    numerator = joint_steps * TOPOLOGY_FREEZE_PERCENTAGE
+    if numerator % 100:
+        raise RuntimeError("Warehouse topology freeze percentage is not integral")
+    step = numerator // 100
+    if (step % SCENARIO_BLOCK_STEPS
+            or step != online_program_extraction_steps(joint_steps)[0]):
+        raise RuntimeError("Warehouse topology freeze differs from first extraction")
+    return step
+
+
+def topology_refresh_history_valid(history: object, *,
+                                   joint_steps: int) -> bool:
+    """Verify both role trees were recertified after each PPO refresh."""
+    if not isinstance(history, list):
+        return False
+    try:
+        expected_steps = topology_refresh_steps(joint_steps)
+        if len(history) != len(expected_steps):
+            return False
+        for row, step in zip(history, expected_steps, strict=True):
+            if (not isinstance(row, Mapping)
+                    or set(row) != {"joint_step", "role_tree_sha256",
+                                       "route_parity_passed",
+                                       "path_legality_passed",
+                                       "core_qualification_recomputed"}
+                    or row["joint_step"] != step
+                    or type(row["joint_step"]) is not int
+                    or any(row[key] is not True for key in (
+                        "route_parity_passed", "path_legality_passed",
+                        "core_qualification_recomputed"))):
+                return False
+            roles = row["role_tree_sha256"]
+            if (not isinstance(roles, Mapping) or set(roles) != set(ROLES)
+                    or any(not isinstance(roles[role], str)
+                           or not re.fullmatch(r"[0-9a-f]{64}", roles[role])
+                           for role in ROLES)):
+                return False
+        return True
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def frozen_topology_valid(report: Mapping) -> bool:
+    """Verify both role trees and their qualified leaves remain frozen."""
+    if not isinstance(report, Mapping):
+        return False
+    frozen = report.get("frozen_topology_role_sha256")
+    final = report.get("final_topology_role_sha256")
+    frozen_leaves = report.get("frozen_core_leaf_logits_sha256")
+    final_leaves = report.get("final_core_leaf_logits_sha256")
+    frozen_actor = report.get("frozen_actor_role_sha256")
+    qualification = report.get("topology_freeze_qualification")
+    if (any(not isinstance(value, Mapping) or set(value) != set(ROLES)
+            for value in (frozen, final, frozen_leaves, final_leaves,
+                          frozen_actor))
+            or report.get("topology_updates_after_freeze") != 0
+            or type(report.get("topology_updates_after_freeze")) is not int
+            or not isinstance(qualification, Mapping)
+            or qualification.get("stage") !=
+               f"ppo_freeze_{report.get('topology_frozen_at_step')}"
+            or qualification.get("role_tree_sha256") != frozen
+            or qualification.get("route_parity_passed") is not True
+            or qualification.get("path_legality_passed") is not True
+            or qualification.get("core_qualification_recomputed") is not True
+            or not isinstance(qualification.get("roles"), Mapping)
+            or set(qualification["roles"]) != set(ROLES)):
+        return False
+    for role in ROLES:
+        if (not all(isinstance(value[role], str) and
+                    re.fullmatch(r"[0-9a-f]{64}", value[role])
+                    for value in (frozen, frozen_leaves, frozen_actor))
+                or final[role] != frozen[role]
+                or final_leaves[role] != frozen_leaves[role]):
+            return False
+        role_receipt = qualification["roles"][role]
+        if not isinstance(role_receipt, Mapping):
+            return False
+        core = role_receipt.get("qualification")
+        installed = role_receipt.get("installed_core")
+        parity = role_receipt.get("parity")
+        if (role_receipt.get("topology_sha256") != frozen[role]
+                or role_receipt.get("qualification_bound_to_installed_actor")
+                   is not True
+                or role_receipt.get("qualification_failed_core_reset") is not False
+                or not isinstance(core, Mapping)
+                or core.get("method") !=
+                   REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD
+                or core.get("validation_passed") is not True
+                or core.get("frozen_role_sha256") != frozen_actor[role]
+                or core.get("actor_topology_sha256") != frozen[role]
+                or not isinstance(installed, Mapping)
+                or not isinstance(parity, Mapping)
+                or type(parity.get("routing_mismatches")) is not int
+                or parity["routing_mismatches"] != 0):
+            return False
+        selected = core.get("selected_core_leaf_ids")
+        proofs = core.get("leaf_path_proof")
+        if (not isinstance(selected, list) or not selected
+                or any(type(leaf) is not int or not 0 <= leaf < CORE_MASK_LEAVES
+                       for leaf in selected)
+                or len(selected) != len(set(selected))
+                or type(installed.get("core_leaf_count")) is not int
+                or installed["core_leaf_count"] != len(selected)
+                or not isinstance(proofs, Mapping)):
+            return False
+        # The qualification receipt hashes a NumPy bool mask (one byte per
+        # leaf); the installed Actor hashes the same mask as float32 (four
+        # bytes per leaf). Both must be reconstructed from the selected IDs.
+        mask = bytearray(CORE_MASK_LEAVES)
+        for leaf in selected:
+            mask[leaf] = 1
+        qualified_digest = sha256(mask).hexdigest()
+        installed_digest = sha256(struct.pack(
+            f"={CORE_MASK_LEAVES}f", *(float(value) for value in mask)
+        )).hexdigest()
+        if (core.get("core_mask_sha256") != qualified_digest
+                or installed.get("core_mask_sha256") != installed_digest):
+            return False
+        if {key for key, proof in proofs.items()
+                if isinstance(proof, Mapping) and proof.get("selected") is True} != \
+                {str(leaf) for leaf in selected}:
+            return False
+        for leaf in selected:
+            proof = proofs.get(str(leaf))
+            if (not isinstance(proof, Mapping)
+                    or proof.get("selected") is not True
+                    or proof.get("candidate") is not True
+                    or proof.get("raw_top") not in
+                       ("WAIT", "UP", "DOWN", "LEFT", "RIGHT")
+                    or not isinstance(proof.get("proven_actions"), list)
+                    or proof["raw_top"] not in proof["proven_actions"]):
+                return False
+    return True
+
+
 @dataclass(frozen=True)
 class PairRunSpec:
     candidate_id: str
@@ -629,6 +889,8 @@ class PairRunSpec:
     scenario_namespace: str = "warehouse-v6-matched-120-step-blocks"
     checkpoint_seeds: tuple[int, ...] = ()
     online_program_extraction_steps: tuple[int, ...] = ()
+    topology_refresh_steps: tuple[int, ...] = ()
+    topology_frozen_at_step: int = 0
     architecture_mode: str = REGISTERED_ARCHITECTURE_MODE
     bc_recipe_version: str = REGISTERED_BC_RECIPE_VERSION
     bc_recipe_sha256: str = REGISTERED_BC_SPEC_SHA256
@@ -681,6 +943,18 @@ class PairRunSpec:
                 raise ValueError("Warehouse online program extraction schedule mismatch")
         else:
             object.__setattr__(self, "online_program_extraction_steps", scheduled)
+        refresh = topology_refresh_steps(self.joint_steps)
+        if self.topology_refresh_steps:
+            if self.topology_refresh_steps != refresh:
+                raise ValueError("Warehouse topology refresh schedule mismatch")
+        else:
+            object.__setattr__(self, "topology_refresh_steps", refresh)
+        frozen = topology_frozen_at_step(self.joint_steps)
+        if self.topology_frozen_at_step:
+            if self.topology_frozen_at_step != frozen:
+                raise ValueError("Warehouse topology freeze step mismatch")
+        else:
+            object.__setattr__(self, "topology_frozen_at_step", frozen)
         sealed_seed_blocks(self.release_id)
         final_program_fit_seed_schedule(self.release_id, self.pair_seed)
 
@@ -870,6 +1144,14 @@ def paired_training_pass(variants: Mapping, *, joint_steps: int) -> bool:
                 report.get("bc_data_seed_schedule_sha256") !=
                 _hash_json(bc_data_seed_schedule(seed)) or
                 report.get("online_program_extraction_steps") != extraction_steps or
+                report.get("topology_refresh_steps") !=
+                list(topology_refresh_steps(joint_steps)) or
+                report.get("topology_frozen_at_step") !=
+                topology_frozen_at_step(joint_steps) or
+                not topology_refresh_history_valid(
+                    report.get("topology_refresh_history"),
+                    joint_steps=joint_steps) or
+                not frozen_topology_valid(report) or
                 report.get("online_program_split_block_cycle") !=
                 FINAL_PROGRAM_SPLIT_COUNTS or
                 report.get("online_program_cohorts_disjoint") is not True or

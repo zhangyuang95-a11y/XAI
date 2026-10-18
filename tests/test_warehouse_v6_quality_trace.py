@@ -14,10 +14,11 @@ from experiments.warehouse.admission import _quality_trace_valid, _validated_epi
 from experiments.warehouse.acceptance import _digest, _paired_schedule_evidence
 from experiments.warehouse.protocol import (
     DEVELOPMENT_SELECTION_SEEDS, FINAL_PROGRAM_SPLIT_COUNTS, PairRunSpec,
-    REGISTERED_BC_SPEC, SCENARIO_BLOCK_STEPS,
+    REGISTERED_BC_SPEC, REGISTERED_PROGRAM_FIT_METHOD, ROLES,
+    SCENARIO_BLOCK_STEPS,
     scenario_schedule_sha256, scenario_seed,
 )
-from tests.warehouse_v6_contract_fixture import bc_receipt
+from tests.warehouse_v6_contract_fixture import bc_receipt, topology_freeze_evidence
 from tests.warehouse_v614_test_scopes import isolated_evaluation_scope
 
 
@@ -50,7 +51,7 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
     spec = PairRunSpec(
         candidate_id="hash-contract", pair_seed=6120, joint_steps=200_000,
         output_dir=str(tmp_path),
-        program_fit_method="actor_sparse_topology_v1",
+        program_fit_method=REGISTERED_PROGRAM_FIT_METHOD,
         checkpoint_seeds=DEVELOPMENT_SELECTION_SEEDS)
     run_spec = {
         **spec.to_mapping(),
@@ -90,6 +91,12 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
     schedule_sha = scenario_schedule_sha256(
         spec.scenario_namespace, spec.pair_seed, spec.joint_steps)
     bc_schedule = spec.to_mapping()["bc_data_seed_schedule"]
+    refresh_history = [{
+        "joint_step": step,
+        "role_tree_sha256": {role: "c" * 64 for role in ROLES},
+        "route_parity_passed": True, "path_legality_passed": True,
+        "core_qualification_recomputed": True,
+    } for step in spec.topology_refresh_steps]
     variants = {variant: {
         "variant": variant, "pair_seed": spec.pair_seed,
         "joint_steps": spec.joint_steps,
@@ -103,6 +110,9 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
         "risk_dual_config_sha256": spec.risk_dual_config_sha256,
         "online_program_extraction_steps": list(
             spec.online_program_extraction_steps),
+        "topology_refresh_steps": list(spec.topology_refresh_steps),
+        "topology_refresh_history": refresh_history,
+        **topology_freeze_evidence(spec.joint_steps),
         "online_program_split_block_cycle": FINAL_PROGRAM_SPLIT_COUNTS,
         "online_program_cohorts_disjoint": True,
         "run_spec_sha256": scientific,
@@ -119,6 +129,8 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
         "program_fit_method": spec.program_fit_method,
         "online_program_extraction_steps": list(
             spec.online_program_extraction_steps),
+        "topology_refresh_steps": list(spec.topology_refresh_steps),
+        "topology_frozen_at_step": spec.topology_frozen_at_step,
         "run_spec_sha256": scientific,
         "training_config_sha256": _training_config_sha256(checked),
         "source_closure_sha256": checked["source_closure_sha256"],

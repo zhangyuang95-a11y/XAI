@@ -1,0 +1,149 @@
+{
+  "archive_only": true,
+  "environment_resets": 0,
+  "files": [
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/323fd6d02eef75c3a7f3c7dc5e9a26aa5a7d037b13e0430852e41846c3ce251b/kitchen_dual_nn_v5_pair_report.json",
+      "bytes": 310218,
+      "domain": "kitchen",
+      "kind": "original_pair_report_sha256",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/kitchen_v5_matched_candidates/kitchen_dual_nn_v5_pair_report.json",
+      "sha256": "323fd6d02eef75c3a7f3c7dc5e9a26aa5a7d037b13e0430852e41846c3ce251b"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/8b4cf7c67a8c7f5c8d81532e99e9605e6f9eba2a70e98c686fedb7cc170438f5/kitchen_dual_nn_v5_reextracted_pair_report.json",
+      "bytes": 322078,
+      "domain": "kitchen",
+      "kind": "pair_report_sha256",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/kitchen_v5_matched_candidates/kitchen_dual_nn_v5_reextracted_pair_report.json",
+      "sha256": "8b4cf7c67a8c7f5c8d81532e99e9605e6f9eba2a70e98c686fedb7cc170438f5"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/1447da723fb119135400f78c1c78674753c50cecbf7968127c84368ad9e312ff/kitchen_dual_nn_v5_final_program_validation_receipt.json",
+      "bytes": 5361,
+      "domain": "kitchen",
+      "kind": "final_program_validation_receipt_sha256",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/kitchen_v5_matched_candidates/kitchen_dual_nn_v5_final_program_validation_receipt.json",
+      "sha256": "1447da723fb119135400f78c1c78674753c50cecbf7968127c84368ad9e312ff"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/5d98f77ade726b2309a91e749b328c3ce91c9719f033421121d89e42b8f8e924/kitchen_dual_nn_v5_heldout_receipt.json",
+      "bytes": 8236,
+      "domain": "kitchen",
+      "kind": "heldout_receipt_sha256",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/kitchen_v5_matched_candidates/kitchen_dual_nn_v5_heldout_receipt.json",
+      "sha256": "5d98f77ade726b2309a91e749b328c3ce91c9719f033421121d89e42b8f8e924"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/eb78f7bfe0cebd6da723d7dc8f662a40ee0a590b1739ff6e997ffc1b024ca6fb/rolling_actor_v5.heldout.started.json",
+      "bytes": 1536,
+      "domain": "pong",
+      "kind": "heldout_claim",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/domains/pong/rolling_actor_v5.heldout.started.json",
+      "sha256": "eb78f7bfe0cebd6da723d7dc8f662a40ee0a590b1739ff6e997ffc1b024ca6fb"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/23cf39e4c123a72d279efe75a37a4d99c3bf5afc5633f18a6352530c72a129e8/pair_251014_raw.pt",
+      "bytes": 276431,
+      "domain": "pong",
+      "kind": "checkpoint",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/pong_rolling_v5/pair_251014_raw.pt",
+      "sha256": "23cf39e4c123a72d279efe75a37a4d99c3bf5afc5633f18a6352530c72a129e8"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba/pre_self_play.pt",
+      "bytes": 276331,
+      "domain": "pong",
+      "kind": "bc_checkpoint",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/pong_rolling_nn/pre_self_play.pt",
+      "sha256": "b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/2a802c066cd61713eccb4fc79c4b9fcbfd90f6560c47927ec262b70c0c0c7f1b/pair_251015_raw.pt",
+      "bytes": 276431,
+      "domain": "pong",
+      "kind": "checkpoint",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/pong_rolling_v5/pair_251015_raw.pt",
+      "sha256": "2a802c066cd61713eccb4fc79c4b9fcbfd90f6560c47927ec262b70c0c0c7f1b"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba/pre_self_play.pt",
+      "bytes": 276331,
+      "domain": "pong",
+      "kind": "bc_checkpoint",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/pong_rolling_nn/pre_self_play.pt",
+      "sha256": "b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/4ca55cd4753a8c5259393281d8a34432134d2c91f77605490552da7d33d62a4e/pair_251016_raw.pt",
+      "bytes": 276431,
+      "domain": "pong",
+      "kind": "checkpoint",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/pong_rolling_v5/pair_251016_raw.pt",
+      "sha256": "4ca55cd4753a8c5259393281d8a34432134d2c91f77605490552da7d33d62a4e"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba/pre_self_play.pt",
+      "bytes": 276331,
+      "domain": "pong",
+      "kind": "bc_checkpoint",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/pong_rolling_nn/pre_self_play.pt",
+      "sha256": "b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/761118558a30a3798f088a78f036234d452d347320dc63724c983ef9ada404e5/pair_251014_regularized.pt",
+      "bytes": 289119,
+      "domain": "pong",
+      "kind": "checkpoint",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/pong_rolling_v5/pair_251014_regularized.pt",
+      "sha256": "761118558a30a3798f088a78f036234d452d347320dc63724c983ef9ada404e5"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba/pre_self_play.pt",
+      "bytes": 276331,
+      "domain": "pong",
+      "kind": "bc_checkpoint",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/pong_rolling_nn/pre_self_play.pt",
+      "sha256": "b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/bfde0b51854c0fd5b3717e7a4fd578fbdfb492f929507714038b5a9ac3750a53/pair_251015_regularized.pt",
+      "bytes": 289247,
+      "domain": "pong",
+      "kind": "checkpoint",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/pong_rolling_v5/pair_251015_regularized.pt",
+      "sha256": "bfde0b51854c0fd5b3717e7a4fd578fbdfb492f929507714038b5a9ac3750a53"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba/pre_self_play.pt",
+      "bytes": 276331,
+      "domain": "pong",
+      "kind": "bc_checkpoint",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/pong_rolling_nn/pre_self_play.pt",
+      "sha256": "b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/81482a3c05d12ee47d42d9b6be8e276785280c3a2ef2f36d1fcc795996167d3f/pair_251016_regularized.pt",
+      "bytes": 289183,
+      "domain": "pong",
+      "kind": "checkpoint",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/pong_rolling_v5/pair_251016_regularized.pt",
+      "sha256": "81482a3c05d12ee47d42d9b6be8e276785280c3a2ef2f36d1fcc795996167d3f"
+    },
+    {
+      "archive_path": "output/warehouse_v620/carried-domain-evidence-01/assets/b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba/pre_self_play.pt",
+      "bytes": 276331,
+      "domain": "pong",
+      "kind": "bc_checkpoint",
+      "original_path": "/Users/zhangyuang/Desktop/ICLR/XAI-study-v3/output/pong_rolling_nn/pre_self_play.pt",
+      "sha256": "b53ca021c1512aeaec0fb0852634264981460d39a45b2d8ab9bf515b708dc5ba"
+    }
+  ],
+  "heldout_rerun": false,
+  "pilot_open": false,
+  "publishable": false,
+  "release_id": "policylens-three-domain-20261016.v6.0",
+  "schema": "warehouse-v620-carried-domain-evidence-archive.v1",
+  "source_audit_sha256": "827d83bf0c535c48d6d0258bc059305c53eb0c12db4320033edf8247e0e44887",
+  "unique_assets": 12
+}

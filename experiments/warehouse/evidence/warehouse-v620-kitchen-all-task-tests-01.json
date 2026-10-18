@@ -1,0 +1,43 @@
+{
+  "command": "python3 -m pytest -q tests/test_study_v620_kitchen_all_task_frames.py --disable-warnings --maxfail=1",
+  "coverage": [
+    "independent full logits plus legal mask argmax each frame",
+    "NN-NN and human takeover transitions compared with physical engine",
+    "wall-blocked human movement keeps NN AI action",
+    "source and packaged physics parity for both variants and all three tasks",
+    "three-step counterfactual recomputes current bound NN on each simulated state",
+    "program evidence exactly requires currently agreeing audited program and model/program hash binding",
+    "forged counterfactual decision and saved role binding rejected",
+    "actual Store commands persist verified actions in per-task temporary SQLite fixtures",
+    "new Store recovery and frame replay retain same frozen binding and reject cache-warmed saved decision corruption"
+  ],
+  "fixture_scenario_seed": 1000,
+  "heldout_rerun": false,
+  "heldout_seeds_excluded_by_stored_receipt": true,
+  "limits": [
+    "Six task/variant fixture combinations with bounded paths do not prove exhaustive state-space correctness.",
+    "No quality, fresh program fidelity, heldout or human-collaboration result was measured.",
+    "Enrollment run scaffolding is synthetic; production pilot remains closed."
+  ],
+  "log_path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/kitchen-all-task-tests-01.log",
+  "log_sha256": "947447234d07ec78267dbb8d12ce82f61fabdfd3aa691626e5ae9cc661a1a197",
+  "new_human_results": false,
+  "original_receipt_sha256": "77b43e10dadac520f3be79bf4cbf6087df56bb56519dfd58f070bc60ab370429",
+  "passed": 24,
+  "production_source_closure_after": "93581bbb94775934bd434f1175f706cd3581280ce089021dfadfde3ac2e03c1c",
+  "production_source_closure_before": "93581bbb94775934bd434f1175f706cd3581280ce089021dfadfde3ac2e03c1c",
+  "production_source_unchanged": true,
+  "schema": "warehouse-v620-kitchen-all-task-execution-tests.v1",
+  "scope": "bounded_engineering_fixture_only_not_quality_admission_or_participant_evidence",
+  "tasks": [
+    1,
+    2,
+    3
+  ],
+  "test_file": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/tests/test_study_v620_kitchen_all_task_frames.py",
+  "test_file_sha256": "394fa4324bb910191d2834ff0ec41b4eb8118895b83469461c3b9f1e12fa7b23",
+  "variants": [
+    "raw",
+    "regularized"
+  ]
+}

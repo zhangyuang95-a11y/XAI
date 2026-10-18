@@ -1,0 +1,15 @@
+{
+  "archive_ref": "archive/warehouse-v619-closed-20261018",
+  "baseline_commit": "7c0169a",
+  "files": {
+    "output/warehouse_v618_preflight/warehouse-v618-quality-selective-01-bc-preflight/pair_6150_steps_200000/final-bc-internal-precheck.json": "3c22a08fedabc892f40e287542a3d6ed34fa8fc2b5fb5dfe76bffb3d9b4286ed",
+    "output/warehouse_v618_preflight/warehouse-v618-quality-selective-01-bc-preflight/pair_6150_steps_200000/final-bc-program-rows.npz": "c27e0645f01b691707dd885c9432b90b892e3be47143217b1f60e0f8876439dc",
+    "output/warehouse_v618_preflight/warehouse-v618-quality-selective-01-bc-preflight/pair_6150_steps_200000/final-bc-robot_1.program.json": "5f7b48108209ad4f7b37b23955ddcbba5ab1c5bcc0bb862ec0398195ebc708fc",
+    "output/warehouse_v618_preflight/warehouse-v618-quality-selective-01-bc-preflight/pair_6150_steps_200000/final-bc-robot_2.program.json": "17e358fb888661f2b6eea6e3b20a3e3a425651d037623e971682374c4fdb15ff",
+    "output/warehouse_v618_preflight/warehouse-v618-quality-selective-01-bc-preflight/pair_6150_steps_200000/final-bc.actor.npz": "76acb00d8d24c5540379513a89f7c1024f5849427858fe945a9c39cd67a3fd88",
+    "output/warehouse_v619/fixed-validation-01/plan.json": "11f2b6519ae8bd437784f7197ac4d1d51d54272c32e55f54ff1998d980968037",
+    "output/warehouse_v619/fixed-validation-01/result.json": "3adb4f20dd757ff2776003ea620b3dc453764f032bc29704ac7f969883974d6a"
+  },
+  "purpose": "read_only_input_identity_not_new_scientific_evidence",
+  "schema": "warehouse-v620-preserved-inputs.v1"
+}

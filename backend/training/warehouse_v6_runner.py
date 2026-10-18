@@ -184,6 +184,8 @@ _SOURCE_FILES = (
     "backend/training/warehouse_v618_selective_tree.py",
     "backend/training/warehouse_v619_leaf_fit.py",
     "backend/training/warehouse_v619_tree.py",
+    "backend/training/warehouse_program_search.py",
+    "backend/training/warehouse_bc_alignment.py",
     "backend/training/warehouse_v6_evaluation_authorization.py",
     "backend/training/warehouse_v614_certificate_tree.py",
     "backend/training/warehouse_v614_masked_refit.py",
@@ -197,6 +199,7 @@ _SOURCE_FILES = (
     "experiments/warehouse/acceptance.py", "experiments/warehouse/quality_replay.py",
     "experiments/warehouse/stage2_evidence.py",
     "experiments/warehouse/v619_protocol.py",
+    "experiments/warehouse/v620_protocol.py",
     "domains/warehouse/neural_turnbased.py", "domains/warehouse/turnbased.py",
     *(path.relative_to(_SOURCE_ROOT).as_posix()
       for path in sorted((_SOURCE_ROOT / "study_v3").glob("*.py"))),
@@ -210,12 +213,14 @@ _SOURCE_FILES = (
     "scripts/run_warehouse_v618_engineering_smoke.py",
     "scripts/run_warehouse_v619_cached_comparison.py",
     "scripts/run_warehouse_v619_fixed_validation.py",
+    "scripts/run_warehouse_development_cv.py",
     "configs/study_v3_warehouse.json", "configs/study_v3_warehouse_neural.json",
     "configs/study_v3_warehouse_neural_v5.json", "configs/study_v3_warehouse_neural_v6.json",
     "configs/warehouse_v614_exploratory_recipe.json",
     "configs/warehouse_v617_risk_protected_recipe.json",
     "configs/warehouse_v618_quality_selective_recipe.json",
     "configs/warehouse_v619_program_recipe.json",
+    "configs/warehouse_v620_recipe.json",
     "requirements-warehouse-v6-training.txt",
 )
 

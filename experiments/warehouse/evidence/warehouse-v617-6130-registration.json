@@ -1,0 +1,22 @@
+{
+  "authorization_file_sha256": "4e846bfda28d14b443e5bd3e7ee5f8fca3b5ee823972ddc1b563ab1118dfa42d",
+  "authorization_path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v617_runs/warehouse-v617-risk-protected-01/admission/locked-pairs/pair_6130_steps_200000.authorization.json",
+  "bc_recipe_sha256": "512a20b18a7c88b9dde7c27d976aade4f5ab7eb479aa94a808506d475fda1ae0",
+  "candidate_id": "warehouse-v617-risk-protected-01",
+  "executable_recipe_file_sha256": "db2ba32d33a28b76ddae1a1da4eabad4827e971c7bcbc0f263c886f7e3e842bd",
+  "initial_role_sha256": {
+    "robot_1": "87167568e7b80a1959aaee67f4ec068b2018df4095966663bf02c0d3db2f5db4",
+    "robot_2": "fb3d91ebf28e415b1b99ce1189748d89d2c3cf9e30c846fda16bbba9c64db77b"
+  },
+  "joint_step_budget": 200000,
+  "pair_seed": 6130,
+  "pilot_opened": false,
+  "release_id": "policylens-three-domain-20261016.v6.0",
+  "run_spec_file_sha256": "88bec8a5324d7e8cd986f10b4eff25a40e3fee5b6d8ef59dd138da766e2e0474",
+  "run_spec_path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v617_runs/warehouse-v617-risk-protected-01/admission/locked-pairs/pair_6130_steps_200000.run-spec.json",
+  "sealed_audit_and_heldout_used": false,
+  "source_closure_sha256": "85f64d1a49f780cc801f1eb5243e06bd18cf40e7e88a31678efc5758671192ef",
+  "source_commit": "420453e",
+  "status": "registered_development_started",
+  "training_config_sha256": "57bdf711ce9f9c679c55ce84212e1d5a3b3308662a46b5370a331e7f74992dfe"
+}

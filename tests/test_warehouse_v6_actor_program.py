@@ -371,6 +371,10 @@ def test_each_ppo_epoch_rechecks_current_actor_before_program_gradient():
     with torch.no_grad():
         model.actors["robot_1"].tree.leaf_logits.zero_()
         model.actors["robot_1"].tree.leaf_logits[:, wait] = 30.0
+        # The current Actor starts at g=0. This fixture deliberately enables
+        # the learned branch so the controlled full-NN distribution changes
+        # when its leaf logits change below.
+        model.actors["robot_1"].gate[-1].bias.fill_(5.0)
     original = FrozenWarehouseV6Actor.from_model(model)
     env = _state(700)
     obs, mask = encode_public_observation(env.state), action_masks(env.state)

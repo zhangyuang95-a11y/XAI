@@ -16,7 +16,7 @@ from backend.training.warehouse_v6_actor import (
 from backend.training.warehouse_v6_runner import _checked_spec
 from experiments.warehouse import protocol as p
 from scripts import package_warehouse_v6_release as packaging
-from tests.warehouse_v6_contract_fixture import bc_receipt, topology_freeze_evidence
+from tests.warehouse_v6_contract_fixture import bc_receipt, topology_freeze_evidence, topology_diagnostic
 
 
 def _registered_mapping(spec: p.PairRunSpec) -> dict:
@@ -34,7 +34,7 @@ def test_registered_bc_schedule_and_method_are_inseparable_from_run_spec(tmp_pat
                          p.PROGRAM_FIT_METHOD_CANDIDATES[0],
                          checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS)
     schedule = p.bc_data_seed_schedule(spec.pair_seed)
-    assert len(schedule) == 26
+    assert len(schedule) == 23
     assert sum(map(len, schedule.values())) == 1_394
     assert len(set(seed for block in schedule.values() for seed in block)) == 1_394
     assert spec.bc_data_seed_schedule_sha256 == p._hash_json(schedule)
@@ -80,7 +80,7 @@ def test_bc_receipt_cannot_hide_removed_stage_or_critic_drift():
     assert not p.bc_report_valid(drift, seed, closure)
     drift = deepcopy(report)
     next(row for row in drift["bc_stages"] if row["stage"] ==
-         "final_standard_margin_calibration")["fit"]["margin_weight"] = 0.0
+         "final_standard_margin_calibration")["fit"]["margin_weight"] = 0.03
     assert not p.bc_report_valid(drift, seed, closure)
     drift = deepcopy(report)
     next(row for row in drift["bc_stages"] if row["stage"] ==
@@ -138,14 +138,8 @@ def test_packaging_rejects_axis_program_even_if_file_hashes_match(
             "program_fit_method": p.PROGRAM_FIT_METHOD_CANDIDATES[0],
             "topology_refresh_steps": pair["topology_refresh_steps"],
             "topology_frozen_at_step": pair["topology_frozen_at_step"],
-            "topology_refresh_history": [{
-                "joint_step": step,
-                "role_tree_sha256": {"robot_1": "a" * 64,
-                                     "robot_2": "b" * 64},
-                "route_parity_passed": True,
-                "path_legality_passed": True,
-                "core_qualification_recomputed": True,
-            } for step in pair["topology_refresh_steps"]],
+            "topology_refresh_history": [topology_diagnostic(joint_step=step)
+                                         for step in pair["topology_refresh_steps"]],
             **topology_freeze_evidence(200_000),
             "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
                 "action_physics_config_sha256"],

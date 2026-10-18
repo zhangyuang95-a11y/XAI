@@ -8,6 +8,7 @@ import torch
 
 from backend.training.warehouse_v6_actor import (
     FrozenWarehouseV6Role, WarehouseV6Actor, _role_arrays, role_sha256,
+    V617_MODEL_VERSION, V617_CORE_BOUND_MODE,
 )
 from backend.training.warehouse_v617_risk_tree import (
     fit_risk_tree, fit_boxed_logits, PROTECTED_RESIDUAL_CAP,
@@ -22,9 +23,9 @@ from tests.test_warehouse_v616_joint_actor import _guarded_role, _encoded_rows
 def test_qualification_sidecar_never_changes_frozen_actor_identity_or_logits():
     actor = _guarded_role()
     rows = _encoded_rows()
-    before = FrozenWarehouseV6Role(_role_arrays(actor))
+    before = FrozenWarehouseV6Role(_role_arrays(actor), core_bound_mode=V617_CORE_BOUND_MODE)
     actor.install_certified_core_mask(np.zeros(16, np.float32))
-    after = FrozenWarehouseV6Role(_role_arrays(actor))
+    after = FrozenWarehouseV6Role(_role_arrays(actor), core_bound_mode=V617_CORE_BOUND_MODE)
     assert before.role_sha256 == after.role_sha256
     np.testing.assert_array_equal(before.logits_encoded(rows), after.logits_encoded(rows))
     _, residual, _ = actor.components(torch.from_numpy(rows))
@@ -69,14 +70,14 @@ def test_fit_only_tree_has_legal_protected_paths_and_no_independent_certificate(
     assert fitted.leaf_count <= 16
     assert fitted.node_count <= 15
     assert fitted.report["fit_only_not_independent_certificate"]
-    actor = WarehouseV6Actor().actors["robot_1"]
+    actor = WarehouseV6Actor(model_version=V617_MODEL_VERSION).actors["robot_1"]
     actor.initialize_tree_from_core_result(fitted)
     assert actor.core_leaf_mask.sum() == 0
     assert actor.protected_leaf_mask.sum() > 0
     proof = actor.topology_certificate_report(rows)
     assert proof["routing_mismatches"] == 0
     assert proof["maximum_features_per_node"] <= 3
-    frozen = FrozenWarehouseV6Role(_role_arrays(actor))
+    frozen = FrozenWarehouseV6Role(_role_arrays(actor), core_bound_mode=V617_CORE_BOUND_MODE)
     leaf = frozen.leaf(rows)
     for i in range(len(rows)):
         if frozen.weights["protected_leaf_mask"][leaf[i]]:
@@ -87,7 +88,7 @@ def test_fit_only_tree_has_legal_protected_paths_and_no_independent_certificate(
 def test_boxed_distribution_refit_has_masked_kl_bound_for_all_physical_masks():
     actor = _guarded_role()
     rows = _encoded_rows()
-    frozen = FrozenWarehouseV6Role(_role_arrays(actor))
+    frozen = FrozenWarehouseV6Role(_role_arrays(actor), core_bound_mode=V617_CORE_BOUND_MODE)
     center = frozen.weights["tree.leaf_logits"][1]
     for bits in range(16):
         mask = np.array([bool(bits & (1 << i)) for i in range(4)]+[True], np.float32)
@@ -105,13 +106,15 @@ def test_protection_buffer_is_checkpointed_and_hashed():
     actor = _guarded_role()
     restored = _guarded_role()
     restored.load_state_dict(actor.state_dict())
-    assert role_sha256(_role_arrays(actor)) == role_sha256(_role_arrays(restored))
+    assert role_sha256(_role_arrays(actor), model_version=V617_MODEL_VERSION) == role_sha256(
+        _role_arrays(restored), model_version=V617_MODEL_VERSION)
     with torch.no_grad():
         restored.protected_leaf_mask[1] = 0
-    assert role_sha256(_role_arrays(actor)) != role_sha256(_role_arrays(restored))
+    assert role_sha256(_role_arrays(actor), model_version=V617_MODEL_VERSION) != role_sha256(
+        _role_arrays(restored), model_version=V617_MODEL_VERSION)
 
 
-def test_actual_topology_refresh_rebuilds_from_fit_episodes_and_binds_sidecar():
+def test_current_topology_refresh_is_read_only_and_performs_no_auxiliary_ce():
     from backend.training.warehouse_v6_runner import _refresh_qualified_topology
     rows = _encoded_rows()
     buffers = {role: [
@@ -121,15 +124,20 @@ def test_actual_topology_refresh_rebuilds_from_fit_episodes_and_binds_sidecar():
         for role in ("robot_1", "robot_2")}
     torch.set_num_threads(2)
     model = WarehouseV6Actor()
+    before = {name: value.detach().clone() for name, value in model.state_dict().items()}
     receipt = _refresh_qualified_topology(model, buffers, stage="test_fit_only")
-    assert receipt["route_parity_passed"] and receipt["path_legality_passed"]
+    assert receipt["route_parity_passed"] and receipt["guard_invariants_passed"]
+    assert not receipt["actor_rebuilt"]
+    assert not receipt["core_qualification_recomputed"]
+    assert receipt["auxiliary_ce_updates"] == 0
+    assert receipt["actor_role_sha256_before"] == receipt["actor_role_sha256_after"]
+    for name, value in before.items():
+        torch.testing.assert_close(value, model.state_dict()[name], rtol=0, atol=0)
     for role in buffers:
         entry = receipt["roles"][role]
-        assert entry["support"]["fit_only_alignment_epochs"] == 4
-        assert entry["qualification_bound_to_installed_actor"]
-        assert entry["protection_is_not_certificate"]
-        assert entry["qualification"]["frozen_role_sha256"] == role_sha256(
-            _role_arrays(model.actors[role]))
+        assert entry["parity"]["routing_mismatches"] == 0
+        assert entry["parity"]["maximum_logit_abs_difference"] < 1e-4
+        assert receipt["actor_role_sha256_after"][role] == role_sha256(_role_arrays(model.actors[role]))
 
 
 def test_bc_quality_screen_enters_real_reset_audit_context(tmp_path):
@@ -151,8 +159,10 @@ def test_independent_bc_collection_retains_repeated_collision_frames(monkeypatch
         def reset(self, seed):
             self.state = SimpleNamespace(terminated=False, truncated=False,
                 robot_collision_events=0, total_deliveries=0, shutdown_count=0,
+                frame=0, episode_id=int(seed),
                 by_id=lambda _: SimpleNamespace(position=(1, 1)))
         def step(self, actions):
+            self.state.frame += 1
             self.state.robot_collision_events += 1
             self.state.truncated = self.state.robot_collision_events == 120
             return None, None, None, None, {"proposed_actions": actions,

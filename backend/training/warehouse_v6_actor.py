@@ -1,7 +1,8 @@
 """Exact NumPy inference for the independent Warehouse v6 neural Actors.
 
-The learned tree and bounded 256-unit residual jointly select an action after
-the environment's physical mask. Torch training definitions load lazily from
+The v6.18 Actor combines a complete 256-unit NN with an additive learned tree
+branch. Historical bounded-residual inference remains version dispatched.
+All versions apply the environment's physical mask. Torch training definitions load lazily from
 ``warehouse_v6_actor_training`` and never enter the deployed study runtime.
 """
 from __future__ import annotations
@@ -37,7 +38,8 @@ from .warehouse_v6_tree_routing import (
 
 LEGACY_MODEL_VERSION = "warehouse-dual-actor.v6.14-public-affordance-exploratory"
 V616_MODEL_VERSION = "warehouse-dual-actor.v6.16-joint-certified"
-MODEL_VERSION = "warehouse-dual-actor.v6.17-risk-protected"
+V617_MODEL_VERSION = "warehouse-dual-actor.v6.17-risk-protected"
+MODEL_VERSION = "warehouse-dual-actor.v6.18-quality-selective"
 FEATURE_DIM = TREE_FEATURE_DIM
 FEATURE_NAMES = TREE_FEATURE_NAMES
 FEATURE_SCHEMA_SHA256 = ACTOR_FEATURE_SCHEMA_SHA256
@@ -51,7 +53,8 @@ MAX_RESIDUAL_BOUND = 8.05
 CORE_LOW_GATE_BOUND = 0.12
 LEGACY_CORE_BOUND_MODE = "public_state_gate_conditioned_escape_v1"
 V616_CORE_BOUND_MODE = "certified_margin_cap_v2"
-CORE_BOUND_MODE = "fit_protected_margin_cap_v3"
+V617_CORE_BOUND_MODE = "fit_protected_margin_cap_v3"
+CORE_BOUND_MODE = "additive_nn_tree_branch_v4"
 CORE_MARGIN_FLOOR = 0.26
 PROTECTED_RESIDUAL_CAP = 0.08
 GATE_WIDTH = 64
@@ -73,13 +76,25 @@ _LEGACY_TENSOR_NAMES = (
     "action_residual.4.weight", "action_residual.4.bias",
     "leaf_bound_logits", "core_leaf_mask",
 )
-_TENSOR_NAMES = (*_LEGACY_TENSOR_NAMES[:-1], "protected_leaf_mask")
+_V617_TENSOR_NAMES = (*_LEGACY_TENSOR_NAMES[:-1], "protected_leaf_mask")
+# Qualification and obsolete residual bounds are not part of v6.18 inference.
+_TENSOR_NAMES = _LEGACY_TENSOR_NAMES[:-2]
+
+
+def _tensor_names(model_version: str) -> tuple[str, ...]:
+    if model_version == MODEL_VERSION:
+        return _TENSOR_NAMES
+    if model_version == V617_MODEL_VERSION:
+        return _V617_TENSOR_NAMES
+    if model_version in (V616_MODEL_VERSION, LEGACY_MODEL_VERSION):
+        return _LEGACY_TENSOR_NAMES
+    raise ValueError("Warehouse v6 unknown model version")
 
 
 def _role_arrays(actor: RoleActor) -> dict[str, np.ndarray]:
     state = actor.state_dict()
     weights = {name: state[name].detach().cpu().numpy().astype(np.float32).copy()
-               for name in _TENSOR_NAMES}
+               for name in _tensor_names(getattr(actor, "model_version", MODEL_VERSION))}
     weights["tree.split.weight"] = actor.tree.effective_weights().detach().cpu().numpy().astype(
         np.float32, copy=True)
     return weights
@@ -87,18 +102,19 @@ def _role_arrays(actor: RoleActor) -> dict[str, np.ndarray]:
 
 def role_sha256(weights: Mapping[str, np.ndarray], *,
                 model_version: str = MODEL_VERSION) -> str:
-    names = _TENSOR_NAMES if model_version == MODEL_VERSION else _LEGACY_TENSOR_NAMES
+    names = _tensor_names(model_version)
     if set(weights) != set(names):
         raise ValueError("Warehouse v6 role tensor keys mismatch")
-    if model_version not in (MODEL_VERSION, V616_MODEL_VERSION, LEGACY_MODEL_VERSION):
+    if model_version not in (MODEL_VERSION, V617_MODEL_VERSION, V616_MODEL_VERSION, LEGACY_MODEL_VERSION):
         raise ValueError("Warehouse v6 role hash model version mismatch")
     digest = sha256()
     if model_version != LEGACY_MODEL_VERSION:
         # The same tensors have different action semantics under the v6.14
         # learned escape bound and the v6.16 certified margin cap.
         digest.update(model_version.encode("ascii"))
-        digest.update((CORE_BOUND_MODE if model_version == MODEL_VERSION else
-                       V616_CORE_BOUND_MODE).encode("ascii"))
+        digest.update({MODEL_VERSION: CORE_BOUND_MODE,
+                       V617_MODEL_VERSION: V617_CORE_BOUND_MODE,
+                       V616_MODEL_VERSION: V616_CORE_BOUND_MODE}[model_version].encode("ascii"))
     for name in names:
         value = np.ascontiguousarray(weights[name], dtype="<f4")
         digest.update(name.encode("ascii"))
@@ -110,16 +126,17 @@ def role_sha256(weights: Mapping[str, np.ndarray], *,
 class FrozenWarehouseV6Role:
     def __init__(self, weights: Mapping[str, np.ndarray], *,
                  core_bound_mode: str = CORE_BOUND_MODE):
-        if core_bound_mode not in (CORE_BOUND_MODE, V616_CORE_BOUND_MODE, LEGACY_CORE_BOUND_MODE):
+        if core_bound_mode not in (CORE_BOUND_MODE, V617_CORE_BOUND_MODE, V616_CORE_BOUND_MODE, LEGACY_CORE_BOUND_MODE):
             raise ValueError("Warehouse v6 unknown core bound mode")
         self.core_bound_mode = core_bound_mode
         self.model_version = {CORE_BOUND_MODE: MODEL_VERSION,
+                              V617_CORE_BOUND_MODE: V617_MODEL_VERSION,
                               V616_CORE_BOUND_MODE: V616_MODEL_VERSION,
                               LEGACY_CORE_BOUND_MODE: LEGACY_MODEL_VERSION}[core_bound_mode]
-        self.feature_names = (FEATURE_NAMES if core_bound_mode == CORE_BOUND_MODE
+        self.feature_names = (FEATURE_NAMES if core_bound_mode in (CORE_BOUND_MODE, V617_CORE_BOUND_MODE)
                               else legacy_features.TREE_FEATURE_NAMES)
         self.feature_dim = len(self.feature_names)
-        self.protection_key = ("protected_leaf_mask" if core_bound_mode == CORE_BOUND_MODE
+        self.protection_key = ("protected_leaf_mask" if core_bound_mode == V617_CORE_BOUND_MODE
                                else "core_leaf_mask")
         self.weights = {name: np.asarray(value, dtype=np.float32)
                         for name, value in weights.items()}
@@ -146,17 +163,21 @@ class FrozenWarehouseV6Role:
             "leaf_bound_logits": (TREE_LEAVES,),
             self.protection_key: (TREE_LEAVES,),
         }
+        if core_bound_mode == CORE_BOUND_MODE:
+            del expected["leaf_bound_logits"]
+            del expected[self.protection_key]
         if (set(self.weights) != set(expected)
                 or any(self.weights[name].shape != shape
                        or not np.isfinite(self.weights[name]).all()
                        for name, shape in expected.items())):
             raise ValueError("Warehouse v6 role tensor shape or value mismatch")
         self._validate_tree()
-        core = self.weights[self.protection_key]
-        if (np.any((core != 0.0) & (core != 1.0))
-                or np.any(core[int(self.weights["tree.leaf_count"][0]):] != 0.0)):
-            raise ValueError("Warehouse core leaf mask invalid")
-        self._validate_core_action_legality()
+        if core_bound_mode != CORE_BOUND_MODE:
+            core = self.weights[self.protection_key]
+            if (np.any((core != 0.0) & (core != 1.0))
+                    or np.any(core[int(self.weights["tree.leaf_count"][0]):] != 0.0)):
+                raise ValueError("Warehouse core leaf mask invalid")
+            self._validate_core_action_legality()
         self.role_sha256 = role_sha256(
             self.weights, model_version=self.model_version)
 
@@ -220,7 +241,7 @@ class FrozenWarehouseV6Role:
         if np.any(np.count_nonzero(weights["tree.split.weight"], axis=-1)
                   > MAX_SPLIT_FEATURES):
             raise ValueError("Warehouse v6 irregular tree split exceeds feature limit")
-        if self.model_version == MODEL_VERSION:
+        if self.model_version in (MODEL_VERSION, V617_MODEL_VERSION):
             from env.warehouse.public_action_features_v617 import CONTEXT_INDEX
             source_cost = np.count_nonzero(weights["tree.split.weight"], axis=-1)
             source_cost += (weights["tree.split.weight"][:, CONTEXT_INDEX] != 0)
@@ -276,10 +297,11 @@ class FrozenWarehouseV6Role:
         w = self.weights
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             tree = w["tree.leaf_logits"][leaves]
-            core = w[self.protection_key][leaves] > 0.5
-            learned_bound = MIN_RESIDUAL_BOUND + (
-                MAX_RESIDUAL_BOUND - MIN_RESIDUAL_BOUND) / (
-                1.0 + np.exp(-w["leaf_bound_logits"][leaves]))
+            if self.core_bound_mode != CORE_BOUND_MODE:
+                core = w[self.protection_key][leaves] > 0.5
+                learned_bound = MIN_RESIDUAL_BOUND + (
+                    MAX_RESIDUAL_BOUND - MIN_RESIDUAL_BOUND) / (
+                    1.0 + np.exp(-w["leaf_bound_logits"][leaves]))
             own = flat[:, list(_POSITION_COLUMNS[:2])]
             partner = flat[:, list(_POSITION_COLUMNS[2:])]
             relative = own - partner
@@ -288,7 +310,10 @@ class FrozenWarehouseV6Role:
                                      w["gate.0.bias"], 0)
             gate = 1.0 / (1.0 + np.exp(-(
                 gate_hidden @ w["gate.2.weight"].T + w["gate.2.bias"])))
-            if self.core_bound_mode != LEGACY_CORE_BOUND_MODE:
+            if self.core_bound_mode == CORE_BOUND_MODE:
+                gate = np.tanh(gate_hidden @ w["gate.2.weight"].T + w["gate.2.bias"])
+                bound = np.ones((len(flat), 1), dtype=np.float32)
+            elif self.core_bound_mode != LEGACY_CORE_BOUND_MODE:
                 bound = learned_bound[:, None]
                 physical = flat[:, TREE_MASK_START:TREE_MASK_START + len(ACTIONS)]
                 masked_tree = np.where(physical > 0.5, tree, -1.0e9)
@@ -298,7 +323,7 @@ class FrozenWarehouseV6Role:
                 effective = np.where(core[:, None],
                                      np.minimum(gate * bound, margin_cap[:, None]),
                                      gate * bound)
-                if self.core_bound_mode == CORE_BOUND_MODE:
+                if self.core_bound_mode == V617_CORE_BOUND_MODE:
                     effective = np.where(core[:, None],
                                          np.minimum(effective, PROTECTED_RESIDUAL_CAP), effective)
             else:
@@ -315,7 +340,7 @@ class FrozenWarehouseV6Role:
                                        (len(flat), len(ACTIONS), self.feature_dim))
             action = np.broadcast_to(np.eye(len(ACTIONS), dtype=np.float32)[None],
                                      (len(flat), len(ACTIONS), len(ACTIONS)))
-            encoder = (action_features_from_tree_encoded if self.model_version == MODEL_VERSION
+            encoder = (action_features_from_tree_encoded if self.model_version in (MODEL_VERSION, V617_MODEL_VERSION)
                        else legacy_features.action_features_from_tree_encoded)
             candidate_features = encoder(flat)
             relation = np.concatenate((repeated, geometry, action,
@@ -326,7 +351,11 @@ class FrozenWarehouseV6Role:
                                 w["action_residual.2.bias"], 0)
             score = (hidden @ w["action_residual.4.weight"].T +
                      w["action_residual.4.bias"]).squeeze(-1)
-            residual = effective * np.tanh(score)
+            if self.core_bound_mode == CORE_BOUND_MODE:
+                tree = gate * (tree - tree.mean(axis=-1, keepdims=True))
+                residual = score
+            else:
+                residual = effective * np.tanh(score)
         if not np.isfinite(tree).all() or not np.isfinite(residual).all():
             raise RuntimeError("Warehouse v6 role produced nonfinite logits")
         shape = data.shape[:-1]
@@ -352,8 +381,12 @@ class FrozenWarehouseV6Actor:
 
     @classmethod
     def from_model(cls, model: WarehouseV6Actor) -> "FrozenWarehouseV6Actor":
-        return cls({role: FrozenWarehouseV6Role(_role_arrays(model.actors[role]))
-                    for role in AGENTS}, "in-memory")
+        versions = {model.actors[role].model_version for role in AGENTS}
+        if len(versions) != 1:
+            raise ValueError("Warehouse Actor role model versions disagree")
+        return cls({role: FrozenWarehouseV6Role(_role_arrays(model.actors[role]),
+                    core_bound_mode=model.actors[role].core_bound_mode)
+                    for role in AGENTS}, "in-memory", model_version=versions.pop())
 
     @classmethod
     def load(cls, path: str | Path, *, expected_sha256: str,
@@ -366,10 +399,11 @@ class FrozenWarehouseV6Actor:
             metadata = json.loads(str(archive["metadata_json"].item()))
             model_version = metadata.get("model_version")
             core_bound_mode = {MODEL_VERSION: CORE_BOUND_MODE,
+                               V617_MODEL_VERSION: V617_CORE_BOUND_MODE,
                                V616_MODEL_VERSION: V616_CORE_BOUND_MODE,
                                LEGACY_MODEL_VERSION: LEGACY_CORE_BOUND_MODE}.get(model_version)
-            feature_dim = FEATURE_DIM if model_version == MODEL_VERSION else legacy_features.TREE_FEATURE_DIM
-            schema = FEATURE_SCHEMA_SHA256 if model_version == MODEL_VERSION else legacy_features.ACTOR_FEATURE_SCHEMA_SHA256
+            feature_dim = FEATURE_DIM if model_version in (MODEL_VERSION, V617_MODEL_VERSION) else legacy_features.TREE_FEATURE_DIM
+            schema = FEATURE_SCHEMA_SHA256 if model_version in (MODEL_VERSION, V617_MODEL_VERSION) else legacy_features.ACTOR_FEATURE_SCHEMA_SHA256
             if (core_bound_mode is None
                     or metadata.get("observation_version") != OBSERVATION_VERSION
                     or metadata.get("observation_dim") != OBSERVATION_DIM
@@ -381,13 +415,16 @@ class FrozenWarehouseV6Actor:
                     or metadata.get("tree_depth") != TREE_DEPTH
                     or metadata.get("tree_leaves") != TREE_LEAVES
                     or metadata.get("max_split_features") != MAX_SPLIT_FEATURES
-                    or metadata.get("minimum_residual_bound") != MIN_RESIDUAL_BOUND
-                    or metadata.get("maximum_residual_bound") != MAX_RESIDUAL_BOUND
-                    or metadata.get("core_low_gate_bound") != CORE_LOW_GATE_BOUND
+                    or (model_version != MODEL_VERSION and (
+                        metadata.get("minimum_residual_bound") != MIN_RESIDUAL_BOUND
+                        or metadata.get("maximum_residual_bound") != MAX_RESIDUAL_BOUND
+                        or metadata.get("core_low_gate_bound") != CORE_LOW_GATE_BOUND))
                     or metadata.get("core_bound_mode") != core_bound_mode
-                    or (model_version != LEGACY_MODEL_VERSION and
+                    or (model_version == MODEL_VERSION and metadata.get("actor_formula") !=
+                        "nn256_logits+tanh(gate)*center(tree_logits)")
+                    or (model_version not in (MODEL_VERSION, LEGACY_MODEL_VERSION) and
                         metadata.get("core_margin_floor") != CORE_MARGIN_FLOOR)
-                    or (model_version == MODEL_VERSION and
+                    or (model_version == V617_MODEL_VERSION and
                         metadata.get("protected_residual_cap") != PROTECTED_RESIDUAL_CAP)
                     or metadata.get("relation_geometry_dim") != GEOMETRY_DIM
                     or metadata.get("action_feature_dim") != ACTION_FEATURE_DIM
@@ -399,7 +436,7 @@ class FrozenWarehouseV6Actor:
                 raise RuntimeError("Warehouse v6 Actor routing contract mismatch")
             roles = {role: FrozenWarehouseV6Role({
                 name: np.asarray(archive[f"{role}.{name}"], dtype=np.float32)
-                for name in (_TENSOR_NAMES if model_version == MODEL_VERSION else _LEGACY_TENSOR_NAMES)}, core_bound_mode=core_bound_mode)
+                for name in _tensor_names(model_version)}, core_bound_mode=core_bound_mode)
                 for role in AGENTS}
         result = cls(roles, digest, model_version=model_version)
         if metadata.get("role_sha256") != result.role_sha256:
@@ -409,7 +446,7 @@ class FrozenWarehouseV6Actor:
         return result
 
     def logits(self, obs: np.ndarray, masks: np.ndarray) -> np.ndarray:
-        encoder = (encode_actor_tree_features if self.model_version == MODEL_VERSION
+        encoder = (encode_actor_tree_features if self.model_version in (MODEL_VERSION, V617_MODEL_VERSION)
                    else legacy_features.encode_actor_tree_features)
         encoded = encoder(obs, masks)
         if encoded.shape[-2:] != (len(AGENTS), self.roles[AGENTS[0]].feature_dim):

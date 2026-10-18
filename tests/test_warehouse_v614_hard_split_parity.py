@@ -53,7 +53,9 @@ def test_hard_split_tie_is_batch_invariant_and_matches_frozen_actor():
             int(weights["tree.node_count"][0]),
             int(weights["tree.leaf_count"][0]),
             weights["tree.leaf_logits"],
-            weights["protected_leaf_mask"].astype(np.bool_),
+            # This generic route test uses the current Actor. Qualification
+            # sidecars are not part of its exported neural policy tensors.
+            np.zeros(16, dtype=np.bool_),
             {}, frozenset(),
         )
         np.testing.assert_array_equal(certificate.leaf_indices(rows), deployed)

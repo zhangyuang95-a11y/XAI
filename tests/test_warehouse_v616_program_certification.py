@@ -9,7 +9,7 @@ import pytest
 
 from backend.training.warehouse_v6_actor import FEATURE_DIM, FEATURE_NAMES
 from backend.training.warehouse_v6_actor import (
-    FrozenWarehouseV6Actor, WarehouseV6Actor,
+    FrozenWarehouseV6Actor, WarehouseV6Actor, V617_MODEL_VERSION,
 )
 from backend.training.warehouse_v6_program import (
     JOINT_CERTIFIED_TOPOLOGY_METHOD, JOINT_PROGRAM_VERSION,
@@ -189,7 +189,7 @@ def test_actor_core_qualification_uses_current_logits_and_disjoint_purposes():
         _masked_probabilities, certified_actor_actions,
     )
 
-    frozen = FrozenWarehouseV6Actor.from_model(WarehouseV6Actor())
+    frozen = FrozenWarehouseV6Actor.from_model(WarehouseV6Actor(model_version=V617_MODEL_VERSION))
     role = frozen.roles["robot_1"]
     env = WarehouseMultiAgentEnv(participant_study_config())
     groups = {}

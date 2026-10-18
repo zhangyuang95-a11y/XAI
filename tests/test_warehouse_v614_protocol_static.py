@@ -16,131 +16,10 @@ from experiments.warehouse import protocol as p  # noqa: E402
 
 
 def _receipt(pair_seed: int = 12469) -> dict:
-    schedule = p.bc_data_seed_schedule(pair_seed)
-    critic_reset = p.bc_critic_reset_schedule(pair_seed, p.INITIAL_RELEASE_ID)
-    actor_roles = {role: sha256(role.encode()).hexdigest() for role in p.ROLES}
-    warmup_roles = {role: sha256((role + ":warmup").encode()).hexdigest()
-                    for role in p.ROLES}
-    warmup_schedule = {name.removeprefix("topology_"): schedule[name]
-                       for name in schedule if name.startswith("topology_")}
-    final_schedule = {name.removeprefix("final_bc_precheck_"): schedule[name]
-                      for name in schedule if name.startswith("final_bc_precheck_")}
-    stages = []
-    for name, epochs in p.bc_stage_receipt_shape():
-        row = {"stage": name}
-        if epochs is None:
-            row.update({"episode_seeds": schedule[name],
-                        "kind": ("public_teacher" if "teacher" in name
-                                 else "dual_nn_visitation"),
-                        "post_policy_interventions": 0})
-            if "argmax" in name or "sampled" in name:
-                row["training_only_argmax_visits"] = "argmax" in name
-        elif name.startswith("initial_") or name == "post_refit_public_bc":
-            row["epochs"] = epochs
-            if name == "post_refit_public_bc":
-                row["warmup_masked_kl_weight"] = p.REGISTERED_BC_SPEC[
-                    "post_refit_warmup_masked_kl_weight"]
-        else:
-            row["fit"] = {
-                "epochs": epochs,
-                "batch_size": p.REGISTERED_BC_SPEC["batch_size"],
-                "risk_weight": p.REGISTERED_BC_SPEC["risk_weight"],
-                "margin_gap": p.REGISTERED_BC_SPEC["margin_gap"],
-                "margin_weight": (0.0 if name == "risk_public_bc_fit" else
-                                  p.REGISTERED_BC_SPEC["margin_weight"]),
-            }
-        stages.append(row)
-    result = {
-        "bc_recipe_version": p.REGISTERED_BC_RECIPE_VERSION,
-        "bc_recipe_sha256": p.REGISTERED_BC_SPEC_SHA256,
-        "executable_recipe_file_sha256": p.REGISTERED_BC_SPEC[
-            "executable_recipe_file_sha256"],
-        "risk_dual_config_sha256": p.REGISTERED_RISK_DUAL_CONFIG_SHA256,
-        "source_closure_sha256": "f" * 64,
-        "feature_schema_sha256": p.REGISTERED_BC_SPEC["feature_schema_sha256"],
-        "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
-            "action_physics_config_sha256"],
-        "bc_data_seed_blocks": schedule,
-        "bc_data_seed_schedule_sha256": p._hash_json(schedule),
-        "bc_critic_reset_schedule": critic_reset,
-        "bc_critic_reset_schedule_sha256": p._hash_json(critic_reset),
-        "teacher_uses_hidden_goal_or_route_state": False,
-        "offline_critic_used_at_execution": False,
-        "topology_calibration_eligibility_validation_used_for_bc_updates": False,
-        "collision_critic": {
-            "version": p.REGISTERED_BC_SPEC["collision_critic_version"],
-            "epochs": p.REGISTERED_BC_SPEC["collision_critic_epochs"],
-            "batch_size": p.REGISTERED_BC_SPEC["collision_critic_batch_size"],
-            "learning_rate": p.REGISTERED_BC_SPEC[
-                "collision_critic_learning_rate"],
-            "positive_weight": p.REGISTERED_BC_SPEC[
-                "collision_critic_positive_weight"],
-            "seed": critic_reset["seed"],
-            "environment_reset_seed": critic_reset["seed"],
-            "environment_reset_count": critic_reset["environment_reset_count"],
-            "purpose": "offline_BC_gradient_only_not_execution",
-            "labels_source": "env.step_robot_collision_events_delta",
-            "legal_actions_rewritten_by_environment": 0,
-            "validation_passed": True,
-        },
-        "bc_stages": stages,
-        "bc_topology_refresh_history": [{
-            "stage": stage,
-            "role_tree_sha256": {role: sha256(
-                f"{role}:{stage}:tree".encode()).hexdigest() for role in p.ROLES},
-            "route_parity_passed": True,
-            "path_legality_passed": True,
-            "core_qualification_recomputed": True,
-            "roles": {role: {
-                "topology_sha256": sha256(
-                    f"{role}:{stage}:tree".encode()).hexdigest(),
-                "training_scene_count": 100,
-                "qualification": {"method":
-                    p.REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD},
-            } for role in p.ROLES},
-        } for stage in p.bc_topology_refresh_stages()],
-        "pretrained_role_sha256": actor_roles,
-        "warmup_frozen_nn_actor": {
-            "sha256": "a" * 64, "role_sha256": warmup_roles},
-        "topology_source_nn_role_sha256": {"fit": warmup_roles},
-        "topology_episode_parts": {
-            name: {"scenario_seeds": seeds}
-            for name, seeds in warmup_schedule.items()},
-        "final_bc_internal_precheck": {
-            "purpose": "development_internal_precheck_after_complete_bc",
-            "passed": True,
-            "final_bc_actor": {"sha256": "b" * 64,
-                               "model_version": p.REGISTERED_BC_SPEC[
-                                   "actor_model_version"],
-                               "role_sha256": actor_roles},
-            "action_physics_config_sha256": p.REGISTERED_BC_SPEC[
-                "action_physics_config_sha256"],
-            "warmup_actor_sha256": "a" * 64,
-            "warmup_topology_fit_seed_schedule_sha256": p._hash_json(
-                warmup_schedule),
-            "final_bc_seed_schedule_sha256": p._hash_json(final_schedule),
-            "final_bc_visits": {name: {"scenario_seeds": seeds, "rows": 10, "physical_frames": 10, "excluded_frames": 0}
-                                for name, seeds in final_schedule.items()},
-            "roles": {role: {"actor_role_sha256": actor_roles[role],
-                             "refit_report": {"validation_passed": True},
-                             "actor_core_qualification": {
-                                 "method": p.REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD,
-                                 "validation_passed": True},
-                             "installed_core_validation_mass": 0.40,
-                             "installed_core_expected_actionable_mass": 0.35}
-                      for role in p.ROLES},
-        },
-        "final_bc_internal_precheck_receipt": {
-            "path": "/tmp/candidate/final-bc-precheck.json", "sha256": ""},
-    }
-    result["quality_screen_seeds"] = list(p.DEVELOPMENT_SELECTION_SEEDS)
-    result["final_bc_internal_precheck"]["quality_screen_seeds"] = list(p.DEVELOPMENT_SELECTION_SEEDS)
-    result["final_bc_internal_precheck"]["quality_screen"] = {"summary": {
-        "mean_deliveries": 6.0, "mean_collisions": 2.0, "shutdown_episode_rate": 0.0}}
-    result["final_bc_internal_precheck_receipt"]["sha256"] = sha256(
-        (json.dumps(result["final_bc_internal_precheck"],
-                    sort_keys=True, allow_nan=False) + "\n").encode()).hexdigest()
-    return result
+    # Static tests exercise the active receipt contract. Historical recipe
+    # compatibility is checked explicitly below and never runs an environment.
+    from tests.warehouse_v6_contract_fixture import bc_receipt
+    return bc_receipt(pair_seed, "f" * 64)
 
 
 def _write_json(path: Path, value: dict) -> str:
@@ -320,9 +199,9 @@ def _stage1_pressure_fixture(root: Path) -> dict:
     bc.pop("bc_topology_refresh_history")
     for role in p.ROLES:
         role_row = bc["final_bc_internal_precheck"]["roles"][role]
-        role_row.pop("actor_core_qualification")
-        role_row.pop("installed_core_validation_mass")
-        role_row.pop("installed_core_expected_actionable_mass")
+        role_row.pop("program_qualification")
+        role_row.pop("qualified_validation_mass")
+        role_row.pop("expected_feedback_actionable_mass")
     bc["source_closure_sha256"] = source_sha
     bc["final_bc_internal_precheck"]["final_bc_actor"]["sha256"] = actor_sha
     internal_path = root / "final-bc-internal-precheck.json"
@@ -536,20 +415,20 @@ class WarehouseV614StaticProtocolTest(unittest.TestCase):
                          p.REGISTERED_BC_RECIPE_VERSION)
         self.assertEqual(MODEL_VERSION,
                          p.REGISTERED_BC_SPEC["actor_model_version"])
-        self.assertEqual(runner.validate_v617_risk_protected_recipe(),
+        self.assertEqual(runner.validate_v618_quality_selective_recipe(),
                          p.REGISTERED_BC_SPEC["executable_recipe_file_sha256"])
-        recipe = runner.v617_executable_recipe()
-        self.assertEqual(recipe["initial_teacher_episodes"],
+        recipe = runner.v618_executable_recipe()
+        self.assertEqual(recipe["bc_spec"]["bc_episodes"],
                          p.REGISTERED_BC_SPEC["bc_episodes"])
-        self.assertEqual(recipe["initial_bc_epochs"],
+        self.assertEqual(recipe["bc_spec"]["bc_epochs"],
                          p.REGISTERED_BC_SPEC["bc_epochs"])
-        self.assertEqual(recipe["initial_dagger_episodes"],
+        self.assertEqual(recipe["bc_spec"]["dagger_episodes"],
                          p.REGISTERED_BC_SPEC["dagger_episodes"])
         self.assertEqual(recipe["gate_supervision_weight"],
                          p.REGISTERED_BC_SPEC["initial_gate_loss_weight"])
-        self.assertEqual(recipe["post_refit_bc_epochs"],
+        self.assertEqual(recipe["bc_spec"]["post_refit_bc_epochs"],
                          p.REGISTERED_BC_SPEC["post_refit_bc_epochs"])
-        self.assertEqual(recipe["post_refit_warmup_masked_kl_weight"],
+        self.assertEqual(recipe["bc_spec"]["post_refit_warmup_masked_kl_weight"],
                          p.REGISTERED_BC_SPEC["post_refit_warmup_masked_kl_weight"])
         self.assertEqual(recipe["feature_schema_sha256"],
                          p.REGISTERED_BC_SPEC["feature_schema_sha256"])
@@ -567,9 +446,9 @@ class WarehouseV614StaticProtocolTest(unittest.TestCase):
         schedule = p.bc_data_seed_schedule(12469)
         seeds = [seed for values in schedule.values() for seed in values]
         self.assertEqual((len(schedule), len(seeds), len(set(seeds))),
-                         (26, 1394, 1394))
+                         (23, 1394, 1394))
         self.assertEqual(p._hash_json(sorted(seeds)),
-                         "d674c5040b0192efdf951073b3241425dec8241c547923159b855b5b5c3314ef")
+                         "d66516ace2442938c9a30bfe5f1d9005a489de8f1b9a5ef10ac6d3bac8e77f25")
         self.assertEqual(p.bc_critic_reset_schedule(
             12469, p.INITIAL_RELEASE_ID),
             {"seed": 18669, "environment_reset_count": 2})
@@ -583,7 +462,7 @@ class WarehouseV614StaticProtocolTest(unittest.TestCase):
         warmup = set(schedule["topology_fit_sampled"] +
                      schedule["topology_fit_argmax"])
         four = {purpose: set().union(*(
-            set(schedule[f"final_bc_precheck_{purpose}_{kind}"])
+            set(schedule.get(f"final_bc_precheck_{purpose}_{kind}", []))
             for kind in ("sampled", "argmax")))
             for purpose in ("fit", "calibration", "eligibility", "validation")}
         external = {base * 10 + task

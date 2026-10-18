@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import deque
 from contextvars import ContextVar
+from tempfile import TemporaryDirectory
 from copy import deepcopy
 from dataclasses import asdict
 from hashlib import sha256
@@ -61,10 +62,10 @@ from .warehouse_v6_actor import (
 from .warehouse_v6_program import (
     WarehouseV6Program, fit_program, audit_frozen_program, current_actor_fidelity,
     ACTOR_SPARSE_TOPOLOGY_METHOD, JOINT_CERTIFIED_TOPOLOGY_METHOD,
+    INDEPENDENT_SELECTIVE_METHOD,
 )
-from .warehouse_v6_core_intrinsic import core_intrinsic_loss
 from .warehouse_v617_risk_tree import fit_risk_tree, RISK_TREE_RECIPE
-from .warehouse_v6_core_tree import CoreTreeConfig, fit_core_tree, _masked_probabilities
+from .warehouse_v6_core_tree import CoreTreeConfig, CoreTreeResult, fit_core_tree, _masked_probabilities
 from .warehouse_v614_certificate_tree import (
     CertificateSearchConfig, FeatureSchema, fit_certificate_tree,
     to_current_core_tree_result, frozen_actor_topology,
@@ -79,7 +80,7 @@ from .warehouse_v6_shutdown_cost import (
 from .warehouse_v6_teacher_lookahead import public_lookahead_teacher
 
 
-RUNNER_VERSION = "warehouse-v6-risk-protected.v17.1"
+RUNNER_VERSION = "warehouse-v6-quality-selective.v18.1"
 FORMAL_TRAINING_DISABLED = True
 _LOCKED_BC_MARKER = object()
 _LOCKED_EVALUATION_MARKER = object()
@@ -95,12 +96,10 @@ def _require_locked_execution(*, allow_evaluation: bool = False) -> None:
             and active is not _LOCKED_FORMAL_MARKER
             and not (allow_evaluation and active is _LOCKED_EVALUATION_MARKER)):
         raise RuntimeError("Warehouse v6.14 integrated draft is review-only")
-CORE_BC_WEIGHTS = {"tree_ce": 0.15, "full_to_tree_kl": 0.20,
-                   "tree_to_full_kl": 0.20, "gate": 0.005,
-                   "cert_margin": 0.10}
-CORE_PPO_WEIGHTS = {"tree_ce": 0.0, "full_to_tree_kl": 0.20,
-                    "tree_to_full_kl": 0.20, "gate": 0.005,
-                    "cert_margin": 0.10}
+CORE_BC_WEIGHTS = {"tree_ce": 0.0, "full_to_tree_kl": 0.20,
+                   "tree_to_full_kl": 0.0, "gate": 0.0,
+                   "cert_margin": 0.0}
+CORE_PPO_WEIGHTS = {key: 0.0 for key in CORE_BC_WEIGHTS}
 PROGRAM_LAMBDA = 0.01
 PROGRAM_START_FRACTION = 0.80
 PROGRAM_RAMP_FRACTION = 0.05
@@ -122,7 +121,7 @@ DEFAULT_DAGGER_EPOCHS = REGISTERED_BC_SPEC["dagger_epochs"]
 # A single, replayable offline BC recipe is completed before either PPO
 # variant starts. Every data seed and stage is fixed by the pair seed. The
 # offline teacher and learned collision critic are absent from execution.
-BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.17-risk-protected.r3"
+BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.18-quality-selective.r1"
 BC_INITIAL_TEACHER_EPISODES = 100
 BC_INITIAL_EPOCHS = 20
 BC_INITIAL_DAGGER_ROUNDS = 2
@@ -140,13 +139,13 @@ BC_DEEP_EPOCHS = 6
 BC_BATCH_SIZE = 128
 BC_RISK_WEIGHT = 2.0
 BC_MARGIN_GAP = 3.0
-BC_MARGIN_WEIGHT = 0.03
+BC_MARGIN_WEIGHT = 0.0
 BC_NEAR_INCREMENT = 2.0
 BC_LOW_RETURN_INCREMENT = 8.0
 BC_SAMPLED_COLLISION_INCREMENT = 3.0
 BC_ARGMAX_COLLISION_INCREMENT = 5.0
 BC_DUPLICATE_COLLISION_CAP = 8
-BC_GATE_SUPERVISION_WEIGHT = 0.20
+BC_GATE_SUPERVISION_WEIGHT = 0.0
 BC_GATE_TARGET_LOW = 0.10
 BC_GATE_TARGET_CORRECTION = 0.90
 BC_TOPOLOGY_STAGE_COUNTS = {
@@ -154,9 +153,9 @@ BC_TOPOLOGY_STAGE_COUNTS = {
 }
 BC_FINAL_CORE_STAGE_COUNTS = {
     "fit_sampled": (70, 25), "fit_argmax": (71, 25),
-    "calibration_sampled": (72, 13), "calibration_argmax": (73, 12),
-    "eligibility_sampled": (74, 13), "eligibility_argmax": (75, 12),
-    "validation_sampled": (76, 12), "validation_argmax": (77, 12),
+    "calibration_sampled": (72, 25),
+    "eligibility_sampled": (74, 25),
+    "validation_sampled": (76, 24),
 }
 BC_REFIT_EPOCHS = 8
 BC_REFIT_WARMUP_KL_WEIGHT = 0.0
@@ -182,6 +181,8 @@ _SOURCE_FILES = (
     "backend/training/warehouse_v6_core_tree.py",
     "backend/training/warehouse_v6_core_intrinsic.py",
     "backend/training/warehouse_v617_risk_tree.py",
+    "backend/training/warehouse_v618_selective_tree.py",
+    "backend/training/warehouse_v6_evaluation_authorization.py",
     "backend/training/warehouse_v614_certificate_tree.py",
     "backend/training/warehouse_v614_masked_refit.py",
     "backend/training/warehouse_v6_runner.py", "backend/training/warehouse_v6_shutdown_cost.py",
@@ -198,96 +199,72 @@ _SOURCE_FILES = (
       for path in sorted((_SOURCE_ROOT / "study_v3").glob("*.py"))),
     "scripts/package_warehouse_v6_release.py", "scripts/start_warehouse_v6_candidate_release.py",
     "scripts/run_warehouse_v617_locked_pair.py",
+    "scripts/run_warehouse_v618_locked_pair.py",
+    "scripts/diagnose_warehouse_v618_baseline.py",
+    "scripts/diagnose_warehouse_v618_program_feasibility.py",
+    "scripts/run_warehouse_v618_engineering_smoke.py",
     "configs/study_v3_warehouse.json", "configs/study_v3_warehouse_neural.json",
     "configs/study_v3_warehouse_neural_v5.json", "configs/study_v3_warehouse_neural_v6.json",
     "configs/warehouse_v614_exploratory_recipe.json",
     "configs/warehouse_v617_risk_protected_recipe.json",
+    "configs/warehouse_v618_quality_selective_recipe.json",
     "requirements-warehouse-v6-training.txt",
 )
 
 
 def v617_executable_recipe() -> dict:
-    """Return the joint-certified candidate's exact executable recipe."""
+    """Historical failed recipe, retained without executing v6.17 training."""
+    return json.loads((_SOURCE_ROOT / "configs" / "warehouse_v617_risk_protected_recipe.json").read_text())
+
+
+def v618_executable_recipe() -> dict:
+    from .warehouse_v618_selective_tree import SEARCH_BUDGET
     return {
-        "version": BC_RECIPE_VERSION,
-        "actor_model_version": MODEL_VERSION,
+        "version": BC_RECIPE_VERSION, "actor_model_version": MODEL_VERSION,
         "observation_version": OBSERVATION_VERSION,
         "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
         "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
-        "program_fit_method": JOINT_CERTIFIED_TOPOLOGY_METHOD,
-        "tree_split_support": "trainable_deterministic_top3_with_fixed_legal_guards",
-        "core_residual_cap": "min(0.08,max(0,(masked_tree_top_gap-0.26)/2))",
-        "qualified_mask_changes_actor_output": False,
-        "bc_quality_screen": "registered_checkpoint_seeds_before_any_PPO",
-        "topology_refresh_fit_only_alignment_epochs": 4,
-        "risk_stratified_topology": "risk_then_near_then_two_learned_levels_then_pure_legal_guard",
-        "core_intrinsic_margin_delta": 3.0,
-        "actor_topology_refresh": {
-            "bc": "after_each_fit_stage",
-            "ppo_percentages": [24, 48, 72],
-            "freeze_percentage": 75,
-            "certificate_invalidation": "each_refresh",
-        },
+        "program_fit_method": INDEPENDENT_SELECTIVE_METHOD,
+        "actor_formula": "nn256+tanh(gate)*center(tree_logits)",
+        "branch_initialization": "exact_zero_contribution_dense_only_initial_and_dagger",
         "core_bound_mode": CORE_BOUND_MODE,
-        "core_low_gate_bound": CORE_LOW_GATE_BOUND,
-        "risk_tree_fit": dict(RISK_TREE_RECIPE),
-        "episode_separated_refit": asdict(RefitConfig()),
+        "residual_hard_cap": None, "forced_tree_margin": None,
+        "qualified_mask_changes_actor_output": False,
+        "bc_spec": {key: value for key, value in REGISTERED_BC_SPEC.items()
+                    if key != "executable_recipe_file_sha256"},
+        "bc_tree_distillation": {"weight": .20, "direction": "detached_full_nn_to_tree_only"},
+        "gate_supervision_weight": 0.0, "bound_penalty_weight": 0.0,
+        "core_ppo_weights": CORE_PPO_WEIGHTS,
+        "ppo_actor_losses": ["clipped_policy", "entropy", "observed_episode_shutdown_cost",
+                             "regularized_only_qualified_program_kl"],
+        "ppo_optimizer": {"learning_rate": 3e-5, "epochs": 4, "gradient_clip": .5},
+        "program_schedule": {"extract_percentages": [75, 84, 93],
+                             "lambda": .01, "start": .80, "ramp": .05},
+        "topology_diagnostic_percentages": [24, 48, 72],
+        "support_lock": "end_of_bc", "split_freeze_fraction": .75,
+        "ppo_actor_rebuilds": 0, "online_auxiliary_ce_updates": 0,
         "topology_stage_counts": BC_TOPOLOGY_STAGE_COUNTS,
         "final_bc_internal_precheck_stage_counts": BC_FINAL_CORE_STAGE_COUNTS,
-        "post_refit_bc_epochs": BC_REFIT_EPOCHS,
-        "post_refit_warmup_masked_kl_weight": BC_REFIT_WARMUP_KL_WEIGHT,
-        "topology_target": "current_full_nn_complete_masked_distribution",
-        "topology_fit_inputs": "warmup_nn_visits_only_no_warmup_teacher_episodes",
-        "topology_purpose_at_warmup": "fit_only",
-        "final_bc_internal_precheck_purposes": [
-            "fit", "calibration", "eligibility", "validation"],
-        "final_bc_internal_precheck_source": "one_final_frozen_full_bc_actor",
         "final_bc_frame_sampling": "every_physical_pre_action_frame_no_deduplication",
-        "final_program_topology": "selected_final_frozen_full_actor_tree",
-        "warmup_freeze_after": None,
-        "warmup_quality_prequalified": False,
-        "gate_supervision_weight": BC_GATE_SUPERVISION_WEIGHT,
-        "gate_target_low": BC_GATE_TARGET_LOW,
-        "gate_target_correction": BC_GATE_TARGET_CORRECTION,
-        "gate_correction_conditions": ["public_teacher_tree_disagreement",
-                                       "previous_public_same_target_collision",
-                                       "real_training_collision_event"],
-        "core_bc_weights": CORE_BC_WEIGHTS,
-        "core_ppo_weights": CORE_PPO_WEIGHTS,
-        "core_intrinsic_stable_conditions": {
-            "bc_tree_ce_all_training_rows": True,
-            "candidate_selection": "fit_only_protected_leaf_path_and_episode_support",
-            "full_to_tree_includes_unqualified_leaves": True,
-            "reverse_kl_includes_disagreement_rows": True,
-            "includes_protected_near_robot_rows": True,
-            "program_or_validation_rows_used_for_loss": False,
-        },
-        "initial_teacher_episodes": BC_INITIAL_TEACHER_EPISODES,
-        "initial_bc_epochs": BC_INITIAL_EPOCHS,
-        "initial_dagger_rounds": BC_INITIAL_DAGGER_ROUNDS,
-        "initial_dagger_episodes": BC_INITIAL_DAGGER_EPISODES,
-        "initial_dagger_epochs": BC_INITIAL_DAGGER_EPOCHS,
-        "risk_teacher_episodes": BC_RISK_TEACHER_EPISODES,
-        "risk_visit_episodes": BC_RISK_VISIT_EPISODES,
-        "large_teacher_episodes": BC_LARGE_TEACHER_EPISODES,
-        "large_visit_episodes": BC_LARGE_VISIT_EPISODES,
-        "deep_teacher_episodes": BC_DEEP_TEACHER_EPISODES,
-        "deep_dagger_rounds": BC_DEEP_DAGGER_ROUNDS,
-        "deep_dagger_episodes": BC_DEEP_DAGGER_EPISODES,
-        "risk_epochs": BC_RISK_EPOCHS,
-        "deep_epochs": BC_DEEP_EPOCHS,
-        "batch_size": BC_BATCH_SIZE,
-        "risk_weight": BC_RISK_WEIGHT,
-        "margin_gap": BC_MARGIN_GAP,
-        "margin_weight": BC_MARGIN_WEIGHT,
-        "near_increment": BC_NEAR_INCREMENT,
-        "low_return_increment": BC_LOW_RETURN_INCREMENT,
-        "sampled_collision_increment": BC_SAMPLED_COLLISION_INCREMENT,
-        "argmax_collision_increment": BC_ARGMAX_COLLISION_INCREMENT,
-        "duplicate_collision_cap": BC_DUPLICATE_COLLISION_CAP,
+        "final_bc_nonfit_sampling": "native_frozen_nn_sampled",
+        "program_search_budget": dict(SEARCH_BUDGET),
+        "program_qualification": {"leaf_coverage": .35, "expected_actionable_coverage": .30,
+                                  "feedback_agreement": .93, "explanation_agreement": .95,
+                                  "maximum_kl": .25, "illegal_count": 0},
         "training_reward_overrides": TRAINING_REWARD_OVERRIDES,
         "shutdown_risk_dual": asdict(RiskDualConfig()),
+        "bc_quality_screen": "registered_checkpoint_seeds_even_if_program_fails",
     }
+
+
+def validate_v618_quality_selective_recipe() -> str:
+    raw = (_SOURCE_ROOT / "configs" / "warehouse_v618_quality_selective_recipe.json").read_bytes()
+    if json.loads(raw) != json.loads(json.dumps(v618_executable_recipe())):
+        raise RuntimeError("Warehouse v6.18 executable training recipe drifted")
+    digest = sha256(raw).hexdigest()
+    if digest != REGISTERED_BC_SPEC["executable_recipe_file_sha256"]:
+        raise RuntimeError("Warehouse v6.18 executable recipe hash drifted")
+    return digest
 
 
 def v614_executable_recipe() -> dict:
@@ -307,16 +284,8 @@ def validate_v614_exploratory_recipe() -> str:
 
 
 def validate_v617_risk_protected_recipe() -> str:
-    raw = (_SOURCE_ROOT / "configs" /
-           "warehouse_v617_risk_protected_recipe.json").read_bytes()
-    declared = json.loads(raw)
-    expected = json.loads(json.dumps(v617_executable_recipe()))
-    if declared != expected:
-        raise RuntimeError("Warehouse v6.16 executable training recipe drifted")
-    digest = sha256(raw).hexdigest()
-    if digest != REGISTERED_BC_SPEC["executable_recipe_file_sha256"]:
-        raise RuntimeError("Warehouse v6.16 executable recipe hash drifted")
-    return digest
+    """Read-only hash of the closed historical candidate, never authorization."""
+    return sha256((_SOURCE_ROOT / "configs" / "warehouse_v617_risk_protected_recipe.json").read_bytes()).hexdigest()
 
 
 def source_closure_files_sha256() -> dict[str, str]:
@@ -956,6 +925,67 @@ def _formal_partial_reset_prefix(spec: Mapping, observed: Sequence[Mapping]) -> 
     return True
 
 
+def run_locked_engineering_pair(run_spec: Mapping, *,
+                                authorization_receipt_path: str | Path) -> dict:
+    """Bounded, source-locked engineering execution, never a release run."""
+    global _LOCKED_EXECUTION_USED_IN_PROCESS
+    if not FORMAL_TRAINING_DISABLED or _LOCKED_EXECUTION_USED_IN_PROCESS:
+        raise RuntimeError("Warehouse engineering capability unavailable")
+    spec = _checked_spec(run_spec)
+    from .warehouse_v6_evaluation_authorization import is_sealed_scenario_seed
+    if (spec.get("smoke") is not True or not 120 <= spec["joint_steps"] <= 1200
+            or spec["pair_seed"] != 6149
+            or spec["candidate_id"] != "warehouse-v618-engineering-only"
+            or spec["scenario_namespace"] != "warehouse-v618-engineering-only"
+            or any(is_sealed_scenario_seed(seed) for seed in spec["checkpoint_seeds"])):
+        raise RuntimeError("Warehouse engineering spec cannot be promoted or use sealed scenes")
+    directory = (Path(spec["output_dir"]).resolve() / spec["candidate_id"] /
+                 f"pair_{spec['pair_seed']}_steps_{spec['joint_steps']}")
+    if directory.exists():
+        raise RuntimeError("Warehouse engineering output must be new")
+    authorization = json.loads(Path(authorization_receipt_path).read_bytes())
+    main_value = getattr(sys.modules["__main__"], "__file__", None)
+    if not isinstance(main_value, str):
+        raise RuntimeError("Warehouse engineering run requires a saved lock script")
+    main_path = Path(main_value).resolve(strict=True)
+    expected = {"authorization_kind": "warehouse-v618-engineering-only-v1",
+                "source_closure_sha256": spec["source_closure_sha256"],
+                "run_spec_sha256": _scientific_run_spec_sha256(spec),
+                "training_config_sha256": _training_config_sha256(spec),
+                "lock_script_path": str(main_path),
+                "lock_script_sha256": sha256(main_path.read_bytes()).hexdigest(),
+                "output_directory": str(directory), "publishable": False}
+    if any(authorization.get(key) != value for key, value in expected.items()):
+        raise RuntimeError("Warehouse engineering authorization mismatch")
+    _LOCKED_EXECUTION_USED_IN_PROCESS = True
+    journal = Path(authorization_receipt_path).with_suffix(".resets.jsonl")
+    token = _ACTIVE_LOCKED_EXECUTION.set(_LOCKED_FORMAL_MARKER)
+    try:
+        with capture_stage1_resets(journal) as resets:
+            pair = train_pair(run_spec)
+            checkpoint = torch.load(directory / "paired_bc.checkpoint.pt",
+                                    map_location="cpu", weights_only=False)
+            restored_roles = {}
+            before_restore_resets = len(resets)
+            for variant in ("raw", "regularized"):
+                model, _, restored = _train_variant(checkpoint["state_dict"],
+                    variant=variant, spec=spec, directory=directory)
+                restored_roles[variant] = role_hashes(model)
+                if restored_roles[variant] != pair["variants"][variant]["selected_role_sha256"]:
+                    raise RuntimeError("Warehouse completed checkpoint restore changed Actor")
+            if len(resets) != before_restore_resets:
+                raise RuntimeError("Warehouse completed restore executed additional rollouts")
+        _assert_source_closure(spec["source_closure_sha256"])
+        return {"pair": pair, "publishable": False,
+                "purpose": "engineering_execution_only_not_model_acceptance",
+                "reset_audit": {"actual_reset_count": len(resets), "rows": resets,
+                    "journal_path": str(journal), "journal_sha256": sha256(journal.read_bytes()).hexdigest()},
+                "restore_equivalence": {"passed": True, "roles": restored_roles,
+                                        "additional_rollouts": 0}}
+    finally:
+        _ACTIVE_LOCKED_EXECUTION.reset(token)
+
+
 def run_locked_formal_pair(run_spec: Mapping, *,
                            authorization_receipt_path: str | Path) -> dict:
     """One SHA-locked registered pair run; ordinary train_pair stays closed."""
@@ -996,7 +1026,7 @@ def run_locked_formal_pair(run_spec: Mapping, *,
         torch.manual_seed(spec["pair_seed"])
         initial_role_sha256 = role_hashes(WarehouseV6Actor())
     required = {
-        "authorization_kind": "warehouse-v617-registered-pair-locked-run-v1",
+        "authorization_kind": "warehouse-v618-registered-pair-locked-run-v1",
         "candidate_id": spec["candidate_id"],
         "pair_seed": spec["pair_seed"],
         "joint_steps": spec["joint_steps"],
@@ -1004,7 +1034,7 @@ def run_locked_formal_pair(run_spec: Mapping, *,
         "training_config_sha256": _training_config_sha256(spec),
         "source_closure_sha256": spec["source_closure_sha256"],
         "bc_recipe_sha256": REGISTERED_BC_SPEC_SHA256,
-        "executable_recipe_file_sha256": validate_v617_risk_protected_recipe(),
+        "executable_recipe_file_sha256": validate_v618_quality_selective_recipe(),
         "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
         "bc_data_seed_schedule_sha256": spec["bc_data_seed_schedule_sha256"],
         "bc_critic_reset_schedule_sha256": spec["bc_critic_reset_schedule_sha256"],
@@ -1149,17 +1179,30 @@ def _teacher_rows(episodes: int, seed: int) -> tuple[torch.Tensor, torch.Tensor,
              "row_scenario_seeds": row_scenario_seeds})
 
 
+def _bc_tree_distillation(model, encoded, masks, full_logits):
+    """Offline only: detach the entire NN target; never force NN toward a tree."""
+    values = []
+    for index, role in enumerate(AGENTS):
+        tree, _ = model.actors[role].tree(encoded[:, index])
+        tree = tree.masked_fill(masks[:, index] <= .5, -1e9)
+        target = torch.softmax(full_logits[:, index].detach(), -1)
+        log_target = torch.log(target.clamp_min(1e-9))
+        values.append((target * (log_target - torch.log_softmax(tree, -1))).sum(-1).mean())
+    return torch.stack(values).mean()
+
+
 def _bc_epochs(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
                obs: torch.Tensor, mask: torch.Tensor, labels: torch.Tensor,
                *, epochs: int, generator: torch.Generator,
                warmup_target_probs: torch.Tensor | None = None,
                warmup_kl_weight: float = 0.0) -> float:
+    """Public offline BC, plus one-way complete-NN distribution distillation."""
     encoded = policy_features_torch(obs, mask)
     if warmup_target_probs is not None:
         if (warmup_target_probs.shape != mask.shape or
                 not torch.isfinite(warmup_target_probs).all() or
                 torch.any(warmup_target_probs < 0) or
-                torch.any(warmup_target_probs[mask <= 0.5] > 1e-8) or
+                torch.any(warmup_target_probs[mask <= .5] > 1e-8) or
                 not torch.allclose(warmup_target_probs.sum(-1),
                                    torch.ones_like(mask[..., 0]), atol=1e-5)):
             raise ValueError("Warehouse post-refit warmup target is invalid")
@@ -1170,57 +1213,19 @@ def _bc_epochs(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
             logits = model.outputs_encoded(encoded[indices], mask[indices])
             loss = nn.functional.cross_entropy(logits.reshape(-1, len(ACTIONS)),
                                                labels[indices].reshape(-1))
-            if warmup_target_probs is not None:
-                target = warmup_target_probs[indices]
-                source_log = torch.log(target.clamp_min(1e-9))
-                new_log = nn.functional.log_softmax(logits, dim=-1)
-                masked_kl = (target * (source_log - new_log)).sum(-1).mean()
-                loss = loss + warmup_kl_weight * masked_kl
-            tree_loss, gate_supervision = [], []
-            for index, role in enumerate(AGENTS):
-                role_rows = encoded[indices, index]
-                actor = model.actors[role]
-                tree_logits, _ = actor.tree(role_rows)
-                tree_loss.append(nn.functional.cross_entropy(
-                    tree_logits.masked_fill(mask[indices, index] <= 0.5, -1e9),
-                    labels[indices, index]))
-                with torch.no_grad():
-                    tree_choice = tree_logits.masked_fill(
-                        mask[indices, index] <= 0.5, -1e9).argmax(-1)
-                    history = role_rows[:, OBSERVATION_FEATURE_NAMES.index(
-                        "same_target_collision_streak_capped")] > 0
-                    requires_correction = ((tree_choice != labels[indices, index])
-                                           | history)
-                gate_target = torch.where(requires_correction,
-                                          BC_GATE_TARGET_CORRECTION,
-                                          BC_GATE_TARGET_LOW).to(
-                    role_rows.dtype)
-                gate_supervision.append(nn.functional.binary_cross_entropy(
-                    actor.gate_values(role_rows), gate_target))
-            loss = loss + 0.05 * torch.stack(tree_loss).mean()
-            # The gate learns when the public-state tree already predicts the
-            # offline label and when the relation residual must take over.
-            # Only BC/DAgger training rows supply this target, never program
-            # qualification or independent evaluation episodes.
-            loss = loss + BC_GATE_SUPERVISION_WEIGHT * torch.stack(
-                gate_supervision).mean()
-            # Both variants inherit the same learned preference for compact
-            # residual corrections. Raw receives no program gradient later.
-            loss = loss + 5e-4 * torch.stack([
-                model.actors[role].bounds().mean() for role in AGENTS]).mean()
-            intrinsic, _ = core_intrinsic_loss(
-                model, encoded[indices], mask[indices], labels=labels[indices],
-                weights=CORE_BC_WEIGHTS, full_logits=logits)
-            loss = loss + intrinsic
+            loss = loss + .20 * _bc_tree_distillation(
+                model, encoded[indices], mask[indices], logits)
+            if warmup_target_probs is not None and warmup_kl_weight:
+                target = warmup_target_probs[indices].detach()
+                loss = loss + warmup_kl_weight * (target * (
+                    torch.log(target.clamp_min(1e-9)) -
+                    torch.log_softmax(logits, -1))).sum(-1).mean()
             optimizer.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(model.actors.parameters(), 0.5)
+            nn.utils.clip_grad_norm_(model.actors.parameters(), .5)
             optimizer.step()
-            for role in AGENTS:
-                model.actors[role].prune_unproven_core_leaves()
     with torch.no_grad():
-        predicted = model.outputs_encoded(encoded, mask).argmax(-1)
-        return float((predicted == labels).float().mean())
+        return float((model.outputs_encoded(encoded, mask).argmax(-1) == labels).float().mean())
 
 
 def _bc_reliability(model: WarehouseV6Actor, obs: torch.Tensor,
@@ -1356,6 +1361,10 @@ def _initialize_public_trees(model: WarehouseV6Actor, obs: torch.Tensor,
             if not np.array_equal(frozen_role.leaf(features[:, index]),
                                   fitted.leaf_indices(features[:, index])):
                 raise RuntimeError("Warehouse core tree Torch/NumPy route mismatch")
+        # Classifier legal-bit splits are immutable physical guards. Lock
+        # their coefficients before any BC gradient; support remains learnable.
+        model.actors[role].refresh_sparse_support()
+        model.actors[role].tree.support_fixed[0] = False
         with torch.no_grad():
             tree_logits, path = model.actors[role].tree(
                 torch.from_numpy(features[:, index]))
@@ -1496,7 +1505,7 @@ def exploratory_stage1_bc_seed_schedule(pair_seed: int) -> dict[str, list[int]]:
             40 + 2 * index, BC_DEEP_DAGGER_EPISODES // 2)
     counts.update({f"final_bc_precheck_{name}": item
                    for name, item in BC_FINAL_CORE_STAGE_COUNTS.items()})
-    if len(counts) != 26 or sum(count for _, count in counts.values()) != 1394:
+    if len(counts) != 23 or sum(count for _, count in counts.values()) != 1394:
         raise RuntimeError("Warehouse v6.14 exploratory BC stage table drifted")
     schedule = {name: _bc_stage_seeds(pair_seed, stage, count)
                 for name, (stage, count) in counts.items()}
@@ -1518,7 +1527,9 @@ def _bc_rows_sha256(rows: tuple[torch.Tensor, ...]) -> str:
 
 def _collect_bc_visits(model: WarehouseV6Actor, seeds: Sequence[int], *,
                        deterministic: bool, deduplicate_collisions: bool,
-                       collision_state_counts: dict[bytes, int] | None = None
+                       collision_state_counts: dict[bytes, int] | None = None,
+                       include_execution_metadata: bool = False,
+                       public_labels: bool = True
                        ) -> tuple[tuple[torch.Tensor, ...], dict]:
     """Visit using only the current two NN outputs, then label public states.
 
@@ -1533,6 +1544,7 @@ def _collect_bc_visits(model: WarehouseV6Actor, seeds: Sequence[int], *,
     repeated_collision_frames = cross_episode_skips = 0
     collision_rows_kept = 0
     physical_frames = 0
+    execution_metadata = []
     counts = collision_state_counts if collision_state_counts is not None else {}
     time_columns = [OBSERVATION_FEATURE_NAMES.index(name) for name in (
         "elapsed_fraction", "self_steps_since_charging",
@@ -1545,10 +1557,13 @@ def _collect_bc_visits(model: WarehouseV6Actor, seeds: Sequence[int], *,
         while not (env.state.terminated or env.state.truncated):
             physical_frames += 1
             obs, mask = encode_public_observation(env.state), action_masks(env.state)
-            label = public_lookahead_teacher(obs, mask)
+            label = (public_lookahead_teacher(obs, mask) if public_labels else None)
             positions = tuple(env.state.by_id(role).position for role in AGENTS)
             actions, distributions = actor.act(
                 env.state, base_seed=int(seed), deterministic=deterministic)
+            if label is None:
+                label = np.asarray([np.argmax(distributions[r].probabilities) for r in AGENTS], np.int64)
+            frame, episode_id = int(env.state.frame), int(env.state.episode_id)
             joint_teacher_probability.append(float(np.prod([
                 distributions[role].probabilities[int(label[index])]
                 for index, role in enumerate(AGENTS)])))
@@ -1573,6 +1588,9 @@ def _collect_bc_visits(model: WarehouseV6Actor, seeds: Sequence[int], *,
                 else:
                     counts[signature] = counts.get(signature, 0) + 1
             if keep:
+                if include_execution_metadata:
+                    execution_metadata.append({"base_seed": int(seed), "episode_id": episode_id,
+                        "frame": frame, "actions": dict(actions)})
                 obs_rows.append(obs)
                 mask_rows.append(mask)
                 labels.append(label)
@@ -1608,6 +1626,8 @@ def _collect_bc_visits(model: WarehouseV6Actor, seeds: Sequence[int], *,
         "max_collision_signature_rows": max(counts.values(), default=0),
         "collision_rows_kept": collision_rows_kept,
         "post_policy_interventions": 0,
+        "labels_source": "public_offline_teacher" if public_labels else "frozen_nn_argmax_not_teacher",
+        **({"execution_metadata": execution_metadata} if include_execution_metadata else {}),
     }
 
 
@@ -1651,36 +1671,19 @@ def _risk_bc_epochs(model: WarehouseV6Actor, critic: nn.Module,
             ).sum((1, 2)).mean()
             loss = ((ce * weights[indices]).mean() + margin_weight * margin
                     + BC_RISK_WEIGHT * expected_collision)
-            gate_losses = []
-            for role_index, role in enumerate(AGENTS):
-                role_rows = encoded[indices, role_index]
-                actor = model.actors[role]
-                tree_logits, _ = actor.tree(role_rows)
-                with torch.no_grad():
-                    tree_choice = tree_logits.masked_fill(
-                        mask[indices, role_index] <= 0.5, -1e9).argmax(-1)
-                    collision_history = role_rows[:, OBSERVATION_FEATURE_NAMES.index(
-                        "same_target_collision_streak_capped")] > 0
-                    requires_correction = ((tree_choice != label[:, role_index])
-                                           | collision_history | (hard[indices] > 0))
-                    gate_target = torch.where(requires_correction,
-                                              BC_GATE_TARGET_CORRECTION,
-                                              BC_GATE_TARGET_LOW).to(
-                        role_rows.dtype)
-                gate_losses.append(nn.functional.binary_cross_entropy(
-                    actor.gate_values(role_rows), gate_target))
-            gate_loss = torch.stack(gate_losses).mean()
-            loss = loss + BC_GATE_SUPERVISION_WEIGHT * gate_loss
-            intrinsic, intrinsic_report = core_intrinsic_loss(
-                model, encoded[indices], mask[indices], labels=label,
-                weights=CORE_BC_WEIGHTS, full_logits=logits)
+            # Offline only, one-way NN -> tree. The complete policy remains
+            # free to correct an inaccurate branch; there is no gate target,
+            # protected-region KL, residual cap or forced leaf margin.
+            gate_loss = logits.new_zeros(())
+            intrinsic = .20 * _bc_tree_distillation(
+                model, encoded[indices], mask[indices], logits)
+            intrinsic_report = {"direction": "detached_full_nn_to_tree_only",
+                                "tree_to_full_gradient": False}
             loss = loss + intrinsic
             optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.actors.parameters(), 0.5)
             optimizer.step()
-            for role in AGENTS:
-                model.actors[role].prune_unproven_core_leaves()
         last = {"epoch": epoch + 1,
                 "mean_batch_ce": float(ce.detach().mean()),
                 "mean_batch_margin": float(margin.detach()),
@@ -1773,90 +1776,50 @@ def _bc_core_rows(parts: Sequence[tuple[torch.Tensor, ...]]) -> dict[str, list[d
     return rows
 
 
+def _role_support_hashes(model: WarehouseV6Actor) -> dict[str, str]:
+    return {role: sha256(model.actors[role].tree.support_mask.detach().cpu().numpy()
+                        .astype(np.uint8).tobytes()).hexdigest() for role in AGENTS}
+
+
 def _refresh_qualified_topology(model: WarehouseV6Actor,
                                 rows_by_role: Mapping[str, Sequence[Mapping]],
                                 *, stage: str, refresh_support: bool = True) -> dict:
-    """Rebuild on fit training episodes; qualify without changing NN outputs."""
+    """Read-only v6.18 structure diagnostics; never installs an extracted tree.
+
+    The historical function name is retained for callers. Neither this
+    function nor a qualification sidecar can change inference or optimizer
+    state. BC support selection is performed explicitly by the BC trainer.
+    """
+    before = role_hashes(model)
+    frozen = FrozenWarehouseV6Actor.from_model(model)
     reports = {}
     for role in AGENTS:
         actor = model.actors[role]
         rows = list(rows_by_role[role])
-        scenes = list(dict.fromkeys(int(row["base_seed"]) for row in rows))[-200:]
-        if len(scenes) < 40:
-            raise RuntimeError("Warehouse topology refresh lacks distinct training scenes")
-        n = len(scenes)
-        cuts = (0, n//2, n//2+n//6, n//2+2*(n//6), n)
-        parts = {}
-        for i, purpose in enumerate(("fit", "calibration", "eligibility", "validation")):
-            own = set(scenes[cuts[i]:cuts[i+1]])
-            selected = [r for r in rows if int(r["base_seed"]) in own]
-            obs = np.stack([r["obs"] for r in selected]).astype(np.float32)
-            mask = np.stack([r["mask"] for r in selected]).astype(np.float32)
-            x = encode_actor_tree_features(obs, mask)
-            parts[purpose] = (selected, x, mask)
-        rebuild = None
-        if refresh_support:
-            frozen = FrozenWarehouseV6Actor.from_model(model).roles[role]
-            selected, x, mask = parts["fit"]
-            target = _masked_probabilities(frozen.logits_encoded(x), mask)
-            fitted = fit_risk_tree(x, mask, target,
-                                  [f"nn-visit:{r['base_seed']}" for r in selected])
-            rebuild = actor.initialize_tree_from_core_result(fitted)
-            # This continuation uses ONLY fit training episodes. Independent
-            # qualification rows never supply an optimization gradient.
-            optimizer = torch.optim.Adam(actor.parameters(), lr=1e-4)
-            tx, tm = torch.from_numpy(x), torch.from_numpy(mask)
-            labels = torch.tensor([r.get("teacher_action", int(p.argmax()))
-                                   for r, p in zip(selected, target, strict=True)])
-            labels = torch.where(tm.gather(1, labels[:, None]).squeeze(1) > 0.5,
-                                 labels, torch.from_numpy(target.argmax(1)))
-            generator = torch.Generator().manual_seed(int(scenes[0]) + 617)
-            for _ in range(4):
-                for batch in torch.randperm(len(x), generator=generator).split(256):
-                    full = actor(tx[batch]).masked_fill(tm[batch] <= 0.5, -1e9)
-                    tree, path = actor.tree(tx[batch])
-                    tree = tree.masked_fill(tm[batch] <= 0.5, -1e9)
-                    loss = nn.functional.cross_entropy(full, labels[batch])
-                    loss = loss + 0.2 * nn.functional.cross_entropy(tree, labels[batch])
-                    protected = (path.detach() @ actor.protected_leaf_mask) > 0.5
-                    if protected.any():
-                        top = tree[protected].topk(2, dim=-1).values
-                        loss = loss + 0.1 * nn.functional.relu(3.0-top[:, 0]+top[:, 1]).square().mean()
-                    optimizer.zero_grad(); loss.backward()
-                    nn.utils.clip_grad_norm_(actor.parameters(), 0.5)
-                    optimizer.step(); actor.prune_unproven_core_leaves()
-            rebuild["fit_only_alignment_epochs"] = 4
-        frozen = FrozenWarehouseV6Actor.from_model(model).roles[role]
-        groups = {}
-        for purpose, (selected, x, mask) in parts.items():
-            target = _masked_probabilities(frozen.logits_encoded(x), mask)
-            labels = np.asarray([r.get("teacher_action", int(p.argmax()))
-                                 for r, p in zip(selected, target, strict=True)], np.int64)
-            labels = np.where(mask[np.arange(len(mask)), labels] > 0.5, labels, target.argmax(1))
-            groups[purpose] = EpisodeRows(x, mask, labels, target,
-                np.asarray([float(r.get("actual_collision", 0)>0) for r in selected], np.float32),
-                tuple(f"nn-visit:{r['base_seed']}" for r in selected),
-                tuple(int(r["base_seed"]) for r in selected), frozen.role_sha256)
-        qualified, qualification = qualify_actor_core(groups, frozen_role=frozen, config=RefitConfig())
-        installed = actor.install_certified_core_mask(qualified if qualification["validation_passed"]
-                                                      else np.zeros_like(qualified))
-        if role_hashes(model)[role] != frozen.role_sha256:
-            raise RuntimeError("Warehouse qualification changed the Actor identity")
-        parity = actor.topology_certificate_report(groups["validation"].encoded[:512])
-        topology = frozen_actor_topology(frozen.weights,
+        scenes = list(dict.fromkeys(int(row["base_seed"]) for row in rows))
+        sample = rows[-512:]
+        if not sample:
+            raise RuntimeError("Warehouse topology diagnostic lacks public states")
+        encoded = encode_actor_tree_features(
+            np.stack([r["obs"] for r in sample]), np.stack([r["mask"] for r in sample]))
+        parity = actor.topology_certificate_report(encoded)
+        topology = frozen_actor_topology(
+            frozen.roles[role].weights,
             schema=FeatureSchema(tuple(TREE_FEATURE_NAMES), tuple(ACTIONS)),
-            frozen_actor_sha256=frozen.role_sha256)
-        reports[role] = {"support": rebuild or {"support_refreshed": False},
-            "qualification": qualification, "qualification_attempts": [],
-            "qualification_bound_to_installed_actor": True,
-            "qualification_failed_core_reset": not qualification["validation_passed"],
-            "installed_core": installed, "parity": parity,
-            "topology_sha256": topology.topology_sha256(), "training_scene_count": n,
-            "protection_is_not_certificate": True}
+            frozen_actor_sha256=frozen.roles[role].role_sha256)
+        reports[role] = {"topology_sha256": topology.topology_sha256(),
+                         "training_scene_count": len(scenes), "parity": parity}
+    after = role_hashes(model)
+    if before != after:
+        raise RuntimeError("Warehouse topology diagnostic changed Actor weights")
     return {"stage": stage, "roles": reports,
             "role_tree_sha256": {r: reports[r]["topology_sha256"] for r in AGENTS},
-            "route_parity_passed": True, "path_legality_passed": True,
-            "core_qualification_recomputed": True}
+            "actor_role_sha256_before": before, "actor_role_sha256_after": after,
+            "role_support_sha256": _role_support_hashes(model),
+            "route_parity_passed": True, "guard_invariants_passed": True,
+            "core_qualification_recomputed": False,
+            "actor_rebuilt": False, "auxiliary_ce_updates": 0,
+            "support_locked": all(bool(a.tree.support_fixed[0]) for a in model.actors.values())}
 
 
 def _role_topology_hashes(model: WarehouseV6Actor) -> dict[str, str]:
@@ -1935,7 +1898,7 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
     _require_locked_execution()
     from .warehouse_v6_collision_critic import train_collision_critic
 
-    executable_recipe_file_sha256 = validate_v617_risk_protected_recipe()
+    executable_recipe_file_sha256 = validate_v618_quality_selective_recipe()
     warmup_actor_path = spec.get("warmup_actor_path")
     final_bc_actor_path = spec.get("final_bc_actor_path")
     final_bc_precheck_receipt_path = spec.get("final_bc_precheck_receipt_path")
@@ -1977,17 +1940,25 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
 
     def visit_stage(name: str, stage: int, count: int, *,
                     deterministic: bool = False,
-                    collision_counts: dict[bytes, int] | None = None
+                    collision_counts: dict[bytes, int] | None = None,
+                    independent: bool = False
                     ) -> tuple[torch.Tensor, ...]:
         seeds = _bc_stage_seeds(pair_seed, stage, count)
         all_seed_blocks[name] = seeds
         rows, summary = _collect_bc_visits(
             model, seeds, deterministic=deterministic,
             deduplicate_collisions=collision_counts is not None,
-            collision_state_counts=collision_counts)
+            collision_state_counts=collision_counts,
+            include_execution_metadata=independent, public_labels=not independent)
+        metadata = summary.pop("execution_metadata", None)
+        if metadata is not None:
+            independent_execution[name] = metadata
         stages.append({"stage": name, "kind": "dual_nn_visitation", **summary})
         return rows
 
+    independent_execution: dict[str, list[dict]] = {}
+    for actor in model.actors.values():
+        actor.set_tree_branch_enabled(False)
     source = teacher_stage("initial_public_teacher", 10,
                            BC_INITIAL_TEACHER_EPISODES)
     warmup_tree_initialization = _initialize_public_trees(model, *source[:3])
@@ -1995,48 +1966,20 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
     bc_topology_refresh_history: list[dict] = []
 
     def record_core(stage: str, parts: Sequence[tuple[torch.Tensor, ...]]) -> None:
-        refreshed = _refresh_qualified_topology(
-            model, _bc_core_rows(parts), stage=stage)
-        bc_topology_refresh_history.append(refreshed)
-        if stages and stages[-1].get("stage") == stage:
-            stages[-1]["actor_role_sha256_after_topology_refresh"] = role_hashes(model)
-            stages[-1]["topology_refresh_role_tree_sha256"] = refreshed[
-                "role_tree_sha256"]
-        # Each training-stage certificate is freshly computed from the
-        # current support, leaf actions, and public physical mask predicates.
-        frozen = FrozenWarehouseV6Actor.from_model(model)
-        roles = {}
-        for role in AGENTS:
-            actor = model.actors[role]
-            split_hash = _digest_json({
-                "weight": actor.tree.split.weight.detach().tolist(),
-                "bias": actor.tree.split.bias.detach().tolist()})
-            weights = frozen.roles[role].weights
-            count = int(weights["tree.leaf_count"][0])
-            core = actor.core_leaf_mask.detach().cpu().numpy()[:count] > 0.5
-            logits = weights["tree.leaf_logits"][:count]
-            margins = np.sort(logits, axis=-1)[:, -1] - np.sort(logits, axis=-1)[:, -2]
-            roles[role] = {
-                "role_sha256": frozen.roles[role].role_sha256,
-                "split_sha256": split_hash,
-                "core_leaf_count": int(core.sum()),
-                "core_raw_actions": {
-                    str(leaf): ACTIONS[int(np.argmax(logits[leaf]))]
-                    for leaf in np.flatnonzero(core)},
-                "core_raw_margin_min": float(margins[core].min()) if core.any() else None,
-                "core_leaf_parameter_bound_max": float(
-                    actor.bounds().detach().cpu().numpy()[:count][core].max())
-                    if core.any() else None,
-                "core_low_gate_bound": CORE_LOW_GATE_BOUND,
-                "core_bound_mode": CORE_BOUND_MODE,
-                "core_path_legality_verified": True,
-                "qualification": refreshed["roles"][role]["qualification"],
-                "topology_sha256": refreshed["roles"][role]["topology_sha256"],
-            }
-        core_stage_checks.append({"stage": stage, "roles": roles})
+        # Only BC is allowed to select sparse support; PPO never rebuilds.
+        for actor in model.actors.values():
+            if stage == "final_standard_margin_calibration":
+                actor.refresh_sparse_support()
+            else:
+                actor.tree.support_fixed[0] = False
+        detail = _refresh_qualified_topology(model, _bc_core_rows(parts), stage=stage)
+        bc_topology_refresh_history.append(detail)
+        core_stage_checks.append({"stage": stage, "roles": detail["roles"],
+                                  "qualification_changes_actor": False})
         progress = {"stage": stage, "role_sha256": role_hashes(model),
-                    "training_qualified_leaf_count": {r: int(model.actors[r].core_leaf_mask.sum()) for r in AGENTS},
-                    "protected_leaf_count": {r: int(model.actors[r].protected_leaf_mask.sum()) for r in AGENTS}}
+                    "support_locked": detail["support_locked"],
+                    "actor_rebuilt": False,
+                    "qualified_leaf_mask_changes_forward": False}
         progress_path = Path(final_bc_actor_path).parent / "bc-progress.jsonl"
         progress_path.parent.mkdir(parents=True, exist_ok=True)
         with progress_path.open("a") as handle:
@@ -2209,8 +2152,22 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
     for index, role in enumerate(AGENTS):
         groups = topology_rows_by_role[role]
         fit_rows = groups["fit"]
-        fitted = fit_risk_tree(fit_rows.encoded, fit_rows.masks,
-                               fit_rows.frozen_nn_masked_probs, fit_rows.episode_ids)
+        from .warehouse_v618_selective_tree import fit_independent_structure
+        structure, fit_report = fit_independent_structure(
+            fit_rows.encoded, fit_rows.masks, fit_rows.frozen_nn_masked_probs,
+            fit_rows.episode_ids, feature_names=TREE_FEATURE_NAMES,
+            actor_role_sha256=warmup_frozen.role_sha256[role])
+        n = len(structure["split_bias"])
+        leaves = int(structure["leaf_count"])
+        weights = np.zeros((15, len(TREE_FEATURE_NAMES)), np.float32)
+        bias = np.zeros(15, np.float32)
+        left = np.full(15, -1, np.int64); right = np.full(15, -1, np.int64)
+        logits = np.zeros((16, 5), np.float32)
+        weights[:n] = structure["split_weights"]; bias[:n] = structure["split_bias"]
+        left[:n] = structure["left_refs"]; right[:n] = structure["right_refs"]
+        logits[:leaves] = structure["initial_leaf_logits"]
+        fitted = CoreTreeResult(weights, bias, left, right, n, leaves, logits,
+            np.zeros(16, bool), fit_report, frozenset(fit_rows.episode_ids))
         tree_initialization[role] = model.actors[role].initialize_tree_from_core_result(fitted)
         tree_initialization[role]["core_tree_content_sha256"] = fitted.content_sha256()
         tree_initialization[role]["certificate_fit"] = fitted.report
@@ -2222,6 +2179,17 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
     # The full BC continuation must be allowed to align the complete Actor.
     record_core("certificate_first_fit_only_tree_initialization",
                 [*early_parts, *topology_fit_parts])
+    for actor in model.actors.values():
+        actor.set_tree_branch_enabled(True)
+    if role_hashes(model) != warmup_frozen.role_sha256:
+        # Tree tensors legitimately changed while its contribution was zero;
+        # policy equivalence is checked explicitly on the fit rows below.
+        for role in AGENTS:
+            x = topology_rows_by_role[role]["fit"].encoded
+            old = warmup_frozen.roles[role].logits_encoded(x)
+            new = FrozenWarehouseV6Actor.from_model(model).roles[role].logits_encoded(x)
+            if not np.allclose(old, new, atol=1e-6, rtol=0):
+                raise RuntimeError("Warehouse g=0 tree warm start changed full NN policy")
     optimizer = torch.optim.Adam(model.actors.parameters(), lr=1e-4)
     obs, mask, labels = (topology_groups["fit"][index] for index in range(3))
     refit_accuracy = _bc_epochs(
@@ -2324,28 +2292,23 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
     final_parts: dict[str, list[tuple[torch.Tensor, ...]]] = {
         name: [] for name in ("fit", "calibration", "eligibility", "validation")}
     final_visits: dict[str, dict] = {}
-    for purpose in final_parts:
-        for visit_kind in ("sampled", "argmax"):
-            name = f"{purpose}_{visit_kind}"
-            stage, count = BC_FINAL_CORE_STAGE_COUNTS[name]
-            part = visit_stage(f"final_bc_precheck_{name}", stage, count,
-                               deterministic=visit_kind == "argmax")
-            if (len(part[0]) != stages[-1]["physical_frames"]
-                    or stages[-1]["excluded_frames"] != 0):
-                raise RuntimeError("Warehouse BC precheck omitted physical frames")
-            if role_hashes(model) != final_bc_role_sha256:
-                raise RuntimeError("Warehouse final BC precheck visitation changed Actor")
-            final_parts[purpose].append(part)
-            final_visits[name] = {
-                "stage": stage,
-                "scenario_seeds": all_seed_blocks[f"final_bc_precheck_{name}"],
-                "rows": len(part[0]),
-                "physical_frames": stages[-1]["physical_frames"],
-                "excluded_frames": stages[-1]["excluded_frames"],
-                "row_episode_ids_sha256": _digest_json(part[4]),
-                "row_scenario_seeds_sha256": _digest_json(part[5]),
-                "data_sha256": _bc_rows_sha256(part[:4]),
-            }
+    for name, (stage, count) in BC_FINAL_CORE_STAGE_COUNTS.items():
+        purpose, visit_kind = name.split("_", 1)
+        part = visit_stage(f"final_bc_precheck_{name}", stage, count,
+                           deterministic=visit_kind == "argmax", independent=True)
+        if (len(part[0]) != stages[-1]["physical_frames"]
+                or stages[-1]["excluded_frames"] != 0):
+            raise RuntimeError("Warehouse BC precheck omitted physical frames")
+        if role_hashes(model) != final_bc_role_sha256:
+            raise RuntimeError("Warehouse final BC precheck visitation changed Actor")
+        final_parts[purpose].append(part)
+        final_visits[name] = {"stage": stage,
+            "scenario_seeds": all_seed_blocks[f"final_bc_precheck_{name}"],
+            "rows": len(part[0]), "physical_frames": stages[-1]["physical_frames"],
+            "excluded_frames": 0, "sampling_mode": visit_kind,
+            "row_episode_ids_sha256": _digest_json(part[4]),
+            "row_scenario_seeds_sha256": _digest_json(part[5]),
+            "data_sha256": _bc_rows_sha256(part[:4])}
     final_groups = {}
     for purpose, parts in final_parts.items():
         final_groups[purpose] = (
@@ -2367,59 +2330,68 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
     final_rows_path = Path(final_bc_actor_path).with_name("final-bc-program-rows.npz")
     if final_rows_path.exists():
         raise FileExistsError(final_rows_path)
-    np.savez_compressed(final_rows_path, **{
+    cached_arrays = {
         f"{purpose}.{field}": (value.detach().cpu().numpy() if isinstance(value, torch.Tensor) else np.asarray(value))
         for purpose, values in final_groups.items()
-        for field, value in zip(("obs", "mask", "labels", "hard", "episode_ids", "scenario_seeds"), values, strict=True)})
+        for field, value in zip(("obs", "mask", "labels", "hard", "episode_ids", "scenario_seeds"), values, strict=True)}
+    for purpose in final_groups:
+        metadata = [row for name in BC_FINAL_CORE_STAGE_COUNTS if name.startswith(purpose+"_")
+                    for row in independent_execution[f"final_bc_precheck_{name}"]]
+        cached_arrays[f"{purpose}.frames"] = np.asarray([r["frame"] for r in metadata], np.int64)
+        cached_arrays[f"{purpose}.environment_episode_ids"] = np.asarray([r["episode_id"] for r in metadata], np.int64)
+        cached_arrays[f"{purpose}.sampled_actions"] = np.asarray(
+            [[ACTIONS.index(r["actions"][role]) for role in AGENTS] for r in metadata], np.int64)
+    np.savez_compressed(final_rows_path, **cached_arrays)
     final_precheck_roles: dict[str, dict] = {}
     for index, role in enumerate(AGENTS):
-        frozen_role = final_bc_frozen.roles[role]
-        role_groups: dict[str, EpisodeRows] = {}
-        parity: dict[str, dict] = {}
-        for purpose, (obs, mask, labels, hard, episode_ids,
-                      actual_seeds) in final_groups.items():
-            features, role_mask, target, parity[purpose] = _warmup_role_targets(
-                model, frozen_role, role, obs, mask)
-            role_groups[purpose] = EpisodeRows(
-                features, role_mask, labels[:, index].numpy(), target,
-                (hard > 0).numpy(), episode_ids, actual_seeds,
-                frozen_role.role_sha256)
-        topology = frozen_actor_topology(
-            frozen_role.weights,
-            schema=FeatureSchema(tuple(TREE_FEATURE_NAMES), tuple(ACTIONS)),
-            frozen_actor_sha256=frozen_role.role_sha256)
-        _, report = fit_episode_separated_core(
-            role_groups, frozen_role=frozen_role, config=RefitConfig(),
-            expected_topology_sha256=topology.topology_sha256())
-        qualified_core_mask, actor_core_report = qualify_actor_core(
-            role_groups, frozen_role=frozen_role, config=RefitConfig(),
-            expected_topology_sha256=topology.topology_sha256())
-        validation = role_groups["validation"]
-        leaf = frozen_role.leaf(validation.encoded)
-        installed_core_mask = qualified_core_mask.copy() if actor_core_report["validation_passed"] else np.zeros_like(qualified_core_mask)
-        installed_qualified = bool(np.all(
-            ~installed_core_mask | qualified_core_mask))
-        installed_mask = installed_core_mask[leaf]
-        tree_logits = frozen_role.weights["tree.leaf_logits"][leaf]
-        masked_tree = np.where(validation.masks > 0.5, tree_logits, -1e9)
-        tree_action = masked_tree.argmax(axis=1)
-        full_action = validation.frozen_nn_masked_probs.argmax(axis=1)
-        installed_mass = float(np.mean(installed_mask))
-        installed_actionable_mass = float(np.mean(
-            (installed_mask & (tree_action == full_action)).astype(np.float32)
-            * validation.frozen_nn_masked_probs[
-                np.arange(len(tree_action)), tree_action]))
+        rows_by_purpose = {}
+        for purpose, parts in final_parts.items():
+            raw_rows = []
+            for name in BC_FINAL_CORE_STAGE_COUNTS:
+                if not name.startswith(purpose+"_"):
+                    continue
+                ordinal = sum(1 for key in BC_FINAL_CORE_STAGE_COUNTS
+                              if key.startswith(purpose+"_") and
+                              list(BC_FINAL_CORE_STAGE_COUNTS).index(key) < list(BC_FINAL_CORE_STAGE_COUNTS).index(name))
+                part = parts[ordinal]
+                metadata = independent_execution[f"final_bc_precheck_{name}"]
+                for j, meta in enumerate(metadata):
+                    raw_rows.append({"obs": part[0][j, index].numpy(),
+                        "mask": part[1][j, index].numpy(), "episode": part[4][j],
+                        "base_seed": meta["base_seed"], "episode_id": meta["episode_id"],
+                        "frame": meta["frame"], "sampled_action": meta["actions"][role],
+                        "nn_sampled_action": meta["actions"][role]})
+            rows_by_purpose[purpose] = raw_rows
+        program = fit_program(role, final_bc_frozen,
+            *(rows_by_purpose[name] for name in ("fit", "calibration", "eligibility", "validation")),
+            method=INDEPENDENT_SELECTIVE_METHOD)
+        program_path = Path(final_bc_actor_path).with_name(f"final-bc-{role}.program.json")
+        if program_path.exists():
+            raise FileExistsError(program_path)
+        program.save(program_path)
+        validation = program.report["validation"]
+        feedback = validation["feedback"]
+        explanation = validation["explanation"]
+        mass = min(float(feedback["coverage"]), float(explanation["coverage"]))
+        expected = float(feedback.get("expected_actionable_coverage", feedback["actionable_coverage"]))
+        passed = (mass >= .35 and expected >= .30
+                  and all(value["agreement"] >= (.93 if purpose == "feedback" else .95)
+                          and value["kl"] <= .25 and value["illegal_count"] == 0
+                          for purpose, value in (("feedback", feedback), ("explanation", explanation))))
+        program_hash = program.sha256()
         final_precheck_roles[role] = {
-            "actor_role_sha256": frozen_role.role_sha256,
-            "frozen_actor_topology_sha256": topology.topology_sha256(),
-            "target_parity": parity,
-            "refit_report": report,
-            "actor_core_qualification": actor_core_report,
-            "installed_core_is_newly_qualified": installed_qualified,
-            "installed_core_validation_mass": installed_mass,
-            "protected_validation_mass": float(np.mean(frozen_role.weights["protected_leaf_mask"][leaf])),
-            "installed_core_expected_actionable_mass": installed_actionable_mass,
-        }
+            "actor_role_sha256": final_bc_role_sha256[role],
+            "program_sha256": program_hash, "program_path": str(program_path),
+            "qualification_changes_actor": False,
+            "program_qualification": {"method": "independent_program_only_qualification_v4",
+                "validation_passed": bool(passed), "frozen_role_sha256": final_bc_role_sha256[role],
+                "program_sha256": program_hash},
+            "refit_report": {"validation_passed": bool(passed), **program.report},
+            "qualified_validation_mass": mass,
+            "expected_feedback_actionable_mass": expected,
+            "validation": validation}
+    if role_hashes(model) != final_bc_role_sha256:
+        raise RuntimeError("Warehouse external program fitting changed complete Actor")
     final_bc_precheck = {
         "purpose": "development_internal_precheck_after_complete_bc",
         "final_bc_actor": final_bc_export,
@@ -2440,20 +2412,18 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
         "reserved_external_scenario_seeds_sha256": _digest_json(
             sorted(later_program_scenes)),
         "roles": final_precheck_roles,
-        "passed": all(
-            row["actor_core_qualification"]["validation_passed"]
-            and row["refit_report"]["validation_passed"]
-            and row["installed_core_is_newly_qualified"]
-            and row["installed_core_validation_mass"] >= 0.35
-            and row["installed_core_expected_actionable_mass"] >= 0.30
-            for row in final_precheck_roles.values()),
+        "passed": all(row["program_qualification"]["validation_passed"]
+                      for row in final_precheck_roles.values()),
     }
-    if final_bc_precheck["passed"]:
-        with stage1_reset_phase("bc_quality_screen"):
-            quality_screen = evaluate(final_bc_frozen, spec["checkpoint_seeds"], trace=True)
-        final_bc_precheck["quality_screen"] = quality_screen
-        final_bc_precheck["quality_screen_seeds"] = list(spec["checkpoint_seeds"])
-        final_bc_precheck["passed"] = bool(quality_screen["summary"]["development_quality_passed"])
+    # Always expose task quality, even when the program gate fails. This is
+    # one predeclared diagnostic, never an extra chance at admission.
+    with stage1_reset_phase("bc_quality_screen"):
+        quality_screen = evaluate(final_bc_frozen, spec["checkpoint_seeds"], trace=True)
+    final_bc_precheck["quality_screen"] = quality_screen
+    final_bc_precheck["quality_screen_seeds"] = list(spec["checkpoint_seeds"])
+    final_bc_precheck["program_precheck_passed"] = final_bc_precheck["passed"]
+    final_bc_precheck["passed"] = bool(final_bc_precheck["passed"] and
+        quality_screen["summary"]["development_quality_passed"])
     if sha256(Path(final_bc_actor_path).read_bytes()).hexdigest() != final_bc_export["sha256"]:
         raise RuntimeError("Warehouse final BC Actor artifact changed during precheck")
     with Path(final_bc_precheck_receipt_path).open("x") as handle:
@@ -2512,8 +2482,9 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
         "bc_data_seed_schedule_sha256": _digest_json(all_seed_blocks),
         "bc_stages": stages,
         "final_bc_training_reliability": _bc_reliability(model, obs, mask, labels),
-        "final_bc_training_core_diagnostics": _training_core_diagnostics(
-            model, topology_groups["fit"]),
+        "final_bc_training_core_diagnostics": {
+            "qualification_changes_actor": False, "forced_leaf_margin": False,
+            "tree_to_full_bc_feedback": False},
         "training_dependencies": {
             "torch": torch.__version__, "numpy": np.__version__,
             "sklearn": tree_initialization[AGENTS[0]]["sklearn_version"]},
@@ -2754,13 +2725,10 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
         loss = (-reward_surrogate.mean() + cost_multiplier * cost_surrogate
                 + 0.5 * nn.functional.mse_loss(reward_value, data["reward_target"])
                 + 0.25 * cost_critic_loss
-                - 0.005 * policy.entropy().mean()
-                + 5e-4 * torch.stack([
-                    model.actors[role].bounds().mean() for role in AGENTS]).mean())
-        intrinsic, intrinsic_report = core_intrinsic_loss(
-            model, encoded, masks, labels=None, weights=CORE_PPO_WEIGHTS,
-            full_logits=logits)
-        loss = loss + intrinsic
+                - 0.005 * policy.entropy().mean())
+        intrinsic = logits.new_zeros(())
+        intrinsic_report = {"online_auxiliary_ce_updates": 0,
+                            "implicit_tree_to_nn_feedback_rows": 0}
         if programs is not None:
             for index, role in enumerate(AGENTS):
                 penalty, count, kl = _program_feedback(
@@ -2791,12 +2759,6 @@ def ppo_update(model: WarehouseV6Actor, optimizer: torch.optim.Optimizer,
                 for parameter in (split.weight, split.bias) if parameter.grad is not None) ** 0.5)
         nn.utils.clip_grad_norm_(model.parameters(), 0.5)
         optimizer.step()
-        for role in AGENTS:
-            pruned = model.actors[role].prune_unproven_core_leaves()
-            uncertified_core_leaves_pruned[role] += pruned
-            if topology_frozen and pruned:
-                raise RuntimeError(
-                    "Warehouse PPO invalidated a frozen core leaf certificate")
         losses.append(float(loss.detach()))
     return {"loss": float(np.mean(losses)), "cost_multiplier": cost_multiplier,
             "core_intrinsic_loss": float(intrinsic.detach()),
@@ -2901,6 +2863,58 @@ def evaluate(model: WarehouseV6Actor | FrozenWarehouseV6Actor,
         summary["mean_deliveries"] >= 5.5 and summary["mean_collisions"] <= 6.0
         and summary["shutdown_episode_rate"] <= 0.05)
     return {"summary": summary, "episodes": episodes}
+
+
+def _authorized_frozen_operation(actor, seeds, authorization, operation, *, kind):
+    from .warehouse_v6_evaluation_authorization import validate_evaluation_authorization
+    declared = validate_evaluation_authorization(
+        actor=actor, seeds=seeds, authorization=authorization, consume_sealed=True)
+    if declared["purpose"] in ("heldout", "final_program_audit") and declared["purpose"] != kind:
+        raise RuntimeError("Warehouse sealed claim cannot authorize another evaluation operation")
+    token = _ACTIVE_LOCKED_EXECUTION.set(_LOCKED_EVALUATION_MARKER)
+    try:
+        with TemporaryDirectory(prefix="warehouse-v618-evaluation-") as folder:
+            journal = Path(folder) / "resets.jsonl"
+            with capture_stage1_resets(journal) as resets:
+                with stage1_reset_phase("program" if kind == "final_program_audit" else "quality"):
+                    result = operation()
+            if [row["seed"] for row in resets] != list(seeds):
+                raise RuntimeError("Warehouse authorized evaluation reset schedule drifted")
+            audit = {"resets": resets, "journal_sha256": sha256(journal.read_bytes()).hexdigest(),
+                     "actual_reset_count": len(resets)}
+        _assert_source_closure(declared["expected_source_closure_sha256"])
+        return result, {**declared, "reset_audit": audit}
+    finally:
+        _ACTIVE_LOCKED_EXECUTION.reset(token)
+
+
+def evaluate_authorized_frozen(actor: FrozenWarehouseV6Actor, seeds: Sequence[int], *,
+                               action_seed_offset: int = 0, trace: bool = False,
+                               authorization: Mapping | None = None) -> dict:
+    result, evidence = _authorized_frozen_operation(actor, seeds, authorization,
+        lambda: evaluate(actor, seeds, action_seed_offset=action_seed_offset, trace=trace), kind="heldout")
+    return {**result, "evaluation_authorization": evidence}
+
+
+def audit_authorized_frozen(actor: FrozenWarehouseV6Actor, programs: Mapping,
+                            seeds: Sequence[int], *, trace_dir: str | Path | None = None,
+                            authorization: Mapping | None = None) -> dict:
+    result, evidence = _authorized_frozen_operation(actor, seeds, authorization,
+        lambda: audit_programs(actor, programs, seeds, trace_dir=trace_dir), kind="final_program_audit")
+    return {role: {**row, "evaluation_authorization": evidence} for role, row in result.items()}
+
+
+def collect_authorized_program_rows(actor: FrozenWarehouseV6Actor, seeds: Sequence[int], *,
+                                     authorization: Mapping | None = None):
+    """Development fit data only; cannot consume a sealed audit as training data."""
+    from .warehouse_v6_evaluation_authorization import validate_evaluation_authorization
+    declared = validate_evaluation_authorization(actor=actor, seeds=seeds,
+                                                  authorization=authorization)
+    if declared["purpose"] in ("heldout", "final_program_audit"):
+        raise RuntimeError("Warehouse sealed evaluation cannot collect fitting data")
+    rows, evidence = _authorized_frozen_operation(actor, seeds, authorization,
+        lambda: collect_program_audit_rows(actor, seeds), kind="final_program_audit")
+    return rows, evidence
 
 
 def _program_rows(episodes: Sequence[Mapping], role_index: int) -> list[dict]:
@@ -3226,8 +3240,10 @@ def _fresh_final_programs(model: WarehouseV6Actor,
                 "actor_role_sha256": actor.role_sha256[role],
                 "actor_artifact_sha256": actor.artifact_sha256,
                 "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
-                "actor_tree_structure_sha256": program.report["fit_tree"][
-                    "actor_tree_structure_sha256"],
+                "program_split_sha256": program.report["fit_tree"].get("split_sha256"),
+                **({"actor_tree_structure_sha256": program.report["fit_tree"][
+                    "actor_tree_structure_sha256"]} if "actor_tree_structure_sha256"
+                   in program.report["fit_tree"] else {}),
                 "program_sha256": program.sha256(),
                 "release_id": spec["release_id"],
                 "final_fit_traces": traces,
@@ -3302,6 +3318,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
     frozen_topology_role_sha256: dict[str, str] | None = None
     frozen_actor_role_sha256: dict[str, str] | None = None
     frozen_core_leaf_logits_sha256: dict[str, str] | None = None
+    frozen_support_role_sha256: dict[str, str] | None = None
     topology_freeze_qualification: dict | None = None
     topology_updates_after_freeze = 0
     next_extraction_index = 0
@@ -3361,6 +3378,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         frozen_actor_role_sha256 = saved.get("frozen_actor_role_sha256")
         frozen_core_leaf_logits_sha256 = saved.get(
             "frozen_core_leaf_logits_sha256")
+        frozen_support_role_sha256 = saved.get("frozen_support_role_sha256")
         topology_freeze_qualification = saved.get("topology_freeze_qualification")
         topology_updates_after_freeze = saved.get("topology_updates_after_freeze", 0)
         if (next_refresh_index != len(topology_refresh_history)
@@ -3376,8 +3394,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 model.actors[role].set_certified_core_logits_trainable(False)
         if (topology_frozen and
                 (_role_topology_hashes(model) != frozen_topology_role_sha256
-                 or _core_leaf_logits_hashes(model) !=
-                 frozen_core_leaf_logits_sha256
+                 or _role_support_hashes(model) != frozen_support_role_sha256
                  or not isinstance(topology_freeze_qualification, Mapping))):
             raise RuntimeError("Warehouse restored frozen topology differs from checkpoint")
     while used_steps < spec["joint_steps"]:
@@ -3447,7 +3464,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         updates.append(update)
         if topology_frozen and (
                 _role_topology_hashes(model) != frozen_topology_role_sha256
-                or _core_leaf_logits_hashes(model) != frozen_core_leaf_logits_sha256):
+                or _role_support_hashes(model) != frozen_support_role_sha256):
             topology_updates_after_freeze += 1
             raise RuntimeError("Warehouse PPO changed a frozen Actor core or topology")
         if (next_refresh_index < len(refresh_steps) and
@@ -3458,17 +3475,8 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
             _assert_source_closure(spec["source_closure_sha256"])
             detail = _refresh_qualified_topology(
                 model, buffers, stage=f"ppo_{used_steps}")
-            _clear_rebuilt_tree_adam_momentum(optimizer, model)
-            _clear_guard_adam_momentum(optimizer, model)
             topology_refresh_details.append(detail)
-            topology_refresh_history.append({
-                "joint_step": used_steps,
-                "role_tree_sha256": detail["role_tree_sha256"],
-                "route_parity_passed": detail["route_parity_passed"],
-                "path_legality_passed": detail["path_legality_passed"],
-                "core_qualification_recomputed": detail[
-                    "core_qualification_recomputed"],
-            })
+            topology_refresh_history.append({"joint_step": used_steps, **detail})
             next_refresh_index += 1
         if freeze_step is not None and used_steps == freeze_step:
             if next_refresh_index != len(refresh_steps):
@@ -3478,23 +3486,19 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 model, buffers, stage=f"ppo_freeze_{used_steps}",
                 refresh_support=False)
             if not (topology_freeze_qualification["route_parity_passed"]
-                    and topology_freeze_qualification["path_legality_passed"]
-                    and all(
-                        topology_freeze_qualification["roles"][role][
-                            "qualification_bound_to_installed_actor"]
-                        and topology_freeze_qualification["roles"][role][
-                            "qualification"]["validation_passed"]
-                        for role in AGENTS)):
-                raise RuntimeError("Warehouse freeze qualification failed at 75%")
+                    and topology_freeze_qualification["guard_invariants_passed"]
+                    and topology_freeze_qualification["support_locked"]
+                    and not topology_freeze_qualification["actor_rebuilt"]):
+                raise RuntimeError("Warehouse split freeze invariant failed at 75%")
             for role in AGENTS:
                 model.actors[role].set_topology_trainable(False)
                 model.actors[role].tree.split.weight.grad = None
                 model.actors[role].tree.split.bias.grad = None
                 model.actors[role].set_certified_core_logits_trainable(False)
-            _clear_core_leaf_adam_momentum(optimizer, model)
             topology_frozen = True
             frozen_topology_role_sha256 = _role_topology_hashes(model)
             frozen_actor_role_sha256 = role_hashes(model)
+            frozen_support_role_sha256 = _role_support_hashes(model)
             frozen_core_leaf_logits_sha256 = _core_leaf_logits_hashes(model)
         if (next_extraction_index < len(extraction_steps) and
                 used_steps == extraction_steps[next_extraction_index]):
@@ -3524,15 +3528,9 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 role: sum(item["feedback_gradient_norm"][role] for item in updates)
                 for role in AGENTS}
             development.append(checkpoint_result)
-            selectable = ((variant == "raw" and
-                           (freeze_step is None or topology_frozen)) or
-                          (variant == "regularized" and
-                           used_steps / spec["joint_steps"] >= 0.85))
-            if variant == "regularized" and not spec.get("smoke", False):
-                selectable = selectable and all(
-                    checkpoint_result["external_feedback_rows"][role] > 0 and
-                    checkpoint_result["external_feedback_gradient_norm"][role] > 0
-                    for role in AGENTS)
+            # Both variants use the same predeclared late checkpoint window.
+            # Program metrics/gradient counts never rank or filter checkpoints.
+            selectable = used_steps / spec["joint_steps"] >= .85
             from experiments.warehouse.protocol import DEVELOPMENT_PAIR_SEEDS
             threshold = ("development_quality_passed"
                          if spec["pair_seed"] in DEVELOPMENT_PAIR_SEEDS else
@@ -3569,6 +3567,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
                 "topology_frozen": topology_frozen,
                 "frozen_topology_role_sha256": frozen_topology_role_sha256,
                 "frozen_actor_role_sha256": frozen_actor_role_sha256,
+                "frozen_support_role_sha256": frozen_support_role_sha256,
                 "frozen_core_leaf_logits_sha256": frozen_core_leaf_logits_sha256,
                 "topology_freeze_qualification": topology_freeze_qualification,
                 "topology_updates_after_freeze": topology_updates_after_freeze,
@@ -3600,8 +3599,7 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
     if (freeze_step is not None and
             (not topology_frozen or len(topology_refresh_history) != len(refresh_steps)
              or selected_topology_role_sha256 != frozen_topology_role_sha256
-             or _core_leaf_logits_hashes(model) !=
-                frozen_core_leaf_logits_sha256
+             or _role_support_hashes(model) != frozen_support_role_sha256
              or topology_updates_after_freeze)):
         raise RuntimeError("Warehouse selected Actor does not retain the frozen topology")
     for role in AGENTS:
@@ -3660,6 +3658,11 @@ def _train_variant(initial: Mapping[str, torch.Tensor], *, variant: str,
         "topology_freeze_qualification": topology_freeze_qualification,
         "frozen_topology_role_sha256": frozen_topology_role_sha256,
         "frozen_actor_role_sha256": frozen_actor_role_sha256,
+        "frozen_support_role_sha256": frozen_support_role_sha256,
+        "final_support_role_sha256": _role_support_hashes(model),
+        "core_leaf_freezing_used": False, "leaf_outputs_remain_trainable": True,
+        "online_teacher_action_imitation_rows": 0, "online_auxiliary_ce_updates": 0,
+        "implicit_tree_to_nn_feedback_rows": 0,
         "frozen_core_leaf_logits_sha256": frozen_core_leaf_logits_sha256,
         "final_core_leaf_logits_sha256": _core_leaf_logits_hashes(model),
         "final_topology_role_sha256": selected_topology_role_sha256,

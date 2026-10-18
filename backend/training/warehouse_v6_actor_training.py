@@ -26,6 +26,7 @@ from env.warehouse.public_action_features_v617 import (
 )
 from .warehouse_v6_actor import (
     FrozenWarehouseV6Actor, FrozenWarehouseV6Role, MODEL_VERSION,
+    V617_MODEL_VERSION, V617_CORE_BOUND_MODE,
     FEATURE_DIM, FEATURE_SCHEMA_SHA256,
     TREE_DEPTH, TREE_LEAVES, TREE_NODES, MAX_SPLIT_FEATURES, RESIDUAL_WIDTH,
     MIN_RESIDUAL_BOUND, MAX_RESIDUAL_BOUND, CORE_LOW_GATE_BOUND,
@@ -57,8 +58,9 @@ def policy_features_torch(obs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor
 class SparseHardTree(nn.Module):
     """Hard sparse tree with local gradients through visited decisions."""
 
-    def __init__(self):
+    def __init__(self, *, model_version: str = MODEL_VERSION):
         super().__init__()
+        self.model_version = model_version
         self.split = nn.Linear(FEATURE_DIM, TREE_NODES)
         self.leaf_logits = nn.Parameter(torch.zeros(TREE_LEAVES, len(ACTIONS)))
         left = torch.zeros(TREE_NODES, dtype=torch.int64)
@@ -130,6 +132,11 @@ class SparseHardTree(nn.Module):
         # straight-through surrogate reaches unselected weights, allowing a
         # feature to enter at the next scheduled support refresh.
         surrogate = 0.1 * weights
+        if self.model_version == MODEL_VERSION:
+            # Group the zero-valued surrogate before adding it. Left-to-right
+            # w+s-s can round selected coefficients by one ULP and thereby
+            # change hard routing near a fitted threshold.
+            return weights * hard + (surrogate - surrogate.detach())
         return weights * hard + surrogate - surrogate.detach()
 
     def refresh_sparse_support(self) -> dict:
@@ -273,9 +280,14 @@ class SparseHardTree(nn.Module):
 
 
 class RoleActor(nn.Module):
-    def __init__(self):
+    def __init__(self, *, model_version: str = MODEL_VERSION):
         super().__init__()
-        self.tree = SparseHardTree()
+        if model_version not in (MODEL_VERSION, V617_MODEL_VERSION):
+            raise ValueError("Unsupported Warehouse training Actor version")
+        self.model_version = model_version
+        self.core_bound_mode = (CORE_BOUND_MODE if model_version == MODEL_VERSION
+                                else V617_CORE_BOUND_MODE)
+        self.tree = SparseHardTree(model_version=model_version)
         self.gate = nn.Sequential(
             nn.Linear(FEATURE_DIM + 4, GATE_WIDTH), nn.ReLU(),
             nn.Linear(GATE_WIDTH, 1),
@@ -286,9 +298,12 @@ class RoleActor(nn.Module):
             nn.ReLU(), nn.Linear(RESIDUAL_WIDTH, RESIDUAL_WIDTH), nn.ReLU(),
             nn.Linear(RESIDUAL_WIDTH, 1),
         )
-        self.leaf_bound_logits = nn.Parameter(torch.full((TREE_LEAVES,), -0.9))
-        # A public-training-data core is an Actor tensor, not a runtime action
-        # rule. Its bound is applied inside the NN forward pass for both arms.
+        # Retained in training checkpoints for compatibility, never used or
+        # exported by the v6.18 Actor.
+        self.leaf_bound_logits = nn.Parameter(torch.full((TREE_LEAVES,), -0.9),
+                                              requires_grad=model_version != MODEL_VERSION)
+        # Qualification is a training-only sidecar for v6.18; historical
+        # v6.17 dispatch alone consumes the protected mask in its forward.
         self.register_buffer("core_leaf_mask", torch.zeros(TREE_LEAVES))
         self.register_buffer("protected_leaf_mask", torch.zeros(TREE_LEAVES))
         # Only the certified rows are locked at the 75% topology freeze. Keep
@@ -297,7 +312,7 @@ class RoleActor(nn.Module):
         self._certified_core_logits_trainable = True
         self.tree.leaf_logits.register_hook(self._core_leaf_logit_gradient)
         nn.init.zeros_(self.gate[-1].weight)
-        nn.init.constant_(self.gate[-1].bias, -0.7)
+        nn.init.constant_(self.gate[-1].bias, 0.0 if model_version == MODEL_VERSION else -0.7)
         nn.init.normal_(self.action_residual[-1].weight, mean=0.0, std=0.01)
         nn.init.zeros_(self.action_residual[-1].bias)
 
@@ -316,7 +331,7 @@ class RoleActor(nn.Module):
         return report
 
     def initialize_tree_from_core_result(self, result) -> dict:
-        """Install a fit-only public sparse tree and hashed core-leaf mask."""
+        """Install a BC tree; v6.18 never inherits its protected-core verdict."""
         arrays = {
             "split_weights": (TREE_NODES, FEATURE_DIM),
             "split_bias": (TREE_NODES,),
@@ -350,7 +365,10 @@ class RoleActor(nn.Module):
             self.tree.leaf_logits.copy_(torch.from_numpy(np.array(
                 values["leaf_logits"], dtype=np.float32, copy=True)))
             self.core_leaf_mask.zero_()
-            self.protected_leaf_mask.copy_(torch.from_numpy(core).to(self.protected_leaf_mask.device))
+            if self.model_version != MODEL_VERSION:
+                self.protected_leaf_mask.copy_(torch.from_numpy(core).to(self.protected_leaf_mask.device))
+            else:
+                self.protected_leaf_mask.zero_()
             # Every leaf retains a learned residual budget. In core leaves a
             # learned pre-action gate makes the effective budget small in
             # ordinary states and can release it in conflict states.
@@ -370,6 +388,10 @@ class RoleActor(nn.Module):
                 if lhs or rhs:
                     self.tree.guard_node_mask[node] = True
         support = self.tree.refresh_sparse_support()
+        if self.model_version == MODEL_VERSION:
+            # BC may keep learning sparse feature support until its final
+            # boundary. The caller locks support once before starting PPO.
+            self.tree.support_fixed[0] = False
         for node in getattr(result, "report", {}).get("fixed_node_ids", []):
             self.tree.guard_node_mask[node] = True
         self.install_certified_core_mask(np.zeros_like(core))
@@ -387,7 +409,7 @@ class RoleActor(nn.Module):
         self.tree.set_topology_trainable(enabled)
 
     def _core_leaf_logit_gradient(self, gradient: torch.Tensor) -> torch.Tensor:
-        if self._certified_core_logits_trainable:
+        if self.model_version == MODEL_VERSION or self._certified_core_logits_trainable:
             return gradient
         return gradient.masked_fill(self.protected_leaf_mask[:, None] > 0.5, 0.0)
 
@@ -397,8 +419,12 @@ class RoleActor(nn.Module):
         Optimizer momentum for the locked rows must also be cleared when this
         switches to False; a zero gradient alone does not stop Adam momentum.
         """
+        if self.model_version == MODEL_VERSION:
+            self._certified_core_logits_trainable = True
+            return {"certified_core_logits_trainable": True,
+                    "frozen_leaf_count": 0}
         if not enabled:
-            FrozenWarehouseV6Role(_role_arrays(self))
+            FrozenWarehouseV6Role(_role_arrays(self), core_bound_mode=self.core_bound_mode)
         self._certified_core_logits_trainable = bool(enabled)
         return {"certified_core_logits_trainable": bool(enabled),
                 "frozen_leaf_count": (0 if enabled else
@@ -421,8 +447,8 @@ class RoleActor(nn.Module):
                 or np.any((core != 0.0) & (core != 1.0))
                 or np.any(core[leaves:] != 0.0)):
             raise ValueError("Warehouse certified core mask invalid")
-        frozen = FrozenWarehouseV6Role(_role_arrays(self))
-        if np.any(core > self.protected_leaf_mask.detach().cpu().numpy()):
+        frozen = FrozenWarehouseV6Role(_role_arrays(self), core_bound_mode=self.core_bound_mode)
+        if self.model_version != MODEL_VERSION and np.any(core > self.protected_leaf_mask.detach().cpu().numpy()):
             raise ValueError("Warehouse qualified core is not a protected subset")
         with torch.no_grad():
             self.core_leaf_mask.copy_(torch.from_numpy(core).to(
@@ -440,10 +466,13 @@ class RoleActor(nn.Module):
         it never replaces the Actor's chosen action. Frozen inference keeps
         rejecting any unpruned invalid certificate.
         """
+        if self.model_version == MODEL_VERSION:
+            # No certificate participates in the v6.18 action computation.
+            return 0
         weights = _role_arrays(self)
         original = weights["protected_leaf_mask"].copy()
         weights["protected_leaf_mask"] = np.zeros_like(original)
-        proven = FrozenWarehouseV6Role(weights).certified_actions()
+        proven = FrozenWarehouseV6Role(weights, core_bound_mode=self.core_bound_mode).certified_actions()
         raw_action = np.argmax(weights["tree.leaf_logits"], axis=-1)
         invalid = [leaf for leaf in range(len(proven))
                    if original[leaf] > 0.5 and int(raw_action[leaf]) not in proven[leaf]]
@@ -452,13 +481,13 @@ class RoleActor(nn.Module):
                 self.core_leaf_mask[invalid] = 0.0
                 self.protected_leaf_mask[invalid] = 0.0
         # This also checks the unmodified core leaves and the deployed tree.
-        FrozenWarehouseV6Role(_role_arrays(self))
+        FrozenWarehouseV6Role(_role_arrays(self), core_bound_mode=self.core_bound_mode)
         return len(invalid)
 
     def topology_certificate_report(self,
                                     encoded: torch.Tensor | np.ndarray | None = None) -> dict:
         """Check deployed tree constraints and optional Torch/NumPy parity."""
-        frozen = FrozenWarehouseV6Role(_role_arrays(self))
+        frozen = FrozenWarehouseV6Role(_role_arrays(self), core_bound_mode=self.core_bound_mode)
         count = int(self.tree.node_count[0])
         weights = frozen.weights["tree.split.weight"][:count]
         mask_indices = tuple(range(TREE_MASK_START,
@@ -500,6 +529,8 @@ class RoleActor(nn.Module):
         return report
 
     def bounds(self) -> torch.Tensor:
+        if self.model_version == MODEL_VERSION:
+            return torch.ones_like(self.leaf_bound_logits)
         return MIN_RESIDUAL_BOUND + (MAX_RESIDUAL_BOUND - MIN_RESIDUAL_BOUND) * torch.sigmoid(
             self.leaf_bound_logits)
 
@@ -525,6 +556,12 @@ class RoleActor(nn.Module):
 
     def components(self, encoded: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         tree_logits, path = self.tree(encoded)
+        if self.model_version == MODEL_VERSION:
+            gate_input, relation = self._relation_features(encoded)
+            gate = torch.tanh(self.gate(gate_input).squeeze(-1))
+            branch = gate.unsqueeze(-1) * (tree_logits - tree_logits.mean(-1, keepdim=True))
+            primary = self.action_residual(relation).squeeze(-1)
+            return branch, primary, torch.ones_like(gate)
         learned_bound = path @ self.bounds()
         gate_input, relation = self._relation_features(encoded)
         gate = torch.sigmoid(self.gate(gate_input).squeeze(-1))
@@ -544,7 +581,22 @@ class RoleActor(nn.Module):
 
     def gate_values(self, encoded: torch.Tensor) -> torch.Tensor:
         gate_input, _ = self._relation_features(encoded)
-        return torch.sigmoid(self.gate(gate_input).squeeze(-1))
+        logits = self.gate(gate_input).squeeze(-1)
+        return torch.tanh(logits) if self.model_version == MODEL_VERSION else torch.sigmoid(logits)
+
+    def set_tree_branch_enabled(self, enabled: bool) -> None:
+        """BC schedule switch implemented entirely by trainable gate weights.
+
+        Disable is allowed only while the final gate layer is exactly zero;
+        it never silently changes a trained Actor or adds a runtime flag.
+        """
+        if self.model_version != MODEL_VERSION:
+            raise ValueError("Tree branch scheduling requires the v6.18 Actor")
+        if not enabled and (torch.count_nonzero(self.gate[-1].weight).item()
+                            or torch.count_nonzero(self.gate[-1].bias).item()):
+            raise ValueError("Cannot disable a nonzero learned tree branch")
+        for parameter in self.gate.parameters():
+            parameter.requires_grad_(bool(enabled))
 
     def forward(self, encoded: torch.Tensor) -> torch.Tensor:
         tree_logits, residual, _ = self.components(encoded)
@@ -554,9 +606,11 @@ class RoleActor(nn.Module):
 class WarehouseV6Actor(nn.Module):
     """Two independent Actors with centralized reward and shutdown critics."""
 
-    def __init__(self):
+    def __init__(self, *, model_version: str = MODEL_VERSION):
         super().__init__()
-        self.actors = nn.ModuleDict({role: RoleActor() for role in AGENTS})
+        self.model_version = model_version
+        self.actors = nn.ModuleDict({role: RoleActor(model_version=model_version)
+                                    for role in AGENTS})
         self.reward_critic = nn.Sequential(
             nn.Linear(2 * OBSERVATION_DIM, RESIDUAL_WIDTH), nn.ReLU(),
             nn.Linear(RESIDUAL_WIDTH, RESIDUAL_WIDTH), nn.ReLU(),
@@ -604,13 +658,17 @@ class WarehouseV6Actor(nn.Module):
 
 
 def role_hashes(model: WarehouseV6Actor) -> dict[str, str]:
-    return {role: role_sha256(_role_arrays(model.actors[role])) for role in AGENTS}
+    return {role: role_sha256(_role_arrays(model.actors[role]),
+                              model_version=model.actors[role].model_version)
+            for role in AGENTS}
 
 
 def export_actor(model: WarehouseV6Actor, path: str | Path, *, pair_seed: int,
                  variant: str, candidate_id: str) -> dict:
     if variant not in ("raw", "regularized"):
         raise ValueError("invalid Warehouse v6 variant")
+    if any(model.actors[role].model_version != MODEL_VERSION for role in AGENTS):
+        raise ValueError("Only the current Warehouse Actor can be newly exported")
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     weights = {role: _role_arrays(model.actors[role]) for role in AGENTS}
@@ -624,12 +682,8 @@ def export_actor(model: WarehouseV6Actor, path: str | Path, *, pair_seed: int,
         "agent_ids": list(AGENTS), "action_names": list(ACTIONS),
         "tree_depth": TREE_DEPTH, "tree_leaves": TREE_LEAVES,
         "max_split_features": MAX_SPLIT_FEATURES,
-        "minimum_residual_bound": MIN_RESIDUAL_BOUND,
-        "maximum_residual_bound": MAX_RESIDUAL_BOUND,
-        "core_low_gate_bound": CORE_LOW_GATE_BOUND,
         "core_bound_mode": CORE_BOUND_MODE,
-        "core_margin_floor": CORE_MARGIN_FLOOR,
-        "protected_residual_cap": PROTECTED_RESIDUAL_CAP,
+        "actor_formula": "nn256_logits+tanh(gate)*center(tree_logits)",
         "relation_geometry_dim": GEOMETRY_DIM,
         "action_feature_dim": ACTION_FEATURE_DIM,
         "gate_width": GATE_WIDTH,

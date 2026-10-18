@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+from contextlib import contextmanager, nullcontext
 from hashlib import sha256
 import json
 import math
@@ -428,11 +429,11 @@ class NativeBackend:
                 row = roles[role]
                 if not isinstance(row, Mapping):
                     return None
-                qualification = row.get("actor_core_qualification")
+                qualification = row.get("program_qualification")
                 refit = row.get("refit_report")
-                mass = row.get("installed_core_validation_mass")
-                actionable = row.get("installed_core_expected_actionable_mass")
-                installed = row.get("installed_core_is_newly_qualified")
+                mass = row.get("qualified_validation_mass")
+                actionable = row.get("expected_feedback_actionable_mass")
+                installed = row.get("qualification_changes_actor") is False
                 if (row.get("actor_role_sha256") != actor.role_sha256[role]
                         or not isinstance(refit, Mapping)
                         or not isinstance(qualification, Mapping)
@@ -453,16 +454,18 @@ class NativeBackend:
                 computed_pass &= role_pass
                 if not role_pass:
                     failed_roles.append(role)
-            if computed_pass:
+            if precheck.get("quality_screen") is not None:
                 quality = precheck.get("quality_screen")
                 if (not isinstance(quality, Mapping) or
                         precheck.get("quality_screen_seeds") != list(run_spec["checkpoint_seeds"])):
                     return None
                 _validated_episodes(quality, run_spec["checkpoint_seeds"], require_trace=True,
                                     actor_sha256=actor_receipt["sha256"])
-                if p.quality_pass(quality["summary"], development=True):
+                quality_passed = p.quality_pass(quality["summary"], development=True)
+                if computed_pass and quality_passed:
                     return None
-                failed_roles.extend(p.ROLES)
+                if not quality_passed:
+                    failed_roles.extend(p.ROLES)
             authorization = _read(authorization_path)
             audit = _read(audit_path)
             raw_journal = journal_path.read_bytes()
@@ -475,7 +478,7 @@ class NativeBackend:
             expected_resets = runner._formal_bc_reset_sequence(
                 runner._checked_spec(run_spec), include_quality_screen="quality_screen" in precheck)
             if (authorization.get("authorization_kind") !=
-                    "warehouse-v617-registered-pair-locked-run-v1"
+                    "warehouse-v618-registered-pair-locked-run-v1"
                     or authorization.get("run_spec_sha256") !=
                     runner._scientific_run_spec_sha256(run_spec)
                     or authorization.get("training_config_sha256") !=
@@ -535,8 +538,9 @@ class NativeBackend:
                 "training_log_path": str(log_path),
                 "training_log_sha256": _file_sha(log_path),
                 "subprocess_returncode": returncode,
-                "failed_roles": failed_roles,
-                "quality_screen_failed": computed_pass,
+                "failed_roles": sorted(set(failed_roles)),
+                "quality_screen_failed": bool(precheck.get("quality_screen") is not None
+                    and not p.quality_pass(precheck["quality_screen"]["summary"], development=True)),
             }
         except (KeyError, TypeError, ValueError, OSError, RuntimeError,
                 OverflowError, UnicodeError):
@@ -574,7 +578,7 @@ class NativeBackend:
                 raise RuntimeError("Warehouse formal budget differs from development lock")
         source = runner.source_closure_sha256()
         lock_script = (PROJECT_ROOT / "scripts" /
-                       "run_warehouse_v617_locked_pair.py").resolve(strict=True)
+                       "run_warehouse_v618_locked_pair.py").resolve(strict=True)
         lock_dir = candidate_root / "admission" / "locked-pairs"
         lock_dir.mkdir(parents=True, exist_ok=True)
         stem = f"pair_{pair_seed}_steps_{budget}"
@@ -597,7 +601,7 @@ class NativeBackend:
             torch.manual_seed(pair_seed)
             initial_roles = role_hashes(WarehouseV6Actor())
         authorization = {
-            "authorization_kind": "warehouse-v617-registered-pair-locked-run-v1",
+            "authorization_kind": "warehouse-v618-registered-pair-locked-run-v1",
             "candidate_id": spec["candidate_id"],
             "pair_seed": pair_seed, "joint_steps": budget,
             "run_spec_sha256": runner._scientific_run_spec_sha256(run_spec),
@@ -666,14 +670,39 @@ class NativeBackend:
 
     def evaluate(self, actor, seeds: Sequence[int], *, action_seed_offset: int = 0,
                  trace: bool = False) -> dict:
-        from backend.training.warehouse_v6_runner import evaluate
-        return evaluate(actor, seeds, action_seed_offset=action_seed_offset,
-                        trace=trace)
+        from backend.training.warehouse_v6_runner import evaluate_authorized_frozen
+        return evaluate_authorized_frozen(
+            actor, seeds, action_seed_offset=action_seed_offset, trace=trace,
+            authorization=self._evaluation_authorization(actor))
 
     def audit_programs(self, actor, programs: Mapping, seeds: Sequence[int], *,
                        trace_dir: str | Path | None = None) -> dict:
-        from backend.training.warehouse_v6_runner import audit_programs
-        return audit_programs(actor, programs, seeds, trace_dir=trace_dir)
+        from backend.training.warehouse_v6_runner import audit_authorized_frozen
+        return audit_authorized_frozen(
+            actor, programs, seeds, trace_dir=trace_dir,
+            authorization=self._evaluation_authorization(actor))
+
+    def _evaluation_authorization(self, actor) -> dict:
+        from backend.training.warehouse_v6_evaluation_authorization import (
+            development_evaluation_authorization, sealed_evaluation_authorization,
+        )
+        claim = getattr(self, "_sealed_evaluation_claim", None)
+        if claim is None:
+            return development_evaluation_authorization(actor)
+        return sealed_evaluation_authorization(
+            actor, claim_path=claim[0], expected_claim_sha256=claim[1])
+
+    @contextmanager
+    def sealed_evaluation(self, *, claim_path: str | Path,
+                          expected_claim_sha256: str):
+        """Bind an existing one-use claim; this never creates or spends seeds."""
+        if getattr(self, "_sealed_evaluation_claim", None) is not None:
+            raise RuntimeError("Warehouse sealed evaluation context is already active")
+        self._sealed_evaluation_claim = (Path(claim_path), expected_claim_sha256)
+        try:
+            yield
+        finally:
+            self._sealed_evaluation_claim = None
 
     def verify_program_trace(self, *, actor, programs: Mapping,
                              trace_bytes_by_role: Mapping[str, bytes],
@@ -1584,9 +1613,13 @@ class Admission:
                 raise
             claim_sha = _file_sha(claim_path)
         try:
-            audits = self.backend.audit_programs(
-                actor, programs, seeds,
-                trace_dir=self.directory / "traces" / phase)
+            authorization_scope = (self.backend.sealed_evaluation(
+                claim_path=claim_path, expected_claim_sha256=claim_sha)
+                if sealed and isinstance(self.backend, NativeBackend) else nullcontext())
+            with authorization_scope:
+                audits = self.backend.audit_programs(
+                    actor, programs, seeds,
+                    trace_dir=self.directory / "traces" / phase)
             passed = _audit_valid(audits, actor, programs, seeds,
                                   development=False)
             receipt = self._new(name, {
@@ -1646,23 +1679,27 @@ class Admission:
         claim_sha = _file_sha(claim_path)
         try:
             outcomes = {}
-            for variant in p.VARIANTS:
-                actor = self._load_variant(pair, variant)
-                tasks, all_episodes = {}, []
-                for task in p.TASKS:
-                    seeds = schedule[task]
-                    result = self.backend.evaluate(actor, seeds, trace=True)
-                    episodes = _validated_episodes(
-                        result, seeds, require_trace=True,
-                        actor_sha256=actor.artifact_sha256)
-                    tasks[str(task)] = {"summary": _summary(episodes),
-                                        "episodes": episodes,
-                                        "episodes_sha256": _sha(episodes)}
-                    all_episodes.extend(episodes)
-                outcomes[variant] = {"summary": _summary(all_episodes),
-                                     "actor_sha256": actor.artifact_sha256,
-                                     "tasks": tasks,
-                                     "episode_count": len(all_episodes)}
+            authorization_scope = (self.backend.sealed_evaluation(
+                claim_path=claim_path, expected_claim_sha256=claim_sha)
+                if isinstance(self.backend, NativeBackend) else nullcontext())
+            with authorization_scope:
+                for variant in p.VARIANTS:
+                    actor = self._load_variant(pair, variant)
+                    tasks, all_episodes = {}, []
+                    for task in p.TASKS:
+                        seeds = schedule[task]
+                        result = self.backend.evaluate(actor, seeds, trace=True)
+                        episodes = _validated_episodes(
+                            result, seeds, require_trace=True,
+                            actor_sha256=actor.artifact_sha256)
+                        tasks[str(task)] = {"summary": _summary(episodes),
+                                            "episodes": episodes,
+                                            "episodes_sha256": _sha(episodes)}
+                        all_episodes.extend(episodes)
+                    outcomes[variant] = {"summary": _summary(all_episodes),
+                                         "actor_sha256": actor.artifact_sha256,
+                                         "tasks": tasks,
+                                         "episode_count": len(all_episodes)}
             passed = all(p.quality_pass(outcomes[variant]["summary"],
                                         development=False)
                          for variant in p.VARIANTS)

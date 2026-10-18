@@ -19,14 +19,14 @@ from typing import Mapping, Sequence
 
 INITIAL_RELEASE_ID = "policylens-three-domain-20261016.v6.0"
 BUDGETS = (200_000, 300_000, 400_000)
-DEVELOPMENT_PAIR_SEEDS = (6140, 6141, 6142)
+DEVELOPMENT_PAIR_SEEDS = (6150, 6151, 6152)
 FORMAL_PAIR_SEEDS = (6101, 6102, 6103)
 # Candidate-only development seed. PairRunSpec and release acceptance continue
 # to admit only the registered three development and three formal pairs.
 EXPLORATORY_PAIR_SEEDS = (12469, 12470, 12471)
-DEVELOPMENT_SELECTION_SEEDS = tuple(range(263_100, 263_124))
-DEVELOPMENT_STRESS_BASE_SEEDS = tuple(range(263_200, 263_456))
-DEVELOPMENT_PROGRAM_AUDIT_SEEDS = tuple(range(263_500, 263_524))
+DEVELOPMENT_SELECTION_SEEDS = tuple(range(264_100, 264_124))
+DEVELOPMENT_STRESS_BASE_SEEDS = tuple(range(264_200, 264_456))
+DEVELOPMENT_PROGRAM_AUDIT_SEEDS = tuple(range(264_500, 264_524))
 DEVELOPMENT_ACTION_STREAMS = (0, 1, 2)
 FORMAL_SELECTION_SEEDS = tuple(range(240_048, 240_072))
 FORMAL_PROGRAM_PREAUDIT_SEEDS = tuple(range(240_072, 240_096))
@@ -47,13 +47,13 @@ TOPOLOGY_REFRESH_PERCENTAGES = (24, 48, 72)
 TOPOLOGY_FREEZE_PERCENTAGE = 75
 FINAL_PROGRAM_SPLIT_COUNTS = {"fit": 50, "calibration": 25,
                               "eligibility": 25, "validation": 24}
-REGISTERED_CANDIDATE_ID = "warehouse-v617-risk-protected-02"
-REGISTERED_ARCHITECTURE_MODE = "risk_stratified_protected_tree_256_residual.v6.17-candidate"
+REGISTERED_CANDIDATE_ID = "warehouse-v618-quality-selective-01"
+REGISTERED_ARCHITECTURE_MODE = "additive_nn_256_sparse_tree.v6.18-candidate"
 # A candidate names its fitting implementation explicitly. This list is not
 # a release selection: the selected method is sealed only after development
 # quality and independent fidelity gates pass. The old axis fit is excluded.
-REGISTERED_PROGRAM_FIT_METHOD = "actor_risk_stratified_protected_topology_v3"
-REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD = "actor_risk_protected_core_qualification_v3"
+REGISTERED_PROGRAM_FIT_METHOD = "independent_selective_masked_distribution_v4"
+REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD = "independent_program_only_qualification_v4"
 PROGRAM_FIT_METHOD_CANDIDATES = (REGISTERED_PROGRAM_FIT_METHOD,)
 # The failed 11969 v2 screen does not retire its extractor algorithm: a new
 # Actor may reuse that implementation. Its concrete frozen Actor and source
@@ -65,7 +65,7 @@ RETIRED_119_SOURCE_CLOSURE_SHA256 = frozenset({
 })
 RETIRED_119_MODEL_VERSION = "warehouse-dual-actor.v6.9-exploratory"
 REGISTERED_BC_RECIPE_VERSION = (
-    "warehouse-public-dual-bc.v6.17-risk-protected.r3")
+    "warehouse-public-dual-bc.v6.18-quality-selective.r1")
 LEGACY_V614_BC_RECIPE_VERSION = (
     "warehouse-public-dual-bc.v6.14-public-affordance-exploratory")
 LEGACY_V614_BC_SPEC_SHA256 = (
@@ -93,7 +93,7 @@ REGISTERED_BC_SPEC = {
     "batch_size": 128,
     "risk_weight": 2.0,
     "margin_gap": 3.0,
-    "margin_weight": 0.03,
+    "margin_weight": 0.0,
     "near_increment": 2.0,
     "low_return_increment": 8.0,
     "sampled_collision_increment": 3.0,
@@ -102,9 +102,9 @@ REGISTERED_BC_SPEC = {
     "initial_bc_learning_rate": 0.0003,
     "risk_bc_learning_rate": 0.0001,
     "initial_bc_batch_size": 256,
-    "initial_tree_loss_weight": 0.05,
-    "initial_gate_loss_weight": 0.2,
-    "initial_bound_loss_weight": 0.0005,
+    "initial_tree_loss_weight": 0.20,
+    "initial_gate_loss_weight": 0.0,
+    "initial_bound_loss_weight": 0.0,
     "initial_bc_gradient_clip": 0.5,
     "risk_bc_gradient_clip": 0.5,
     "collision_critic_version": "warehouse-v6-collision-critic.v1",
@@ -124,26 +124,27 @@ REGISTERED_BC_SPEC = {
     # collect four disjoint internal development-purpose blocks.
     "final_fit_sampled_episodes": 25,
     "final_fit_argmax_episodes": 25,
-    "final_calibration_sampled_episodes": 13,
-    "final_calibration_argmax_episodes": 12,
-    "final_eligibility_sampled_episodes": 13,
-    "final_eligibility_argmax_episodes": 12,
-    "final_validation_sampled_episodes": 12,
-    "final_validation_argmax_episodes": 12,
+    "final_calibration_sampled_episodes": 25,
+    "final_calibration_argmax_episodes": 0,
+    "final_eligibility_sampled_episodes": 25,
+    "final_eligibility_argmax_episodes": 0,
+    "final_validation_sampled_episodes": 24,
+    "final_validation_argmax_episodes": 0,
     "warmup_fit_source": "frozen_warmup_full_nn_masked_distribution",
     "final_internal_source": "one_final_frozen_full_bc_actor",
     "program_fit_method": REGISTERED_PROGRAM_FIT_METHOD,
-    "actor_model_version": "warehouse-dual-actor.v6.17-risk-protected",
-    "core_bound_mode": "fit_protected_margin_cap_v3",
+    "actor_model_version": "warehouse-dual-actor.v6.18-quality-selective",
+    "core_bound_mode": "additive_nn_tree_branch_v4",
     "actor_topology_refresh": {
-        "bc": "after_each_fit_stage",
+        "bc": "learn_support_then_lock_at_bc_end",
+        "ppo_mode": "diagnostics_only_no_actor_rebuild_or_ce",
         "certificate_invalidation": "each_refresh",
         "freeze_percentage": TOPOLOGY_FREEZE_PERCENTAGE,
         "ppo_percentages": list(TOPOLOGY_REFRESH_PERCENTAGES),
     },
     "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
     "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
-    "executable_recipe_file_sha256": "35d79af9b918ba3ffa015b1202f026fed2334f66a7dfeee2612f72292c1ff904",
+    "executable_recipe_file_sha256": "1f7cd90168d3d4260355a37542a4ae4b7e319adc64c5c4f92b2549caa011e9e2",
 }
 REGISTERED_RISK_DUAL_CONFIG = {
     "target": 0.04, "window_episodes": 128, "minimum_episodes": 64,
@@ -200,22 +201,16 @@ def bc_data_seed_schedule(pair_seed: int) -> dict[str, list[int]]:
             (71, REGISTERED_BC_SPEC["final_fit_argmax_episodes"]),
         "final_bc_precheck_calibration_sampled":
             (72, REGISTERED_BC_SPEC["final_calibration_sampled_episodes"]),
-        "final_bc_precheck_calibration_argmax":
-            (73, REGISTERED_BC_SPEC["final_calibration_argmax_episodes"]),
         "final_bc_precheck_eligibility_sampled":
             (74, REGISTERED_BC_SPEC["final_eligibility_sampled_episodes"]),
-        "final_bc_precheck_eligibility_argmax":
-            (75, REGISTERED_BC_SPEC["final_eligibility_argmax_episodes"]),
         "final_bc_precheck_validation_sampled":
             (76, REGISTERED_BC_SPEC["final_validation_sampled_episodes"]),
-        "final_bc_precheck_validation_argmax":
-            (77, REGISTERED_BC_SPEC["final_validation_argmax_episodes"]),
     })
     schedule = {name: [pair_seed * 100_000 + stage * 1_000 + index
                        for index in range(count)]
                 for name, (stage, count) in counts.items()}
     flattened = [seed for values in schedule.values() for seed in values]
-    if (len(counts) != 26 or len(flattened) != 1_394
+    if (len(counts) != 23 or len(flattened) != 1_394
             or len(set(flattened)) != len(flattened)):
         raise RuntimeError("Warehouse registered BC stage seed schedule drifted")
     return schedule
@@ -323,8 +318,9 @@ def bc_stage_receipt_shape() -> tuple[tuple[str, int | None], ...]:
     stages.append(("final_standard_margin_calibration",
                    REGISTERED_BC_SPEC["deep_epochs"]))
     for purpose in ("fit", "calibration", "eligibility", "validation"):
-        stages += [(f"final_bc_precheck_{purpose}_sampled", None),
-                   (f"final_bc_precheck_{purpose}_argmax", None)]
+        for mode in ("sampled", "argmax"):
+            if REGISTERED_BC_SPEC[f"final_{purpose}_{mode}_episodes"]:
+                stages.append((f"final_bc_precheck_{purpose}_{mode}", None))
     return tuple(stages)
 
 
@@ -342,36 +338,64 @@ def bc_topology_refresh_stages() -> tuple[str, ...]:
     )
 
 
-def bc_topology_refresh_history_valid(history: object) -> bool:
-    """Receipt-level check for every BC-stage topology/certificate refresh."""
-    if not isinstance(history, list):
+def _role_hash_mapping_valid(value: object) -> bool:
+    return (isinstance(value, Mapping) and set(value) == set(ROLES)
+            and all(isinstance(value[role], str)
+                    and re.fullmatch(r"[0-9a-f]{64}", value[role])
+                    for role in ROLES))
+
+
+def _topology_diagnostic_valid(row: object, *, support_locked: bool | None) -> bool:
+    """A diagnostic observes Actor bytes; it cannot rebuild or qualify them."""
+    if (not isinstance(row, Mapping)
+            or row.get("route_parity_passed") is not True
+            or row.get("guard_invariants_passed") is not True
+            or row.get("core_qualification_recomputed") is not False
+            or row.get("actor_rebuilt") is not False
+            or type(row.get("auxiliary_ce_updates")) is not int
+            or row["auxiliary_ce_updates"] != 0
+            or type(row.get("support_locked")) is not bool
+            or (support_locked is not None and
+                row["support_locked"] is not support_locked)):
         return False
+    hashes = row.get("role_tree_sha256")
+    before = row.get("actor_role_sha256_before")
+    after = row.get("actor_role_sha256_after")
+    roles = row.get("roles")
+    if (not all(_role_hash_mapping_valid(value) for value in (
+                hashes, before, after, row.get("role_support_sha256")))
+            or before != after or not isinstance(roles, Mapping)
+            or set(roles) != set(ROLES)):
+        return False
+    for role in ROLES:
+        item = roles[role]
+        if not isinstance(item, Mapping):
+            return False
+        parity = item.get("parity")
+        if (item.get("topology_sha256") != hashes[role]
+                or type(item.get("training_scene_count")) is not int
+                or item["training_scene_count"] < 40
+                or not isinstance(parity, Mapping)
+                or type(parity.get("routing_mismatches")) is not int
+                or parity["routing_mismatches"] != 0
+                or parity.get("role_sha256") != after[role]
+                or type(parity.get("maximum_logit_abs_difference")) not in (int, float)
+                or not math.isfinite(parity["maximum_logit_abs_difference"])
+                or not 0 <= parity["maximum_logit_abs_difference"] <= 1e-4):
+            return False
+    return True
+
+
+def bc_topology_refresh_history_valid(history: object) -> bool:
+    """Check BC diagnostics and the final feature-support lock."""
     stages = bc_topology_refresh_stages()
-    if len(history) != len(stages):
+    if not isinstance(history, list) or len(history) != len(stages):
         return False
     for row, stage in zip(history, stages, strict=True):
-        if (not isinstance(row, Mapping) or row.get("stage") != stage
-                or row.get("route_parity_passed") is not True
-                or row.get("path_legality_passed") is not True
-                or row.get("core_qualification_recomputed") is not True):
+        if (not _topology_diagnostic_valid(
+                row, support_locked=True if stage == stages[-1] else None)
+                or row.get("stage") != stage):
             return False
-        roles, hashes = row.get("roles"), row.get("role_tree_sha256")
-        if (not isinstance(roles, Mapping) or set(roles) != set(ROLES)
-                or not isinstance(hashes, Mapping)
-                or set(hashes) != set(ROLES)):
-            return False
-        for role in ROLES:
-            item = roles[role]
-            if (not isinstance(item, Mapping)
-                    or item.get("topology_sha256") != hashes[role]
-                    or not isinstance(hashes[role], str)
-                    or not re.fullmatch(r"[0-9a-f]{64}", hashes[role])
-                    or type(item.get("training_scene_count")) is not int
-                    or item["training_scene_count"] < 40
-                    or not isinstance(item.get("qualification"), Mapping)
-                    or item["qualification"].get("method") !=
-                    REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD):
-                return False
     return True
 
 
@@ -545,32 +569,42 @@ def bc_report_valid(report: Mapping, pair_seed: int,
         if (not isinstance(final.get("roles"), Mapping)
                 or set(final["roles"]) != set(ROLES)):
             return False
-        if not legacy_v614 and (final.get("quality_screen_seeds") != report.get("quality_screen_seeds")
-                or not quality_pass(final.get("quality_screen", {}).get("summary", {}), development=True)):
-            return False
+        if not legacy_v614:
+            expected_quality_seeds = list(DEVELOPMENT_SELECTION_SEEDS if
+                pair_seed in DEVELOPMENT_PAIR_SEEDS else FORMAL_SELECTION_SEEDS)
+            if (final.get("quality_screen_seeds") != expected_quality_seeds
+                    or report.get("quality_screen_seeds") != expected_quality_seeds
+                    or not quality_pass(final.get("quality_screen", {}).get("summary", {}),
+                                        development=True)):
+                return False
         for role in ROLES:
-            actor_core = final["roles"][role].get("actor_core_qualification")
-            installed_mass = final["roles"][role].get(
-                "installed_core_validation_mass")
-            actionable_mass = final["roles"][role].get(
-                "installed_core_expected_actionable_mass")
-            if (final["roles"][role].get("actor_role_sha256") != roles[role]
-                    or final["roles"][role].get("refit_report", {}).get(
-                        "validation_passed") is not True
-                    or (not legacy_v614 and (
-                        not isinstance(actor_core, Mapping)
-                        or actor_core.get("method") !=
-                        REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD
-                        or actor_core.get("validation_passed") is not True
-                        or type(installed_mass) not in (int, float)
-                        or not math.isfinite(installed_mass)
-                        or not 0.35 <= installed_mass <= 1.0
-                        or type(actionable_mass) not in (int, float)
-                        or not math.isfinite(actionable_mass)
-                        or not 0.30 <= actionable_mass <= installed_mass))
+            item = final["roles"][role]
+            if not isinstance(item, Mapping):
+                return False
+            if (item.get("actor_role_sha256") != roles[role]
+                    or item.get("refit_report", {}).get("validation_passed") is not True
                     or report.get("topology_source_nn_role_sha256", {}).get(
                         "fit", {}).get(role) != warmup["role_sha256"][role]):
                 return False
+            if not legacy_v614:
+                qualification = item.get("program_qualification")
+                coverage = item.get("qualified_validation_mass")
+                actionable = item.get("expected_feedback_actionable_mass")
+                program_hash = item.get("program_sha256")
+                if (not isinstance(qualification, Mapping)
+                        or qualification.get("method") !=
+                           REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD
+                        or qualification.get("validation_passed") is not True
+                        or qualification.get("frozen_role_sha256") != roles[role]
+                        or qualification.get("program_sha256") != program_hash
+                        or not isinstance(program_hash, str)
+                        or not re.fullmatch(r"[0-9a-f]{64}", program_hash)
+                        or item.get("qualification_changes_actor") is not False
+                        or type(coverage) not in (int, float)
+                        or not math.isfinite(coverage) or not 0.35 <= coverage <= 1
+                        or type(actionable) not in (int, float)
+                        or not math.isfinite(actionable) or not 0.30 <= actionable <= coverage):
+                    return False
         return True
     except (KeyError, AttributeError, TypeError, ValueError):
         return False
@@ -764,7 +798,7 @@ def topology_frozen_at_step(joint_steps: int) -> int:
 
 def topology_refresh_history_valid(history: object, *,
                                    joint_steps: int) -> bool:
-    """Verify both role trees were recertified after each PPO refresh."""
+    """The 24/48/72% boundaries only observe already locked supports."""
     if not isinstance(history, list):
         return False
     try:
@@ -772,22 +806,10 @@ def topology_refresh_history_valid(history: object, *,
         if len(history) != len(expected_steps):
             return False
         for row, step in zip(history, expected_steps, strict=True):
-            if (not isinstance(row, Mapping)
-                    or set(row) != {"joint_step", "role_tree_sha256",
-                                       "route_parity_passed",
-                                       "path_legality_passed",
-                                       "core_qualification_recomputed"}
-                    or row["joint_step"] != step
-                    or type(row["joint_step"]) is not int
-                    or any(row[key] is not True for key in (
-                        "route_parity_passed", "path_legality_passed",
-                        "core_qualification_recomputed"))):
-                return False
-            roles = row["role_tree_sha256"]
-            if (not isinstance(roles, Mapping) or set(roles) != set(ROLES)
-                    or any(not isinstance(roles[role], str)
-                           or not re.fullmatch(r"[0-9a-f]{64}", roles[role])
-                           for role in ROLES)):
+            if (not _topology_diagnostic_valid(row, support_locked=True)
+                    or row.get("role_support_sha256") != history[0].get("role_support_sha256")
+                    or type(row.get("joint_step")) is not int
+                    or row["joint_step"] != step):
                 return False
         return True
     except (KeyError, TypeError, ValueError):
@@ -795,95 +817,29 @@ def topology_refresh_history_valid(history: object, *,
 
 
 def frozen_topology_valid(report: Mapping) -> bool:
-    """Verify both role trees and their qualified leaves remain frozen."""
+    """Freeze split predicates/support, never the trainable leaf outputs."""
     if not isinstance(report, Mapping):
         return False
     frozen = report.get("frozen_topology_role_sha256")
     final = report.get("final_topology_role_sha256")
-    frozen_leaves = report.get("frozen_core_leaf_logits_sha256")
-    final_leaves = report.get("final_core_leaf_logits_sha256")
+    frozen_support = report.get("frozen_support_role_sha256")
+    final_support = report.get("final_support_role_sha256")
     frozen_actor = report.get("frozen_actor_role_sha256")
-    qualification = report.get("topology_freeze_qualification")
-    if (any(not isinstance(value, Mapping) or set(value) != set(ROLES)
-            for value in (frozen, final, frozen_leaves, final_leaves,
-                          frozen_actor))
-            or report.get("topology_updates_after_freeze") != 0
+    diagnostic = report.get("topology_freeze_qualification")
+    if (not all(_role_hash_mapping_valid(value) for value in (
+                frozen, final, frozen_support, final_support, frozen_actor))
+            or final != frozen or final_support != frozen_support
             or type(report.get("topology_updates_after_freeze")) is not int
-            or not isinstance(qualification, Mapping)
-            or qualification.get("stage") !=
+            or report["topology_updates_after_freeze"] != 0
+            or report.get("core_leaf_freezing_used") is not False
+            or report.get("leaf_outputs_remain_trainable") is not True
+            or not _topology_diagnostic_valid(diagnostic, support_locked=True)
+            or diagnostic.get("stage") !=
                f"ppo_freeze_{report.get('topology_frozen_at_step')}"
-            or qualification.get("role_tree_sha256") != frozen
-            or qualification.get("route_parity_passed") is not True
-            or qualification.get("path_legality_passed") is not True
-            or qualification.get("core_qualification_recomputed") is not True
-            or not isinstance(qualification.get("roles"), Mapping)
-            or set(qualification["roles"]) != set(ROLES)):
+            or diagnostic.get("role_tree_sha256") != frozen
+            or diagnostic.get("role_support_sha256") != frozen_support
+            or diagnostic.get("actor_role_sha256_after") != frozen_actor):
         return False
-    for role in ROLES:
-        if (not all(isinstance(value[role], str) and
-                    re.fullmatch(r"[0-9a-f]{64}", value[role])
-                    for value in (frozen, frozen_leaves, frozen_actor))
-                or final[role] != frozen[role]
-                or final_leaves[role] != frozen_leaves[role]):
-            return False
-        role_receipt = qualification["roles"][role]
-        if not isinstance(role_receipt, Mapping):
-            return False
-        core = role_receipt.get("qualification")
-        installed = role_receipt.get("installed_core")
-        parity = role_receipt.get("parity")
-        if (role_receipt.get("topology_sha256") != frozen[role]
-                or role_receipt.get("qualification_bound_to_installed_actor")
-                   is not True
-                or role_receipt.get("qualification_failed_core_reset") is not False
-                or not isinstance(core, Mapping)
-                or core.get("method") !=
-                   REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD
-                or core.get("validation_passed") is not True
-                or core.get("frozen_role_sha256") != frozen_actor[role]
-                or core.get("actor_topology_sha256") != frozen[role]
-                or not isinstance(installed, Mapping)
-                or not isinstance(parity, Mapping)
-                or type(parity.get("routing_mismatches")) is not int
-                or parity["routing_mismatches"] != 0):
-            return False
-        selected = core.get("selected_core_leaf_ids")
-        proofs = core.get("leaf_path_proof")
-        if (not isinstance(selected, list) or not selected
-                or any(type(leaf) is not int or not 0 <= leaf < CORE_MASK_LEAVES
-                       for leaf in selected)
-                or len(selected) != len(set(selected))
-                or type(installed.get("core_leaf_count")) is not int
-                or installed["core_leaf_count"] != len(selected)
-                or not isinstance(proofs, Mapping)):
-            return False
-        # The qualification receipt hashes a NumPy bool mask (one byte per
-        # leaf); the installed Actor hashes the same mask as float32 (four
-        # bytes per leaf). Both must be reconstructed from the selected IDs.
-        mask = bytearray(CORE_MASK_LEAVES)
-        for leaf in selected:
-            mask[leaf] = 1
-        qualified_digest = sha256(mask).hexdigest()
-        installed_digest = sha256(struct.pack(
-            f"={CORE_MASK_LEAVES}f", *(float(value) for value in mask)
-        )).hexdigest()
-        if (core.get("core_mask_sha256") != qualified_digest
-                or installed.get("core_mask_sha256") != installed_digest):
-            return False
-        if {key for key, proof in proofs.items()
-                if isinstance(proof, Mapping) and proof.get("selected") is True} != \
-                {str(leaf) for leaf in selected}:
-            return False
-        for leaf in selected:
-            proof = proofs.get(str(leaf))
-            if (not isinstance(proof, Mapping)
-                    or proof.get("selected") is not True
-                    or proof.get("candidate") is not True
-                    or proof.get("raw_top") not in
-                       ("WAIT", "UP", "DOWN", "LEFT", "RIGHT")
-                    or not isinstance(proof.get("proven_actions"), list)
-                    or proof["raw_top"] not in proof["proven_actions"]):
-                return False
     return True
 
 
@@ -1026,9 +982,12 @@ def program_pass(metrics: Mapping, *, purpose: str, development: bool) -> bool:
         actionable_coverage = float(metrics["actionable_coverage"])
         agreement = float(metrics["agreement"])
         kl = float(metrics["kl"])
-        rows = int(metrics["rows"])
-        actionable_rows = int(metrics["actionable_rows"])
-        illegal = int(metrics["illegal_count"])
+        if any(type(metrics[key]) is not int for key in (
+                "rows", "actionable_rows", "illegal_count")):
+            return False
+        rows = metrics["rows"]
+        actionable_rows = metrics["actionable_rows"]
+        illegal = metrics["illegal_count"]
     except (KeyError, TypeError, ValueError):
         return False
     return (rows > 0 and actionable_rows > 0 and
@@ -1161,11 +1120,16 @@ def paired_training_pass(variants: Mapping, *, joint_steps: int) -> bool:
                     report.get("topology_refresh_history"),
                     joint_steps=joint_steps) or
                 not frozen_topology_valid(report) or
+                report["topology_refresh_history"][-1].get("role_support_sha256") !=
+                report.get("frozen_support_role_sha256") or
                 report.get("online_program_split_block_cycle") !=
                 FINAL_PROGRAM_SPLIT_COUNTS or
                 report.get("online_program_cohorts_disjoint") is not True or
                 report.get("post_policy_interventions") != 0 or
-                report.get("physical_no_legal_action_rows") != 0):
+                report.get("physical_no_legal_action_rows") != 0 or
+                any(type(report.get(key)) is not int or report[key] != 0 for key in (
+                    "online_teacher_action_imitation_rows", "online_auxiliary_ce_updates",
+                    "implicit_tree_to_nn_feedback_rows"))):
             return False
         initial = report.get("initial_role_sha256")
         selected = report.get("selected_role_sha256")
@@ -1182,7 +1146,9 @@ def paired_training_pass(variants: Mapping, *, joint_steps: int) -> bool:
             except (TypeError, ValueError):
                 return False
             if (not isinstance(initial[role], str) or
+                    not re.fullmatch(r"[0-9a-f]{64}", initial[role]) or
                     not isinstance(selected[role], str) or
+                    not re.fullmatch(r"[0-9a-f]{64}", selected[role]) or
                     initial[role] == selected[role] or
                     not _finite(change) or change <= 0):
                 return False
@@ -1212,10 +1178,10 @@ def paired_training_pass(variants: Mapping, *, joint_steps: int) -> bool:
                 or set(rows) != set(ROLES) or set(gradients) != set(ROLES)):
             return False
         for role in ROLES:
-            try:
-                count, norm = int(rows[role]), float(gradients[role])
-            except (TypeError, ValueError):
+            if (type(rows[role]) is not int
+                    or type(gradients[role]) not in (int, float)):
                 return False
+            count, norm = rows[role], float(gradients[role])
             if (not _finite(norm) or
                     (should_be_positive and (count <= 0 or norm <= 0)) or
                     (not should_be_positive and (count != 0 or norm != 0))):

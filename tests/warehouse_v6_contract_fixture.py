@@ -1,60 +1,63 @@
-"""Synthetic Warehouse v6.16 receipts for protocol tests only.
+"""Synthetic Warehouse active-contract receipts for protocol tests only.
 
 No environment is constructed or reset by this fixture.
 """
 
 from hashlib import sha256
 import json
-import numpy as np
 
 from experiments.warehouse import protocol as p
 
 
-def topology_freeze_evidence(joint_steps: int) -> dict:
-    """Synthetic v6.16 proof that both role cores stayed certified at freeze."""
-    frozen = {"robot_1": "a" * 64, "robot_2": "b" * 64}
+def topology_diagnostic(*, stage: str | None = None,
+                        joint_step: int | None = None,
+                        support_locked: bool = True) -> dict:
+    """Observe frozen arrays without rebuilding or qualifying the Actor."""
+    trees = {"robot_1": "a" * 64, "robot_2": "b" * 64}
     actors = {"robot_1": "c" * 64, "robot_2": "d" * 64}
-    leaves = {"robot_1": "e" * 64, "robot_2": "f" * 64}
-    core_mask = np.zeros(p.CORE_MASK_LEAVES, dtype=np.bool_)
-    core_mask[0] = True
-    qualification_mask_sha = sha256(core_mask.tobytes()).hexdigest()
-    installed_mask_sha = sha256(core_mask.astype(np.float32).tobytes()).hexdigest()
-    qualification = {
-        "stage": f"ppo_freeze_{p.topology_frozen_at_step(joint_steps)}",
-        "role_tree_sha256": frozen,
+    result = {
+        "role_tree_sha256": trees,
+        "role_support_sha256": {"robot_1": "e" * 64, "robot_2": "f" * 64},
+        "actor_role_sha256_before": actors,
+        "actor_role_sha256_after": dict(actors),
         "route_parity_passed": True,
-        "path_legality_passed": True,
-        "core_qualification_recomputed": True,
+        "guard_invariants_passed": True,
+        "core_qualification_recomputed": False,
+        "actor_rebuilt": False,
+        "auxiliary_ce_updates": 0,
+        "support_locked": support_locked,
         "roles": {role: {
-            "topology_sha256": frozen[role],
-            "qualification_bound_to_installed_actor": True,
-            "qualification_failed_core_reset": False,
-            "qualification": {
-                "method": p.REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD,
-                "validation_passed": True,
-                "frozen_role_sha256": actors[role],
-                "actor_topology_sha256": frozen[role],
-                "core_mask_sha256": qualification_mask_sha,
-                "selected_core_leaf_ids": [0],
-                "leaf_path_proof": {"0": {
-                    "raw_top": "WAIT", "proven_actions": ["WAIT"],
-                    "candidate": True, "selected": True,
-                }},
-            },
-            "installed_core": {"core_leaf_count": 1,
-                               "core_mask_sha256": installed_mask_sha},
-            "parity": {"routing_mismatches": 0},
+            "topology_sha256": trees[role],
+            "training_scene_count": 100,
+            "parity": {"routing_mismatches": 0,
+                       "maximum_logit_abs_difference": 0.0,
+                       "role_sha256": actors[role]},
         } for role in p.ROLES},
     }
+    if stage is not None:
+        result["stage"] = stage
+    if joint_step is not None:
+        result["joint_step"] = joint_step
+    return result
+
+
+def topology_freeze_evidence(joint_steps: int) -> dict:
+    diagnostic = topology_diagnostic(
+        stage=f"ppo_freeze_{p.topology_frozen_at_step(joint_steps)}")
+    frozen = diagnostic["role_tree_sha256"]
+    actors = diagnostic["actor_role_sha256_after"]
+    supports = {"robot_1": "e" * 64, "robot_2": "f" * 64}
     return {
         "topology_frozen_at_step": p.topology_frozen_at_step(joint_steps),
         "frozen_topology_role_sha256": frozen,
         "final_topology_role_sha256": dict(frozen),
-        "frozen_core_leaf_logits_sha256": leaves,
-        "final_core_leaf_logits_sha256": dict(leaves),
+        "frozen_support_role_sha256": supports,
+        "final_support_role_sha256": dict(supports),
         "frozen_actor_role_sha256": actors,
-        "topology_freeze_qualification": qualification,
+        "topology_freeze_qualification": diagnostic,
         "topology_updates_after_freeze": 0,
+        "core_leaf_freezing_used": False,
+        "leaf_outputs_remain_trainable": True,
     }
 
 
@@ -127,21 +130,9 @@ def bc_receipt(pair_seed: int, source_closure_sha256: str) -> dict:
             "validation_passed": True,
         },
         "bc_stages": stages,
-        "bc_topology_refresh_history": [{
-            "stage": stage,
-            "role_tree_sha256": {role: sha256(
-                f"{role}:{stage}:tree".encode()).hexdigest() for role in p.ROLES},
-            "route_parity_passed": True,
-            "path_legality_passed": True,
-            "core_qualification_recomputed": True,
-            "roles": {role: {
-                "topology_sha256": sha256(
-                    f"{role}:{stage}:tree".encode()).hexdigest(),
-                "training_scene_count": 100,
-                "qualification": {"method":
-                    p.REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD},
-            } for role in p.ROLES},
-        } for stage in p.bc_topology_refresh_stages()],
+        "bc_topology_refresh_history": [topology_diagnostic(
+            stage=stage, support_locked=index == len(p.bc_topology_refresh_stages())-1)
+            for index, stage in enumerate(p.bc_topology_refresh_stages())],
         "pretrained_role_sha256": actor_roles,
         "warmup_frozen_nn_actor": {
             "sha256": "a" * 64, "role_sha256": warmup_roles},
@@ -166,18 +157,24 @@ def bc_receipt(pair_seed: int, source_closure_sha256: str) -> dict:
                                 for name, seeds in final_schedule.items()},
             "roles": {role: {"actor_role_sha256": actor_roles[role],
                              "refit_report": {"validation_passed": True},
-                             "actor_core_qualification": {
+                             "program_sha256": sha256((role+":program").encode()).hexdigest(),
+                             "qualification_changes_actor": False,
+                             "program_qualification": {
                                  "method": p.REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD,
-                                 "validation_passed": True},
-                             "installed_core_validation_mass": 0.40,
-                             "installed_core_expected_actionable_mass": 0.35}
+                                 "validation_passed": True,
+                                 "frozen_role_sha256": actor_roles[role],
+                                 "program_sha256": sha256((role+":program").encode()).hexdigest()},
+                             "qualified_validation_mass": 0.40,
+                             "expected_feedback_actionable_mass": 0.35}
                       for role in p.ROLES},
         },
         "final_bc_internal_precheck_receipt": {
             "path": "/tmp/candidate/final-bc-precheck.json", "sha256": ""},
     }
-    result["quality_screen_seeds"] = list(p.DEVELOPMENT_SELECTION_SEEDS)
-    result["final_bc_internal_precheck"]["quality_screen_seeds"] = list(p.DEVELOPMENT_SELECTION_SEEDS)
+    seeds = list(p.DEVELOPMENT_SELECTION_SEEDS if pair_seed in p.DEVELOPMENT_PAIR_SEEDS
+                 else p.FORMAL_SELECTION_SEEDS)
+    result["quality_screen_seeds"] = seeds
+    result["final_bc_internal_precheck"]["quality_screen_seeds"] = seeds
     result["final_bc_internal_precheck"]["quality_screen"] = {"summary": {
         "mean_deliveries": 6.0, "mean_collisions": 2.0,
         "shutdown_episode_rate": 0.0}}

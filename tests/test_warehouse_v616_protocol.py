@@ -11,17 +11,14 @@ import pytest
 
 from experiments.warehouse import protocol as p
 from experiments.warehouse.admission import NativeBackend
-from tests.warehouse_v6_contract_fixture import bc_receipt, topology_freeze_evidence
+from tests.warehouse_v6_contract_fixture import (
+    bc_receipt, topology_freeze_evidence, topology_diagnostic,
+)
 
 
 def _history(steps: int) -> list[dict]:
-    return [{"joint_step": step,
-             "role_tree_sha256": {"robot_1": str(index + 1) * 64,
-                                  "robot_2": str(index + 4) * 64},
-             "route_parity_passed": True,
-             "path_legality_passed": True,
-             "core_qualification_recomputed": True}
-            for index, step in enumerate(p.topology_refresh_steps(steps))]
+    return [topology_diagnostic(joint_step=step)
+            for step in p.topology_refresh_steps(steps)]
 
 
 @pytest.mark.parametrize("budget, expected", [
@@ -99,13 +96,16 @@ def test_formal_bc_reset_order_matches_topology_before_risk_at_index_180() -> No
         runner._formal_bc_reset_sequence(incomplete)
 
 
-def test_refresh_history_requires_both_role_certificates_at_every_step() -> None:
+def test_refresh_history_requires_nonmutating_both_role_diagnostics_at_every_step() -> None:
     valid = _history(200_000)
     assert p.topology_refresh_history_valid(valid, joint_steps=200_000)
     for field, bad_value in (("joint_step", 48_120),
                              ("route_parity_passed", False),
-                             ("path_legality_passed", False),
-                             ("core_qualification_recomputed", False)):
+                             ("guard_invariants_passed", False),
+                             ("core_qualification_recomputed", True),
+                             ("actor_rebuilt", True),
+                             ("auxiliary_ce_updates", 1),
+                             ("support_locked", False)):
         tampered = deepcopy(valid)
         tampered[0][field] = bad_value
         assert not p.topology_refresh_history_valid(
@@ -119,14 +119,13 @@ def test_refresh_history_requires_both_role_certificates_at_every_step() -> None
 def test_frozen_topology_requires_unchanged_role_hashes_and_zero_updates() -> None:
     valid = topology_freeze_evidence(200_000)
     assert p.frozen_topology_valid(valid)
-    robot_core = valid["topology_freeze_qualification"]["roles"]["robot_1"]
-    assert robot_core["qualification"]["core_mask_sha256"] != \
-        robot_core["installed_core"]["core_mask_sha256"]
+    assert valid["leaf_outputs_remain_trainable"] is True
+    assert valid["core_leaf_freezing_used"] is False
     for key, value in (("topology_updates_after_freeze", 1),
                        ("topology_updates_after_freeze", False),
                        ("final_topology_role_sha256",
                         {"robot_1": "a" * 64, "robot_2": "c" * 64}),
-                       ("final_core_leaf_logits_sha256",
+                       ("final_support_role_sha256",
                         {"robot_1": "e" * 64, "robot_2": "c" * 64}),
                        ("frozen_topology_role_sha256",
                         {"robot_1": "bad", "robot_2": "b" * 64})):
@@ -135,17 +134,16 @@ def test_frozen_topology_requires_unchanged_role_hashes_and_zero_updates() -> No
         assert not p.frozen_topology_valid(tampered)
     for path, value in (
             (("topology_freeze_qualification", "route_parity_passed"), False),
-            (("topology_freeze_qualification", "path_legality_passed"), False),
+            (("topology_freeze_qualification", "guard_invariants_passed"), False),
             (("topology_freeze_qualification", "roles", "robot_2",
-              "qualification_bound_to_installed_actor"), False),
+              "parity", "routing_mismatches"), 1),
             (("topology_freeze_qualification", "roles", "robot_1",
-              "qualification", "frozen_role_sha256"), "0" * 64),
+              "parity", "role_sha256"), "0" * 64),
             (("topology_freeze_qualification", "roles", "robot_1",
-              "qualification", "core_mask_sha256"), "0" * 64),
-            (("topology_freeze_qualification", "roles", "robot_1",
-              "installed_core", "core_mask_sha256"), "0" * 64),
-            (("topology_freeze_qualification", "roles", "robot_1",
-              "qualification", "leaf_path_proof", "0", "proven_actions"), [])):
+              "parity", "maximum_logit_abs_difference"), .01),
+            (("topology_freeze_qualification", "actor_role_sha256_after",
+              "robot_1"), "0" * 64),
+            (("topology_freeze_qualification", "auxiliary_ce_updates"), 1)):
         tampered = deepcopy(valid)
         target = tampered
         for key in path[:-1]:
@@ -167,7 +165,7 @@ def test_native_backend_creates_sha_bound_authorization_without_direct_training(
         raise AssertionError("ordinary train_pair must remain closed")
 
     def fake_run(argv, **kwargs):
-        assert Path(argv[1]).name == "run_warehouse_v617_locked_pair.py"
+        assert Path(argv[1]).name == "run_warehouse_v618_locked_pair.py"
         spec_path = Path(argv[argv.index("--spec") + 1])
         authorization_path = Path(argv[argv.index("--authorization") + 1])
         run_spec = json.loads(spec_path.read_bytes())
@@ -258,16 +256,16 @@ def test_failed_bc_precheck_never_starts_raw_or_regularized_ppo(
     assert pair_dir.is_dir() and not list(pair_dir.iterdir())
 
 
-def test_current_bc_contract_rejects_missing_core_evidence_and_legacy_is_read_only():
+def test_current_bc_contract_rejects_missing_program_evidence_and_legacy_is_read_only():
     seed, source = p.DEVELOPMENT_PAIR_SEEDS[0], "f" * 64
     current = bc_receipt(seed, source)
     assert p.bc_report_valid(current, seed, source)
     tampered = deepcopy(current)
-    tampered["bc_topology_refresh_history"][2]["path_legality_passed"] = False
+    tampered["bc_topology_refresh_history"][2]["guard_invariants_passed"] = False
     assert not p.bc_report_valid(tampered, seed, source)
     tampered = deepcopy(current)
     tampered["final_bc_internal_precheck"]["roles"]["robot_1"][
-        "installed_core_validation_mass"] = 0.34
+        "qualified_validation_mass"] = 0.34
     assert not p.bc_report_valid(tampered, seed, source)
 
     old = deepcopy(current)
@@ -277,9 +275,9 @@ def test_current_bc_contract_rejects_missing_core_evidence_and_legacy_is_read_on
     old.pop("bc_topology_refresh_history")
     for role in p.ROLES:
         row = old["final_bc_internal_precheck"]["roles"][role]
-        row.pop("actor_core_qualification")
-        row.pop("installed_core_validation_mass")
-        row.pop("installed_core_expected_actionable_mass")
+        row.pop("program_qualification")
+        row.pop("qualified_validation_mass")
+        row.pop("expected_feedback_actionable_mass")
     old["final_bc_internal_precheck_receipt"]["sha256"] = sha256(
         (json.dumps(old["final_bc_internal_precheck"], sort_keys=True,
                     allow_nan=False) + "\n").encode()).hexdigest()

@@ -4,7 +4,7 @@ from copy import deepcopy
 import pytest
 
 from experiments.warehouse import protocol as p
-from tests.warehouse_v6_contract_fixture import topology_freeze_evidence
+from tests.warehouse_v6_contract_fixture import topology_freeze_evidence, topology_diagnostic
 
 METHOD = p.PROGRAM_FIT_METHOD_CANDIDATES[0]
 
@@ -64,18 +64,14 @@ def _paired_training(joint_steps=200_000, pair_seed=p.DEVELOPMENT_PAIR_SEEDS[0])
                 p.online_program_extraction_steps(joint_steps)),
             "topology_refresh_steps": list(p.topology_refresh_steps(joint_steps)),
             "topology_frozen_at_step": p.topology_frozen_at_step(joint_steps),
-            "topology_refresh_history": [{
-                "joint_step": step,
-                "role_tree_sha256": {"robot_1": "1" * 64,
-                                     "robot_2": "2" * 64},
-                "route_parity_passed": True,
-                "path_legality_passed": True,
-                "core_qualification_recomputed": True,
-            } for step in p.topology_refresh_steps(joint_steps)],
+            "topology_refresh_history": [topology_diagnostic(joint_step=step)
+                                         for step in p.topology_refresh_steps(joint_steps)],
             **topology_freeze_evidence(joint_steps),
             "online_program_split_block_cycle": p.FINAL_PROGRAM_SPLIT_COUNTS,
             "online_program_cohorts_disjoint": True,
             "post_policy_interventions": 0, "physical_no_legal_action_rows": 0,
+            "online_teacher_action_imitation_rows": 0,
+            "online_auxiliary_ce_updates": 0, "implicit_tree_to_nn_feedback_rows": 0,
             "scenario_schedule_sha256": "s" * 64,
             "initial_role_sha256": initial,
             "selected_role_sha256": {"robot_1": ("c" if variant == "raw" else "e") * 64,

@@ -874,10 +874,11 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
     """Derive final leaf qualification and validation from independent rows."""
     from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor
     from backend.training.warehouse_v6_program import (
-        WarehouseV6Program, _eligible, _metrics, _passes,
+        WarehouseV6Program, _eligible, _metrics, _passes, _metric_context,
         _sample_arrays, actor_sparse_topology_matches,
         certified_program_actions, ACTOR_SPARSE_TOPOLOGY_METHOD,
-        JOINT_CERTIFIED_TOPOLOGY_METHOD, FEEDBACK_AGREEMENT,
+        JOINT_CERTIFIED_TOPOLOGY_METHOD, V616_TOPOLOGY_METHOD,
+        INDEPENDENT_SELECTIVE_METHOD, FEEDBACK_AGREEMENT,
         EXPLANATION_AGREEMENT, MAX_COVERED_KL)
     from env.warehouse.navigation import ACTIONS
 
@@ -917,18 +918,48 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
         fit_supported = None
         method = report.get("fit_method")
         if method in (ACTOR_SPARSE_TOPOLOGY_METHOD,
-                      JOINT_CERTIFIED_TOPOLOGY_METHOD):
-            if not actor_sparse_topology_matches(program, actor.roles[role]):
+                      JOINT_CERTIFIED_TOPOLOGY_METHOD, V616_TOPOLOGY_METHOD,
+                      INDEPENDENT_SELECTIVE_METHOD):
+            independent = method == INDEPENDENT_SELECTIVE_METHOD
+            if not independent and not actor_sparse_topology_matches(program, actor.roles[role]):
                 return False
-            fit_x, _ = _sample_arrays(samples[role]["fit"], "final program fit")
+            fit_x, _ = _sample_arrays(samples[role]["fit"], "final program fit",
+                                      actor.roles[role].feature_dim)
             fit_leaves = program.leaf_indices(fit_x)
             counts = np.bincount(fit_leaves, minlength=len(program.leaf_logits))
-            if (not np.array_equal(fit_leaves, actor.roles[role].leaf(fit_x))
+            if ((not independent and not np.array_equal(
+                    fit_leaves, actor.roles[role].leaf(fit_x)))
                     or report.get("fit_leaf_row_counts") !=
                         counts.astype(int).tolist()):
                 return False
             fit_supported = set(np.flatnonzero(counts).tolist())
-            if method == JOINT_CERTIFIED_TOPOLOGY_METHOD:
+            if independent:
+                # Independent program partitions need not equal Actor tree
+                # partitions. Package-time refitting binds their exact bytes;
+                # runtime replays the rows, source hash and fit-only topology
+                # declaration, then derives qualification again below.
+                fit_tree = report.get("fit_tree", {})
+                structure = {"root_ref": program.root_ref,
+                             "split_weights": program.split_weights.tolist(),
+                             "split_bias": program.split_bias.tolist(),
+                             "left_refs": program.left_refs.tolist(),
+                             "right_refs": program.right_refs.tolist(),
+                             "leaf_count": len(program.leaf_logits)}
+                if (fit_tree.get("topology_origin") !=
+                        "independent_fit_only_sparse_search"
+                        or fit_tree.get("actor_role_sha256") != actor.role_sha256[role]
+                        or fit_tree.get("target_provenance") !=
+                        "complete_frozen_nn_masked_distribution"
+                        or fit_tree.get("topology_uses_fit_only") is not True
+                        or fit_tree.get("calibration_eligibility_validation_used") is not False
+                        or fit_tree.get("guard_capacity_included_in_search") is not True
+                        or fit_tree.get("execution_action_override") is not False
+                        or fit_tree.get("split_sha256") != _digest(structure)
+                        or not _sha(fit_tree.get("fit_target_sha256"))
+                        or report.get("excluded_frames") != 0):
+                    return False
+            if method in (JOINT_CERTIFIED_TOPOLOGY_METHOD,
+                          V616_TOPOLOGY_METHOD, INDEPENDENT_SELECTIVE_METHOD):
                 # The calibrated output may change a leaf's raw top action.
                 # Rebuild proofs from the saved tree and final leaf logits;
                 # empirical legal rows cannot substitute for a path proof.
@@ -947,9 +978,11 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
                         or report.get("path_certificate_rule") !=
                         "pure_legal_bit_ancestor+certified_mask_branches.v2"):
                     return False
-                for name in ("calibration", "eligibility", "validation"):
+                for name in (() if independent else (
+                        "calibration", "eligibility", "validation")):
                     encoded, _ = _sample_arrays(
-                        samples[role][name], f"final program {name}")
+                        samples[role][name], f"final program {name}",
+                        actor.roles[role].feature_dim)
                     if not np.array_equal(program.leaf_indices(encoded),
                                           actor.roles[role].leaf(encoded)):
                         return False
@@ -972,30 +1005,41 @@ def _verify_final_fit_pair(*, root: Path, release_id: str,
                 map(str, range(program.leaf_logits.shape[0]))):
             return False
         selected = {"feedback": set(), "explanation": set()}
+        metric_kwargs = ({"context": _metric_context(
+            program, actor.roles[role], samples[role]["eligibility"])}
+            if method == INDEPENDENT_SELECTIVE_METHOD else {})
         for leaf_text, metrics in leaf_reports.items():
             leaf = int(leaf_text)
             for purpose, threshold in (("feedback", FEEDBACK_AGREEMENT),
                                        ("explanation", EXPLANATION_AGREEMENT)):
                 measured = _metrics(program, actor.roles[role],
-                                    samples[role]["eligibility"], {leaf}, purpose)
+                                    samples[role]["eligibility"], {leaf}, purpose,
+                                    **metric_kwargs)
                 if not _same_recomputed(metrics.get(purpose), measured):
                     return False
-                path_certified = (method != JOINT_CERTIFIED_TOPOLOGY_METHOD
+                path_certified = (method not in (JOINT_CERTIFIED_TOPOLOGY_METHOD,
+                                                 V616_TOPOLOGY_METHOD,
+                                                 INDEPENDENT_SELECTIVE_METHOD)
                                   or certificates[leaf_text][
                                       "raw_top_path_certified"])
                 if ((fit_supported is None or leaf in fit_supported)
                         and path_certified
+                        and (method != JOINT_CERTIFIED_TOPOLOGY_METHOD
+                             or actor.roles[role].weights["protected_leaf_mask"][leaf] > .5)
                         and _eligible(measured, threshold)):
                     selected[purpose].add(leaf)
         if (selected["feedback"] != set(program.feedback_leaves)
                 or selected["explanation"] != set(program.explanation_leaves)):
             return False
         validation = {}
+        metric_kwargs = ({"context": _metric_context(
+            program, actor.roles[role], samples[role]["validation"])}
+            if method == INDEPENDENT_SELECTIVE_METHOD else {})
         for purpose, threshold in (("feedback", FEEDBACK_AGREEMENT),
                                    ("explanation", EXPLANATION_AGREEMENT)):
             validation[purpose] = _metrics(
                 program, actor.roles[role], samples[role]["validation"],
-                selected[purpose], purpose)
+                selected[purpose], purpose, **metric_kwargs)
             measured = validation[purpose]
             validation[purpose + "_online_passed"] = bool(
                 measured["rows"] > 0 and measured["agreement"] >= threshold

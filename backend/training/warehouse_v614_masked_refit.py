@@ -23,7 +23,7 @@ from backend.training.warehouse_v614_certificate_tree import (
     to_current_core_tree_result,
 )
 from backend.training.warehouse_v6_actor import (
-    CORE_BOUND_MODE, LEGACY_MODEL_VERSION, MODEL_VERSION,
+    CORE_BOUND_MODE, LEGACY_MODEL_VERSION, MODEL_VERSION, V617_MODEL_VERSION,
     FrozenWarehouseV6Role, role_sha256,
 )
 from env.warehouse.navigation import ACTIONS
@@ -381,7 +381,7 @@ def fit_episode_separated_core(groups: Mapping[str, EpisodeRows], *,
         frozen_actor_sha256=frozen_role.role_sha256,
         expected_topology_sha256=expected_topology_sha256)
     candidate = to_current_core_tree_result(refitted)
-    if frozen_role.model_version == MODEL_VERSION:
+    if frozen_role.model_version == V617_MODEL_VERSION:
         from .warehouse_v617_risk_tree import fit_boxed_logits
         from .warehouse_v614_certificate_tree import _leaf_stats
         leaves = candidate.leaf_indices(fit.encoded[indices])
@@ -417,7 +417,7 @@ def fit_episode_separated_core(groups: Mapping[str, EpisodeRows], *,
     scale = np.minimum(1.0, config.maximum_raw_logit_span /
                        np.maximum(span, 1e-8))
     logits *= scale[:, None]
-    if frozen_role.model_version == MODEL_VERSION:
+    if frozen_role.model_version == V617_MODEL_VERSION:
         from .warehouse_v617_risk_tree import project_logit_box
         for leaf in range(candidate.leaf_count):
             if frozen_role.weights["protected_leaf_mask"][leaf] > 0.5:
@@ -557,7 +557,7 @@ def qualify_actor_core(
         candidate_mask[leaf] = bool(
             action in proven[leaf] and fit_visits[leaf] > 0
             and calibration_visits[leaf] > 0
-            and (frozen_role.model_version != MODEL_VERSION or
+            and (frozen_role.model_version != V617_MODEL_VERSION or
                  frozen_role.weights["protected_leaf_mask"][leaf] > 0.5))
     candidate = _replace(extracted, extracted.leaf_logits,
                          candidate_mask, dict(extracted.report))
@@ -581,7 +581,7 @@ def qualify_actor_core(
                 if selected[detail["leaf"]]))
     report = {
         "method": ("actor_risk_protected_core_qualification_v3" if
-                   frozen_role.model_version == MODEL_VERSION else "actor_joint_core_qualification_v2"),
+                   frozen_role.model_version == V617_MODEL_VERSION else "actor_joint_core_qualification_v2"),
         "frozen_role_sha256": frozen_role.role_sha256,
         "actor_topology_sha256": topology_hash,
         "actor_tree_logits_sha256": sha256(np.ascontiguousarray(

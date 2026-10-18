@@ -14,6 +14,7 @@ import torch
 from backend.training.warehouse_v6_actor import (
     CORE_BOUND_MODE, CORE_MARGIN_FLOOR, FEATURE_DIM, LEGACY_CORE_BOUND_MODE,
     LEGACY_MODEL_VERSION, MODEL_VERSION, TREE_LEAVES,
+    V617_MODEL_VERSION, V617_CORE_BOUND_MODE,
     FrozenWarehouseV6Actor, FrozenWarehouseV6Role, WarehouseV6Actor,
     _TENSOR_NAMES, _role_arrays, export_actor, role_sha256,
 )
@@ -46,8 +47,8 @@ def _encoded_rows() -> np.ndarray:
         np.stack([action_masks(state)[0] for state in states]))
 
 
-def _guarded_role():
-    actor = WarehouseV6Actor().actors[AGENTS[0]]
+def _guarded_role(*, model_version=V617_MODEL_VERSION):
+    actor = WarehouseV6Actor(model_version=model_version).actors[AGENTS[0]]
     right = ACTIONS.index("RIGHT")
     wait = ACTIONS.index("WAIT")
     with torch.no_grad():
@@ -65,17 +66,18 @@ def _guarded_role():
         actor.tree.guard_node_mask.zero_()
         actor.tree.guard_node_mask[0] = True
     actor.refresh_sparse_support()
-    with torch.no_grad():
-        actor.protected_leaf_mask[:2] = 1
+    if model_version == V617_MODEL_VERSION:
+        with torch.no_grad():
+            actor.protected_leaf_mask[:2] = 1
     actor.install_certified_core_mask(np.asarray([1, 1] + [0] * (
         TREE_LEAVES - 2), dtype=np.float32))
     return actor
 
 
-def _guarded_model() -> WarehouseV6Actor:
-    model = WarehouseV6Actor()
+def _guarded_model(*, model_version=V617_MODEL_VERSION) -> WarehouseV6Actor:
+    model = WarehouseV6Actor(model_version=model_version)
     for role in AGENTS:
-        model.actors[role] = _guarded_role()
+        model.actors[role] = _guarded_role(model_version=model_version)
         with torch.no_grad():
             model.actors[role].tree.leaf_logits[2].fill_(1.0)
     return model
@@ -102,7 +104,7 @@ def test_dedicated_mask_path_and_margin_cap_match_frozen_numpy():
     cap = np.maximum(0.0, (margin - CORE_MARGIN_FLOOR) / 2.0)
     assert np.all(np.abs(residual.numpy()) <= cap[:, None] + 1e-6)
     assert np.all(np.abs(residual.numpy()) <= learned_bound.numpy()[:, None] + 1e-6)
-    frozen = FrozenWarehouseV6Role(_role_arrays(actor))
+    frozen = FrozenWarehouseV6Role(_role_arrays(actor), core_bound_mode=V617_CORE_BOUND_MODE)
     np.testing.assert_allclose(frozen.logits_encoded(rows), full.numpy(), atol=1e-4, rtol=0)
 
 
@@ -117,7 +119,7 @@ def test_public_core_initializer_keeps_guard_fixed_and_other_nodes_trainable():
         leaf_logits=source["tree.leaf_logits"],
         core_mask=source["protected_leaf_mask"],
         node_count=1, leaf_count=2, report={"test": True})
-    fresh = WarehouseV6Actor().actors[AGENTS[1]]
+    fresh = WarehouseV6Actor(model_version=V617_MODEL_VERSION).actors[AGENTS[1]]
     report = fresh.initialize_tree_from_core_result(result)
     assert report["split_frozen_after_public_fit"] is False
     assert report["explicit_guard_node_count"] == 1
@@ -150,7 +152,7 @@ def test_post_update_prunes_only_core_leaf_whose_new_raw_action_lacks_proof():
         actor.tree.leaf_logits[1].zero_()
         actor.tree.leaf_logits[1, left] = 3.0
     with pytest.raises(ValueError, match="path legality proof"):
-        FrozenWarehouseV6Role(_role_arrays(actor))
+        FrozenWarehouseV6Role(_role_arrays(actor), core_bound_mode=V617_CORE_BOUND_MODE)
     result = actor.prune_unproven_core_leaves()
     assert result == 1
     assert actor.core_leaf_mask.sum().item() == 1
@@ -246,7 +248,7 @@ def test_checkpoint_load_reapplies_certified_core_freeze():
     checkpoint_optimizer = deepcopy(optimizer.state_dict())
     frozen_hash = _core_leaf_logits_hashes(model)
 
-    restored = WarehouseV6Actor()
+    restored = WarehouseV6Actor(model_version=V617_MODEL_VERSION)
     restored.load_state_dict(checkpoint_model, strict=True)
     restored_optimizer = torch.optim.Adam(restored.actors.parameters(), lr=0.01)
     restored_optimizer.load_state_dict(checkpoint_optimizer)
@@ -277,19 +279,18 @@ def test_train_variant_resume_after_75_percent_matches_continuous_run(
                         (_ for _ in ()).throw(AssertionError("unexpected environment")))
 
     def fake_refresh(model, _buffers, *, stage, refresh_support=True):
-        core = np.asarray([1, 1] + [0] * (TREE_LEAVES - 2), dtype=np.float32)
-        for role in AGENTS:
-            actor = model.actors[role]
-            if refresh_support:
-                actor.refresh_sparse_support()
-            actor.install_certified_core_mask(core)
-        return {"stage": stage, "roles": {role: {
-                    "qualification_bound_to_installed_actor": True,
-                    "qualification": {"validation_passed": True}}
+        # Current training refreshes are read-only diagnostics. The legacy
+        # guard/cap tests above remain explicitly bound to the v6.17 Actor.
+        return {"stage": stage, "roles": {role: {"parity": {
+                    "routing_mismatches": 0, "maximum_logit_abs_difference": 0.}}
                     for role in AGENTS},
                 "role_tree_sha256": runner._role_topology_hashes(model),
-                "route_parity_passed": True, "path_legality_passed": True,
-                "core_qualification_recomputed": True}
+                "role_support_sha256": runner._role_support_hashes(model),
+                "actor_role_sha256_before": runner.role_hashes(model),
+                "actor_role_sha256_after": runner.role_hashes(model),
+                "route_parity_passed": True, "guard_invariants_passed": True,
+                "support_locked": True, "actor_rebuilt": False,
+                "core_qualification_recomputed": False, "auxiliary_ce_updates": 0}
 
     observation = np.zeros((len(AGENTS), runner.OBSERVATION_DIM), dtype=np.float32)
     masks = np.ones((len(AGENTS), len(ACTIONS)), dtype=np.float32)
@@ -317,7 +318,7 @@ def test_train_variant_resume_after_75_percent_matches_continuous_run(
         phases.append(topology_frozen)
         for actor in model.actors.values():
             assert actor.tree.split.weight.requires_grad is not topology_frozen
-            assert actor._certified_core_logits_trainable is not topology_frozen
+            assert actor._certified_core_logits_trainable
         loss = -sum(actor.tree.leaf_logits[0, wait] +
                     actor.tree.leaf_logits[1, right] +
                     actor.tree.leaf_logits[2, wait]
@@ -354,7 +355,7 @@ def test_train_variant_resume_after_75_percent_matches_continuous_run(
             raise InterruptedTraining("checkpoint saved after topology freeze")
 
     monkeypatch.setattr(runner, "_save_checkpoint", maybe_interrupt)
-    initial = deepcopy(_guarded_model().state_dict())
+    initial = deepcopy(_guarded_model(model_version=MODEL_VERSION).state_dict())
 
     def run(directory):
         directory.mkdir(parents=True, exist_ok=True)
@@ -391,7 +392,7 @@ def test_train_variant_resume_after_75_percent_matches_continuous_run(
     for role in AGENTS:
         assert not continuous.actors[role].tree.split.weight.requires_grad
         assert not resumed.actors[role].tree.split.weight.requires_grad
-        assert not resumed.actors[role]._certified_core_logits_trainable
+        assert resumed.actors[role]._certified_core_logits_trainable
 
 
 def test_guard_node_immutable_while_inactive_support_receives_gradient():
@@ -439,7 +440,22 @@ def test_legacy_bound_mode_is_dispatched_from_metadata(tmp_path):
     assert metadata["model_version"] == MODEL_VERSION
     assert metadata["core_bound_mode"] == CORE_BOUND_MODE
     from env.warehouse.public_action_features_v614 import ACTOR_FEATURE_SCHEMA_SHA256
-    from backend.training.warehouse_v6_actor import _LEGACY_TENSOR_NAMES
+    from backend.training.warehouse_v6_actor import (
+        _LEGACY_TENSOR_NAMES, MIN_RESIDUAL_BOUND, MAX_RESIDUAL_BOUND,
+        CORE_LOW_GATE_BOUND,
+    )
+    # Manufacture historical bytes from an explicitly historical Actor. The
+    # production exporter only writes v6.18, whose tensor set has no bound or
+    # protected mask; assigning old metadata to those bytes is invalid.
+    historical = WarehouseV6Actor(model_version=V617_MODEL_VERSION)
+    for role in AGENTS:
+        for key in [key for key in arrays if key.startswith(role+".")]:
+            del arrays[key]
+        arrays.update({f"{role}.{name}": value for name, value in
+                       _role_arrays(historical.actors[role]).items()})
+    metadata.update(minimum_residual_bound=MIN_RESIDUAL_BOUND,
+                    maximum_residual_bound=MAX_RESIDUAL_BOUND,
+                    core_low_gate_bound=CORE_LOW_GATE_BOUND)
     metadata["model_version"] = LEGACY_MODEL_VERSION
     metadata["core_bound_mode"] = LEGACY_CORE_BOUND_MODE
     metadata["feature_dim"] = 171
@@ -474,11 +490,11 @@ def test_legacy_bound_mode_is_dispatched_from_metadata(tmp_path):
 
 
 def test_training_state_loader_accepts_pre_support_checkpoint():
-    source = WarehouseV6Actor()
+    source = WarehouseV6Actor(model_version=V617_MODEL_VERSION)
     state = {key: value for key, value in source.state_dict().items()
              if not key.endswith(("support_mask", "support_fixed",
                                   "guard_node_mask"))}
-    restored = WarehouseV6Actor()
+    restored = WarehouseV6Actor(model_version=V617_MODEL_VERSION)
     restored.load_state_dict(state, strict=True)
     for role in AGENTS:
         tree = restored.actors[role].tree

@@ -29,6 +29,7 @@ from .warehouse_v6_actor import (
 from .warehouse_v6_tree_routing import (
     HARD_SPLIT_TIE_EPSILON, certified_feature_bounds,
     certified_mask_branches, split_scores as hard_tree_split_scores,
+    leaf_indices as hard_tree_leaf_indices,
     validate_certification_domain,
 )
 
@@ -36,10 +37,12 @@ from .warehouse_v6_tree_routing import (
 PROGRAM_VERSION = "warehouse-role-program.v6.14-public-affordance-exploratory"
 V616_PROGRAM_VERSION = "warehouse-role-program.v6.16-joint-certified-topology"
 JOINT_PROGRAM_VERSION = "warehouse-role-program.v6.17-risk-protected-topology"
+SELECTIVE_PROGRAM_VERSION = "warehouse-role-program.v6.18-independent-selective-distribution"
 AXIS_TREE_METHOD = "axis_tree_v1"
 ACTOR_SPARSE_TOPOLOGY_METHOD = "actor_sparse_topology_v1"
 V616_TOPOLOGY_METHOD = "actor_joint_certified_topology_v2"
 JOINT_CERTIFIED_TOPOLOGY_METHOD = "actor_risk_stratified_protected_topology_v3"
+INDEPENDENT_SELECTIVE_METHOD = "independent_selective_masked_distribution_v4"
 PROGRAM_MAX_DEPTH = 5
 PROGRAM_MAX_LEAVES = 16
 PROGRAM_MAX_INTERNAL_NODES = PROGRAM_MAX_LEAVES - 1
@@ -104,7 +107,15 @@ def certified_actor_actions(
 
 
 def _requires_path_certificate(program: "WarehouseV6Program") -> bool:
-    return program.report.get("fit_method") in (JOINT_CERTIFIED_TOPOLOGY_METHOD, V616_TOPOLOGY_METHOD)
+    return program.report.get("fit_method") in (
+        JOINT_CERTIFIED_TOPOLOGY_METHOD, V616_TOPOLOGY_METHOD,
+        INDEPENDENT_SELECTIVE_METHOD)
+
+
+def _requires_actor_topology(program: "WarehouseV6Program") -> bool:
+    return program.report.get("fit_method") in (
+        ACTOR_SPARSE_TOPOLOGY_METHOD, JOINT_CERTIFIED_TOPOLOGY_METHOD,
+        V616_TOPOLOGY_METHOD)
 
 
 def _sample_arrays(rows: Sequence[Mapping], name: str, feature_dim: int = FEATURE_DIM) -> tuple[np.ndarray, np.ndarray]:
@@ -147,18 +158,48 @@ def _wilson_lower(success_fraction: float, count: int) -> float:
     return float(max(0.0, (centre - spread) / denominator))
 
 
-def _metrics(program: "WarehouseV6Program", actor: FrozenWarehouseV6Role,
-             rows: Sequence[Mapping], selected_leaves: set[int],
-             purpose: str = "feedback") -> dict:
-    if purpose not in ("feedback", "explanation"):
-        raise ValueError("invalid program metric purpose")
+def _metric_context(program: "WarehouseV6Program", actor: FrozenWarehouseV6Role,
+                    rows: Sequence[Mapping]) -> dict:
+    if (program.feature_dim != actor.feature_dim
+            or tuple(program.feature_names) != tuple(actor.feature_names)):
+        raise RuntimeError("Warehouse program and Actor feature schema mismatch")
     x, masks = _sample_arrays(rows, "program audit", actor.feature_dim)
     if _requires_path_certificate(program):
-        validate_certification_domain(x, _MASK_INDICES, certified_feature_bounds(tuple(actor.feature_names)))
-    sampled = _sampled_indices(rows)
-    leaves = program.leaf_indices(x)
+        validate_certification_domain(x, _MASK_INDICES,
+            certified_feature_bounds(tuple(actor.feature_names)))
+    return {"actor": actor, "program": program, "rows": rows,
+            "x": x, "masks": masks, "sampled": _sampled_indices(rows),
+            "leaves": program.leaf_indices(x),
+            "p": _masked_probabilities(actor.logits_encoded(x), masks)}
+
+
+def _metrics(program: "WarehouseV6Program", actor: FrozenWarehouseV6Role,
+             rows: Sequence[Mapping], selected_leaves: set[int],
+             purpose: str = "feedback", *, context: Mapping | None = None) -> dict:
+    if purpose not in ("feedback", "explanation"):
+        raise ValueError("invalid program metric purpose")
+    if (program.feature_dim != actor.feature_dim
+            or tuple(program.feature_names) != tuple(actor.feature_names)):
+        raise RuntimeError("Warehouse program and Actor feature schema mismatch")
+    if context is not None:
+        if (context["actor"] is not actor or context["program"] is not program
+                or context["rows"] is not rows):
+            raise ValueError("program metric context binding mismatch")
+        x, masks = context["x"], context["masks"]
+        sampled, leaves = context["sampled"], context["leaves"]
+    else:
+        x, masks = _sample_arrays(rows, "program audit", actor.feature_dim)
+        if _requires_path_certificate(program):
+            validate_certification_domain(x, _MASK_INDICES, certified_feature_bounds(tuple(actor.feature_names)))
+        sampled = _sampled_indices(rows)
+        leaves = program.leaf_indices(x)
     selected = np.isin(leaves, tuple(selected_leaves))
     count = int(selected.sum())
+    independent = program.report.get("fit_method") == INDEPENDENT_SELECTIVE_METHOD
+    all_x = x if independent else None
+    all_p = (context["p"] if context is not None else
+             _masked_probabilities(actor.logits_encoded(x), masks)
+             if independent else None)
     result = {
         "sample_count": len(rows), "rows": count,
         "coverage": count / len(rows), "actionable_rows": 0,
@@ -170,10 +211,15 @@ def _metrics(program: "WarehouseV6Program", actor: FrozenWarehouseV6Role,
         "distinct_scenario_seed_count": 0,
         "max_episode_fraction": 0.0,
     }
+    if independent:
+        result.update({"physical_frame_count": len(rows), "excluded_frames": 0,
+                       "expected_actionable_coverage": 0.,
+                       "expected_actionable_rows": 0.,
+                       "per_nn_action": {}, "public_strata": {}})
     if not count:
         return result
     x, m, leaf, actions = x[selected], masks[selected], leaves[selected], sampled[selected]
-    p = _masked_probabilities(actor.logits_encoded(x), m)
+    p = all_p[selected] if independent else _masked_probabilities(actor.logits_encoded(x), m)
     raw = program.leaf_logits[leaf]
     q = _masked_probabilities(raw, m)
     top = q.argmax(-1)
@@ -208,6 +254,50 @@ def _metrics(program: "WarehouseV6Program", actor: FrozenWarehouseV6Role,
         "distinct_scenario_seed_count": len(scenario_seeds),
         "max_episode_fraction": max(frequencies.values()) / count,
     })
+    if independent:
+        valid = raw_legal & path_certified
+        expected = valid * p[np.arange(count), top]
+        if purpose == "feedback":
+            expected *= top == nn_top
+        result["expected_actionable_rows"] = float(expected.sum())
+        result["expected_actionable_coverage"] = float(expected.sum()/len(rows))
+        for action, label in enumerate(ACTIONS):
+            chosen = nn_top == action
+            denominator = int(np.sum(all_p.argmax(-1) == action))
+            result["per_nn_action"][label] = {
+                "rows": int(chosen.sum()),
+                "physical_frames": denominator,
+                "qualified_coverage": float(chosen.sum()/denominator) if denominator else None,
+                "agreement": float(np.mean(top[chosen] == nn_top[chosen])) if chosen.any() else None,
+                "actual_actionable_rows": int(matched[chosen].sum()),
+                "expected_actionable_rows": float(expected[chosen].sum()),
+            }
+        names = tuple(actor.feature_names)
+        conflict = x[:, names.index("same_target_collision_streak_capped")] > 0
+        near = x[:, names.index("robots_shortest_distance")]*42 <= 2
+        low = x[:, names.index("self_charger_return_margin")]*50 <= 4
+        all_conflict = all_x[:, names.index("same_target_collision_streak_capped")] > 0
+        all_near = all_x[:, names.index("robots_shortest_distance")]*42 <= 2
+        all_low = all_x[:, names.index("self_charger_return_margin")]*50 <= 4
+        denominators = {"ordinary": int(np.sum(~(all_conflict | all_near | all_low))),
+                        "conflict": int(all_conflict.sum()),
+                        "near_robots": int(all_near.sum()),
+                        "low_return_margin": int(all_low.sum())}
+        row_kl = np.sum(p*(np.log(np.maximum(p, _EPSILON))
+                           - np.log(np.maximum(q, _EPSILON))), axis=-1)
+        for label, chosen in {"ordinary": ~(conflict | near | low),
+                              "conflict": conflict, "near_robots": near,
+                              "low_return_margin": low}.items():
+            result["public_strata"][label] = {
+                "rows": int(chosen.sum()),
+                "physical_frames": denominators[label],
+                "qualified_coverage": float(chosen.sum()/denominators[label]) if denominators[label] else None,
+                "agreement": float(np.mean(top[chosen] == nn_top[chosen])) if chosen.any() else None,
+                "kl": float(row_kl[chosen].mean()) if chosen.any() else None,
+                "illegal_count": int(np.sum(~raw_legal[chosen])),
+                "actual_actionable_rows": int(matched[chosen].sum()),
+                "expected_actionable_rows": float(expected[chosen].sum()),
+            }
     return result
 
 
@@ -261,6 +351,11 @@ class WarehouseV6Program:
     @property
     def feature_names(self):
         return FEATURE_NAMES if self.feature_dim == FEATURE_DIM else legacy_features.TREE_FEATURE_NAMES
+
+    @property
+    def feature_schema_sha256(self):
+        return (FEATURE_SCHEMA_SHA256 if self.feature_dim == FEATURE_DIM
+                else legacy_features.ACTOR_FEATURE_SCHEMA_SHA256)
 
     def encode(self, obs, mask):
         encoder = encode_actor_tree_features if self.feature_dim == FEATURE_DIM else legacy_features.encode_actor_tree_features
@@ -337,6 +432,11 @@ class WarehouseV6Program:
 
     def leaf_indices(self, encoded: np.ndarray) -> np.ndarray:
         flat = np.asarray(encoded, dtype=np.float32).reshape(-1, self.feature_dim)
+        if self.report.get("fit_method") == INDEPENDENT_SELECTIVE_METHOD:
+            return hard_tree_leaf_indices(
+                flat, self.split_weights, self.split_bias, self.left_refs,
+                self.right_refs, len(self.split_weights), PROGRAM_MAX_DEPTH,
+            ).reshape(encoded.shape[:-1])
         return np.asarray([self._leaf_encoded(row)[0] for row in flat], dtype=np.int64
                           ).reshape(encoded.shape[:-1])
 
@@ -388,7 +488,9 @@ class WarehouseV6Program:
             return None
         if actor_role is not None and (
                 not isinstance(actor_role, FrozenWarehouseV6Role)
-                or actor_role.role_sha256 != self.actor_role_sha256):
+                or actor_role.role_sha256 != self.actor_role_sha256
+                or actor_role.feature_dim != self.feature_dim
+                or tuple(actor_role.feature_names) != tuple(self.feature_names)):
             return None
         leaves = self.feedback_leaves if purpose == "feedback" else self.explanation_leaves
         if not self.report["validation"][purpose + "_passed"]:
@@ -406,10 +508,11 @@ class WarehouseV6Program:
 
     def to_dict(self) -> dict:
         return {
-            "version": (JOINT_PROGRAM_VERSION if self.report.get("fit_method") == JOINT_CERTIFIED_TOPOLOGY_METHOD else
+            "version": (SELECTIVE_PROGRAM_VERSION if self.report.get("fit_method") == INDEPENDENT_SELECTIVE_METHOD else
+                        JOINT_PROGRAM_VERSION if self.report.get("fit_method") == JOINT_CERTIFIED_TOPOLOGY_METHOD else
                         V616_PROGRAM_VERSION if _requires_path_certificate(self) else PROGRAM_VERSION), "role": self.role,
             "actor_role_sha256": self.actor_role_sha256,
-            "feature_schema_sha256": (FEATURE_SCHEMA_SHA256 if self.feature_dim == FEATURE_DIM else legacy_features.ACTOR_FEATURE_SCHEMA_SHA256),
+            "feature_schema_sha256": self.feature_schema_sha256,
             "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
             "root_ref": int(self.root_ref),
             "split_weights": self.split_weights.tolist(),
@@ -437,22 +540,33 @@ class WarehouseV6Program:
     def from_dict(cls, data: Mapping, *, actor_role_sha256: str) -> "WarehouseV6Program":
         version = data.get("version")
         method = data.get("report", {}).get("fit_method")
-        dim = FEATURE_DIM if data.get("feature_schema_sha256") == FEATURE_SCHEMA_SHA256 else legacy_features.TREE_FEATURE_DIM
-        schema = FEATURE_SCHEMA_SHA256 if dim == FEATURE_DIM else legacy_features.ACTOR_FEATURE_SCHEMA_SHA256
-        if (version not in (PROGRAM_VERSION, JOINT_PROGRAM_VERSION, V616_PROGRAM_VERSION)
-                or (version in (JOINT_PROGRAM_VERSION, V616_PROGRAM_VERSION)) !=
-                   (method in (JOINT_CERTIFIED_TOPOLOGY_METHOD, V616_TOPOLOGY_METHOD))
+        schemas = {FEATURE_SCHEMA_SHA256: FEATURE_DIM,
+                   legacy_features.ACTOR_FEATURE_SCHEMA_SHA256: legacy_features.TREE_FEATURE_DIM}
+        schema = data.get("feature_schema_sha256")
+        dim = schemas.get(schema)
+        if (version not in (PROGRAM_VERSION, JOINT_PROGRAM_VERSION, V616_PROGRAM_VERSION,
+                            SELECTIVE_PROGRAM_VERSION)
+                or (version in (JOINT_PROGRAM_VERSION, V616_PROGRAM_VERSION,
+                                SELECTIVE_PROGRAM_VERSION)) !=
+                   (method in (JOINT_CERTIFIED_TOPOLOGY_METHOD, V616_TOPOLOGY_METHOD,
+                               INDEPENDENT_SELECTIVE_METHOD))
                 or (version == JOINT_PROGRAM_VERSION and method != JOINT_CERTIFIED_TOPOLOGY_METHOD)
                 or (version == V616_PROGRAM_VERSION and method != V616_TOPOLOGY_METHOD)
-                or data.get("feature_schema_sha256") != schema
+                or (version == SELECTIVE_PROGRAM_VERSION and method != INDEPENDENT_SELECTIVE_METHOD)
+                or dim is None
                 or data.get("action_physics_config_sha256") !=
                    ACTION_PHYSICS_CONFIG_SHA256
                 or data.get("role") not in AGENTS
                 or data.get("actor_role_sha256") != actor_role_sha256):
             raise RuntimeError("Warehouse program version, schema, role or Actor hash mismatch")
+        raw_weights = np.asarray(data["split_weights"], dtype=np.float32)
+        if raw_weights.size == 0:
+            raw_weights = np.zeros((0, dim), dtype=np.float32)
+        elif raw_weights.ndim != 2 or raw_weights.shape[1] != dim:
+            raise RuntimeError("Warehouse program feature schema and split tensor mismatch")
         result = cls(
             str(data["role"]), actor_role_sha256, int(data["root_ref"]),
-            np.asarray(data["split_weights"], dtype=np.float32).reshape(-1, dim),
+            raw_weights,
             np.asarray(data["split_bias"], dtype=np.float32),
             np.asarray(data["left_refs"], dtype=np.int64),
             np.asarray(data["right_refs"], dtype=np.int64),
@@ -465,6 +579,10 @@ class WarehouseV6Program:
         report = result.report
         if (report.get("max_depth") != depth
                 or report.get("leaf_count") != leaves
+                or ("feature_schema_sha256" in report and
+                    report["feature_schema_sha256"] != schema)
+                or ("actor_role_sha256" in report and
+                    report["actor_role_sha256"] != actor_role_sha256)
                 or report.get("max_features_per_node", MAX_SPLIT_FEATURES)
                     > MAX_SPLIT_FEATURES):
             raise RuntimeError("Warehouse program report complexity mismatch")
@@ -617,7 +735,9 @@ def _actor_sparse_topology(actor: FrozenWarehouseV6Role) -> tuple[dict, dict]:
     digest = sha256(json.dumps({
         "root_ref": structure["root_ref"],
         "leaf_count": leaves,
-        "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+        "feature_schema_sha256": (FEATURE_SCHEMA_SHA256
+                                  if actor.feature_dim == FEATURE_DIM
+                                  else legacy_features.ACTOR_FEATURE_SCHEMA_SHA256),
         "split_weights": structure["split_weights"].tolist(),
         "split_bias": structure["split_bias"].tolist(),
         "left_refs": structure["left_refs"].tolist(),
@@ -699,7 +819,8 @@ def _fit_leaf_logits(actor: FrozenWarehouseV6Role, features: np.ndarray,
 def _calibrate_leaf_logits(logits: np.ndarray, actor: FrozenWarehouseV6Role,
                            x: np.ndarray, masks: np.ndarray,
                            leaves: np.ndarray, *,
-                           fitted_leaves: frozenset[int] | None = None) -> np.ndarray:
+                           fitted_leaves: frozenset[int] | None = None,
+                           respect_actor_leaf_bounds: bool = True) -> np.ndarray:
     target = _masked_probabilities(actor.logits_encoded(x), masks)
     result = logits.copy()
     for leaf in range(len(logits)):
@@ -711,7 +832,8 @@ def _calibrate_leaf_logits(logits: np.ndarray, actor: FrozenWarehouseV6Role,
         best, best_kl = logits[leaf], float("inf")
         for temperature in (0.8, 0.9, 1.0, 1.1, 1.2):
             trial = logits[leaf] / temperature
-            if "protected_leaf_mask" in actor.weights and actor.weights["protected_leaf_mask"][leaf] > 0.5:
+            if (respect_actor_leaf_bounds and "protected_leaf_mask" in actor.weights
+                    and actor.weights["protected_leaf_mask"][leaf] > 0.5):
                 from .warehouse_v617_risk_tree import project_logit_box
                 trial = project_logit_box(trial, actor.weights["tree.leaf_logits"][leaf])
             q = _masked_probabilities(
@@ -735,7 +857,8 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
     if role not in AGENTS:
         raise ValueError("invalid Warehouse program role")
     if method not in (AXIS_TREE_METHOD, ACTOR_SPARSE_TOPOLOGY_METHOD,
-                      JOINT_CERTIFIED_TOPOLOGY_METHOD):
+                      JOINT_CERTIFIED_TOPOLOGY_METHOD,
+                      INDEPENDENT_SELECTIVE_METHOD):
         raise ValueError("unknown Warehouse program fitting method")
     parts = {"fit": list(fit), "calibration": list(calibration),
              "eligibility": list(eligibility), "validation": list(validation)}
@@ -747,23 +870,46 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         name: {str(row.get("base_seed", row["episode"])) for row in rows}
         for name, rows in parts.items()
     }
+    role_actor = actor.roles[role]
     for name, rows in parts.items():
-        encoded, _ = _sample_arrays(rows, name)
-        if method == JOINT_CERTIFIED_TOPOLOGY_METHOD:
+        encoded, _ = _sample_arrays(rows, name, role_actor.feature_dim)
+        if method in (JOINT_CERTIFIED_TOPOLOGY_METHOD, INDEPENDENT_SELECTIVE_METHOD):
             validate_certification_domain(
-                encoded, _MASK_INDICES, _CERTIFICATION_BOUNDS)
+                encoded, _MASK_INDICES,
+                certified_feature_bounds(tuple(role_actor.feature_names)))
         _sampled_indices(rows)
+        if method == INDEPENDENT_SELECTIVE_METHOD and name != "fit":
+            # A repeated physical frame is a real observation. It must not be
+            # dropped merely because its state equals an earlier state.
+            if any("frame" in row for row in rows):
+                if any("frame" not in row for row in rows):
+                    raise ValueError("natural program validation frame metadata is incomplete")
+                by_episode: dict[str, list[int]] = {}
+                for row in rows:
+                    by_episode.setdefault(str(row["episode"]), []).append(int(row["frame"]))
+                for frames in by_episode.values():
+                    ordered = sorted(frames)
+                    if (ordered[0] != 0 or len(set(frames)) != len(frames)
+                            or ordered != list(range(ordered[0], ordered[-1]+1))):
+                        raise ValueError("natural program validation contains duplicated or omitted physical frames")
     if any(episode_ids[left] & episode_ids[right]
            for left in parts for right in parts if left < right):
         raise ValueError("Warehouse program episode splits overlap")
     if any(scenario_ids[left] & scenario_ids[right]
            for left in parts for right in parts if left < right):
         raise ValueError("Warehouse program scenario seed splits overlap")
-    role_actor = actor.roles[role]
-    fit_x, fit_masks = _sample_arrays(parts["fit"], "fit")
+    fit_x, fit_masks = _sample_arrays(parts["fit"], "fit", role_actor.feature_dim)
     actor_topology = method in (ACTOR_SPARSE_TOPOLOGY_METHOD,
                                 JOINT_CERTIFIED_TOPOLOGY_METHOD)
-    if actor_topology:
+    if method == INDEPENDENT_SELECTIVE_METHOD:
+        from .warehouse_v618_selective_tree import fit_independent_structure
+        structure, tree_report = fit_independent_structure(
+            fit_x, fit_masks,
+            _masked_probabilities(role_actor.logits_encoded(fit_x), fit_masks),
+            [str(row["episode"]) for row in parts["fit"]],
+            feature_names=role_actor.feature_names,
+            actor_role_sha256=role_actor.role_sha256, actions=ACTIONS)
+    elif actor_topology:
         structure, tree_report = _actor_sparse_topology(role_actor)
     else:
         structure, tree_report = _fit_sparse_tree(role, role_actor, parts["fit"],
@@ -773,11 +919,14 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         for name, ids in episode_ids.items()
     }
     report = {
-        "version": (JOINT_PROGRAM_VERSION
+        "version": (SELECTIVE_PROGRAM_VERSION
+                    if method == INDEPENDENT_SELECTIVE_METHOD else JOINT_PROGRAM_VERSION
                     if method == JOINT_CERTIFIED_TOPOLOGY_METHOD
                     else PROGRAM_VERSION), "role": role,
         "actor_role_sha256": role_actor.role_sha256,
-        "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+        "feature_schema_sha256": (FEATURE_SCHEMA_SHA256
+                                  if role_actor.feature_dim == FEATURE_DIM
+                                  else legacy_features.ACTOR_FEATURE_SCHEMA_SHA256),
         "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
         "max_depth": PROGRAM_MAX_DEPTH,
         "leaf_count": structure["leaf_count"],
@@ -791,7 +940,7 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         "leaf_eligibility": {}, "validation": {},
         "certificate_kind": "independent_empirical_audit_only",
     }
-    if actor_topology:
+    if actor_topology or method == INDEPENDENT_SELECTIVE_METHOD:
         report["fit_method"] = method
     provisional = WarehouseV6Program(
         role, role_actor.role_sha256, structure["root_ref"],
@@ -816,23 +965,37 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
                     raise RuntimeError(
                         f"extracted Warehouse Actor tree route mismatch in {name}")
         report["fit_leaf_row_counts"] = fit_counts.astype(int).tolist()
-    learned = _fit_leaf_logits(role_actor, fit_x, fit_masks, fit_leaves,
-                               structure["leaf_count"],
-                               empty_leaf_logits=(role_actor.weights[
-                                   "tree.leaf_logits"][:structure["leaf_count"]]
-                                   if actor_topology else None))
-    cal_x, cal_masks = _sample_arrays(parts["calibration"], "calibration")
+    if method == INDEPENDENT_SELECTIVE_METHOD:
+        # This is a new independent partition. Actor leaf numbers and their
+        # legacy box bounds have no meaning here.
+        from .warehouse_v618_selective_tree import fit_leaf_distribution
+        target = _masked_probabilities(role_actor.logits_encoded(fit_x), fit_masks)
+        learned = np.stack([fit_leaf_distribution(
+            target[fit_leaves == leaf], fit_masks[fit_leaves == leaf])
+            for leaf in range(structure["leaf_count"])])
+        report["fit_leaf_row_counts"] = fit_counts.astype(int).tolist()
+        report["sampling_denominator"] = "all_recorded_physical_pre_action_frames"
+        report["excluded_frames"] = 0
+    else:
+        learned = _fit_leaf_logits(role_actor, fit_x, fit_masks, fit_leaves,
+                                   structure["leaf_count"],
+                                   empty_leaf_logits=(role_actor.weights[
+                                       "tree.leaf_logits"][:structure["leaf_count"]]
+                                       if actor_topology else None))
+    cal_x, cal_masks = _sample_arrays(parts["calibration"], "calibration", role_actor.feature_dim)
     calibrated = _calibrate_leaf_logits(
         learned, role_actor, cal_x, cal_masks, provisional.leaf_indices(cal_x),
-        fitted_leaves=(fitted_leaves if actor_topology
-                       else None))
+        fitted_leaves=(fitted_leaves if actor_topology or method == INDEPENDENT_SELECTIVE_METHOD
+                       else None),
+        respect_actor_leaf_bounds=(method != INDEPENDENT_SELECTIVE_METHOD))
     provisional = WarehouseV6Program(
         role, role_actor.role_sha256, structure["root_ref"],
         structure["split_weights"], structure["split_bias"],
         structure["left_refs"], structure["right_refs"], calibrated,
         frozenset(), frozenset(), report)
     path_certificates = (certified_program_actions(provisional)
-                         if method == JOINT_CERTIFIED_TOPOLOGY_METHOD else {})
+                         if method in (JOINT_CERTIFIED_TOPOLOGY_METHOD,
+                                       INDEPENDENT_SELECTIVE_METHOD) else {})
     if path_certificates:
         report["leaf_path_certificates"] = {
             str(leaf): {
@@ -846,13 +1009,17 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         report["path_certificate_rule"] = (
             "pure_legal_bit_ancestor+certified_mask_branches.v2")
     feedback, explanation = set(), set()
+    metric_kwargs = ({"context": _metric_context(
+        provisional, role_actor, parts["eligibility"])}
+        if method == INDEPENDENT_SELECTIVE_METHOD else {})
     # Eligibility alone locks the leaf sets. Internal validation is evaluated
     # once, after the selection, and cannot remove or add a leaf.
     for leaf in range(structure["leaf_count"]):
-        f = _metrics(provisional, role_actor, parts["eligibility"], {leaf}, "feedback")
-        e = _metrics(provisional, role_actor, parts["eligibility"], {leaf}, "explanation")
+        f = _metrics(provisional, role_actor, parts["eligibility"], {leaf}, "feedback", **metric_kwargs)
+        e = _metrics(provisional, role_actor, parts["eligibility"], {leaf}, "explanation", **metric_kwargs)
         report["leaf_eligibility"][str(leaf)] = {"feedback": f, "explanation": e}
-        has_path_proof = (method != JOINT_CERTIFIED_TOPOLOGY_METHOD or
+        has_path_proof = (method not in (JOINT_CERTIFIED_TOPOLOGY_METHOD,
+                                        INDEPENDENT_SELECTIVE_METHOD) or
                           int(np.argmax(calibrated[leaf])) in
                           path_certificates[leaf])
         if leaf in fitted_leaves and has_path_proof and (method != JOINT_CERTIFIED_TOPOLOGY_METHOD or role_actor.weights["protected_leaf_mask"][leaf] > 0.5) and _eligible(f, FEEDBACK_AGREEMENT):
@@ -864,10 +1031,13 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         structure["split_weights"], structure["split_bias"],
         structure["left_refs"], structure["right_refs"], calibrated,
         frozenset(feedback), frozenset(explanation), report)
+    metric_kwargs = ({"context": _metric_context(
+        program, role_actor, parts["validation"])}
+        if method == INDEPENDENT_SELECTIVE_METHOD else {})
     feedback_metric = _metrics(program, role_actor, parts["validation"],
-                               feedback, "feedback")
+                               feedback, "feedback", **metric_kwargs)
     explanation_metric = _metrics(program, role_actor, parts["validation"],
-                                  explanation, "explanation")
+                                  explanation, "explanation", **metric_kwargs)
     report["validation"] = {
         "feedback": feedback_metric, "explanation": explanation_metric,
         "feedback_online_passed": bool(
@@ -902,7 +1072,7 @@ def current_actor_fidelity(program: WarehouseV6Program,
     leaves = (set(program.feedback_leaves) if purpose == "feedback"
               else set(program.explanation_leaves))
     metric = _metrics(program, actor.roles[program.role], rows, leaves, purpose)
-    topology_matches = (not _requires_path_certificate(program) or
+    topology_matches = (not _requires_actor_topology(program) or
                         actor_sparse_topology_matches(
                             program, actor.roles[program.role],
                             require_actor_binding=False))
@@ -954,7 +1124,7 @@ def audit_frozen_program(program: WarehouseV6Program,
         "audit_version": "warehouse-role-program-independent.v6.2",
         "role": program.role, "actor_role_sha256": program.actor_role_sha256,
         "program_sha256": program.sha256(),
-        "feature_schema_sha256": FEATURE_SCHEMA_SHA256,
+        "feature_schema_sha256": program.feature_schema_sha256,
         "episode_ids": sorted(ids), "episode_count": len(ids),
         "sample_count": len(rows),
         "max_depth": int(program.report["max_depth"]),
@@ -970,6 +1140,7 @@ def audit_frozen_program(program: WarehouseV6Program,
 
 __all__ = [
     "PROGRAM_VERSION", "JOINT_PROGRAM_VERSION", "JOINT_CERTIFIED_TOPOLOGY_METHOD",
+    "SELECTIVE_PROGRAM_VERSION", "INDEPENDENT_SELECTIVE_METHOD",
     "WarehouseV6Program", "fit_program", "certified_actor_actions",
     "certified_program_actions", "actor_sparse_topology_matches",
     "audit_frozen_program", "current_actor_fidelity",

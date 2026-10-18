@@ -13,12 +13,12 @@ from backend.training.warehouse_v6_runner import (
 from experiments.warehouse.admission import _quality_trace_valid, _validated_episodes
 from experiments.warehouse.acceptance import _digest, _paired_schedule_evidence
 from experiments.warehouse.protocol import (
-    DEVELOPMENT_SELECTION_SEEDS, FINAL_PROGRAM_SPLIT_COUNTS, PairRunSpec,
+    DEVELOPMENT_PAIR_SEEDS, DEVELOPMENT_SELECTION_SEEDS, FINAL_PROGRAM_SPLIT_COUNTS, PairRunSpec,
     REGISTERED_BC_SPEC, REGISTERED_PROGRAM_FIT_METHOD, ROLES,
     SCENARIO_BLOCK_STEPS,
     scenario_schedule_sha256, scenario_seed,
 )
-from tests.warehouse_v6_contract_fixture import bc_receipt, topology_freeze_evidence
+from tests.warehouse_v6_contract_fixture import bc_receipt, topology_freeze_evidence, topology_diagnostic
 from tests.warehouse_v614_test_scopes import isolated_evaluation_scope
 
 
@@ -49,7 +49,7 @@ def test_frozen_quality_trace_keeps_both_nn_actions_and_binding(tmp_path):
 
 def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path):
     spec = PairRunSpec(
-        candidate_id="hash-contract", pair_seed=6140, joint_steps=200_000,
+        candidate_id="hash-contract", pair_seed=DEVELOPMENT_PAIR_SEEDS[0], joint_steps=200_000,
         output_dir=str(tmp_path),
         program_fit_method=REGISTERED_PROGRAM_FIT_METHOD,
         checkpoint_seeds=DEVELOPMENT_SELECTION_SEEDS)
@@ -91,12 +91,8 @@ def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path)
     schedule_sha = scenario_schedule_sha256(
         spec.scenario_namespace, spec.pair_seed, spec.joint_steps)
     bc_schedule = spec.to_mapping()["bc_data_seed_schedule"]
-    refresh_history = [{
-        "joint_step": step,
-        "role_tree_sha256": {role: "c" * 64 for role in ROLES},
-        "route_parity_passed": True, "path_legality_passed": True,
-        "core_qualification_recomputed": True,
-    } for step in spec.topology_refresh_steps]
+    refresh_history = [topology_diagnostic(joint_step=step)
+                       for step in spec.topology_refresh_steps]
     variants = {variant: {
         "variant": variant, "pair_seed": spec.pair_seed,
         "joint_steps": spec.joint_steps,

@@ -48,13 +48,13 @@ def _failed_locked_bc_child(argv, *, quality_failure=False, **kwargs) -> SimpleN
         roles[role] = {
             "actor_role_sha256": actor_receipt["role_sha256"][role],
             "refit_report": {"method": "fit_episode_separated_core", "validation_passed": passing},
-            "actor_core_qualification": {
+            "program_qualification": {
                 "method": p.REGISTERED_ACTOR_CORE_QUALIFICATION_METHOD,
                 "validation_passed": passing,
             },
-            "installed_core_is_newly_qualified": passing,
-            "installed_core_validation_mass": .40 if passing else .20,
-            "installed_core_expected_actionable_mass": .35 if passing else .10,
+            "qualification_changes_actor": False,
+            "qualified_validation_mass": .40 if passing else .20,
+            "expected_feedback_actionable_mass": .35 if passing else .10,
         }
     precheck = {
         "purpose": "development_internal_precheck_after_complete_bc",

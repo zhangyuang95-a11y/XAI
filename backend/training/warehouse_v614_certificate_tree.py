@@ -831,10 +831,12 @@ def frozen_actor_topology(
     for offline program refit only and never changes the runtime Actor.
     """
     from backend.training.warehouse_v6_actor import (
-        LEGACY_MODEL_VERSION, V616_MODEL_VERSION, MODEL_VERSION, role_sha256,
+        LEGACY_MODEL_VERSION, V616_MODEL_VERSION, V617_MODEL_VERSION,
+        MODEL_VERSION, role_sha256,
     )
 
-    versions = ((MODEL_VERSION,) if "protected_leaf_mask" in role_weights else
+    versions = ((MODEL_VERSION,) if "leaf_bound_logits" not in role_weights else
+                (V617_MODEL_VERSION,) if "protected_leaf_mask" in role_weights else
                 (V616_MODEL_VERSION, LEGACY_MODEL_VERSION))
     if (_SHA.fullmatch(frozen_actor_sha256) is None or frozen_actor_sha256 not in {
             role_sha256(role_weights, model_version=version) for version in versions}):

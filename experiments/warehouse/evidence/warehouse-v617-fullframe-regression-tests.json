@@ -1,0 +1,12 @@
+{
+  "command": "python3 -m pytest -q tests/test_warehouse_v6*.py tests/test_study_runtime_no_torch.py tests/test_study_v6_warehouse_frame_invariants.py tests/test_study_v6_pong_kitchen_frames.py --disable-warnings --maxfail=1",
+  "executable_recipe_file_sha256": "35d79af9b918ba3ffa015b1202f026fed2334f66a7dfeee2612f72292c1ff904",
+  "exit_code": 0,
+  "passed": 225,
+  "scientific_admission_evidence": false,
+  "source_closure_sha256": "979398f3910d1a364184c0455090af201208599bc015a0ba221d0298578a3d91",
+  "source_commit": "a43ed537c0f7a6a59238eb450f786201cb26784a",
+  "stdout_summary": "225 passed, 2 subtests passed in 76.58s",
+  "subtests_passed": 2,
+  "training_rerun_after_fullframe_fix": false
+}

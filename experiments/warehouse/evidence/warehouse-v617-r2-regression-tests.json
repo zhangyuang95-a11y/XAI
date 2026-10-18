@@ -1,0 +1,10 @@
+{
+  "command": "python3 -m pytest -q tests/test_warehouse_v6*.py tests/test_study_runtime_no_torch.py tests/test_study_v6_warehouse_frame_invariants.py tests/test_study_v6_pong_kitchen_frames.py --disable-warnings --maxfail=1",
+  "exit_code": 0,
+  "passed": 223,
+  "scientific_admission_evidence": false,
+  "source_closure_sha256": "97efd0bfa2eb3476e66b4e5b055a8d3d418bd10aae2b721fef6aac0f3fb1cc03",
+  "source_commit": "a5cb4d9",
+  "stdout_summary": "223 passed, 2 subtests passed in 84.24s",
+  "subtests_passed": 2
+}

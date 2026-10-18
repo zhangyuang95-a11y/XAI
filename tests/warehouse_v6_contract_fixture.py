@@ -162,7 +162,7 @@ def bc_receipt(pair_seed: int, source_closure_sha256: str) -> dict:
             "warmup_topology_fit_seed_schedule_sha256": p._hash_json(
                 warmup_schedule),
             "final_bc_seed_schedule_sha256": p._hash_json(final_schedule),
-            "final_bc_visits": {name: {"scenario_seeds": seeds}
+            "final_bc_visits": {name: {"scenario_seeds": seeds, "rows": 10, "physical_frames": 10, "excluded_frames": 0}
                                 for name, seeds in final_schedule.items()},
             "roles": {role: {"actor_role_sha256": actor_roles[role],
                              "refit_report": {"validation_passed": True},

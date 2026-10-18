@@ -65,7 +65,7 @@ def _failed_locked_bc_child(argv, *, quality_failure=False, **kwargs) -> SimpleN
         "final_bc_seed_schedule_sha256": a._sha(final_schedule),
         "final_bc_stage_counts": runner.BC_FINAL_CORE_STAGE_COUNTS,
         "final_bc_visits": {
-            name: {"scenario_seeds": seeds, "rows": 10}
+            name: {"scenario_seeds": seeds, "rows": 10, "physical_frames": 10, "excluded_frames": 0}
             for name, seeds in final_schedule.items()},
         "roles": roles,
     }

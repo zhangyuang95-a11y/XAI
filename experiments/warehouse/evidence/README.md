@@ -42,3 +42,5 @@ release ID after the current candidate is closed.
 
 
 - `warehouse-v617-risk-capacity-diagnostic.json`: retired 6120 scenes only; large structural protection regions but untrained transplant fails delivery/collision/shutdown quality. Not joint-training or admission evidence.
+
+- `warehouse-v617-02-quality-failure.json`: complete BC plus 24-episode quality failure, 2,880-frame physical replay and fixed-program full-frame diagnostic; candidate closed before PPO, no sealed seed used. Original BC sampled coverage and full-frame diagnostic coverage are reported separately.

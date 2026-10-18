@@ -122,7 +122,7 @@ DEFAULT_DAGGER_EPOCHS = REGISTERED_BC_SPEC["dagger_epochs"]
 # A single, replayable offline BC recipe is completed before either PPO
 # variant starts. Every data seed and stage is fixed by the pair seed. The
 # offline teacher and learned collision critic are absent from execution.
-BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.17-risk-protected.r2"
+BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.17-risk-protected.r3"
 BC_INITIAL_TEACHER_EPISODES = 100
 BC_INITIAL_EPOCHS = 20
 BC_INITIAL_DAGGER_ROUNDS = 2
@@ -242,6 +242,7 @@ def v617_executable_recipe() -> dict:
         "final_bc_internal_precheck_purposes": [
             "fit", "calibration", "eligibility", "validation"],
         "final_bc_internal_precheck_source": "one_final_frozen_full_bc_actor",
+        "final_bc_frame_sampling": "every_physical_pre_action_frame_no_deduplication",
         "final_program_topology": "selected_final_frozen_full_actor_tree",
         "warmup_freeze_after": None,
         "warmup_quality_prequalified": False,
@@ -1531,6 +1532,7 @@ def _collect_bc_visits(model: WarehouseV6Actor, seeds: Sequence[int], *,
     outcomes, joint_teacher_probability = [], []
     repeated_collision_frames = cross_episode_skips = 0
     collision_rows_kept = 0
+    physical_frames = 0
     counts = collision_state_counts if collision_state_counts is not None else {}
     time_columns = [OBSERVATION_FEATURE_NAMES.index(name) for name in (
         "elapsed_fraction", "self_steps_since_charging",
@@ -1541,6 +1543,7 @@ def _collect_bc_visits(model: WarehouseV6Actor, seeds: Sequence[int], *,
         _set_dual_nn_mode(env)
         prior_collision_key, repeat_streak = None, 0
         while not (env.state.terminated or env.state.truncated):
+            physical_frames += 1
             obs, mask = encode_public_observation(env.state), action_masks(env.state)
             label = public_lookahead_teacher(obs, mask)
             positions = tuple(env.state.by_id(role).position for role in AGENTS)
@@ -1591,6 +1594,8 @@ def _collect_bc_visits(model: WarehouseV6Actor, seeds: Sequence[int], *,
     return rows, {
         "episode_seeds": list(map(int, seeds)), "episodes": len(seeds),
         "rows_kept_for_training": len(obs_rows),
+        "physical_frames": physical_frames,
+        "excluded_frames": physical_frames - len(obs_rows),
         "data_sha256": _bc_rows_sha256(rows[:4]),
         "row_episode_ids_sha256": _digest_json(row_episode_ids),
         "row_scenario_seeds_sha256": _digest_json(row_scenario_seeds),
@@ -2320,13 +2325,14 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
         name: [] for name in ("fit", "calibration", "eligibility", "validation")}
     final_visits: dict[str, dict] = {}
     for purpose in final_parts:
-        collision_counts: dict[bytes, int] = {}
         for visit_kind in ("sampled", "argmax"):
             name = f"{purpose}_{visit_kind}"
             stage, count = BC_FINAL_CORE_STAGE_COUNTS[name]
             part = visit_stage(f"final_bc_precheck_{name}", stage, count,
-                               deterministic=visit_kind == "argmax",
-                               collision_counts=collision_counts)
+                               deterministic=visit_kind == "argmax")
+            if (len(part[0]) != stages[-1]["physical_frames"]
+                    or stages[-1]["excluded_frames"] != 0):
+                raise RuntimeError("Warehouse BC precheck omitted physical frames")
             if role_hashes(model) != final_bc_role_sha256:
                 raise RuntimeError("Warehouse final BC precheck visitation changed Actor")
             final_parts[purpose].append(part)
@@ -2334,6 +2340,8 @@ def _pretrain_pair_production(model: WarehouseV6Actor, *, pair_seed: int,
                 "stage": stage,
                 "scenario_seeds": all_seed_blocks[f"final_bc_precheck_{name}"],
                 "rows": len(part[0]),
+                "physical_frames": stages[-1]["physical_frames"],
+                "excluded_frames": stages[-1]["excluded_frames"],
                 "row_episode_ids_sha256": _digest_json(part[4]),
                 "row_scenario_seeds_sha256": _digest_json(part[5]),
                 "data_sha256": _bc_rows_sha256(part[:4]),

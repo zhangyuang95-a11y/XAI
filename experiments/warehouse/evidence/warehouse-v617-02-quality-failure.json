@@ -1,0 +1,329 @@
+{
+  "actual_PPO_joint_steps": 0,
+  "actual_reset_count": 1420,
+  "assets": {
+    "BC_precheck": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v617_runs/warehouse-v617-risk-protected-02/pair_6140_steps_200000/final-bc-internal-precheck.json",
+      "sha256": "d5d16591a17b1654ff14b7f401f67c99f2b339c5a5296aeec5b50e384dd06b9b"
+    },
+    "BC_program_rows": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v617_runs/warehouse-v617-risk-protected-02/pair_6140_steps_200000/final-bc-program-rows.npz",
+      "sha256": "87829f9b85829bb031477741d9aa31298f36de5fbee4309c1fc677bbe1f51a96"
+    },
+    "candidate_closed": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v617_runs/warehouse-v617-risk-protected-02/admission/candidate.closed.json",
+      "sha256": "0258bdccc690fbb3341b350c36f5520d7ff3a517b7113bfe482e96fd0cb87d91"
+    },
+    "development_failed": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v617_runs/warehouse-v617-risk-protected-02/admission/development.failed.json",
+      "sha256": "26d32f71bbe77f1643b287a49b773f66b820f3cedbb089169101610cf481720f"
+    },
+    "final_bc_actor": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v617_runs/warehouse-v617-risk-protected-02/pair_6140_steps_200000/final-bc.actor.npz",
+      "sha256": "7dc15d992722107aadc5eed73497ca590c6c4439aec3c5eccba82da9db0069cf"
+    },
+    "full_frame_diagnostic": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v617_runs/warehouse-v617-risk-protected-02/pair_6140_steps_200000/posthoc-fullframe-program-diagnostic.json",
+      "sha256": "371aa454dbe7834b536e60b76504bb2f8e05688d55854def679fa7a8a0e68ad3"
+    },
+    "public_BC_label_diagnostic": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v617_runs/warehouse-v617-risk-protected-02/pair_6140_steps_200000/posthoc-public-label-diagnostic.json",
+      "sha256": "e60a5dbb84e781b15c90f30d9a533d782191529fd61cd0150418c60acd5dcbc3"
+    },
+    "quality_replay": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v617_runs/warehouse-v617-risk-protected-02/pair_6140_steps_200000/bc-quality-replay.json",
+      "sha256": "efefe75511e43cda07f6137779dfcb84c666094ee18721465b61122883e2ed06"
+    },
+    "reset_audit": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v617_runs/warehouse-v617-risk-protected-02/admission/locked-pairs/pair_6140_steps_200000.reset-audit.json",
+      "sha256": "e0bf39789277d81a7ebdeab64571dad73f45cf9880517fdc3f456e0581af2037"
+    },
+    "reset_journal": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v617_runs/warehouse-v617-risk-protected-02/admission/locked-pairs/pair_6140_steps_200000.reset-audit.jsonl",
+      "sha256": "b3fc9a546b8a916fb37f12da9f24aa84449a0ebcb30e3ba466c588c322fb3d18"
+    }
+  },
+  "candidate_id": "warehouse-v617-risk-protected-02",
+  "complete_quality_frame_diagnostic": {
+    "actor_sha256": "7dc15d992722107aadc5eed73497ca590c6c4439aec3c5eccba82da9db0069cf",
+    "bc_precheck_frame_sampling": "existing_collision_deduplication_retained_in_registered_recipe; not a full-frame audit",
+    "frames_per_role": 2880,
+    "program_refit_reproduced": true,
+    "purpose": "posthoc_complete_quality_frames_diagnostic_not_admission",
+    "quality_scenarios_already_recorded": true,
+    "roles": {
+      "robot_1": {
+        "actionable_coverage": 0.315625,
+        "agreement": 1000,
+        "coverage": 0.3472222222222222,
+        "covered": 1000,
+        "feedback_actionable": 909,
+        "frames": 2880,
+        "illegal": 0,
+        "kl_sum": 0.4000553073201445,
+        "masked_kl": 0.0004000553073201445,
+        "top1_agreement": 1.0
+      },
+      "robot_2": {
+        "actionable_coverage": 0.6409722222222223,
+        "agreement": 1954,
+        "coverage": 0.6784722222222223,
+        "covered": 1954,
+        "feedback_actionable": 1846,
+        "frames": 2880,
+        "illegal": 0,
+        "kl_sum": 0.4712479678855743,
+        "masked_kl": 0.00024117091498749966,
+        "top1_agreement": 1.0
+      }
+    },
+    "sealed_seeds_used": false
+  },
+  "failure": "delivery_and_collision_quality",
+  "independent_final_audit_or_holdout_used": false,
+  "pair_seed": 6140,
+  "passed": false,
+  "phase": "development_BC_and_quality_screen",
+  "pilot_opened": false,
+  "public_BC_label_diagnostic": {
+    "actor_sha256": "7dc15d992722107aadc5eed73497ca590c6c4439aec3c5eccba82da9db0069cf",
+    "purpose": "posthoc_public_BC_label_diagnostic_not_admission",
+    "roles": {
+      "robot_1": {
+        "nn_top_action_counts": [
+          576,
+          697,
+          174,
+          187,
+          291
+        ],
+        "protected_teacher_agreement": 0.3289817232375979,
+        "sampled_rows": 1925,
+        "teacher_top1_agreement": 0.6187012987012988,
+        "unprotected_teacher_agreement": 0.8101811906816221
+      },
+      "robot_2": {
+        "nn_top_action_counts": [
+          457,
+          344,
+          339,
+          246,
+          539
+        ],
+        "protected_teacher_agreement": 0.371523178807947,
+        "sampled_rows": 1925,
+        "teacher_top1_agreement": 0.4451948051948052,
+        "unprotected_teacher_agreement": 0.7132530120481928
+      }
+    }
+  },
+  "quality_episode_count": 24,
+  "quality_episodes": [
+    {
+      "collisions": 27,
+      "deliveries": 1,
+      "seed": 263100,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 77,
+      "deliveries": 1,
+      "seed": 263101,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 40,
+      "deliveries": 1,
+      "seed": 263102,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 21,
+      "deliveries": 3,
+      "seed": 263103,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 15,
+      "deliveries": 1,
+      "seed": 263104,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 14,
+      "deliveries": 1,
+      "seed": 263105,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 30,
+      "deliveries": 2,
+      "seed": 263106,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 0,
+      "deliveries": 0,
+      "seed": 263107,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 41,
+      "deliveries": 0,
+      "seed": 263108,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 16,
+      "deliveries": 0,
+      "seed": 263109,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 20,
+      "deliveries": 3,
+      "seed": 263110,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 46,
+      "deliveries": 0,
+      "seed": 263111,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 48,
+      "deliveries": 1,
+      "seed": 263112,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 29,
+      "deliveries": 1,
+      "seed": 263113,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 42,
+      "deliveries": 2,
+      "seed": 263114,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 6,
+      "deliveries": 2,
+      "seed": 263115,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 56,
+      "deliveries": 1,
+      "seed": 263116,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 39,
+      "deliveries": 1,
+      "seed": 263117,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 52,
+      "deliveries": 1,
+      "seed": 263118,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 0,
+      "deliveries": 2,
+      "seed": 263119,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 29,
+      "deliveries": 1,
+      "seed": 263120,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 6,
+      "deliveries": 0,
+      "seed": 263121,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 2,
+      "deliveries": 0,
+      "seed": 263122,
+      "shutdown_episode": false
+    },
+    {
+      "collisions": 65,
+      "deliveries": 1,
+      "seed": 263123,
+      "shutdown_episode": false
+    }
+  ],
+  "quality_replay": {
+    "actor_role_sha256": {
+      "robot_1": "ecf396e1580959d092dc82fda1104d39add01d90187fe1f941b44c21f8ef431f",
+      "robot_2": "94656968c0071e0eb8a2225e98f8eee088708569bac44cd53b64849de682b8cb"
+    },
+    "actor_sha256": "7dc15d992722107aadc5eed73497ca590c6c4439aec3c5eccba82da9db0069cf",
+    "chain_list_sha256": "c6344673709ce79828266ecdbed09ff1e54a9449a246364ac6fac1a1b1f5fa48",
+    "episode_count": 24,
+    "frame_count": 2880,
+    "measured": {
+      "mean_collisions": 30.041666666666668,
+      "mean_deliveries": 1.0833333333333333,
+      "shutdown_episode_rate": 0.0
+    },
+    "passed": true,
+    "rows_sha256": "ddb9a0adb19e6b12e9a5039c289ae1db28c14b9de3172362bbd8bb136c1fcfba",
+    "schedule_sha256": "854a396ac97d451f44c6cc660c0617003219b1893c0a03f4b468201fb05d58f2",
+    "schema": "warehouse-quality-replay.v1"
+  },
+  "quality_summary": {
+    "development_quality_passed": false,
+    "formal_quality_passed": false,
+    "mean_collisions": 30.041666666666668,
+    "mean_deliveries": 1.0833333333333333,
+    "quality": -6.427083333333334,
+    "shutdown_episode_rate": 0.0
+  },
+  "registered_joint_step_budget": 200000,
+  "reset_prefix_valid": true,
+  "roles": {
+    "robot_1": {
+      "BC_precheck_actor_core_passed": true,
+      "BC_precheck_program_passed": true,
+      "BC_precheck_sampled_frames": 1925,
+      "actor_core_coverage": 0.3548051948051948,
+      "expected_feedback_actionable_coverage": 0.326898992061615,
+      "masked_kl": 0.0004207460442557931,
+      "program_qualified_coverage": 0.3548051948051948,
+      "protected_coverage": 0.3979220688343048,
+      "top1_agreement": 1.0
+    },
+    "robot_2": {
+      "BC_precheck_actor_core_passed": true,
+      "BC_precheck_program_passed": true,
+      "BC_precheck_sampled_frames": 1925,
+      "actor_core_coverage": 0.7319480519480519,
+      "expected_feedback_actionable_coverage": 0.6352069973945618,
+      "masked_kl": 0.00027446448802948,
+      "program_qualified_coverage": 0.6727272727272727,
+      "protected_coverage": 0.784415602684021,
+      "top1_agreement": 1.0
+    }
+  },
+  "scope_notes": [
+    "BC internal coverage used the inherited collision-deduplicated visitation rows, not all physical frames; it is not formal all-frame audit evidence.",
+    "The posthoc complete-frame diagnostic reuses the 24 recorded development quality episodes, fixes both Actor and program, and does not select another model or claim a fresh statistical test.",
+    "Independent program refit was reproduced from the saved four-purpose arrays and matched the original content hash.",
+    "This candidate stopped before PPO; there is no regularized-vs-raw or human-effect result.",
+    "Public BC teacher agreement is a surrogate diagnostic on the already collected sampled validation frames, not task optimality or human performance."
+  ],
+  "source_closure_sha256": "97efd0bfa2eb3476e66b4e5b055a8d3d418bd10aae2b721fef6aac0f3fb1cc03",
+  "source_commit": "a5cb4d9"
+}

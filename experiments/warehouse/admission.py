@@ -415,6 +415,8 @@ class NativeBackend:
                            or visits[name].get("scenario_seeds") != seeds
                            or type(visits[name].get("rows")) is not int
                            or visits[name]["rows"] < 1
+                           or visits[name].get("physical_frames") != visits[name]["rows"]
+                           or visits[name].get("excluded_frames") != 0
                            for name, seeds in final_schedule.items())):
                 return None
             roles = precheck.get("roles")

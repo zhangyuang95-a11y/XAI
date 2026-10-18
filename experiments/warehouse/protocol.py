@@ -65,7 +65,7 @@ RETIRED_119_SOURCE_CLOSURE_SHA256 = frozenset({
 })
 RETIRED_119_MODEL_VERSION = "warehouse-dual-actor.v6.9-exploratory"
 REGISTERED_BC_RECIPE_VERSION = (
-    "warehouse-public-dual-bc.v6.17-risk-protected.r2")
+    "warehouse-public-dual-bc.v6.17-risk-protected.r3")
 LEGACY_V614_BC_RECIPE_VERSION = (
     "warehouse-public-dual-bc.v6.14-public-affordance-exploratory")
 LEGACY_V614_BC_SPEC_SHA256 = (
@@ -143,7 +143,7 @@ REGISTERED_BC_SPEC = {
     },
     "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
     "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
-    "executable_recipe_file_sha256": "6998d0c68152a7161762b5f66e4e2d8b4136ea6bec400e8c9e830e18af8d6bec",
+    "executable_recipe_file_sha256": "35d79af9b918ba3ffa015b1202f026fed2334f66a7dfeee2612f72292c1ff904",
 }
 REGISTERED_RISK_DUAL_CONFIG = {
     "target": 0.04, "window_episodes": 128, "minimum_episodes": 64,
@@ -535,6 +535,12 @@ def bc_report_valid(report: Mapping, pair_seed: int,
                 return False
         for name, seeds in final_schedule.items():
             if final_visits[name].get("scenario_seeds") != seeds:
+                return False
+            if not legacy_v614 and (
+                    type(final_visits[name].get("rows")) is not int
+                    or final_visits[name]["rows"] <= 0
+                    or final_visits[name].get("physical_frames") != final_visits[name]["rows"]
+                    or final_visits[name].get("excluded_frames") != 0):
                 return False
         if (not isinstance(final.get("roles"), Mapping)
                 or set(final["roles"]) != set(ROLES)):

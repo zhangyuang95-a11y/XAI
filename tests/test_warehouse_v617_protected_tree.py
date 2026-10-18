@@ -142,3 +142,50 @@ def test_bc_quality_screen_enters_real_reset_audit_context(tmp_path):
     assert len(rows) == 1
     assert rows[0]["phase"] == "bc_quality_screen"
     assert rows[0]["seed"] == 950617
+
+
+def test_independent_bc_collection_retains_repeated_collision_frames(monkeypatch):
+    from types import SimpleNamespace
+    from backend.training import warehouse_v6_runner as runner
+    class Environment:
+        def reset(self, seed):
+            self.state = SimpleNamespace(terminated=False, truncated=False,
+                robot_collision_events=0, total_deliveries=0, shutdown_count=0,
+                by_id=lambda _: SimpleNamespace(position=(1, 1)))
+        def step(self, actions):
+            self.state.robot_collision_events += 1
+            self.state.truncated = self.state.robot_collision_events == 120
+            return None, None, None, None, {"proposed_actions": actions,
+                                           "action_override_agents": []}
+    roles = ("robot_1", "robot_2")
+    actor = SimpleNamespace(act=lambda *a, **k: (
+        {r: "UP" for r in roles},
+        {r: SimpleNamespace(probabilities=(1, 0, 0, 0, 0)) for r in roles}))
+    monkeypatch.setattr(runner.FrozenWarehouseV6Actor, "from_model", lambda _: actor)
+    monkeypatch.setattr(runner, "_environment", lambda **_: Environment())
+    monkeypatch.setattr(runner, "_set_dual_nn_mode", lambda _: None)
+    monkeypatch.setattr(runner, "encode_public_observation", lambda _: np.zeros((2, 141), np.float32))
+    monkeypatch.setattr(runner, "action_masks", lambda _: np.ones((2, 5), np.float32))
+    monkeypatch.setattr(runner, "public_lookahead_teacher", lambda *_: np.zeros(2, np.int64))
+    rows, report = runner._collect_bc_visits(None, [950618], deterministic=True,
+                                           deduplicate_collisions=False)
+    assert len(rows[0]) == report["physical_frames"] == 120
+    assert report["excluded_frames"] == 0
+    training_rows, training_report = runner._collect_bc_visits(
+        None, [950618], deterministic=True, deduplicate_collisions=True)
+    assert len(training_rows[0]) < 120
+    assert training_report["excluded_frames"] == 120-len(training_rows[0])
+
+
+def test_admission_rejects_a_bc_precheck_with_filtered_frames():
+    from experiments.warehouse import protocol as p
+    from tests.warehouse_v6_contract_fixture import bc_receipt
+    import json
+    seed = p.DEVELOPMENT_PAIR_SEEDS[0]
+    receipt = bc_receipt(seed, "f"*64)
+    assert p.bc_report_valid(receipt, seed, "f"*64)
+    visits = receipt["final_bc_internal_precheck"]["final_bc_visits"]
+    next(iter(visits.values()))["excluded_frames"] = 1
+    receipt["final_bc_internal_precheck_receipt"]["sha256"] = sha256(
+        (json.dumps(receipt["final_bc_internal_precheck"],sort_keys=True,allow_nan=False)+"\n").encode()).hexdigest()
+    assert not p.bc_report_valid(receipt, seed, "f"*64)

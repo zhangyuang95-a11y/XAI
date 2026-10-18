@@ -52,3 +52,37 @@ reset journals. Ordinary training calls remain closed. No runtime action
 controller or program can replace a frozen NN action.
 
 Candidate 01 was interrupted after 424 audited resets because the new quality-screen phase was absent from the reset phase allowlist. Its partial training is retired, without a scientific verdict. Candidate 02 fixes and directly tests that hook, uses fresh development scenes, and starts from scratch.
+
+## Candidate 02 result
+
+The complete BC run on seed 6140 is closed. It used source commit `a5cb4d9`,
+source closure `97efd0bfa2eb3476e66b4e5b055a8d3d418bd10aae2b721fef6aac0f3fb1cc03`,
+and 1,420 audited resets. No PPO, formal pair, sealed audit, or holdout ran.
+
+Both roles passed the inherited sampled BC program precheck: program leaf
+coverage 35.48% / 67.27%, expected actionable coverage 32.69% / 63.52%,
+100% top-one agreement, KL 0.000421 / 0.000274. That collector deduplicates
+collision rows; these figures must not be labeled a formal all-frame audit.
+
+The pre-PPO quality screen failed: 24 episodes averaged 1.083 deliveries,
+30.042 robot collisions, and zero shutdown episodes. Independent physical
+replay verified all 2,880 frames, frozen NN draws and reported outcomes.
+The candidate therefore closed automatically before either PPO arm.
+
+An additional diagnostic reproduced the fixed programs from the cached
+four-purpose data and evaluated every recorded quality frame. Coverage was
+34.72% / 67.85%, actual feedback-actionable coverage 31.56% / 64.10%, with
+100% agreement, zero illegal actions and KL 0.000400 / 0.000241. This reuses
+recorded development trajectories and is diagnostic only. It does not
+constitute a new independent test or justify model selection.
+
+The structure improves local program fidelity, but this trained candidate
+does not preserve task quality. Strong protection on broad regions must not
+be promoted. A later method must preserve delivery and collision quality;
+its BC screening must also retain every physical frame rather than report
+the inherited deduplicated sample as all-frame coverage. All acceptance
+thresholds and the closed pilot remain in force. The complete failure summary
+and original asset hashes are in
+`experiments/warehouse/evidence/warehouse-v617-02-quality-failure.json`.
+
+After closure, the unexecuted `.r3` recipe corrects BC precheck collection to retain every physical frame in all four purposes. Both receipt validators now reject excluded frames, and a repeated-collision test verifies that independent rows are retained while training deduplication remains available. Candidate 02 results remain bound to `.r2` and commit `a5cb4d9`; they are not reissued under the corrected source. No replacement training run has started.

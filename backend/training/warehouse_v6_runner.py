@@ -200,6 +200,7 @@ _SOURCE_FILES = (
     "scripts/package_warehouse_v6_release.py", "scripts/start_warehouse_v6_candidate_release.py",
     "scripts/run_warehouse_v617_locked_pair.py",
     "scripts/run_warehouse_v618_locked_pair.py",
+    "scripts/run_warehouse_v618_bc_preflight.py",
     "scripts/diagnose_warehouse_v618_baseline.py",
     "scripts/diagnose_warehouse_v618_program_feasibility.py",
     "scripts/run_warehouse_v618_engineering_smoke.py",
@@ -536,8 +537,8 @@ def _training_config_sha256(spec: Mapping) -> str:
                      REGISTERED_RISK_DUAL_CONFIG_SHA256) !=
             REGISTERED_RISK_DUAL_CONFIG_SHA256 or
             spec.get("executable_recipe_file_sha256",
-                     validate_v614_exploratory_recipe()) !=
-            validate_v614_exploratory_recipe() or
+                     validate_v618_quality_selective_recipe()) !=
+            validate_v618_quality_selective_recipe() or
             spec.get("action_physics_config_sha256",
                      ACTION_PHYSICS_CONFIG_SHA256) !=
             ACTION_PHYSICS_CONFIG_SHA256):
@@ -923,6 +924,211 @@ def _formal_partial_reset_prefix(spec: Mapping, observed: Sequence[Mapping]) -> 
                 return False
             program_index += 1
     return True
+
+
+def run_locked_bc_preflight(run_spec: Mapping, *,
+                            authorization_receipt_path: str | Path) -> dict:
+    """Execute the registered full BC once, with no route to PPO or publishing.
+
+    The 200k spec budget identifies the future paired recipe only. This
+    capability calls _pretrain_pair_production directly and never train_pair,
+    _train_variant, or ppo_update. A failed/interrupted attempt writes its
+    receipt before reraising; the independent precheck remains untouched.
+    """
+    global _LOCKED_EXECUTION_USED_IN_PROCESS
+    from experiments.warehouse.protocol import REGISTERED_CANDIDATE_ID
+
+    if not FORMAL_TRAINING_DISABLED or _LOCKED_EXECUTION_USED_IN_PROCESS:
+        raise RuntimeError("Warehouse BC preflight capability unavailable")
+    spec = _checked_spec(run_spec)
+    output_root = (_SOURCE_ROOT / "output" / "warehouse_v618_preflight").resolve()
+    if (spec.get("smoke") or spec["pair_seed"] != 6150
+            or spec["candidate_id"] != REGISTERED_CANDIDATE_ID + "-bc-preflight"
+            or spec["joint_steps"] != 200_000
+            or Path(spec["output_dir"]).resolve() != output_root):
+        raise RuntimeError("Warehouse BC preflight is development-only and cannot be promoted")
+    directory = output_root / spec["candidate_id"] / "pair_6150_steps_200000"
+    artifact_paths = {key: str(Path(spec[key]).resolve()) for key in (
+        "warmup_actor_path", "final_bc_actor_path", "final_bc_precheck_receipt_path")}
+    expected_artifacts = {
+        "warmup_actor_path": str(directory / "warmup.actor.npz"),
+        "final_bc_actor_path": str(directory / "final-bc.actor.npz"),
+        "final_bc_precheck_receipt_path": str(directory / "final-bc-internal-precheck.json"),
+    }
+    if (directory.exists() or not output_root.is_dir()
+            or artifact_paths != expected_artifacts):
+        raise RuntimeError("Warehouse BC preflight output must be isolated and new")
+    authorization_path = Path(authorization_receipt_path).resolve(strict=True)
+    authorization = json.loads(authorization_path.read_bytes())
+    main_value = getattr(sys.modules["__main__"], "__file__", None)
+    main_path = Path(main_value).resolve(strict=True) if isinstance(main_value, str) else None
+    allowed_main = (_SOURCE_ROOT / "scripts" / "run_warehouse_v618_bc_preflight.py").resolve(strict=True)
+    if main_path != allowed_main:
+        raise RuntimeError("Warehouse BC preflight requires its saved authorized main script")
+    journal_path = directory / "bc-preflight.resets.jsonl"
+    receipt_path = directory / "bc-preflight.receipt.json"
+    report_path = directory / "bc-preflight.bc-report.json"
+    expected_resets = _formal_bc_reset_sequence(spec, include_quality_screen=True)
+    if len(expected_resets) != 1420:
+        raise RuntimeError("Warehouse BC preflight registered reset schedule drifted")
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(spec["pair_seed"])
+        initial_role_sha256 = role_hashes(WarehouseV6Actor())
+    required = {
+        "authorization_kind": "warehouse-v618-full-bc-preflight-only-v1",
+        "candidate_id": spec["candidate_id"], "pair_seed": spec["pair_seed"],
+        "future_pair_joint_steps": spec["joint_steps"], "PPO_joint_steps": 0,
+        "publishable": False,
+        "source_closure_sha256": spec["source_closure_sha256"],
+        "run_spec_sha256": _scientific_run_spec_sha256(spec),
+        "training_config_sha256": _training_config_sha256(spec),
+        "bc_recipe_sha256": REGISTERED_BC_SPEC_SHA256,
+        "executable_recipe_file_sha256": validate_v618_quality_selective_recipe(),
+        "action_physics_config_sha256": ACTION_PHYSICS_CONFIG_SHA256,
+        "bc_data_seed_schedule_sha256": spec["bc_data_seed_schedule_sha256"],
+        "bc_critic_reset_schedule_sha256": spec["bc_critic_reset_schedule_sha256"],
+        "initial_role_sha256": initial_role_sha256,
+        "output_directory": str(directory), "artifact_paths_sha256": _digest_json(artifact_paths),
+        "expected_reset_sequence_sha256": _digest_json(expected_resets),
+        "lock_script_path": str(main_path),
+        "lock_script_sha256": sha256(main_path.read_bytes()).hexdigest(),
+    }
+    if (authorization.get("publishable") is not False
+            or type(authorization.get("PPO_joint_steps")) is not int
+            or any(authorization.get(key) != value for key, value in required.items())):
+        raise RuntimeError("Warehouse BC preflight authorization mismatch")
+    _LOCKED_EXECUTION_USED_IN_PROCESS = True
+    directory.mkdir(parents=True, exist_ok=False)
+    torch.manual_seed(spec["pair_seed"])
+    model = WarehouseV6Actor()
+    status, failure, bc_report = "failed", None, None
+    try:
+        with capture_stage1_resets(journal_path) as actual_rows:
+            token = _ACTIVE_LOCKED_EXECUTION.set(_LOCKED_BC_MARKER)
+            try:
+                with stage1_reset_phase("formal_bc"):
+                    bc_report = _pretrain_pair_production(
+                        model, pair_seed=spec["pair_seed"], spec=spec)
+                saved_precheck = json.loads(Path(spec["final_bc_precheck_receipt_path"]).read_bytes())
+                final_asset = bc_report.get("final_bc_internal_precheck", {}).get("final_bc_actor")
+                if (not isinstance(saved_precheck, Mapping)
+                        or saved_precheck != bc_report.get("final_bc_internal_precheck")
+                        or saved_precheck.get("passed") is not True
+                        or saved_precheck.get("program_precheck_passed") is not True
+                        or saved_precheck.get("quality_screen", {}).get("summary", {}).get(
+                            "development_quality_passed") is not True
+                        or not isinstance(final_asset, Mapping)
+                        or final_asset.get("path") != spec["final_bc_actor_path"]
+                        or bc_report.get("initial_role_sha256") != initial_role_sha256
+                        or bc_report.get("pretrained_role_sha256") != role_hashes(model)):
+                    raise RuntimeError("Warehouse BC preflight completed without complete bound evidence")
+                FrozenWarehouseV6Actor.load(spec["final_bc_actor_path"],
+                    expected_sha256=final_asset["sha256"],
+                    expected_role_sha256=role_hashes(model))
+                observed = [_formal_reset_projection(row) for row in actual_rows]
+                if observed != expected_resets:
+                    raise RuntimeError("Warehouse BC preflight reset sequence differs from declared BC")
+                if any(row["map_layout_id"] != ACTION_PHYSICS_CONFIG["map_layout_id"]
+                       or row["move_battery_cost"] != ACTION_PHYSICS_CONFIG["move_battery_cost"]
+                       or row["charge_per_wait"] != ACTION_PHYSICS_CONFIG["charge_per_wait"]
+                       for row in actual_rows):
+                    raise RuntimeError("Warehouse BC preflight reset physics drifted")
+                _assert_source_closure(spec["source_closure_sha256"])
+                status = "completed"
+            finally:
+                _ACTIVE_LOCKED_EXECUTION.reset(token)
+    except BaseException as exc:
+        failure = exc
+        status = "interrupted" if isinstance(exc, (KeyboardInterrupt, SystemExit)) else "failed"
+    # The capture context has closed/flushed the journal before its hash is
+    # committed. Failed BC can still have a complete final Actor and precheck.
+    actual_rows = actual_rows if "actual_rows" in locals() else []
+    observed = [_formal_reset_projection(row) for row in actual_rows]
+    prefix_matches = len(observed) <= len(expected_resets) and observed == expected_resets[:len(observed)]
+    precheck_path = Path(spec["final_bc_precheck_receipt_path"])
+    precheck, precheck_read_error = None, None
+    if precheck_path.is_file():
+        try:
+            precheck = json.loads(precheck_path.read_bytes())
+        except (OSError, ValueError) as exc:
+            precheck_read_error = f"{type(exc).__name__}: {exc}"
+    try:
+        observed_source = source_closure_sha256()
+    except (OSError, ValueError) as exc:
+        observed_source = None
+        if failure is None:
+            failure, status = exc, "failed"
+    if bc_report is not None:
+        with report_path.open("x") as handle:
+            json.dump(bc_report, handle, sort_keys=True, allow_nan=False)
+            handle.write("\n")
+    program_passed = (precheck.get("program_precheck_passed")
+                      if isinstance(precheck, Mapping) else None)
+    quality_passed = (precheck.get("quality_screen", {}).get("summary", {}).get(
+        "development_quality_passed") if isinstance(precheck, Mapping) else None)
+    if status == "interrupted":
+        category = "interrupted"
+    elif not prefix_matches:
+        category = "reset_sequence_violation"
+    elif program_passed is False and quality_passed is False:
+        category = "program_and_quality_precheck_failed"
+    elif program_passed is False:
+        category = "program_precheck_failed"
+    elif quality_passed is False:
+        category = "quality_precheck_failed"
+    elif failure is not None:
+        category = "execution_or_integrity_error"
+    else:
+        category = None
+    final_path = Path(spec["final_bc_actor_path"])
+    final_asset = None
+    if final_path.is_file():
+        final_digest = sha256(final_path.read_bytes()).hexdigest()
+        try:
+            final_actor = FrozenWarehouseV6Actor.load(final_path, expected_sha256=final_digest)
+            final_asset = {"path": str(final_path), "sha256": final_digest,
+                           "model_version": final_actor.model_version,
+                           "role_sha256": final_actor.role_sha256}
+        except (ValueError, RuntimeError, KeyError) as exc:
+            final_asset = {"path": str(final_path), "sha256": final_digest,
+                           "load_error": f"{type(exc).__name__}: {exc}"}
+    receipt = {
+        "version": "warehouse-v618-full-bc-preflight-receipt.v1",
+        "purpose": "development_full_bc_precheck_only_not_pair_training_or_admission",
+        "status": status, "publishable": False, "PPO_joint_steps": 0,
+        "future_pair_joint_steps": spec["joint_steps"], "candidate_id": spec["candidate_id"],
+        "pair_seed": spec["pair_seed"], "error_category": category,
+        "error": None if failure is None else f"{type(failure).__name__}: {failure}",
+        "source_closure_sha256": spec["source_closure_sha256"],
+        "observed_source_closure_sha256": observed_source,
+        "run_spec_sha256": required["run_spec_sha256"],
+        "training_config_sha256": required["training_config_sha256"],
+        "authorization_receipt_sha256": sha256(authorization_path.read_bytes()).hexdigest(),
+        "initial_role_sha256": initial_role_sha256, "current_role_sha256": role_hashes(model),
+        "final_actor": final_asset,
+        "bc_report_path": str(report_path) if report_path.is_file() else None,
+        "bc_report_sha256": sha256(report_path.read_bytes()).hexdigest() if report_path.is_file() else None,
+        "final_bc_precheck_path": str(precheck_path) if precheck_path.is_file() else None,
+        "final_bc_precheck_sha256": sha256(precheck_path.read_bytes()).hexdigest() if precheck_path.is_file() else None,
+        "program_precheck_passed": program_passed, "quality_screen_passed": quality_passed,
+        "precheck_read_error": precheck_read_error,
+        "expected_reset_count": len(expected_resets), "actual_reset_count": len(actual_rows),
+        "actual_reset_rows": actual_rows, "declared_prefix_matches": prefix_matches,
+        "exact_full_sequence_matches": observed == expected_resets,
+        "expected_reset_sequence_sha256": _digest_json(expected_resets),
+        "actual_reset_sequence_sha256": _digest_json(observed),
+        "reset_journal_path": str(journal_path),
+        "reset_journal_sha256": sha256(journal_path.read_bytes()).hexdigest() if journal_path.is_file() else None,
+    }
+    with receipt_path.open("x") as handle:
+        json.dump(receipt, handle, sort_keys=True, allow_nan=False)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    if failure is not None:
+        raise failure.with_traceback(failure.__traceback__)
+    return {"receipt": receipt, "receipt_path": str(receipt_path),
+            "receipt_sha256": sha256(receipt_path.read_bytes()).hexdigest()}
 
 
 def run_locked_engineering_pair(run_spec: Mapping, *,

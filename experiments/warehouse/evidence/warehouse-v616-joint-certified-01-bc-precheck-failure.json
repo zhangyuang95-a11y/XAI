@@ -1,0 +1,51 @@
+{
+  "candidate_id": "warehouse-v616-joint-certified-01",
+  "source_commit": "42a66a4",
+  "source_closure_sha256": "bca4eb192396e0c98fc506b37823f63df009e8d84fd8b116c8b51628f04940be",
+  "phase": "development_bc_precheck",
+  "pair_seed": 6120,
+  "joint_step_budget": 200000,
+  "bc_precheck_passed": false,
+  "ppo_started": false,
+  "release_eligible": false,
+  "independent_audit_or_holdout_used": false,
+  "evidence": {
+    "final_bc_actor_sha256": "d3f0ee01fff90d78e7ffb84697deb203162cd7c73a73026d653e51bfc8d5f7fe",
+    "final_bc_precheck_sha256": "4ddef0f720484fff8916959d8b8d0d6e3de4113c7e1a9045f356c92f081d038b",
+    "reset_audit_sha256": "5334b7a9ce3e00e4a2eb1e9626084c1a0b1c443c21a8b203a2f9946c24d6a6d5",
+    "reset_journal_sha256": "807d97dc84204775b0c4364096dfd25b4a724290182c069d52325a69342cb431",
+    "run_spec_sha256": "d67a323c45b85e497d04ad2455b90d1427a67b56dea235ba6a098f87f3ac09d9",
+    "original_generic_failure_receipt_sha256": "c6cb11235f6ed09816b512da358ec44ba2a6172827bc817dd651b73ac345eaa6"
+  },
+  "roles": {
+    "robot_1": {
+      "fit_candidate_leaves": 3,
+      "eligibility_candidate_leaf_mass": 0.5036700454386578,
+      "eligibility_candidate_actionable_mass": 0.34020835161209106,
+      "eligibility_candidate_top1_agreement": 0.7453157529493407,
+      "eligibility_candidate_masked_kl": 0.5186309218406677,
+      "selected_core_leaves": 0,
+      "installed_core_validation_mass": 0.0,
+      "installed_core_expected_actionable_mass": 0.0
+    },
+    "robot_2": {
+      "fit_candidate_leaves": 6,
+      "eligibility_candidate_leaf_mass": 0.47116392869626006,
+      "eligibility_candidate_actionable_mass": 0.25261831283569336,
+      "eligibility_candidate_top1_agreement": 0.6186943620178041,
+      "eligibility_candidate_masked_kl": 0.6491948366165161,
+      "selected_core_leaves": 0,
+      "installed_core_validation_mass": 0.0,
+      "installed_core_expected_actionable_mass": 0.0
+    }
+  },
+  "reset_audit_posthoc_reconciliation": {
+    "recorded_declared_prefix_matches": false,
+    "reason": "The v6.16 verifier iterated registered schedule keys instead of BC execution order, placing risk visits before topology fit visits.",
+    "corrected_expected_reset_count": 1396,
+    "actual_reset_count": 1396,
+    "all_reset_rows_match_corrected_order": true,
+    "actual_reset_sequence_sha256": "8baa8896e0bff95d7b9b648e584bbc77e4933a8124c92699cccfa744f184d1f1",
+    "status": "diagnostic_only_not_an_admission_receipt"
+  }
+}

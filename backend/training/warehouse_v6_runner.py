@@ -756,8 +756,29 @@ def _checked_spec(run_spec: Mapping) -> dict:
 
 
 def _formal_bc_reset_sequence(spec: Mapping) -> list[dict]:
+    # Pretraining visits the topology-fit scenes before the critic and the
+    # risk/large/deep BC stages. The registered schedule is a mapping of
+    # purposes, not a timeline; JSON serialization may reorder its keys.
+    ordered_names = (
+        "initial_public_teacher",
+        *(f"initial_nn_dagger_{index}"
+          for index in range(1, BC_INITIAL_DAGGER_ROUNDS + 1)),
+        "topology_fit_sampled", "topology_fit_argmax",
+        "risk_public_teacher", "risk_nn_visitation",
+        "large_public_teacher", "large_nn_visitation",
+        "deep_public_teacher",
+        *(f"deep_{index}_{kind}"
+          for index in range(1, BC_DEEP_DAGGER_ROUNDS + 1)
+          for kind in ("sampled", "argmax")),
+        *(f"final_bc_precheck_{name}"
+          for name in BC_FINAL_CORE_STAGE_COUNTS),
+    )
+    schedule = spec["bc_data_seed_schedule"]
+    if set(schedule) != set(ordered_names):
+        raise RuntimeError("Warehouse formal BC purpose schedule changed")
     expected = []
-    for name, seeds in spec["bc_data_seed_schedule"].items():
+    for name in ordered_names:
+        seeds = schedule[name]
         expected.extend({"phase": "formal_bc", "seed": seed} for seed in seeds)
         if name == "topology_fit_argmax":
             critic = spec["bc_critic_reset_schedule"]

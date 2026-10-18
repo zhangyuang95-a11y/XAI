@@ -64,6 +64,41 @@ def test_run_spec_seals_joint_tree_schedule_and_method(tmp_path) -> None:
                       checkpoint_seeds=p.DEVELOPMENT_SELECTION_SEEDS)
 
 
+def test_formal_bc_reset_order_matches_topology_before_risk_at_index_180() -> None:
+    from backend.training import warehouse_v6_runner as runner
+
+    seed = p.DEVELOPMENT_PAIR_SEEDS[0]
+    schedule = p.bc_data_seed_schedule(seed)
+    spec = {
+        "bc_data_seed_schedule": schedule,
+        "bc_critic_reset_schedule": p.bc_critic_reset_schedule(
+            seed, p.INITIAL_RELEASE_ID),
+    }
+    expected = runner._formal_bc_reset_sequence(spec)
+    # The old mapping iteration put risk first at 180. The real BC visits
+    # both topology stages, then performs critic resets, before risk data.
+    assert expected[180] == {"phase": "formal_bc",
+                             "seed": schedule["topology_fit_sampled"][0]}
+    assert expected[205] == {"phase": "formal_bc",
+                             "seed": schedule["topology_fit_argmax"][0]}
+    assert expected[230] == {"phase": "formal_bc",
+                             "seed": spec["bc_critic_reset_schedule"]["seed"]}
+    assert expected[232] == {"phase": "formal_bc",
+                             "seed": schedule["risk_public_teacher"][0]}
+    assert len(expected) == 1_396
+    reordered = {**spec, "bc_data_seed_schedule": dict(sorted(schedule.items()))}
+    assert runner._formal_bc_reset_sequence(reordered) == expected
+    wrong_prefix = expected[:180] + [{"phase": "formal_bc",
+                                      "seed": schedule["risk_public_teacher"][0]}]
+    assert runner._formal_partial_reset_prefix(spec, expected[:233])
+    assert not runner._formal_partial_reset_prefix(spec, wrong_prefix)
+    incomplete = {**spec, "bc_data_seed_schedule": {
+        name: seeds for name, seeds in schedule.items()
+        if name != "topology_fit_sampled"}}
+    with pytest.raises(RuntimeError, match="purpose schedule changed"):
+        runner._formal_bc_reset_sequence(incomplete)
+
+
 def test_refresh_history_requires_both_role_certificates_at_every_step() -> None:
     valid = _history(200_000)
     assert p.topology_refresh_history_valid(valid, joint_steps=200_000)

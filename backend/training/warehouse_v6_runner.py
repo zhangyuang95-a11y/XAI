@@ -182,6 +182,8 @@ _SOURCE_FILES = (
     "backend/training/warehouse_v6_core_intrinsic.py",
     "backend/training/warehouse_v617_risk_tree.py",
     "backend/training/warehouse_v618_selective_tree.py",
+    "backend/training/warehouse_v619_leaf_fit.py",
+    "backend/training/warehouse_v619_tree.py",
     "backend/training/warehouse_v6_evaluation_authorization.py",
     "backend/training/warehouse_v614_certificate_tree.py",
     "backend/training/warehouse_v614_masked_refit.py",
@@ -194,6 +196,7 @@ _SOURCE_FILES = (
     "experiments/warehouse/protocol.py", "experiments/warehouse/admission.py",
     "experiments/warehouse/acceptance.py", "experiments/warehouse/quality_replay.py",
     "experiments/warehouse/stage2_evidence.py",
+    "experiments/warehouse/v619_protocol.py",
     "domains/warehouse/neural_turnbased.py", "domains/warehouse/turnbased.py",
     *(path.relative_to(_SOURCE_ROOT).as_posix()
       for path in sorted((_SOURCE_ROOT / "study_v3").glob("*.py"))),
@@ -205,11 +208,14 @@ _SOURCE_FILES = (
     "scripts/diagnose_warehouse_v618_baseline.py",
     "scripts/diagnose_warehouse_v618_program_feasibility.py",
     "scripts/run_warehouse_v618_engineering_smoke.py",
+    "scripts/run_warehouse_v619_cached_comparison.py",
+    "scripts/run_warehouse_v619_fixed_validation.py",
     "configs/study_v3_warehouse.json", "configs/study_v3_warehouse_neural.json",
     "configs/study_v3_warehouse_neural_v5.json", "configs/study_v3_warehouse_neural_v6.json",
     "configs/warehouse_v614_exploratory_recipe.json",
     "configs/warehouse_v617_risk_protected_recipe.json",
     "configs/warehouse_v618_quality_selective_recipe.json",
+    "configs/warehouse_v619_program_recipe.json",
     "requirements-warehouse-v6-training.txt",
 )
 
@@ -3083,11 +3089,21 @@ def _authorized_frozen_operation(actor, seeds, authorization, operation, *, kind
     try:
         with TemporaryDirectory(prefix="warehouse-v618-evaluation-") as folder:
             journal = Path(folder) / "resets.jsonl"
-            with capture_stage1_resets(journal) as resets:
-                with stage1_reset_phase("program" if kind == "final_program_audit" else "quality"):
-                    result = operation()
-            if [row["seed"] for row in resets] != list(seeds):
-                raise RuntimeError("Warehouse authorized evaluation reset schedule drifted")
+            resets = []
+            try:
+                with capture_stage1_resets(journal) as resets:
+                    with stage1_reset_phase("program" if kind == "final_program_audit" else "quality"):
+                        result = operation()
+                if [row["seed"] for row in resets] != list(seeds):
+                    raise RuntimeError("Warehouse authorized evaluation reset schedule drifted")
+            except BaseException as exc:
+                # Retain consumed scenes even when a collection fails before
+                # returning; the temporary journal is about to be removed.
+                exc.warehouse_reset_audit = {
+                    "resets": list(resets), "actual_reset_count": len(resets),
+                    "journal_sha256": sha256(journal.read_bytes()).hexdigest()
+                    if journal.is_file() else None}
+                raise
             audit = {"resets": resets, "journal_sha256": sha256(journal.read_bytes()).hexdigest(),
                      "actual_reset_count": len(resets)}
         _assert_source_closure(declared["expected_source_closure_sha256"])
@@ -3113,15 +3129,34 @@ def audit_authorized_frozen(actor: FrozenWarehouseV6Actor, programs: Mapping,
 
 
 def collect_authorized_program_rows(actor: FrozenWarehouseV6Actor, seeds: Sequence[int], *,
-                                     authorization: Mapping | None = None):
+                                     authorization: Mapping | None = None,
+                                     deterministic: bool = False,
+                                     action_seed_offset: int = 0,
+                                     include_episode_outcomes: bool = False):
     """Development fit data only; cannot consume a sealed audit as training data."""
     from .warehouse_v6_evaluation_authorization import validate_evaluation_authorization
     declared = validate_evaluation_authorization(actor=actor, seeds=seeds,
                                                   authorization=authorization)
     if declared["purpose"] in ("heldout", "final_program_audit"):
         raise RuntimeError("Warehouse sealed evaluation cannot collect fitting data")
+    if (type(deterministic) is not bool or type(action_seed_offset) is not int
+            or type(include_episode_outcomes) is not bool
+            or any(int(seed) + action_seed_offset < 0 for seed in seeds)):
+        raise ValueError("Warehouse development visitation mode is invalid")
+    outcomes = [] if include_episode_outcomes else None
+    options = {}
+    if deterministic:
+        options["deterministic"] = True
+    if action_seed_offset:
+        options["action_seed_offset"] = action_seed_offset
+    if outcomes is not None:
+        options["outcome_sink"] = outcomes
     rows, evidence = _authorized_frozen_operation(actor, seeds, authorization,
-        lambda: collect_program_audit_rows(actor, seeds), kind="final_program_audit")
+        lambda: collect_program_audit_rows(actor, seeds, **options), kind="final_program_audit")
+    if outcomes is not None:
+        evidence = {**evidence, "episode_outcomes": outcomes,
+                    "sampling_mode": "argmax" if deterministic else "sampled",
+                    "action_seed_offset": action_seed_offset}
     return rows, evidence
 
 
@@ -3234,13 +3269,17 @@ def _fit_training_programs(model: WarehouseV6Actor,
 
 
 def collect_program_audit_rows(actor: FrozenWarehouseV6Actor,
-                               seeds: Sequence[int]) -> dict[str, list[dict]]:
+                               seeds: Sequence[int], *, deterministic: bool = False,
+                               action_seed_offset: int = 0,
+                               outcome_sink: list | None = None) -> dict[str, list[dict]]:
     """Independent neural rollouts; no program call can change their actions."""
     rows = {role: [] for role in AGENTS}
     for seed in seeds:
         env = _environment(training_reward=False)
         env.reset(seed=int(seed))
         _set_dual_nn_mode(env)
+        action_seed = int(seed) + action_seed_offset
+        first_frame_row = len(rows[AGENTS[0]])
         while not (env.state.terminated or env.state.truncated):
             obs, masks = encode_public_observation(env.state), action_masks(env.state)
             pre_state = public_pre_action_snapshot(env.state)
@@ -3250,7 +3289,8 @@ def collect_program_audit_rows(actor: FrozenWarehouseV6Actor,
                 raise RuntimeError("Warehouse audit public snapshot cannot rebuild NN inputs")
             pre_sha = canonical_sha256(pre_state)
             frame, episode_id = int(env.state.frame), int(env.state.episode_id)
-            actions, distributions = actor.act(env.state, base_seed=int(seed))
+            actions, distributions = actor.act(env.state, base_seed=action_seed,
+                **({"deterministic": True} if deterministic else {}))
             for index, role in enumerate(AGENTS):
                 distribution = distributions[role]
                 rows[role].append({"obs": obs[index].copy(),
@@ -3264,7 +3304,7 @@ def collect_program_audit_rows(actor: FrozenWarehouseV6Actor,
                                        distribution.probabilities))],
                                    "nn_probabilities": list(distribution.probabilities),
                                    "rng_seed": independent_agent_seed(
-                                       base_seed=int(seed), episode_id=episode_id,
+                                       base_seed=action_seed, episode_id=episode_id,
                                        frame=frame, agent_id=role),
                                    "actor_sha256": actor.artifact_sha256,
                                    "actor_role_sha256": actor.role_sha256[role],
@@ -3278,6 +3318,13 @@ def collect_program_audit_rows(actor: FrozenWarehouseV6Actor,
             for role in AGENTS:
                 rows[role][-1]["post_state_public"] = post_state
                 rows[role][-1]["post_state_public_sha256"] = post_sha
+        if outcome_sink is not None:
+            outcome_sink.append({"seed": int(seed), "action_seed": action_seed,
+                "sampling_mode": "argmax" if deterministic else "sampled",
+                "deliveries": int(env.state.total_deliveries),
+                "collisions": int(env.state.robot_collision_events),
+                "shutdown_episode": bool(env.state.shutdown_count),
+                "frame_count": len(rows[AGENTS[0]])-first_frame_row})
     return rows
 
 

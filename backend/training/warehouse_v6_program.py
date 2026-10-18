@@ -38,11 +38,13 @@ PROGRAM_VERSION = "warehouse-role-program.v6.14-public-affordance-exploratory"
 V616_PROGRAM_VERSION = "warehouse-role-program.v6.16-joint-certified-topology"
 JOINT_PROGRAM_VERSION = "warehouse-role-program.v6.17-risk-protected-topology"
 SELECTIVE_PROGRAM_VERSION = "warehouse-role-program.v6.18-independent-selective-distribution"
+PATH_CONSTRAINED_PROGRAM_VERSION = "warehouse-role-program.v6.19-path-constrained-distribution-tree"
 AXIS_TREE_METHOD = "axis_tree_v1"
 ACTOR_SPARSE_TOPOLOGY_METHOD = "actor_sparse_topology_v1"
 V616_TOPOLOGY_METHOD = "actor_joint_certified_topology_v2"
 JOINT_CERTIFIED_TOPOLOGY_METHOD = "actor_risk_stratified_protected_topology_v3"
 INDEPENDENT_SELECTIVE_METHOD = "independent_selective_masked_distribution_v4"
+PATH_CONSTRAINED_METHOD = "path_constrained_distribution_tree_v1"
 PROGRAM_MAX_DEPTH = 5
 PROGRAM_MAX_LEAVES = 16
 PROGRAM_MAX_INTERNAL_NODES = PROGRAM_MAX_LEAVES - 1
@@ -109,7 +111,7 @@ def certified_actor_actions(
 def _requires_path_certificate(program: "WarehouseV6Program") -> bool:
     return program.report.get("fit_method") in (
         JOINT_CERTIFIED_TOPOLOGY_METHOD, V616_TOPOLOGY_METHOD,
-        INDEPENDENT_SELECTIVE_METHOD)
+        INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD)
 
 
 def _requires_actor_topology(program: "WarehouseV6Program") -> bool:
@@ -195,7 +197,7 @@ def _metrics(program: "WarehouseV6Program", actor: FrozenWarehouseV6Role,
         leaves = program.leaf_indices(x)
     selected = np.isin(leaves, tuple(selected_leaves))
     count = int(selected.sum())
-    independent = program.report.get("fit_method") == INDEPENDENT_SELECTIVE_METHOD
+    independent = program.report.get("fit_method") in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD)
     all_x = x if independent else None
     all_p = (context["p"] if context is not None else
              _masked_probabilities(actor.logits_encoded(x), masks)
@@ -463,7 +465,7 @@ class WarehouseV6Program:
 
     def leaf_indices(self, encoded: np.ndarray) -> np.ndarray:
         flat = np.asarray(encoded, dtype=np.float32).reshape(-1, self.feature_dim)
-        if self.report.get("fit_method") == INDEPENDENT_SELECTIVE_METHOD:
+        if self.report.get("fit_method") in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD):
             return hard_tree_leaf_indices(
                 flat, self.split_weights, self.split_bias, self.left_refs,
                 self.right_refs, len(self.split_weights), PROGRAM_MAX_DEPTH,
@@ -523,8 +525,10 @@ class WarehouseV6Program:
                 or actor_role.feature_dim != self.feature_dim
                 or tuple(actor_role.feature_names) != tuple(self.feature_names)):
             return None
+        if self.report.get("fit_method") == PATH_CONSTRAINED_METHOD:
+            _validate_constrained_program_leaves(self)
         leaves = self.feedback_leaves if purpose == "feedback" else self.explanation_leaves
-        if (self.report.get("fit_method") == INDEPENDENT_SELECTIVE_METHOD
+        if (self.report.get("fit_method") in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD)
                 and not _whole_tree_raw_legality_passed(
                     self.report.get("validation", {}).get(purpose, {}))):
             return None
@@ -543,7 +547,8 @@ class WarehouseV6Program:
 
     def to_dict(self) -> dict:
         return {
-            "version": (SELECTIVE_PROGRAM_VERSION if self.report.get("fit_method") == INDEPENDENT_SELECTIVE_METHOD else
+            "version": (PATH_CONSTRAINED_PROGRAM_VERSION if self.report.get("fit_method") == PATH_CONSTRAINED_METHOD else
+                        SELECTIVE_PROGRAM_VERSION if self.report.get("fit_method") == INDEPENDENT_SELECTIVE_METHOD else
                         JOINT_PROGRAM_VERSION if self.report.get("fit_method") == JOINT_CERTIFIED_TOPOLOGY_METHOD else
                         V616_PROGRAM_VERSION if _requires_path_certificate(self) else PROGRAM_VERSION), "role": self.role,
             "actor_role_sha256": self.actor_role_sha256,
@@ -580,14 +585,15 @@ class WarehouseV6Program:
         schema = data.get("feature_schema_sha256")
         dim = schemas.get(schema)
         if (version not in (PROGRAM_VERSION, JOINT_PROGRAM_VERSION, V616_PROGRAM_VERSION,
-                            SELECTIVE_PROGRAM_VERSION)
+                            SELECTIVE_PROGRAM_VERSION, PATH_CONSTRAINED_PROGRAM_VERSION)
                 or (version in (JOINT_PROGRAM_VERSION, V616_PROGRAM_VERSION,
-                                SELECTIVE_PROGRAM_VERSION)) !=
+                                SELECTIVE_PROGRAM_VERSION, PATH_CONSTRAINED_PROGRAM_VERSION)) !=
                    (method in (JOINT_CERTIFIED_TOPOLOGY_METHOD, V616_TOPOLOGY_METHOD,
-                               INDEPENDENT_SELECTIVE_METHOD))
+                               INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD))
                 or (version == JOINT_PROGRAM_VERSION and method != JOINT_CERTIFIED_TOPOLOGY_METHOD)
                 or (version == V616_PROGRAM_VERSION and method != V616_TOPOLOGY_METHOD)
                 or (version == SELECTIVE_PROGRAM_VERSION and method != INDEPENDENT_SELECTIVE_METHOD)
+                or (version == PATH_CONSTRAINED_PROGRAM_VERSION and method != PATH_CONSTRAINED_METHOD)
                 or dim is None
                 or data.get("action_physics_config_sha256") !=
                    ACTION_PHYSICS_CONFIG_SHA256
@@ -627,6 +633,8 @@ class WarehouseV6Program:
             if any(int(np.argmax(result.leaf_logits[leaf])) not in certificates[leaf]
                    for leaf in selected):
                 raise RuntimeError("Warehouse program eligible leaf lacks path legality proof")
+        if method == PATH_CONSTRAINED_METHOD:
+            _validate_constrained_program_leaves(result)
         return result
 
     @classmethod
@@ -884,17 +892,87 @@ def _calibrate_leaf_logits(logits: np.ndarray, actor: FrozenWarehouseV6Role,
     return result
 
 
+def _normalized_program_structure(structure: Mapping) -> dict:
+    """Canonical structural bytes only; no old leaf logits enter new fitting."""
+    if not isinstance(structure, Mapping):
+        raise ValueError("fixed structure must be a mapping")
+    weights = np.asarray(structure["split_weights"], np.float32)
+    if weights.size == 0 and weights.ndim != 2:
+        dim = structure.get("feature_dim")
+        if dim not in (FEATURE_DIM, legacy_features.TREE_FEATURE_DIM):
+            raise ValueError("empty structure needs its feature_dim")
+        weights = np.zeros((0, dim), np.float32)
+    bias = np.asarray(structure["split_bias"], np.float32)
+    raw_left, raw_right = (np.asarray(structure[key]) for key in ("left_refs", "right_refs"))
+    if (weights.ndim != 2 or weights.shape[1] not in (FEATURE_DIM, legacy_features.TREE_FEATURE_DIM)
+            or bias.shape != (len(weights),) or raw_left.shape != bias.shape or raw_right.shape != bias.shape
+            or any(not np.isfinite(a).all() for a in (weights, bias, raw_left, raw_right))
+            or np.any(raw_left != np.floor(raw_left)) or np.any(raw_right != np.floor(raw_right))
+            or type(structure.get("root_ref")) not in (int, np.int64, np.int32)
+            or type(structure.get("leaf_count")) not in (int, np.int64, np.int32)):
+        raise ValueError("invalid fixed program structure tensors")
+    return {"root_ref": int(structure["root_ref"]), "split_weights": weights.copy(),
+            "split_bias": bias.copy(), "left_refs": raw_left.astype(np.int64),
+            "right_refs": raw_right.astype(np.int64), "leaf_count": int(structure["leaf_count"]),
+            "feature_dim": weights.shape[1]}
+
+
+def program_structure_sha256(structure: Mapping) -> str:
+    normalized = _normalized_program_structure(structure)
+    payload = {key: value.tolist() if isinstance(value, np.ndarray) else value
+               for key, value in normalized.items()}
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                             allow_nan=False).encode()).hexdigest()
+
+
+def _validate_constrained_program_leaves(program: WarehouseV6Program) -> None:
+    """Every stored leaf keeps its optimized, path-certified float32 top."""
+    from .warehouse_v619_leaf_fit import (LEAF_EPSILON, LEAF_REGULARIZATION,
+        LEAF_MAXITER, LEAF_TOLERANCE, CALIBRATION_TEMPERATURES, float32_preference_proof)
+    certificates = certified_program_actions(program)
+    count = len(program.leaf_logits)
+    fits = program.report.get("constrained_leaf_fits", {})
+    calibrations = program.report.get("constrained_leaf_calibration", {})
+    fit_counts = program.report.get("fit_leaf_row_counts")
+    if (not isinstance(fits, Mapping) or set(fits) != {str(i) for i in range(count)}
+            or not isinstance(calibrations, Mapping) or set(calibrations) != set(fits)
+            or not isinstance(fit_counts, list) or len(fit_counts) != count):
+        raise RuntimeError("constrained program lacks complete per-leaf optimization evidence")
+    selected = program.feedback_leaves | program.explanation_leaves
+    for leaf in range(count):
+        fit, calibration = fits[str(leaf)], calibrations[str(leaf)]
+        action = fit.get("chosen_action")
+        if (fit.get("success") is not True or fit.get("float32_feasible") is not True
+                or fit.get("solver") != "SLSQP" or fit.get("solver_status") != 0
+                or fit.get("epsilon") != LEAF_EPSILON or fit.get("regularization") != LEAF_REGULARIZATION
+                or fit.get("maxiter") != LEAF_MAXITER or fit.get("tolerance") != LEAF_TOLERANCE
+                or type(fit.get("row_count")) is not int or fit["row_count"] < 0
+                or fit["row_count"] != fit_counts[leaf]
+                or (leaf in selected and fit["row_count"] == 0)
+                or calibration.get("chosen_action") != action
+                or calibration.get("temperature") not in CALIBRATION_TEMPERATURES
+                or not float32_preference_proof(program.leaf_logits[leaf], action,
+                    certificates[leaf], epsilon=LEAF_EPSILON)["passed"]):
+            raise RuntimeError("constrained program leaf lost optimization/path/float32 certificate")
+
+
 def fit_program(role: str, actor: FrozenWarehouseV6Actor,
                 fit: Sequence[Mapping], calibration: Sequence[Mapping],
                 eligibility: Sequence[Mapping],
                 validation: Sequence[Mapping], *,
-                method: str = AXIS_TREE_METHOD) -> WarehouseV6Program:
+                method: str = AXIS_TREE_METHOD,
+                fixed_structure: Mapping | None = None,
+                fixed_structure_sha256: str | None = None) -> WarehouseV6Program:
     if role not in AGENTS:
         raise ValueError("invalid Warehouse program role")
     if method not in (AXIS_TREE_METHOD, ACTOR_SPARSE_TOPOLOGY_METHOD,
                       JOINT_CERTIFIED_TOPOLOGY_METHOD,
-                      INDEPENDENT_SELECTIVE_METHOD):
+                      INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD):
         raise ValueError("unknown Warehouse program fitting method")
+    if method != PATH_CONSTRAINED_METHOD and (fixed_structure is not None or fixed_structure_sha256 is not None):
+        raise ValueError("fixed structures require the new constrained method")
+    if (fixed_structure is None) != (fixed_structure_sha256 is None):
+        raise ValueError("fixed structure and SHA must be supplied together")
     parts = {"fit": list(fit), "calibration": list(calibration),
              "eligibility": list(eligibility), "validation": list(validation)}
     episode_ids = {name: {str(row["episode"]) for row in rows}
@@ -908,12 +986,12 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
     role_actor = actor.roles[role]
     for name, rows in parts.items():
         encoded, _ = _sample_arrays(rows, name, role_actor.feature_dim)
-        if method in (JOINT_CERTIFIED_TOPOLOGY_METHOD, INDEPENDENT_SELECTIVE_METHOD):
+        if method in (JOINT_CERTIFIED_TOPOLOGY_METHOD, INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD):
             validate_certification_domain(
                 encoded, _MASK_INDICES,
                 certified_feature_bounds(tuple(role_actor.feature_names)))
         _sampled_indices(rows)
-        if method == INDEPENDENT_SELECTIVE_METHOD and name != "fit":
+        if method in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD) and name != "fit":
             # A repeated physical frame is a real observation. It must not be
             # dropped merely because its state equals an earlier state.
             if any("frame" in row for row in rows):
@@ -936,7 +1014,26 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
     fit_x, fit_masks = _sample_arrays(parts["fit"], "fit", role_actor.feature_dim)
     actor_topology = method in (ACTOR_SPARSE_TOPOLOGY_METHOD,
                                 JOINT_CERTIFIED_TOPOLOGY_METHOD)
-    if method == INDEPENDENT_SELECTIVE_METHOD:
+    if method == PATH_CONSTRAINED_METHOD:
+        if fixed_structure is not None:
+            if program_structure_sha256(fixed_structure) != fixed_structure_sha256:
+                raise ValueError("fixed program structure SHA mismatch")
+            structure = _normalized_program_structure(fixed_structure)
+            if structure["feature_dim"] != role_actor.feature_dim:
+                raise ValueError("fixed structure feature dimension differs from bound Actor")
+            tree_report = {"topology_origin": "fixed_development_structure",
+                           "fixed_structure_sha256": fixed_structure_sha256,
+                           "topology_uses_fit_only": True,
+                           "calibration_eligibility_validation_used": False,
+                           "actor_role_sha256": role_actor.role_sha256}
+        else:
+            from .warehouse_v619_tree import fit_legal_structure
+            structure, tree_report = fit_legal_structure(
+                fit_x, fit_masks, _masked_probabilities(role_actor.logits_encoded(fit_x), fit_masks),
+                [str(row["episode"]) for row in parts["fit"]],
+                feature_names=role_actor.feature_names, actor_role_sha256=role_actor.role_sha256,
+                actions=ACTIONS)
+    elif method == INDEPENDENT_SELECTIVE_METHOD:
         from .warehouse_v618_selective_tree import fit_independent_structure
         structure, tree_report = fit_independent_structure(
             fit_x, fit_masks,
@@ -954,7 +1051,7 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         for name, ids in episode_ids.items()
     }
     report = {
-        "version": (SELECTIVE_PROGRAM_VERSION
+        "version": (PATH_CONSTRAINED_PROGRAM_VERSION if method == PATH_CONSTRAINED_METHOD else SELECTIVE_PROGRAM_VERSION
                     if method == INDEPENDENT_SELECTIVE_METHOD else JOINT_PROGRAM_VERSION
                     if method == JOINT_CERTIFIED_TOPOLOGY_METHOD
                     else PROGRAM_VERSION), "role": role,
@@ -975,7 +1072,7 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         "leaf_eligibility": {}, "validation": {},
         "certificate_kind": "independent_empirical_audit_only",
     }
-    if actor_topology or method == INDEPENDENT_SELECTIVE_METHOD:
+    if actor_topology or method in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD):
         report["fit_method"] = method
     provisional = WarehouseV6Program(
         role, role_actor.role_sha256, structure["root_ref"],
@@ -1000,7 +1097,50 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
                     raise RuntimeError(
                         f"extracted Warehouse Actor tree route mismatch in {name}")
         report["fit_leaf_row_counts"] = fit_counts.astype(int).tolist()
-    if method == INDEPENDENT_SELECTIVE_METHOD:
+    if method == PATH_CONSTRAINED_METHOD:
+        from .warehouse_v619_leaf_fit import fit_constrained_leaf_distribution
+        certificates = certified_program_actions(provisional)
+        target = _masked_probabilities(role_actor.logits_encoded(fit_x), fit_masks)
+        if fixed_structure is None:
+            # P2's winning leaves already optimized the same full NN target.
+            # Reuse them after independent binding/proof checks; a second fit
+            # would exceed the registered end-to-end 20k leaf-call budget.
+            from .warehouse_v619_leaf_fit import float32_preference_proof
+            fitted_reports = tree_report.get("fit_leaf_reports")
+            target_sha = sha256(np.ascontiguousarray(target, dtype="<f4").tobytes()).hexdigest()
+            if (tree_report.get("fit_target_sha256") != target_sha
+                    or not isinstance(fitted_reports, list)
+                    or len(fitted_reports) != structure["leaf_count"]):
+                raise RuntimeError("constrained search leaf target/report binding mismatch")
+            leaf_fits = []
+            for leaf, item in enumerate(fitted_reports):
+                optimizer_report = item.get("optimizer", {})
+                logits = np.asarray(structure["initial_leaf_logits"][leaf], np.float32).copy()
+                if (item.get("leaf") != leaf or item.get("rows") != int(fit_counts[leaf])
+                        or optimizer_report.get("row_count") != int(fit_counts[leaf])
+                        or set(item.get("path_legal_actions", ())) != set(certificates[leaf])
+                        or item.get("raw_action") != optimizer_report.get("chosen_action")
+                        or not float32_preference_proof(logits,
+                            optimizer_report.get("chosen_action"), certificates[leaf])["passed"]):
+                    raise RuntimeError("constrained search leaf route/count/certificate binding mismatch")
+                leaf_fits.append((logits, dict(optimizer_report)))
+            report["leaf_optimization_calls_outside_search"] = 0
+            report["convex_solver_calls_outside_search"] = 0
+        else:
+            leaf_fits = [fit_constrained_leaf_distribution(
+                target[fit_leaves == leaf], fit_masks[fit_leaves == leaf], certificates[leaf])
+                for leaf in range(structure["leaf_count"])]
+            report["leaf_optimization_calls_outside_search"] = len(leaf_fits)
+            report["convex_solver_calls_outside_search"] = sum(
+                item[1]["enumerated_action_solves"] for item in leaf_fits)
+        learned = np.stack([result[0] for result in leaf_fits])
+        report["constrained_leaf_fits"] = {str(leaf): result[1] for leaf, result in enumerate(leaf_fits)}
+        report["fit_leaf_row_counts"] = fit_counts.astype(int).tolist()
+        report["sampling_denominator"] = "all_recorded_physical_pre_action_frames"
+        report["excluded_frames"] = 0
+        report["fixed_structure_sha256"] = fixed_structure_sha256
+        report["program_structure_sha256"] = program_structure_sha256(structure)
+    elif method == INDEPENDENT_SELECTIVE_METHOD:
         # This is a new independent partition. Actor leaf numbers and their
         # legacy box bounds have no meaning here.
         from .warehouse_v618_selective_tree import fit_leaf_distribution
@@ -1018,11 +1158,22 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
                                        "tree.leaf_logits"][:structure["leaf_count"]]
                                        if actor_topology else None))
     cal_x, cal_masks = _sample_arrays(parts["calibration"], "calibration", role_actor.feature_dim)
-    calibrated = _calibrate_leaf_logits(
-        learned, role_actor, cal_x, cal_masks, provisional.leaf_indices(cal_x),
-        fitted_leaves=(fitted_leaves if actor_topology or method == INDEPENDENT_SELECTIVE_METHOD
-                       else None),
-        respect_actor_leaf_bounds=(method != INDEPENDENT_SELECTIVE_METHOD))
+    if method == PATH_CONSTRAINED_METHOD:
+        from .warehouse_v619_leaf_fit import calibrate_constrained_leaf_distribution
+        target = _masked_probabilities(role_actor.logits_encoded(cal_x), cal_masks)
+        cal_leaves = provisional.leaf_indices(cal_x)
+        calibrated_results = [calibrate_constrained_leaf_distribution(
+            learned[leaf], target[cal_leaves == leaf], cal_masks[cal_leaves == leaf],
+            certificates[leaf], chosen_action=leaf_fits[leaf][1]["chosen_action"])
+            for leaf in range(structure["leaf_count"])]
+        calibrated = np.stack([result[0] for result in calibrated_results])
+        report["constrained_leaf_calibration"] = {
+            str(leaf): result[1] for leaf, result in enumerate(calibrated_results)}
+    else:
+        calibrated = _calibrate_leaf_logits(
+            learned, role_actor, cal_x, cal_masks, provisional.leaf_indices(cal_x),
+            fitted_leaves=(fitted_leaves if actor_topology or method == INDEPENDENT_SELECTIVE_METHOD else None),
+            respect_actor_leaf_bounds=(method != INDEPENDENT_SELECTIVE_METHOD))
     provisional = WarehouseV6Program(
         role, role_actor.role_sha256, structure["root_ref"],
         structure["split_weights"], structure["split_bias"],
@@ -1030,7 +1181,7 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         frozenset(), frozenset(), report)
     path_certificates = (certified_program_actions(provisional)
                          if method in (JOINT_CERTIFIED_TOPOLOGY_METHOD,
-                                       INDEPENDENT_SELECTIVE_METHOD) else {})
+                                       INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD) else {})
     if path_certificates:
         report["leaf_path_certificates"] = {
             str(leaf): {
@@ -1043,10 +1194,12 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         }
         report["path_certificate_rule"] = (
             "pure_legal_bit_ancestor+certified_mask_branches.v2")
+    if method == PATH_CONSTRAINED_METHOD:
+        _validate_constrained_program_leaves(provisional)
     feedback, explanation = set(), set()
     metric_kwargs = ({"context": _metric_context(
         provisional, role_actor, parts["eligibility"])}
-        if method == INDEPENDENT_SELECTIVE_METHOD else {})
+        if method in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD) else {})
     # Eligibility alone locks the leaf sets. Internal validation is evaluated
     # once, after the selection, and cannot remove or add a leaf.
     for leaf in range(structure["leaf_count"]):
@@ -1054,7 +1207,7 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         e = _metrics(provisional, role_actor, parts["eligibility"], {leaf}, "explanation", **metric_kwargs)
         report["leaf_eligibility"][str(leaf)] = {"feedback": f, "explanation": e}
         has_path_proof = (method not in (JOINT_CERTIFIED_TOPOLOGY_METHOD,
-                                        INDEPENDENT_SELECTIVE_METHOD) or
+                                        INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD) or
                           int(np.argmax(calibrated[leaf])) in
                           path_certificates[leaf])
         if leaf in fitted_leaves and has_path_proof and (method != JOINT_CERTIFIED_TOPOLOGY_METHOD or role_actor.weights["protected_leaf_mask"][leaf] > 0.5) and _eligible(f, FEEDBACK_AGREEMENT):
@@ -1068,7 +1221,7 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
         frozenset(feedback), frozenset(explanation), report)
     metric_kwargs = ({"context": _metric_context(
         program, role_actor, parts["validation"])}
-        if method == INDEPENDENT_SELECTIVE_METHOD else {})
+        if method in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD) else {})
     feedback_metric = _metrics(program, role_actor, parts["validation"],
                                feedback, "feedback", **metric_kwargs)
     explanation_metric = _metrics(program, role_actor, parts["validation"],
@@ -1082,7 +1235,7 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
             and feedback_metric["kl"] <= MAX_COVERED_KL
             and feedback_metric["illegal_count"] == 0
             and feedback_metric["path_uncertified_count"] == 0
-            and (method != INDEPENDENT_SELECTIVE_METHOD or
+            and (method not in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD) or
                  _whole_tree_raw_legality_passed(feedback_metric))),
         "explanation_online_passed": bool(
             explanation_metric["rows"] > 0
@@ -1091,18 +1244,18 @@ def fit_program(role: str, actor: FrozenWarehouseV6Actor,
             and explanation_metric["kl"] <= MAX_COVERED_KL
             and explanation_metric["illegal_count"] == 0
             and explanation_metric["path_uncertified_count"] == 0
-            and (method != INDEPENDENT_SELECTIVE_METHOD or
+            and (method not in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD) or
                  _whole_tree_raw_legality_passed(explanation_metric))),
         "feedback_passed": _passes(feedback_metric, FEEDBACK_AGREEMENT,
-            require_whole_tree_zero=method == INDEPENDENT_SELECTIVE_METHOD),
+            require_whole_tree_zero=method in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD)),
         "explanation_passed": _passes(explanation_metric, EXPLANATION_AGREEMENT,
-            require_whole_tree_zero=method == INDEPENDENT_SELECTIVE_METHOD),
+            require_whole_tree_zero=method in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD)),
         "development_feedback_passed": _passes(
             feedback_metric, FEEDBACK_AGREEMENT, development=True,
-            require_whole_tree_zero=method == INDEPENDENT_SELECTIVE_METHOD),
+            require_whole_tree_zero=method in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD)),
         "development_explanation_passed": _passes(
             explanation_metric, EXPLANATION_AGREEMENT, development=True,
-            require_whole_tree_zero=method == INDEPENDENT_SELECTIVE_METHOD),
+            require_whole_tree_zero=method in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD)),
     }
     return program
 
@@ -1114,6 +1267,8 @@ def current_actor_fidelity(program: WarehouseV6Program,
     """Recheck fixed validation rows against the current live Actor snapshot."""
     leaves = (set(program.feedback_leaves) if purpose == "feedback"
               else set(program.explanation_leaves))
+    if program.report.get("fit_method") == PATH_CONSTRAINED_METHOD:
+        _validate_constrained_program_leaves(program)
     metric = _metrics(program, actor.roles[program.role], rows, leaves, purpose)
     topology_matches = (not _requires_actor_topology(program) or
                         actor_sparse_topology_matches(
@@ -1125,11 +1280,11 @@ def current_actor_fidelity(program: WarehouseV6Program,
     metric["passed"] = bool(
         topology_matches
         and program.report["validation"][purpose + "_passed"]
-        and (program.report.get("fit_method") != INDEPENDENT_SELECTIVE_METHOD or
+        and (program.report.get("fit_method") not in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD) or
              _whole_tree_raw_legality_passed(program.report["validation"].get(purpose, {})))
         and _passes(metric, FEEDBACK_AGREEMENT if purpose == "feedback"
                     else EXPLANATION_AGREEMENT, development=True,
-                    require_whole_tree_zero=program.report.get("fit_method") == INDEPENDENT_SELECTIVE_METHOD))
+                    require_whole_tree_zero=program.report.get("fit_method") in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD)))
     return metric
 
 
@@ -1148,6 +1303,8 @@ def audit_frozen_program(program: WarehouseV6Program,
         if any(int(np.argmax(program.leaf_logits[leaf])) not in certificates[leaf]
                for leaf in program.feedback_leaves | program.explanation_leaves):
             raise RuntimeError("Warehouse program eligible leaf lacks path legality proof")
+    if program.report.get("fit_method") == PATH_CONSTRAINED_METHOD:
+        _validate_constrained_program_leaves(program)
     ids = {str(row["episode"]) for row in rows}
     prior = program.report["split_episode_ids"]
     if any(ids & set(used) for used in prior.values()):
@@ -1161,7 +1318,7 @@ def audit_frozen_program(program: WarehouseV6Program,
                         set(program.feedback_leaves), "feedback")
     explanation = _metrics(program, role_actor, rows,
                            set(program.explanation_leaves), "explanation")
-    independent = program.report.get("fit_method") == INDEPENDENT_SELECTIVE_METHOD
+    independent = program.report.get("fit_method") in (INDEPENDENT_SELECTIVE_METHOD, PATH_CONSTRAINED_METHOD)
     feedback_passed = bool(program.report["validation"]["feedback_passed"]
         and (not independent or _whole_tree_raw_legality_passed(
             program.report["validation"].get("feedback", {})))
@@ -1192,6 +1349,7 @@ def audit_frozen_program(program: WarehouseV6Program,
 __all__ = [
     "PROGRAM_VERSION", "JOINT_PROGRAM_VERSION", "JOINT_CERTIFIED_TOPOLOGY_METHOD",
     "SELECTIVE_PROGRAM_VERSION", "INDEPENDENT_SELECTIVE_METHOD",
+    "PATH_CONSTRAINED_PROGRAM_VERSION", "PATH_CONSTRAINED_METHOD", "program_structure_sha256",
     "WarehouseV6Program", "fit_program", "certified_actor_actions",
     "certified_program_actions", "actor_sparse_topology_matches",
     "audit_frozen_program", "current_actor_fidelity",

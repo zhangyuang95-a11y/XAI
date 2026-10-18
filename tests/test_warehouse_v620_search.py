@@ -95,9 +95,65 @@ def test_eight_requested_initializations_are_different_fit_only_and_budget_reser
     assert report["distinct_requested_initializations"] == 8
     assert len({run["requested_initial_tree_sha256"] for run in report["search_runs"]}) == 8
     assert [run["reserved_cumulative_leaf_call_limit"] for run in report["search_runs"]] == list(range(20, 161, 20))
+    assert [run["reserved_cumulative_round_limit"] for run in report["search_runs"]] == [0]*7+[1]
+    assert all(not run["rounds"] for run in report["search_runs"][:7])
+    assert report["global_search_rounds"] <= 1
     assert not report["calibration_eligibility_validation_used"]
     assert report["topology_uses_fit_only"]
     proof(structure, rows[0], rows[1])
+
+
+@pytest.mark.parametrize("method", search.METHODS)
+@pytest.mark.parametrize("round_budget", [1, 3, 7, 30])
+def test_round_budget_is_global_across_eight_starts_including_small_budgets(method, round_budget):
+    rows = list(data())
+    rows[0][:, :3] = 0.
+    _, report = fit(rows, config(initializations=8, max_rounds=round_budget,
+                                 max_leaf_optimization_calls=800), method)
+    runs = report["search_runs"]
+    used = sum(len(run["rounds"]) for run in runs)
+    assert len(runs) == 8
+    assert report["distinct_requested_initializations"] == 8
+    assert report["round_budget_scope"] == "global_per_role_fit_across_all_initializations"
+    assert used == report["global_search_rounds"] <= round_budget
+    assert report["global_search_rounds_remaining"] == round_budget-used
+    assert [run["reserved_cumulative_round_limit"] for run in runs] == [
+        (index+1)*round_budget//8 for index in range(8)]
+    cumulative = 0
+    for run in runs:
+        assert run["global_rounds_before_start"] == cumulative
+        assert run["round_budget_available_at_start"] == run["reserved_cumulative_round_limit"]-cumulative
+        assert len(run["rounds"]) <= run["round_budget_available_at_start"]
+        for update in run["rounds"]:
+            cumulative += 1
+            assert update["global_round"] == cumulative
+        assert run["global_rounds_after_start"] == cumulative
+        assert cumulative <= run["reserved_cumulative_round_limit"]
+
+
+def test_early_stop_carries_unused_round_share_and_logs_progress_without_configuring_logging(caplog):
+    import logging
+
+    rows = list(data())
+    rows[0][:, :3] = 0.
+    logger = logging.getLogger(search.__name__)
+    handlers = list(logger.handlers)
+    with caplog.at_level(logging.INFO, logger=search.__name__):
+        _, report = fit(rows, config(initializations=8, max_rounds=30,
+                                     max_leaf_optimization_calls=800))
+    assert logger.handlers == handlers
+    first, second = report["search_runs"][:2]
+    assert first["reserved_cumulative_round_limit"] == 3
+    assert first["rounds"] == []  # Constant inputs leave no root proposal.
+    assert second["global_rounds_before_start"] == 0
+    assert second["round_budget_available_at_start"] == 7  # Includes unused first share.
+    starts = [record for record in caplog.records if "start_complete" in record.getMessage()]
+    rounds = [record for record in caplog.records if "round_complete" in record.getMessage()]
+    assert len(starts) == 8
+    assert len(rounds) == report["global_search_rounds"]
+    assert all(all(field in record.getMessage() for field in (
+        "api_calls=", "convex_calls=", "fit_score=", "remaining_queue="))
+        for record in starts+rounds)
 
 
 def test_full_distribution_fits_and_joint_guards_include_empty_branches():

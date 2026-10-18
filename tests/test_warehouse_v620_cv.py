@@ -131,7 +131,8 @@ def results(coverages=None):
     for job in v.jobs():
         row = metrics(coverage=coverages[job["arm"]])
         out.append({"job": job, "metrics": {"validation": row},
-                    "development_gate": c.development_gate(row), "leaf_count": 16})
+                    "development_gate": c.development_gate(row), "leaf_count": 16,
+                    "search_budget_audit": {"passed": True}})
     return out
 
 
@@ -168,6 +169,13 @@ def test_single_failed_role_fold_invalidates_arm_even_when_mean_exceeds_45_perce
 
 def test_recipe_keeps_future_data_and_training_gated_and_raw_fair():
     recipe = v.executable_recipe()
+    assert recipe["schema"] == "warehouse-v620-development-recipe.v2"
+    assert recipe["cv"]["batch_id"] == "cv-02"
+    assert recipe["cv"]["complete_new_eighteen_jobs_including_M0"]
+    assert recipe["cv"]["closed_engineering_attempt_not_method_evidence"] == "cv-01"
+    assert recipe["cv"]["round_budget_contract"]["M0"]["maximum_total_rounds"] == 240
+    assert recipe["cv"]["round_budget_contract"]["M1"]["maximum_total_rounds"] == 30
+    assert recipe["cv"]["round_budget_contract"]["M2"]["maximum_total_rounds"] == 30
     assert recipe["search"]["beam_width"] == 4
     assert recipe["search"]["max_nonimproving_steps"] == 2
     assert recipe["future_common_bc"]["raw_ppo_external_program_feedback"] == 0
@@ -180,9 +188,10 @@ def test_recipe_keeps_future_data_and_training_gated_and_raw_fair():
 @pytest.mark.parametrize("mutation", ["fold", "job", "publishable", "steps", "schema"])
 def test_parent_identity_drift_is_rejected_before_actor_or_fitting(tmp_path, monkeypatch, mutation):
     monkeypatch.setattr(c, "ROOT", tmp_path)
-    directory = tmp_path/v.OUTPUT_ROOT/"cv-test"
+    directory = tmp_path/v.OUTPUT_ROOT/v.CV_BATCH_ID
     directory.mkdir(parents=True)
-    plan = {"schema": "warehouse-development-cv-plan.v1", "output_directory": str(directory),
+    plan = {"schema": v.CV_PLAN_SCHEMA, "output_directory": str(directory),
+        "batch_id": v.CV_BATCH_ID, "round_budget_contract": v.round_budget_contract(),
         "candidate_id": v.CANDIDATE_ID, "folds": v.grouped_folds(),
         "fold_assignment_sha256": v.digest(v.grouped_folds()), "jobs": v.jobs(),
         "gates": v.GATES, "selection_arms": ["M1", "M2"], "publishable": False,
@@ -216,3 +225,65 @@ def test_exclusive_job_claim_prevents_resume_or_scientific_retry(tmp_path, monke
     with pytest.raises(FileExistsError):
         c.execute_job(plan_path, job["job_id"])
     assert not (job_dir/"started.json").exists()
+
+
+def search_report(rounds, *, calls=20000, outside=0, global_scope=True):
+    total = sum(rounds)
+    return {"fit_tree": {"search_runs": [{"rounds": [{}]*count} for count in rounds],
+        "leaf_optimization_calls": calls,
+        "round_budget_scope": "global_per_role_fit_across_all_initializations" if global_scope else "per_start",
+        "global_search_rounds": total, "global_search_rounds_remaining": 30-total},
+        "leaf_optimization_calls_outside_search": outside}
+
+
+def test_global_round_budget_not_replaced_by_api_budget_or_cache_hits():
+    report = search_report([4, 4, 4, 4, 4, 4, 4, 4], calls=100)
+    for arm in ("M1", "M2"):
+        audit = c.search_budget_audit(report, arm)
+        assert not audit["passed"]
+        assert audit["actual_total_rounds"] == 32
+        assert audit["checks"]["total_leaf_api_limit"]
+        assert not audit["checks"]["total_round_limit"]
+
+
+def test_new_methods_require_total_30_while_m0_preserves_historical_per_start_budget():
+    legacy = search_report([15, 11, 10, 13, 15, 11, 12, 14], calls=1491, global_scope=False)
+    assert c.search_budget_audit(legacy, "M0")["passed"]
+    assert c.search_budget_audit(legacy, "M0")["actual_total_rounds"] == 101
+    assert not c.search_budget_audit(legacy, "M1")["passed"]
+    assert not c.search_budget_audit(search_report([31, 0, 0, 0, 0, 0, 0, 0]), "M0")["passed"]
+    corrected = search_report([3, 4, 4, 4, 3, 4, 4, 4])
+    assert c.search_budget_audit(corrected, "M1")["passed"]
+    assert c.search_budget_audit(corrected, "M2")["passed"]
+
+
+@pytest.mark.parametrize("mutation", ["missing_start", "outside_api", "counter", "scope", "remaining"])
+def test_actual_budget_accounting_fails_closed(mutation):
+    report = search_report([3, 4, 4, 4, 3, 4, 4, 4])
+    if mutation == "missing_start":
+        report["fit_tree"]["search_runs"].pop()
+    elif mutation == "outside_api":
+        report["leaf_optimization_calls_outside_search"] = 1
+    elif mutation == "counter":
+        report["fit_tree"]["global_search_rounds"] = 29
+    elif mutation == "scope":
+        report["fit_tree"]["round_budget_scope"] = "per_start"
+    else:
+        report["fit_tree"]["global_search_rounds_remaining"] = 1
+    assert not c.search_budget_audit(report, "M2")["passed"]
+
+
+def test_summary_rejects_old_or_failed_budget_results_even_with_good_fidelity():
+    rows = results()
+    rows[0].pop("search_budget_audit")
+    with pytest.raises(RuntimeError, match="independent search budget"):
+        c.summarize_results(rows)
+
+
+def test_closed_engineering_batch_cannot_be_reprepared(tmp_path, monkeypatch):
+    from backend.training import warehouse_v6_runner as runner
+    monkeypatch.setattr(c, "ROOT", tmp_path)
+    monkeypatch.setattr(runner, "source_closure_sha256", lambda: "fixed")
+    monkeypatch.setattr(c, "checked_actor", lambda: (_ for _ in ()).throw(AssertionError("must reject before Actor input")))
+    with pytest.raises(RuntimeError, match="cv-01 is closed"):
+        c.prepare(tmp_path/v.OUTPUT_ROOT/"cv-01", "fixed")

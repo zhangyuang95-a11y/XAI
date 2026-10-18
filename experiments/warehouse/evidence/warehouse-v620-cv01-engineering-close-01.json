@@ -1,0 +1,124 @@
+{
+  "PPO_joint_steps": 0,
+  "actor_updates": 0,
+  "admission_evidence": false,
+  "attempt": "cv-01",
+  "candidate_id": "warehouse-v620-01",
+  "complete_jobs": 1,
+  "environment_resets": 0,
+  "interrupted_jobs": 2,
+  "jobs": [
+    {
+      "files_sha256": {
+        "completed.json": "042dd3c7a12e4b18a131682730f1ff4d0303b30305f9a763aef4eb436d800ce3",
+        "program.json": "55a3a3a6a9305c40773b49f14bb57a9b5ab62d3ad3509238aeab61191cb4e06e",
+        "result.json": "6329c34d965e52588c5ab55e6068c87c61e41e360d9bcb9eadc3c0c7a47be701",
+        "started.json": "9da1320c9e556c45c783ca9db0fe6015204ce5e4f9a5f1982398bced7a051951"
+      },
+      "job_id": "fold-0-robot_1-M0",
+      "status": "completed_baseline_diagnostic_only"
+    },
+    {
+      "files_sha256": {
+        "failed.json": "9668e7f016618fc8900fc30dfa01a5adb2f93e3e52edeb448199225ef5ebaf98",
+        "started.json": "31bb8a73b2dc849ba5892b970f4aae673922271fed679a1293e7d28dd30cb768"
+      },
+      "job_id": "fold-0-robot_1-M1",
+      "status": "interrupted_engineering_attempt"
+    },
+    {
+      "files_sha256": {
+        "failed.json": "f43aeb807737b56a0583979ab9e742911f395a7bbb1131a1a2680fc57578794d",
+        "started.json": "88fa6b3aeb3ebad6ee9a3612b16188a61b02ecf31dcbfcb336db7b53a397158f"
+      },
+      "job_id": "fold-0-robot_1-M2",
+      "status": "interrupted_engineering_attempt"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-0-robot_2-M0",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-0-robot_2-M1",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-0-robot_2-M2",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-1-robot_1-M0",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-1-robot_1-M1",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-1-robot_1-M2",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-1-robot_2-M0",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-1-robot_2-M1",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-1-robot_2-M2",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-2-robot_1-M0",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-2-robot_1-M1",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-2-robot_1-M2",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-2-robot_2-M0",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-2-robot_2-M1",
+      "status": "not_started"
+    },
+    {
+      "files_sha256": {},
+      "job_id": "fold-2-robot_2-M2",
+      "status": "not_started"
+    }
+  ],
+  "new_method_result_selected": false,
+  "plan_sha256": "11da697cf170c7af63beb19548fb78250b339b94d70c23a17f23f4c7fb890ba1",
+  "publishable": false,
+  "reason": "max_rounds=30 was enforced per initialization rather than globally per role fit; M1/M2 cannot establish the planned total-round guarantee",
+  "route_selection_permitted": false,
+  "same_directory_retry_permitted": false,
+  "schema": "warehouse-v620-development-attempt-closed.v1",
+  "source_closure_sha256": "93581bbb94775934bd434f1175f706cd3581280ce089021dfadfde3ac2e03c1c",
+  "source_fix_requires_new_complete_batch_and_new_hash_lock": true,
+  "status": "closed_engineering_protocol_error",
+  "unstarted_jobs": 15
+}

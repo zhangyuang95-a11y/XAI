@@ -10,6 +10,7 @@ from collections import deque
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
+import logging
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -39,6 +40,7 @@ ROBUST_MIN_AGREEMENT = .97
 ROBUST_MAX_KL = .20
 STABILITY_GROUPS = 3
 _GAIN_TOLERANCE = 1.e-10
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -46,7 +48,7 @@ class SearchConfig:
     """Production limits can only be reduced for offline unit diagnostics."""
 
     initializations: int = 8
-    max_rounds: int = 30
+    max_rounds: int = 30  # Global sum of completed/partial search rounds per role fit.
     max_leaf_optimization_calls: int = 20000
     proposals_per_round: int = 48  # A page size, never a round truncation.
     beam_width: int = 4
@@ -519,12 +521,19 @@ def fit_legal_structure(
 
     starts = initial_trees()
     best, runs = None, []
+    global_rounds = 0
     operation_counts = {kind: 0 for kind in PROPOSAL_QUOTAS}
     for start, initialization in enumerate(SEARCH_INITIALIZATIONS[:cfg.initializations]):
         before_calls, before_solves = calls, solves
         # Deterministic cumulative shares let later starts use earlier unused
         # calls, while never exceeding the one per-role API-call hard bound.
         current_call_limit = max(1, ((start+1)*cfg.max_leaf_optimization_calls)//cfg.initializations)
+        # Both limits are cumulative shares. An early stop passes its unused
+        # rounds to later starts; even when rounds < starts, the zero-share
+        # starts cannot spend a round reserved for a later initialization.
+        current_round_limit = ((start+1)*cfg.max_rounds)//cfg.initializations
+        before_rounds = global_rounds
+        available_rounds = current_round_limit-global_rounds
         root_fallback = evaluate(None)
         initial_failure = None
         try:
@@ -548,9 +557,9 @@ def fit_legal_structure(
         beam = [_BeamEntry(state)]
         attempted, history = {state.key}, []
         expanded = set()
-        stop = "round_limit"
+        stop = "global_round_share_limit"
         remaining_queue = 0
-        for round_index in range(cfg.max_rounds):
+        for round_index in range(available_rounds):
             offered = {}
             parent_entries = []
             for entry in beam:
@@ -615,7 +624,9 @@ def fit_legal_structure(
             beam = _choose_beam(transitions, start_best, cfg.beam_width)
             remaining_queue = len(queue)
             changed = _improves(start_best.score, previous_score)
-            history.append({"round": round_index+1, "proposals": proposal_count,
+            global_rounds += 1
+            history.append({"round": round_index+1, "global_round": global_rounds,
+                "proposals": proposal_count,
                 "scheduled_proposals": proposal_count, "pages": pages,
                 "complete_evaluations": evaluated, "failed_evaluations": failed,
                 "remaining_queue": remaining_queue,
@@ -629,6 +640,13 @@ def fit_legal_structure(
                     for entry in beam],
                 "leaf_optimization_calls_cumulative": calls,
                 "budget_interrupted": interrupted})
+            _LOG.info(
+                "Warehouse program search round_complete method=%s start=%d "
+                "round=%d global_rounds=%d/%d api_calls=%d convex_calls=%d "
+                "fit_score=%s proposals=%d complete=%d failed=%d remaining_queue=%d",
+                method, start+1, round_index+1, global_rounds, cfg.max_rounds,
+                calls, solves, list(start_best.score), proposal_count, evaluated,
+                failed, remaining_queue)
             if interrupted:
                 stop = "leaf_optimization_call_budget"
                 break
@@ -648,10 +666,23 @@ def fit_legal_structure(
             "initial_tree_incomplete": initial_interrupted,
             "initial_tree_failure": initial_failure,
             "remaining_queue": remaining_queue,
+            "global_rounds_before_start": before_rounds,
+            "global_rounds_after_start": global_rounds,
+            "round_budget_available_at_start": available_rounds,
+            "reserved_cumulative_round_limit": current_round_limit,
             "reserved_cumulative_leaf_call_limit": current_call_limit})
+        _LOG.info(
+            "Warehouse program search start_complete method=%s start=%d/%d "
+            "rounds=%d global_rounds=%d/%d reserved_round_limit=%d api_calls=%d "
+            "convex_calls=%d fit_score=%s remaining_queue=%d stop=%s",
+            method, start+1, cfg.initializations, len(history), global_rounds,
+            cfg.max_rounds, current_round_limit, calls, solves,
+            list(start_best.score), remaining_queue, stop)
     assert best is not None
-    if not (calls <= cfg.max_leaf_optimization_calls and 0 <= solves <= 5*calls):
-        raise RuntimeError("constrained tree leaf/solver call accounting is invalid")
+    if not (calls <= cfg.max_leaf_optimization_calls and 0 <= solves <= 5*calls
+            and global_rounds == sum(len(run["rounds"]) for run in runs)
+            and 0 <= global_rounds <= cfg.max_rounds):
+        raise RuntimeError("constrained tree global round/leaf/solver accounting is invalid")
     structure = _export(best.tree, best.leaves, len(names))
     weights = structure["split_weights"]
     if any(source_feature_cost(weight, names) > MAX_SOURCE_FEATURES for weight in weights):
@@ -684,6 +715,10 @@ def fit_legal_structure(
         "fit_episode_count": len(set(episode)),
         "fit_target_sha256": sha256(np.ascontiguousarray(p, dtype="<f4").tobytes()).hexdigest(),
         "search_budget": asdict(cfg), "production_configuration": cfg == PRODUCTION_SEARCH_CONFIG,
+        "round_budget_scope": "global_per_role_fit_across_all_initializations",
+        "global_search_rounds": global_rounds,
+        "global_search_rounds_remaining": cfg.max_rounds-global_rounds,
+        "round_share_rule": "floor((start_index_plus_one)*max_rounds/initializations)_cumulative_with_unused_carry",
         "initial_structure": "eight_distinct_fit_ranked_certified_guard_topologies",
         "initialization_scope": "deterministic_fit_only_guard_topologies_and_predicate_grids",
         "distinct_requested_initializations": len({_tree_key(tree) for tree in starts}),

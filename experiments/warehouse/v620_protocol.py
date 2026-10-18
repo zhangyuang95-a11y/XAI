@@ -15,6 +15,8 @@ from experiments.warehouse.v619_protocol import ACTOR_SHA256, BASELINE_RUN, ROLE
 CANDIDATE_ID = "warehouse-v620-01"
 DATA_ROOT = "output/warehouse_v619/fixed-validation-01"
 OUTPUT_ROOT = "output/warehouse_v620"
+CV_BATCH_ID = "cv-02"
+CV_PLAN_SCHEMA = "warehouse-development-cv-plan.v2"
 RECIPE_PATH = "configs/warehouse_v620_recipe.json"
 METHODS = {
     "M0": "path_constrained_distribution_tree_v1",
@@ -105,14 +107,30 @@ def jobs():
             for fold in range(3) for role in ROLES for arm, method in METHODS.items()]
 
 
+def round_budget_contract():
+    return {
+        "M0": {"scope": "historical_baseline_per_initialization_unchanged",
+               "maximum_rounds_per_initialization": 30, "maximum_total_rounds": 240,
+               "maximum_initializations": 8, "maximum_leaf_api_calls_per_role_fit": 20000},
+        **{arm: {"scope": "per_role_fit_across_all_initializations",
+                 "maximum_total_rounds": 30, "maximum_initializations": 8,
+                 "maximum_leaf_api_calls_per_role_fit": 20000}
+           for arm in ("M1", "M2")},
+    }
+
+
 def executable_recipe():
     from backend.training.warehouse_program_search import PRODUCTION_SEARCH_CONFIG
-    return {"schema": "warehouse-v620-development-recipe.v1", "candidate_id": CANDIDATE_ID,
+    return {"schema": "warehouse-v620-development-recipe.v2", "candidate_id": CANDIDATE_ID,
         "methods": METHODS, "frozen_actor_sha256": ACTOR_SHA256,
         "search": asdict(PRODUCTION_SEARCH_CONFIG),
         "leaf_fit": {"epsilon": .001, "regularization": .0001, "maxiter": 200, "tolerance": .000001},
         "calibration_temperatures": [.8, .9, 1., 1.1, 1.2],
-        "cv": {"fold_seed": FOLD_SEED, "fold_seed_sha256": digest(FOLD_SEED),
+        "cv": {"batch_id": CV_BATCH_ID,
+               "closed_engineering_attempt_not_method_evidence": "cv-01",
+               "complete_new_eighteen_jobs_including_M0": True,
+               "round_budget_contract": round_budget_contract(),
+               "fold_seed": FOLD_SEED, "fold_seed_sha256": digest(FOLD_SEED),
                "episodes": 124, "natural_episodes": 99, "fit_only_argmax_episodes": 25,
                "split_episode_counts": {"fit": 55, "calibration": 18, "eligibility": 18, "validation": 33},
                "whole_base_grouping": True, "fold_assignments_sha256": digest(grouped_folds()),

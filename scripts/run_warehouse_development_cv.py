@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from hashlib import sha256
 import json
+import logging
 from pathlib import Path
 import sys
 from time import perf_counter
@@ -35,6 +36,7 @@ TRACE_SHA256 = {
     "validation": "6cf1323d0b4c09da6471383fd821a592e3e2b0ceea723f1604f9622bb742c87c",
 }
 ACTIONS = ("UP", "DOWN", "LEFT", "RIGHT", "WAIT")
+LOGGER = logging.getLogger("warehouse.development_cv")
 
 
 def file_sha(path):
@@ -182,17 +184,18 @@ def prepare(output_dir, expected_source):
     from backend.training import warehouse_v6_runner as runner
     if runner.source_closure_sha256() != expected_source:
         raise RuntimeError("CV prepare source differs from requested frozen closure")
+    output = Path(output_dir).resolve()
+    if output != (ROOT/v.OUTPUT_ROOT/v.CV_BATCH_ID).resolve():
+        raise RuntimeError("corrected recipe requires new cv-02; cv-01 is closed read-only engineering evidence")
     actor, actor_path = checked_actor()
     episodes, manifest = checked_inputs()
     targets = target_identity(actor, episodes)
     recipe_sha = v.validate_recipe(ROOT)
-    output = Path(output_dir).resolve()
-    if not output.is_relative_to((ROOT/v.OUTPUT_ROOT).resolve()) or output == (ROOT/v.OUTPUT_ROOT).resolve():
-        raise RuntimeError("CV output must be a new isolated v6.20 run directory")
     identity = {"source_closure_sha256": expected_source, "script_sha256": file_sha(__file__),
         "recipe_sha256": recipe_sha, "actor_path": str(actor_path), "actor_sha256": v.ACTOR_SHA256,
         "actor_role_sha256": ROLE_SHA256, "inputs": manifest, "full_nn_targets": targets}
-    plan = {"schema": "warehouse-development-cv-plan.v1", "candidate_id": v.CANDIDATE_ID,
+    plan = {"schema": v.CV_PLAN_SCHEMA, "candidate_id": v.CANDIDATE_ID,
+        "batch_id": v.CV_BATCH_ID, "round_budget_contract": v.round_budget_contract(),
         "output_directory": str(output), "identity": identity, "folds": v.grouped_folds(),
         "fold_assignment_sha256": v.digest(v.grouped_folds()), "jobs": v.jobs(),
         "gates": v.GATES, "selection_arms": ["M1", "M2"],
@@ -216,8 +219,10 @@ def load_plan(plan_path):
     path = Path(plan_path).resolve(strict=True)
     plan = json.loads(path.read_bytes())
     directory = path.parent
-    if (plan.get("schema") != "warehouse-development-cv-plan.v1"
-            or not directory.is_relative_to((ROOT/v.OUTPUT_ROOT).resolve())
+    if (plan.get("schema") != v.CV_PLAN_SCHEMA
+            or directory != (ROOT/v.OUTPUT_ROOT/v.CV_BATCH_ID).resolve()
+            or plan.get("batch_id") != v.CV_BATCH_ID
+            or plan.get("round_budget_contract") != v.round_budget_contract()
             or plan.get("output_directory") != str(directory)
             or plan.get("candidate_id") != v.CANDIDATE_ID
             or plan.get("folds") != v.grouped_folds()
@@ -252,6 +257,37 @@ def development_gate(metrics):
     return {"passed": all(checks.values()), "checks": checks}
 
 
+def search_budget_audit(report, arm):
+    """Independently count actual rounds; a config name cannot prove a budget."""
+    if arm not in v.METHODS:
+        raise ValueError("unknown comparison arm")
+    search = report.get("fit_tree", {})
+    runs = search.get("search_runs", [])
+    if not isinstance(runs, list) or any(not isinstance(run, dict) or not isinstance(run.get("rounds"), list) for run in runs):
+        raise RuntimeError("search round accounting is missing or malformed")
+    contract = v.round_budget_contract()[arm]
+    per_start = [len(run["rounds"]) for run in runs]
+    calls = search.get("leaf_optimization_calls")
+    outside = report.get("leaf_optimization_calls_outside_search", 0)
+    if type(calls) is not int or type(outside) is not int or calls < 0 or outside < 0:
+        raise RuntimeError("search leaf API accounting is missing or malformed")
+    checks = {"all_eight_initializations_accounted": len(runs) == contract["maximum_initializations"],
+        "total_round_limit": sum(per_start) <= contract["maximum_total_rounds"],
+        "total_leaf_api_limit": calls+outside <= contract["maximum_leaf_api_calls_per_role_fit"]}
+    if arm == "M0":
+        checks["historical_per_start_round_limit"] = all(value <= 30 for value in per_start)
+    else:
+        checks["declared_global_round_scope"] = search.get("round_budget_scope") == "global_per_role_fit_across_all_initializations"
+        checks["global_round_counter_matches_histories"] = (type(search.get("global_search_rounds")) is int
+            and search["global_search_rounds"] == sum(per_start))
+        checks["global_remaining_counter_matches_histories"] = (type(search.get("global_search_rounds_remaining")) is int
+            and search["global_search_rounds_remaining"] == 30-sum(per_start))
+    return {"passed": all(checks.values()), "checks": checks,
+        "round_budget_scope": contract["scope"], "rounds_per_initialization": per_start,
+        "actual_total_rounds": sum(per_start), "end_to_end_leaf_api_calls": calls+outside,
+        "contract": contract}
+
+
 def execute_job(plan_path, job_id):
     from backend.training.warehouse_v6_program import fit_program, WarehouseV6Program
     path, plan = load_plan(plan_path)
@@ -264,6 +300,7 @@ def execute_job(plan_path, job_id):
         "plan_sha256": file_sha(path), "identity_sha256": v.digest(plan["identity"]),
         "publishable": False, "environment_resets": 0, "PPO_joint_steps": 0}
     write_new(directory/"started.json", started)
+    LOGGER.info("job_started job=%s fold=%s role=%s method=%s", job_id, job["fold"], job["role"], job["method"])
     start = perf_counter()
     try:
         actor, actor_path = checked_actor()
@@ -275,6 +312,9 @@ def execute_job(plan_path, job_id):
         parts = {name: [row for case in fold["splits"][name]
                         for row in episodes[case["base"]][job["role"]]] for name in v.SPLITS}
         load_plan(path)
+        LOGGER.info("fit_started job=%s frames=%s round_scope=%s", job_id,
+                    {name: len(rows) for name, rows in parts.items()},
+                    v.round_budget_contract()[job["arm"]]["scope"])
         # Every arm starts from fit data only, including M0. No historical tree
         # or earlier arm's output is supplied as a warm start.
         program = fit_program(job["role"], actor, *(parts[name] for name in v.SPLITS), method=job["method"])
@@ -283,6 +323,13 @@ def execute_job(plan_path, job_id):
         program_sha = file_sha(program_path)
         program = WarehouseV6Program.load(program_path, expected_sha256=program_sha,
                                          actor_role_sha256=ROLE_SHA256[job["role"]])
+        budget = search_budget_audit(program.report, job["arm"])
+        write_new(directory/"search-budget-audit.json", budget)
+        LOGGER.info("fit_completed job=%s rounds=%s leaf_api=%s budget_passed=%s elapsed_seconds=%.3f",
+                    job_id, budget["actual_total_rounds"], budget["end_to_end_leaf_api_calls"],
+                    budget["passed"], perf_counter()-start)
+        if not budget["passed"]:
+            raise RuntimeError("fit exceeded the frozen role-level search budget; see search-budget-audit.json")
         metrics = {name: program_metrics(program, actor, rows) for name, rows in parts.items()}
         gate = development_gate(metrics["validation"])
         solver = solver_counts(program.report)
@@ -303,14 +350,17 @@ def execute_job(plan_path, job_id):
             "fold_assignment_sha256": fold["assignment_sha256"],
             "physical_frames_per_split": {name: len(rows) for name, rows in parts.items()},
             "excluded_frames": 0, "metrics": metrics, "development_gate": gate,
-            "solver": solver, "leaf_count": len(program.leaf_logits),
+            "solver": solver, "search_budget_audit": budget, "leaf_count": len(program.leaf_logits),
             "elapsed_seconds": perf_counter()-start, "actor_weights_unchanged": True,
             "admission_evidence": False, "fresh_validation_evidence": False}
         write_new(directory/"result.json", result)
         write_new(directory/"completed.json", {"result_sha256": file_sha(directory/"result.json"),
             "program_sha256": program_sha, "plan_sha256": file_sha(path), "passed": gate["passed"]})
+        LOGGER.info("job_completed job=%s development_gate=%s elapsed_seconds=%.3f", job_id,
+                    gate["passed"], perf_counter()-start)
         return result
     except BaseException as error:
+        LOGGER.exception("job_failed job=%s elapsed_seconds=%.3f", job_id, perf_counter()-start)
         write_new(directory/"failed.json", {**started, "error_type": type(error).__name__,
             "error": str(error), "elapsed_seconds": perf_counter()-start,
             "scientific_retry_permitted": False})
@@ -320,6 +370,8 @@ def execute_job(plan_path, job_id):
 def summarize_results(results):
     if len(results) != 18 or {r["job"]["job_id"] for r in results} != {r["job_id"] for r in v.jobs()}:
         raise RuntimeError("all eighteen paired CV jobs must complete before method selection")
+    if any(row.get("search_budget_audit", {}).get("passed") is not True for row in results):
+        raise RuntimeError("all eighteen corrected-batch jobs must pass independent search budget accounting")
     arms = {}
     for arm in v.METHODS:
         rows = [r for r in results if r["job"]["arm"] == arm]
@@ -371,6 +423,8 @@ def summarize(plan_path):
 
 
 def main(argv=None):
+    logging.basicConfig(level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s", stream=sys.stdout, force=True)
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--prepare", action="store_true")

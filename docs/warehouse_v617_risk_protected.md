@@ -1,6 +1,6 @@
 # Warehouse v6.17 risk-stratified Actor candidate
 
-Candidate `warehouse-v617-risk-protected-01` targets the still-unused v6.0
+Candidate `warehouse-v617-risk-protected-02` targets the still-unused v6.0
 sealed audit. v6.16 is closed; its original model bytes and failure receipt
 remain unchanged. Pilot stays closed pending the complete admission pipeline.
 
@@ -34,8 +34,8 @@ outputs freeze at 75%. Optimizer moments for frozen rows are cleared.
 The complete BC precheck is followed by a quality screen before any PPO.
 Full multi-trajectory pressure evaluation still follows paired PPO.
 
-New development pairs are 6130–6132; selection 262100–262123, pressure base
-262200–262455, program audit 262500–262523. The formal pairs 6101–6103 and
+New development pairs are 6140–6142; selection 263100–263123, pressure base
+263200–263455, program audit 263500–263523. The formal pairs 6101–6103 and
 v6.0 sealed sets remain unused until development passes. Budgets remain
 200k/300k/400k; a BC failure stops the candidate before PPO.
 
@@ -45,8 +45,10 @@ tree is transplanted without joint training. Therefore the registered
 candidate starts BC from scratch; diagnostic weights cannot initialize it.
 
 Entry point: `python3 -m experiments.warehouse.admission develop --output-root
-/absolute/new/run/root --candidate-id warehouse-v617-risk-protected-01
+/absolute/new/run/root --candidate-id warehouse-v617-risk-protected-02
 --program-fit-method actor_risk_stratified_protected_topology_v3`.
 The native backend creates immutable recipe/source-bound authorization and
 reset journals. Ordinary training calls remain closed. No runtime action
 controller or program can replace a frozen NN action.
+
+Candidate 01 was interrupted after 424 audited resets because the new quality-screen phase was absent from the reset phase allowlist. Its partial training is retired, without a scientific verdict. Candidate 02 fixes and directly tests that hook, uses fresh development scenes, and starts from scratch.

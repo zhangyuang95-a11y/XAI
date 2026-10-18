@@ -11,7 +11,7 @@
 `warehouse_v615_guarded_tree_probe_20261017.md`；它未注册为新候选。
 正式配对 6101–6103、独立程序审计和留出测试仍未启动；pilot 继续关闭。
 
-v6.16 候选 `warehouse-v616-joint-certified-01` 在 BC 独立预检得到两角色 0% 合格覆盖，未启动 PPO。后续候选为 `warehouse-v617-risk-protected-01`，采用保护掩码与证书分离的风险分层 Actor，见 `warehouse_v617_risk_protected.md`。下表已为新候选分配未用开发种子，旧候选收据不改写。
+v6.16 候选 `warehouse-v616-joint-certified-01` 在 BC 独立预检得到两角色 0% 合格覆盖，未启动 PPO。后续候选为 `warehouse-v617-risk-protected-02`，采用保护掩码与证书分离的风险分层 Actor，见 `warehouse_v617_risk_protected.md`。下表已为新候选分配未用开发种子，旧候选收据不改写。
 
 ## 不可变实验边界
 
@@ -28,10 +28,10 @@ v6.16 候选 `warehouse-v616-joint-certified-01` 在 BC 独立预检得到两角
 
 | 阶段 | 预注册种子 | 使用方式 |
 | --- | --- | --- |
-| 开发配对 | 6130–6132 | 每个预算各训练 raw、regularized |
-| 开发 checkpoint | 262100–262123 | 训练内选 checkpoint |
-| 开发压力集 | base 262200–262455 | 每 task 三个独立动作 RNG，共 2304 轨迹／模型 |
-| 开发程序审计 | 262500–262523 | 与拟合 episode、checkpoint 和压力集分离 |
+| 开发配对 | 6140–6142 | 每个预算各训练 raw、regularized |
+| 开发 checkpoint | 263100–263123 | 训练内选 checkpoint |
+| 开发压力集 | base 263200–263455 | 每 task 三个独立动作 RNG，共 2304 轨迹／模型 |
+| 开发程序审计 | 263500–263523 | 与拟合 episode、checkpoint 和压力集分离 |
 | 正式配对 | 6101–6103 | 锁定预算后运行 |
 | 正式质量选择 | 240048–240071 | 只按两版本较差质量成绩选一对 |
 | 程序预审 | 240072–240095 | 只审被选中的一对，不改选 |

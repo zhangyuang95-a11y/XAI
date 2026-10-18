@@ -442,6 +442,8 @@ class WarehouseV6Program:
         if (version not in (PROGRAM_VERSION, JOINT_PROGRAM_VERSION, V616_PROGRAM_VERSION)
                 or (version in (JOINT_PROGRAM_VERSION, V616_PROGRAM_VERSION)) !=
                    (method in (JOINT_CERTIFIED_TOPOLOGY_METHOD, V616_TOPOLOGY_METHOD))
+                or (version == JOINT_PROGRAM_VERSION and method != JOINT_CERTIFIED_TOPOLOGY_METHOD)
+                or (version == V616_PROGRAM_VERSION and method != V616_TOPOLOGY_METHOD)
                 or data.get("feature_schema_sha256") != schema
                 or data.get("action_physics_config_sha256") !=
                    ACTION_PHYSICS_CONFIG_SHA256

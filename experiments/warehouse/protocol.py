@@ -19,14 +19,14 @@ from typing import Mapping, Sequence
 
 INITIAL_RELEASE_ID = "policylens-three-domain-20261016.v6.0"
 BUDGETS = (200_000, 300_000, 400_000)
-DEVELOPMENT_PAIR_SEEDS = (6130, 6131, 6132)
+DEVELOPMENT_PAIR_SEEDS = (6140, 6141, 6142)
 FORMAL_PAIR_SEEDS = (6101, 6102, 6103)
 # Candidate-only development seed. PairRunSpec and release acceptance continue
 # to admit only the registered three development and three formal pairs.
 EXPLORATORY_PAIR_SEEDS = (12469, 12470, 12471)
-DEVELOPMENT_SELECTION_SEEDS = tuple(range(262_100, 262_124))
-DEVELOPMENT_STRESS_BASE_SEEDS = tuple(range(262_200, 262_456))
-DEVELOPMENT_PROGRAM_AUDIT_SEEDS = tuple(range(262_500, 262_524))
+DEVELOPMENT_SELECTION_SEEDS = tuple(range(263_100, 263_124))
+DEVELOPMENT_STRESS_BASE_SEEDS = tuple(range(263_200, 263_456))
+DEVELOPMENT_PROGRAM_AUDIT_SEEDS = tuple(range(263_500, 263_524))
 DEVELOPMENT_ACTION_STREAMS = (0, 1, 2)
 FORMAL_SELECTION_SEEDS = tuple(range(240_048, 240_072))
 FORMAL_PROGRAM_PREAUDIT_SEEDS = tuple(range(240_072, 240_096))
@@ -47,7 +47,7 @@ TOPOLOGY_REFRESH_PERCENTAGES = (24, 48, 72)
 TOPOLOGY_FREEZE_PERCENTAGE = 75
 FINAL_PROGRAM_SPLIT_COUNTS = {"fit": 50, "calibration": 25,
                               "eligibility": 25, "validation": 24}
-REGISTERED_CANDIDATE_ID = "warehouse-v617-risk-protected-01"
+REGISTERED_CANDIDATE_ID = "warehouse-v617-risk-protected-02"
 REGISTERED_ARCHITECTURE_MODE = "risk_stratified_protected_tree_256_residual.v6.17-candidate"
 # A candidate names its fitting implementation explicitly. This list is not
 # a release selection: the selected method is sealed only after development
@@ -65,7 +65,7 @@ RETIRED_119_SOURCE_CLOSURE_SHA256 = frozenset({
 })
 RETIRED_119_MODEL_VERSION = "warehouse-dual-actor.v6.9-exploratory"
 REGISTERED_BC_RECIPE_VERSION = (
-    "warehouse-public-dual-bc.v6.17-risk-protected")
+    "warehouse-public-dual-bc.v6.17-risk-protected.r2")
 LEGACY_V614_BC_RECIPE_VERSION = (
     "warehouse-public-dual-bc.v6.14-public-affordance-exploratory")
 LEGACY_V614_BC_SPEC_SHA256 = (
@@ -143,7 +143,7 @@ REGISTERED_BC_SPEC = {
     },
     "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
     "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
-    "executable_recipe_file_sha256": "db2ba32d33a28b76ddae1a1da4eabad4827e971c7bcbc0f263c886f7e3e842bd",
+    "executable_recipe_file_sha256": "6998d0c68152a7161762b5f66e4e2d8b4136ea6bec400e8c9e830e18af8d6bec",
 }
 REGISTERED_RISK_DUAL_CONFIG = {
     "target": 0.04, "window_episodes": 128, "minimum_episodes": 64,

@@ -130,3 +130,15 @@ def test_actual_topology_refresh_rebuilds_from_fit_episodes_and_binds_sidecar():
         assert entry["protection_is_not_certificate"]
         assert entry["qualification"]["frozen_role_sha256"] == role_sha256(
             _role_arrays(model.actors[role]))
+
+
+def test_bc_quality_screen_enters_real_reset_audit_context(tmp_path):
+    from env.warehouse.reset_audit_v614 import capture_stage1_resets, stage1_reset_phase
+    from env.warehouse.environment import WarehouseMultiAgentEnv
+    from env.warehouse.domain import participant_study_config
+    with capture_stage1_resets(tmp_path / "resets.jsonl") as rows:
+        with stage1_reset_phase("bc_quality_screen"):
+            WarehouseMultiAgentEnv(participant_study_config()).reset(seed=950617)
+    assert len(rows) == 1
+    assert rows[0]["phase"] == "bc_quality_screen"
+    assert rows[0]["seed"] == 950617

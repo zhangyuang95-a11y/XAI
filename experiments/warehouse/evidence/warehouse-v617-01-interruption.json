@@ -1,0 +1,13 @@
+{
+  "actual_reset_count": 424,
+  "candidate_id": "warehouse-v617-risk-protected-01",
+  "declared_prefix_matches": true,
+  "independent_audit_or_holdout_used": false,
+  "ppo_started": false,
+  "reason": "Implementation audit found bc_quality_screen missing from authorized reset phases; stopped before any independent BC precheck or PPO. No method-quality conclusion.",
+  "reset_audit_sha256": "5d501cceb0ce6a6de0ad0129cfa45b1dd8317d09c81cc816857c7de0117730a1",
+  "reset_journal_sha256": "351f17f9ba69dc29048c0d1b7bbab5f337bd8d60f96299f60d0096a1090b51da",
+  "source_closure_sha256": "85f64d1a49f780cc801f1eb5243e06bd18cf40e7e88a31678efc5758671192ef",
+  "source_commit": "420453e",
+  "status": "closed_interrupted_development"
+}

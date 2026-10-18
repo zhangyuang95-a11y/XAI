@@ -49,7 +49,7 @@ def test_frozen_quality_trace_keeps_both_nn_actions_and_binding(tmp_path):
 
 def test_preregistered_spec_hash_is_identical_in_runner_and_acceptance(tmp_path):
     spec = PairRunSpec(
-        candidate_id="hash-contract", pair_seed=6130, joint_steps=200_000,
+        candidate_id="hash-contract", pair_seed=6140, joint_steps=200_000,
         output_dir=str(tmp_path),
         program_fit_method=REGISTERED_PROGRAM_FIT_METHOD,
         checkpoint_seeds=DEVELOPMENT_SELECTION_SEEDS)

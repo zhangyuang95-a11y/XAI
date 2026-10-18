@@ -79,7 +79,7 @@ from .warehouse_v6_shutdown_cost import (
 from .warehouse_v6_teacher_lookahead import public_lookahead_teacher
 
 
-RUNNER_VERSION = "warehouse-v6-risk-protected.v17"
+RUNNER_VERSION = "warehouse-v6-risk-protected.v17.1"
 FORMAL_TRAINING_DISABLED = True
 _LOCKED_BC_MARKER = object()
 _LOCKED_EVALUATION_MARKER = object()
@@ -122,7 +122,7 @@ DEFAULT_DAGGER_EPOCHS = REGISTERED_BC_SPEC["dagger_epochs"]
 # A single, replayable offline BC recipe is completed before either PPO
 # variant starts. Every data seed and stage is fixed by the pair seed. The
 # offline teacher and learned collision critic are absent from execution.
-BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.17-risk-protected"
+BC_RECIPE_VERSION = "warehouse-public-dual-bc.v6.17-risk-protected.r2"
 BC_INITIAL_TEACHER_EPISODES = 100
 BC_INITIAL_EPOCHS = 20
 BC_INITIAL_DAGGER_ROUNDS = 2

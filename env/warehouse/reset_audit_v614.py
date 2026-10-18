@@ -43,7 +43,7 @@ def capture_stage1_resets(journal_path: str | Path) -> Iterator[list[dict]]:
 def stage1_reset_phase(phase: str, *, start_joint_step: int | None = None,
                        episode_index: int | None = None) -> Iterator[None]:
     if _AUDIT_SINK.get() is None or phase not in (
-            "bc", "quality", "pressure", "program", "formal_bc",
+            "bc", "quality", "pressure", "program", "formal_bc", "bc_quality_screen",
             "formal_raw_rollout", "formal_raw_selection",
             "formal_regularized_rollout", "formal_regularized_selection",
             "formal_regularized_program"):

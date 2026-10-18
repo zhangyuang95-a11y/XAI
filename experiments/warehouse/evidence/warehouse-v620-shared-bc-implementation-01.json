@@ -1,0 +1,33 @@
+{
+  "PPO_joint_steps": 0,
+  "actor_updates": 0,
+  "checked_at_utc": "2026-10-18T17:43:14.558474+00:00",
+  "engineering_only": true,
+  "exact_seed_config_still_inert": true,
+  "historical_seven_input_hashes_unchanged": true,
+  "implementation": [
+    "Common BC alignment, exact paired schedule capability and native failed-CV prerequisite chain.",
+    "Spent-scene gamma comparison with fixed quality/fidelity ranking and typed downstream model-method lock.",
+    "275 then conditional216 frozen-only development entry with persistent reset provenance and full NN physical replay.",
+    "Typed metadata/seed audit tooling with unresolved states preserved and no authority."
+  ],
+  "pilot_opened": false,
+  "publishable": false,
+  "regression": {
+    "command": "python3 -m pytest -q tests/test_warehouse_v6*.py tests/test_study_runtime_no_torch.py tests/test_study_v6_warehouse_frame_invariants.py tests/test_study_v6_pong_kitchen_frames.py tests/test_study_v620_kitchen_all_task_frames.py --disable-warnings --maxfail=1",
+    "elapsed_seconds": 97.29,
+    "log_path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/shared-bc-implementation-regression-01.log",
+    "log_sha256": "0a7191a12694b614c1c3bb930609e7c1623eb9f52a5c24a901eaada26bc13068",
+    "passed": 614,
+    "subtests_passed": 2
+  },
+  "schema": "warehouse-v620-shared-bc-implementation-verification.v1",
+  "scientific_environment_resets": 0,
+  "source_closure_sha256": "83a3abcd47aa60dbc7905b6ea18007dea978b55137c8bcfa8cc46238978576d8",
+  "source_file_count": 180,
+  "source_manifest": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/shared-bc-implementation-source-01.json",
+    "sha256": "ad29b41befc06909b5264157778731b53b63a5b034dfd5f1f46592519fa50d40"
+  },
+  "training_authorization_granted": false
+}

@@ -22,9 +22,12 @@ L_BC = mean(w * CE(mask(full), public_teacher))
 ```
 
 `gamma` is strictly one of `0.01` and `0.03`; all other coefficients are fixed.
-The two candidates must use the same initialization, public training rows,
-minibatch order and declared step budget. This is a paired BC recipe comparison,
-not permission to test additional weights against fresh validation outcomes.
+The two candidates must use the same initialization, assigned scene/action RNG
+sequences, minibatch generator recipe and declared stage budget. Teacher-driven
+public records are identical. NN visitation trajectories can differ after the
+two recipes update their weights; their frame counts and row identities are
+recorded rather than described as identical data. This is a paired BC recipe
+comparison. Fresh validation cannot select additional loss weights.
 
 `correct_tree` is the detached condition that the raw internal tree's masked
 argmax equals the **public offline BC teacher action**. The penalty is exactly

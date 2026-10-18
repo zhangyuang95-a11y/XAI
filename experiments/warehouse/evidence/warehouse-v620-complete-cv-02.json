@@ -1,0 +1,156 @@
+{
+  "PPO_joint_steps": 0,
+  "actor_updates": 0,
+  "arms": {
+    "M0": {
+      "all_role_fold_gates_passed": false,
+      "maximum_qualified_kl": 0.12803012132644653,
+      "mean_45_percent_target_reached": false,
+      "mean_explanation_coverage": 0.2662925290497046,
+      "minimum_expected_feedback_coverage": 0.21142125129699707,
+      "minimum_explanation_coverage": 0.175,
+      "selection_score": [
+        0.175,
+        0.21142125129699707,
+        -0.12803012132644653,
+        -96
+      ],
+      "total_leaf_count": 96
+    },
+    "M1": {
+      "all_role_fold_gates_passed": false,
+      "maximum_qualified_kl": 0.14549604058265686,
+      "mean_45_percent_target_reached": false,
+      "mean_explanation_coverage": 0.25123625339843275,
+      "minimum_expected_feedback_coverage": 0.1603986620903015,
+      "minimum_explanation_coverage": 0.16792929292929293,
+      "selection_score": [
+        0.16792929292929293,
+        0.1603986620903015,
+        -0.14549604058265686,
+        -73
+      ],
+      "total_leaf_count": 73
+    },
+    "M2": {
+      "all_role_fold_gates_passed": false,
+      "maximum_qualified_kl": 0.05744249373674393,
+      "mean_45_percent_target_reached": false,
+      "mean_explanation_coverage": 0.24878878318362696,
+      "minimum_expected_feedback_coverage": 0.2151697278022766,
+      "minimum_explanation_coverage": 0.21843434343434343,
+      "selection_score": [
+        0.21843434343434343,
+        0.2151697278022766,
+        -0.05744249373674393,
+        -70
+      ],
+      "total_leaf_count": 70
+    }
+  },
+  "candidate_id": "warehouse-v620-01",
+  "chosen_method": null,
+  "completed_jobs": 18,
+  "environment_resets": 0,
+  "fresh_validation_evidence": false,
+  "independent_checker": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02-independent/check_cv_v2.py",
+    "sha256": "7c34b11b35a6cdf80f0fd4311e1ea8afcda4aa2bbe245be4624d74f75270419f"
+  },
+  "independent_summary": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02-independent/results/complete-summary.json",
+    "sha256": "8f33e43c04032cdacba2e555f5cd61c8b41fea4ebe5acc05c0a6061354ff360e"
+  },
+  "job_results": {
+    "fold-0-robot_1-M0": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-0-robot_1-M0/result.json",
+      "sha256": "7677f4e073289f06438836a537aeab0855156f9a8a00bf0616325d9cdd40a20b"
+    },
+    "fold-0-robot_1-M1": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-0-robot_1-M1/result.json",
+      "sha256": "40b88ffc315e1cc645232242f4a18ae5c4045f7fec60dfe8f8104d77d525015c"
+    },
+    "fold-0-robot_1-M2": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-0-robot_1-M2/result.json",
+      "sha256": "e47b53f4330f57a816fb64691df47327d4e9bbc79ebdabab5e5f5ff56c532397"
+    },
+    "fold-0-robot_2-M0": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-0-robot_2-M0/result.json",
+      "sha256": "dfa843e959f27f1b6748a8e780550b40abce7d9e8b86d232d9ba581aad65486a"
+    },
+    "fold-0-robot_2-M1": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-0-robot_2-M1/result.json",
+      "sha256": "f9584504a5752951354861f7cb8b3a16cc26670f546e72d5376e57891bc96b0a"
+    },
+    "fold-0-robot_2-M2": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-0-robot_2-M2/result.json",
+      "sha256": "c112272d64d15e62eea2c6f90da5f95937e76372ab3f3b8e91e08d849713f535"
+    },
+    "fold-1-robot_1-M0": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-1-robot_1-M0/result.json",
+      "sha256": "4fca8ed98a4be527ebc98f6d04a490b4125a1b9ae104b88d31add67faef952b1"
+    },
+    "fold-1-robot_1-M1": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-1-robot_1-M1/result.json",
+      "sha256": "bc1426d0855a88e65528cec572fece675185a504ff0128eafe537ee1c748a32c"
+    },
+    "fold-1-robot_1-M2": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-1-robot_1-M2/result.json",
+      "sha256": "28aae4df95109c93e3ba4a850a73ad49448b05a4a76c0f596fb0a8d5417dd097"
+    },
+    "fold-1-robot_2-M0": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-1-robot_2-M0/result.json",
+      "sha256": "d6779255ad12d99e45fa84f5c11de7251dc94330c500531ee14a960097bba965"
+    },
+    "fold-1-robot_2-M1": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-1-robot_2-M1/result.json",
+      "sha256": "0f6fa9e165e7aa8fe5eeb32619fdb0717ac1c0ab2ea4ff57e0216d9352346268"
+    },
+    "fold-1-robot_2-M2": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-1-robot_2-M2/result.json",
+      "sha256": "c6e79efa37f72761f1ffdeca5127078ca1319418fdf8fbb791e2aba4b4c1de5a"
+    },
+    "fold-2-robot_1-M0": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-2-robot_1-M0/result.json",
+      "sha256": "d1f2767d22be14daaa8a0308826759a7968eaf87ff56067caa1bcdd81fcf02b7"
+    },
+    "fold-2-robot_1-M1": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-2-robot_1-M1/result.json",
+      "sha256": "a206d9f156a5c57acf724ed3e62ad71765aeb1966861d4641f06a68bf37328af"
+    },
+    "fold-2-robot_1-M2": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-2-robot_1-M2/result.json",
+      "sha256": "51783de7d731c7050c26f22e51f0eb8f297e1fac8a4282e4b0b36d2479e8c410"
+    },
+    "fold-2-robot_2-M0": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-2-robot_2-M0/result.json",
+      "sha256": "e2be42b6a10cc018c3981c79ed99db67b90bf01e566f763521835412423be747"
+    },
+    "fold-2-robot_2-M1": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-2-robot_2-M1/result.json",
+      "sha256": "be7946b4e5642ba0eb8f38e077041b5e13ffc955030433e60316b8ce28704413"
+    },
+    "fold-2-robot_2-M2": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/jobs/fold-2-robot_2-M2/result.json",
+      "sha256": "a2716ee7782f475086f2f1b199f57c01222bc9428d040d3ed1f75db605c8ca81"
+    }
+  },
+  "limitations": [
+    "Old development episodes only; no new NN quality estimate.",
+    "M0 historical round scope differs from M1/M2; no equal-compute efficiency claim.",
+    "A failed bounded search does not prove that a compliant program cannot exist."
+  ],
+  "native_summary": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/summary.json",
+    "sha256": "ffcbaa855bb6b12384fd0e600b82527d7f7ab28573e2a7e74a35c6d3b2414e6e"
+  },
+  "next_stage": "common_bc_structure_learning_before_fresh_validation",
+  "pilot_opened": false,
+  "plan": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620/cv-02/plan.json",
+    "sha256": "5c207671e6fd676d677430fbe8aa725f674e9e42955021fd521287a3b8e3198d"
+  },
+  "publishable": false,
+  "schema": "warehouse-v620-complete-cv-evidence.v1",
+  "source_closure_sha256": "5d8236dee814f6d8b83343a3d2d9ddd453d4aee9dfe4d0376448b424a8b085ed"
+}

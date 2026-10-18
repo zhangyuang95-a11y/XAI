@@ -1,0 +1,1 @@
+{"candidate_id":"warehouse-v620-01-shared-bc-pilot","gamma_candidates":[0.01,0.03],"pair_seed":6160,"schema":"warehouse-v620-paired-bc-seeds.v1","seed_binding":{"bc_seed_schedule":{},"critic_environment_reset_seeds":[null,null],"critic_seed":null,"initialization_pair_seed":6160,"training_rng_schedule":null},"status":"DRAFT_REQUIRES_INDEPENDENT_SEED_CLEARANCE_AND_NEW_SOURCE_LOCK"}

@@ -1,6 +1,8 @@
 # v6.21 共同 BC 开发执行约定
 
-本模块是尚未启用的后续实现。只有旧数据上的18项提取诊断全部完成、独立审计确认没有方法通过、精确种子清场完成后，才允许启动。实现代码或测试通过不代表模型验收通过。
+2026-10-19，旧数据上的18项提取诊断已全部完成，独立审计确认没有方法通过；精确种子核查及最后增量审查完成后，`bc-development-01` 已获得有限授权并开始执行。194项训练源码锁为 `35e9fe54e8de193ed79d3553b540e481a5738f1b2f47369d3a9ba5ef47a25c3a`。准入依据见 [诊断收据](../experiments/warehouse/evidence/warehouse-v621-diagnostics-01.json) 与 [BC准入收据](../experiments/warehouse/evidence/warehouse-v621-bc-development-admission-01.json)。
+
+该授权仅覆盖本页的有限BC开发。实现代码、合成测试或完成缓存都不代表模型验收通过；新的275局验证、PPO、封存审计和pilot仍关闭。实际结果以隔离运行目录中的完整收据为准。
 
 ## 有限配方
 

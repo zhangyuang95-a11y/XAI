@@ -1,0 +1,32 @@
+{
+  "BC_model_training_started": false,
+  "PPO_joint_steps": 0,
+  "candidate_id": "warehouse-v621-shared-structure-01",
+  "diagnostic_source_closure_sha256": "500a81d4cc3a6079b379895e88fc7bdbb43175242eb2dedd48d586a4f74fa622",
+  "final_focused_after_readonly_cache_and_actor_file_mode_changes": {
+    "elapsed_seconds": 5.2,
+    "passed": 57,
+    "source_closure_sha256": "f1c4b6f7bdcf7ef1ca5172d7d0c712b6e77a15905295f8404e4b82f16e84c016"
+  },
+  "fresh_precheck_episodes": 0,
+  "full_regression": {
+    "elapsed_seconds": 9.78,
+    "passed": 296,
+    "source_closure_sha256": "702cf53fd2866c3fd75cfa0366704050f1235f89e07a3a33e0be4619d79e14e3"
+  },
+  "git_commit": "90759e2",
+  "independent_review": "Actor and program agents reviewed the final mathematical bounds, post-freeze gradient probe, complete dual-NN execution traces, exact-reset capabilities, conditional backup and shared readonly caches; no remaining blocking finding.",
+  "legacy_source_closure_sha256": "4fba3c172feeaefa11e4c0c2b435e21457f4f27c60c11e5b2cd0c24c618f229c",
+  "new_model_results_available": false,
+  "pilot_opened": false,
+  "publishable": false,
+  "schema": "warehouse-v621-shared-actor-implementation.v1",
+  "source_closure_sha256": "f1c4b6f7bdcf7ef1ca5172d7d0c712b6e77a15905295f8404e4b82f16e84c016",
+  "source_file_count": 194,
+  "source_manifest": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/experiments/warehouse/evidence/warehouse-v621-bc-source-manifest-01.json",
+    "sha256": "97c89e5d4a231210bc6d10717e18bc5a86f128675d9e8851e4bb18a0e424e9e1"
+  },
+  "test_counts_not_added_as_unique_tests": true,
+  "training_authority_granted_by_this_receipt": false
+}

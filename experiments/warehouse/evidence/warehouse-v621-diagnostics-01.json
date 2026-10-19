@@ -1,0 +1,552 @@
+{
+  "PPO_joint_steps": 0,
+  "actor_updates": 0,
+  "all_eighteen_completed_and_independently_audited": true,
+  "arms": {
+    "A": {
+      "all_role_fold_gates_passed": false,
+      "maximum_qualified_kl": 0.08788146823644638,
+      "mean_explanation_coverage": 0.30685290271500004,
+      "minimum_expected_feedback_coverage": 0.2623055875301361,
+      "minimum_explanation_coverage": 0.2703795194251067,
+      "selection_score": [
+        0.2703795194251067,
+        0.2623055875301361,
+        -0.08788146823644638,
+        -95
+      ],
+      "structurally_infeasible_units": 0
+    },
+    "B": {
+      "all_role_fold_gates_passed": false,
+      "maximum_qualified_kl": null,
+      "mean_explanation_coverage": null,
+      "minimum_expected_feedback_coverage": 0.0,
+      "minimum_explanation_coverage": 0.0,
+      "selection_score": [
+        0.0,
+        0.0,
+        null,
+        0
+      ],
+      "structurally_infeasible_units": 6
+    },
+    "C": {
+      "all_role_fold_gates_passed": false,
+      "maximum_qualified_kl": 0.09678040444850922,
+      "mean_explanation_coverage": 0.24035235137847102,
+      "minimum_expected_feedback_coverage": 0.20050399005413055,
+      "minimum_explanation_coverage": 0.2037951942510667,
+      "selection_score": [
+        0.2037951942510667,
+        0.20050399005413055,
+        -0.09678040444850922,
+        -81
+      ],
+      "structurally_infeasible_units": 0
+    }
+  },
+  "baseline_actor_sha256": "1b6310f6d93309fb17e64516519a71680ad3c30e73f222be27df4dff10da81ec",
+  "candidate_id": "warehouse-v621-shared-structure-01",
+  "checked_at_utc": "2026-10-19T04:24:09.756346+00:00",
+  "diagnostic_source_closure_sha256": "500a81d4cc3a6079b379895e88fc7bdbb43175242eb2dedd48d586a4f74fa622",
+  "environment_resets": 0,
+  "fresh_validation_evidence": false,
+  "independent_audit": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/independent-01/audit.json",
+    "sha256": "581d33516f4840ab92cee6586af829cf804ba182e1b21182d9057d71e376380d"
+  },
+  "interpretation": "bounded posthoc extraction under fixed model and spent episodes; not a global capacity impossibility proof or model improvement",
+  "jobs": [
+    {
+      "elapsed_seconds": 2639.484849582892,
+      "job": {
+        "arm": "A",
+        "fold": 0,
+        "job_id": "fold-0-robot_1-A",
+        "method": "v620_m2_same_fold_refit_v1",
+        "role": "robot_1"
+      },
+      "leaf_count": 16,
+      "passed": false,
+      "status": "completed",
+      "validation": {
+        "explanation": {
+          "actionable_coverage": 0.28812036829103976,
+          "agreement": 0.9831144465290806,
+          "coverage": 0.2992364697956434,
+          "expected_actionable_coverage": 0.28896504640579224,
+          "kl": 0.0765160396695137,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        },
+        "feedback": {
+          "actionable_coverage": 0.28755894902313045,
+          "agreement": 0.9831144465290806,
+          "coverage": 0.2992364697956434,
+          "expected_actionable_coverage": 0.2883110046386719,
+          "kl": 0.0765160396695137,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 6.314528291113675,
+      "job": {
+        "arm": "B",
+        "fold": 0,
+        "job_id": "fold-0-robot_1-B",
+        "method": "actor_topology_compilation_distribution_refit_v1",
+        "role": "robot_1"
+      },
+      "leaf_count": null,
+      "passed": false,
+      "status": "structurally_infeasible",
+      "validation": null
+    },
+    {
+      "elapsed_seconds": 147.52160783391446,
+      "job": {
+        "arm": "C",
+        "fold": 0,
+        "job_id": "fold-0-robot_1-C",
+        "method": "path_constrained_alternating_tree_optimization_v1",
+        "role": "robot_1"
+      },
+      "leaf_count": 14,
+      "passed": false,
+      "status": "completed",
+      "validation": {
+        "explanation": {
+          "actionable_coverage": 0.24949472265888165,
+          "agreement": 0.9750430292598967,
+          "coverage": 0.26094767572423083,
+          "expected_actionable_coverage": 0.2492157369852066,
+          "kl": 0.09678040444850922,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        },
+        "feedback": {
+          "actionable_coverage": 0.24848416797664497,
+          "agreement": 0.9750430292598967,
+          "coverage": 0.26094767572423083,
+          "expected_actionable_coverage": 0.24845467507839203,
+          "kl": 0.09678040444850922,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 2521.9474391660187,
+      "job": {
+        "arm": "A",
+        "fold": 0,
+        "job_id": "fold-0-robot_2-A",
+        "method": "v620_m2_same_fold_refit_v1",
+        "role": "robot_2"
+      },
+      "leaf_count": 16,
+      "passed": false,
+      "status": "completed",
+      "validation": {
+        "explanation": {
+          "actionable_coverage": 0.26330563664944984,
+          "agreement": 0.9875415282392026,
+          "coverage": 0.2703795194251067,
+          "expected_actionable_coverage": 0.2626113295555115,
+          "kl": 0.049139752984046936,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        },
+        "feedback": {
+          "actionable_coverage": 0.2630810689422861,
+          "agreement": 0.9875415282392026,
+          "coverage": 0.2703795194251067,
+          "expected_actionable_coverage": 0.2623055875301361,
+          "kl": 0.049139752984046936,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 6.699632749892771,
+      "job": {
+        "arm": "B",
+        "fold": 0,
+        "job_id": "fold-0-robot_2-B",
+        "method": "actor_topology_compilation_distribution_refit_v1",
+        "role": "robot_2"
+      },
+      "leaf_count": null,
+      "passed": false,
+      "status": "structurally_infeasible",
+      "validation": null
+    },
+    {
+      "elapsed_seconds": 150.3644162081182,
+      "job": {
+        "arm": "C",
+        "fold": 0,
+        "job_id": "fold-0-robot_2-C",
+        "method": "path_constrained_alternating_tree_optimization_v1",
+        "role": "robot_2"
+      },
+      "leaf_count": 16,
+      "passed": false,
+      "status": "completed",
+      "validation": {
+        "explanation": {
+          "actionable_coverage": 0.2015495171794296,
+          "agreement": 0.9994490358126722,
+          "coverage": 0.2037951942510667,
+          "expected_actionable_coverage": 0.20054331421852112,
+          "kl": 0.016525831073522568,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        },
+        "feedback": {
+          "actionable_coverage": 0.20143723332584773,
+          "agreement": 0.9994490358126722,
+          "coverage": 0.2037951942510667,
+          "expected_actionable_coverage": 0.20050399005413055,
+          "kl": 0.016525831073522568,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 2622.722412541043,
+      "job": {
+        "arm": "A",
+        "fold": 1,
+        "job_id": "fold-1-robot_1-A",
+        "method": "v620_m2_same_fold_refit_v1",
+        "role": "robot_1"
+      },
+      "leaf_count": 15,
+      "passed": false,
+      "status": "completed",
+      "validation": {
+        "explanation": {
+          "actionable_coverage": 0.29844444444444446,
+          "agreement": 0.9892163910855499,
+          "coverage": 0.3091111111111111,
+          "expected_actionable_coverage": 0.29892757534980774,
+          "kl": 0.05775574967265129,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        },
+        "feedback": {
+          "actionable_coverage": 0.29744444444444446,
+          "agreement": 0.9892163910855499,
+          "coverage": 0.3091111111111111,
+          "expected_actionable_coverage": 0.2981214225292206,
+          "kl": 0.05775574967265129,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 6.381957416888326,
+      "job": {
+        "arm": "B",
+        "fold": 1,
+        "job_id": "fold-1-robot_1-B",
+        "method": "actor_topology_compilation_distribution_refit_v1",
+        "role": "robot_1"
+      },
+      "leaf_count": null,
+      "passed": false,
+      "status": "structurally_infeasible",
+      "validation": null
+    },
+    {
+      "elapsed_seconds": 146.62776941712946,
+      "job": {
+        "arm": "C",
+        "fold": 1,
+        "job_id": "fold-1-robot_1-C",
+        "method": "path_constrained_alternating_tree_optimization_v1",
+        "role": "robot_1"
+      },
+      "leaf_count": 16,
+      "passed": false,
+      "status": "completed",
+      "validation": {
+        "explanation": {
+          "actionable_coverage": 0.2388888888888889,
+          "agreement": 0.9829596412556054,
+          "coverage": 0.2477777777777778,
+          "expected_actionable_coverage": 0.23929478228092194,
+          "kl": 0.06790465861558914,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        },
+        "feedback": {
+          "actionable_coverage": 0.23855555555555555,
+          "agreement": 0.9829596412556054,
+          "coverage": 0.2477777777777778,
+          "expected_actionable_coverage": 0.23879680037498474,
+          "kl": 0.06790465861558914,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 2814.483036499936,
+      "job": {
+        "arm": "A",
+        "fold": 1,
+        "job_id": "fold-1-robot_2-A",
+        "method": "v620_m2_same_fold_refit_v1",
+        "role": "robot_2"
+      },
+      "leaf_count": 16,
+      "passed": false,
+      "status": "completed",
+      "validation": {
+        "explanation": {
+          "actionable_coverage": 0.31655555555555553,
+          "agreement": 0.979750253121836,
+          "coverage": 0.32922222222222225,
+          "expected_actionable_coverage": 0.3172350227832794,
+          "kl": 0.08788146823644638,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        },
+        "feedback": {
+          "actionable_coverage": 0.31566666666666665,
+          "agreement": 0.979750253121836,
+          "coverage": 0.32922222222222225,
+          "expected_actionable_coverage": 0.31640559434890747,
+          "kl": 0.08788146823644638,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 6.073608666891232,
+      "job": {
+        "arm": "B",
+        "fold": 1,
+        "job_id": "fold-1-robot_2-B",
+        "method": "actor_topology_compilation_distribution_refit_v1",
+        "role": "robot_2"
+      },
+      "leaf_count": null,
+      "passed": false,
+      "status": "structurally_infeasible",
+      "validation": null
+    },
+    {
+      "elapsed_seconds": 148.85780641599558,
+      "job": {
+        "arm": "C",
+        "fold": 1,
+        "job_id": "fold-1-robot_2-C",
+        "method": "path_constrained_alternating_tree_optimization_v1",
+        "role": "robot_2"
+      },
+      "leaf_count": 13,
+      "passed": false,
+      "status": "completed",
+      "validation": {
+        "explanation": {
+          "actionable_coverage": 0.21544444444444444,
+          "agreement": 0.9959370238699847,
+          "coverage": 0.21877777777777777,
+          "expected_actionable_coverage": 0.21539385616779327,
+          "kl": 0.030106190592050552,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        },
+        "feedback": {
+          "actionable_coverage": 0.21533333333333332,
+          "agreement": 0.9959370238699847,
+          "coverage": 0.21877777777777777,
+          "expected_actionable_coverage": 0.21522721648216248,
+          "kl": 0.030106190592050552,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 2770.821236375021,
+      "job": {
+        "arm": "A",
+        "fold": 2,
+        "job_id": "fold-2-robot_1-A",
+        "method": "v620_m2_same_fold_refit_v1",
+        "role": "robot_1"
+      },
+      "leaf_count": 16,
+      "passed": false,
+      "status": "completed",
+      "validation": {
+        "explanation": {
+          "actionable_coverage": 0.2992338891392519,
+          "agreement": 0.9849596478356566,
+          "coverage": 0.3071203244704822,
+          "expected_actionable_coverage": 0.2975987195968628,
+          "kl": 0.06942754983901978,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        },
+        "feedback": {
+          "actionable_coverage": 0.31173952230734564,
+          "agreement": 0.9832460732984293,
+          "coverage": 0.322780531771068,
+          "expected_actionable_coverage": 0.3102136254310608,
+          "kl": 0.07481138408184052,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 6.1710675419308245,
+      "job": {
+        "arm": "B",
+        "fold": 2,
+        "job_id": "fold-2-robot_1-B",
+        "method": "actor_topology_compilation_distribution_refit_v1",
+        "role": "robot_1"
+      },
+      "leaf_count": null,
+      "passed": false,
+      "status": "structurally_infeasible",
+      "validation": null
+    },
+    {
+      "elapsed_seconds": 152.69265633285977,
+      "job": {
+        "arm": "C",
+        "fold": 2,
+        "job_id": "fold-2-robot_1-C",
+        "method": "path_constrained_alternating_tree_optimization_v1",
+        "role": "robot_1"
+      },
+      "leaf_count": 11,
+      "passed": false,
+      "status": "completed",
+      "validation": {
+        "explanation": {
+          "actionable_coverage": 0.25,
+          "agreement": 0.9799038881607689,
+          "coverage": 0.2578864353312303,
+          "expected_actionable_coverage": 0.2487039864063263,
+          "kl": 0.07881210744380951,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        },
+        "feedback": {
+          "actionable_coverage": 0.24909869310500227,
+          "agreement": 0.9799038881607689,
+          "coverage": 0.2578864353312303,
+          "expected_actionable_coverage": 0.24785996973514557,
+          "kl": 0.07881210744380951,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 2810.214488042053,
+      "job": {
+        "arm": "A",
+        "fold": 2,
+        "job_id": "fold-2-robot_2-A",
+        "method": "v620_m2_same_fold_refit_v1",
+        "role": "robot_2"
+      },
+      "leaf_count": 16,
+      "passed": false,
+      "status": "completed",
+      "validation": {
+        "explanation": {
+          "actionable_coverage": 0.31365479945921587,
+          "agreement": 0.9813407049067036,
+          "coverage": 0.3260477692654349,
+          "expected_actionable_coverage": 0.3142412304878235,
+          "kl": 0.07964589446783066,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        },
+        "feedback": {
+          "actionable_coverage": 0.3133168093735917,
+          "agreement": 0.9813407049067036,
+          "coverage": 0.3260477692654349,
+          "expected_actionable_coverage": 0.313532292842865,
+          "kl": 0.07964589446783066,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 6.284115249989554,
+      "job": {
+        "arm": "B",
+        "fold": 2,
+        "job_id": "fold-2-robot_2-B",
+        "method": "actor_topology_compilation_distribution_refit_v1",
+        "role": "robot_2"
+      },
+      "leaf_count": null,
+      "passed": false,
+      "status": "structurally_infeasible",
+      "validation": null
+    },
+    {
+      "elapsed_seconds": 147.8896789161954,
+      "job": {
+        "arm": "C",
+        "fold": 2,
+        "job_id": "fold-2-robot_2-C",
+        "method": "path_constrained_alternating_tree_optimization_v1",
+        "role": "robot_2"
+      },
+      "leaf_count": 11,
+      "passed": false,
+      "status": "completed",
+      "validation": {
+        "explanation": {
+          "actionable_coverage": 0.24504281207751238,
+          "agreement": 0.9804008908685968,
+          "coverage": 0.2529292474087427,
+          "expected_actionable_coverage": 0.24464067816734314,
+          "kl": 0.06828700006008148,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        },
+        "feedback": {
+          "actionable_coverage": 0.24369085173501578,
+          "agreement": 0.9804008908685968,
+          "coverage": 0.2529292474087427,
+          "expected_actionable_coverage": 0.24393372237682343,
+          "kl": 0.06828700006008148,
+          "whole_tree_path_uncertified_count": 0,
+          "whole_tree_raw_illegal_count": 0
+        }
+      }
+    }
+  ],
+  "native_next_stage": "shared_structure_actor_implementation",
+  "pilot_opened": false,
+  "publishable": false,
+  "schema": "warehouse-v621-diagnostics-evidence-summary.v1",
+  "selected_arm": null,
+  "summary": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/diagnostics-01/summary.json",
+    "sha256": "38b462305234e8ff2694370043079a34d234966234d214c8295a9e7438034e2c"
+  },
+  "training_authority_granted_by_this_receipt": false
+}

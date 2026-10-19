@@ -1,0 +1,228 @@
+{
+  "PPO_joint_steps": 0,
+  "actor_updates": 0,
+  "batch_id": "capacity-02",
+  "candidate_id": "warehouse-v622-v620-preserving-01",
+  "environment_resets": 0,
+  "fallback_batch_id": "fallback-02",
+  "fresh_or_sealed_evaluation_authorized": false,
+  "interruption": {
+    "path": "output/warehouse_v622/capacity-01/interrupted.json",
+    "sha256": "155ae082c265d64bc947cb229c0600a15cd5b71670f3daa58c58548bbce0a1a0"
+  },
+  "old_disposition": {
+    "completed_jobs": 9,
+    "interrupted_job_ids": [
+      "fold-1-robot_2-A32",
+      "fold-2-robot_1-A32",
+      "fold-2-robot_2-A32"
+    ],
+    "interrupted_jobs": 3,
+    "unlogged_in_flight_work": "unknown; logged counters are lower bounds only"
+  },
+  "original_plan": {
+    "path": "output/warehouse_v622/capacity-01/plan.json",
+    "sha256": "b85f8e09befa918e4c9a02229d7d037b8112792092b8576263f77263475bfdc2"
+  },
+  "original_protocol_recipe": {
+    "path": "configs/warehouse_v622_recipe.json",
+    "sha256": "10b9eccf7d6791d7f2c6b4ca35e28eaa904683f72255341ebd84a4ca4c391a5b"
+  },
+  "original_source_closure_sha256": "fb969ab32556b2a5d3163ed8a4e77874b0176ca733870004507f46e0b90545b6",
+  "original_source_manifest": {
+    "path": "output/warehouse_v622/capacity-01/source-manifest.json",
+    "sha256": "d525f6caa89bce874374c88039a7d9a92d9c85207c2ae425d3e5a9e1f6970b99"
+  },
+  "pilot_opened": false,
+  "replacement": {
+    "automatic_scientific_retry": false,
+    "conditional_fallback_jobs": [
+      {
+        "arm": "D32",
+        "fold": 0,
+        "job_id": "fold-0-robot_1-D32",
+        "method": "fixed_template_leaf_budget_dp_v622",
+        "role": "robot_1"
+      },
+      {
+        "arm": "D32",
+        "fold": 0,
+        "job_id": "fold-0-robot_2-D32",
+        "method": "fixed_template_leaf_budget_dp_v622",
+        "role": "robot_2"
+      },
+      {
+        "arm": "D32",
+        "fold": 1,
+        "job_id": "fold-1-robot_1-D32",
+        "method": "fixed_template_leaf_budget_dp_v622",
+        "role": "robot_1"
+      },
+      {
+        "arm": "D32",
+        "fold": 1,
+        "job_id": "fold-1-robot_2-D32",
+        "method": "fixed_template_leaf_budget_dp_v622",
+        "role": "robot_2"
+      },
+      {
+        "arm": "D32",
+        "fold": 2,
+        "job_id": "fold-2-robot_1-D32",
+        "method": "fixed_template_leaf_budget_dp_v622",
+        "role": "robot_1"
+      },
+      {
+        "arm": "D32",
+        "fold": 2,
+        "job_id": "fold-2-robot_2-D32",
+        "method": "fixed_template_leaf_budget_dp_v622",
+        "role": "robot_2"
+      }
+    ],
+    "cross_batch_selection": false,
+    "cross_batch_stitching": false,
+    "fallback_requires_complete_independently_audited_new_primary_failure": true,
+    "full_primary_jobs": [
+      {
+        "arm": "A32",
+        "fold": 0,
+        "job_id": "fold-0-robot_1-A32",
+        "method": "v620_m2_expanded_distribution_refit_v622",
+        "role": "robot_1"
+      },
+      {
+        "arm": "B32",
+        "fold": 0,
+        "job_id": "fold-0-robot_1-B32",
+        "method": "actor_topology_guarded_distribution_refit_v622",
+        "role": "robot_1"
+      },
+      {
+        "arm": "A32",
+        "fold": 0,
+        "job_id": "fold-0-robot_2-A32",
+        "method": "v620_m2_expanded_distribution_refit_v622",
+        "role": "robot_2"
+      },
+      {
+        "arm": "B32",
+        "fold": 0,
+        "job_id": "fold-0-robot_2-B32",
+        "method": "actor_topology_guarded_distribution_refit_v622",
+        "role": "robot_2"
+      },
+      {
+        "arm": "A32",
+        "fold": 1,
+        "job_id": "fold-1-robot_1-A32",
+        "method": "v620_m2_expanded_distribution_refit_v622",
+        "role": "robot_1"
+      },
+      {
+        "arm": "B32",
+        "fold": 1,
+        "job_id": "fold-1-robot_1-B32",
+        "method": "actor_topology_guarded_distribution_refit_v622",
+        "role": "robot_1"
+      },
+      {
+        "arm": "A32",
+        "fold": 1,
+        "job_id": "fold-1-robot_2-A32",
+        "method": "v620_m2_expanded_distribution_refit_v622",
+        "role": "robot_2"
+      },
+      {
+        "arm": "B32",
+        "fold": 1,
+        "job_id": "fold-1-robot_2-B32",
+        "method": "actor_topology_guarded_distribution_refit_v622",
+        "role": "robot_2"
+      },
+      {
+        "arm": "A32",
+        "fold": 2,
+        "job_id": "fold-2-robot_1-A32",
+        "method": "v620_m2_expanded_distribution_refit_v622",
+        "role": "robot_1"
+      },
+      {
+        "arm": "B32",
+        "fold": 2,
+        "job_id": "fold-2-robot_1-B32",
+        "method": "actor_topology_guarded_distribution_refit_v622",
+        "role": "robot_1"
+      },
+      {
+        "arm": "A32",
+        "fold": 2,
+        "job_id": "fold-2-robot_2-A32",
+        "method": "v620_m2_expanded_distribution_refit_v622",
+        "role": "robot_2"
+      },
+      {
+        "arm": "B32",
+        "fold": 2,
+        "job_id": "fold-2-robot_2-B32",
+        "method": "actor_topology_guarded_distribution_refit_v622",
+        "role": "robot_2"
+      }
+    ],
+    "report_old_compute_separately": true,
+    "resume_partial_search": false,
+    "reuse_old_completed_jobs": false
+  },
+  "schema": "warehouse-v622-capacity-recovery-recipe.v1",
+  "scientific_arguments_unchanged": {
+    "actor_role_sha256": {
+      "robot_1": "7aee44859397b8cbe1bb9cd3b8541e82f2a080d884c83404fe1e4fd2a998eaf0",
+      "robot_2": "17f2f75877421854c680fab07557f031389800a9503b14f060db5ff4f862fcf0"
+    },
+    "actor_sha256": "1b6310f6d93309fb17e64516519a71680ad3c30e73f222be27df4dff10da81ec",
+    "budgets": {
+      "A32": {
+        "global_rounds": 60,
+        "initializations": 8,
+        "leaf_api_calls": 20000,
+        "reserved_final_leaf_calls": 32,
+        "reserved_final_wall_seconds": 600,
+        "wall_seconds": 5400
+      },
+      "B32": {
+        "global_rounds": 0,
+        "initializations": 0,
+        "leaf_api_calls": 32,
+        "reserved_final_leaf_calls": 32,
+        "wall_seconds": 600
+      },
+      "D32": {
+        "maximum_templates": 4,
+        "node_table_leaf_api_calls": 540,
+        "optimality_scope": "declared_templates_and_frozen_leaf_output_tables_only",
+        "reserved_final_wall_seconds": 600,
+        "template_depth": 6,
+        "template_generation_leaf_api_calls": 20000,
+        "template_leaves": 64,
+        "wall_seconds": 5400
+      }
+    },
+    "folds_sha256": "72e6e5629e28c93f5cc9de6704f0dbf53a63383b752dc674272ba4f2cc0e998d",
+    "gates": {
+      "maximum_kl": 0.2,
+      "minimum_expected_feedback_coverage": 0.4,
+      "minimum_explanation_agreement": 0.97,
+      "minimum_explanation_coverage": 0.45,
+      "minimum_feedback_agreement": 0.95,
+      "minimum_feedback_coverage": 0.45,
+      "whole_tree_path_uncertified_count": 0,
+      "whole_tree_raw_illegal_count": 0
+    },
+    "limits": {
+      "guards_and_empty_branches_count": true,
+      "maximum_depth": 6,
+      "maximum_leaves": 32,
+      "maximum_source_features_per_node": 3
+    }
+  }
+}

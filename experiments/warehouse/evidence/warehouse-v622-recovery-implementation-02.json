@@ -1,0 +1,49 @@
+{
+  "PPO_joint_steps": 0,
+  "at_utc": "2026-10-19T11:23:50.902991+00:00",
+  "automatic_scientific_retry": false,
+  "candidate_id": "warehouse-v622-v620-preserving-01",
+  "capacity_stage_started": true,
+  "cross_batch_stitching": false,
+  "detached_scheduler": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v622/recovery-02-launch.json",
+    "sha256": "c04a8b61529b2ca47791e1e2b9be799925565b198d04aa18688fb77c56231a4f"
+  },
+  "fresh_confirmation_started": false,
+  "heldout_used": false,
+  "old_interrupted_batch": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v622/capacity-01/interrupted.json",
+    "sha256": "155ae082c265d64bc947cb229c0600a15cd5b71670f3daa58c58548bbce0a1a0"
+  },
+  "old_scientific_source_closure_sha256": "fb969ab32556b2a5d3163ed8a4e77874b0176ca733870004507f46e0b90545b6",
+  "old_scientific_source_files_unchanged": true,
+  "pilot_opened": false,
+  "publishable": false,
+  "recovery_recipe": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/configs/warehouse_v622_recovery02_recipe.json",
+    "sha256": "8ac8c0b486db1a849bffa4c1031e6e1f20635786176328d8fcb45e2de8a3d9ad"
+  },
+  "replacement_plan": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v622/capacity-02/plan.json",
+    "sha256": "2b7c26da533cdbb6697632a4e1b1ca1a69d5ec2bdb2ac1de9564310120ae4fdd"
+  },
+  "schema": "warehouse-v622-engineering-recovery-implementation.v1",
+  "scientific_actor_updates": 0,
+  "scientific_environment_resets": 0,
+  "sealed_audit_used": false,
+  "selection_uses_only_complete_replacement_batch": true,
+  "source_closure_sha256": "1f2e63fdea9e3e3ebc0e9c9733fa2400a74359d9a87718c76e46229ce61063ee",
+  "source_file_count": 199,
+  "tests": [
+    {
+      "elapsed_seconds": 2.95,
+      "passed": 100,
+      "scope": "v622 program/search/training adapter/independent math/posthoc"
+    },
+    {
+      "elapsed_seconds": 0.45,
+      "passed": 29,
+      "scope": "engineering recovery metadata/source binding/scope restoration"
+    }
+  ]
+}

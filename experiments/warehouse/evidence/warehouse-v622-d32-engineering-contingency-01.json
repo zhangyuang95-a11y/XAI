@@ -1,0 +1,50 @@
+{
+  "schema": "warehouse-v622-D32-engineering-contingency-intent.v1",
+  "recorded_at_utc": "2026-10-19 13:06:23 UTC",
+  "candidate_id": "warehouse-v622-v620-preserving-01",
+  "base_scientific_source_closure_sha256": "1f2e63fdea9e3e3ebc0e9c9733fa2400a74359d9a87718c76e46229ce61063ee",
+  "primary_batch": "capacity-02",
+  "initial_D32_batch": "fallback-02",
+  "trigger_only": "actual_failure_of_four_template_completeness_not_validation_scores",
+  "conditional_recovery_batch": "fallback-03",
+  "maximum_recovery_batches": 1,
+  "selection_if_recovery_needed": {
+    "reuse_primary_only_as_fixed_parent": true,
+    "exclude_entire_old_D32_batch_from_selection": true,
+    "recompute_all_six_role_fold_units": true,
+    "cross_batch_stitching": false,
+    "between_batch_best_selection": false
+  },
+  "unchanged": [
+    "frozen_v620_complete_dual_NN",
+    "spent_275_episodes_and_three_folds",
+    "four_declared_template_recipes_and_candidate_menu",
+    "all_quality_fidelity_legality_and_complexity_gates",
+    "optimizer_and_full_masked_distribution_fitting",
+    "generation_20000_leaf_API_call_ceiling",
+    "additional_table_plus_final_540_leaf_API_call_ceiling",
+    "frozen_table_508_plus_unused_final_32_layout"
+  ],
+  "wall_only_engineering_change_if_required": {
+    "per_role_fold_seconds": 86400,
+    "reserved_final_seconds": 600,
+    "reason": "complete_the_users_four_template_protocol_without_the_extra_unrequested_90_minute_D32_wall_stop",
+    "scientific_call_budget_increased": false,
+    "wall_failure_is_not_method_failure": true
+  },
+  "required_before_any_recovery_launch": [
+    "complete_old_batch_disposition_and_compute_ledger",
+    "explicit_new_protocol_recipe_and_source_hash_binding",
+    "independent_audit_and_consumer_binding_to_new_batch",
+    "synthetic_tests_and_no_frozen_199_file_mutation"
+  ],
+  "existing_reports_are_not_resume_checkpoints": true,
+  "extra_compute_must_be_disclosed": true,
+  "method_tuning_from_partial_validation_forbidden": true,
+  "new_environment_resets": 0,
+  "actor_updates": 0,
+  "PPO_joint_steps": 0,
+  "new_run_authorized_by_this_record": false,
+  "final_audit_or_holdout_authorized": false,
+  "pilot_opened": false
+}

@@ -1,0 +1,153 @@
+{
+  "baseline_A16": {
+    "audit_path": "output/warehouse_v621/independent-01/audit.json",
+    "audit_sha256": "581d33516f4840ab92cee6586af829cf804ba182e1b21182d9057d71e376380d",
+    "refit": false,
+    "summary_path": "output/warehouse_v621/diagnostics-01/summary.json",
+    "summary_sha256": "38b462305234e8ff2694370043079a34d234966234d214c8295a9e7438034e2c"
+  },
+  "budgets": {
+    "A32": {
+      "global_rounds": 60,
+      "initializations": 8,
+      "leaf_api_calls": 20000,
+      "reserved_final_leaf_calls": 32,
+      "reserved_final_wall_seconds": 600,
+      "wall_seconds": 5400
+    },
+    "B32": {
+      "global_rounds": 0,
+      "initializations": 0,
+      "leaf_api_calls": 32,
+      "reserved_final_leaf_calls": 32,
+      "wall_seconds": 600
+    },
+    "D32": {
+      "maximum_templates": 4,
+      "node_table_leaf_api_calls": 540,
+      "optimality_scope": "declared_templates_and_frozen_leaf_output_tables_only",
+      "reserved_final_wall_seconds": 600,
+      "template_depth": 6,
+      "template_generation_leaf_api_calls": 20000,
+      "template_leaves": 64,
+      "wall_seconds": 5400
+    }
+  },
+  "candidate_id": "warehouse-v622-v620-preserving-01",
+  "cv": {
+    "argmax_episodes_fit_only": 50,
+    "counts": {
+      "calibration": 25,
+      "eligibility": 50,
+      "fit": 125,
+      "validation": 75
+    },
+    "excluded_frames": 0,
+    "fold_assignments_sha256": "72e6e5629e28c93f5cc9de6704f0dbf53a63383b752dc674272ba4f2cc0e998d",
+    "folds": 3,
+    "physical_frames_per_role": 32782,
+    "source_episodes": 275
+  },
+  "formal": {
+    "heldout_seeds_per_task": 100,
+    "maximum_KL": 0.35,
+    "maximum_collisions": 8.0,
+    "maximum_shutdown_rate": 0.1,
+    "minimum_deliveries": 5.0,
+    "minimum_explanation_agreement": 0.9,
+    "minimum_feedback_agreement": 0.85,
+    "minimum_program_coverage": 0.2,
+    "pair_selection": "quality_only_before_program_preaudit",
+    "paired_streams": 3,
+    "raw_illegal_actions": 0,
+    "sealed_audit_attempts": 1
+  },
+  "fresh_confirmation": {
+    "counts": {
+      "calibration": 25,
+      "eligibility": 75,
+      "fit": 100,
+      "validation": 75
+    },
+    "fit_argmax": 50,
+    "no_validation_or_pressure_rows_in_any_gradient": true,
+    "pressure_bases": 72,
+    "pressure_trajectories_per_base": 3,
+    "requires_successful_independent_capacity_audit": true
+  },
+  "frozen_actor_role_sha256": {
+    "robot_1": "7aee44859397b8cbe1bb9cd3b8541e82f2a080d884c83404fe1e4fd2a998eaf0",
+    "robot_2": "17f2f75877421854c680fab07557f031389800a9503b14f060db5ff4f862fcf0"
+  },
+  "frozen_actor_sha256": "1b6310f6d93309fb17e64516519a71680ad3c30e73f222be27df4dff10da81ec",
+  "gates": {
+    "maximum_kl": 0.2,
+    "minimum_expected_feedback_coverage": 0.4,
+    "minimum_explanation_agreement": 0.97,
+    "minimum_explanation_coverage": 0.45,
+    "minimum_feedback_agreement": 0.95,
+    "minimum_feedback_coverage": 0.45,
+    "whole_tree_path_uncertified_count": 0,
+    "whole_tree_raw_illegal_count": 0
+  },
+  "methods": {
+    "A32": "v620_m2_expanded_distribution_refit_v622",
+    "B32": "actor_topology_guarded_distribution_refit_v622",
+    "D32": "fixed_template_leaf_budget_dp_v622"
+  },
+  "pilot_opened": false,
+  "quality_retention": {
+    "applies_separately_to_every_stream_and_variant": true,
+    "maximum_collision_reference_increment": 1.0,
+    "maximum_collisions": 6.0,
+    "maximum_shutdown_rate": 0.05,
+    "minimum_deliveries": 5.5,
+    "minimum_delivery_reference_ratio": 0.95
+  },
+  "release_id": "policylens-three-domain-20261016.v6.0",
+  "schema": "warehouse-v622-preserving-recipe.v1",
+  "training": {
+    "beta_update_only_after_actor_update": true,
+    "budgets": [
+      200000,
+      300000,
+      400000
+    ],
+    "calibration_pair_joint_steps_per_variant": 20000,
+    "critic_only_joint_steps_in_budget": 4000,
+    "development_streams": 3,
+    "program_extraction_progress": [
+      0.75,
+      0.84,
+      0.93
+    ],
+    "program_lambda": 0.01,
+    "program_loss_denominator": "all_physical_role_rows",
+    "program_ramp_progress": [
+      0.8,
+      0.85
+    ],
+    "raw_program_gradients": 0,
+    "reference_KL_direction": "reference_to_current",
+    "reference_beta_bounds": [
+      0.001,
+      100.0
+    ],
+    "reference_beta_initial": 1.0,
+    "reference_buffer_fractions": {
+      "current_training": 0.5,
+      "frozen_initial_training": 0.5
+    },
+    "reference_loss_shared_between_raw_and_regularized": true,
+    "reference_target_nats_per_role": 0.01,
+    "restart_each_budget_from_same_BC": true,
+    "runtime_action_controller": "frozen_NN_with_physical_mask_only",
+    "source": "same_v620_BC_snapshot_continuation_not_independent_BC_reproductions"
+  },
+  "whole_tree_limits": {
+    "guards_and_empty_branches_count": true,
+    "maximum_depth": 6,
+    "maximum_leaves": 32,
+    "maximum_source_features_per_node": 3
+  }
+}

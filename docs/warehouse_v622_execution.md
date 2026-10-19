@@ -68,6 +68,26 @@
 最多3个单线程作业；写入原始日志、进程ID、完成回执和45秒心跳。任何作业工程失败均不自动重试。
 外层进程超时只生成工程失败记录，不能伪造拟合器的科学预算耗尽回执。
 
+## 新开发确认入口（尚未激活）
+
+`scripts/run_warehouse_v622_confirmation.py` 提供独立的prepare、collect、fit和audit入口。
+它先核对02完整获胜方法、199文件恢复闭包、组合配方哈希、预算和plan claim，再接受新的
+491条精确case表（275个程序episode及216条压力轨迹）。没有完整获胜收据及新种子清场时拒绝执行。
+
+新的种子清场须绑定四个历史根的完整metadata、opaque权重文件名/stat增量，以及权威inventory
+`output/warehouse_v621/seed-ledger-03/rebound-01/inventory.json`中的8个已注册历史trace，
+该inventory SHA为`98ea8b4d0aed59978d8537e45b8677fa84af848416a64ccc6aa1b0d9edf62b19`。
+275个新episode的四个用途及72个压力场景按base分离；每个压力场景只允许预声明的3条动作随机流。
+
+独立capability在环境构造/reset前消费精确case，原native reset hook另记实际reset。
+逐帧保存完整NN概率、随机流、提议动作、物理掩码、公开前后状态及动作链；碰撞造成的物理WAIT
+按环境规则保留，但环境记录的`last_action`必须仍与NN提议动作一致。
+
+验证75局和压力216局各自要求程序覆盖45%、预期反馈40%、一致率95%/97%、KL≤.20、
+非法动作和未证明路径为0；两套轨迹各自要求配送≥5.5、碰撞≤6、停机率≤5%，不能用合并均值通过。
+本入口只用于冻结原NN的新开发确认，不授权PPO、最终封存集或pilot。26项合成测试及独立源码审查
+已完成；尚未分配真实新种子、执行实际prepare/collect/fit/audit。
+
 ## 文献与适配限制
 
 - [GOSDT, ICML 2020](https://proceedings.mlr.press/v119/lin20g.html)：借用有限空间的DP思路，

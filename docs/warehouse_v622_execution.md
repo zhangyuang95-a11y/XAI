@@ -88,6 +88,11 @@
 本入口只用于冻结原NN的新开发确认，不授权PPO、最终封存集或pilot。26项合成测试及独立源码审查
 已完成；尚未分配真实新种子、执行实际prepare/collect/fit/audit。
 
+后续训练须显式绑定`warehouse_v622_continuation_safety.py`：raw分支先逐元素乘零再归约，
+避免有限极大logits在先求和时溢出；23项纯张量测试验证严格零损失/梯度和原regularized语义。
+该接口不属于当前199文件容量实验闭包，也不是PPO driver；完整环境、rollout、参考缓冲、
+未完成episode、风险乘子和程序进度仍须由获准后的训练driver保存，张量恢复测试不代表完整PPO恢复。
+
 ## 文献与适配限制
 
 - [GOSDT, ICML 2020](https://proceedings.mlr.press/v119/lin20g.html)：借用有限空间的DP思路，

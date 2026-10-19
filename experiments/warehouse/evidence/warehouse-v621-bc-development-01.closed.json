@@ -1,0 +1,524 @@
+{
+  "PPO_joint_steps": 0,
+  "actual_successful_resets": 10671,
+  "all_three_backup_passed": false,
+  "all_three_main_passed": false,
+  "archive": {
+    "dependency_scope": "The BC run is preserved here; phase-1 fixed-v620-model diagnostics retain their prior archived baseline dependency.",
+    "is_release_manifest": false,
+    "is_self_contained": false,
+    "manifest": {
+      "path": "output/warehouse_v621_archive/warehouse-v621-shared-structure-01-closed-bc-development-01/manifest.json",
+      "sha256": "aeaec8cc161330fa7c7f133c0ca0c5c237a2a77816d9dcdfa12d52f5711f5e8e"
+    },
+    "old_baseline_dependency_retained_in_place_not_recopied": {
+      "path": "output/warehouse_v620_archive/warehouse-v620-01-closed-internal275-01/manifest.json",
+      "sha256": "01e8a275141f342bc2e7647e97fe418dc786673caf2231ef4fc0ac5b95d010e6"
+    },
+    "payload_bytes": 2028422319,
+    "payload_file_count": 12274,
+    "payload_file_modes": "0444",
+    "pointer": {
+      "path": "output/warehouse_v621/archive-01.json",
+      "sha256": "c2878f064c0826608c01eaf8f8a81d6fb59bbacbc4ac89d81c659f47bc8489a8"
+    },
+    "source194_snapshot_count": 194
+  },
+  "audit_environment_resets": 0,
+  "audit_execution_binding": {
+    "path": "output/warehouse_v621/bc-final-independent-01/execution-audit-binding.json",
+    "sha256": "16e04e26c2ea9a0c7716350217587c3c3d9182022bb5fd02e6dce37865d3f4f2"
+  },
+  "audit_passed_means_evidence_consistency_not_model_admission": true,
+  "audit_scope": {
+    "BC730_intermediate_visits_independent_frame_replay_performed": false,
+    "BC730_scope": "exact_reset_journal_and_immutable_native_producer_provenance_only_intermediate_Actor_states_not_saved",
+    "cache_scope": "teacher_NPZ_semantic_and_file_hashes_critic_file_hash_plus_report_binding_no_new_critic_evaluation",
+    "fresh_quality_or_human_collaboration_claimed": false,
+    "gradient_scope": "independent_selected_samples_and_lambda01_KL_value_plus_bound_native_autograd_receipt_no_new_autograd_or_optimizer",
+    "physical_trace_NN_recomputation_per_model": "all275_spent_development_episodes_all_physical_frames_both_roles",
+    "quality_episodes_per_model": 75
+  },
+  "audited_joint_physical_frames": 283430,
+  "audited_role_NN_actions": 566860,
+  "candidate_id": "warehouse-v621-shared-structure-01",
+  "closed_candidate": {
+    "path": "output/warehouse_v621/candidate.closed.json",
+    "sha256": "ae743b3d83d06f29847a697b5c902b22c02be66b4bb75ebc1ccb8d7ab2304a1a"
+  },
+  "common_BC_selected": false,
+  "formal_raw_regularized_pairs_trained": false,
+  "fresh_precheck_episodes": 0,
+  "heldout_episodes": 0,
+  "independent_BC_evidence_audit": {
+    "path": "output/warehouse_v621/bc-final-independent-01/audit.json",
+    "sha256": "24b2426d478b14d3090699238b977a85a8bbdabe7aaf5d3cc7f24cd013dab12d"
+  },
+  "metrics_json": {
+    "path": "output/warehouse_v621/bc-metrics-reports/completed-01/metrics.json",
+    "sha256": "92b2d6720f51b175997d50e95229d2c54e08f79bd772d1fb30e012c22f398082"
+  },
+  "metrics_report": {
+    "path": "output/warehouse_v621/bc-metrics-reports/completed-01/metrics.zh.md",
+    "sha256": "839260c8207f1b200875897efe75b70d2f41b5083ab3121b4b2228556bbcec60"
+  },
+  "models": [
+    {
+      "actor": {
+        "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
+        "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
+        "model_version": "warehouse-dual-actor.v6.18-quality-selective",
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/bc-development-01/init-6171/additive_control/final-bc.actor.npz",
+        "role_sha256": {
+          "robot_1": "4dca3aa9263e985c999d49f1366225e030d92071f4d012421bb1134e7aef12b8",
+          "robot_2": "75c7fc25ea93f9bc3d5e8ba5c1719c4a3810988d4b70b1e9b4f98c3fc9b82e26"
+        },
+        "sha256": "763ee1a2fc0c25252d91f0ab3b7bfebe1c6e63fee01cc09f893ccd0abdd20ba6"
+      },
+      "individual_candidate_passed": null,
+      "initialization": 6171,
+      "program_passed": false,
+      "quality": {
+        "mean_collisions": 2.88,
+        "mean_deliveries": 13.973333333333333,
+        "shutdown_episode_rate": 0.013333333333333334
+      },
+      "quality_passed": true,
+      "recipe": "additive_control",
+      "result": {
+        "path": "output/warehouse_v621/bc-development-01/init-6171/additive_control/result.json",
+        "sha256": "62291ba8181d816900f7c9918dd1395028e6b6a8ebae53afd6cb152b4c5ac13c"
+      },
+      "roles": {
+        "robot_1": {
+          "actual_feedback_coverage": 0.20367260105251372,
+          "expected_feedback_coverage": 0.2022370547056198,
+          "explanation_KL": 0.0428178496658802,
+          "explanation_agreement": 0.9924160346695557,
+          "explanation_qualified_coverage": 0.2066957787481805,
+          "feedback_qualified_coverage": 0.2066957787481805,
+          "raw_probe_zero": null,
+          "regularized_probe_maximum_gradient_norm": null
+        },
+        "robot_2": {
+          "actual_feedback_coverage": 0.2049042660396372,
+          "expected_feedback_coverage": 0.20439715683460236,
+          "explanation_KL": 0.04235600680112839,
+          "explanation_agreement": 0.9861407249466951,
+          "explanation_qualified_coverage": 0.21005486507669913,
+          "feedback_qualified_coverage": 0.21005486507669913,
+          "raw_probe_zero": null,
+          "regularized_probe_maximum_gradient_norm": null
+        }
+      }
+    },
+    {
+      "actor": {
+        "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
+        "model_version": "warehouse-dual-actor.v6.21-static-shared-structure",
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/bc-development-01/init-6171/shared_b035/final-bc.actor.npz",
+        "publishable": false,
+        "role_sha256": {
+          "robot_1": "17947b33eed30ae37d17762510e4c1e8d72a4aaf16d75b0b04768e299689db40",
+          "robot_2": "a088ba6d6f3f029319ec2b85dfeb86414f25f41759ce96c63cbf4d27f4585869"
+        },
+        "sha256": "591a5388c09931d9f394591b5bad949f2f324526002218bd75849f0890d70e22"
+      },
+      "individual_candidate_passed": false,
+      "initialization": 6171,
+      "program_passed": false,
+      "quality": {
+        "mean_collisions": 4.213333333333333,
+        "mean_deliveries": 8.053333333333333,
+        "shutdown_episode_rate": 0.10666666666666667
+      },
+      "quality_passed": false,
+      "recipe": "shared_b035",
+      "result": {
+        "path": "output/warehouse_v621/bc-development-01/init-6171/shared_b035/result.json",
+        "sha256": "5125647b19fc7e58040ab6cd57995ac21f3911e4b2c6d1ea4ee6167ec5b5bd8f"
+      },
+      "roles": {
+        "robot_1": {
+          "actual_feedback_coverage": 0.5296605326323008,
+          "expected_feedback_coverage": 0.528502936871755,
+          "explanation_KL": 0.005524112298935409,
+          "explanation_agreement": 1.0,
+          "explanation_qualified_coverage": 0.5806377871756773,
+          "feedback_qualified_coverage": 0.5806377871756773,
+          "raw_probe_zero": true,
+          "regularized_probe_maximum_gradient_norm": 0.002486819263717975
+        },
+        "robot_2": {
+          "actual_feedback_coverage": 0.12355697794033604,
+          "expected_feedback_coverage": 0.12241539845651761,
+          "explanation_KL": 0.016685677611639714,
+          "explanation_agreement": 1.0,
+          "explanation_qualified_coverage": 0.16539033032346553,
+          "feedback_qualified_coverage": 0.16539033032346553,
+          "raw_probe_zero": true,
+          "regularized_probe_maximum_gradient_norm": 0.0
+        }
+      }
+    },
+    {
+      "actor": {
+        "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
+        "model_version": "warehouse-dual-actor.v6.21-static-shared-structure",
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/bc-development-01/init-6171/shared_b050/final-bc.actor.npz",
+        "publishable": false,
+        "role_sha256": {
+          "robot_1": "14408431168029cad1d3d3fe6eba6a50da6144e7d607472266cf63c95e892a5c",
+          "robot_2": "a7775b21a180970571f69ae11fa4eb6735ee8924a37a814c40d9a1d2c0aceb05"
+        },
+        "sha256": "4465cac109551f787fe72a2c57df8eadb05444d67683243aeee9f146b2dc3bae"
+      },
+      "individual_candidate_passed": false,
+      "initialization": 6171,
+      "program_passed": false,
+      "quality": {
+        "mean_collisions": 14.013333333333334,
+        "mean_deliveries": 5.053333333333334,
+        "shutdown_episode_rate": 0.18666666666666668
+      },
+      "quality_passed": false,
+      "recipe": "shared_b050",
+      "result": {
+        "path": "output/warehouse_v621/bc-development-01/init-6171/shared_b050/result.json",
+        "sha256": "b5c89fa05b6434381251d7a251ce4f634c45e1f31344204eaafc96f194168a00"
+      },
+      "roles": {
+        "robot_1": {
+          "actual_feedback_coverage": 0.311015634323905,
+          "expected_feedback_coverage": 0.31242050115295467,
+          "explanation_KL": 0.02395038787063337,
+          "explanation_agreement": 1.0,
+          "explanation_qualified_coverage": 0.36149898555913595,
+          "feedback_qualified_coverage": 0.36149898555913595,
+          "raw_probe_zero": true,
+          "regularized_probe_maximum_gradient_norm": 0.0035093783189425664
+        },
+        "robot_2": {
+          "actual_feedback_coverage": 0.5747702589807853,
+          "expected_feedback_coverage": 0.5723340325759975,
+          "explanation_KL": 0.007743260843489253,
+          "explanation_agreement": 1.0,
+          "explanation_qualified_coverage": 0.6201217329036878,
+          "feedback_qualified_coverage": 0.6201217329036878,
+          "raw_probe_zero": true,
+          "regularized_probe_maximum_gradient_norm": 0.003729075472787696
+        }
+      }
+    },
+    {
+      "actor": {
+        "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
+        "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
+        "model_version": "warehouse-dual-actor.v6.18-quality-selective",
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/bc-development-01/init-6172/additive_control/final-bc.actor.npz",
+        "role_sha256": {
+          "robot_1": "2c4e27f3c1ce9e1d18d0abe5b1d8600add3bdf88eac96858cb0f7132cfdf3ccc",
+          "robot_2": "a45a2380ed487a6dc994116065464d1a9fb93bb636f1cc5814fc36e5884df6eb"
+        },
+        "sha256": "8b59410a4f9ff1027f0067a64dae7aac517bcd2e932b6db30ddad0fbfcba852e"
+      },
+      "individual_candidate_passed": null,
+      "initialization": 6172,
+      "program_passed": false,
+      "quality": {
+        "mean_collisions": 2.6133333333333333,
+        "mean_deliveries": 14.12,
+        "shutdown_episode_rate": 0.02666666666666667
+      },
+      "quality_passed": true,
+      "recipe": "additive_control",
+      "result": {
+        "path": "output/warehouse_v621/bc-development-01/init-6172/additive_control/result.json",
+        "sha256": "63d270b172c0003077977eb10ba2511f201df30991b32198ff2315469d91f3a6"
+      },
+      "roles": {
+        "robot_1": {
+          "actual_feedback_coverage": 0.1440260031383098,
+          "expected_feedback_coverage": 0.14320912957191467,
+          "explanation_KL": 0.02804282121360302,
+          "explanation_agreement": 0.9946112394149346,
+          "explanation_qualified_coverage": 0.14559515803631473,
+          "feedback_qualified_coverage": 0.14559515803631473,
+          "raw_probe_zero": null,
+          "regularized_probe_maximum_gradient_norm": null
+        },
+        "robot_2": {
+          "actual_feedback_coverage": 0.19020399013674064,
+          "expected_feedback_coverage": 0.19016321003437042,
+          "explanation_KL": 0.04457633197307587,
+          "explanation_agreement": 0.9919308357348703,
+          "explanation_qualified_coverage": 0.1944631248598969,
+          "feedback_qualified_coverage": 0.1944631248598969,
+          "raw_probe_zero": null,
+          "regularized_probe_maximum_gradient_norm": null
+        }
+      }
+    },
+    {
+      "actor": {
+        "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
+        "model_version": "warehouse-dual-actor.v6.21-static-shared-structure",
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/bc-development-01/init-6172/shared_b035/final-bc.actor.npz",
+        "publishable": false,
+        "role_sha256": {
+          "robot_1": "d1a16a08a0d8c0e15c3f50677fc10c88a771c8d6826b0619ff6f882b6dd0c852",
+          "robot_2": "a4902928c5a6721b767d7360f96302376aebbd8ad500fc6bd7b5167c9dcd21e0"
+        },
+        "sha256": "3fb1150ff0898f361ef15790a05fc8c02c376a541850074d6fbe2ded15e409b6"
+      },
+      "individual_candidate_passed": false,
+      "initialization": 6172,
+      "program_passed": false,
+      "quality": {
+        "mean_collisions": 6.506666666666667,
+        "mean_deliveries": 6.4,
+        "shutdown_episode_rate": 0.28
+      },
+      "quality_passed": false,
+      "recipe": "shared_b035",
+      "result": {
+        "path": "output/warehouse_v621/bc-development-01/init-6172/shared_b035/result.json",
+        "sha256": "ea240ab17d9d5427067032d7a2211e33194373d1aa4e74d792fcc9a4aab62056"
+      },
+      "roles": {
+        "robot_1": {
+          "actual_feedback_coverage": 0.38676176176176175,
+          "expected_feedback_coverage": 0.3846895860538531,
+          "explanation_KL": 0.018086075470759636,
+          "explanation_agreement": 1.0,
+          "explanation_qualified_coverage": 0.5251501501501501,
+          "feedback_qualified_coverage": 0.5251501501501501,
+          "raw_probe_zero": true,
+          "regularized_probe_maximum_gradient_norm": 0.0024615490870497697
+        },
+        "robot_2": {
+          "actual_feedback_coverage": 0.2484984984984985,
+          "expected_feedback_coverage": 0.2516380379716929,
+          "explanation_KL": 0.021483404365543565,
+          "explanation_agreement": 1.0,
+          "explanation_qualified_coverage": 0.3255755755755756,
+          "feedback_qualified_coverage": 0.3255755755755756,
+          "raw_probe_zero": true,
+          "regularized_probe_maximum_gradient_norm": 0.0
+        }
+      }
+    },
+    {
+      "actor": {
+        "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
+        "model_version": "warehouse-dual-actor.v6.21-static-shared-structure",
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/bc-development-01/init-6172/shared_b050/final-bc.actor.npz",
+        "publishable": false,
+        "role_sha256": {
+          "robot_1": "65dbe211bfbeb884bfaac1405a6a8e56a176c935bb62cfebbad0e7297ab64be7",
+          "robot_2": "0a6c7cfdb4a7a1f0800787bdb8a2300a17a16d5ad956179998cd1bb5e6e0573c"
+        },
+        "sha256": "3397ff5a78da7600a70ee0a2853c71c4cb91b5988beaa74473502ea52502cc72"
+      },
+      "individual_candidate_passed": false,
+      "initialization": 6172,
+      "program_passed": false,
+      "quality": {
+        "mean_collisions": 3.5866666666666664,
+        "mean_deliveries": 9.066666666666666,
+        "shutdown_episode_rate": 0.25333333333333335
+      },
+      "quality_passed": false,
+      "recipe": "shared_b050",
+      "result": {
+        "path": "output/warehouse_v621/bc-development-01/init-6172/shared_b050/result.json",
+        "sha256": "1dc3c66ad8ec176c3f69b77d8555fbadcf772491fb08d9784bb764421897b1f8"
+      },
+      "roles": {
+        "robot_1": {
+          "actual_feedback_coverage": 0.4036697247706422,
+          "expected_feedback_coverage": 0.40232794555775764,
+          "explanation_KL": 0.01790120482198836,
+          "explanation_agreement": 1.0,
+          "explanation_qualified_coverage": 0.44501529051987765,
+          "feedback_qualified_coverage": 0.44501529051987765,
+          "raw_probe_zero": true,
+          "regularized_probe_maximum_gradient_norm": 0.002391181564382127
+        },
+        "robot_2": {
+          "actual_feedback_coverage": 0.3001834862385321,
+          "expected_feedback_coverage": 0.3000644501220987,
+          "explanation_KL": 0.03328661930635761,
+          "explanation_agreement": 1.0,
+          "explanation_qualified_coverage": 0.3712538226299694,
+          "feedback_qualified_coverage": 0.3712538226299694,
+          "raw_probe_zero": true,
+          "regularized_probe_maximum_gradient_norm": 0.004445437928178226
+        }
+      }
+    },
+    {
+      "actor": {
+        "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
+        "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
+        "model_version": "warehouse-dual-actor.v6.18-quality-selective",
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/bc-development-01/init-6173/additive_control/final-bc.actor.npz",
+        "role_sha256": {
+          "robot_1": "33da27800f636276378b1a1c524e4f3e26e04815024fc1be80eaeafc163b5e72",
+          "robot_2": "512a071ecfba78293cb615b9b450801878cafdf7891b091e7a6fdcaae1085c33"
+        },
+        "sha256": "2e18c72b663205ce2e359a4f910309cf3b2c46157f15031a4106ee5e1e97ee61"
+      },
+      "individual_candidate_passed": null,
+      "initialization": 6173,
+      "program_passed": false,
+      "quality": {
+        "mean_collisions": 3.16,
+        "mean_deliveries": 13.186666666666667,
+        "shutdown_episode_rate": 0.09333333333333334
+      },
+      "quality_passed": false,
+      "recipe": "additive_control",
+      "result": {
+        "path": "output/warehouse_v621/bc-development-01/init-6173/additive_control/result.json",
+        "sha256": "f67b6dcd32b862a5c7d8c07904c8402e4e8e67bd217b66b71aa56058404b82fc"
+      },
+      "roles": {
+        "robot_1": {
+          "actual_feedback_coverage": 0.20216939764597278,
+          "expected_feedback_coverage": 0.20242883265018463,
+          "explanation_KL": 0.11475835740566254,
+          "explanation_agreement": 0.9691056910569106,
+          "explanation_qualified_coverage": 0.21290099238402954,
+          "feedback_qualified_coverage": 0.21290099238402954,
+          "raw_probe_zero": null,
+          "regularized_probe_maximum_gradient_norm": null
+        },
+        "robot_2": {
+          "actual_feedback_coverage": 0.2485575813524117,
+          "expected_feedback_coverage": 0.24906738102436066,
+          "explanation_KL": 0.10757830739021301,
+          "explanation_agreement": 0.9703801945181255,
+          "explanation_qualified_coverage": 0.2610200784675744,
+          "feedback_qualified_coverage": 0.2610200784675744,
+          "raw_probe_zero": null,
+          "regularized_probe_maximum_gradient_norm": null
+        }
+      }
+    },
+    {
+      "actor": {
+        "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
+        "model_version": "warehouse-dual-actor.v6.21-static-shared-structure",
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/bc-development-01/init-6173/shared_b035/final-bc.actor.npz",
+        "publishable": false,
+        "role_sha256": {
+          "robot_1": "35e1f5eb54efb71dd37bbe46e6d41826c5714d67e33c59ef0e09f655a52b46c1",
+          "robot_2": "04627019b72c03bd75ed9e441383f13ff0411051a94a26db12bce386d12ae1c2"
+        },
+        "sha256": "091773082bfbb745fa8e30caa64a945794fa05e0e35918dbedb5e2f4c7bfe235"
+      },
+      "individual_candidate_passed": false,
+      "initialization": 6173,
+      "program_passed": false,
+      "quality": {
+        "mean_collisions": 4.586666666666667,
+        "mean_deliveries": 5.453333333333333,
+        "shutdown_episode_rate": 0.28
+      },
+      "quality_passed": false,
+      "recipe": "shared_b035",
+      "result": {
+        "path": "output/warehouse_v621/bc-development-01/init-6173/shared_b035/result.json",
+        "sha256": "75b3bc60d3976999f240c6428c984886805c2b8f5b405d6fe249d8e08a3e4afb"
+      },
+      "roles": {
+        "robot_1": {
+          "actual_feedback_coverage": 0.6076010070734924,
+          "expected_feedback_coverage": 0.6098373997197787,
+          "explanation_KL": 0.008814050444429997,
+          "explanation_agreement": 1.0,
+          "explanation_qualified_coverage": 0.7202973264596572,
+          "feedback_qualified_coverage": 0.7202973264596572,
+          "raw_probe_zero": true,
+          "regularized_probe_maximum_gradient_norm": 0.0030899572119283437
+        },
+        "robot_2": {
+          "actual_feedback_coverage": 0.28329936458458216,
+          "expected_feedback_coverage": 0.2835497033668611,
+          "explanation_KL": 0.01553890568115399,
+          "explanation_agreement": 1.0,
+          "explanation_qualified_coverage": 0.3535547296487232,
+          "feedback_qualified_coverage": 0.3535547296487232,
+          "raw_probe_zero": true,
+          "regularized_probe_maximum_gradient_norm": 0.0
+        }
+      }
+    },
+    {
+      "actor": {
+        "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
+        "model_version": "warehouse-dual-actor.v6.21-static-shared-structure",
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/bc-development-01/init-6173/shared_b050/final-bc.actor.npz",
+        "publishable": false,
+        "role_sha256": {
+          "robot_1": "7b35a08d7700d6909719d22dd2611ffc39f2b466d8c9e3990b5ca58ac9f437dd",
+          "robot_2": "7e8237f269ee99ae5c5780053887cddf0838175494128a959ef108bd48d0f195"
+        },
+        "sha256": "91ed7006d1b60140e5c75d59506ed011ae293ce54c5662cd4e8dd5129838de2d"
+      },
+      "individual_candidate_passed": false,
+      "initialization": 6173,
+      "program_passed": false,
+      "quality": {
+        "mean_collisions": 3.68,
+        "mean_deliveries": 9.706666666666667,
+        "shutdown_episode_rate": 0.22666666666666666
+      },
+      "quality_passed": false,
+      "recipe": "shared_b050",
+      "result": {
+        "path": "output/warehouse_v621/bc-development-01/init-6173/shared_b050/result.json",
+        "sha256": "281b8286ae27b8e4c2eabc647dfb3da9eda2967e17d07b53c77258644039cbfa"
+      },
+      "roles": {
+        "robot_1": {
+          "actual_feedback_coverage": 0.21856936416184972,
+          "expected_feedback_coverage": 0.2181079682879351,
+          "explanation_KL": 0.023967898093463842,
+          "explanation_agreement": 1.0,
+          "explanation_qualified_coverage": 0.24807321772639693,
+          "feedback_qualified_coverage": 0.24807321772639693,
+          "raw_probe_zero": true,
+          "regularized_probe_maximum_gradient_norm": 0.0
+        },
+        "robot_2": {
+          "actual_feedback_coverage": 0.22591522157996147,
+          "expected_feedback_coverage": 0.2279033189928026,
+          "explanation_KL": 0.029717473505688315,
+          "explanation_agreement": 1.0,
+          "explanation_qualified_coverage": 0.2726396917148362,
+          "feedback_qualified_coverage": 0.2726396917148362,
+          "raw_probe_zero": true,
+          "regularized_probe_maximum_gradient_norm": 0.0
+        }
+      }
+    }
+  ],
+  "native_backup_summary": {
+    "path": "output/warehouse_v621/bc-development-01/backup.summary.json",
+    "sha256": "5dc215e88a280818698ab132414eabd02ccd39e9618a39333169cf0c7b399610"
+  },
+  "native_main_summary": {
+    "path": "output/warehouse_v621/bc-development-01/main.summary.json",
+    "sha256": "4931d9023f09cb606d3442df5e1c2e516fe7b90f05b4fc451fdc47fe16e07ceb"
+  },
+  "new_human_benefit_claimed": false,
+  "pilot_opened": false,
+  "pressure_precheck_episodes": 0,
+  "publishable": false,
+  "schema": "warehouse-v621-BC-development-closed-summary.v1",
+  "sealed_program_audit_episodes": 0,
+  "source_194_sha256": "35e9fe54e8de193ed79d3553b540e481a5738f1b2f47369d3a9ba5ef47a25c3a",
+  "status": "closed_development_gate_failed"
+}

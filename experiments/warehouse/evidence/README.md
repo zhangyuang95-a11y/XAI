@@ -1,9 +1,34 @@
 # Warehouse v6 evidence ledger
 
 The active release target is `policylens-three-domain-20261016.v6.0`.
-Its Warehouse Actor is **pending**; the pilot remains closed. Every row below
-is a historical failure or unregistered development probe. None is a passing
+Its Warehouse Actor is **pending**; the pilot remains closed. Entries below
+are development or historical evidence. None is a passing
 formal paired run, final independent program audit, or held-out test.
+
+## Current v6.21 development
+
+The finite `bc-development-01` batch completed under the locked 194-file
+source closure. All 18 extraction diagnostics and their independent audit
+completed without a passing method. All three shared-structure main BC runs
+have completed and failed; all three architecture controls have also completed.
+The complete native main summary confirmed main task-quality failures and
+activated the three predeclared backups. All three backups also failed both
+quality and program admission. The candidate is closed; no common BC was
+selected. No fresh precheck, PPO or publication is authorized by these receipts.
+See the [completed model comparison](../../../docs/warehouse_v621_results.md).
+
+| Record | Scope |
+| --- | --- |
+| [Execution protocol](../../../docs/warehouse_v621_execution.md) and [BC execution](../../../docs/warehouse_v621_bc_development.md) | Current stages, finite recipes and gates. |
+| [18 diagnostics](warehouse-v621-diagnostics-01.json) | Complete frozen-model comparison; no extraction method passed. |
+| [BC admission](warehouse-v621-bc-development-admission-01.json) | Finite training authorization and exact source/seed binding; not model acceptance. |
+| [Shared cache audit](warehouse-v621-shared-cache-audit-01.json) | Teacher data and critic provenance; not NN task quality. |
+| [First main diagnosis](warehouse-v621-main6171-readonly-diagnosis-01.json) | Descriptive completed-run coverage and shutdown findings; no causal claim. |
+| [Independent audit implementation](warehouse-v621-independent-bc-audit-implementation-01.json) | Tested completed-cohort auditor; code/source provenance. |
+| [Completed BC closure](warehouse-v621-bc-development-01.closed.json) | All 9 models, 566,860 NN action checks and the closed candidate; evidence consistency is not model admission. |
+| [Pong/Kitchen preservation](warehouse-v621-pong-kitchen-reverification-01.json) | Existing asset/receipt hash preservation; no spent held-out rerun. |
+
+## Historical evidence
 
 | Study | Evidence | Result |
 | --- | --- | --- |

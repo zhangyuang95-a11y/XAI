@@ -1,0 +1,42 @@
+{
+  "PPO_joint_steps": 0,
+  "admission_record_before_queue_start": true,
+  "admitted_at_utc": "2026-10-19T04:30:32.013244+00:00",
+  "backup_planned_additional_actual_resets": 3015,
+  "candidate_id": "warehouse-v621-shared-structure-01",
+  "final_evidence_index": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/seed-ledger-03/BC-clearance-read-evidence-index-01.json",
+    "sha256": "01893b6b89928a2da412dc9c3628504ce0c02d53998d9fc6d9a6bd6b060aaab1"
+  },
+  "formal_training_authorized": false,
+  "fresh_precheck_authorized": false,
+  "initializations": [
+    6171,
+    6172,
+    6173
+  ],
+  "main_scope_planned_actual_resets": 7656,
+  "operational_queue": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/execute_bc_development_01.py",
+    "sha256": "e483815af52a53e6cc0b09613b93b8df9350ac211c7867db2d409c1c2dd6bce9"
+  },
+  "permitted_recipes": [
+    "additive_control",
+    "shared_b035",
+    "quality_failure_conditional_shared_b050"
+  ],
+  "pilot_opened": false,
+  "publishable": false,
+  "schema": "warehouse-v621-finite-bc-admission-summary.v1",
+  "sealed_audit_authorized": false,
+  "source_bound_seed_clearance": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/seed-ledger-03/clearance-01.json",
+    "sha256": "e2d7ac13d4714b412c4552b8ad5e59aa8c87cc8b58a10498c3ee3acc783c277f"
+  },
+  "source_closure_sha256": "35e9fe54e8de193ed79d3553b540e481a5738f1b2f47369d3a9ba5ef47a25c3a",
+  "specification": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v621/bc-development-spec-01.json",
+    "sha256": "ece4e40baedc6ec2457bce55ba4ec5c68843a3f174cc1dc7b8a43e4ae353fc2e"
+  },
+  "training_results_claimed": false
+}

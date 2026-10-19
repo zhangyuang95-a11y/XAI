@@ -1,0 +1,115 @@
+{
+  "auditor_path": "output/warehouse_v621/pong-kitchen-reverification-01/verify.py",
+  "auditor_sha256": "d01015f1537584b2ec1bb5f00f4cdc0f69d4f84d187c992897fb73daa5f6d88b",
+  "carried_archive_manifest_mode_octal": "0o444",
+  "carried_archive_manifest_permission_repair": {
+    "after_mode_octal": "0o444",
+    "after_sha256": "d72c6067b52343cc67ced2154d1b2a3601b2536d77bc5173a31343f3c3017f1a",
+    "before_mode_octal": "0o644",
+    "before_sha256": "d72c6067b52343cc67ced2154d1b2a3601b2536d77bc5173a31343f3c3017f1a",
+    "bytes_unchanged": true,
+    "operation": "chmod_0444_only",
+    "path": "output/warehouse_v620/carried-domain-evidence-01/manifest.json",
+    "performed_by": "parent_root",
+    "prior_mode_observation_receipt": "output/warehouse_v621/pong-kitchen-reverification-01/receipt-02.json",
+    "prior_mode_observation_receipt_sha256": "157f6400fa49564c65233886e6fe1f869343a4ea548f2ea057002d53bc2fd891"
+  },
+  "carried_archive_manifest_readonly_verified": true,
+  "carried_references": 17,
+  "carried_unique_archive_assets": 12,
+  "carried_unique_archive_bytes": 2620602,
+  "catalog_sha256": "402726d459db90c1347f0e4a00d34500631b106b19937c08d2010f803e2af77b",
+  "checked_at_utc": "2026-10-19T03:51:09.301633+00:00",
+  "comparison_dispositions": {
+    "active_or_historical_original_path": 20,
+    "active_pending_catalog_packaged_path": 35,
+    "historical_incident_document": 1,
+    "historical_sibling_original": 26,
+    "readonly_carried_archive": 17
+  },
+  "domains": {
+    "kitchen": {
+      "A_B_identical_full_binding": true,
+      "C_actor_and_both_roles_distinct_from_A_B": true,
+      "bindings_equal_prior_audit": true,
+      "fresh_performance_claimed": false,
+      "fresh_role_tensor_hash_recomputation": false,
+      "historical_receipt_claims_heldout_evaluated": true,
+      "historical_receipt_claims_passed": true,
+      "raw_feedback_record": {
+        "ai": 0,
+        "human": 0
+      },
+      "regularized_feedback_record": {
+        "ai": 103320,
+        "human": 115245
+      }
+    },
+    "pong": {
+      "A_B_identical_full_binding": true,
+      "C_actor_and_both_roles_distinct_from_A_B": true,
+      "bindings_equal_prior_audit": true,
+      "fresh_performance_claimed": false,
+      "fresh_role_tensor_hash_recomputation": false,
+      "historical_receipt_claims_heldout_evaluated": true,
+      "historical_receipt_claims_passed": true,
+      "raw_feedback_record": {
+        "ai": 0,
+        "human": 0
+      },
+      "regularized_feedback_record": {
+        "ai": 111466,
+        "human": 55197
+      }
+    }
+  },
+  "environment_resets": 0,
+  "errors": [],
+  "file_comparisons": 99,
+  "heldout_rerun": false,
+  "limitations": [
+    "Byte preservation carries existing v5 evidence; no fresh independent model/program acceptance is claimed.",
+    "Role hashes are checked as pinned catalog/program/receipt metadata; model tensors were not executed or rehashed by role.",
+    "Kitchen offline human-agent proxy records do not establish real-participant collaboration benefit.",
+    "The active pending catalog and readonly carried archive are separate paths; the carried archive is not activated.",
+    "All twelve carried asset files and their manifest are now mode 0444. Parent changed only the manifest's mode from 0644 to 0444, with bytes and SHA unchanged; directory-level immutability is not claimed.",
+    "Historical thresholds remain domain-specific and are not asserted to satisfy Warehouse's new thresholds.",
+    "Warehouse is pending. A complete release still requires Warehouse acceptance and new entrypoint execution-consistency checks."
+  ],
+  "model_executions": 0,
+  "new_human_results": false,
+  "new_performance_evaluation": false,
+  "pilot_opened": false,
+  "prior_file_comparisons": 65,
+  "prior_local_attempts": [
+    {
+      "path": "output/warehouse_v621/pong-kitchen-reverification-01/receipt.json",
+      "reason": "An initial permission assertion found the unchanged archive manifest was mode 0644; all asset hashes matched.",
+      "sha256": "010c619b2c0ff0f465212cb86bd253a7bc6c07a8f3041474a4f5107b9a426e77",
+      "status": "failed"
+    },
+    {
+      "path": "output/warehouse_v621/pong-kitchen-reverification-01/receipt-02.json",
+      "reason": "Byte-preservation passed while explicitly recording the manifest's then-current mode 0644; parent subsequently changed only its mode.",
+      "sha256": "157f6400fa49564c65233886e6fe1f869343a4ea548f2ea057002d53bc2fd891",
+      "status": "passed"
+    }
+  ],
+  "prior_unique_paths": 49,
+  "publishable": false,
+  "receipt_path": "output/warehouse_v621/pong-kitchen-reverification-01/receipt-03.json",
+  "receipt_sha256": "5e98819eec699f88bf70e87560318017318ab4198108aae642b09148e356370d",
+  "release_id": "policylens-three-domain-20261016.v6.0",
+  "schema": "warehouse-v621-pong-kitchen-byte-preservation-summary.v1",
+  "scope": "existing_asset_receipt_hash_and_metadata_binding_preservation_only",
+  "source_closure_after": "35e9fe54e8de193ed79d3553b540e481a5738f1b2f47369d3a9ba5ef47a25c3a",
+  "source_closure_before": "35e9fe54e8de193ed79d3553b540e481a5738f1b2f47369d3a9ba5ef47a25c3a",
+  "source_files": 194,
+  "source_manifest_path": "experiments/warehouse/evidence/warehouse-v621-bc-source-manifest-02.json",
+  "source_manifest_sha256": "6f2d287a3c75d297f840c3a9587b064210672a10f31fd05c27e2da52ba21b014",
+  "source_unchanged": true,
+  "status": "passed",
+  "training_updates": 0,
+  "unique_paths": 62,
+  "warehouse_status": "pending"
+}

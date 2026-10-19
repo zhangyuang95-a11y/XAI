@@ -1,0 +1,126 @@
+{
+  "PPO_joint_steps": 0,
+  "actor_updates": 0,
+  "admission_evidence": false,
+  "batch_id": "diagnostics-01",
+  "calibration_temperatures": [
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2
+  ],
+  "candidate_id": "warehouse-v621-shared-structure-01",
+  "cv": {
+    "all_physical_frames": true,
+    "argmax_only_in_fit": true,
+    "fit_argmax_episodes": 50,
+    "fit_only_argmax_episodes": 50,
+    "fit_sampled_episodes": 75,
+    "fold_assignments_sha256": "72e6e5629e28c93f5cc9de6704f0dbf53a63383b752dc674272ba4f2cc0e998d",
+    "fold_seed": "warehouse-v621-spent-v620-whole-base-cv.v1",
+    "folds": 3,
+    "jobs": 18,
+    "natural_episodes": 225,
+    "physical_frames_per_role": 32782,
+    "source_episodes": 275,
+    "split_episode_counts": {
+      "calibration": 25,
+      "eligibility": 50,
+      "fit": 125,
+      "validation": 75
+    },
+    "whole_base_grouping": true
+  },
+  "environment_resets": 0,
+  "fresh_validation_evidence": false,
+  "frozen_actor_role_sha256": {
+    "robot_1": "7aee44859397b8cbe1bb9cd3b8541e82f2a080d884c83404fe1e4fd2a998eaf0",
+    "robot_2": "17f2f75877421854c680fab07557f031389800a9503b14f060db5ff4f862fcf0"
+  },
+  "frozen_actor_sha256": "1b6310f6d93309fb17e64516519a71680ad3c30e73f222be27df4dff10da81ec",
+  "future_stages_closed": [
+    "new_cohort",
+    "BC",
+    "PPO",
+    "formal_training",
+    "sealed_audit",
+    "holdout",
+    "pilot"
+  ],
+  "gates": {
+    "maximum_kl": 0.2,
+    "minimum_expected_feedback_coverage": 0.4,
+    "minimum_explanation_agreement": 0.97,
+    "minimum_explanation_coverage": 0.45,
+    "minimum_feedback_agreement": 0.95,
+    "minimum_feedback_coverage": 0.45,
+    "whole_tree_path_uncertified_count": 0,
+    "whole_tree_raw_illegal_count": 0
+  },
+  "interpretation": {
+    "current_topology_action_agreement_upper_bound_is_not_class_impossibility": true,
+    "no_equal_compute_efficiency_claim_without_measured_costs": true,
+    "spent_cohort_never_independent_admission": true
+  },
+  "leaf_fit": {
+    "epsilon": 0.001,
+    "maxiter": 200,
+    "regularization": 0.0001,
+    "tolerance": 1e-06
+  },
+  "legacy_source_sha256": "4fba3c172feeaefa11e4c0c2b435e21457f4f27c60c11e5b2cd0c24c618f229c",
+  "methods": {
+    "A": "v620_m2_same_fold_refit_v1",
+    "B": "actor_topology_compilation_distribution_refit_v1",
+    "C": "path_constrained_alternating_tree_optimization_v1"
+  },
+  "publishable": false,
+  "schema": "warehouse-v621-spent-diagnostics-recipe.v1",
+  "search": {
+    "A": {
+      "guards_and_empty_branches_count_towards_complexity": true,
+      "maximum_initializations": 8,
+      "maximum_leaf_api_calls_per_role_fit": 20000,
+      "maximum_total_rounds": 60,
+      "reserved_final_fixed_topology_leaf_calls": 16,
+      "scope": "per_role_fit_across_all_initializations_including_final_refit"
+    },
+    "B": {
+      "guards_and_empty_branches_count_towards_complexity": true,
+      "maximum_initializations": 8,
+      "maximum_leaf_api_calls_per_role_fit": 20000,
+      "maximum_total_rounds": 60,
+      "reserved_final_fixed_topology_leaf_calls": 16,
+      "scope": "per_role_fit_across_all_initializations_including_final_refit"
+    },
+    "C": {
+      "guards_and_empty_branches_count_towards_complexity": true,
+      "maximum_initializations": 8,
+      "maximum_leaf_api_calls_per_role_fit": 20000,
+      "maximum_total_rounds": 60,
+      "reserved_final_fixed_topology_leaf_calls": 16,
+      "scope": "per_role_fit_across_all_initializations_including_final_refit"
+    }
+  },
+  "selection": {
+    "any_pass_route": "three_initializer_bc_development",
+    "eligible_method_requires_both_roles_all_three_folds": true,
+    "infeasible_compiled_topology_is_scientific_failure": true,
+    "none_pass_route": "shared_structure_actor_implementation",
+    "ordering": [
+      "minimum_explanation_coverage",
+      "minimum_expected_feedback_coverage",
+      "negative_maximum_qualified_kl",
+      "negative_total_leaf_count",
+      "arm"
+    ],
+    "requires_all_eighteen_completed_or_scientific_infeasible": true
+  },
+  "whole_tree_limits": {
+    "guards_and_empty_branches_count": true,
+    "maximum_depth": 5,
+    "maximum_leaves": 16,
+    "maximum_source_features_per_node": 3
+  }
+}

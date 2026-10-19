@@ -41,6 +41,7 @@
   },
   "development_cases": "exact_spent_v620_275_cases_original_purpose_split",
   "external_program_actor_updates_during_bc": 0,
+  "feedback_gradient_probe_coefficient": 0.01,
   "feedback_gradient_probe_required_both_roles": true,
   "fresh_precheck_authorized": false,
   "gradient_clip": 0.5,

@@ -580,6 +580,7 @@ def gradient_probe(plan, model, actor, program, validation):
             logits = model.role_logits(role, obs, mask)
             loss, report = differentiable_feedback_loss(program, logits, encoded, mask, actions,
                 current_fidelity=fidelity, variant=variant)
+            loss = .01*loss
             gradients = torch.autograd.grad(loss, tuple(p for p in model.actors[role].parameters()
                 if p.requires_grad), allow_unused=True)
             norm = float(sum((value.detach().double().square().sum() for value in gradients if value is not None),
@@ -603,6 +604,7 @@ def gradient_probe(plan, model, actor, program, validation):
         'actor_parameters_unchanged': True, 'optimizer_steps': 0,
         'post_75_percent_structure_and_core_logits_frozen_clone': True,
         'clone_virtual_frozen_at_step': 150000, 'actual_PPO_joint_steps': 0,
+        'program_coefficient': .01,
         'real_PPO_feedback_or_human_benefit_claimed': False}
 
 

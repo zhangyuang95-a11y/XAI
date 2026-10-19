@@ -112,6 +112,7 @@ def recipe():
         "quality_gates": {"mean_deliveries": 5.5, "maximum_mean_collisions": 6.,
             "maximum_shutdown_rate": .05}, "program_gates": diagnostics.GATES,
         "feedback_gradient_probe_required_both_roles": True,
+        "feedback_gradient_probe_coefficient": .01,
         "external_program_actor_updates_during_bc": 0,
         "fresh_precheck_authorized": False, "PPO_joint_steps": 0,
         "publishable": False, "pilot_opened": False}

@@ -389,3 +389,47 @@ def test_live_noncore_anchor_drift_is_revalidated_while_core_anchor_drift_reject
         active.actors['robot_1'].tree.extra_margin[0] += .1
     changed_core = frozen.FrozenWarehouseV621Actor.from_model(active)
     assert not p.current_actor_fidelity(program, changed_core, rows[3])['passed']
+
+
+def test_empty_core_leaf_corrects_valid_actor_anchor_rounding_without_solver():
+    anchor = np.array([-3.8417201042175293, -5.141720294952393, 3.3582801818847656,
+                       1.1582801342010498, 4.466877460479736], np.float32)
+    assert abs(float(anchor.astype(np.float64).sum())) > 2e-6
+    assert np.isclose(anchor.mean(), 0., atol=2e-5)
+    assert not p._box_proof(anchor, anchor, 4, {4})['passed']
+    z, report = p.fit_core_leaf_distribution(np.zeros((0, 5)), np.zeros((0, 5)), {4}, anchor)
+    assert report['success'] and report['float32_feasible'] and report['proof']['passed']
+    assert report['empty_leaf'] and report['row_count'] == report['enumerated_action_solves'] == 0
+    assert report['numeric_centering']['solver_calls'] == 0
+    assert report['numeric_centering']['component_corrections']
+    assert abs(float(z.astype(np.float64).sum())) <= 2e-6
+    assert np.max(np.abs(z.astype(float)-anchor.astype(float))) <= .05
+    assert z.argmax() == anchor.argmax() == 4
+    calibrated, cal = p.calibrate_core_leaf_distribution(z, np.zeros((0, 5)),
+        np.zeros((0, 5)), {4}, anchor)
+    assert cal['empty_calibration_leaf'] and cal['proof']['passed']
+    np.testing.assert_array_equal(calibrated, z)
+
+
+def test_nonempty_fit_and_calibration_reprove_centering_in_original_anchor_box():
+    anchor = np.array([-3.8417201042175293, -5.141720294952393, 3.3582801818847656,
+                       1.1582801342010498, 4.466877460479736], np.float32)
+    masks = np.ones((10, 5), np.float32)
+    target = p._probs(anchor+[.01, -.02, .02, -.01, 0.], masks).astype(np.float32)
+    z, report = p.fit_core_leaf_distribution(target, masks, {4}, anchor)
+    assert report['proof']['passed'] and report['enumerated_action_solves'] == 1
+    calibrated, cal = p.calibrate_core_leaf_distribution(z, target, masks, {4}, anchor)
+    assert cal['proof']['passed']
+    assert abs(float(calibrated.astype(float).sum())) <= 2e-6
+    assert np.max(np.abs(calibrated.astype(float)-anchor.astype(float))) <= .05
+
+
+def test_float32_centering_failure_is_typed_and_never_reported_success():
+    # No stored value can change by <=.05 at this magnitude; this particular
+    # anchor has sum 32, so a centered program is unrepresentable in the box.
+    anchor = np.array([1e8, -1e8, 32., -16., 16.], np.float32)
+    with pytest.raises(p.CoreBoxNumericalError) as info:
+        p._center_float32_in_box(anchor, anchor, 0, {0})
+    assert not info.value.report['success'] and not info.value.report['proof']['passed']
+    assert info.value.report['proof']['preference']['passed']
+    assert info.value.report['absolute_center_sum_limit'] == 2e-6

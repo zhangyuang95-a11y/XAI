@@ -44,6 +44,16 @@ _MASKS = tuple(FEATURE_NAMES.index(f"legal_{a.lower()}") for a in ACTIONS)
 _SPLITS = ("fit", "calibration", "eligibility", "validation")
 
 
+class CoreBoxNumericalError(RuntimeError):
+    """Stored float32 logits cannot satisfy the registered centering/box proof."""
+
+    def __init__(self, message, *, proof):
+        super().__init__(message)
+        self.report = {"success": False, "kind": "float32_centered_core_box_infeasible",
+                       "proof": proof, "box_epsilon": BOX_EPSILON,
+                       "absolute_center_sum_limit": 2e-6}
+
+
 def _digest(value):
     return sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
@@ -100,6 +110,50 @@ def _box_proof(logits, anchor, action, legal_actions):
             "box_epsilon": BOX_EPSILON, "preference": preference}
 
 
+def _center_float32_in_box(logits, anchor, action, legal_actions):
+    """Repair only float32 summation residue, without relaxing any certificate.
+
+    An Actor's centered gauge has its own rounding tolerance. That does not
+    imply the program's stricter five-logit sum proof. Correct the smallest-ULP
+    component first, retaining the original anchor box and preferred action.
+    No samples, optimization, clipping or action relabeling are involved.
+    """
+    z = np.asarray(logits, np.float32).copy()
+    t = np.asarray(anchor, np.float32)
+    if z.shape != (5,) or t.shape != (5,) or not np.isfinite(z).all() or not np.isfinite(t).all():
+        raise CoreBoxNumericalError("invalid float32 core centering input", proof={"passed": False})
+    initial_sum = float(z.astype(np.float64).sum())
+    changes = []
+    for _ in range(5):
+        proof = _box_proof(z, t, action, legal_actions)
+        if proof["passed"]:
+            return z, {"initial_float64_sum": initial_sum, "final_float64_sum": float(z.astype(float).sum()),
+                       "component_corrections": changes, "solver_calls": 0, "proof": proof}
+        residue = float(z.astype(np.float64).sum())
+        if abs(residue) <= 2e-6:
+            break  # This is a box/action failure, never a centering repair.
+        candidates = []
+        order = sorted(range(5), key=lambda i: (abs(float(np.spacing(z[i]))), i))
+        for index in order:
+            trial = z.copy()
+            with np.errstate(over="ignore", invalid="ignore"):
+                trial[index] = np.float32(float(z[index])-residue)
+            if not np.isfinite(trial).all() or trial[index] == z[index]:
+                continue
+            candidate = _box_proof(trial, t, action, legal_actions)
+            if (candidate["maximum_anchor_offset"] <= BOX_EPSILON
+                    and candidate["preference"]["passed"]
+                    and candidate["absolute_center_sum"] < abs(residue)):
+                candidates.append((candidate["absolute_center_sum"], order.index(index), index, trial))
+        if not candidates:
+            break
+        _, _, index, trial = min(candidates, key=lambda value: value[:3])
+        changes.append({"component": index, "before": float(z[index]), "after": float(trial[index])})
+        z = trial
+    proof = _box_proof(z, t, action, legal_actions)
+    raise CoreBoxNumericalError("no centered float32 logits inside the original certified core box", proof=proof)
+
+
 def fit_core_leaf_distribution(target, masks, legal_actions, anchor):
     """One convex full-distribution fit, centered in the Actor anchor's box."""
     p, m = _distribution_inputs(target, masks)
@@ -111,10 +165,11 @@ def fit_core_leaf_distribution(target, masks, legal_actions, anchor):
         raise ValueError("invalid core anchor, centering or path certificate")
     n = len(p)
     if not n:
-        return t.copy(), {"success": True, "row_count": 0, "chosen_action": action,
+        z, centering = _center_float32_in_box(t, t, action, legal_actions)
+        return z, {"success": True, "row_count": 0, "chosen_action": action,
             "solver": "SLSQP", "solver_status": 0, "enumerated_action_solves": 0,
             "empty_leaf": True, "float32_feasible": True,
-            "proof": _box_proof(t, t, action, legal_actions),
+            "proof": centering["proof"], "numeric_centering": centering,
             "epsilon": BOX_EPSILON, "maxiter": LEAF_MAXITER, "tolerance": LEAF_TOLERANCE,
             "regularization": LEAF_REGULARIZATION}
     patterns, inv = np.unique(m, axis=0, return_inverse=True)
@@ -142,14 +197,18 @@ def fit_core_leaf_distribution(target, masks, legal_actions, anchor):
         constraints=({"type": "eq", "fun": lambda z: float(z.sum()),
                       "jac": lambda z: np.ones(5)},),
         options={"maxiter": LEAF_MAXITER, "ftol": LEAF_TOLERANCE, "disp": False})
-    z = np.asarray(result.x-result.x.mean(), np.float32)
+    if not result.success:
+        raise RuntimeError("core box fit did not converge to a float32 certified solution")
+    z, centering = _center_float32_in_box(np.asarray(result.x-result.x.mean(), np.float32),
+                                         t, action, legal_actions)
     proof = _box_proof(z, t, action, legal_actions)
-    if not result.success or not proof["passed"]:
+    if not proof["passed"]:
         raise RuntimeError("core box fit did not converge to a float32 certified solution")
     return z, {"success": True, "row_count": n, "chosen_action": action,
         "solver": "SLSQP", "solver_status": int(result.status),
         "iterations": int(result.nit), "enumerated_action_solves": 1,
         "empty_leaf": False, "float32_feasible": True, "proof": proof,
+        "numeric_centering": centering,
         "masked_kl": float(_kl(p, _probs(z, m)).mean()),
         "epsilon": BOX_EPSILON, "maxiter": LEAF_MAXITER, "tolerance": LEAF_TOLERANCE,
         "regularization": LEAF_REGULARIZATION, "target": "complete_masked_NN_distribution"}
@@ -165,11 +224,17 @@ def calibrate_core_leaf_distribution(logits, target, masks, legal_actions, ancho
     for temperature in CALIBRATION_TEMPERATURES:
         # Scaling the entire anchor would silently violate the shared box.
         trial = np.asarray(t.astype(float)+(z.astype(float)-t.astype(float))/temperature, np.float32)
-        proof = _box_proof(trial, t, action, legal_actions)
+        centering_error = None
+        try:
+            trial, centering = _center_float32_in_box(trial, t, action, legal_actions)
+            proof = centering["proof"]
+        except CoreBoxNumericalError as error:
+            centering_error = error.report
+            proof = _box_proof(trial, t, action, legal_actions)
         value = float(_kl(p, _probs(trial, m)).mean()) if len(p) else 0.
-        accepted = bool(proof["passed"] and np.isfinite(value))
+        accepted = bool(centering_error is None and proof["passed"] and np.isfinite(value))
         records.append({"temperature": temperature, "masked_kl": value, "accepted": accepted,
-                        "proof": proof})
+                        "proof": proof, "numeric_centering_failure": centering_error})
         if accepted:
             candidates.append((value, CALIBRATION_TEMPERATURES.index(temperature), trial, temperature))
     if not candidates:

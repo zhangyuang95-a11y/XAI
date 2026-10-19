@@ -3,6 +3,9 @@
 候选：`warehouse-v622-v620-preserving-01`。目标发布仍为
 `policylens-three-domain-20261016.v6.0`；任何开发收据都不能开启 pilot。
 
+本轮状态：18项容量作业、独立审计和四模板完整性检查已完成，所有方法均未通过程序预检。
+候选已关闭，后续数据与训练均未启动。汇总见[开发结果](warehouse_v622_results.md)。
+
 ## 固定基线
 
 - 完整双 Actor NPZ：`1b6310f6d93309fb17e64516519a71680ad3c30e73f222be27df4dff10da81ec`。

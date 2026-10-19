@@ -1,0 +1,115 @@
+{
+  "schema": "warehouse-v622-final-development-evidence.v1",
+  "created_at_utc": "2026-10-19 13:32:18 UTC",
+  "candidate_id": "warehouse-v622-v620-preserving-01",
+  "status": "closed_failed_program_precheck",
+  "reason": "no_complete_method_met_all_program_precheck_gates",
+  "implementation_commit": "2547eae",
+  "branch": "codex/warehouse-v622-v620-preserving",
+  "source_closure_sha256": "1f2e63fdea9e3e3ebc0e9c9733fa2400a74359d9a87718c76e46229ce61063ee",
+  "completed_scientific_jobs": 18,
+  "independent_arithmetic_audits_passed": 2,
+  "completed_D32_four_template_units": 6,
+  "selected_arm": null,
+  "evidence": {
+    "final": {
+      "path": "output/warehouse_v622/finalizations/completed-development-02/final.json",
+      "sha256": "cbdd777bd076e056453140b80523b2c834522aaf1094f3b3437899bdeae4045b"
+    },
+    "closed": {
+      "path": "output/warehouse_v622/candidate.closed.json",
+      "sha256": "2d6c2090c1cbfbfe7c9410136d0bdaf8632aaf91da3a1f5f5c076abbd191aaa7"
+    },
+    "archive": {
+      "path": "output/warehouse_v622/finalizations/completed-development-02/archive-manifest.json",
+      "sha256": "b8b84d1ac931ddc601923c6a5de41ae071c4ef7492f95d3c82dae238aee94455"
+    },
+    "posthoc": {
+      "path": "output/warehouse_v622/reports/completed-development-02/posthoc.json",
+      "sha256": "30fdfff3021769992909b8baad4b592042b55a73268df8e0dd2fe8a1f6f42c88"
+    },
+    "primary_audit": {
+      "path": "output/warehouse_v622/capacity-02/independent-audit.json",
+      "sha256": "d04573135d22ad01e559ee4643bcd3a2607b074a9f6b0b19952c62b1604cd884"
+    },
+    "fallback_audit": {
+      "path": "output/warehouse_v622/fallback-02/independent-audit.json",
+      "sha256": "8ec1076645e6a8f93216fa11771a0666b28569ac338ae59ccda97d3fde4a0f35"
+    },
+    "original_actor": {
+      "path": "output/warehouse_v620_bc_pilot/warehouse-v620-01-shared-bc-pilot/pair-6160-gamma-003/final-bc.actor.npz",
+      "sha256": "1b6310f6d93309fb17e64516519a71680ad3c30e73f222be27df4dff10da81ec"
+    },
+    "release_catalog": {
+      "path": "releases/policylens-three-domain-20261016.v6.0/catalog.json",
+      "sha256": "402726d459db90c1347f0e4a00d34500631b106b19937c08d2010f803e2af77b"
+    }
+  },
+  "selection_uses_current_complete_batches_only": true,
+  "cross_batch_stitching": false,
+  "engineering_contingency_triggered": false,
+  "compute": {
+    "current_02_leaf_API_calls": 57798,
+    "interrupted_01_leaf_API_lower_bound": 33685,
+    "combined_leaf_API_lower_bound": 91483,
+    "combined_is_exact": false,
+    "unlogged_interrupted_work": "unknown"
+  },
+  "engineering_tests": {
+    "passed": 256,
+    "model_acceptance_evidence": false,
+    "distinct_scopes": [
+      {
+        "scope": "original_v622_protocol_program_search_actor_capacity_posthoc",
+        "passed": 100
+      },
+      {
+        "scope": "recovery",
+        "passed": 29
+      },
+      {
+        "scope": "recovery_reports",
+        "passed": 14
+      },
+      {
+        "scope": "completeness_and_finalization",
+        "passed": 53
+      },
+      {
+        "scope": "confirmation",
+        "passed": 37
+      },
+      {
+        "scope": "inactive_continuation_safety",
+        "passed": 23
+      }
+    ]
+  },
+  "original_dual_NN_hash_unchanged": true,
+  "NN_quality": {
+    "new_quality_evaluation_performed": false,
+    "carried_development_episode_count": 75,
+    "mean_deliveries": 14.933333333333334,
+    "mean_collisions": 2.84,
+    "shutdown_episodes": 1,
+    "heldout_evidence": false,
+    "human_study_evidence": false
+  },
+  "environment_resets": 0,
+  "actor_updates": 0,
+  "PPO_joint_steps": 0,
+  "stage_B_fresh_confirmation_started": false,
+  "stage_B_pressure_started": false,
+  "calibration_PPO_started": false,
+  "formal_training_started": false,
+  "final_sealed_audit_started": false,
+  "heldout_test_started": false,
+  "Pong_Kitchen_used_holdouts_rerun": false,
+  "publishable": false,
+  "pilot_opened": false,
+  "local_release_status": "warehouse_pending_no_Warehouse_policy",
+  "remote_deployment_state_inspected": false,
+  "historical_assets_deleted": false,
+  "archive_copies_assets": false,
+  "full_PPO_driver_or_full_PPO_resume_claimed": false
+}

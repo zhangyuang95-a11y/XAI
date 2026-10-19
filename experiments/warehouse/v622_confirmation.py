@@ -20,13 +20,15 @@ from types import MappingProxyType
 
 from experiments.warehouse import v622_protocol as capacity
 from experiments.warehouse import v622_recovery_protocol as recovery
+from experiments.warehouse.v622_completeness import require_complete_d32_search
 
 SCHEMA = "warehouse-v622-confirmation-config.v1"
 PLAN_SCHEMA = "warehouse-v622-confirmation-plan.v1"
 CLEARANCE_SCHEMA = "warehouse-v622-confirmation-seed-clearance.v1"
 COUNTS = {"fit": 100, "calibration": 25, "eligibility": 75, "validation": 75, "pressure": 216}
 NEW_SOURCES = ("experiments/warehouse/v622_confirmation.py",
-    "scripts/run_warehouse_v622_confirmation.py", "tests/test_warehouse_v622_confirmation.py")
+    "scripts/run_warehouse_v622_confirmation.py", "tests/test_warehouse_v622_confirmation.py",
+    "experiments/warehouse/v622_completeness.py")
 HISTORY_ROOT_NAMES = ("XAI", "XAI-study-v3", "XAI-v6-integration", "XAI-v6-recovery-20261015T165508Z")
 HISTORICAL_TRACE_INVENTORY = "output/warehouse_v621/seed-ledger-03/rebound-01/inventory.json"
 HISTORICAL_TRACE_INVENTORY_SHA256 = "98ea8b4d0aed59978d8537e45b8677fa84af848416a64ccc6aa1b0d9edf62b19"
@@ -128,6 +130,13 @@ def _capacity_bundle(root, refs, stage, bound):
                 or a.get("job") != job or a.get("passed") is not True
                 or completion.get("plan_sha256") != plan_sha or completion.get("result_sha256") != summary["jobs"][job["job_id"]]["sha256"]):
             raise RuntimeError("winner child completion/audit binding differs")
+        if job['arm']=='D32':
+            if result.get('search_report') is None:
+                require_complete_d32_search(result.get('budget_exhaustion'))
+            else:
+                search_path,search=read_bound(root,result.get('search_report'),bound)
+                if search_path!=folder/'search-report.json': raise RuntimeError('noncanonical D32 winner search evidence')
+                require_complete_d32_search(search)
         if result.get("status") == "completed":
             gate = capacity.gate_metrics(result["metrics"]["validation"])
             _, raw = read_bound(root, result["program"], bound)
@@ -218,6 +227,7 @@ def recipe():
         "quality_gates_by_split":{s:{"minimum_deliveries":5.5,"maximum_collisions":6.,"maximum_shutdown_episode_rate":.05}
             for s in ("validation","pressure")},
         "reference_retention":"same_frozen_NN_self_reference_descriptive_only","training_authorized":False,
+        "D32_requires_all_four_templates_tables_and_DP":True,
         "programs_never_select_actions":True,"no_validation_or_pressure_gradients":True,"pilot_opened":False}
 
 
@@ -556,6 +566,7 @@ def fit(root,plan_path):
                     feature_names=actor.roles[role].feature_names,actor_role_sha256=actor.role_sha256[role],
                     config=SearchConfig(wall_time_seconds=limits["wall_seconds"]-limits["reserved_final_wall_seconds"]))
             write_new(target/"structure.json",capacity.plain(structure));write_new(target/"search.json",search)
+            if arm=='D32': require_complete_d32_search(search)
             program=fit_program(role,actor,*(parts[s][role] for s in capacity.SPLITS),structure=structure,
                 structure_sha256=program_structure_sha256(structure),fit_method=plan["method"],validation_phase="precheck",
                 fit_budget={"deadline_monotonic":deadline,"maximum_leaf_api_calls":0 if arm=="D32" else 32,
@@ -590,11 +601,17 @@ def audit(root,plan_path):
     """
     import numpy as np
     from scripts import audit_warehouse_v622_capacity as independent
-    path,plan=load_plan(root,plan_path);actor,parts,collection=collection_rows(root,path);bound={}
+    path,plan=load_plan(root,plan_path);bound={}
     folder=path.parent/"programs";_,done=read_bound(root,pointer(folder/"completed.json"),bound)
     _,result=read_bound(root,{"path":str(folder/"result.json"),"sha256":done["result_sha256"]},bound)
     if done.get("plan_sha256")!=file_sha(path) or result.get("plan_sha256")!=file_sha(path) or (folder/"failed.json").exists() or set(result.get("roles",{}))!=set(capacity.ROLES):
         raise RuntimeError("cannot audit incomplete confirmation fit")
+    if plan['arm']=='D32':
+        for role in capacity.ROLES:
+            search_path,search=read_bound(root,result['roles'][role].get('search'),bound)
+            if search_path!=folder/role/'search.json': raise RuntimeError('noncanonical fresh D32 search evidence')
+            require_complete_d32_search(search)
+    actor,parts,collection=collection_rows(root,path)
     quality_by_split,quality_gates_by_split=development_quality(collection["outcomes"])
     if result.get("quality_by_split")!=quality_by_split or result.get("quality_gates_by_split")!=quality_gates_by_split:
         raise RuntimeError("quality flag/counters differ from separate public validation and pressure episodes")

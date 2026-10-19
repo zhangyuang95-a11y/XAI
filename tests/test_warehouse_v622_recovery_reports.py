@@ -82,7 +82,8 @@ def test_metrics_uses_only_audited_single_plan_and_marks_carried_quality(monkeyp
     assert not binding["actor_quality_change_claimed"]
     assert binding["old_quality_is_carried_provenance_not_new_evaluation"]
     assert binding["new_NN_forward_calls"] == binding["fit_calls"] == binding["actor_updates"] == 0
-    assert len(binding["reporting_sources_sha256"]) == 3
+    assert len(binding["reporting_sources_sha256"]) == 4
+    assert binding["D32_four_complete_templates_required"]
 
 
 def test_posthoc_accepts_audited_primary_and_fallback_and_restores_scope(monkeypatch, tmp_path):
@@ -118,6 +119,37 @@ def test_single_fallback_metrics_also_checks_complete_primary_parent(monkeypatch
     monkeypatch.setattr(r.metrics, "snapshot", snapshot)
     report = r.prepare_report("metrics", [plans[1][0]])
     assert [p["stage"] for p in report["recovery_reporting"]["plans"]] == ["primary", "fallback"]
+
+
+@pytest.mark.parametrize("complete", [False, True])
+def test_D32_report_requires_full_declared_template_family_before_metrics(monkeypatch, tmp_path, complete):
+    plans = fake_completed(tmp_path)
+    path, _, results = plans[0]
+    job_id = "fold-0-robot_1-D32"
+    search_path = path.parent / "jobs" / job_id / "search-report.json"
+    search_path.parent.mkdir(parents=True)
+    count = 4 if complete else 3
+    search = {"templates_requested": 4, "complete_templates": count, "complete_frozen_tables": count,
+        "certificate": {"all_requested_templates_completed_and_enumerated": complete},
+        "template_generation_reports": [{"template": i, "completed_structure": True,
+            "frozen_table_completed": True, "dp_completed": True} for i in range(count)],
+        "frozen_terminal_tables": [{"template": i, "certificate": {"complete_DP": True}}
+            for i in range(count)]}
+    search_path.write_text(json.dumps(search))
+    results.append({"job": {"arm": "D32", "job_id": job_id},
+        "search_report": {"path": str(search_path), "sha256": r.sha256(search_path.read_bytes()).hexdigest()}})
+    monkeypatch.setattr(r.posthoc, "completed_inputs", lambda paths, evidence: plans)
+    calls = []
+    monkeypatch.setattr(r.metrics, "snapshot", lambda p: calls.append(p) or
+        {"independent_batch_arithmetic_audit_passed": True})
+    if complete:
+        report = r.prepare_report("metrics", [path])
+        assert report["recovery_reporting"]["D32_protocol_completeness"][job_id]["passed"]
+        assert calls == [path]
+    else:
+        with pytest.raises(r.completeness.D32ProtocolIncomplete):
+            r.prepare_report("metrics", [path])
+        assert calls == []
 
 
 @pytest.mark.parametrize("mode,paths", [("unknown", ["x"]), ("metrics", []),

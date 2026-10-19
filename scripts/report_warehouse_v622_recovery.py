@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
 
 import experiments.warehouse as warehouse_package
 from experiments.warehouse import v622_recovery_protocol as recovery
+from experiments.warehouse import v622_completeness as completeness
 from scripts import run_warehouse_v622_capacity_recovery as runner
 from scripts import report_warehouse_v622_metrics as metrics
 from scripts import report_warehouse_v622_posthoc as posthoc
@@ -48,7 +49,8 @@ def recovery_scope():
 
 
 def _source_bindings():
-    paths = (Path(__file__).resolve(), Path(metrics.__file__).resolve(), Path(posthoc.__file__).resolve())
+    paths = (Path(__file__).resolve(), Path(metrics.__file__).resolve(), Path(posthoc.__file__).resolve(),
+             Path(completeness.__file__).resolve())
     return {str(path): sha256(path.read_bytes()).hexdigest() for path in paths}
 
 
@@ -69,6 +71,20 @@ def prepare_report(mode, plan_paths):
         if mode == "metrics" and requested_path.parent == recovery.output_directory("fallback"):
             completion_paths = [recovery.output_directory("primary") / "plan.json", requested_path]
         plans = posthoc.completed_inputs(completion_paths, evidence)
+        family_receipts = {}
+        for path, plan, results in plans:
+            for result in results:
+                if result["job"]["arm"] != "D32":
+                    continue
+                ref = result.get("search_report")
+                if ref is not None:
+                    expected = path.parent / "jobs" / result["job"]["job_id"] / "search-report.json"
+                    if Path(ref["path"]).resolve() != expected.resolve():
+                        raise RuntimeError("D32 reporting search belongs to another job")
+                    search = evidence.pointer(ref)
+                else:
+                    search = result.get("budget_exhaustion")
+                family_receipts[result["job"]["job_id"]] = completeness.require_complete_d32_search(search)
         if mode == "metrics":
             report = metrics.snapshot(requested_path)
             if report.get("independent_batch_arithmetic_audit_passed") is not True:
@@ -86,6 +102,8 @@ def prepare_report(mode, plan_paths):
                    "source_closure_sha256": plan["identity"]["source_closure_sha256"]}
                   for path, plan, _ in plans],
         "complete_independent_audit_required": True,
+        "D32_four_complete_templates_required": True,
+        "D32_protocol_completeness": family_receipts,
         "used_for_selection": False, "actor_quality_change_claimed": False,
         "old_quality_is_carried_provenance_not_new_evaluation": True,
         "new_environment_resets": 0, "new_NN_forward_calls": 0,

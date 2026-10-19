@@ -39,7 +39,16 @@ def metrics():
     return {'feedback':dict(row),'explanation':dict(row)}
 
 
-def bundle(root,stage='primary',passing='A32'):
+def d32_search(*,complete=True):
+    n=4 if complete else 3
+    return {'templates_requested':4,'complete_templates':n,'complete_frozen_tables':n,
+        'certificate':{'all_requested_templates_completed_and_enumerated':complete},
+        'template_generation_reports':[{'template':i,'completed_structure':True,'frozen_table_completed':True,'dp_completed':True} for i in range(n)],
+        'frozen_terminal_tables':[{'template':i,'certificate':{'complete_DP':True}} for i in range(n)],
+        'leaf_optimization_calls':0,'report_sha256':'synthetic-only'}
+
+
+def bundle(root,stage='primary',passing='A32',fallback_parent=None,partial_d32_job=None):
     folder=root/'output/warehouse_v622'/('capacity-02' if stage=='primary' else 'fallback-02')
     folder.mkdir(parents=True)
     source=root/'fixture-source.py';source.write_text('# synthetic source\n')
@@ -49,6 +58,7 @@ def bundle(root,stage='primary',passing='A32'):
         'scientific_retry_permitted':False,'identity':{'source_files_sha256':sources,'source_closure_sha256':c.digest(sources),
             'actor_role_sha256':c.capacity.ROLE_SHA256,'actor':{'sha256':c.capacity.ACTOR_SHA256},'recipe_sha256':'synthetic-recovery-recipe'},
         'environment_resets':0,'actor_updates':0,'PPO_joint_steps':0,'publishable':False,'pilot_opened':False}
+    if fallback_parent is not None:plan['fallback_parent']=fallback_parent
     c.write_new(folder/'plan.json',plan);plan_sha=c.file_sha(folder/'plan.json');results=[];refs={};audited=[]
     c.write_new(folder/'plan.claim.json',{'sha256':plan_sha,'single_use':True})
     for job in plan['jobs']:
@@ -60,6 +70,9 @@ def bundle(root,stage='primary',passing='A32'):
         result={'job':job,'status':'completed','plan_sha256':plan_sha,'actor_weights_unchanged':True,'excluded_frames':0,
             'metrics':{'validation':m},'program':c.pointer(d/'program.json'),'development_gate':gate,'leaf_count':20,
             'budget_audit':{'passed':True},'environment_resets':0,'actor_updates':0,'PPO_joint_steps':0,'publishable':False,'pilot_opened':False}
+        if job['arm']=='D32':
+            c.write_new(d/'search-report.json',d32_search(complete=job['job_id']!=partial_d32_job))
+            result['search_report']=c.pointer(d/'search-report.json')
         c.write_new(d/'result.json',result);ref=c.pointer(d/'result.json');refs[job['job_id']]=ref;results.append(result)
         c.write_new(d/'completed.json',{'plan_sha256':plan_sha,'result_sha256':ref['sha256'],'passed':gate['passed']})
         audited.append({'job':job,'passed':True,'program_sha256':result['program']['sha256']})
@@ -312,3 +325,89 @@ def test_recovery_recipe_budgets_and_exact_source_identity_are_not_self_attested
     refs=bundle(tmp_path);p=Path(refs['plan']['path']);value=json.loads(p.read_bytes());change(value);p.write_text(json.dumps(value))
     refs['plan']=c.pointer(p)
     with pytest.raises(RuntimeError):c.checked_winner(tmp_path,{'primary':refs,'fallback':None},{})
+
+
+def d32_winner(root,partial_job=None):
+    primary=bundle(root,passing=None)
+    fallback=bundle(root,stage='fallback',passing='D32',partial_d32_job=partial_job,
+        fallback_parent={'summary':primary['summary'],'independent_audit':primary['audit']})
+    return {'primary':primary,'fallback':fallback}
+
+
+def test_full_four_template_D32_winner_and_completeness_source_are_required(tmp_path):
+    winner=d32_winner(tmp_path)
+    arm,plan=c.checked_winner(tmp_path,winner,{})
+    assert arm=='D32' and plan['stage']=='fallback'
+    assert 'experiments/warehouse/v622_completeness.py' in c.NEW_SOURCES
+    assert c.recipe()['D32_requires_all_four_templates_tables_and_DP'] is True
+
+
+@pytest.mark.parametrize('job',[j['job_id'] for j in c.capacity.jobs('fallback')])
+def test_each_partial_D32_capacity_unit_refuses_prepare_before_any_reset_or_fit(tmp_path,monkeypatch,job):
+    from experiments.warehouse.v622_completeness import D32ProtocolIncomplete
+    winner=d32_winner(tmp_path,job)
+    config={'schema':c.SCHEMA,'candidate_id':c.capacity.CANDIDATE_ID,'run_id':'partial-d32','winner':winner,
+        'method':c.capacity.METHODS['D32'],'actor':{},'cases':[],'recipe':c.recipe(),'source_closure_sha256':'',
+        'exact_seed_plan':{},'seed_clearance':{}}
+    path=tmp_path/'configuration.json';c.write_new(path,config)
+    def forbidden(*a,**kw):raise AssertionError('partial family reached seed clearance or collection')
+    monkeypatch.setattr(c,'_seed_clearance',forbidden)
+    monkeypatch.setattr(c,'collection_capability',forbidden)
+    with pytest.raises(D32ProtocolIncomplete,match='protocol incomplete') as failure:c.prepare(tmp_path,path)
+    assert failure.value.report['reason']=='four_template_protocol_incomplete'
+    assert not (tmp_path/'output/warehouse_v622/confirmation-partial-d32').exists()
+
+
+@pytest.mark.parametrize('partial_role',c.capacity.ROLES)
+def test_fresh_D32_partial_search_stops_before_any_real_leaf_optimization(tmp_path,monkeypatch,partial_role):
+    from backend.training import warehouse_v622_program as program,warehouse_v622_search as search
+    from experiments.warehouse.v622_completeness import D32ProtocolIncomplete
+    path=tmp_path/'plan.json';path.write_text('{}')
+    plan={'arm':'D32','method':c.capacity.METHODS['D32'],'actor':{'sha256':'synthetic'}}
+    actor=SimpleNamespace(roles={r:SimpleNamespace(feature_names=('synthetic',),logits_encoded=lambda x:np.zeros((len(x),5),np.float32)) for r in c.capacity.ROLES},
+        role_sha256={r:r for r in c.capacity.ROLES})
+    parts={s:{r:[{'episode':'synthetic-episode'}] for r in c.capacity.ROLES} for s in c.COUNTS}
+    collection=tmp_path/'collection';collection.mkdir();(collection/'result.json').write_text('{}')
+    monkeypatch.setattr(c,'load_plan',lambda *a,**kw:(path,plan))
+    monkeypatch.setattr(c,'collection_rows',lambda *a:(actor,parts,{'outcomes':[]}))
+    monkeypatch.setattr(program,'_arrays',lambda rows:(np.zeros((1,1),np.float32),np.ones((1,5),np.float32),None))
+    monkeypatch.setattr(program,'masked_probabilities',lambda *a:np.full((1,5),.2,np.float32))
+    monkeypatch.setattr(program,'program_structure_sha256',lambda *a:'synthetic')
+    def fake_search(*args,actor_role_sha256,**kwargs):
+        return {'leaf_count':1},d32_search(complete=actor_role_sha256!=partial_role)
+    monkeypatch.setattr(search,'fit_structure',fake_search)
+    fitted=[]
+    class FakeProgram:
+        def save(self,p):c.write_new(p,{'synthetic':True})
+    def fake_fit(role,*a,**kw):fitted.append(role);return FakeProgram()
+    monkeypatch.setattr(program,'fit_program',fake_fit)
+    def fake_metrics(*a):
+        m=metrics()
+        for v in m.values():v.update(illegal_count=0,path_uncertified_count=0)
+        return m
+    monkeypatch.setattr(program,'program_metrics',fake_metrics)
+    with pytest.raises(D32ProtocolIncomplete):c.fit(tmp_path,path)
+    assert partial_role not in fitted  # Every fitter here is a stub, never SciPy.
+    assert not (tmp_path/'programs/completed.json').exists()
+    failure=json.loads((tmp_path/'programs/failed.json').read_bytes())
+    assert failure['attempted_fit_work']['reason']=='four_template_protocol_incomplete'
+    assert (tmp_path/'programs'/partial_role/'search.json').is_file()  # Preserve spent work.
+
+
+@pytest.mark.parametrize('partial_role',c.capacity.ROLES)
+def test_fresh_D32_partial_search_cannot_reach_arithmetic_audit(tmp_path,monkeypatch,partial_role):
+    from experiments.warehouse.v622_completeness import D32ProtocolIncomplete
+    from scripts import audit_warehouse_v622_capacity as independent
+    path=tmp_path/'plan.json';path.write_text('{}')
+    plan={'arm':'D32','method':c.capacity.METHODS['D32']}
+    monkeypatch.setattr(c,'load_plan',lambda *a,**kw:(path,plan))
+    def forbidden(*a,**kw):raise AssertionError('partial family reached NN/arithmetic audit')
+    monkeypatch.setattr(c,'collection_rows',forbidden)
+    monkeypatch.setattr(independent,'encoded_data',forbidden)
+    folder=tmp_path/'programs';roles={}
+    for role in c.capacity.ROLES:
+        target=folder/role/'search.json';c.write_new(target,d32_search(complete=role!=partial_role));roles[role]={'search':c.pointer(target)}
+    result={'plan_sha256':c.file_sha(path),'roles':roles};c.write_new(folder/'result.json',result)
+    c.write_new(folder/'completed.json',{'plan_sha256':c.file_sha(path),'result_sha256':c.file_sha(folder/'result.json')})
+    with pytest.raises(D32ProtocolIncomplete):c.audit(tmp_path,path)
+    assert not (tmp_path/'arithmetic-audit.json').exists()

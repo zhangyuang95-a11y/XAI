@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.warehouse import v622_protocol as v
+from experiments.warehouse.v622_completeness import require_complete_d32_search
 
 BASELINE_SUMMARY_SHA256 = v.BASELINE_SUMMARY_SHA256
 BASELINE_AUDIT_SHA256 = v.BASELINE_AUDIT_SHA256
@@ -207,7 +208,7 @@ def completed_batch(evidence, plan_path, stage):
     require(len(audit_jobs) == len(plan["jobs"]) and {r["job"]["job_id"] for r in audit_jobs} == set(summary["jobs"])
         and {r["job"]["job_id"]: r["job"] for r in audit_jobs} == {j["job_id"]: j for j in plan["jobs"]}
         and all(r.get("passed") is True for r in audit_jobs), "independent audit job family is incomplete")
-    results, rows, calls = [], [], []
+    results, rows, calls, protocol_completeness = [], [], [], {}
     for job in plan["jobs"]:
         jobdir = folder/"jobs"/job["job_id"]
         require(not (jobdir/"failed.json").exists(), "failed job cannot enter finalization")
@@ -230,6 +231,8 @@ def completed_batch(evidence, plan_path, stage):
             require(result["development_gate"]["passed"] is gate and completion.get("passed") is gate,
                 "native completed gate differs")
             search = evidence.bound(result["search_report"])
+            if job["arm"] == "D32":
+                protocol_completeness[job["job_id"]] = require_complete_d32_search(search)
             program = evidence.bound(result["program"])
             evidence.bound(result["structure"])
             if result.get("compiler_report"):
@@ -244,6 +247,8 @@ def completed_batch(evidence, plan_path, stage):
                 "incomplete scientific job claims program success")
             failure = result["budget_exhaustion"]
             search = evidence.bound(result["search_report"]) if result.get("search_report") else None
+            if job["arm"] == "D32":
+                protocol_completeness[job["job_id"]] = require_complete_d32_search(search if search is not None else failure)
             if result["error_type"] == "ProgramBudgetExhausted":
                 require(search is not None, "final timeout lost search report")
                 n = integer(search["leaf_optimization_calls"], "completed search calls")+integer(failure["leaf_optimization_calls"], "attempted final calls")
@@ -262,7 +267,8 @@ def completed_batch(evidence, plan_path, stage):
     recomputed = v.summarize_units(results, stage=stage)
     require(all(summary.get(k) == value for k, value in recomputed.items()), "summary selection arithmetic differs")
     return {"plan": plan, "summary": summary, "plan_ref": plan_ref, "summary_ref": summary_ref,
-        "audit_ref": audit_ref, "folder": folder, "source": source, "rows": rows, "calls": calls}
+        "audit_ref": audit_ref, "folder": folder, "source": source, "rows": rows, "calls": calls,
+        "protocol_completeness": protocol_completeness}
 
 
 def baseline(evidence, primary):
@@ -335,6 +341,7 @@ def build_report(primary_plan, fallback_plan=None, *, report_id, root=ROOT):
     require(re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", report_id) is not None, "unsafe report ID")
     evidence = Evidence(root)
     reporting_source = evidence.add("scripts/finalize_warehouse_v622_development.py")
+    completeness_source = evidence.add("experiments/warehouse/v622_completeness.py")
     primary = completed_batch(evidence, primary_plan, "primary")
     require(primary["folder"] == evidence.root/v.OUTPUT_ROOT/"capacity-02", "only the explicit complete current 02 primary supplies selection")
     fallback = None
@@ -361,9 +368,11 @@ def build_report(primary_plan, fallback_plan=None, *, report_id, root=ROOT):
         "reason": "program_precheck_failed" if closed else "complete_capacity_batch_passed",
         "selected_arm": selected, "selection_uses_only_explicit_complete_current_batches": True,
         "reporting_source": reporting_source, "reporting_source_is_outside_frozen_scientific_closure": True,
+        "reporting_source_dependencies": {"D32_completeness": completeness_source},
         "cross_batch_stitching": False, "current_primary": {k: primary[k] for k in ("plan_ref", "summary_ref", "audit_ref")},
         "current_fallback": {k: fallback[k] for k in ("plan_ref", "summary_ref", "audit_ref")} if fallback else None,
         "baseline_A16": baseline_refs, "source_closure_sha256": primary["source"],
+        "D32_protocol_completeness": fallback["protocol_completeness"] if fallback else {},
         "rows": rows, "aggregates": aggregate(rows), "paired_differences_from_A16": compare(rows),
         "method_gates": {arm: {"complete_role_folds": sum(r["status"] == "completed" for r in rows if r["arm"] == arm),
             "all_role_fold_gates_passed": all(r["status"] == "completed" and r["development_gate_passed"] for r in rows if r["arm"] == arm)}

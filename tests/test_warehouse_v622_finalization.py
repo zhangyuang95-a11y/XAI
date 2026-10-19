@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from scripts import finalize_warehouse_v622_development as f
+from tests.test_warehouse_v622_completeness import complete as complete_d32
 
 
 def put(path, value):
@@ -30,6 +31,9 @@ class Fixture:
         reporting_source=root/"scripts"/"finalize_warehouse_v622_development.py"
         reporting_source.parent.mkdir(parents=True,exist_ok=True)
         reporting_source.write_bytes(Path(f.__file__).read_bytes())
+        helper=root/"experiments"/"warehouse"/"v622_completeness.py"
+        helper.parent.mkdir(parents=True,exist_ok=True)
+        helper.write_bytes((Path(f.__file__).resolve().parents[1]/"experiments/warehouse/v622_completeness.py").read_bytes())
         source = root/"frozen.py"; source.write_text("frozen scientific source\n")
         self.sources = {"frozen.py": sha256(source.read_bytes()).hexdigest()}
         self.baseline = self.old_baseline()
@@ -78,7 +82,7 @@ class Fixture:
             "scientific_method_failure_claimed": False, "scientific_timeout_claimed": False,
             "plan": plan, "completed_jobs": 9, "interrupted_jobs": 3, "jobs": jobs})
 
-    def batch(self, stage="primary", passing=None, parent=None, exhausted=False):
+    def batch(self, stage="primary", passing=None, parent=None, exhausted=False, partial_templates=None):
         folder = self.output/("capacity-02" if stage == "primary" else "fallback-02")
         identity = {"source_files_sha256": self.sources, "source_closure_sha256": f.digest(self.sources)}
         plan = {"schema": "warehouse-v622-capacity-plan.v1", "candidate_id": f.v.CANDIDATE_ID,
@@ -95,7 +99,14 @@ class Fixture:
             put(d/"started.json", {"job": job, "plan_sha256": pref["sha256"]})
             search_calls = 10 if job["arm"] == "A32" else 20 if job["arm"] == "D32" else 0
             outside = 0 if job["arm"] == "D32" else 2
-            sref = put(d/"search-report.json", {"leaf_optimization_calls": search_calls})
+            search={"leaf_optimization_calls": search_calls}
+            if job["arm"]=="D32":
+                search.update(complete_d32())
+                if partial_templates is not None:
+                    for key in ("template_generation_reports","frozen_terminal_tables"):search[key]=search[key][:partial_templates]
+                    search["complete_templates"]=search["complete_frozen_tables"]=partial_templates
+                    search["certificate"]["all_requested_templates_completed_and_enumerated"]=False
+            sref = put(d/"search-report.json", search)
             zref = put(d/"program.json", {"report": {"leaf_optimization_calls_outside_search": outside}})
             tref = put(d/"structure.json", {"leaf_count": 2})
             m = metrics(.55 if job["arm"] == passing else .35)
@@ -150,6 +161,9 @@ def test_both_audited_failures_close_without_permissions_or_copy(fixture):
     assert report["compute"]["all_v622_leaf_api_calls_lower_bound"] == 594
     assert not report["compute"]["all_v622_total_is_exact"]
     assert all(report[k] == value for k,value in f.ZERO.items())
+    assert report["reporting_source_dependencies"]["D32_completeness"]["sha256"] == sha256(
+        (fixture.root/"experiments/warehouse/v622_completeness.py").read_bytes()).hexdigest()
+    assert len(report["D32_protocol_completeness"]) == 6
     assert report["stage_B_pressure_started"] is False
     assert "stage_C_pressure_started" not in report
     manifest = read(refs["archive_manifest"]["path"])
@@ -247,6 +261,17 @@ def test_exhausted_actual_calls_are_kept_separate_from_missing_metrics(fixture):
     assert first["F_leaf_coverage"] is None
     assert report["compute"]["current_02"]["actual_leaf_api_calls"]==203
     assert report["aggregates"]["A32"]["metrics"]["E_KL"]["available_role_folds"]==5
+
+
+@pytest.mark.parametrize("count", [1,3])
+@pytest.mark.parametrize("native_winner", [None,"D32"])
+def test_partial_D32_arithmetic_audit_cannot_close_or_succeed_finalization(fixture,count,native_winner):
+    p,parent=fixture.batch()
+    b,_=fixture.batch("fallback",parent=parent,passing=native_winner,partial_templates=count)
+    with pytest.raises(RuntimeError,match="D32 protocol incomplete"):
+        f.finalize(p,b,report_id="partial-family",root=fixture.root)
+    assert not (fixture.output/"candidate.closed.json").exists()
+    assert not (fixture.output/"finalizations"/"partial-family").exists()
 
 
 @pytest.mark.parametrize("report_id", ["../escape","UPPER","", "x"*65])

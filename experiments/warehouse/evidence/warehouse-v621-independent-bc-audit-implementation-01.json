@@ -1,0 +1,30 @@
+{
+  "PPO_joint_steps": 0,
+  "actual_BC_audit_executed": false,
+  "candidate_id": "warehouse-v621-shared-structure-01",
+  "environment_resets": 0,
+  "fresh_precheck_authorized": false,
+  "independent_code_review": {
+    "path": "output/warehouse_v621/bc-final-audit-preparation-01/compile-independent-review-01.json",
+    "sha256": "fe77eeb1eca35cb2a7de95861c0d35c02d1f4720fe8ba7b56d8f67241e72f218"
+  },
+  "pilot_opened": false,
+  "preparation": {
+    "path": "output/warehouse_v621/bc-final-audit-preparation-01/preparation.json",
+    "sha256": "d3040a54a83772eee0b13434439a9ae24723d7613ce1ac7608c26cc9cca3aa46"
+  },
+  "publishable": false,
+  "schema": "warehouse-v621-independent-BC-audit-implementation-index.v1",
+  "scope": "Independent completed-BC trace arithmetic; original frozen NN forward and public physics encoder reused; native autograd receipt bound, not recomputed.",
+  "source_194_sha256": "35e9fe54e8de193ed79d3553b540e481a5738f1b2f47369d3a9ba5ef47a25c3a",
+  "source_files": {
+    "experiments/warehouse/v621_bc_audit_math.py": "e55f60e45fc5fd2f77e507e5cd7f895ad7a1bb96856c35997fe4e5356f203637",
+    "scripts/audit_warehouse_v621_bc_results.py": "5b1682971676d1bc0557528e767e206bbed6e5eba632451e1159c690b7698906",
+    "tests/test_warehouse_v621_bc_audit_math.py": "735d2106940f8f95db567205c01304792749896dc38f4873fe046223e79f3675",
+    "tests/test_warehouse_v621_bc_final_audit.py": "33f0dd61bc0c30ba566088e59ea4f8e2c44cfb9db9e4ad9e37deeb17a014a0bd"
+  },
+  "synthetic_tests": {
+    "entrypoint_passed": 4,
+    "math_passed": 31
+  }
+}

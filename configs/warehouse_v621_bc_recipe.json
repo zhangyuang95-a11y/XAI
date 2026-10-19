@@ -1,0 +1,198 @@
+{
+  "PPO_joint_steps": 0,
+  "activation": "all_eighteen_diagnostics_and_independent_audit_complete_with_no_passing_method",
+  "all_physical_training_frames_retained": true,
+  "all_three_main_must_pass": true,
+  "argmax_collision_increment": 5.0,
+  "augmentation": {
+    "batch_size": 256,
+    "epochs": 8,
+    "learning_rate": 0.0001
+  },
+  "backup_activation": "all_three_main_runs_complete_and_at_least_one_main_quality_failure",
+  "backup_starts_from_same_initialization_not_main_checkpoint": true,
+  "batch_id": "bc-development-01",
+  "candidate_id": "warehouse-v621-shared-structure-01",
+  "control_is_diagnostic_not_candidate_admission": true,
+  "control_losses": {
+    "gamma": 0.03,
+    "recipe": "warehouse-public-shared-bc-alignment.v6.20.r1"
+  },
+  "core_bounds": {
+    "backup": 0.5,
+    "main": 0.35,
+    "minimum_tree_gap": "2*(bound+0.05)+0.26",
+    "no_confidence_guarantee_claimed": true,
+    "no_sample_dependent_escape": true,
+    "noncore_residual": "unbounded_256_nn",
+    "program_centered_box": 0.05
+  },
+  "critic": {
+    "batch_size": 256,
+    "epochs": 80,
+    "learning_rate": 0.001,
+    "positive_weight": 3.0
+  },
+  "critic_environment_resets_per_initialization": 2,
+  "deep_bc": {
+    "epochs": 6,
+    "final_epochs": 6,
+    "rounds": 4
+  },
+  "development_cases": "exact_spent_v620_275_cases_original_purpose_split",
+  "external_program_actor_updates_during_bc": 0,
+  "feedback_gradient_probe_required_both_roles": true,
+  "fresh_precheck_authorized": false,
+  "gradient_clip": 0.5,
+  "identical_full_bc_start_required_between_raw_and_regularized": true,
+  "initial_bc": {
+    "batch_size": 256,
+    "epochs": 20,
+    "learning_rate": 0.0003
+  },
+  "initial_dagger": {
+    "epochs": 10,
+    "rounds": 2
+  },
+  "initial_shared_topology": {
+    "algorithm": "public_supervised_tree_then_frozen_action_legal_guard_compilation",
+    "criterion": "log_loss",
+    "maximum_classifier_depth": 4,
+    "maximum_classifier_leaves": 8,
+    "maximum_episode_fraction": 0.2,
+    "minimum_classifier_leaf_rows": 80,
+    "minimum_episodes": 8,
+    "minimum_rows": 80,
+    "reject_no_core_instead_of_silently_changing_recipe": true,
+    "static_core_minimum_teacher_agreement": 0.75,
+    "target": "initial_public_teacher_one_hot_only_before_any_bc"
+  },
+  "initializations": [
+    6171,
+    6172,
+    6173
+  ],
+  "later_bc": {
+    "batch_size": 128,
+    "epochs": 8,
+    "learning_rate": 0.0001
+  },
+  "later_near_increment": 2.0,
+  "low_return_increment": 8.0,
+  "nn_visitation_episodes_per_model": 730,
+  "offline_collision_risk_weight": 2.0,
+  "offline_margin_weight": 0.0,
+  "pilot_opened": false,
+  "program_gates": {
+    "maximum_kl": 0.2,
+    "minimum_expected_feedback_coverage": 0.4,
+    "minimum_explanation_agreement": 0.97,
+    "minimum_explanation_coverage": 0.45,
+    "minimum_feedback_agreement": 0.95,
+    "minimum_feedback_coverage": 0.45,
+    "whole_tree_path_uncertified_count": 0,
+    "whole_tree_raw_illegal_count": 0
+  },
+  "publishable": false,
+  "quality_cases": "75_natural_original_validation_episodes_not_independent_evidence",
+  "quality_gates": {
+    "maximum_mean_collisions": 6.0,
+    "maximum_shutdown_rate": 0.05,
+    "mean_deliveries": 5.5
+  },
+  "recipes": [
+    "additive_control",
+    "shared_b035",
+    "shared_b050"
+  ],
+  "risk_near_increment": 0.0,
+  "sampled_collision_increment": 3.0,
+  "schema": "warehouse-v621-shared-actor-bc-development.v1",
+  "shared_initial_primary_nn_tensors_between_architectures": true,
+  "shared_losses": {
+    "condition_on_current_teacher_correctness": false,
+    "full_task_ce": 1.0,
+    "full_to_tree_kl": 0.2,
+    "training_core_occupancy_target": 0.5,
+    "training_core_occupancy_weight": 0.05,
+    "tree_task_ce": 0.2,
+    "tree_to_full_kl": 0.2
+  },
+  "stage_counts": [
+    [
+      "initial_public_teacher",
+      100
+    ],
+    [
+      "initial_nn_dagger_1",
+      40
+    ],
+    [
+      "initial_nn_dagger_2",
+      40
+    ],
+    [
+      "joint_augmentation_sampled",
+      25
+    ],
+    [
+      "joint_augmentation_argmax",
+      25
+    ],
+    [
+      "risk_public_teacher",
+      40
+    ],
+    [
+      "risk_nn_visitation",
+      80
+    ],
+    [
+      "large_public_teacher",
+      200
+    ],
+    [
+      "large_nn_visitation",
+      120
+    ],
+    [
+      "deep_public_teacher",
+      200
+    ],
+    [
+      "deep_1_sampled",
+      50
+    ],
+    [
+      "deep_1_argmax",
+      50
+    ],
+    [
+      "deep_2_sampled",
+      50
+    ],
+    [
+      "deep_2_argmax",
+      50
+    ],
+    [
+      "deep_3_sampled",
+      50
+    ],
+    [
+      "deep_3_argmax",
+      50
+    ],
+    [
+      "deep_4_sampled",
+      50
+    ],
+    [
+      "deep_4_argmax",
+      50
+    ]
+  ],
+  "teacher_cache_episodes_per_initialization": 540,
+  "teacher_only_pre_action_public_information": true,
+  "training_episode_exposure_per_model": 1270
+}

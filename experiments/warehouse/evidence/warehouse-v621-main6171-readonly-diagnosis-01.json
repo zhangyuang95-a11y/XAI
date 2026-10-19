@@ -1,0 +1,39 @@
+{
+  "schema": "warehouse-v621-main6171-readonly-diagnosis-index.v1",
+  "candidate_id": "warehouse-v621-shared-structure-01",
+  "initialization": 6171,
+  "recipe": "shared_b035",
+  "scope": "completed first main only; spent development observations; descriptive diagnosis",
+  "evidence": {
+    "path": "output/warehouse_v621/main6171-readonly-diagnostics-01/diagnosis.json",
+    "sha256": "ab8ac94cc55c2fc496edd6e491a5526379241d40b598687676870da1f5f056ee"
+  },
+  "report": {
+    "path": "output/warehouse_v621/main6171-readonly-diagnostics-01/diagnosis.zh.md",
+    "sha256": "d667e649a29464d885730968b46ec9869fa872ce04e867b4e429b4f5803d4225"
+  },
+  "receipt": {
+    "path": "output/warehouse_v621/main6171-readonly-diagnostics-01/receipt.json",
+    "sha256": "728b1f8bd097d7691235eb162cb362b7ebac923706253f8fe6364bc5a771c2f6"
+  },
+  "findings": {
+    "role2_same_teacher_core_occupancy_initial": 0.248,
+    "role2_same_teacher_core_occupancy_final": 0.17275,
+    "role1_qualified_explanation_WAIT_fraction": 0.8011811023622047,
+    "shutdown_episodes": 8,
+    "shutdown_role1_battery_zero": 8,
+    "terminal_pre_charger_empty": 8,
+    "validation_probability_max_abs_error_both_roles": 0.0
+  },
+  "limitations": [
+    "Initial core occupancy is descriptive, not a new admission gate.",
+    "Role2 zero gradient probe follows coverage gate closure, not evidence of an intrinsically zero local KL derivative.",
+    "Shutdown observations do not establish a cause or model motivation.",
+    "No prior-round paired improvement, fresh validation, PPO feedback or human benefit is claimed."
+  ],
+  "source_file_count": 194,
+  "source_sha256": "35e9fe54e8de193ed79d3553b540e481a5738f1b2f47369d3a9ba5ef47a25c3a",
+  "training_recipe_or_queue_changed": false,
+  "fresh_or_PPO_authority": false,
+  "pilot_opened": false
+}

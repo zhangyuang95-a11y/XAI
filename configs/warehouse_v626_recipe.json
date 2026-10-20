@@ -1,0 +1,101 @@
+{
+  "schema": "warehouse-v626-domain-complete-recipe.v1",
+  "candidate_id": "warehouse-v626-domain-complete-01",
+  "domain_sha256": "68880e6eed388e5f67ad4cb4fc4b34527c3147ecf122266673f87cfb46075fa8",
+  "release_id": "policylens-three-domain-20261016.v6.0",
+  "arms": [
+    "C0",
+    "C1",
+    "C2",
+    "C3"
+  ],
+  "roles": [
+    "robot_1",
+    "robot_2"
+  ],
+  "folds": 3,
+  "spent_episodes": 275,
+  "limits_A0": {
+    "leaf": 2304,
+    "node": 0,
+    "proof": 10000
+  },
+  "A0_wall_seconds": 1200,
+  "final_leaf_reserve": 256,
+  "final_wall_seconds": 600,
+  "maximum_workers": 3,
+  "BLAS_threads": 1,
+  "source_features_per_node": 3,
+  "source_features_per_leaf": 3,
+  "coefficients_per_leaf": 20,
+  "internal_fit_split": {
+    "train": 0.8,
+    "selection": 0.2,
+    "unit": "whole_scenario",
+    "stratify": "task",
+    "hash_recipe": "warehouse-v626-domain-complete-01:inner-fit-v1"
+  },
+  "gate": {
+    "feedback_coverage": 0.45,
+    "explanation_coverage": 0.45,
+    "expected_feedback_coverage": 0.4,
+    "feedback_agreement": 0.95,
+    "explanation_agreement": 0.97,
+    "qualified_KL": 0.2,
+    "illegal": 0,
+    "uncertified": 0
+  },
+  "performance_gate": {
+    "maximum_checkpoint_fraction": 0.1,
+    "blocks_science": false,
+    "blocks_release": true
+  },
+  "correctness_and_budget_remain_hard_gates": true,
+  "A1": {
+    "order": [
+      "TAO32",
+      "TAO64"
+    ],
+    "rounds": 14,
+    "leaf_calls": 20000,
+    "node_calls": 1024,
+    "proof_calls": 100000,
+    "search_seconds": 4800,
+    "final_seconds": 600,
+    "reserved_final_calls_per_leaf": 8,
+    "capacities": [
+      {
+        "leaves": 32,
+        "depth": 6
+      },
+      {
+        "leaves": 64,
+        "depth": 7
+      }
+    ]
+  },
+  "B": {
+    "fit_episodes": 100,
+    "argmax_fit_episodes": 50,
+    "calibration_episodes": 25,
+    "eligibility_episodes": 75,
+    "validation_episodes": 75,
+    "pressure_scenarios": 72,
+    "pressure_trajectories": 3,
+    "requires_scientific_method_lock": true,
+    "bootstrap_lower": 0.9875,
+    "primary_endpoints": 4
+  },
+  "actor_initialization": "exact_complete_frozen_v620",
+  "full_NN_masked_distribution_targets": true,
+  "no_diagnostic_cache_import": true,
+  "automatic_retry": false,
+  "environment_resets": 0,
+  "actor_updates": 0,
+  "PPO_joint_steps": 0,
+  "pilot_opened": false,
+  "publishable": false,
+  "fresh_data_used": false,
+  "sealed_audit_used": false,
+  "heldout_used": false
+}

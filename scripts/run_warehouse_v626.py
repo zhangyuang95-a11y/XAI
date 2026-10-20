@@ -11,7 +11,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from experiments.warehouse import v626_protocol as v
 from scripts.run_warehouse_v625 import write_new
-from scripts.run_warehouse_v622_capacity import arrays
+from backend.training.warehouse_v622_program import _arrays,masked_probabilities
 from scripts.run_warehouse_v621_diagnostics import runtime_identity
 from backend.training.warehouse_v626_domain import validate_rows,domain_sha
 from backend.training.warehouse_v626_certificate import region,structure_info
@@ -43,14 +43,25 @@ def prepare():
     for name,expected in files.items():
         raw=(ROOT/name).read_bytes();v.require(v.file_sha(ROOT/name)==expected,'source changed during snapshot')
         p=snapshots/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(raw);p.chmod(0o444)
-    datasets={};folds=v.old.grouped_folds()
+    datasets={};folds=v.old.grouped_folds();canonical={}
     for fold in folds:
         for role in v.old.ROLES:
             data={};meta={}
             for split in v.old.SPLITS:
-                rows=[r for case in fold['splits'][split] for r in episodes[case['base']][role]]
-                x,m,p,ep=arrays(actor,role,rows);validate_rows(x)
-                v.require(np.allclose(p,np.array([r['nn_probabilities'] for r in rows]),atol=1e-6,rtol=0),'cached teacher distribution differs from original complete NN')
+                blocks=[];rows=[]
+                for case in fold['splits'][split]:
+                    key0=(case['base'],role);case_rows=episodes[case['base']][role];rows.extend(case_rows)
+                    if key0 not in canonical:
+                        x0,m0,_=_arrays(case_rows);validate_rows(x0)
+                        # Exact deployed single-frame arithmetic. The historical
+                        # target cannot be silently changed by a BLAS batch size.
+                        p0=np.concatenate([masked_probabilities(actor.roles[role].logits_encoded(x0[i:i+1]),m0[i:i+1])
+                            for i in range(len(x0))])
+                        v.require(np.array_equal(p0,np.asarray([r['nn_probabilities'] for r in case_rows],np.float32)),
+                            'canonical single-frame NN differs from its bound historical recording')
+                        canonical[key0]=(x0,m0,p0)
+                    blocks.append(canonical[key0])
+                x,m,p=(np.concatenate([block[i] for block in blocks]) for i in range(3))
                 data.update({split+'_x':x,split+'_m':m,split+'_p':p,
                     split+'_sampled':np.array([ACTIONS.index(r['sampled_action']) for r in rows],np.int64)})
                 meta[split]=[dict(episode=str(r['episode']),base_seed=str(r['base_seed']),task=int(r['task'])) for r in rows]
@@ -65,7 +76,8 @@ def prepare():
         source_sha256=source,source_files=files,recipe=recipe,runtime=runtime_identity(),
         actor=v.pointer(actorpath),actor_role_sha256=v.old.ROLE_SHA256,inputs=manifest,
         initial_S1=initial,baseline=baseline,folds=folds,datasets=datasets,jobs=v.jobs(),
-        domain_sha256=domain_sha(),automatic_retry=False,performance_blocks_science=False)
+        domain_sha256=domain_sha(),target_arithmetic='canonical_frozen_NN_single_physical_frame_numpy',
+        automatic_retry=False,performance_blocks_science=False)
     v.require(v.source_sha()==source,'source changed while preparing A0')
     write_new(folder/'plan.json',plan);write_new(folder/'plan.claim.json',dict(sha256=v.file_sha(folder/'plan.json'),single_use=True))
     return folder/'plan.json'

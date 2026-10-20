@@ -88,6 +88,7 @@
   },
   "actor_initialization": "exact_complete_frozen_v620",
   "full_NN_masked_distribution_targets": true,
+  "target_arithmetic": "canonical_frozen_NN_single_physical_frame_numpy",
   "no_diagnostic_cache_import": true,
   "automatic_retry": false,
   "environment_resets": 0,

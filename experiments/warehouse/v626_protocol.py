@@ -46,6 +46,7 @@ def recipe():
             validation_episodes=75,pressure_scenarios=72,pressure_trajectories=3,
             requires_scientific_method_lock=True,bootstrap_lower=.9875,primary_endpoints=4),
         actor_initialization='exact_complete_frozen_v620',full_NN_masked_distribution_targets=True,
+        target_arithmetic='canonical_frozen_NN_single_physical_frame_numpy',
         no_diagnostic_cache_import=True,automatic_retry=False,**ZERO)
 
 

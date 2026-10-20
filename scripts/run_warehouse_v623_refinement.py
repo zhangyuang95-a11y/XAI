@@ -42,6 +42,19 @@ def _prior(stage, source):
 
 def prepare(stage):
     source = v.source_sha()
+    interrupted = v.INTERRUPTED / "execution" / "failed.json"
+    old_plan = v.INTERRUPTED / "S1" / "plan.json"
+    if not interrupted.is_file() or not old_plan.is_file():
+        raise RuntimeError("recovery requires the first engineering failure receipt")
+    failed = json.loads(interrupted.read_bytes())
+    parent_plan = json.loads(old_plan.read_bytes())
+    if (failed.get("error_type") != "RuntimeError"
+            or failed.get("error") != "job failed without completion: fold-0-robot_1"
+            or parent_plan.get("candidate_id") != v.CANDIDATE
+            or (v.INTERRUPTED / "S1" / "summary.json").exists()
+            or any((v.INTERRUPTED / "S1" / "jobs" / j["job_id"] / "result.json").exists()
+                   for j in v.jobs())):
+        raise RuntimeError("old batch cannot be recorded as a pre-fit engineering interruption")
     actor, actor_path = old.checked_actor(ROOT)
     episodes, manifest = old.checked_inputs(ROOT)
     prior = {job["job_id"]: v.checked_prior(job) for job in v.jobs()}
@@ -51,6 +64,8 @@ def prepare(stage):
         "actor": pointer(actor_path), "actor_role_sha256": old.ROLE_SHA256,
         "inputs": manifest, "targets": old.target_identity(actor, episodes),
         "folds": old.grouped_folds(), "jobs": v.jobs(), "prior_A32": prior,
+        "engineering_parent": {"failed": pointer(interrupted), "plan": pointer(old_plan),
+            "reuse_old_jobs": False, "old_complete_results": 0},
         "stage_dependency": _prior(stage, source), "scientific_retry": False, **ZERO}
     if source != v.source_sha():
         raise RuntimeError("source changed while preparing")
@@ -87,8 +102,15 @@ def checked_plan(stage):
             or any(plan.get(k) != value for k, value in ZERO.items())):
         raise RuntimeError("v6.23 source, plan, actor or contract mismatch")
     read_pinned(plan["actor"]["path"], plan["actor"]["sha256"])
-    for path, expected in plan["inputs"]["files_sha256"].items():
-        read_pinned(path, expected)
+    for file_path, expected in plan["inputs"]["files_sha256"].items():
+        read_pinned(file_path, expected)
+    parent = plan.get("engineering_parent", {})
+    for name in ("failed", "plan"):
+        ref = parent.get(name, {})
+        if file_sha(ref.get("path", "")) != ref.get("sha256"):
+            raise RuntimeError("engineering interruption binding changed")
+    if parent.get("reuse_old_jobs") is not False or parent.get("old_complete_results") != 0:
+        raise RuntimeError("engineering interruption results cannot be imported")
     if plan["prior_A32"] != {job["job_id"]: v.checked_prior(job) for job in v.jobs()}:
         raise RuntimeError("historical A32 input changed")
     if plan["stage_dependency"] != _prior(stage, plan["source_sha256"]):

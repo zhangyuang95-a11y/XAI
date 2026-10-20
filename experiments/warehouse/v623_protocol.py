@@ -9,7 +9,8 @@ from experiments.warehouse import v622_recovery_protocol as old
 
 ROOT = Path(__file__).resolve().parents[2]
 CANDIDATE = "warehouse-v623-a32-refine-01"
-OUTPUT = ROOT / "output/warehouse_v623" / CANDIDATE
+OUTPUT = ROOT / "output/warehouse_v623" / CANDIDATE / "recovery-02"
+INTERRUPTED = ROOT / "output/warehouse_v623" / CANDIDATE
 RECIPE = "configs/warehouse_v623_recipe.json"
 PRIOR_SUMMARY_SHA256 = "dbb6702e32e75c17d26822eac641f5fc0e158cdad5379050493b0ccfffadecff"
 PRIOR_AUDIT_SHA256 = "d04573135d22ad01e559ee4643bcd3a2607b074a9f6b0b19952c62b1604cd884"

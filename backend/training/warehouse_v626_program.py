@@ -317,5 +317,11 @@ def complete_program(program,parts,budget):
         results[name]={p:metrics(program,a['rows'],arr,a['p'],sel,p,pred) for p,sel in (
             ('feedback',program.feedback_leaves),('explanation',program.explanation_leaves))}
         results[name]['gate']=gate_metrics(results[name],phase='development')
+        results[name]['per_task']={}
+        for task in sorted({r['task'] for r in a['rows']}):
+            take=np.array([r['task']==task for r in a['rows']]);task_rows=[r for r,keep in zip(a['rows'],take,strict=True) if keep]
+            task_arrays=tuple(value[take] for value in arr);task_pred=tuple(value[take] for value in pred)
+            results[name]['per_task'][str(task)]={purpose:metrics(program,task_rows,task_arrays,a['p'][take],selected,purpose,task_pred)
+                for purpose,selected in (('feedback',program.feedback_leaves),('explanation',program.explanation_leaves))}
     program.validate()
     return program,results

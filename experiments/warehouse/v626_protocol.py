@@ -7,6 +7,8 @@ from experiments.warehouse.v625_protocol import old,require,pointer,file_sha,bou
 ROOT=Path(__file__).resolve().parents[2]
 CANDIDATE='warehouse-v626-domain-complete-01'
 OUTPUT=ROOT/'output/warehouse_v626'/CANDIDATE
+A0_BATCH='A0-recovery-02'
+A0_INTERRUPTION_SHA256='ece9f725a34a6a06b44c2fc2109d1593ab88c48abb6a325dd6faba1bb80c2615'
 ZERO=dict(environment_resets=0,actor_updates=0,PPO_joint_steps=0,pilot_opened=False,
           publishable=False,fresh_data_used=False,sealed_audit_used=False,heldout_used=False)
 FILES=('backend/training/warehouse_v626_domain.py','backend/training/warehouse_v626_certificate.py',
@@ -30,6 +32,7 @@ def recipe():
     return dict(schema='warehouse-v626-domain-complete-recipe.v1',candidate_id=CANDIDATE,
         domain_sha256=domain_sha(),release_id='policylens-three-domain-20261016.v6.0',
         arms=['C0','C1','C2','C3'],roles=list(old.ROLES),folds=3,spent_episodes=275,
+        A0_batch=A0_BATCH,engineering_interruption_parent_sha256=A0_INTERRUPTION_SHA256,
         limits_A0=dict(leaf=2304,node=0,proof=10000),A0_wall_seconds=1200,
         final_leaf_reserve=256,final_wall_seconds=600,maximum_workers=3,BLAS_threads=1,
         source_features_per_node=3,source_features_per_leaf=3,coefficients_per_leaf=20,
@@ -53,6 +56,16 @@ def recipe():
 def checked_recipe():
     path=ROOT/'configs/warehouse_v626_recipe.json'
     require(json.loads(path.read_bytes())==recipe(),'registered v626 recipe differs')
+    return pointer(path)
+
+
+def checked_interruption():
+    path=OUTPUT/'A0/interruption-receipt.json'
+    require(file_sha(path)==A0_INTERRUPTION_SHA256,'registered A0 interruption receipt changed')
+    r=json.loads(path.read_bytes())
+    require(r['failure']['all_owned_workers_waited'] is True and r['scientific_comparison_completed'] is False
+        and r['permits_partial_result_reuse'] is False,'invalid engineering replacement authority')
+    for name,expected in r['original_files'].items():require(file_sha(path.parent/name)==expected,'original partial A0 evidence changed')
     return pointer(path)
 
 

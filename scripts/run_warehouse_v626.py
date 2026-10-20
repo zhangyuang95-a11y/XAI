@@ -34,7 +34,8 @@ def internal_split(rows):
 
 
 def prepare():
-    folder=v.OUTPUT/'A0';v.require(not folder.exists(),'A0 attempt already exists; no automatic retry')
+    folder=v.OUTPUT/v.A0_BATCH;v.require(not folder.exists(),'A0 attempt already exists; no automatic retry')
+    interruption=v.checked_interruption()
     recipe=v.checked_recipe();source=v.source_sha();files=v.source_files()
     baseline,initial=v.previous.checked_baseline()
     actor,actorpath=v.old.checked_actor(ROOT);episodes,manifest=v.old.checked_inputs(ROOT)
@@ -77,21 +78,22 @@ def prepare():
         actor=v.pointer(actorpath),actor_role_sha256=v.old.ROLE_SHA256,inputs=manifest,
         initial_S1=initial,baseline=baseline,folds=folds,datasets=datasets,jobs=v.jobs(),
         domain_sha256=domain_sha(),target_arithmetic='canonical_frozen_NN_single_physical_frame_numpy',
-        automatic_retry=False,performance_blocks_science=False)
+        engineering_interruption_parent=interruption,automatic_retry=False,performance_blocks_science=False)
     v.require(v.source_sha()==source,'source changed while preparing A0')
     write_new(folder/'plan.json',plan);write_new(folder/'plan.claim.json',dict(sha256=v.file_sha(folder/'plan.json'),single_use=True))
     return folder/'plan.json'
 
 
 def checked_plan():
-    path=v.OUTPUT/'A0/plan.json';plan=json.loads(path.read_bytes())
+    path=v.OUTPUT/v.A0_BATCH/'plan.json';plan=json.loads(path.read_bytes())
     claim=json.loads(path.with_name('plan.claim.json').read_bytes())
     v.require(claim==dict(sha256=v.file_sha(path),single_use=True),'A0 claim changed')
     v.require(plan.get('schema')=='warehouse-v626-A0-plan.v1' and plan.get('source_sha256')==v.source_sha()
         and plan.get('source_files')==v.source_files() and plan.get('jobs')==v.jobs()
         and plan.get('recipe')==v.checked_recipe() and plan.get('runtime')==runtime_identity()
         and plan.get('domain_sha256')==domain_sha() and plan.get('actor_role_sha256')==v.old.ROLE_SHA256
-        and plan.get('performance_blocks_science') is False,'A0 source/recipe/model binding changed')
+        and plan.get('performance_blocks_science') is False
+        and plan.get('engineering_interruption_parent')==v.checked_interruption(),'A0 source/recipe/model binding changed')
     for k,value in v.ZERO.items():v.require(type(plan.get(k)) is type(value) and plan[k]==value,'A0 authority changed')
     v.require(v.pointer(plan['actor']['path'])==plan['actor'] and plan['actor']['sha256']==v.old.ACTOR_SHA256,'complete NN asset changed')
     for name,expected in plan['source_files'].items():
@@ -149,7 +151,7 @@ def job(job_id):
         result=dict(schema='warehouse-v626-A0-result.v1',job=spec,plan_sha256=v.file_sha(path),status='completed',
             program=v.pointer(folder/'program.json'),metrics=result_metrics,gate=v.gate(result_metrics['validation']),
             solver=budget.summary(),elapsed_seconds=time.monotonic()-started,
-            performance_pass=budget.summary()['checkpoint']['checkpoint_fraction']<=.10,
+            performance_pass=False,performance_status='full_runner_overhead_not_independently_measured',
             scientific_gate_ignores_performance=True,**v.ZERO)
         v.require(v.file_sha(plan['actor']['path'])==v.old.ACTOR_SHA256,'NN asset changed during scientific fit')
     except (BudgetExhausted,DeadlineExceeded) as error:

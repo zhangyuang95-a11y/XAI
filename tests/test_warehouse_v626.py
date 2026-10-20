@@ -156,3 +156,26 @@ def test_inner_selection_cannot_split_trajectories_from_the_same_scenario():
     train,selection=internal_split(a)
     assert set(np.array([r['base_seed'] for r in a])[train]).isdisjoint(set(np.array([r['base_seed'] for r in a])[selection]))
     assert sum(selection)==18
+
+
+def test_complete_worker_writes_science_result_without_optional_performance_field(monkeypatch,tmp_path):
+    from scripts import run_warehouse_v626 as runner
+    from backend.training.warehouse_v622_program import masked_probabilities
+    structure=dict(root_ref=-1,split_weights=np.zeros((0,len(FEATURE_NAMES)),np.float32),split_bias=[],
+        left_refs=[],right_refs=[],leaf_count=1,feature_dim=len(FEATURE_NAMES))
+    parts={}
+    for split in ('fit','calibration','eligibility','validation'):
+        x=rows(120);m=np.ones((120,5),np.float32);z=np.tile(np.array([-3.,-3.,-3.,-3.,3.],np.float32),(120,1))
+        parts[split]=dict(x=x,m=m,p=masked_probabilities(z,m),sampled=np.full(120,4),
+            rows=[dict(episode=f'{split}-ep-{i//10}',base_seed=f'{split}-scene-{i//10}',task=(i//10)%3+1) for i in range(120)])
+    path=tmp_path/'plan.json';path.write_text('{}');spec=dict(job_id='toy-C0',fold=0,role='robot_1',arm='C0')
+    plan=dict(jobs=[spec],initial_S1={'fold-0-robot_1':{'structure':{}}},actor={'path':'fake-frozen-nn.npz'})
+    monkeypatch.setattr(runner,'checked_plan',lambda:(path,plan))
+    monkeypatch.setattr(runner,'load_parts',lambda *a:parts)
+    monkeypatch.setattr(runner.v,'bound',lambda *a:structure)
+    original=runner.v.file_sha
+    monkeypatch.setattr(runner.v,'file_sha',lambda p:runner.v.old.ACTOR_SHA256 if str(p)=='fake-frozen-nn.npz' else original(p))
+    result=runner.job('toy-C0')
+    assert result['status']=='completed' and result['gate']['passed']
+    assert result['performance_pass'] is False and result['scientific_gate_ignores_performance'] is True
+    assert (tmp_path/'jobs/toy-C0/result.json').exists() and (tmp_path/'jobs/toy-C0/completed.json').exists()

@@ -15,6 +15,8 @@
   ],
   "folds": 3,
   "spent_episodes": 275,
+  "A0_batch": "A0-recovery-02",
+  "engineering_interruption_parent_sha256": "ece9f725a34a6a06b44c2fc2109d1593ab88c48abb6a325dd6faba1bb80c2615",
   "limits_A0": {
     "leaf": 2304,
     "node": 0,

@@ -1,0 +1,62 @@
+{
+  "schema": "warehouse-v626-TAO-recipe.v1",
+  "candidate_id": "warehouse-v626-domain-complete-01",
+  "order": [
+    "TAO32",
+    "TAO64"
+  ],
+  "maximum_rounds": 14,
+  "stagnant_sweeps": 2,
+  "limits": {
+    "leaf": 20000,
+    "node": 1024,
+    "proof": 100000
+  },
+  "search_seconds": 4800,
+  "search_settlement_reserve": 10,
+  "final_seconds": 600,
+  "final_leaf_calls_per_leaf": 8,
+  "final_proof_calls_per_leaf": 52,
+  "capacities": {
+    "TAO32": {
+      "leaves": 32,
+      "depth": 6
+    },
+    "TAO64": {
+      "leaves": 64,
+      "depth": 7
+    }
+  },
+  "node_optimizer": {
+    "method": "L-BFGS-B",
+    "maxiter": 100,
+    "ftol": 1e-07,
+    "L2": 0.001,
+    "coefficient_bound": 32
+  },
+  "node_supports": [
+    "incumbent_support",
+    "fit_cost_residual_ranked_support"
+  ],
+  "legal_guards_immutable": true,
+  "leaf_cache_entries": 512,
+  "cache_eviction": "FIFO",
+  "checkpoint": "CAS_leaves_cache_complete_queue_cursor_state_machine",
+  "selection": "fit_internal_80_20_scenario_split_explanation_expected_feedback_negative_KL_negative_leaves",
+  "growth": "first_fit_improvement_from_four_worst_fit_leaves_legal_guard_or_axis_plus_guard",
+  "maximum_growth_acceptances_per_sweep": 4,
+  "initial_TAO32": "original_corresponding_S1_topology",
+  "initial_TAO64": "TAO32_fit_selected_structure_before_calibration",
+  "validation_selects_topology": false,
+  "performance_blocks_science": false,
+  "maximum_workers": 3,
+  "BLAS_threads": 1,
+  "environment_resets": 0,
+  "actor_updates": 0,
+  "PPO_joint_steps": 0,
+  "pilot_opened": false,
+  "publishable": false,
+  "fresh_data_used": false,
+  "sealed_audit_used": false,
+  "heldout_used": false
+}

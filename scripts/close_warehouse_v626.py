@@ -41,6 +41,14 @@ def checked_results(path, plan, expected):
                   'incomplete result seal')
         v.require(result['job'] == spec and result['plan_sha256'] == v.file_sha(path)
                   and result['status'] == 'completed', 'unfinished or unbound unit')
+        wall_limit = 1200 if expected == 24 else 5400
+        v.require(0 <= result['elapsed_seconds'] < wall_limit and
+                  result['solver']['checkpoint']['pending_calls'] == 0,
+                  'wall budget exceeded or unsettled optimization calls')
+        if expected == 6:
+            search = v.bound(result['search_report'])
+            v.require(0 <= search['actual_search_seconds'] < 4800,
+                      'search phase exceeded its independent time budget')
         for key, value in v.ZERO.items():
             v.require(type(result.get(key)) is type(value) and result[key] == value,
                       'closure cannot authorize new experiments')
@@ -102,6 +110,18 @@ def close():
     actor = plan0['actor']
     v.require(v.pointer(actor['path']) == actor and actor['sha256'] == v.old.ACTOR_SHA256,
               'original complete Actor changed')
+    from study_v3 import policies
+    from study_v3.release_catalog import RELEASE_ID
+    v.require(RELEASE_ID == 'policylens-three-domain-20261016.v6.0',
+              'unexpected release when checking pilot binding')
+    binding_refusals = {}
+    for group in ('A', 'B', 'C'):
+        try:
+            policies.binding_for_group('warehouse', group, release_id=RELEASE_ID)
+        except policies.PolicyUnavailable as error:
+            binding_refusals[group] = str(error)
+        else:
+            raise RuntimeError('failed candidate must not bind any v6 participant group')
     tests_path = ROOT / 'output/warehouse_v626/engineering-search-tests-02.xml'
     tests = ET.parse(tests_path).getroot()
     suites = list(tests) if tests.tag == 'testsuites' else [tests]
@@ -139,6 +159,7 @@ def close():
               '32/64分别为容量上限；搜索不强迫使用全部叶，实际叶数和停止原因保存在每项search-report/result中。',
               '所有支持和拓扑选择仅用fit内部80%/20%场景分区，最终全fit重拟合；校准、资格和验证未参与搜索。',
               '这些结果表明：本轮表示与优化组合仍未达到预设覆盖率，不能声称已解决。合法性与已合格区域保真通过，不等于整棵树均已保真。', '',
+              '搜索是有限预算的局部交替优化，并非穷举；结论仅是本轮未找到合格程序，不能据此证明32/64叶表示下不存在解。', '',
               '## NN、训练与准入状态', '',
               '| 项目 | 结果 |', '|---|---|',
               '| 双Actor | 完整v6.20权重与角色哈希保持不变 |',
@@ -148,6 +169,7 @@ def close():
               '| 新数据确认、正式审计和留出测试 | 均未启动，封存种子未使用 |',
               '| 工程开销≤10% | 完整科学运行器开销未独立测量，单列为待验工程门槛 |',
               '| v6发布／pilot | 关闭 |', '',
+              '对当前v6.0的A/B/C逐组调用真实绑定入口，三组均被拒绝（policy_catalog_unavailable）。', '',
               '没有向执行接口添加分配、避让或救场规则；程序没有选择环境动作。Pong/Kitchen未重跑已用留出集。', '',
               '## 调用预算与可恢复证据', '',
               '| 阶段 | 叶优化 | 节点优化 | 证明LP |', '|---|---:|---:|---:|']
@@ -184,6 +206,7 @@ def close():
                    source_A0=plan0['source_sha256'], source_A1=plan64['source_sha256'],
                    summaries=summaries, actor=actor, actor_role_sha256=v.old.ROLE_SHA256,
                    tests=v.pointer(tests_path), test_counts=test_counts,
+                   participant_binding_refusals=binding_refusals,
                    manifest=v.pointer(root / 'closure-manifest.json'),
                    result_report=v.pointer(root / 'results.md'),
                    closeout_code=v.pointer(Path(__file__).resolve()),

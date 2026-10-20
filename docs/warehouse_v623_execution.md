@@ -4,8 +4,10 @@
 目标发布：`policylens-three-domain-20261016.v6.0`。
 
 本文件记录已运行的开发证据，不构成模型准入或发布许可。
-S1 六份作业已完成并经过原生及补充独立算术审计，全部未通过覆盖预检。
-S2 正在运行；新开发数据、PPO、封存程序审计、留出测试及 pilot 均未启动。
+S1与S2各六份作业均已完成，并经过原生及补充独立算术审计，两阶段均为0/6通过。
+候选已按停止条件关闭，状态为 `closed_failed_program_precheck`，没有选中方法。
+新开发数据、PPO、封存程序审计、留出测试及pilot均未启动。完整逐作业对照见
+[最终结果](warehouse_v623_results.md)。
 
 ## 固定实验
 
@@ -52,6 +54,22 @@ episode／场景不足、非法动作和路径证明失败对应验证帧为0。
 主要瓶颈是大叶子混合不同NN分布，拟合集上已表现不足。
 这些开发诊断不替代新数据确认。
 
+## S2与最终关闭
+
+S2六份非加权平均解释覆盖35.5603%，最小31.7763%；平均反馈覆盖36.1099%，
+平均预期可反馈覆盖34.5318%，最小30.8143%。相对S1，五个角色／折的解释覆盖下降，
+仅折2／robot_2从35.2749%略增至35.3200%。S2整体未进一步改善。
+S1和S2全部12份作业仅三个覆盖门槛失败；一致率、KL、原始非法动作和路径证明门槛通过，
+因此没有满足完整预检的方法。
+
+S1新增叶API调用95,312次，S2为89,493次，合计184,805次；
+搜索及最终拟合凸求解合计455,829次。每个角色／折独立验收，不池化掩盖失败。
+最终单次关闭收据与内容哈希证据清单保存在
+`finalizations/completed-development-01/`。
+
+本地发布目录检查显示Warehouse仍为 `pending`，仅登记Pong和Kitchen策略；
+v6 Warehouse证据读取返回 `warehouse_release_pending`。这是本地观察，不声明远端部署状态。
+
 ## 运行身份、工程中断与限制
 
 首次启动在进入拟合前因入口局部变量遮蔽错误中断，无完整科学结果；
@@ -76,8 +94,12 @@ S1切换S2前曾只暂停调度器，拟合作业继续按原时钟运行；
 - 运行根：`output/warehouse_v623/warehouse-v623-a32-refine-01/recovery-02/`
 - S1：`S1/summary.json`、`S1/audit.json`、`S1/pretransition-audit.json`、
   `S1/postsummary-supplemental-audit.json`
-- 六份对照：`reports/S1-vs-A32.md`、`reports/S1-vs-A32.csv`
+- S2：`S2/summary.json`、`S2/audit.json`、`S2/tracked-postsummary-supplemental-audit.json`
+- 最终收据及清单：`finalizations/completed-development-01/receipt.json`、`evidence-manifest.json`
+- 完整最终对照：`reports/S0-A32-S1-S2-final.csv`与`docs/warehouse_v623_results.md`
+- 六份S1对照：`reports/S1-vs-A32.md`、`reports/S1-vs-A32.csv`
 - 逐叶诊断：`reports/S1-qualification-diagnosis-01.zh.md`及带SHA的JSON
 - 补充审计源码：`supplemental_audit_source.py`，自身SHA写入各审计收据。
 
-若S2六份未全部通过并完成独立审计，候选关闭，不进入新数据确认或训练。
+S2已完成独立审计且未通过完整预检，候选已关闭，不进入新数据确认或训练。
+本轮未生成v6发布包，pilot继续关闭；新方法需要重新明确设计与登记。

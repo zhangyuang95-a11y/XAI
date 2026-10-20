@@ -1,0 +1,107 @@
+{
+  "PPO_joint_steps": 0,
+  "actor": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/warehouse-v620-01-shared-bc-pilot/pair-6160-gamma-003/final-bc.actor.npz",
+    "sha256": "1b6310f6d93309fb17e64516519a71680ad3c30e73f222be27df4dff10da81ec"
+  },
+  "actor_role_sha256": {
+    "robot_1": "7aee44859397b8cbe1bb9cd3b8541e82f2a080d884c83404fe1e4fd2a998eaf0",
+    "robot_2": "17f2f75877421854c680fab07557f031389800a9503b14f060db5ff4f862fcf0"
+  },
+  "actor_updates": 0,
+  "actual_compute_totals_by_stage": {
+    "S1": {
+      "final_convex_solver_calls": 463,
+      "final_leaf_api_calls": 192,
+      "search_convex_solver_calls": 239154,
+      "search_leaf_api_calls": 95120,
+      "total_new_leaf_api_calls": 95312
+    },
+    "S2": {
+      "final_convex_solver_calls": 452,
+      "final_leaf_api_calls": 187,
+      "search_convex_solver_calls": 215760,
+      "search_leaf_api_calls": 89306,
+      "total_new_leaf_api_calls": 89493
+    }
+  },
+  "candidate_closed": true,
+  "candidate_id": "warehouse-v623-a32-refine-01",
+  "development_evidence_only": true,
+  "environment_resets": 0,
+  "evidence_manifest": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v623/warehouse-v623-a32-refine-01/recovery-02/finalizations/completed-development-01/evidence-manifest.json",
+    "sha256": "56952ca25d2335a3c6282e27317dcc5d33b35597cf98e7e54333358cab4d1ad3"
+  },
+  "finalization_receipt": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v623/warehouse-v623-a32-refine-01/recovery-02/finalizations/completed-development-01/receipt.json",
+    "sha256": "881aab18714c0667bad47bb6d3b9c8b246390ed78cc5bc05d5090f58dc32ac8a"
+  },
+  "formal_training_authorized": false,
+  "fresh_development_episodes": 0,
+  "fresh_pressure_trajectories": 0,
+  "heldout_used": false,
+  "human_collaboration_evidence": false,
+  "large_assets_copied": false,
+  "new_task_quality_evaluation": false,
+  "pilot_opened": false,
+  "publishable": false,
+  "reference_only": true,
+  "release_generated": false,
+  "report_csv": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v623/warehouse-v623-a32-refine-01/recovery-02/reports/S0-A32-S1-S2-final.csv",
+    "sha256": "c938b3e588d47b2383166aa5e8651ef37a83c84dcdd41d68a0057c44e69725fb"
+  },
+  "role_fold_pass_counts": {
+    "S0_A32": 0,
+    "S1": 0,
+    "S2": 0
+  },
+  "scheduler_stage_elapsed_seconds": {
+    "S1": 9803.178926,
+    "S2": 9644.354758
+  },
+  "schema": "warehouse-v623-final-development-evidence.v1",
+  "sealed_audit_used": false,
+  "selected_method": null,
+  "source_sha256": "03cd01e2be51792c67e51c3b3a3f1cd0c9110c8e69630cb6a46ef973f5bb393c",
+  "stage_evidence": {
+    "S1": {
+      "native_audit": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v623/warehouse-v623-a32-refine-01/recovery-02/S1/audit.json",
+        "sha256": "5dc1ab93f72e4a49a3e45840624462809b3fe3bf22040a54418cea2e313a65fc"
+      },
+      "summary": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v623/warehouse-v623-a32-refine-01/recovery-02/S1/summary.json",
+        "sha256": "c71c9296c8f9695d0872ad4cc3f5f39b4ab490769f814d2983646e739f826aa9"
+      },
+      "supplemental_audit": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v623/warehouse-v623-a32-refine-01/recovery-02/S1/tracked-postsummary-supplemental-audit.json",
+        "sha256": "6a2a433d7a430992ae10159ba0796fe4bcc3a5f91c9dbd8bbebf49a61a380e77"
+      }
+    },
+    "S2": {
+      "native_audit": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v623/warehouse-v623-a32-refine-01/recovery-02/S2/audit.json",
+        "sha256": "23b176ffa44e9d11d11b9f10f615e1a051489b8c324cbaf8bb8e31f47480c559"
+      },
+      "summary": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v623/warehouse-v623-a32-refine-01/recovery-02/S2/summary.json",
+        "sha256": "06143dd3162b1aa312523af2eadab43406cd05d25f0b7a16461697bec2699996"
+      },
+      "supplemental_audit": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v623/warehouse-v623-a32-refine-01/recovery-02/S2/tracked-postsummary-supplemental-audit.json",
+        "sha256": "37b2d574a25e046aec96206657b71b7550b4a88e4edee9d46727654d99dc6b71"
+      }
+    }
+  },
+  "status": "closed_failed_program_precheck",
+  "summed_job_elapsed_seconds_by_stage": {
+    "S1": 28875.571543544065,
+    "S2": 28875.993007333018
+  },
+  "summed_search_elapsed_seconds_by_stage": {
+    "S1": 28800.25417453982,
+    "S2": 28800.228628125275
+  }
+}

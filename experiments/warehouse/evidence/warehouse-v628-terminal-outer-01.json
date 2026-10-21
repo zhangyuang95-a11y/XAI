@@ -1,0 +1,32 @@
+{
+  "schema": "warehouse-v628-terminal-outer-evidence.v1",
+  "scope": "first_fold_role1_budget_stop_fixed_checkpoint_outer_development_observation",
+  "scientific_pass": false,
+  "candidate_admission": false,
+  "observations": [
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v628/warehouse-v628-v626-capacity-01/progress/terminal-outer/C64-fold-0-robot_1/result.json",
+      "sha256": "172ab813f1fd020ddc5245911139f6204f22a0185e156e0bae5d6ef62b4b5822"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v628/warehouse-v628-v626-capacity-01/progress/terminal-outer/C128-fold-0-robot_1/result.json",
+      "sha256": "a02a29eb2d06ff8ffa45c0f13bb4cb528ecd5805fc6474084c1f554a21aaad85"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v628/warehouse-v628-v626-capacity-01/progress/terminal-outer/C256-fold-0-robot_1/result.json",
+      "sha256": "82ebcb13616b296ca3b4ec894baafa09158a317aeeba13a3982f703defe3660e"
+    }
+  ],
+  "v629_actual_import_preflight": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/diagnostics/actual_terminal_import_preflight_20261021_01.json",
+    "sha256": "71bc7a363d8ed1b174bba7b0f57dde6eacdf8244cb48f5845fe2b5ab644b7e77"
+  },
+  "fresh_data_collected": false,
+  "NN_updated": false,
+  "original_search_resumed": false,
+  "fitting_calls": 0,
+  "LP_calls": 0,
+  "sealed_audit_used": false,
+  "heldout_used": false,
+  "pilot_opened": false
+}

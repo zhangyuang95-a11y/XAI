@@ -1,0 +1,59 @@
+{
+  "schema": "warehouse-checkpoint-storage-preservation-evidence.v1",
+  "observed_utc": "2026-10-21T10:38:48.573100+00:00",
+  "implementation_commit": "a57f5e5",
+  "tests": {
+    "command": "python -m pytest -q tests/test_warehouse_checkpoint_compression.py -x --tb=short",
+    "passed": 15,
+    "failed": 0,
+    "elapsed_seconds": 1.17
+  },
+  "copy_probe": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/diagnostics/storage-native-probe-01/result.json",
+    "sha256": "40f0255578df8c1bcfa76d755106136e5e777d74dff7802e362c62ba2a195248"
+  },
+  "actual_compression": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_storage/native-compression-20261021-01/completed.json",
+    "sha256": "3136bbb7bddb05f92e0196d9e8f8660e2833e6efa4aa2b11a03fd49c12ff8ef1"
+  },
+  "independent_read_only_replay": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/diagnostics/storage-reader-verification-01/result.json",
+    "sha256": "23f5a977b2cd6d0cd60b02e95e8b22f81336a9d24aa89d44f6074144839a50c2"
+  },
+  "replay_script": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/diagnostics/storage-reader-verification-01/replay.py",
+    "sha256": "542196f8fd2443d009e01c0ae84769f8c3c99f1bde03a525455860e38f4e790b"
+  },
+  "verified_pack_count": 5859,
+  "saved_allocated_bytes": 9673342976,
+  "original_CAS_reader_imports": 6,
+  "every_pack_SHA_and_logical_metadata_equal": true,
+  "scientific_plans": [
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v628/warehouse-v628-v626-capacity-01/plan.json",
+      "sha256": "029a921d0199287803190f86ca629accc008dd9fb43bfdd1c8c230ec39ca8187"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/plan.json",
+      "sha256": "370c8dd36182e1601a9af5940242f9872899827302c8e5f55d54a0ac88ff64a6"
+    }
+  ],
+  "scientific_source_sha256": [
+    "1fd77d5d7de38a99260e1ee06dddb6104bf0d99f11a3b22027539508e823721b",
+    "4cd4de16e45d76026ee76dc22ef2c3d42c8f54c8652ad17dce5f757a7d04723f"
+  ],
+  "finite_maintenance_watch_launch": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_storage/native-compression-watch-20261021-01/launch.json",
+    "sha256": "22b3a9844445eae0eef73c85e7fc6f4e5259566a25b2b5e9e372683a6d99a424"
+  },
+  "maintenance_watch_identity": "Wed Oct 21 18:38:23 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python -u /Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/scripts/compress_warehouse_checkpoint_storage.py --apply --output-dir /Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_storage/native-compression-watch-20261021-01/maintenance --watch --driver-pid 41972 --driver-pid 43591",
+  "logical_files_deleted": 0,
+  "fit_calls": 0,
+  "LP_calls": 0,
+  "environment_resets": 0,
+  "actor_updates": 0,
+  "PPO_joint_steps": 0,
+  "scientific_effect_claimed": false,
+  "pilot_opened": false,
+  "goal_complete": false
+}

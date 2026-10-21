@@ -1,0 +1,112 @@
+{
+  "schema": "warehouse-v630-stable-partition-recipe.v1",
+  "candidate_id": "warehouse-v630-stable-partitions-01",
+  "method": "fit_only_stable_confidence_partitions_frozen_distributions_v1",
+  "arms": [
+    {
+      "name": "C0",
+      "scope": "control"
+    },
+    {
+      "name": "P",
+      "scope": "protected"
+    },
+    {
+      "name": "A",
+      "scope": "all"
+    }
+  ],
+  "initial": "fixed_G128_v629_inner_search_best_for_every_role_fold_after_all_24_settled",
+  "outer_refitted_source_forbidden": true,
+  "maximum_leaves": 256,
+  "maximum_depth": 9,
+  "source_features_per_node": 3,
+  "source_features_per_leaf": 3,
+  "maximum_leaf_coefficients": 20,
+  "all_source_surrogate_distributions_frozen": true,
+  "descendant_qualification_inherited": false,
+  "additional_classifier_depth": 3,
+  "classifier": "axis_aligned_entropy_CART",
+  "classifier_min_samples_leaf": 40,
+  "classifier_error_class_weight": 4.0,
+  "classifier_random_state": 0,
+  "classifier_random_state_is_fixed_engineering_control": true,
+  "data": "same_spent_1650_v628_development_scenes_not_new_confirmation",
+  "confidence_fit_sampled_scenes": 300,
+  "risk_sampled_scenes": 150,
+  "selection_sampled_scenes": 150,
+  "lane_rule": "sorted_outer_fit_sampled_case_ids_per_task_100_50_50",
+  "argmax_confidence_frames": 0,
+  "reliability": {
+    "subsets": 30,
+    "scenes_per_task": 30,
+    "minimum_passes": 27,
+    "subset_rule": "SHA256_of_method_repeat_and_original_episode_ID_no_new_RNG",
+    "feedback_leaf_threshold": 0.93,
+    "explanation_leaf_threshold": 0.95,
+    "selection_feedback_agreement": 0.95,
+    "selection_explanation_agreement": 0.97,
+    "selection_KL": 0.2
+  },
+  "pruning": "stop_or_keep_both_children_no_promotion_all_empty_leaves_count",
+  "allocation": {
+    "weights": [
+      0.0,
+      0.5,
+      1.0,
+      2.0
+    ],
+    "maximum_leaves": 256,
+    "additive_primary": "E/(.45*N)+weight*(F/(.45*N)+expected_F/(.40*N))",
+    "secondary": [
+      "E",
+      "expected_F",
+      "F"
+    ],
+    "scope": "only_fixed_options_and_frozen_additive_tables",
+    "nonlinear_global_optimality_gap": "unknown",
+    "candidate_selection": "reliable_proxy_pass_then_same_v629_strict_selection_score"
+  },
+  "limits": {
+    "leaf": 0,
+    "node": 256,
+    "proof": 0
+  },
+  "search_seconds": 1200,
+  "final_seconds": 600,
+  "total_seconds": 1800,
+  "final_refit": false,
+  "final_temperature_calibration": false,
+  "final_qualification": "original_outer_fit900_cal150_elig300_valid300",
+  "gate": {
+    "coverage": 0.45,
+    "expected_feedback": 0.4,
+    "feedback_agreement": 0.95,
+    "explanation_agreement": 0.97,
+    "KL": 0.2,
+    "illegal": 0,
+    "unproved": 0
+  },
+  "maximum_workers": 3,
+  "BLAS_threads": 1,
+  "automatic_retry": false,
+  "all_18_settled_before_selection": true,
+  "all_18_completed_before_selection": true,
+  "selection": "first_P_then_A_with_all_six_strict_gates_and_reliable_proxy",
+  "conditional_start": "only_after_v629_all_24_reaped_integrity_audited_and_closed_without_winner",
+  "if_v629_passes": "skip_new_candidate_and_continue_original_winner",
+  "fresh_confirmation_required": true,
+  "independent_final_audit_used": false,
+  "heldout_used": false,
+  "actor_updates": 0,
+  "PPO_joint_steps": 0,
+  "environment_resets": 0,
+  "training_authority": false,
+  "pilot_opened": false,
+  "performance": {
+    "maximum_checkpoint_fraction": 0.1,
+    "blocks_science": false,
+    "blocks_release": true
+  },
+  "release_id": "policylens-three-domain-20261016.v6.0"
+}

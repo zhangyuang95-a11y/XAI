@@ -1,0 +1,94 @@
+{
+  "schema": "warehouse-v629-shared-reference-preparation-evidence.v1",
+  "observed_utc": "2026-10-21T11:16:08.679100+00:00",
+  "implementation_commit": "c8ac607",
+  "tests": {
+    "command": "env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/test_warehouse_v629_reference_buffer.py -x --tb=short",
+    "passed": 24,
+    "failed": 0,
+    "elapsed_seconds": 22.19
+  },
+  "independent_code_runner": {
+    "passed": 24,
+    "failed": 0,
+    "elapsed_seconds": 21.92,
+    "scope": "same_family_read_only_code_review_not_final_model_audit"
+  },
+  "preparation": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/training-preparation/reference-buffer-01/result.json",
+    "sha256": "2afc4d502b4fff65c4558a135d498150e99aee1f601203e3726acef907bb3c16"
+  },
+  "completion": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/training-preparation/reference-buffer-01/completed.json",
+    "sha256": "30cd1fe37c5c92fd8fcda530b549d07fc1719693b522b523693e35234bcb5e39"
+  },
+  "independent_source_readback": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/training-preparation/reference-buffer-01/independent-audit.json",
+    "sha256": "a51d6bddf7fa842ffcbfd6ffaa8051324efc9cd28a6a9239fb03c2652ed62a21"
+  },
+  "shared_buffer": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/training-preparation/reference-buffer-01/reference-training.npz",
+    "sha256": "2d4b2e593ed3d16a60e90564f8ee9c58a8026a722c4786f1e9ccff574b125dfa"
+  },
+  "complete_episodes": 300,
+  "joint_frames": 35931,
+  "NN_action_checks": 71862,
+  "all_three_inner_and_outer_fit_only": true,
+  "qualification_validation_confirmation_frames": 0,
+  "future_raw_regularized_binding": "must_reference_this_same_buffer_SHA_after_separate_training_admission_not_yet_bound_to_runs",
+  "pristine_reference_actor": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v620_bc_pilot/warehouse-v620-01-shared-bc-pilot/pair-6160-gamma-003/final-bc.actor.npz",
+    "sha256": "1b6310f6d93309fb17e64516519a71680ad3c30e73f222be27df4dff10da81ec"
+  },
+  "scientific_plans": [
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v628/warehouse-v628-v626-capacity-01/plan.json",
+      "sha256": "029a921d0199287803190f86ca629accc008dd9fb43bfdd1c8c230ec39ca8187"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/plan.json",
+      "sha256": "370c8dd36182e1601a9af5940242f9872899827302c8e5f55d54a0ac88ff64a6"
+    }
+  ],
+  "source_sha256": [
+    "1fd77d5d7de38a99260e1ee06dddb6104bf0d99f11a3b22027539508e823721b",
+    "4cd4de16e45d76026ee76dc22ef2c3d42c8f54c8652ad17dce5f757a7d04723f"
+  ],
+  "confirmation_gate_observation": "v629 has no locked audited winner; confirmation remains closed",
+  "training_admitted": false,
+  "current_inner_observation": {
+    "source": {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/training-preparation/reference-buffer-01/inner-progress-observation.json",
+      "sha256": "84a4c55117d9dd5596976113f91d7fb84ff1a318906d4c12e20196bb797680bf"
+    },
+    "scope": "fit_internal_180_episode_score_not_outer_validation_or_admission",
+    "job": {
+      "capacity": 64,
+      "fold": 1,
+      "job_id": "C64-fold-1-robot_1",
+      "role": "robot_1"
+    },
+    "observed_utc": "2026-10-21T11:06:30.738249+00:00",
+    "F_coverage": 0.43981223275701803,
+    "E_coverage": 0.40495445250046475,
+    "expected_F": 0.4218851625919342
+  },
+  "live_processes": {
+    "41972": "Wed Oct 21 14:57:51 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python -u scripts/continue_warehouse_v628_seed_audit_bounded.py",
+    "43591": "Wed Oct 21 16:17:16 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python -u scripts/run_warehouse_v629.py --pipeline --wait-pid 41972",
+    "47879": "Wed Oct 21 18:10:41 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python /Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/scripts/run_warehouse_v628.py --job C64-fold-1-robot_1",
+    "47880": "Wed Oct 21 18:10:41 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python /Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/scripts/run_warehouse_v628.py --job C128-fold-1-robot_1",
+    "47881": "Wed Oct 21 18:10:41 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python /Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/scripts/run_warehouse_v628.py --job C256-fold-1-robot_1",
+    "54635": "Wed Oct 21 18:38:23 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python -u /Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/scripts/compress_warehouse_checkpoint_storage.py --apply --output-dir /Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_storage/native-compression-watch-20261021-01/maintenance --watch --driver-pid 41972 --driver-pid 43591"
+  },
+  "new_environment_resets": 0,
+  "new_action_streams": 0,
+  "fit_calls": 0,
+  "LP_calls": 0,
+  "Actor_updates": 0,
+  "PPO_joint_steps": 0,
+  "sealed_program_audit_used": false,
+  "heldout_used": false,
+  "pilot_opened": false,
+  "goal_complete": false
+}

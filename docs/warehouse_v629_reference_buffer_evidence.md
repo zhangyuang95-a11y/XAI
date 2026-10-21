@@ -48,3 +48,20 @@ raw／regularized将显式绑定同一个文件SHA；共同参考目标仍是完
 后续仍为三个继续训练流的200k／300k／400k最小全通过预算、正式质量选择、
 一次独立程序审计与每task100新种子留出、Pong/Kitchen既有收据核验、三域执行绑定、
 工程门槛与最终发布。原实验闭包、预算、门槛及失败收据保持不变，pilot继续关闭。
+
+## 实测准备与审计结果
+
+- 合成测试24项通过，22.19秒；只读code_runner独立复核24项通过，21.92秒。
+  包括全部共同fit选择、跨分区拒绝、公开帧／完整episode、真实读取器及存储块核对，
+  以及审计过程中六类资产替换必须拒绝的回归。
+- 实际原300局全部完成准备，35,931联合帧、71,862次两角色NN动作核对。
+  未过滤其中的真实停机局；没有补采或把短局当作安全负例。
+- 从原公开轨迹与NPZ到输出缓冲的第二次全量读取核验通过。
+- 共同文件3,928,455字节，SHA256：
+  `2d4b2e593ed3d16a60e90564f8ee9c58a8026a722c4786f1e9ccff574b125dfa`。
+- 254个源码文件已绑定并保留只读快照，含实际Buffer loader。
+- 新reset／随机动作流／拟合／LP／Actor或critic更新／PPO均0。
+  这是数据准备结果，不是模型效果改善、实际双版本run绑定或科学准入。
+
+产物在 `output/warehouse_v629/training-preparation/reference-buffer-01/`；
+逐项证据在 `experiments/warehouse/evidence/warehouse-v629-reference-buffer-preparation-01.json`。

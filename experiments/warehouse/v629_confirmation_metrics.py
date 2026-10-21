@@ -34,7 +34,7 @@ def validate_cases(cases):
         require(isinstance(c,dict) and set(c)==required, 'unknown confirmation case schema')
         require(isinstance(c['case_id'],str) and re.fullmatch(r'[A-Za-z0-9_-]+',c['case_id']), 'unsafe case ID')
         require(c['split'] in SPLITS and c['sampling_mode']=='sampled', 'confirmation contains training/argmax rows')
-        require(all(type(c[k]) is int and c[k]>=0 for k in ('base','scenario_seed','task','action_seed','draw'))
+        require(all(type(c[k]) is int and 0<=c[k]<2**63 for k in ('base','scenario_seed','task','action_seed','draw'))
             and c['task'] in (1,2,3) and c['scenario_seed']==10*c['base']+c['task'], 'invalid scene/action arguments')
     require(len({c['case_id'] for c in cases})==516 and len({c['action_seed'] for c in cases})==516, 'episode or action stream reused')
     from backend.training.warehouse_v6_evaluation_authorization import is_sealed_scenario_seed

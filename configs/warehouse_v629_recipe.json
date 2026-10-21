@@ -1,0 +1,90 @@
+{
+  "schema": "warehouse-v629-cumulative-recipe.v1",
+  "candidate_id": "warehouse-v629-cumulative-guard-01",
+  "method": "cumulative_local_certified_repair_v1",
+  "arms": [
+    {
+      "name": "C64",
+      "capacity": 64,
+      "guard_bundles": false
+    },
+    {
+      "name": "G64",
+      "capacity": 64,
+      "guard_bundles": true
+    },
+    {
+      "name": "G128",
+      "capacity": 128,
+      "guard_bundles": true
+    },
+    {
+      "name": "G256",
+      "capacity": 256,
+      "guard_bundles": true
+    }
+  ],
+  "initial": "corresponding_v628_committed_inner_search_best_after_batch_settled",
+  "initial_source_order": [
+    "sealed_search_best_file",
+    "last_committed_CAS_best_only_if_terminal_budget_exhausted"
+  ],
+  "protected": "unchanged_v626_feedback_explanation_union",
+  "maximum_depth": 9,
+  "source_features_per_node": 3,
+  "source_features_per_leaf": 3,
+  "maximum_leaf_coefficients": 20,
+  "local_unchanged_leaf_refit": false,
+  "cumulative_acceptance": "immediate_in_same_sweep",
+  "guard_language": "canonical_two_three_physical_legal_bit_conjunctions",
+  "guard_verifier": "independent_exact_rational_replay_all_16_movement_masks",
+  "mandatory": "all_maximal_disjoint_wholly_unprotected_roots_first_sweep",
+  "descendant_repairs": "enumerated_each_sweep_fit_residual_priority_new_descendants_next_sweep",
+  "data": "exact_v628_common_1650_development_pool_and_partitions",
+  "outer_evidence": "shared_development_only_fresh_confirmation_required",
+  "limits": {
+    "leaf": 80000,
+    "node": 4096,
+    "proof": 400000
+  },
+  "search_seconds": 4800,
+  "soft_search_seconds": 4770,
+  "hard_search_seconds": 4790,
+  "final_seconds": 1200,
+  "common_final_reserve": {
+    "leaf": 2048,
+    "node": 0,
+    "proof": 13312
+  },
+  "rounds": 14,
+  "beam_width": 3,
+  "frontier": "one_alternative_per_repair_path_deduplicated_before_truncation",
+  "maximum_workers": 3,
+  "BLAS_threads": 1,
+  "automatic_retry": false,
+  "stoppage_does_not_prove_infeasibility": true,
+  "gate": {
+    "coverage": 0.45,
+    "expected_feedback": 0.4,
+    "feedback_agreement": 0.95,
+    "explanation_agreement": 0.97,
+    "KL": 0.2,
+    "illegal": 0,
+    "unproved": 0
+  },
+  "selected": "smallest_G_capacity_with_all_6_units_pass_after_all_24_settled",
+  "run_after": "verified_v628_driver_exit_and_all_18_settled_no_interruption",
+  "actor_updates": 0,
+  "PPO_joint_steps": 0,
+  "environment_resets": 0,
+  "sealed_audit_used": false,
+  "heldout_used": false,
+  "pilot_opened": false,
+  "publishable": false,
+  "release_id": "policylens-three-domain-20261016.v6.0",
+  "performance": {
+    "maximum_checkpoint_fraction": 0.1,
+    "blocks_science": false,
+    "blocks_release": true
+  }
+}

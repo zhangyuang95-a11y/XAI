@@ -34,3 +34,20 @@
 掩码概率均与对应v6.26最终父程序完全相同。
 收据：`output/warehouse_v628/warehouse-v628-v626-capacity-01/parent-compatibility.json`。
 这只是兼容性证据，不是新开发效果或验收通过证据。
+
+## 2026-10-21 指标交付补充
+
+新增只读检查点指标读取器 `scripts/measure_warehouse_v628_intermediate.py`。
+使用预登记的fit内部180场景评分集和对应内部资格叶集合，报告F/E覆盖、预期F、
+一致率、KL，以及同一评分集上重新判定资格的原父程序差值。
+不得将这些搜索中间指标写成外层验证、独立确认或完整验收。
+合成测试验证读取前后检查点目录所有文件字节不变，并拒绝身份不符的检查点。
+
+最终单元实测仍读取 `jobs/*/result.json` 和完成封印；18项结算前不选择容量。
+实时最终表：`progress/latest.md`；搜索中间表：`progress/inner-score/latest.md`。
+
+审计第二次工程继续使用完整有界JSON解析，最大768 MiB，之后保持原精确区间分类。
+49,859,266字节历史报告完整语义复核一致，耗时2.739秒；未减少审计范围。
+原bounded inventory、两次未完成流解析记录及进程终止观察均保留。
+新增来源在 `seed-ledger/bounded-admission.json` 单独绑定，原科学计划和源码不变。
+当前科学实验未重试，前置工程继续发生在首次reset之前。

@@ -7,13 +7,14 @@ The future finite owner still proves reset freshness and exclusion from NN
 gradient buffers; a scope label alone cannot establish those facts.
 """
 from copy import deepcopy
-from dataclasses import dataclass,asdict
+from dataclasses import dataclass,asdict,field
 from hashlib import sha256
 from pathlib import Path
 import gzip,json
 import numpy as np
 from . import warehouse_v629_online_evidence as online
 from . import warehouse_v630_online_evidence as evidence
+from . import warehouse_v630_target_cache as target_cache
 from . import warehouse_v629_environment_replay as physics
 from . import warehouse_v630_program_refit as refit
 from .warehouse_v6_actor import FrozenWarehouseV6Actor,MODEL_VERSION,encode_actor_tree_features
@@ -39,7 +40,9 @@ def source_files():
     files=physics.source_files();files.update(refit.source_files())
     files['backend/training/warehouse_v630_observed_pool.py']=file_sha(__file__)
     for name in ('tests/test_warehouse_v630_observed_pool.py','docs/warehouse_v630_observed_pool_bridge.md',
-                 'tests/test_warehouse_v629_observed_pool.py','tests/test_warehouse_v629_environment_replay.py'):
+                 'tests/test_warehouse_v629_observed_pool.py','tests/test_warehouse_v629_environment_replay.py',
+                 'backend/training/warehouse_v630_target_cache.py','tests/test_warehouse_v630_target_cache.py',
+                 'docs/warehouse_v630_target_cache.md'):
         files[name]=file_sha(admission.v.ROOT/name)
     return dict(sorted(files.items()))
 
@@ -64,6 +67,7 @@ class ObservedPool:
     observed_data_sha256:str
     audit:dict
     audit_sha256:str
+    _replayed_target_cache:object=field(default=None,init=False,repr=False,compare=False)
 
     def verify(self):
         self.readiness.verify()
@@ -200,7 +204,7 @@ def relabel_current_NN(observed,target_actor_ref,output):
         write_new(output/'failed.json',dict(error=str(error),automatic_retry=False,training_authority=False));raise
 
 
-def checked_targets(observed,ref):
+def _replay_targets(observed,ref):
     observed.verify();p=bound(ref);require(p['schema']==TARGET_VERSION and p['observed_source']==observed.source_ref
         and p['observed_audit_sha256']==observed.audit_sha256 and p['observed_data_sha256']==observed.observed_data_sha256
         and p['owner']==observed.owner_ref and p['source_files']==source_files() and set(p['pools'])==set(AGENTS)
@@ -233,6 +237,20 @@ def checked_targets(observed,ref):
     require({digest(item) for item in expected_refs}=={digest(item) for item in p['asset_refs']},'counterfactual asset manifest omitted consumed files')
     observed.verify()
     for item in refs:require(pointer(item['path'])==item,'counterfactual asset changed during replay')
+    return p,refs,parts,actor.role_sha256
+
+
+def checked_targets(observed,ref):
+    observed.verify();cached=observed._replayed_target_cache
+    if cached is not None and cached.target_ref==ref:
+        cached.verify(observed)
+        return deepcopy(cached.payload),deepcopy(list(cached.asset_refs))
+    p,refs,parts,roles=_replay_targets(observed,ref)
+    cached=target_cache._seal_after_replay(observed=observed,ref=ref,payload=p,
+        parts=parts,role_hashes=roles,asset_refs=refs)
+    # At most one target package stays resident. Never serialize this cache
+    # as authority; a restored pool starts with no replay certificate.
+    object.__setattr__(observed,'_replayed_target_cache',cached)
     return p,refs
 
 
@@ -253,8 +271,21 @@ class ObservedOnlineEvidence(evidence.OnlineEvidence):
 
 
 def build_observed_evidence(program_ref,observed,targets_ref,*,epoch_id):
-    targets,refs=checked_targets(observed,targets_ref);program=bound(program_ref);role=program['role']
-    base=evidence.build_evidence(program_ref,targets['target_actor'],targets['pools'][role],epoch_id=epoch_id)
+    require(isinstance(epoch_id,str) and epoch_id and len(epoch_id)<=128,'explicit optimizer epoch ID required')
+    targets,refs=checked_targets(observed,targets_ref);cached=observed._replayed_target_cache
+    cached.verify(observed);encoded=bound(program_ref)
+    program=evidence.Program.from_dict(encoded,encoded['actor_role_sha256']);role=program.role
+    # Qualification remains program- and epoch-specific. Only the unchanged
+    # current-NN targets, already replayed above, avoid another NN forward.
+    report=online.current_report(program,cached.parts[role])
+    role_refs=[targets['pools'][role]];manifest=bound(targets['pools'][role])
+    for split in online.SPLITS:
+        role_refs.extend([manifest['parts'][split]['arrays'],manifest['parts'][split]['rows']])
+    base=evidence.OnlineEvidence(program,report,deepcopy(program_ref),deepcopy(targets['target_actor']),
+        cached.role_hashes[role],deepcopy(targets['pools'][role]),epoch_id,
+        tuple(deepcopy([program_ref,targets['target_actor'],program.protection['parent'],*role_refs])), '')
+    base=evidence.OnlineEvidence(**{**base.__dict__,'envelope_digest':digest(base.payload())})
+    base.verify(current_role_sha256=base.target_role_sha256,epoch_id=epoch_id)
     args={**base.__dict__,'asset_refs':tuple(deepcopy([*base.asset_refs,*refs])),
         'observed':observed,'target_package_ref':deepcopy(targets_ref),'envelope_digest':''}
     value=ObservedOnlineEvidence(**args);value=ObservedOnlineEvidence(**{**args,'envelope_digest':digest(value.payload())})

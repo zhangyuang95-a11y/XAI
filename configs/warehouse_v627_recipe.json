@@ -1,0 +1,110 @@
+{
+  "schema": "warehouse-v627-semantic-compiled-recipe.v1",
+  "candidate_id": "warehouse-v627-semantic-compiled-01",
+  "stages": [
+    "S32",
+    "S64"
+  ],
+  "capacities": {
+    "S32": {
+      "semantic_depth": 5,
+      "semantic_leaves": 16,
+      "compiled_depth": 6,
+      "compiled_leaves": 32
+    },
+    "S64": {
+      "semantic_depth": 6,
+      "semantic_leaves": 32,
+      "compiled_depth": 7,
+      "compiled_leaves": 64
+    }
+  },
+  "initialization": [
+    "S1_guard_discarded_recompiled",
+    "NN_distribution_greedy_tree",
+    "random_extra_tree_2",
+    "random_extra_tree_3"
+  ],
+  "support_source_limit": 3,
+  "leaf_coefficient_limit": 20,
+  "inner_fit_partition": {
+    "fit": 0.55,
+    "calibration": 0.1,
+    "eligibility": 0.15,
+    "score": 0.2,
+    "unit": "whole_scenario",
+    "stratify": "task"
+  },
+  "leaf_eligibility": "unchanged_v622_eligible_with_counts_Wilson_episodes_KL_and_proofs",
+  "selection": [
+    "qualified_explanation_coverage",
+    "qualified_expected_feedback",
+    "negative_full_KL",
+    "negative_leaf_count"
+  ],
+  "rounds": 14,
+  "beam_width": 4,
+  "stagnation_stop": false,
+  "cache_entries": 512,
+  "mandatory_per_start": [
+    "whole_tree_gradient",
+    "root_subtree_rebuild"
+  ],
+  "limits": {
+    "leaf": 20000,
+    "node": 1024,
+    "proof": 100000
+  },
+  "gradient_steps_total": 20000,
+  "gradient_steps_per_call": 200,
+  "gradient_optimizer": {
+    "name": "Adam",
+    "lr": 0.015,
+    "batch_frames": 512,
+    "sigmoid_temperature": 0.5,
+    "forward": "same_raw_fp32_coefficients_shared_fp64_hard_router",
+    "backward": "sparse_forward_dense_support_straight_through"
+  },
+  "search_seconds": 4800,
+  "settlement_reserve": 10,
+  "final_seconds": 600,
+  "final_leaf_calls_per_leaf": 8,
+  "final_proof_calls_per_leaf": 52,
+  "maximum_workers": 3,
+  "BLAS_threads": 1,
+  "Torch_threads": 1,
+  "automatic_retry": false,
+  "complete_NN_distribution_target": true,
+  "reuse_only_pure_frozen_targets": true,
+  "Actor_unchanged": true,
+  "performance": {
+    "maximum_checkpoint_fraction": 0.1,
+    "blocks_science": false,
+    "blocks_release": true
+  },
+  "development_gate": {
+    "coverage": 0.45,
+    "expected_feedback": 0.4,
+    "feedback_agreement": 0.95,
+    "explanation_agreement": 0.97,
+    "KL": 0.2,
+    "illegal": 0,
+    "unproved": 0
+  },
+  "design_targets": {
+    "coverage": 0.55,
+    "expected_feedback": 0.5,
+    "feedback_agreement": 0.98,
+    "explanation_agreement": 0.99,
+    "KL": 0.1
+  },
+  "release_id": "policylens-three-domain-20261016.v6.0",
+  "environment_resets": 0,
+  "actor_updates": 0,
+  "PPO_joint_steps": 0,
+  "pilot_opened": false,
+  "publishable": false,
+  "fresh_data_used": false,
+  "sealed_audit_used": false,
+  "heldout_used": false
+}

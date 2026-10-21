@@ -1,0 +1,346 @@
+{
+  "schema": "warehouse-v629-first-three-outer-and-gap.v1",
+  "utc": "2026-10-21T16:46:52.511648+00:00",
+  "plan": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/plan.json",
+    "sha256": "370c8dd36182e1601a9af5940242f9872899827302c8e5f55d54a0ac88ff64a6"
+  },
+  "scientific_source_sha256": "4cd4de16e45d76026ee76dc22ef2c3d42c8f54c8652ad17dce5f757a7d04723f",
+  "rows": [
+    {
+      "job": {
+        "capacity": 64,
+        "fold": 0,
+        "guard_bundles": false,
+        "job_id": "C64-fold-0-robot_1",
+        "name": "C64",
+        "role": "robot_1"
+      },
+      "result": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/C64-fold-0-robot_1/result.json",
+        "sha256": "a66b9e8f32d1fa06a1b994086278b8fd53448d99e7f2a7f482a1173d009780d8"
+      },
+      "completed": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/C64-fold-0-robot_1/completed.json",
+        "sha256": "388ca5b59625be0f8bc8d294889efeb142e6354b12f5b0f289ad1cf21942d725"
+      },
+      "program": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/C64-fold-0-robot_1/program.json",
+        "sha256": "a8938cb3a15e902d9c82466d42d99fb86009277af211f03b7a166c03dfbff230"
+      },
+      "search_best": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/C64-fold-0-robot_1/search-best.json",
+        "sha256": "31ad46c05e69a111b7657f6379da5c1d1d59abd7b5e23df9aed9e7003ad4abac"
+      },
+      "search_report": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/C64-fold-0-robot_1/search-report.json",
+        "sha256": "2e03302e00707cd6fe60f953111974ce7d0b2b5c1cdd65fd9431ec75e006d5c1"
+      },
+      "leaf_count": 64,
+      "depth": 9,
+      "feedback_coverage": 0.45922686230248305,
+      "explanation_coverage": 0.3886568848758465,
+      "expected_feedback": 0.4345514178276062,
+      "feedback_agreement": 0.9751766513056835,
+      "explanation_agreement": 0.9833744736459997,
+      "feedback_KL": 0.07120363414287567,
+      "explanation_KL": 0.054663997143507004,
+      "illegal": 0,
+      "unproved": 0,
+      "reference_explanation": 0.37869638826185104,
+      "explanation_improvement_pp": 0.9960496613995451,
+      "explanation_gap_pp": 6.134311512415352,
+      "passed": false,
+      "gate": {
+        "checks": {
+          "expected_feedback_coverage": true,
+          "explanation_agreement": true,
+          "explanation_coverage": false,
+          "explanation_illegal_count": true,
+          "explanation_kl": true,
+          "explanation_path_uncertified_count": true,
+          "explanation_whole_tree_path_uncertified_count": true,
+          "explanation_whole_tree_raw_illegal_count": true,
+          "feedback_agreement": true,
+          "feedback_coverage": true,
+          "feedback_illegal_count": true,
+          "feedback_kl": true,
+          "feedback_path_uncertified_count": true,
+          "feedback_whole_tree_path_uncertified_count": true,
+          "feedback_whole_tree_raw_illegal_count": true,
+          "mandatory_disjoint_roots_explored": true
+        },
+        "passed": false
+      },
+      "mandatory_first_sweep_complete": true,
+      "search_budget_limited": true
+    },
+    {
+      "job": {
+        "capacity": 64,
+        "fold": 0,
+        "guard_bundles": true,
+        "job_id": "G64-fold-0-robot_1",
+        "name": "G64",
+        "role": "robot_1"
+      },
+      "result": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/G64-fold-0-robot_1/result.json",
+        "sha256": "edf9e304e5c9830d4d24b06dea1f1b2061f5b0b77853c652dc9e2310c1053725"
+      },
+      "completed": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/G64-fold-0-robot_1/completed.json",
+        "sha256": "0669d2c19501f1d4ea0d98d48756cece21f6d8c487bddaca54839d96a836a486"
+      },
+      "program": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/G64-fold-0-robot_1/program.json",
+        "sha256": "8b8333eb954ed4a5d5f5804e19f8bc66080f40a4a586d568492688ba4dee6d60"
+      },
+      "search_best": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/G64-fold-0-robot_1/search-best.json",
+        "sha256": "66134d18b4cb4b94244828eed1d465b31b1b0ef7701d4d7d66b7dfa2c22fb377"
+      },
+      "search_report": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/G64-fold-0-robot_1/search-report.json",
+        "sha256": "a5aec059f17ed1ba58b450c586a86d9086c83feaac4c9814372c4479b2e5dd1f"
+      },
+      "leaf_count": 64,
+      "depth": 9,
+      "feedback_coverage": 0.45922686230248305,
+      "explanation_coverage": 0.3886568848758465,
+      "expected_feedback": 0.4345853924751282,
+      "feedback_agreement": 0.9752995391705069,
+      "explanation_agreement": 0.9835196747495281,
+      "feedback_KL": 0.07116340845823288,
+      "explanation_KL": 0.054616473615169525,
+      "illegal": 0,
+      "unproved": 0,
+      "reference_explanation": 0.37869638826185104,
+      "explanation_improvement_pp": 0.9960496613995451,
+      "explanation_gap_pp": 6.134311512415352,
+      "passed": false,
+      "gate": {
+        "checks": {
+          "expected_feedback_coverage": true,
+          "explanation_agreement": true,
+          "explanation_coverage": false,
+          "explanation_illegal_count": true,
+          "explanation_kl": true,
+          "explanation_path_uncertified_count": true,
+          "explanation_whole_tree_path_uncertified_count": true,
+          "explanation_whole_tree_raw_illegal_count": true,
+          "feedback_agreement": true,
+          "feedback_coverage": true,
+          "feedback_illegal_count": true,
+          "feedback_kl": true,
+          "feedback_path_uncertified_count": true,
+          "feedback_whole_tree_path_uncertified_count": true,
+          "feedback_whole_tree_raw_illegal_count": true,
+          "mandatory_disjoint_roots_explored": true
+        },
+        "passed": false
+      },
+      "mandatory_first_sweep_complete": true,
+      "search_budget_limited": true
+    },
+    {
+      "job": {
+        "capacity": 128,
+        "fold": 0,
+        "guard_bundles": true,
+        "job_id": "G128-fold-0-robot_1",
+        "name": "G128",
+        "role": "robot_1"
+      },
+      "result": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/G128-fold-0-robot_1/result.json",
+        "sha256": "3e9a38ab666af844bab8d54426856203c7de9bfe6ca30ac0f998b51cebfba88b"
+      },
+      "completed": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/G128-fold-0-robot_1/completed.json",
+        "sha256": "45ca571b7e7991850a1d625cb12b5266f33615578f71c702eaaae328382a15a5"
+      },
+      "program": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/G128-fold-0-robot_1/program.json",
+        "sha256": "5e0719e04bb9cd29687123e5a69d39c2324ccd5621fab2b01899e22f225d5f28"
+      },
+      "search_best": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/G128-fold-0-robot_1/search-best.json",
+        "sha256": "48d9801120f1a44a3eb5371321ddbb0b858cf393f0ed751a4be0fdd8ebd7bcdf"
+      },
+      "search_report": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/jobs/G128-fold-0-robot_1/search-report.json",
+        "sha256": "6b2f84bc0fa9b1c8fe2dd3318bd906d1e97fd32b40faa20f29257004dfb0dc69"
+      },
+      "leaf_count": 93,
+      "depth": 9,
+      "feedback_coverage": 0.49483634311512414,
+      "explanation_coverage": 0.42000564334085777,
+      "expected_feedback": 0.46714887022972107,
+      "feedback_agreement": 0.9743399669270685,
+      "explanation_agreement": 0.9821296607322808,
+      "feedback_KL": 0.07387567311525345,
+      "explanation_KL": 0.0580173060297966,
+      "illegal": 0,
+      "unproved": 0,
+      "reference_explanation": 0.37869638826185104,
+      "explanation_improvement_pp": 4.130925507900674,
+      "explanation_gap_pp": 2.9994356659142243,
+      "passed": false,
+      "gate": {
+        "checks": {
+          "expected_feedback_coverage": true,
+          "explanation_agreement": true,
+          "explanation_coverage": false,
+          "explanation_illegal_count": true,
+          "explanation_kl": true,
+          "explanation_path_uncertified_count": true,
+          "explanation_whole_tree_path_uncertified_count": true,
+          "explanation_whole_tree_raw_illegal_count": true,
+          "feedback_agreement": true,
+          "feedback_coverage": true,
+          "feedback_illegal_count": true,
+          "feedback_kl": true,
+          "feedback_path_uncertified_count": true,
+          "feedback_whole_tree_path_uncertified_count": true,
+          "feedback_whole_tree_raw_illegal_count": true,
+          "mandatory_disjoint_roots_explored": true
+        },
+        "passed": false
+      },
+      "mandatory_first_sweep_complete": true,
+      "search_budget_limited": true
+    }
+  ],
+  "true_waitpid_exits": [
+    {
+      "event": "exited",
+      "job": {
+        "capacity": 64,
+        "fold": 0,
+        "guard_bundles": true,
+        "job_id": "G64-fold-0-robot_1",
+        "name": "G64",
+        "role": "robot_1"
+      },
+      "pid": 78792,
+      "returncode": 0,
+      "waited": true
+    },
+    {
+      "event": "exited",
+      "job": {
+        "capacity": 64,
+        "fold": 0,
+        "guard_bundles": false,
+        "job_id": "C64-fold-0-robot_1",
+        "name": "C64",
+        "role": "robot_1"
+      },
+      "pid": 78791,
+      "returncode": 0,
+      "waited": true
+    },
+    {
+      "event": "exited",
+      "job": {
+        "capacity": 128,
+        "fold": 0,
+        "guard_bundles": true,
+        "job_id": "G128-fold-0-robot_1",
+        "name": "G128",
+        "role": "robot_1"
+      },
+      "pid": 78793,
+      "returncode": 0,
+      "waited": true
+    }
+  ],
+  "diagnostic_source": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/scripts/diagnose_warehouse_v629_finalization_gap.py",
+    "sha256": "7194a05c37407b8eb493ae6fa2fe4fefa447118cac4a5cb392b084527848cc62"
+  },
+  "diagnostics": [
+    {
+      "result": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/diagnostics/finalization-gap-G64-fold-0-robot_1-20261022-02/result.json",
+        "sha256": "936425aa8e7308822ade84aeb4c60ce9c6484faf862c87bdd19ba752f61dc22f"
+      },
+      "job": {
+        "capacity": 64,
+        "fold": 0,
+        "guard_bundles": true,
+        "job_id": "G64-fold-0-robot_1",
+        "name": "G64",
+        "role": "robot_1"
+      },
+      "explanation_coverage": {
+        "final_inner_requalified_without_refit": 0.43314911995541727,
+        "final_outer_actual_qualification": 0.3886568848758465,
+        "final_outer_search_best_requalified_leaf_sets": 0.3886568848758465,
+        "search_best_inner_original_qualification": 0.43314911995541727,
+        "search_best_outer_original_qualification": 0.43575056433408577,
+        "search_best_outer_requalified_without_refit": 0.3886568848758465
+      },
+      "inner_qualified_leaves": 18,
+      "outer_qualified_leaves": 15,
+      "leaves_losing_qualification": [
+        9,
+        10,
+        39,
+        57
+      ],
+      "leaves_gaining_qualification": [
+        46
+      ]
+    },
+    {
+      "result": {
+        "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/diagnostics/finalization-gap-G128-fold-0-robot_1-20261022-02/result.json",
+        "sha256": "ba4e73b56227e9864390c7768132f769748b7644e87d01d09b89431fa93c72e0"
+      },
+      "job": {
+        "capacity": 128,
+        "fold": 0,
+        "guard_bundles": true,
+        "job_id": "G128-fold-0-robot_1",
+        "name": "G128",
+        "role": "robot_1"
+      },
+      "explanation_coverage": {
+        "final_inner_requalified_without_refit": 0.45009984674685366,
+        "final_outer_actual_qualification": 0.42000564334085777,
+        "final_outer_search_best_requalified_leaf_sets": 0.42000564334085777,
+        "search_best_inner_original_qualification": 0.45009984674685366,
+        "search_best_outer_original_qualification": 0.4498589164785553,
+        "search_best_outer_requalified_without_refit": 0.42000564334085777
+      },
+      "inner_qualified_leaves": 20,
+      "outer_qualified_leaves": 18,
+      "leaves_losing_qualification": [
+        9,
+        10,
+        49,
+        63,
+        86
+      ],
+      "leaves_gaining_qualification": [
+        27,
+        41,
+        75
+      ]
+    }
+  ],
+  "failed_diagnostic_attempt_log": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/diagnostics/finalization-gap-G64-f0r1-20261022-01.log",
+    "sha256": "01267c0dfec40d3d9dea3a2646282f95ef6d3e7b36f6de371b748016465e9f54"
+  },
+  "diagnostic_engineering_correction": "initial comparison used scalar-only same_metrics on nested dictionaries; corrected to exact full dictionary equality; original scalar independent replay retained",
+  "scope": "three_settled_development_units_not_full_24_or_new_confirmation",
+  "all_24_settled": false,
+  "selected_capacity": null,
+  "NN_updates": 0,
+  "PPO_joint_steps": 0,
+  "pilot_opened": false,
+  "publishable": false
+}

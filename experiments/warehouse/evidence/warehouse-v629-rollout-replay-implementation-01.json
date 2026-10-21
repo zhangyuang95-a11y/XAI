@@ -1,0 +1,89 @@
+{
+  "schema": "warehouse-v629-rollout-replay-implementation-evidence.v1",
+  "observed_utc": "2026-10-21T10:55:07.772735+00:00",
+  "source_files": {
+    "backend/training/warehouse_v629_rollout_replay.py": "670b2321c5536bbeb9f3d2902ee5f9f6b1fa313c8d892166ee00f90064d1fcf5",
+    "tests/test_warehouse_v629_rollout_replay.py": "db530c36680a5c518064573ae80d07ca80c99214924b74adc3028efc8cf65b00",
+    "docs/warehouse_v629_rollout_replay_evidence.md": "3da0f7b18e83bd2b9ac5b21d6c33e7f0a89a058893d6d53ada81f2bd1141ed07"
+  },
+  "tests": {
+    "command": "env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/test_warehouse_v629_rollout_replay.py -x --tb=short",
+    "passed": 23,
+    "failed": 0,
+    "elapsed_seconds": 33.51
+  },
+  "independent_code_runner": {
+    "passed": 23,
+    "failed": 0,
+    "elapsed_seconds": 33.34,
+    "scope": "same_family_read_only_synthetic_code_review_not_independent_model_audit",
+    "remaining_actual_defects_reported": 0
+  },
+  "scientific_plans": [
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v628/warehouse-v628-v626-capacity-01/plan.json",
+      "sha256": "029a921d0199287803190f86ca629accc008dd9fb43bfdd1c8c230ec39ca8187"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/warehouse-v629-cumulative-guard-01/plan.json",
+      "sha256": "370c8dd36182e1601a9af5940242f9872899827302c8e5f55d54a0ac88ff64a6"
+    }
+  ],
+  "original_scientific_source_sha256": [
+    "1fd77d5d7de38a99260e1ee06dddb6104bf0d99f11a3b22027539508e823721b",
+    "4cd4de16e45d76026ee76dc22ef2c3d42c8f54c8652ad17dce5f757a7d04723f"
+  ],
+  "current_inner_observation": {
+    "job": {
+      "capacity": 64,
+      "fold": 1,
+      "job_id": "C64-fold-1-robot_1",
+      "role": "robot_1"
+    },
+    "observed_utc": "2026-10-21T10:47:28.827757+00:00",
+    "program_sha256": "e2101ca537a61cf29396266fccc7e8717f0b3339d0594ff9364d601a55eb46d1",
+    "scope": "fit_internal_180_episode_score_not_outer_validation_or_admission",
+    "metrics": {
+      "feedback": {
+        "coverage": 0.4316787506971556,
+        "expected_actionable_coverage": 0.41459938883781433,
+        "agreement": 0.9857881136950905,
+        "kl": 0.04764919728040695,
+        "whole_tree_raw_illegal_count": 0,
+        "whole_tree_path_uncertified_count": 0
+      },
+      "explanation": {
+        "coverage": 0.3968209704406023,
+        "expected_actionable_coverage": 0.38342392444610596,
+        "agreement": 0.9879362848442258,
+        "kl": 0.04565231129527092,
+        "whole_tree_raw_illegal_count": 0,
+        "whole_tree_path_uncertified_count": 0
+      }
+    }
+  },
+  "inner_observation_source": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/diagnostics/rollout-replay-implementation-01/inner-score-source.json",
+    "sha256": "27b7eabd66c50ce0426504c8328269d275e2a268e84c21bee33d24734eaa6bc7"
+  },
+  "processes": {
+    "41972": "Wed Oct 21 14:57:51 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python -u scripts/continue_warehouse_v628_seed_audit_bounded.py",
+    "43591": "Wed Oct 21 16:17:16 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python -u scripts/run_warehouse_v629.py --pipeline --wait-pid 41972",
+    "47879": "Wed Oct 21 18:10:41 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python /Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/scripts/run_warehouse_v628.py --job C64-fold-1-robot_1",
+    "47880": "Wed Oct 21 18:10:41 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python /Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/scripts/run_warehouse_v628.py --job C128-fold-1-robot_1",
+    "47881": "Wed Oct 21 18:10:41 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python /Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/scripts/run_warehouse_v628.py --job C256-fold-1-robot_1",
+    "54635": "Wed Oct 21 18:38:23 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python -u /Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/scripts/compress_warehouse_checkpoint_storage.py --apply --output-dir /Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_storage/native-compression-watch-20261021-01/maintenance --watch --driver-pid 41972 --driver-pid 43591"
+  },
+  "candidate_environment_resets": 0,
+  "candidate_Actor_updates": 0,
+  "candidate_PPO_joint_steps": 0,
+  "new_fitting_calls": 0,
+  "new_LP_calls": 0,
+  "used_new_confirmation": false,
+  "used_sealed_audit": false,
+  "used_heldout": false,
+  "scientific_admission": false,
+  "pilot_opened": false,
+  "full_goal_complete": false,
+  "scope": "public_frame_numeric_interface_preparation_not_complete_Stage_C_driver"
+}

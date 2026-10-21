@@ -1,0 +1,93 @@
+{
+  "schema": "warehouse-v628-protected-capacity-recipe.v1",
+  "candidate_id": "warehouse-v628-v626-capacity-01",
+  "method": "protected_region_subtree_refinement_v1",
+  "capacities": [
+    64,
+    128,
+    256
+  ],
+  "maximum_depth": 9,
+  "source_features_per_node": 3,
+  "source_features_per_leaf": 3,
+  "maximum_leaf_coefficients": 20,
+  "parent": "v626_TAO64_final_programs",
+  "protected": "union_parent_feedback_and_explanation",
+  "protected_refit": false,
+  "protected_temperature_calibration": false,
+  "inherited_qualification": false,
+  "data": {
+    "episodes": 1650,
+    "argmax": 300,
+    "sampled": 1350,
+    "outer": {
+      "fit": 900,
+      "calibration": 150,
+      "eligibility": 300,
+      "validation": 300
+    },
+    "inner": {
+      "fit": 450,
+      "calibration": 90,
+      "eligibility": 180,
+      "validation": 180
+    },
+    "fold_rotation_sampled_per_task": 100,
+    "inner_argmax_fit_only": true,
+    "scene_disjoint_within_fold": true
+  },
+  "limits": {
+    "leaf": 80000,
+    "node": 4096,
+    "proof": 400000
+  },
+  "search_seconds": 4800,
+  "final_seconds": 1200,
+  "common_final_reserve": {
+    "leaf": 2048,
+    "node": 0,
+    "proof": 13312
+  },
+  "rounds": 14,
+  "beam_width": 3,
+  "cache_entries": 512,
+  "automatic_retry": false,
+  "stagnation_stop": false,
+  "node_initialization_rng": 0,
+  "node_rng_freshness_claimed": false,
+  "mandatory_all_editable_regions": true,
+  "independent_capacity_initializations": true,
+  "shared_learned_caches": false,
+  "maximum_workers": 3,
+  "BLAS_threads": 1,
+  "gate": {
+    "coverage": 0.45,
+    "expected_feedback": 0.4,
+    "feedback_agreement": 0.95,
+    "explanation_agreement": 0.97,
+    "KL": 0.2,
+    "illegal": 0,
+    "unproved": 0
+  },
+  "confirmation": {
+    "episodes": 300,
+    "pressure_scenes": 72,
+    "draws_per_scene": 3,
+    "bootstrap_one_sided_lower": 0.9875,
+    "primary_endpoints": 4,
+    "requires_all_18_complete": true,
+    "requires_fixed_six_programs": true
+  },
+  "performance": {
+    "maximum_checkpoint_fraction": 0.1,
+    "blocks_science": false,
+    "blocks_release": true
+  },
+  "actor_updates": 0,
+  "PPO_joint_steps": 0,
+  "pilot_opened": false,
+  "publishable": false,
+  "sealed_audit_used": false,
+  "heldout_used": false,
+  "release_id": "policylens-three-domain-20261016.v6.0"
+}

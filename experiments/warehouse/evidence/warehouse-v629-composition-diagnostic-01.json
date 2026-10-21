@@ -1,0 +1,23 @@
+{
+  "schema": "warehouse-v629-spent-composition-evidence.v1",
+  "scientific_pass": false,
+  "scope": "posthoc_spent_inner_score_single_role_fold_not_candidate_or_confirmation",
+  "diagnostic": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/diagnostics/cumulative_replay_20261021_02.json",
+    "sha256": "9894949a08fbfd723ffde389a0fa478d2a92773ff1ccf7b4452edc04dd19da36"
+  },
+  "audit": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/diagnostics/cumulative_replay_20261021_02.audit01.json",
+    "sha256": "0541d24d390c5a379c14ba3fc5b01560931f231ae5f0bbd8156b70abbc386840"
+  },
+  "diagnostic_program": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v629/diagnostics/cumulative_replay_20261021_02.audit01.program.json",
+    "sha256": "bdadb9d3333a80bee7fe40685d3b83a435234b2907c71857c154542092c2f2ab"
+  },
+  "new_fitting_calls": 0,
+  "new_LP_calls": 0,
+  "new_environment_resets": 0,
+  "actor_updates": 0,
+  "PPO_joint_steps": 0,
+  "pilot_opened": false
+}

@@ -49,12 +49,19 @@ def snapshot():
         jobs.append(dict(**spec,status=status,validation_metrics=m,gate=r.get('gate') if valid else None,
             elapsed_seconds=r.get('elapsed_seconds') if valid else None))
     collection=read(OUT/'collection/result.json');summary=read(OUT/'summary.json')
+    task_quality=read(OUT/'progress/collection-metrics/latest.json')
+    initial=[value for p in sorted((OUT/'progress/initial-programs').glob('fold-*.json')) if (value:=read(p))]
+    search=read(OUT/'progress/inner-score/latest.json')
+    validated=any(j['validation_metrics'] is not None for j in jobs)
     stage='complete' if summary else 'capacity_experiments' if any(j['status']!='not_started' for j in jobs) else 'collecting' if (OUT/'collection/started.json').exists() else 'seed_history_audit'
     return dict(schema='warehouse-v628-live-metrics.v1',observed_utc=datetime.now(timezone.utc).isoformat(),
         stage=stage,collected_episodes=len(list((OUT/'collection').glob('dev-*.npz'))),scheduled_episodes=1650,
         completed_jobs=sum(j['status']=='completed' for j in jobs),started_jobs=sum(j['status']!='not_started' for j in jobs),scheduled_jobs=18,
         scientific_pass=summary.get('scientific_pass') if summary else None,
-        new_metrics_available=any(j['validation_metrics'] is not None for j in jobs),jobs=jobs,
+        new_metrics_available=bool(validated or task_quality and task_quality['completed_episodes'] or initial or search and search['rows']),
+        new_capacity_validation_metrics_available=validated,
+        task_quality_snapshot=task_quality,initial_program_metrics=initial,search_diagnostics=search,
+        jobs=jobs,
         new_task_quality=collection.get('outcomes') if collection else None,
         historical_baseline=historical(),
         method_modified=False,fit_calls=0,environment_resets=0,actor_updates=0,PPO_joint_steps=0)
@@ -64,15 +71,42 @@ def markdown(s):
     lines=['# Warehouse v6.28 实测进度','',f"更新时间（UTC）：{s['observed_utc']}",
         f"阶段：{s['stage']}；轨迹 {s['collected_episodes']}/1650；实验完成 {s['completed_jobs']}/18。",'',
         '**空项表示尚无实测结果，不表示0。测试通过和启动成功不属于效果指标。**','',
-        '| 容量 | 折 | 角色 | 状态 | F覆盖 | E覆盖 | 预期F | F/E一致 | F/E KL | 准入 |',
-        '|---|---|---|---|---|---|---|---|---|---|']
+        '| 容量 | 折 | 角色 | 状态 | F覆盖 | E覆盖 | 预期F | 实际F | F/E一致 | F/E KL | 非法/未证 | 准入 |',
+        '|---|---|---|---|---|---|---|---|---|---|---|---|']
     pct=lambda x:'待测' if x is None else f'{100*x:.2f}%'
     num=lambda x:'待测' if x is None else f'{x:.4f}'
+    # Present actual new numerical observations before unfinished final rows.
+    insertion=['## 已完成新轨迹的任务指标','',
+        'NN冻结；argmax仅供拟合，sampled是开发轨迹。此处不能据不同场景均值声称模型改善。','',
+        '| 方式 | 完整局数 | 配送 | 碰撞 | 停机 | 停机率 |','|---|---:|---:|---:|---:|---:|']
+    q=s.get('task_quality_snapshot')
+    if q:
+        for mode,value in q['quality'].items():
+            if value:insertion.append('| '+' | '.join([mode,str(value['episodes']),num(value['deliveries']),num(value['collisions']),str(value['shutdown_episodes']),pct(value['shutdown_rate'])])+' |')
+    else:insertion+=['','尚无完整episode指标。']
+    insertion+=['','## 新数据上的优化前参考程序','',
+        '仅拟合集内部评分；不是容量优化结果。资格已在新内部资格集重新判定。','',
+        '| 折 | 角色 | F覆盖 | E覆盖 | 预期F | 实际F | F/E一致 | F/E KL | 非法/未证 |','|---|---|---:|---:|---:|---:|---|---|---|']
+    for r in s.get('initial_program_metrics',[]):
+        f,e=r['metrics']['feedback'],r['metrics']['explanation']
+        insertion.append('| '+' | '.join([str(r['fold']),r['role'],pct(f['coverage']),pct(e['coverage']),pct(f['expected_actionable_coverage']),pct(f['actionable_coverage']),
+            pct(f['agreement'])+'/'+pct(e['agreement']),num(f['kl'])+'/'+num(e['kl']),str(f['whole_tree_raw_illegal_count'])+'/'+str(f['whole_tree_path_uncertified_count'])])+' |')
+    insertion+=['','## 容量搜索中间指标','',
+        '**预定fit内部评分集，经过搜索选择；不能替代外层验证或准入。**','',
+        '| 容量 | 折 | 角色 | F覆盖 | E覆盖 | 预期F | 实际F | F/E一致 | F/E KL | 非法/未证 | E变化(pp) |','|---|---|---|---:|---:|---:|---:|---|---|---|---:|']
+    for r in (s.get('search_diagnostics') or {}).get('rows',[]):
+        j=r['job'];f,e=r['metrics']['feedback'],r['metrics']['explanation']
+        insertion.append('| '+' | '.join([str(j['capacity']),str(j['fold']),j['role'],pct(f['coverage']),pct(e['coverage']),pct(f['expected_actionable_coverage']),pct(f['actionable_coverage']),
+            pct(f['agreement'])+'/'+pct(e['agreement']),num(f['kl'])+'/'+num(e['kl']),str(f['whole_tree_raw_illegal_count'])+'/'+str(f['whole_tree_path_uncertified_count']),f"{r['delta_explanation_percentage_points']:+.2f}"])+' |')
+    if not (s.get('search_diagnostics') or {}).get('rows'):insertion+=['','尚无已提交的容量搜索检查点。']
+    insertion+=['','## 外层验证：正式18项','']
+    lines[6:6]=insertion
     for j in s['jobs']:
         m=j['validation_metrics'] or {};f=m.get('feedback',{});e=m.get('explanation',{})
         lines.append('| '+' | '.join([str(j['capacity']),str(j['fold']),j['role'],j['status'],pct(f.get('coverage')),
-            pct(e.get('coverage')),pct(f.get('expected_actionable_coverage')),
+            pct(e.get('coverage')),pct(f.get('expected_actionable_coverage')),pct(f.get('actionable_coverage')),
             pct(f.get('agreement'))+'/'+pct(e.get('agreement')),num(f.get('kl'))+'/'+num(e.get('kl')),
+            str(f.get('whole_tree_raw_illegal_count','待测'))+'/'+str(f.get('whole_tree_path_uncertified_count','待测')),
             str(j['gate']['passed']) if j['gate'] else '待测'])+' |')
     lines+=['','## 历史起点及差距','',
         '下表仅为v6.26旧开发结果；不能代替v6.28新场景的配对基线。',
@@ -90,7 +124,7 @@ def markdown(s):
 def save(s):
     folder=OUT/'progress';folder.mkdir(exist_ok=True)
     for name,text in (('latest.json',json.dumps(s,ensure_ascii=False,indent=2)+'\n'),('latest.md',markdown(s))):
-        tmp=folder/(name+'.writing');tmp.write_text(text);os.replace(tmp,folder/name)
+        tmp=folder/(name+'.'+str(os.getpid())+'.writing');tmp.write_text(text);os.replace(tmp,folder/name)
 
 
 def main():

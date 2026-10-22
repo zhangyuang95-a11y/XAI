@@ -152,3 +152,48 @@ SHA-256：`57015c9a85f6d350dff3635f167fb0854a256725648b9aac7502974ae63f2b48`。
 - [regularized 16,800步程序](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-extraction/097bca0716954649b5f213456c2c0ee32efd13eedd267d8cd8746876760c4581/step-16800/result.json)，SHA-256：`aa6bbbeb59dd0941b147ec535cfda7fc9e0b2e27a8e14d1ad14bb45eda554100`。
 - [raw检查点](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/checkpoints/016800/owner-state.json)，SHA-256：`4019ffb17b612be0c95979ddf0086b79b60b3d5eec5560d234fb903091236755`。
 - [regularized检查点](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/checkpoints/016800/owner-state.json)，SHA-256：`1c6d1fde78693b7fecb03ca11ae298108f238ca36047108ee818ee4e7a565553`。
+
+## 2026-10-23更新：17,824步批次末尾解释覆盖失效，反馈已关闭
+
+在`batch-17/epoch-3/minibatch-768`更新前，当前NN复验的robot_2仅`explanation_coverage`未通过。
+这是本批最后一次优化之前的快照结果，不是批后或最终20k模型的独立评估。
+
+| robot_2指标 | 前一次复验call46 | 失效复验call47 | 门槛 |
+|---|---:|---:|---:|
+| 反馈覆盖 | 50.59138% | 45.76485% | ≥45% |
+| 解释覆盖 | 49.63618% | 44.61301% | ≥45% |
+| 预期反馈覆盖 | 48.49510% | 43.71517% | ≥40% |
+| 反馈一致率 | 98.73390% | 98.60651% | ≥95% |
+| 解释一致率 | 98.79443% | 98.76574% | ≥97% |
+| 反馈KL | 0.050963 | 0.055133 | ≤0.20 |
+| 解释KL | 0.050196 | 0.053610 | ≤0.20 |
+
+原始非法动作和未证明路径仍均为0。解释覆盖距门槛差0.38699个百分点。
+robot_1自身全部门槛仍通过；联合provider因robot_2失败而锁定关闭两个角色的反馈。
+实际最后一次更新的程序损失、两个角色程序梯度及选中帧数均为0；PPO等共同损失继续更新Actor。
+本批每角色接受15次正程序梯度更新，累计各47次；raw累计仍各0次。没有降低门槛或加入执行动作规则。
+只有登记的下一次18,600步程序提取可以重新判定并解除反馈锁定，当前训练按原协议继续到20k。
+
+### 已有源数据的只读局部诊断
+
+外部程序及两次数据的公开特征、物理掩码相同。解释合格叶减少3、27，反馈合格叶减少27。
+叶27在资格分区有1,727帧：一致率由99.94210%降至92.76202%，KL由0.014317升至0.347470，因而失去资格。
+该叶在验证分区有1,718帧，占全部35,595帧的4.82652%；另一个失去解释资格的小叶共同造成5.02318个百分点的覆盖下降。
+
+对两个已保存NN快照，调用原生冻结Actor的逐帧内部硬路由，并比较绑定的缓存NN分布，得到：
+
+| 叶27所在分区 | 帧数 | NN内部叶路由变化 | 缓存NN首选动作变化 | KL(NN前快照∥NN后快照)均值 |
+|---|---:|---:|---:|---:|
+| 资格 | 1,727 | 125 | 124 | 0.211151 |
+| 验证 | 1,718 | 117 | 109 | 0.206294 |
+
+两个NN快照的内部节点前三特征支持未改变，分裂权重及偏置发生了小幅数值变化。
+这些事实指向硬路由边界变化及整叶资格排除放大覆盖损失；未隔离PPO、参考KL、成本或程序项各自的因果贡献。
+诊断使用已花费源数据，无新环境、动作采样、拟合、NN梯度或优化器更新，不构成新的独立质量或保真验收。
+首次诊断误用了旧v629程序读取器、第二次误传原始Actor哈希，均在读取阶段拒绝；随后使用v642读取器及16,800步程序绑定的目标Actor哈希完成上述只读诊断，未修改任何资产或训练源码。
+
+原始只读证据：
+
+- [call46 robot_2](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-evidence-provider/097bca0716954649b5f213456c2c0ee32efd13eedd267d8cd8746876760c4581/calls/000046/robot_2-evidence.json)，SHA-256：`eca02562e87771232d96d69d6f2e6eac6abb4e148e6186102fb7d1cedfe154c5`。
+- [call47 robot_2](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-evidence-provider/097bca0716954649b5f213456c2c0ee32efd13eedd267d8cd8746876760c4581/calls/000047/robot_2-evidence.json)，SHA-256：`37dd0e1dff7406e194604b96cbf8b223cb69cb8ed07f9173a344194c0a98113d`。
+- [本批实际PPO更新收据](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/016800/update.json)，SHA-256：`5f44ded39a4f39f534f2d71be22260776862aa3fc9d99f0942e9f7883977b9b1`。

@@ -41,10 +41,10 @@ class Bundle:
 
 def load_locked_bundle():
     # Reject partial development before source traversal, seeds or environments.
-    for name in ('result.json','independent-replay.json','supervisor-exit.json'):
+    for name in ('result.json','independent-replay.json','supervisor-exit.json','method-lock.json'):
         v.require((v.OUTPUT/name).is_file(),'v642 has no complete reaped and independently audited winner; confirmation remains closed')
     path,plan=v.checked_plan();refs={k:v.pointer(v.OUTPUT/name) for k,name in
-        (('plan','plan.json'),('summary','result.json'),('independent_audit','independent-replay.json'),('execution','supervisor-exit.json'))}
+        (('plan','plan.json'),('summary','result.json'),('independent_audit','independent-replay.json'),('execution','supervisor-exit.json'),('lock','method-lock.json'))}
     summary=v.bound(refs['summary']);audit=v.bound(refs['independent_audit']);execution=v.bound(refs['execution'])
     audit_plan_ref=v.pointer(v.OUTPUT/'audit-plan.json');ap=v.bound(audit_plan_ref)
     v.require(audit['schema']=='warehouse-v642-depth-matched-independent-replay.v1' and audit['audit_plan']==audit_plan_ref and
@@ -72,7 +72,13 @@ def load_locked_bundle():
         rows=[r for r in results if r['spec']['maximum_depth']==d]
         expected=dict(all_six_passed=all(r['development_passed'] for r in rows),development_pass_count=sum(r['development_passed'] for r in rows),numerical_pass_count=sum(r['numerical_passed'] for r in rows))
         v.require(summary['arms'][str(d)]==expected,'arm aggregate differs from all six measured units')
-    depth=passing[0];_,old=v.previous.checked_plan();quality=v.previous.common_quality(old)
+    depth=passing[0]
+    expected_lock=dict(schema='warehouse-v642-method-lock.v1',plan=refs['plan'],summary=refs['summary'],independent_audit=refs['independent_audit'],supervisor_exit=refs['execution'],
+        selected_depth=depth,selection_rule='first_uniform_all_six_pass_depth9_then_depth12_no_rolewise_mixing',
+        programs=[r['program'] for r in results if r['spec']['maximum_depth']==depth],scientific_development_precheck_passed=True,
+        fresh_confirmation_required=True,training_authority=False,sealed_authority=False,model_acceptance_passed=False,pilot_opened=False)
+    v.require(v.bound(refs['lock'])==expected_lock,'method lock differs from first all-six passing capacity')
+    _,old=v.previous.checked_plan();quality=v.previous.common_quality(old)
     assets.extend((old['common_quality'],old['collection']))
     v.require(all(m['deliveries']>=5.5 and m['collisions']<=6 and m['shutdown_rate']<=.05 for m in quality.values()),'frozen NN historical development quality failed')
     old_plan=v.bound(old['previous_plan']);old_summary=v.bound(v.pointer(v.previous.previous.OUTPUT/'summary.json'));old_audit=v.bound(old_summary['independent_audit'])
@@ -150,7 +156,8 @@ def evaluate_fixed(bundle, datasets, cases, outcomes):
     q=quality(outcomes,cases);bootstrap={s:paired_bootstrap(paired,cases,s) for s in SPLITS}
     passed=all(g['passed'] for r in reports for g in r['gates'].values()) and all(r['passed'] for r in q.values()) and bootstrap['validation']['passed']
     bundle.verify()
-    return dict(schema='warehouse-v642-fixed-confirmation-metrics.v1',metrics_passed=bool(passed),
+    return dict(schema='warehouse-v642-fixed-confirmation-metrics.v1',selected_method=bundle.selected_method,selected_depth=bundle.selected_depth,
+        primary_comparator=BASELINE,metrics_passed=bool(passed),
         scope='fixed_asset_metrics_only_requires_independent_collection_audit',full_confirmation_admission=False,
         units=reports,quality=q,bootstrap=bootstrap,primary_bootstrap_family='validation_four_endpoints',
         pressure_bootstrap='secondary_diagnostic_not_a_replacement_for_strict_pressure_gates',

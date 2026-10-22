@@ -29,7 +29,9 @@ def sources():
     for module in list(sys.modules.values()):
         raw=getattr(module,'__file__',None)
         if not raw:continue
-        p=Path(raw).resolve()
+        p=Path(raw)
+        if not p.is_absolute() and not p.is_file():continue
+        p=p.resolve()
         if p.suffix=='.py' and p.is_relative_to(ROOT):files[str(p)]=v.file_sha(p)
     for name,sha in files.items():v.require(v.file_sha(Path(name) if Path(name).is_absolute() else ROOT/name)==sha,'immutable upstream source changed')
     return dict(sorted(files.items()))

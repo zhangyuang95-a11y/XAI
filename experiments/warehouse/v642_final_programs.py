@@ -13,7 +13,7 @@ from backend.training import warehouse_v642_observed_pool as pools
 from backend.training.warehouse_v642_training_program import complete_program,language_lock,protected_indices,limits
 from backend.training.warehouse_v642_program import Program,payload
 from backend.training.warehouse_v626_budget import Budget
-from backend.training.warehouse_v629_online_evidence import current_report
+from backend.training.warehouse_v629_online_evidence import current_report,gate
 from scripts.audit_warehouse_v642_program import forward
 from scripts.audit_warehouse_v628 import ledger
 from scripts.run_warehouse_v625 import write_new
@@ -21,6 +21,9 @@ from scripts.run_warehouse_v625 import write_new
 VERSION='warehouse-v642-post-training-fixed-language-programs.v1'
 OUTPUT=q.ROOT/'output/warehouse_v642/training-final-programs'
 ROLES=('robot_1','robot_2')
+
+
+def claim_path():return q.training.owner.seeds.partitions.admission.v.OUTPUT/'calibration-final-programs.claim.json'
 
 
 def source_files():
@@ -55,7 +58,7 @@ def run(*,completed_assets_ref,reference_directory,run_id):
     events=[json.loads(line) for line in Path(journal_ref['path']).read_text().splitlines()]
     for i,event in enumerate(events):require(event['sequence']==i,'training journal has missing or reordered events')
     sources=source_files();source_sha=digest(sources);output=OUTPUT/run_id
-    claim=q.training.owner.seeds.partitions.admission.v.OUTPUT/'calibration-final-programs.claim.json'
+    claim=claim_path()
     require(not claim.exists(),'post-training program finalization is once-only even after failure')
     output.mkdir(parents=True,exist_ok=False)
     identity=dict(version=VERSION,completed_assets=completed_assets_ref,seed_plan=plan.ref,
@@ -134,3 +137,51 @@ def run(*,completed_assets_ref,reference_directory,run_id):
     except BaseException as error:
         write_new(output/'failed.json',dict(version=VERSION,error_type=type(error).__name__,error=str(error),completed_roles=results,
             single_use_claim_retained=True,automatic_retry=False,pilot_opened=False));raise
+
+
+def read_completed(ref,completed_assets_ref):
+    """Load fixed programs only after observed successful finalization."""
+    require(isinstance(ref,dict),'completed final-NN program report is required before fresh collection')
+    r=bound(ref);folder=Path(ref['path']).parent
+    require(folder.is_relative_to(OUTPUT.resolve()) and folder!=OUTPUT.resolve()
+        and Path(ref['path']).name=='result.json' and not (folder/'failed.json').exists()
+        and r['version']==VERSION and r['source_files']==source_files()
+        and r['completed_assets']==completed_assets_ref
+        and r['calibration_program_precheck_passed'] is True
+        and r['new_NN_updates']==r['new_environment_resets']==0
+        and r['model_acceptance_passed'] is r['pilot_opened'] is False,
+        'missing, failed, changed or differently bound final programs')
+    p=bound(r['plan']);c=bound(r['claim']);execution_ref=pointer(folder/'supervisor-exit.json');execution=bound(execution_ref)
+    require(r['plan']==pointer(folder/'plan.json') and r['claim']==pointer(claim_path())
+        and c['plan']==r['plan'] and c['output']==str(folder)
+        and p['version']==VERSION and p['completed_assets']==completed_assets_ref
+        and p['source_files']==r['source_files'] and p['source_sha256']==digest(r['source_files'])
+        and bound(pointer(folder/'completed.json'))==dict(result=ref)
+        and execution['result']==ref and execution['exit_code']==0
+        and execution['observed_by']=='exec_tool_terminal_result',
+        'final-program claim, completion or observed terminal exit differs')
+    fixed=q.assets(completed_assets_ref)
+    require(r['actors']==fixed['actors'] and r['actor_role_sha256']==fixed['actor_role_sha256']
+        and set(r['roles'])=={'raw','regularized'},'final programs belong to another frozen NN pair')
+    programs={};inputs=[ref,r['plan'],r['claim'],execution_ref,pointer(folder/'completed.json'),*r['input_asset_refs']]
+    for variant in ('raw','regularized'):
+        require(set(r['roles'][variant])==set(ROLES),'both final program roles required')
+        programs[variant]={}
+        for role in ROLES:
+            item=r['roles'][variant][role];role_sha=fixed['actor_role_sha256'][variant][role]
+            program=Program.from_dict(bound(item['program']),role_sha)
+            require(item['status']=='completed' and item['calibration_program_precheck_passed'] is True
+                and item['target_actor_role_sha256']==program.target_actor_role_sha256==role_sha
+                and program.role==role and gate(item['current']['validation'])==item['current']['gate']
+                and item['current']['gate']['passed'] is True
+                and set(item['current']['feedback_leaves'])==set(program.feedback_leaves)
+                and set(item['current']['explanation_leaves'])==set(program.explanation_leaves)
+                and item['current']['validation']=={key:item['metrics']['validation'][key] for key in ('feedback','explanation')}
+                and item['solver']['limits']==limits(program) and item['solver']['counts']['node']==0
+                and all(0<=item['solver']['counts'][key]<=item['solver']['limits'][key] for key in ('leaf','node','proof')),
+                'final program target hash, qualification, gate or fixed-search budget differs')
+            programs[variant][role]=item['program'];inputs.extend([item['program'],item['checkpoint'],item['ledger']])
+    for name,sha in r['source_files'].items():
+        path=folder/'source'/name;require(file_sha(path)==sha and not path.stat().st_mode&0o222,'final program source snapshot changed')
+    for item in inputs:require(pointer(item['path'])==item,'final program evidence asset changed')
+    return dict(report=ref,programs=programs,inputs=inputs)

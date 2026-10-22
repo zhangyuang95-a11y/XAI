@@ -28,14 +28,17 @@ from scripts.measure_warehouse_v628_collection import episode as replay_public_e
 
 ROOT=training.owner.ROOT
 OUTPUT=ROOT/'output/warehouse_v642/calibration-quality'
-VERSION='warehouse-v642-once-only-matched-quality-collection.v1'
+VERSION='warehouse-v642-once-only-matched-task-and-program-collection.v2'
 REGISTRY_REF=deepcopy(training.owner.seeds.confirmation.INVENTORY_REF)
 FILES=('experiments/warehouse/v642_quality_collection.py','experiments/warehouse/v642_calibration_quality.py',
     'experiments/warehouse/v642_update_receipt_audit.py','backend/training/warehouse_v642_checkpoint_export.py',
     'scripts/audit_warehouse_v642_calibration_results.py','experiments/warehouse/seed_interval_index_v642.py',
     'experiments/warehouse/seed_metadata_audit_indexed_v642.py','experiments/warehouse/seed_triage_indexed_v642.py',
     'tests/test_warehouse_v642_calibration_quality.py','tests/test_warehouse_v642_quality_collection.py',
-    'scripts/run_warehouse_v642_calibration_quality.py','docs/warehouse_v642_calibration_quality_plan.md')
+    'scripts/run_warehouse_v642_calibration_quality.py','docs/warehouse_v642_calibration_quality_plan.md',
+    'experiments/warehouse/v642_final_programs.py','tests/test_warehouse_v642_final_programs.py','docs/warehouse_v642_final_program_plan.md',
+    'experiments/warehouse/v642_fresh_program_metrics.py','tests/test_warehouse_v642_fresh_program_metrics.py',
+    'scripts/finalize_warehouse_v642_programs.py')
 _ASSET_CACHE={}
 
 
@@ -121,8 +124,20 @@ def declaration(rows):
         uses=declaration,cases_sha256=digest(rows),authorization_granted=False)
 
 
-def prepare(report_ref,*,run_id,base_start,action_start):
+def final_programs(ref,completed_assets_ref):
+    from .v642_final_programs import read_completed
+    return read_completed(ref,completed_assets_ref)
+
+
+def collection_recipe():
+    return dict(quality.recipe(),frozen_final_programs_required_before_allocation=True,
+        fresh_program_gate='each_raw_regularized_role_F_E_45_expected_F_40_agree_95_97_KL_020_illegal_unproved_zero',
+        fresh_program_qualification_changes=0,task_and_all_four_program_gates_must_pass=True)
+
+
+def prepare(report_ref,*,run_id,base_start,action_start,final_programs_ref=None):
     fixed=assets(report_ref)  # Before seed allocation and output creation.
+    programs=final_programs(final_programs_ref,report_ref)
     training.owner.seeds.confirmation.run_name(run_id)
     require(not claim_path().exists(),'this candidate already consumed its calibration quality attempt')
     rows=quality.cases(base_start,action_start);sources=source_files();folder=OUTPUT/run_id
@@ -133,7 +148,7 @@ def prepare(report_ref,*,run_id,base_start,action_start):
         target=folder/'source'/name;target.parent.mkdir(parents=True,exist_ok=True)
         raw=(ROOT/name).read_bytes();require(file_sha(ROOT/name)==sha,'quality source changed while preparing')
         target.write_bytes(raw);target.chmod(0o444)
-    value=dict(version=VERSION,run_id=run_id,fixed=fixed,cases=rows,recipe=quality.recipe(),source_files=sources,
+    value=dict(version=VERSION,run_id=run_id,fixed=fixed,final_programs=programs,cases=rows,recipe=collection_recipe(),source_files=sources,
         exact_plan=pointer(folder/'exact-plan.json'),training_authority=False,sealed_authority=False,pilot_opened=False)
     write_new(folder/'plan.json',value);(folder/'plan.json').chmod(0o444)
     return pointer(folder/'plan.json')
@@ -142,11 +157,13 @@ def prepare(report_ref,*,run_id,base_start,action_start):
 def checked(plan_ref):
     p=bound(plan_ref);folder=OUTPUT/p['run_id']
     require(Path(plan_ref['path']).resolve()==folder/'plan.json' and p['version']==VERSION
-        and p['recipe']==quality.recipe() and p['source_files']==source_files()
+        and p['recipe']==collection_recipe() and p['source_files']==source_files()
         and p['training_authority'] is p['sealed_authority'] is p['pilot_opened'] is False, 'quality plan/source/scope changed')
     quality.validate_cases(p['cases'])
     require(p['fixed']==assets(p['fixed']['report']) and bound(p['exact_plan'])==declaration(p['cases']),
         'quality training prerequisites or exact original arguments changed')
+    require(p['final_programs']==final_programs(p['final_programs']['report'],p['fixed']['report']),
+        'final-NN program prerequisite changed')
     for ref in p['fixed']['inputs']:require(pointer(ref['path'])==ref,'quality prerequisite asset changed')
     for name,sha in p['source_files'].items():
         q=folder/'source'/name;require(file_sha(q)==sha and not q.stat().st_mode&0o222,'quality source snapshot changed')
@@ -283,10 +300,13 @@ def collect(plan_ref):
                 if len(results)%45==0:print(json.dumps(dict(quality_episodes_completed=len(results),total=225)),flush=True)
         require(len(resets)==225 and [r['seed'] for r in resets]==[case['scenario_seed'] for case in p['cases'] for _ in quality.VARIANTS], 'quality reset inventory/order differs')
         checked(plan_ref);metrics=quality.evaluate(results,p['cases'],p['fixed']['actors'])
+        from .v642_fresh_program_metrics import evaluate as score_programs
+        program_metrics=score_programs(p['final_programs'],p['fixed']['actor_role_sha256'],entries,p['cases'])
         result=dict(version=VERSION,plan=plan_ref,claim=pointer(claim_path()),clearance=clearance_ref,metrics=metrics,
+            program_metrics=program_metrics,calibration_precheck_passed=metrics['task_retention_passed'] and program_metrics['passed'],
             outcomes=results,entries=entries,actual_resets=pointer(out/'actual-resets.jsonl'),reset_preauthorization=pointer(out/'reset-preauthorization.jsonl'),
             actual_reset_count=225,task_retention_passed=metrics['task_retention_passed'],
-            program_fidelity_evaluation_required=True,model_acceptance_passed=False,pilot_opened=False)
+            subsequent_development_and_formal_program_evaluation_required=True,model_acceptance_passed=False,pilot_opened=False)
         write_new(out/'result.json',result);(out/'result.json').chmod(0o444)
         write_new(out/'completed.json',dict(result=pointer(out/'result.json')));(out/'completed.json').chmod(0o444)
         return pointer(out/'result.json')

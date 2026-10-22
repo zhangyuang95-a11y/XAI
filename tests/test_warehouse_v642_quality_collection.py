@@ -16,6 +16,15 @@ def test_missing_completed_training_refuses_before_seeds_or_environment(tmp_path
     assert not list(tmp_path.iterdir())
 
 
+def test_actual_completion_without_final_programs_still_cannot_allocate(tmp_path,monkeypatch):
+    monkeypatch.setattr(c,'assets',lambda ref:dict(report=ref))
+    def forbidden(*args,**kwargs):pytest.fail('missing final program reached scene allocation')
+    monkeypatch.setattr(c.quality,'cases',forbidden)
+    with pytest.raises(RuntimeError,match='completed final-NN program report is required'):
+        c.prepare({},run_id='cannot-allocate',base_start=None,action_start=None)
+    assert not list(tmp_path.iterdir())
+
+
 def test_exact_parser_accepts_only_declared_matched_reuse(tmp_path):
     rows=c.quality.cases(90100000,9010000000)
     value=c.declaration(rows);p=tmp_path/'exact-plan.json';p.write_text(json.dumps(value))
@@ -32,6 +41,7 @@ def prepared(tmp_path,monkeypatch):
     path=tmp_path/'synthetic-completed-report.json';path.write_text('{}');ref=c.pointer(path)
     fixed=dict(report=ref,actors={},actor_role_sha256={},inputs=[ref])
     monkeypatch.setattr(c,'assets',lambda r:fixed)
+    monkeypatch.setattr(c,'final_programs',lambda ref,completed:dict(report=fixed['report'],programs={},inputs=[fixed['report']]))
     monkeypatch.setattr(c,'claim_path',lambda:tmp_path/'quality-claim.json')
     plan=c.prepare(ref,run_id='synthetic-plan-only',base_start=90100000,action_start=9010000000)
     return plan

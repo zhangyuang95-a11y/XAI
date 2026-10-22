@@ -4,7 +4,7 @@
 完成20k后，增加一次确定性的离线程序最终拟合，将程序的目标角色哈希绑定到实际最终NN。
 此阶段不修改NN、critic或优化器；不产生NN反馈梯度，不新增场景。
 
-入口为 `experiments.warehouse.v642_final_programs.run`，显式传入完成资产收据、原参考缓冲目录和新run ID。
+入口为 `scripts/finalize_warehouse_v642_programs.py`（调用 `experiments.warehouse.v642_final_programs.run`），显式传入完成资产收据、原参考缓冲目录和新run ID。
 须先通过真实训练完成、实际exit0、raw零反馈及regularized双角色正反馈核对。
 训练日志必须由完成收据绑定；每版本只读取实际18.6k提取结果，不挑选较早程序。
 
@@ -18,3 +18,7 @@
 源码在claim前快照；单次claim即使失败/中断也保留；四个角色结果全部通过后才可进入后续准入。
 
 此处通过仅为训练程序池上的最终NN程序预检。全新任务/程序评估、三个开发流、正式配对、一次独立封存审计与留出要求保持不变，pilot关闭。
+
+读取最终程序还要求同目录的 `supervisor-exit.json`：`exit_code=0`、`observed_by=exec_tool_terminal_result`、`result`为实际结果的内容哈希指针。
+仅在工具观察到该程序正常终止后写入；不能根据PID消失或完成文件存在推断退出成功。
+随后75场景的实际最终NN轨迹对四个固定程序评分，不再拟合、校准或选择资格叶；任务和四项程序门槛共同决定校准预检结果。

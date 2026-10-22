@@ -125,7 +125,8 @@ def fit_option(source,root,subtree,parts,budget):
     old_tree=decode(source.structure);_,old_paths=encode(old_tree)
     old_ids=[i for i,path in enumerate(old_paths) if path[:len(root)]==root]
     takes={s:np.isin(source.leaf_indices(a['x']),old_ids) for s,a in parts.items()}
-    routes={s:_route(local_structure,a['x'][takes[s]],min(4,9-len(root))) for s,a in parts.items()}
+    local_router,local_info=structure_info(local_structure,256)
+    routes={s:_route(local_router,a['x'][takes[s]],local_info['depth']) for s,a in parts.items()}
     models=[];evidence=[]
     for local_id,global_id in enumerate(ids):
         budget.check();a=parts['fit'];within=np.flatnonzero(takes['fit']);selected=within[routes['fit']==local_id]

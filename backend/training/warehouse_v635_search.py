@@ -29,6 +29,9 @@ def option_score(option,parts,repeated):
     class LogicalMap:
         def certificates(self):return tuple(frozenset(x['legal']) for x in option['paths'])
     signals={s:metrics.frame_signals(LogicalMap(),parts[s],p) for s,p in predictions.items()}
+    # The immutable v630 helper infers float64 for an empty list. Empty
+    # subregions are valid and must retain a boolean physical-proof mask.
+    for value in signals.values():value['unproved']=np.asarray(value['unproved'],dtype=bool)
     total=dict(E=0,F=0,expected_F=0.);children=[]
     fit_counts=np.bincount(predictions['fit'][0],minlength=len(option['models']))
     for i in range(len(option['models'])):

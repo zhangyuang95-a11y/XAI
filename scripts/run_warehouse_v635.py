@@ -22,13 +22,16 @@ VERSION='warehouse-v635-action-qualified-root-rebuild.v1'
 PARENT=ROOT/'output/warehouse_v633/warehouse-v633-support-refresh-01'
 FILES=('backend/training/warehouse_v635_guards.py','backend/training/warehouse_v635_program.py',
        'backend/training/warehouse_v635_subtrees.py','backend/training/warehouse_v635_search.py',
-       'scripts/run_warehouse_v635.py','tests/test_warehouse_v635_guards.py','tests/test_warehouse_v635_subtrees.py','docs/warehouse_v635_plan.md')
+       'scripts/run_warehouse_v635.py','tests/test_warehouse_v635_guards.py','tests/test_warehouse_v635_subtrees.py',
+       'tests/test_warehouse_v635_empty_regions.py','docs/warehouse_v635_plan.md')
 
 
 class Budget:
-    def __init__(self,path,limits):
-        self.path=path;self.h=path.open('x');self.started=time.monotonic();self.final=False;self.limits=limits
-        self.counts={k:0 for k in limits};self.seq=0;self.tail='0'*64
+    def __init__(self,path,limits,spent=None):
+        spent=spent or dict(counts={k:0 for k in limits},seconds=0.,source=None)
+        self.path=path;self.h=path.open('x');self.started=time.monotonic()-spent['seconds'];self.final=False;self.limits=limits
+        self.counts=dict(spent['counts']);self.seq=0;self.tail='0'*64
+        self.event('engineering_prefix_debit',spent)
     def check(self):v.require(time.monotonic()-self.started<(4200 if self.final else 3600),'registered root-rebuild phase wall budget exhausted')
     def solve(self,kind,metadata,callback):
         self.check();v.require(not self.final and kind in self.limits and self.counts[kind]<self.limits[kind],'root-rebuild call budget exhausted')
@@ -64,7 +67,7 @@ def sources():
 
 def work(output,spec):
     folder=Path(output)/spec['id'];folder.mkdir(exist_ok=False);planref=v.pointer(Path(output)/'plan.json')
-    budget=Budget(folder/'ledger.jsonl',spec['limits']);write_new(folder/'started.json',dict(spec=spec,plan=planref,pid=os.getpid(),started_monotonic=budget.started))
+    budget=Budget(folder/'ledger.jsonl',spec['limits'],spec.get('engineering_spent'));write_new(folder/'started.json',dict(spec=spec,plan=planref,pid=os.getpid(),started_monotonic=budget.started))
     try:
         _,old=v.checked_plan();prior=v.bound(old['previous_plan']);dp=v.bound(prior['previous_plan'])
         sr=v.bound(spec['source_result']);source=Previous.from_dict(v.bound(sr['program']),old['actor_role_sha256'][spec['role']])
@@ -95,7 +98,7 @@ def work(output,spec):
     write_new(folder/'result.json',r);(folder/'result.json').chmod(0o444);return v.pointer(folder/'result.json')
 
 
-def main(output):
+def main(output,engineering_parent=None):
     v.require(not output.exists(),'single-use run already exists');_,old=v.checked_plan()
     jobs=[]
     for fold in range(3):
@@ -105,6 +108,17 @@ def main(output):
             maximum_new_models=2*sum(s+1 for s in slots)
             limits=dict(node=2*sum(slots)*4*7,leaf=72*maximum_new_models,proof=320*maximum_new_models)
             jobs.append(dict(id=f'fold-{fold}-{role}',fold=fold,role=role,source_result=ref,limits=limits,structural_roots=[list(x) for x in roots]))
+    if engineering_parent is not None:
+        previous=v.bound(v.pointer(engineering_parent/'result.json'))
+        v.require(previous['all_six_settled'] and not previous['scientific_development_passed'],'engineering parent is not terminal')
+        byid={v.bound(ref)['spec']['id']:(ref,v.bound(ref)) for ref in previous['units']}
+        for job in jobs:
+            ref,failed=byid[job['id']]
+            v.require(failed['status']=='failed' and failed['spec']['source_result']==job['source_result'] and failed['spec']['limits']==job['limits'] and
+                failed['error'] in ("ufunc 'bitwise_and' not supported for the input types, and the inputs could not be safely coerced to any supported types according to the casting rule ''safe''",'invalid Warehouse hard-tree split inputs'),
+                'unrecognized repair or changed scientific settings')
+            job['engineering_spent']=dict(counts=failed['counts'],seconds=failed['elapsed_seconds'],source=ref,
+                ledger=v.pointer(engineering_parent/job['id']/'ledger.jsonl'))
     plan=dict(schema=VERSION,registered_utc=datetime.now(timezone.utc).isoformat(),jobs=jobs,source_files=sources(),
         source_method='uniform_v633_final_all_six_no_rolewise_selection',actor=old['actor'],actor_role_sha256=old['actor_role_sha256'],
         maximum_depth=9,maximum_leaves=256,maximum_node_and_leaf_public_sources=3,maximum_leaf_coefficients=20,
@@ -119,6 +133,8 @@ def main(output):
         source_original_protected_outputs_immutable=True,unprotected_program_outputs_may_change=True,NN_execution_unmodified=True,
         risk_and_final_gates_unchanged=True,search_seconds=3600,total_seconds=4200,maximum_workers=3,BLAS_threads=1,automatic_retry=False,
         fresh_confirmation_required=True,NN_updates=0,PPO_joint_steps=0,new_environment_resets=0,training_authority=False,sealed_authority=False,pilot_opened=False)
+    plan['engineering_parent']=None if engineering_parent is None else v.pointer(engineering_parent/'result.json')
+    plan['engineering_repair']='empty_bool_dtype_and_normalized_stump_router_only_cumulative_budgets'
     output.mkdir(parents=True)
     for name,sha in plan['source_files'].items():
         p=Path(name) if Path(name).is_absolute() else ROOT/name;v.require(v.file_sha(p)==sha,'source changed before snapshot')
@@ -154,5 +170,5 @@ def main(output):
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True)
-    main(p.parse_args().output.resolve())
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True);p.add_argument('--engineering-parent',type=Path)
+    a=p.parse_args();main(a.output.resolve(),None if a.engineering_parent is None else a.engineering_parent.resolve())

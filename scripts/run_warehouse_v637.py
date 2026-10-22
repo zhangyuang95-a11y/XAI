@@ -37,6 +37,13 @@ def sources():
     return dict(sorted(files.items()))
 
 
+def snapshot_source(source,target,expected_sha):
+    v.require(v.file_sha(source)==expected_sha,'source changed before snapshot')
+    target.parent.mkdir(parents=True,exist_ok=True)
+    if target.exists():v.require(v.file_sha(target)==expected_sha,'source alias collides with a different snapshot')
+    else:target.write_bytes(source.read_bytes());target.chmod(0o444)
+
+
 def work(output,spec):
     folder=Path(output)/spec['id'];folder.mkdir(exist_ok=False);planref=v.pointer(Path(output)/'plan.json')
     budget=Budget(folder/'ledger.jsonl',spec['limits']);write_new(folder/'started.json',dict(spec=spec,plan=planref,pid=os.getpid()))
@@ -98,7 +105,7 @@ def main(output):
     output.mkdir(parents=True)
     for name,sha in plan['source_files'].items():
         p=Path(name) if Path(name).is_absolute() else ROOT/name;v.require(v.file_sha(p)==sha,'source changed before snapshot')
-        target=output/'source'/p.relative_to(ROOT);target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(p.read_bytes());target.chmod(0o444)
+        snapshot_source(p,output/'source'/p.relative_to(ROOT),sha)
     write_new(output/'plan.json',plan);(output/'plan.json').chmod(0o444);refs=[]
     with ProcessPoolExecutor(max_workers=3) as pool:
         for f in as_completed([pool.submit(work,str(output),spec) for spec in jobs]):

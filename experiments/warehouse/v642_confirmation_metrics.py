@@ -46,6 +46,11 @@ def load_locked_bundle():
     path,plan=v.checked_plan();refs={k:v.pointer(v.OUTPUT/name) for k,name in
         (('plan','plan.json'),('summary','result.json'),('independent_audit','independent-replay.json'),('execution','supervisor-exit.json'))}
     summary=v.bound(refs['summary']);audit=v.bound(refs['independent_audit']);execution=v.bound(refs['execution'])
+    audit_plan_ref=v.pointer(v.OUTPUT/'audit-plan.json');ap=v.bound(audit_plan_ref)
+    v.require(audit['schema']=='warehouse-v642-depth-matched-independent-replay.v1' and audit['audit_plan']==audit_plan_ref and
+        ap['plan']==refs['plan'] and ap['summary']==refs['summary'] and ap['source']==v.pointer(v.ROOT/'scripts/audit_warehouse_v642.py') and
+        ap['optimizer_refits']==0,'independent replay plan/source/summary binding differs')
+    refs['audit_plan']=audit_plan_ref
     v.require(summary['plan']==refs['plan'] and summary['all_twelve_settled'] and len(summary['units'])==12 and
         audit['integrity_passed'] is True and len(audit['units'])==12 and all(r['integrity_passed'] for r in audit['units']),
         'partial or unaudited depth comparison cannot confirm')
@@ -63,7 +68,12 @@ def load_locked_bundle():
         assets.extend((ref,r['program'],r['search_report'],spec['source_result']));results.append(r)
     passing=[depth for depth in (9,12) if all(r['development_passed'] for r in results if r['spec']['maximum_depth']==depth)]
     v.require(passing and summary['scientific_development_passed'] is True,'no uniform all-six winner; do not mix rolewise capacity results')
+    for d in (9,12):
+        rows=[r for r in results if r['spec']['maximum_depth']==d]
+        expected=dict(all_six_passed=all(r['development_passed'] for r in rows),development_pass_count=sum(r['development_passed'] for r in rows),numerical_pass_count=sum(r['numerical_passed'] for r in rows))
+        v.require(summary['arms'][str(d)]==expected,'arm aggregate differs from all six measured units')
     depth=passing[0];_,old=v.previous.checked_plan();quality=v.previous.common_quality(old)
+    assets.extend((old['common_quality'],old['collection']))
     v.require(all(m['deliveries']>=5.5 and m['collisions']<=6 and m['shutdown_rate']<=.05 for m in quality.values()),'frozen NN historical development quality failed')
     old_plan=v.bound(old['previous_plan']);old_summary=v.bound(v.pointer(v.previous.previous.OUTPUT/'summary.json'));old_audit=v.bound(old_summary['independent_audit'])
     units=[]
@@ -73,7 +83,7 @@ def load_locked_bundle():
         role,fold=spec['role'],spec['fold'];folder=v.previous.previous.OUTPUT/'jobs'/f'G128-fold-{fold}-{role}'
         oldref=v.pointer(folder/'result.json');baseline=v.bound(oldref);seal=v.pointer(folder/'completed.json')
         original_job=next(j for j in old_plan['jobs'] if j['job_id']==folder.name);checked_old=next(a for a in old_audit['jobs'] if a['job']==original_job)
-        v.require(v.bound(seal)==dict(result_sha256=oldref['sha256']) and baseline['status']==checked_old['status']=='completed' and
+        v.require(v.bound(seal)==dict(result_sha256=oldref['sha256']) and baseline['job']==original_job and baseline['status']==checked_old['status']=='completed' and
             checked_old['independent_reference_metrics'] is True and baseline['plan_sha256']==old['previous_plan']['sha256'],'original comparator lacks audited provenance')
         program=Program.from_dict(v.bound(r['program']),plan['actor_role_sha256'][role]);reference=ReferenceProgram.from_dict(v.bound(baseline['reference']),plan['actor_role_sha256'][role])
         units.append(arithmetic.Unit(role,fold,program,reference,r['program'],baseline['reference'],v.digest(program.to_dict()),v.digest(reference.to_dict())))

@@ -17,7 +17,15 @@ VERSION='warehouse-v642-completed-calibration-assets.v1'
 STEPS=(4000,15000,16800,18600,20000)
 
 
+def audit_source_files():
+    return {name:file_sha(ROOT/name) for name in (
+        'scripts/audit_warehouse_v642_calibration_results.py',
+        'backend/training/warehouse_v642_checkpoint_export.py',
+        'experiments/warehouse/v642_update_receipt_audit.py')}
+
+
 def run(*,reference_directory,completed_ref,supervisor_exit_ref,output):
+    audit_sources=audit_source_files()
     completed=bound(completed_ref);exit_record=bound(supervisor_exit_ref)
     require(exit_record['exit_code']==0 and exit_record['controller_completed']==completed_ref
         and exit_record['observed_by']=='exec_tool_terminal_result',
@@ -100,8 +108,10 @@ def run(*,reference_directory,completed_ref,supervisor_exit_ref,output):
     require(all(exports['raw']['final']['role_sha256'][r]!=exports['regularized']['final']['role_sha256'][r]
         for r in anchor_roles),'final raw and regularized roles must have independent hashes')
     for ref in inputs:require(pointer(ref['path'])==ref,'calibration inputs changed during read-only export')
+    require(audit_source_files()==audit_sources,'tensor export or receipt audit source changed during calibration readback')
     report=dict(version=VERSION,controller_completed=completed_ref,supervisor_exit=supervisor_exit_ref,
-        source_sha256=file_sha(__file__),receipt_audit=reports,exports=exports,actual_reset_count=len(resets),
+        source_sha256=file_sha(__file__),audit_source_files=audit_sources,input_asset_refs=inputs,
+        receipt_audit=reports,exports=exports,actual_reset_count=len(resets),
         numerical_training_completed=True,independent_quality_evaluation_required=True,
         independent_current_final_NN_program_evaluation_required=True,
         last_fit_programs_are_not_automatically_certified_for_final_NN=True,

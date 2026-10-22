@@ -84,3 +84,18 @@ def test_registered_prior_seed_blocks_quality_before_any_reset(prepared,tmp_path
     with pytest.raises(RuntimeError,match='historical seed conflict|unresolved metadata'):
         c.audit_seeds(prepared)
     assert not c.claim_path().exists()
+
+
+@pytest.mark.parametrize('change',['missing_sources','different_exporter'])
+def test_completed_asset_header_cannot_omit_or_change_audit_helpers(tmp_path,monkeypatch,change):
+    value=dict(version='warehouse-v642-completed-calibration-assets.v1',numerical_training_completed=True,
+        model_acceptance_passed=False,publishable=False,pilot_opened=False,
+        source_sha256=c.file_sha(c.ROOT/'scripts/audit_warehouse_v642_calibration_results.py'),
+        audit_source_files=c.audit_source_files())
+    if change=='missing_sources':value.pop('audit_source_files')
+    else:value['audit_source_files']['backend/training/warehouse_v642_checkpoint_export.py']='wrong'
+    path=tmp_path/'synthetic-bad-source-report.json';path.write_text(json.dumps(value))
+    def forbidden(*args,**kwargs):pytest.fail('unbound report reached frozen Actor loading')
+    monkeypatch.setattr(c.FrozenWarehouseV6Actor,'load',forbidden)
+    with pytest.raises(RuntimeError,match='actual audited 20k completion'):
+        c.assets(c.pointer(path))

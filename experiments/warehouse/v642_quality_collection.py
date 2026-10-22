@@ -22,6 +22,7 @@ from env.warehouse.public_observation_v6 import encode_public_observation,public
 from env.warehouse.pure_nn import action_masks
 from env.warehouse.reset_audit_v614 import capture_stage1_resets,stage1_reset_phase
 from scripts.run_warehouse_v625 import write_new
+from scripts.audit_warehouse_v642_calibration_results import audit_source_files
 from scripts.audit_warehouse_v642_confirmation import verify_frame
 from scripts.measure_warehouse_v628_collection import episode as replay_public_episode
 
@@ -46,7 +47,7 @@ def source_files():
 
 def assets(report_ref):
     """Replay source-bound completed-training counters before any new seeds."""
-    key=digest(dict(report=report_ref,training_sources=training.source_files()))
+    key=digest(dict(report=report_ref,training_sources=training.source_files(),audit_sources=audit_source_files()))
     if key in _ASSET_CACHE:
         saved=_ASSET_CACHE[key]
         for ref in saved['inputs']:require(pointer(ref['path'])==ref,'training/export evidence asset changed')
@@ -54,7 +55,8 @@ def assets(report_ref):
     r=bound(report_ref)
     require(r['version']=='warehouse-v642-completed-calibration-assets.v1' and r['numerical_training_completed'] is True
         and r['model_acceptance_passed'] is r['publishable'] is r['pilot_opened'] is False
-        and r['source_sha256']==file_sha(ROOT/'scripts/audit_warehouse_v642_calibration_results.py'),
+        and r['source_sha256']==file_sha(ROOT/'scripts/audit_warehouse_v642_calibration_results.py')
+        and r.get('audit_source_files')==audit_source_files(),
         'quality collection needs actual audited 20k completion, never a placeholder')
     completed=bound(r['controller_completed']);contract=bound(completed['controller_contract'])
     require(completed['version']==training.VERSION and completed['calibration_training_finished'] is True
@@ -93,6 +95,11 @@ def assets(report_ref):
     require(all(len({roles[v][role] for v in quality.VARIANTS})==3 for role in ('robot_1','robot_2')),
         'reference/raw/regularized need distinct actual role weights, not just different NPZ metadata')
     refs.append(actors['reference'])
+    require(type(r.get('input_asset_refs')) is list
+        and pointer(folder/'owner-journal.jsonl') in r['input_asset_refs']
+        and pointer(folder/'actual-resets.jsonl') in r['input_asset_refs'],
+        'completed training report must bind actual optimizer/refit and reset journal bytes')
+    refs.extend(deepcopy(r['input_asset_refs']))
     for ref in refs:require(pointer(ref['path'])==ref,'training/export evidence asset changed')
     value=dict(report=report_ref,actors=actors,actor_role_sha256=roles,inputs=refs)
     _ASSET_CACHE[key]=deepcopy(value)

@@ -38,3 +38,14 @@ SHA-256：`17d2d193fc7d6854d7af12f1cfbbf7995597bf3bdab6d7427bb7a5eb329e4410`。
 
 Git另经实时只读核对：PR [#5](https://github.com/zhangyuang95-a11y/XAI/pull/5)已合入main；2026-10-22 fetch后main仍为`f7a489305a668c28df4165815ee24d399b9e7166`，包含远端Task 2 `4eecd7d`及研究v3 `b7ccfcf`。
 模型发布的第二次PR尚未启动。现有部署分支、旧脏工作树及恢复快照保持原状，当前NN训练源码契约保持不变。
+
+## 更新：raw完整程序源池重放通过
+
+实际owner于2026-10-22 14:45:31 UTC记录`program_source_replayed`（journal sequence 3929）。
+登记的1650个完整episode已全部采集并通过NN动作、环境物理、奖励、终止及最终私有状态/RNG的重放核对，合计196,420个额外物理联合帧。
+这些帧不增加PPO联合训练步数，也不进入NN梯度缓冲；raw训练前缀仍为15,000步。
+
+源清单SHA-256：`6ca91fc6d75dfa051e38f6d108c40eb0c9959497576ce600fb473994d408a1d9`；
+完整源池审计内容摘要：`a42e16224b45c0e00f09c1d55032699d25210310785ac32e2ea5bf34e9d22e12`。
+证据为实际`calibration/owner-journal.jsonl`中上述事件；此摘要不是额外审计文件的SHA。
+程序重拟合、资格及分布保真尚待实际结果；该重放通过不等于新的程序或20k模型验收通过。

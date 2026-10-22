@@ -69,3 +69,13 @@ Git另经实时只读核对：PR [#5](https://github.com/zhangyuang95-a11y/XAI/p
 
 原始结果：[step-15000/result.json](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-extraction/3f86b1e7d98ed3b833a62b45bfe529bbb9d8f730b18da6f9696463a359ce1d96/step-15000/result.json)。
 SHA-256：`8a7b2f11a301bd6408201fdc0679eef75ea0ab75c23d95a4c4cb902b3d334330`。
+
+## 更新：程序反馈前的实际配对轨迹一致性
+
+两版本15k源池Actor的两个角色权重哈希分别相同。对已完成的前100个登记程序episode做只读比较，
+每版11,913个物理联合帧的完整事件（动作、公开前后状态、奖励、终止和停机）完全相同；
+每局初始及最终私有环境/RNG快照也逐字节相同。所有输入只读并在比较前后核对SHA，未重新执行环境、NN或优化器。
+这核对反馈前的配对过程；只覆盖前100局，不代替regularized完整源池的独立物理/NN重放，也不构成模型质量证据。
+
+只读输入清单及结果：[paired-program-source-prefix-100-01.json](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/paired-program-source-prefix-100-01.json)。
+SHA-256：`344b5cabae1ccc8dc634a5d9b31caff5d2a96c3c984290ee22673c7b1b4b375c`。

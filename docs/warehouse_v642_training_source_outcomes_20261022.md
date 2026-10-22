@@ -88,3 +88,10 @@ SHA-256：`344b5cabae1ccc8dc634a5d9b31caff5d2a96c3c984290ee22673c7b1b4b375c`。
 
 只读收据：[program-source-outcomes-03.json](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/program-source-outcomes-03.json)。
 SHA-256：`e237c9538e813d86732fb0a68eacd88736198a1b6932a921b30c6f992a5c0e26`。
+
+## 用户确认的本轮收尾边界
+
+2026-10-23，用户明确选择“当前20k训练跑完后结束”。因此当前`warehouse-v642-calibration-02`配对运行结束后，
+核对真实终止状态、完成收据、检查点及实际梯度，保存模型和指标并结束本轮工作。
+之后的最终程序拟合、新75场景评估、三个开发流、正式配对及发布等仍是未完成工作，本轮不继续启动。
+这项收尾安排不改变科学门槛，不将20k训练完成表述为完整模型验收通过。

@@ -38,7 +38,9 @@ FILES=('experiments/warehouse/v642_quality_collection.py','experiments/warehouse
     'scripts/run_warehouse_v642_calibration_quality.py','docs/warehouse_v642_calibration_quality_plan.md',
     'experiments/warehouse/v642_final_programs.py','tests/test_warehouse_v642_final_programs.py','docs/warehouse_v642_final_program_plan.md',
     'experiments/warehouse/v642_fresh_program_metrics.py','tests/test_warehouse_v642_fresh_program_metrics.py',
-    'scripts/finalize_warehouse_v642_programs.py')
+    'scripts/finalize_warehouse_v642_programs.py',
+    'experiments/warehouse/v642_calibration_admission.py','scripts/audit_warehouse_v642_calibration_precheck.py',
+    'tests/test_warehouse_v642_calibration_admission.py')
 _ASSET_CACHE={}
 
 
@@ -298,6 +300,8 @@ def collect(plan_ref):
                     trace.chmod(0o444);array.chmod(0o444);results.append(outcome)
                     entries.append(dict(case=case,variant=variant,trace=pointer(trace),arrays=pointer(array)))
                 if len(results)%45==0:print(json.dumps(dict(quality_episodes_completed=len(results),total=225)),flush=True)
+        for name in ('actual-resets.jsonl','reset-preauthorization.jsonl'):
+            (out/name).chmod(0o444)
         require(len(resets)==225 and [r['seed'] for r in resets]==[case['scenario_seed'] for case in p['cases'] for _ in quality.VARIANTS], 'quality reset inventory/order differs')
         checked(plan_ref);metrics=quality.evaluate(results,p['cases'],p['fixed']['actors'])
         from .v642_fresh_program_metrics import evaluate as score_programs

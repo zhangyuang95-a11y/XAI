@@ -79,3 +79,12 @@ SHA-256：`8a7b2f11a301bd6408201fdc0679eef75ea0ab75c23d95a4c4cb902b3d334330`。
 
 只读输入清单及结果：[paired-program-source-prefix-100-01.json](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/paired-program-source-prefix-100-01.json)。
 SHA-256：`344b5cabae1ccc8dc634a5d9b31caff5d2a96c3c984290ee22673c7b1b4b375c`。
+
+## 2026-10-23更新：两版本900局fit分区均完成
+
+两版本15k快照在各自完整900局拟合源数据上均为：配送15.15333、机器人碰撞2.71667、停机18/900＝2.00%，物理联合帧各107,327。
+此时尚未进入80%的外部程序反馈窗口；两版本相同成绩不能解释为程序正则化带来的收益。
+这些仍是程序拟合源数据描述，后续独立任务质量和最终模型验收保持待验证。
+
+只读收据：[program-source-outcomes-03.json](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/program-source-outcomes-03.json)。
+SHA-256：`e237c9538e813d86732fb0a68eacd88736198a1b6932a921b30c6f992a5c0e26`。

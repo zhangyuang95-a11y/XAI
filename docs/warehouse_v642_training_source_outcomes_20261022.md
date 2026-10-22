@@ -124,3 +124,31 @@ SHA-256：`57015c9a85f6d350dff3635f167fb0854a256725648b9aac7502974ae63f2b48`。
 - [regularized update.json](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/015000/update.json)，SHA-256：`5ad11a53a3734bb959475dbaee83ab551a444987bdc1692d3833de4d0ad08955`。
 
 记录时训练仍在继续，未观察到终止状态；后续按上述用户确认边界完成20k并核对最终收据。
+
+## 2026-10-23更新：16,800步两版本程序均通过，检查点已保存
+
+两版本的16,800步程序重拟合、观察源绑定及安全批次边界检查点均已实际生成。
+每份检查点均记录`processed_joint_steps=16800`、`refits=[15000,16800]`、`safe_batch_boundary=true`及`failed=false`。
+检查点内累计接受的正程序梯度更新与全部已完成PPO收据逐项求和一致：raw两个角色各0次，regularized两个角色各32次。
+
+以下是各自当前NN在登记源池validation分区的程序指标，四个角色/版本组合全部通过既定严格开发门槛。
+全部原始非法动作及未证明路径计数均为0；一致率与KL仍只针对对应合格区域。
+
+| 版本/角色 | 反馈覆盖 | 解释覆盖 | 预期反馈覆盖 | 反馈一致率 | 解释一致率 | 反馈KL | 解释KL |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| raw / robot_1 | 59.78649% | 57.79463% | 56.94284% | 98.27076% | 98.42504% | 0.061681 | 0.058938 |
+| raw / robot_2 | 50.59138% | 49.54628% | 48.49315% | 98.73945% | 98.77523% | 0.051023 | 0.050590 |
+| regularized / robot_1 | 59.78649% | 57.79463% | 56.94057% | 98.25666% | 98.41532% | 0.061657 | 0.058913 |
+| regularized / robot_2 | 50.59138% | 49.54628% | 48.50118% | 98.76721% | 98.80358% | 0.050864 | 0.050438 |
+
+两版本角色哈希均已与各自16,024步快照不同，且在相同角色之间raw/regularized哈希不同。
+本轮没有新增独立任务质量评估；上文900局fit描述不属于16,800步模型的新质量成绩。
+这些程序验证结果也不替代最终20k模型的独立保真验证或最终准入，不据两版本的微小差异声称正则化收益。
+当前20k训练仍在运行，继续遵守用户确认的收尾边界。
+
+原始结果及检查点：
+
+- [raw 16,800步程序](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-extraction/3f86b1e7d98ed3b833a62b45bfe529bbb9d8f730b18da6f9696463a359ce1d96/step-16800/result.json)，SHA-256：`3fafea85a12ce21bd527497adb70151c8c07db5d30729ced4f7bf4188aaf1cce`。
+- [regularized 16,800步程序](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-extraction/097bca0716954649b5f213456c2c0ee32efd13eedd267d8cd8746876760c4581/step-16800/result.json)，SHA-256：`aa6bbbeb59dd0941b147ec535cfda7fc9e0b2e27a8e14d1ad14bb45eda554100`。
+- [raw检查点](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/checkpoints/016800/owner-state.json)，SHA-256：`4019ffb17b612be0c95979ddf0086b79b60b3d5eec5560d234fb903091236755`。
+- [regularized检查点](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/checkpoints/016800/owner-state.json)，SHA-256：`1c6d1fde78693b7fecb03ca11ae298108f238ca36047108ee818ee4e7a565553`。

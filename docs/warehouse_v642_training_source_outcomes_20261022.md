@@ -95,3 +95,32 @@ SHA-256：`e237c9538e813d86732fb0a68eacd88736198a1b6932a921b30c6f992a5c0e26`。
 核对真实终止状态、完成收据、检查点及实际梯度，保存模型和指标并结束本轮工作。
 之后的最终程序拟合、新75场景评估、三个开发流、正式配对及发布等仍是未完成工作，本轮不继续启动。
 这项收尾安排不改变科学门槛，不将20k训练完成表述为完整模型验收通过。
+
+## 2026-10-23更新：regularized 15k程序通过，首批双角色实际梯度已接受
+
+regularized的15k程序提取和观察源绑定完成标记均已生成，两个角色的全部严格门槛通过。
+其validation指标与上文raw 15k表逐项相同；此时两版本尚未接受外部程序梯度，不能解释为正则化收益。
+原始结果：[regularized step-15000/result.json](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-extraction/097bca0716954649b5f213456c2c0ee32efd13eedd267d8cd8746876760c4581/step-15000/result.json)。
+SHA-256：`57015c9a85f6d350dff3635f167fb0854a256725648b9aac7502974ae63f2b48`。
+
+两版本15,000→16,024联合步的实际PPO更新收据均已完成。各执行4个epoch、合计16次优化器更新；
+以下梯度为程序损失对对应Actor的梯度范数，记录于共享梯度裁剪前。
+
+| 版本/角色 | 实际接受的正程序梯度更新 | 程序梯度范数范围 | 选中/全部优化器帧暴露 |
+|---|---:|---:|---:|
+| raw / robot_1 | 0 | 0–0 | 0 / 4096 |
+| raw / robot_2 | 0 | 0–0 | 0 / 4096 |
+| regularized / robot_1 | 16 | 0.000125613–0.000287727 | 2412 / 4096 |
+| regularized / robot_2 | 16 | 0.000091172–0.000187038 | 1975 / 4096 |
+
+帧暴露数包含4个epoch的重复使用，不是4096个独立物理帧，也不是独立验证覆盖率。
+两个角色在两版本中均发生实际权重变化，且两版本在本批结束后的角色哈希分别不同。
+这些权重变化来自PPO、成本、参考KL及适用的程序项的合并更新，不能全部归因于程序项。
+本表确认raw零外部反馈和regularized双角色实际反馈；尚未证明最终任务保留、20k最终程序保真或完整模型验收通过。
+
+原始收据：
+
+- [raw update.json](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/015000/update.json)，SHA-256：`841e83ead584badf7389f56b807c7e27d48af590b4ad1475c4848b8af0ecc96f`。
+- [regularized update.json](/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/015000/update.json)，SHA-256：`5ad11a53a3734bb959475dbaee83ab551a444987bdc1692d3833de4d0ad08955`。
+
+记录时训练仍在继续，未观察到终止状态；后续按上述用户确认边界完成20k并核对最终收据。

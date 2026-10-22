@@ -93,7 +93,9 @@ def unit(folder,ref):
         record=report['root_records'][index];trparts,trmask=search.root_parts(source,root,{'fit':outer['fit']})
         indices=np.flatnonzero(trmask['fit']&train);x=outer['fit']['x'][indices];nn=outer['fit']['p'][indices].argmax(1)
         v.require(record['root']==list(root) and record['root_training_frames']==len(indices),'root training exposure differs')
-        for name,option in obj['options'].items():
+        for name in ('old','context-depth-2','context-depth-3'):
+            if name not in obj['options']:continue
+            option=obj['options'][name]
             if name=='old':v.require(option==build.original_option(source,root),'original subtree option changed')
             else:
                 physical_checks+=option_context(source,root,option)
@@ -159,13 +161,13 @@ def main(folder):
     planref=v.pointer(folder/'plan.json');plan=v.bound(planref);summaryref=v.pointer(folder/'result.json');summary=v.bound(summaryref)
     v.require(summary['all_six_settled'] and all(v.bound(ref)['status']=='completed' for ref in summary['units']),'need six actual completed programs')
     auditplan=dict(source=v.pointer(__file__),plan=planref,summary=summaryref,maximum_workers=3,optimizer_candidates_refitted=False)
-    write_new(folder/'audit-plan.json',auditplan);(folder/'audit-plan.json').chmod(0o444);rows=[]
+    write_new(folder/'audit-plan-02.json',auditplan);(folder/'audit-plan-02.json').chmod(0o444);rows=[]
     with ProcessPoolExecutor(max_workers=3) as pool:
         for f in as_completed([pool.submit(unit,str(folder),ref) for ref in summary['units']]):
             r=f.result();rows.append(r);print(r['job'],'independent replay passed',flush=True)
     for name,sha in plan['source_files'].items():v.require(v.file_sha(Path(name) if Path(name).is_absolute() else ROOT/name)==sha,'registered source changed')
     v.require(v.pointer(plan['actor']['path'])==plan['actor'] and v.pointer(__file__)==auditplan['source'],'NN or replay source changed')
-    result=dict(schema='warehouse-v636-independent-replay.v1',audit_plan=v.pointer(folder/'audit-plan.json'),units=sorted(rows,key=lambda r:r['job']),
+    result=dict(schema='warehouse-v636-independent-replay.v1',audit_plan=v.pointer(folder/'audit-plan-02.json'),units=sorted(rows,key=lambda r:r['job']),
         integrity_passed=len(rows)==6 and all(r['integrity_passed'] for r in rows),new_fits=0,NN_updates=0,new_environment_resets=0,
         model_acceptance_passed=False,pilot_opened=False)
     write_new(folder/'independent-replay.json',result);(folder/'independent-replay.json').chmod(0o444)

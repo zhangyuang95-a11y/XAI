@@ -1,0 +1,39 @@
+{
+  "automatic_resume": false,
+  "automatic_retry": false,
+  "config": {
+    "actor_learning_rate": 3e-05,
+    "actor_warmup_joint_steps": 4000,
+    "clip": 0.2,
+    "critic_coefficient": 0.5,
+    "critic_learning_rate": 0.0003,
+    "entropy_coefficient": 0.005,
+    "episode_horizon": 120,
+    "epochs": 4,
+    "gae_lambda": 0.95,
+    "gamma": 0.99,
+    "joint_step_budget": 20000,
+    "maximum_gradient_norm": 0.5,
+    "minibatch_joint_frames": 256,
+    "parallel_environments": 8,
+    "program_maximum_coefficient": 0.01,
+    "rollout_vector_steps": 128
+  },
+  "current_NN_targets_not_execution_controllers": true,
+  "initial_actors": "same_complete_frozen_v620_dual_Actor_for_both_variants",
+  "pilot_opened": false,
+  "program_evidence_counts": {
+    "calibration": 150,
+    "eligibility": 300,
+    "fit": 900,
+    "validation": 300
+  },
+  "program_evidence_excluded_from_NN_gradients": true,
+  "program_pair_fold": 0,
+  "quality_and_program_evaluation_after_training_required": true,
+  "reference_buffer": "original_audited_300_argmax_common_fit",
+  "reserved_training_cases_per_slot": 128,
+  "same_critic_and_optimizer_initialization_within_pair": true,
+  "schema": "warehouse-v642-paired-calibration-recipe.v1",
+  "slots": 8
+}

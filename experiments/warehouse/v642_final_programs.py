@@ -161,18 +161,23 @@ def read_completed(ref,completed_assets_ref):
         and r['model_acceptance_passed'] is r['pilot_opened'] is False,
         'missing, failed, changed or differently bound final programs')
     p=bound(r['plan']);c=bound(r['claim']);execution_ref=pointer(folder/'supervisor-exit.json');execution=bound(execution_ref)
+    supervision_refs=[]
+    if execution.get('observed_by')=='source_bound_subprocess_wait':
+        from .v642_stage_supervisor import verify_execution
+        supervision_refs=verify_execution(execution_ref,ref,stage='final-programs')
     require(r['plan']==pointer(folder/'plan.json') and r['claim']==pointer(claim_path())
         and c['plan']==r['plan'] and c['output']==str(folder)
         and p['version']==VERSION and p['completed_assets']==completed_assets_ref
         and p['source_files']==r['source_files'] and p['source_sha256']==digest(r['source_files'])
         and bound(pointer(folder/'completed.json'))==dict(result=ref)
         and execution['result']==ref and execution['exit_code']==0
-        and execution['observed_by']=='exec_tool_terminal_result',
+        and (execution['observed_by']=='exec_tool_terminal_result' or bool(supervision_refs)),
         'final-program claim, completion or observed terminal exit differs')
     fixed=q.assets(completed_assets_ref)
     require(r['actors']==fixed['actors'] and r['actor_role_sha256']==fixed['actor_role_sha256']
         and set(r['roles'])=={'raw','regularized'},'final programs belong to another frozen NN pair')
-    programs={};inputs=[ref,r['plan'],r['claim'],execution_ref,pointer(folder/'completed.json'),*r['input_asset_refs']]
+    programs={};inputs=[ref,r['plan'],r['claim'],execution_ref,pointer(folder/'completed.json'),
+        *supervision_refs,*r['input_asset_refs']]
     for variant in ('raw','regularized'):
         require(set(r['roles'][variant])==set(ROLES),'both final program roles required')
         programs[variant]={}

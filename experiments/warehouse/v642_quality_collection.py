@@ -43,6 +43,8 @@ FILES=('experiments/warehouse/v642_quality_collection.py','experiments/warehouse
     'scripts/finalize_warehouse_v642_programs.py',
     'experiments/warehouse/v642_calibration_admission.py','scripts/audit_warehouse_v642_calibration_precheck.py',
     'tests/test_warehouse_v642_calibration_admission.py',
+    'experiments/warehouse/v642_stage_supervisor.py','scripts/supervise_warehouse_v642_stage.py',
+    'tests/test_warehouse_v642_stage_supervisor.py',
     *recovery_assets.FILES, *recovery_execution.NEW_SOURCE_NAMES)
 _ASSET_CACHE={}
 

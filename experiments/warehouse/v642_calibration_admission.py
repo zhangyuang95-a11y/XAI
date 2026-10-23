@@ -32,8 +32,14 @@ def audit(result_ref, supervisor_exit_ref):
     result_path = _asset(result_ref, inputs)
     execution = bound(supervisor_exit_ref)
     _asset(supervisor_exit_ref, inputs)
+    subprocess_refs=[]
+    if execution.get('observed_by') == 'source_bound_subprocess_wait':
+        from .v642_stage_supervisor import verify_execution
+        subprocess_refs=verify_execution(supervisor_exit_ref,result_ref,stage='calibration-quality')
+        for ref in subprocess_refs:
+            _asset(ref,inputs)
     require(type(execution.get('exit_code')) is int and execution['exit_code'] == 0
-            and execution.get('observed_by') == 'exec_tool_terminal_result'
+            and (execution.get('observed_by') == 'exec_tool_terminal_result' or bool(subprocess_refs))
             and execution.get('result') == result_ref,
             'calibration collection terminal exit was not actually observed')
     result = bound(result_ref)

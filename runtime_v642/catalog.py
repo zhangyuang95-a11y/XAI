@@ -91,6 +91,7 @@ class FormalContext:
     receipt: object
     bindings: tuple[PolicyBinding, PolicyBinding]
     assets: AssetResolver
+    catalog: object = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +107,11 @@ class FormalVerdict:
 
 
 class VerifierRegistry:
-    """No default scientific verifier exists; unknown receipt schemas fail closed."""
+    """New scientific schemas need DI; explicit carried-v5 readers are built in.
+
+    Unknown schemas remain closed. Historical readers recheck their pinned
+    original evidence and actual migrated execution, not Warehouse stages.
+    """
     def __init__(self, verifiers=None):
         self._verifiers = MappingProxyType(dict(verifiers or {}))
         require(all(isinstance(k, str) and k and callable(v) for k, v in self._verifiers.items()), 'invalid explicit verifier registry')
@@ -114,6 +119,10 @@ class VerifierRegistry:
     def verify(self, context):
         receipt = context.receipt
         schema = receipt.get('version', '')
+        if context.domain in ('pong', 'kitchen'):
+            from .legacy_acceptance import REVALIDATION_SCHEMAS, verify_revalidation
+            if schema == REVALIDATION_SCHEMAS[context.domain]:
+                return verify_revalidation(context)
         if schema not in self._verifiers:
             return FormalVerdict(False, schema, context.receipt_sha256, 'unknown_formal_acceptance_schema')
         # These generic invariants never delegate away to a permissive hook.
@@ -203,7 +212,7 @@ class PolicyCatalog:
         pair = self.policies[domain]
         ref = pair['regularized'].accepted_receipt_sha256
         return self.verifiers.verify(FormalContext(self.release_id, domain, ref, self.assets.json(ref),
-            (pair['raw'], pair['regularized']), self.assets))
+            (pair['raw'], pair['regularized']), self.assets, self))
 
     def require_pilot(self):
         verdicts = tuple(self.formal_verdict(domain) for domain in DOMAINS)
@@ -217,8 +226,12 @@ class PolicyCatalog:
         if binding.variant == 'raw':
             return None
         p = next(p for p in binding.programs if p.role == role)
+        if binding.domain in ('pong', 'kitchen'):
+            from .legacy_domain import LegacyProgramEvidence
+            return LegacyProgramEvidence(self, binding, role)
         require(binding.domain == 'warehouse' and p.reader_schema == 'warehouse-role-program.v6.42-explicit-depth-capacity',
                 'program reader schema is not registered by this v642 reader')
+        require(p.audit_scope == 'independent_final_program_audit', 'Warehouse cannot use a carried development-audit waiver')
         reader = PortableProgram.load(self.assets.pointer(p.archive_sha256),
             expected_source_program_sha256=p.source_program_sha256, target_actor_role_sha256=binding.role_hash(role),
             independent_audit_ref=None if p.independent_audit_sha256 is None else self.assets.pointer(p.independent_audit_sha256),

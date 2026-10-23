@@ -42,11 +42,13 @@ class ProgramBinding:
     archive_sha256: str
     source_program_sha256: str
     independent_audit_sha256: str | None
+    audit_scope: str = 'independent_final_program_audit'
 
     def __post_init__(self):
         require(self.role in ROLES and isinstance(self.native_role, str) and bool(self.native_role)
             and isinstance(self.reader_schema, str) and bool(self.reader_schema)
             and is_sha(self.archive_sha256) and is_sha(self.source_program_sha256)
+            and self.audit_scope in ('independent_final_program_audit', 'carried_selected_actor_development_audit')
             and (self.independent_audit_sha256 is None or is_sha(self.independent_audit_sha256)), 'invalid program binding')
 
     def to_dict(self):

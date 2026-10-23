@@ -10,6 +10,7 @@ from datetime import datetime,timedelta,timezone
 from pathlib import Path
 from collections import Counter
 import os
+import json
 
 from . import v642_long_training_protocol as protocol
 from . import v642_training_partitions as old_partitions
@@ -32,6 +33,8 @@ PROPOSAL_VERSION='warehouse-v642-long-pair-seed-proposal.v1'
 VARIANTS=('raw','regularized')
 HISTORY_NAMES=legacy.confirmation.HISTORY_NAMES
 REGISTRY_REF=deepcopy(legacy.confirmation.INVENTORY_REF)
+EXECUTION_LEASE_DAYS_BY_BUDGET={200000:7,300000:10,400000:14}
+RESTART_VERSION='warehouse-v642-long-common-start-restart.v1'
 
 
 def source_files():
@@ -117,7 +120,10 @@ def _known_spent(registration,readiness):
 def declared_calls(value,training,evidence):
     uses=[];reservations=[];tag=VERSION+':'+value['phase']+':'+value['stream_id']+':'+str(value['joint_step_budget'])
     def use(kind,purpose,argument,seed,group,reuse,draw=None):
-        row=dict(kind=kind,purpose=purpose,argument=argument,value=seed,group=group,reuse_tag=tag+':'+reuse)
+        # Only the common initialization/optimizer start intentionally repeats
+        # across budgets. Scene/action reservations retain their budget tag.
+        reuse_prefix=(VERSION+':'+value['phase']+':'+value['stream_id']) if reuse in ('paired-initialization','paired-optimizer') else tag
+        row=dict(kind=kind,purpose=purpose,argument=argument,value=seed,group=group,reuse_tag=reuse_prefix+':'+reuse)
         if draw is not None:row['consumed_as_random_draw']=draw
         uses.append(row)
     for variant in VARIANTS:
@@ -168,7 +174,11 @@ class LongTrainingSeedPlan:
         for ref in self.refs:_asset(ref,readonly=False)
         require(bound(p['proposal_ref'])==dict(version=PROPOSAL_VERSION,**{key:p[key] for key in
             ('phase','stream_id','joint_step_budget','initialization_seed','optimizer_seed',
-             'train_case_inventory','program_evidence_inventory')}),'long plan differs from its immutable caller proposal')
+             'train_case_inventory','program_evidence_inventory')},
+             **({'restart_declaration':p['restart_declaration']} if p['restart_declaration'] is not None else {})),
+             'long plan differs from its immutable caller proposal')
+        require(p['execution_lease_days']==EXECUTION_LEASE_DAYS_BY_BUDGET[p['joint_step_budget']]
+                and p['seed_clearance_start_window_hours']==24,'long finite execution lease or start window changed')
         require(p['phase'] in ('development','formal') and p['stream_id'] in
                 (protocol.DEVELOPMENT_STREAMS if p['phase']=='development' else protocol.FORMAL_STREAMS)
                 and p['execution_output']==str(folder/'training')
@@ -177,6 +187,7 @@ class LongTrainingSeedPlan:
         for key in ('proposal_ref','train_case_inventory','program_evidence_inventory'):_asset(p[key])
         t,e=bound(p['train_case_inventory']),bound(p['program_evidence_inventory'])
         checked=validate_inventories(t,e,config=self.config,initialization_seed=p['initialization_seed'],optimizer_seed=p['optimizer_seed'])
+        require(p['restart_proof']==_verified_restart(p),'long registered restart proof changed')
         spent,ids=_known_spent(self.registration,self.readiness)
         require(not spent&set(checked['all_seed_arguments']) and not ids&set(checked['episode_ids']),
                 'long-pair plan overlaps spent development, confirmation or calibration-quality scenes')
@@ -197,8 +208,9 @@ def prepare(*,calibration_precheck_ref,reference_directory,proposal_ref,run_id):
     registration=protocol.register_preparation(calibration_precheck_ref)  # FIRST, before caller proposal/output/seed reads.
     registration.verify();readiness=old_partitions.admission.load_readiness(reference_directory);readiness.verify()
     _asset(proposal_ref);p=bound(proposal_ref)
-    require(set(p)=={'version','phase','stream_id','joint_step_budget','initialization_seed','optimizer_seed',
-                    'train_case_inventory','program_evidence_inventory'} and p['version']==PROPOSAL_VERSION,
+    keys={'version','phase','stream_id','joint_step_budget','initialization_seed','optimizer_seed',
+          'train_case_inventory','program_evidence_inventory'}
+    require(set(p) in (keys,keys|{'restart_declaration'}) and p['version']==PROPOSAL_VERSION,
             'invalid explicit long-pair proposal')
     require(p['phase'] in ('development','formal') and p['joint_step_budget'] in protocol.BUDGETS
             and p['stream_id'] in (protocol.DEVELOPMENT_STREAMS if p['phase']=='development' else protocol.FORMAL_STREAMS),
@@ -207,6 +219,11 @@ def prepare(*,calibration_precheck_ref,reference_directory,proposal_ref,run_id):
     for key in ('train_case_inventory','program_evidence_inventory'):_asset(p[key])
     training,evidence=bound(p['train_case_inventory']),bound(p['program_evidence_inventory'])
     checked=validate_inventories(training,evidence,config=config,initialization_seed=p['initialization_seed'],optimizer_seed=p['optimizer_seed'])
+    restart=_verified_restart(p)
+    if restart is not None:
+        fresh=set(checked['all_seed_arguments'])-{p['initialization_seed'],p['optimizer_seed']}
+        require(not fresh&set(restart['spent_seed_arguments']) and not set(checked['episode_ids'])&set(restart['spent_episode_ids']),
+                'a common-start restart cannot reuse old training/program scenes or action arguments')
     spent,ids=_known_spent(registration,readiness)
     require(not spent&set(checked['all_seed_arguments']) and not ids&set(checked['episode_ids']),
             'long-pair proposal overlaps spent development, confirmation or calibration-quality scenes')
@@ -214,7 +231,8 @@ def prepare(*,calibration_precheck_ref,reference_directory,proposal_ref,run_id):
             'long continuation must preserve the registered complete v620 reference')
     run=legacy.confirmation.run_name(run_id);sources=source_files();source_sha=digest(sources)
     declaration,cases=declared_calls(p,training,evidence)
-    refs=tuple(deepcopy([*registration.refs,*readiness.refs,proposal_ref,p['train_case_inventory'],p['program_evidence_inventory']]))
+    refs=tuple(deepcopy([*registration.refs,*readiness.refs,proposal_ref,p['train_case_inventory'],p['program_evidence_inventory'],
+                        *([] if restart is None else [restart['declaration'],*restart['allowed_metadata_refs']])]))
     for ref in refs:_asset(ref,readonly=False)
     global_claim=OUTPUT_ROOT/'claims'/f'{p["phase"]}-{p["stream_id"]}-{p["joint_step_budget"]}.json'
     require(not global_claim.exists(),'this phase/stream/budget was already consumed even if interrupted')
@@ -228,6 +246,8 @@ def prepare(*,calibration_precheck_ref,reference_directory,proposal_ref,run_id):
         write_new(output/name,value);(output/name).chmod(0o444)
     exact.read_exact_plan(output/'exact-plan.json')
     value=dict(deepcopy(p),version=VERSION,run_id=run,proposal_ref=deepcopy(proposal_ref),config=asdict(config),
+        restart_declaration=p.get('restart_declaration'),restart_proof=restart,
+        execution_lease_days=EXECUTION_LEASE_DAYS_BY_BUDGET[p['joint_step_budget']],seed_clearance_start_window_hours=24,
         calibration_precheck_ref=deepcopy(calibration_precheck_ref),protocol_registration_sha256=registration.payload_sha256,
         readiness_sha256=readiness.payload_sha256,source_files=sources,source_sha256=source_sha,
         reference_actor=deepcopy(readiness.value['actor']),reference_role_sha256=dict(protocol.REFERENCE_ROLES),
@@ -255,13 +275,99 @@ def check(plan_ref,*,calibration_precheck_ref,reference_directory):
     _asset(plan_ref);p=bound(plan_ref)
     require(Path(plan_ref['path']).resolve()==OUTPUT_ROOT/legacy.confirmation.run_name(p['run_id'])/'plan.json',
             'long plan is outside its isolated namespace')
-    refs=tuple(deepcopy([*registration.refs,*readiness.refs,p['proposal_ref'],p['train_case_inventory'],p['program_evidence_inventory']]))
+    refs=tuple(deepcopy([*registration.refs,*readiness.refs,p['proposal_ref'],p['train_case_inventory'],p['program_evidence_inventory'],
+        *([] if p['restart_proof'] is None else [p['restart_proof']['declaration'],*p['restart_proof']['allowed_metadata_refs']])]))
     return LongTrainingSeedPlan(plan_ref,p,registration,readiness,refs).verify()
 
 
 def exclusions(plan):
     return [Path(plan.ref['path']).parent,*(Path(plan.value[k]['path']) for k in
-            ('proposal_ref','train_case_inventory','program_evidence_inventory')),Path(plan.value['global_claim_path'])]
+            ('proposal_ref','train_case_inventory','program_evidence_inventory')),Path(plan.value['global_claim_path']),
+            *([] if plan.value['restart_declaration'] is None else [Path(plan.value['restart_declaration']['path'])])]
+
+
+def _verified_restart(p):
+    ref=p.get('restart_declaration')
+    if ref is None:
+        require(p['phase']!='development' or p['joint_step_budget']==protocol.BUDGETS[0],
+                'later development budgets need an independently verified common-start restart declaration')
+        return None
+    _asset(ref);d=bound(ref);budget=p['joint_step_budget']
+    require(set(d)=={'version','phase','stream_id','from_budget','to_budget','initialization_seed','optimizer_seed','previous_assets'}
+            and d['version']==RESTART_VERSION and d['phase']==p['phase']=='development'
+            and d['stream_id']==p['stream_id'] and budget in protocol.BUDGETS[1:]
+            and d['to_budget']==budget and d['from_budget']==protocol.BUDGETS[protocol.BUDGETS.index(budget)-1]
+            and d['initialization_seed']==p['initialization_seed'] and d['optimizer_seed']==p['optimizer_seed'],
+            'restart may only repeat the same development stream common start at the next registered budget')
+    # Lazy import avoids the seed-plan -> owner -> assets -> seed-plan cycle.
+    from . import v642_long_training_assets as assets
+    parent=bound(d['previous_assets'])
+    context=assets.finalization_context(d['previous_assets'],parent['reference_directory'])
+    plan=context['plan'];prior=plan.value
+    require(prior['phase']==p['phase'] and prior['stream_id']==p['stream_id'] and plan.config.joint_step_budget==d['from_budget']
+            and prior['initialization_seed']==p['initialization_seed'] and prior['optimizer_seed']==p['optimizer_seed']
+            and prior['reference_actor']['sha256']==protocol.REFERENCE_SHA256,
+            'restart parent does not prove the same actual common Actor/critic/optimizer start')
+    identity_keys=('roles','critic_sha256','full_initial_training_state_sha256','actor_optimizer_sha256',
+                   'critic_optimizer_sha256','initial_joint_steps','initial_actor_updates','initial_critic_updates')
+    starts=[{key:e[key] for key in identity_keys} for e in context['events'] if e['kind']=='initialized']
+    require(len(starts)==2 and starts[0]==starts[1],'restart parent has inconsistent actual pair initialization')
+    refs=[d['previous_assets'],plan.ref,prior['proposal_ref'],*context['assets']['inputs']]
+    clearance=checked_clearance(plan,execution=False)['value'];prior_exact=bound(clearance['exact'])
+    prior_inventory=bound(prior_exact['bounded_or_triaged_inventory'])
+    audit_refs=[clearance['exact'],prior_exact['bounded_or_triaged_inventory'],prior_inventory['bounded_inventory'],prior_inventory['proposal']]
+    if prior_exact.get('context_annotations'):audit_refs.append(prior_exact['context_annotations'])
+    if clearance['restart_context'] is not None:audit_refs.append(clearance['restart_context'])
+    refs.extend(audit_refs)
+    spent=set(prior['checked']['all_seed_arguments']);ids=set(prior['checked']['episode_ids'])
+    if prior['restart_proof'] is not None:
+        refs.extend(prior['restart_proof']['allowed_metadata_refs'])
+        audit_refs.extend(prior['restart_proof']['reference_only_audit_refs'])
+        spent.update(prior['restart_proof']['spent_seed_arguments']);ids.update(prior['restart_proof']['spent_episode_ids'])
+    unique={r['path']:r for r in refs}
+    for item in unique.values():_asset(item)
+    return dict(version=RESTART_VERSION,declaration=ref,previous_assets=d['previous_assets'],previous_plan=plan.ref,
+        expected_initial_identity=starts[0],allowed_metadata_refs=[unique[k] for k in sorted(unique)],
+        reference_only_audit_refs=sorted({r['path']:r for r in audit_refs}.values(),key=lambda r:r['path']),
+        initialization_seed=p['initialization_seed'],optimizer_seed=p['optimizer_seed'],
+        spent_seed_arguments=sorted(spent),spent_episode_ids=sorted(ids),
+        only_common_initialization_and_optimizer_arguments_reused=True,scene_and_action_arguments_must_remain_fresh=True)
+
+
+def _restart_context(evidence,proof):
+    """Narrow new source-context rule; retain the untouched original audit."""
+    if proof is None:return evidence,[]
+    allowed={ref['path']:ref for ref in proof['allowed_metadata_refs']};result=deepcopy(evidence);removed=[];documents={}
+    reference_only={ref['path'] for ref in proof['reference_only_audit_refs']}
+    init,opt=proof['initialization_seed'],proof['optimizer_seed']
+    for row in result['inventory']:
+        ref=allowed.get(row['path'])
+        if ref is None or row.get('sha256')!=ref['sha256']:continue
+        path=Path(row['path']);_asset(ref)
+        if path.suffix not in ('.json','.jsonl'):continue
+        documents[row['path']]=([json.loads(line) for line in path.read_text().splitlines()] if path.suffix=='.jsonl' else json.loads(path.read_text()))
+        kept=[]
+        for match in row.get('detail',{}).get('candidate_matches',[]):
+            route=match['path'];value=match['value'];body=documents[row['path']];parent=None;valid=False
+            try:
+                for key in route:parent=body;body=body[key]
+                key=route[-1] if route else None
+                valid=(body==value and ((row['path'] in reference_only and value in (init,opt))
+                    or (type(key) is int and len(route)>=2 and route[-2] in ('all_seed_arguments','spent_seed_arguments') and value in (init,opt))
+                    or (value==init and key in ('initialization_seed','pair_seed','new_critic_initialization_seed'))
+                    or (value==opt and key in ('optimizer_seed','optimizer_random_stream_seed'))
+                    or (value==opt and key=='seed' and type(parent) is dict and parent.get('kind')=='optimizer_RNG_predebit')
+                    or (key=='value' and type(parent) is dict and (
+                        (value==init and parent.get('kind')=='init' and parent.get('purpose')=='v642_long_imported_actors_new_critic_initialization')
+                        or (value==opt and parent.get('kind')=='action_rng' and parent.get('purpose')=='v642_long_PPO_shuffle_and_reference_mix')))))
+            except (KeyError,IndexError,TypeError):valid=False
+            if valid:removed.append(dict(file=ref,path=route,value=value,reason='source_bound_same_stream_common_start_restart'))
+            else:kept.append(match)
+        if 'detail' in row:row['detail']['candidate_matches']=kept
+    result['summary']=metadata.summarize(result['inventory'],result['families'],selection_stats=result.get('selection_stats'),
+                                         missing_roots=result.get('missing_roots',()))
+    result['initialization_and_optimizer_are_registered_restarts_not_fresh']=True
+    return result,removed
 
 
 def history_roots():return [ROOT.parent/name for name in HISTORY_NAMES]
@@ -298,18 +404,31 @@ def audit(plan):
     metadata.audit(folder/'proposal.json',history_roots(),folder/'bounded')
     triage.triage(folder/'bounded/inventory.json',folder/'proposal.json',folder/'triaged')
     result=exact.assess(plan.value['exact_plan']['path'],folder/'triaged/result.json',folder/'exact',context_source_root=ROOT)
-    legacy.conflict_free(result);selected,weights=_history(plan,traces)
+    reviewed,exceptions=_restart_context(result,plan.value['restart_proof'])
+    legacy.conflict_free(reviewed);selected,weights=_history(plan,traces)
+    context_ref=None
+    if plan.value['restart_proof'] is not None:
+        context=dict(version=RESTART_VERSION,exact=pointer(folder/'exact/result.json'),
+            proof_sha256=digest(plan.value['restart_proof']),source_sha256=file_sha(__file__),intentional_restart_matches=exceptions,
+            reviewed_inventory_sha256=digest(reviewed['inventory']),reviewed_summary=reviewed['summary'],
+            reused_arguments_are_not_claimed_fresh=True,environment_resets=0,training_authority=False)
+        write_new(folder/'restart-context.json',context);(folder/'restart-context.json').chmod(0o444)
+        context_ref=pointer(folder/'restart-context.json')
     audited={r['path']:(r['bytes'],r.get('mtime_ns')) for r in result['inventory']
              if r['classification']!='source_template_environment_reservation'}
     require(audited=={r['path']:(r['bytes'],r['mtime_ns']) for r in selected},'history changed during long-pair seed audit')
     templates=_templates(result['inventory'],current=True);plan.verify();now=datetime.now(timezone.utc)
     value=dict(version=VERSION,plan=plan.ref,registry=REGISTRY_REF,registered_traces=traces,
         exact=pointer(folder/'exact/result.json'),selection=selected,weight_paths=weights,templates=templates,
+        restart_context=context_ref,
         issued_utc=now.isoformat(),expires_utc=(now+timedelta(hours=24)).isoformat(),
         approved_case_reservations_sha256=plan.value['case_reservations']['sha256'],
         maximum_finite_reset_reservations=plan.value['maximum_explicit_resets'],actual_resets=0,
         training_authority=False,sealed_authority=False,pilot_opened=False)
     write_new(folder/'clearance.json',value);(folder/'clearance.json').chmod(0o444)
+    for path in folder.rglob('*'):
+        require(not path.is_symlink(),'long seed audit output contains a symlink')
+        if path.is_file():path.chmod(0o444)
     return checked_clearance(plan)
 
 
@@ -345,7 +464,17 @@ def checked_clearance(plan,*,execution=True):
              if r['classification']!='source_template_environment_reservation'}
     require(audited=={r['path']:(r['bytes'],r['mtime_ns']) for r in c['selection']}
             and len(audited)==len(c['selection']),'long-pair clearance metadata selection differs')
-    legacy.conflict_free(e)
+    reviewed,exceptions=_restart_context(e,plan.value['restart_proof'])
+    if plan.value['restart_proof'] is None:
+        require(c['restart_context'] is None,'unexpected long restart exception')
+    else:
+        require(c['restart_context']==pointer(folder/'restart-context.json')
+                and bound(c['restart_context'])==dict(version=RESTART_VERSION,exact=c['exact'],
+                    proof_sha256=digest(plan.value['restart_proof']),source_sha256=file_sha(__file__),
+                    intentional_restart_matches=exceptions,reviewed_inventory_sha256=digest(reviewed['inventory']),
+                    reviewed_summary=reviewed['summary'],reused_arguments_are_not_claimed_fresh=True,
+                    environment_resets=0,training_authority=False),'long restart source-context does not independently replay')
+    legacy.conflict_free(reviewed)
     if execution:
         selected,weights=_history(plan,traces)
         require(selected==c['selection'] and weights==c['weight_paths'],'history changed after long-pair clearance')

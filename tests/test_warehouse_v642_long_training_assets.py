@@ -177,3 +177,22 @@ def test_full_checkpoint_reader_never_constructs_model_optimizer_or_rng(tmp_path
         assert a.checkpoint_state(ref,record,variant='raw',step=4000,plan=plan,inputs=[])['joint_steps']==4000
     else:
         with pytest.raises(RuntimeError):a.checkpoint_state(ref,record,variant='raw',step=4000,plan=plan,inputs=[])
+
+
+@pytest.mark.parametrize('change',[None,'late_start','extend','renew','wrong_budget'])
+def test_start_window_is_24h_but_execution_lease_is_finite_budget_days(change):
+    now=datetime.now(timezone.utc)
+    clearance=dict(issued_utc=now.isoformat(),expires_utc=(now+timedelta(hours=24)).isoformat())
+    claim=dict(started_utc=now.isoformat(),expires_utc=(now+timedelta(days=7)).isoformat(),
+        execution_lease_days=7,seed_clearance_start_deadline_utc=clearance['expires_utc'],automatic_renewal=False)
+    plan=SimpleNamespace(value=dict(execution_lease_days=7),config=a.owner.PPOConfig(joint_step_budget=200000))
+    if change=='late_start':claim['started_utc']=(now+timedelta(days=2)).isoformat()
+    elif change=='extend':claim['expires_utc']=(now+timedelta(days=8)).isoformat()
+    elif change=='renew':claim['automatic_renewal']=True
+    elif change=='wrong_budget':claim['execution_lease_days']=10
+    if change is None:
+        start,end=a.audit_lease(claim,clearance,plan)
+        assert start+timedelta(days=2)<end  # Beyond24h remains inside the authorized7days.
+    else:
+        with pytest.raises(RuntimeError,match='finite execution lease differs'):
+            a.audit_lease(claim,clearance,plan)

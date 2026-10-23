@@ -21,6 +21,8 @@
 所有训练输入只读、内容哈希一致，模型与数据缺失或变动即拒绝。
 
 审计核对新owner源码快照、历史精确clearance、claim时限、每条journal、实际reset及有限库存顺序。
+历史clearance的24小时约束启动时间；200k／300k／400k执行claim分别为固定7／10／14天，
+所有训练journal事件必须处于对应claim执行期内，禁止自动续期或篡改到期时间。
 raw／regularized必须从同一完整Actor、critic、两种空优化器及零步状态出发；
 4k预热的完整状态必须相同，不能只凭相同初始化seed推断。
 

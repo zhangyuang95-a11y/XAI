@@ -8,7 +8,7 @@ and seeded action draws may be replayed; no new scene is generated.
 """
 from copy import deepcopy
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime,timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from hashlib import sha256
@@ -66,6 +66,17 @@ def asset(ref,inputs):
 
 def _time(value):
     result=datetime.fromisoformat(value);require(result.tzinfo is not None,'long audit timestamps require a timezone');return result
+
+
+def audit_lease(claim,clearance,plan):
+    start=_time(claim['started_utc']);expiry=_time(claim['expires_utc'])
+    issued=_time(clearance['issued_utc']);deadline=_time(clearance['expires_utc'])
+    days=owner.seeds.EXECUTION_LEASE_DAYS_BY_BUDGET[plan.config.joint_step_budget]
+    require(deadline-issued==timedelta(hours=24) and issued<=start<deadline
+            and days==plan.value['execution_lease_days']==claim['execution_lease_days']
+            and expiry-start==timedelta(days=days) and claim['seed_clearance_start_deadline_utc']==clearance['expires_utc']
+            and claim['automatic_renewal'] is False,'long startup freshness or finite execution lease differs')
+    return start,expiry
 
 
 def audit_terminal(result_ref,exit_ref,*,plan,reference_directory,calibration_precheck_ref,inputs):
@@ -345,6 +356,7 @@ def audit_completion(*,reference_directory,calibration_precheck_ref,result_ref,s
     for ref in (plan.ref,r['source_contract'],clearance['clearance'],r['owner_completed']):asset(ref,inputs)
     done=bound(r['owner_completed']);asset(done['claim'],inputs);asset(done['descriptor'],inputs)
     claim=bound(done['claim']);descriptor=bound(done['descriptor']);sources=owner.source_files()
+    audit_lease(claim,clearance['value'],plan)
     require(done['version']==descriptor['version']==claim['version']==owner.VERSION and done['training_finished'] is True
             and done['claim']==pointer(Path(plan.value['global_claim_path'])) and claim['plan']==plan.ref
             and claim['descriptor']==done['descriptor']==pointer(folder/'descriptor.json')
@@ -353,6 +365,10 @@ def audit_completion(*,reference_directory,calibration_precheck_ref,result_ref,s
             and claim['owner_pid']==exit_record['worker_pid']
             and _time(exit_record['started_utc'])<=_time(claim['started_utc'])<=_time(exit_record['finished_utc'])
             and _time(clearance['value']['issued_utc'])<=_time(claim['started_utc'])<_time(clearance['value']['expires_utc'])
+            and claim['execution_lease_days']==plan.value['execution_lease_days']
+            and _time(claim['expires_utc'])-_time(claim['started_utc'])==timedelta(days=plan.value['execution_lease_days'])
+            and claim['seed_clearance_start_deadline_utc']==clearance['value']['expires_utc']
+            and claim['automatic_renewal'] is False
             and descriptor['source_files']==sources and descriptor['seed_plan']==plan.ref
             and r['stream_id']==descriptor['stream_id']==claim['stream_id']==plan.value['stream_id']
             and descriptor['phase']==claim['phase']==plan.value['phase']=='development'
@@ -365,7 +381,7 @@ def audit_completion(*,reference_directory,calibration_precheck_ref,result_ref,s
     require([e['sequence'] for e in events]==list(range(len(events))) and events[0]['kind']=='long_training_claimed'
             and events[-1]['kind']=='paired_long_steps_finished' and all(e['version']==owner.VERSION and e['claim']==done['claim']
             and e['phase']==plan.value['phase'] and e['stream_id']==plan.value['stream_id']
-            and e['budget']==budget and _time(claim['started_utc'])<=_time(e['utc'])<_time(clearance['value']['expires_utc'])
+            and e['budget']==budget and _time(claim['started_utc'])<=_time(e['utc'])<_time(claim['expires_utc'])
             for e in events),'long owner journal order, identity or lease differs')
     starts=[e for e in events if e['kind']=='initialized']
     require(len(starts)==2 and {e['variant'] for e in starts}==set(VARIANTS),'missing or repeated long initialization')

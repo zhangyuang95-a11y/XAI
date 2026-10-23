@@ -215,3 +215,70 @@ def test_final_delta_and_registry_lifetime_four_root_checks(audited,change):
         p=Path(s.REGISTRY_REF['path']);p.chmod(0o644);p.write_text('{}');p.chmod(0o444)
     with pytest.raises((RuntimeError,KeyError,ValueError)):
         s.checked_clearance(plan)
+
+
+def test_restart_tags_repeat_only_common_start_and_keep_scene_tags_budget_specific():
+    train,program=inventories(200000)
+    v=dict(phase='development',stream_id='development-0',joint_step_budget=200000,initialization_seed=500,optimizer_seed=600)
+    first,_=s.declared_calls(v,train,program);v['joint_step_budget']=300000;second,_=s.declared_calls(v,train,program)
+    for a,b in zip(first['uses'],second['uses'],strict=True):
+        if a['purpose'] in ('v642_long_imported_actors_new_critic_initialization','v642_long_PPO_shuffle_and_reference_mix'):
+            assert a['reuse_tag']==b['reuse_tag']
+        else:assert a['reuse_tag']!=b['reuse_tag']
+
+
+def test_unproven_later_budget_cannot_claim_a_shared_restart():
+    with pytest.raises(RuntimeError,match='independently verified common-start restart'):
+        s._verified_restart(dict(phase='development',joint_step_budget=300000))
+
+
+def test_restart_context_cannot_whitelist_scene_or_unknown_original_use(tmp_path):
+    ref=put(tmp_path/'original-seed-report.json',dict(initialization_seed=500,optimizer_seed=600,
+        scene=dict(scenario_seed=500,action_seed=700)))
+    families=[dict(name=name,kind=kind,values=[value],intervals=[(value,value+1)],count=1,query_only=False)
+              for name,kind,value in [('init','init',500),('optimizer','action_rng',600),('scene','env',700)]]
+    matches=[dict(path=path,value=value,semantics=semantics,families=[family]) for path,value,semantics,family in
+        [(['initialization_seed'],500,'init','init'),(['optimizer_seed'],600,'action_rng','optimizer'),
+         (['scene','scenario_seed'],500,'env','init'),(['scene','action_seed'],700,'action_rng','scene')]]
+    row=dict(path=ref['path'],sha256=ref['sha256'],resolved=True,classification='receipt_or_metadata_report_not_independently_replayed',
+             detail=dict(candidate_matches=matches,reservation_overlaps=[]))
+    evidence=dict(inventory=[row],families=families,missing_roots=[],selection_stats={})
+    proof=dict(allowed_metadata_refs=[ref],reference_only_audit_refs=[],initialization_seed=500,optimizer_seed=600)
+    reviewed,removed=s._restart_context(evidence,proof)
+    assert len(removed)==2 and len(reviewed['inventory'][0]['detail']['candidate_matches'])==2
+    with pytest.raises(RuntimeError,match='historical seed conflict'):
+        s.legacy.conflict_free(reviewed)
+    untrusted=dict(proof,allowed_metadata_refs=[])
+    unchanged,removed=s._restart_context(evidence,untrusted)
+    assert not removed and len(unchanged['inventory'][0]['detail']['candidate_matches'])==4
+
+
+def test_restart_parent_requires_real_asset_reader_and_exact_same_stream_start(tmp_path,monkeypatch):
+    from experiments.warehouse import v642_long_training_assets as assets
+    proposal=put(tmp_path/'previous-proposal.json',dict(initialization_seed=500,optimizer_seed=600))
+    plan_ref=put(tmp_path/'previous-plan.json',dict(initialization_seed=500,optimizer_seed=600))
+    prior_assets=put(tmp_path/'previous-assets.json',dict(reference_directory=str(tmp_path)))
+    bounded=put(tmp_path/'bounded.json',dict(synthetic_only=True))
+    triaged=put(tmp_path/'triaged.json',dict(bounded_inventory=bounded,proposal=proposal))
+    exact=put(tmp_path/'exact.json',dict(bounded_or_triaged_inventory=triaged))
+    identity=dict(roles=dict(s.protocol.REFERENCE_ROLES),critic_sha256='a'*64,full_initial_training_state_sha256='b'*64,
+        actor_optimizer_sha256='c'*64,critic_optimizer_sha256='d'*64,initial_joint_steps=0,initial_actor_updates=0,initial_critic_updates=0)
+    prior=dict(phase='development',stream_id='development-0',initialization_seed=500,optimizer_seed=600,
+        reference_actor=dict(sha256=s.protocol.REFERENCE_SHA256),proposal_ref=proposal,
+        checked=dict(all_seed_arguments=[500,600,10000],episode_ids=['old-scene']),restart_proof=None)
+    context=dict(plan=SimpleNamespace(ref=plan_ref,value=prior,config=s.PPOConfig(joint_step_budget=200000)),
+        events=[dict(kind='initialized',variant=variant,**identity) for variant in s.VARIANTS],assets=dict(inputs=[]))
+    called=[]
+    def read(ref,directory):called.append(ref);return context
+    monkeypatch.setattr(assets,'finalization_context',read)
+    monkeypatch.setattr(s,'checked_clearance',lambda *args,**kwargs:dict(value=dict(exact=exact,restart_context=None)))
+    decl=put(tmp_path/'restart.json',dict(version=s.RESTART_VERSION,phase='development',stream_id='development-0',
+        from_budget=200000,to_budget=300000,initialization_seed=500,optimizer_seed=600,previous_assets=prior_assets))
+    p=dict(phase='development',stream_id='development-0',joint_step_budget=300000,initialization_seed=500,
+           optimizer_seed=600,restart_declaration=decl)
+    proof=s._verified_restart(p)
+    assert called==[prior_assets] and proof['expected_initial_identity']==identity
+    assert proof['spent_seed_arguments']==[500,600,10000] and proof['scene_and_action_arguments_must_remain_fresh']
+    prior['stream_id']='development-1'
+    with pytest.raises(RuntimeError,match='same actual common Actor/critic/optimizer start'):
+        s._verified_restart(p)

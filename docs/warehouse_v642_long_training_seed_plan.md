@@ -59,6 +59,25 @@ clearance始终是零实际reset、无训练／封存权限的证据；owner还�
 真实预算阶段准入及每次reset预扣。正式阶段没有真实budget-lock独立读者时仍不得运行。
 此层可保存formal符号库存，但不因此授权formal训练。
 
+长预算的24小时clearance只约束启动时的历史新鲜度；200k／300k／400k的实际执行期分别固定7／10／14天。
+plan绑定`execution_lease_days`和`seed_clearance_start_window_hours=24`；owner的独占claim记录确切开始与到期，禁止自动续期。
+这项新工程注册不改变旧20k或恢复版本的时限。
+
+## 同流跨预算的共同起点重启
+
+300k／400k开发提案必须额外绑定`restart_declaration`：
+`warehouse-v642-long-common-start-restart.v1`，包括同一phase／stream、相邻from/to预算、
+原initialization／optimizer参数，以及前预算真实`long_training_assets`指针。
+新的读者独立验证前预算真实退出、完整更新与初始身份，保存`expected_initial_identity`；
+新owner必须把实际新初始化的Actor／critic／两optimizer完整身份与其逐项比较。
+这不是从前预算的最终模型续训。
+
+只有这两个已注册的共同起点参数有跨预算复用标签；训练／程序源的场景、episode和动作参数继续使用全新且互斥的库存。
+历史原始exact结果完整保存。新的`restart-context.json`仅对通过前预算资产闭包验证的明确初始化／优化参数位置，
+及已链接的只读历史审计引用，记录有来源证明的有意复用，不冒称fresh。
+其他场景参数、未知文件、同值但不同用途、未解析元数据和区间冲突仍然拒绝。
+该读者不修改旧exact/context全局规则，也不凭重启声明颁发预算递进或正式实验权限。
+
 `assemble_training_batch`仅让有限训练成员经原环境／NN重放读者进入PPO；程序证据不能进入reward或cost缓冲。
 `check_reference_buffer`只接受原已审计common-fit buffer。二者不执行训练更新。
 

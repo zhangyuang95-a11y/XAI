@@ -308,8 +308,13 @@ def test_future_warehouse_release_addresses_separate_package_without_activation(
         warehouse_release_spec("policylens-three-domain-20261016.v6.00")
 
 
-def test_packager_rejects_changed_source_before_copy(tmp_path):
-    from scripts.package_warehouse_v6_release import package
+def test_packager_rejects_changed_source_before_copy(tmp_path, monkeypatch):
+    from scripts import package_warehouse_v6_release as packager
+
+    # Satisfy the current structural receipt gate so this test actually reaches
+    # the source-hash rejection. These are synthetic values, never admission.
+    budget = packager.p.BUDGETS[0]
+    monkeypatch.setattr(packager, "_bundle", lambda *a, **k: pytest.fail("copied before source verification"))
 
     receipt_path = (tmp_path / "runs" / "warehouse-v6-synthetic" / "admission" /
                     "warehouse_v6_acceptance.json")
@@ -319,10 +324,14 @@ def test_packager_rejects_changed_source_before_copy(tmp_path):
         "release_id": RELEASE_ID,
         "policy_id": warehouse_release_spec().policy_ids,
         "passed": True, "heldout_evaluated": True,
+        "actor_model_version": packager.p.REGISTERED_BC_SPEC["actor_model_version"],
+        "locked_budget": budget,
+        "topology_refresh_steps": list(packager.p.topology_refresh_steps(budget)),
+        "topology_frozen_at_step": packager.p.topology_frozen_at_step(budget),
         "source_closure_sha256": "0" * 64,
     }))
     with pytest.raises(ValueError, match="source closure differs"):
-        package(receipt_path)
+        packager.package(receipt_path)
 
 
 def test_successor_release_starts_pending_with_copied_v5_bytes(tmp_path):

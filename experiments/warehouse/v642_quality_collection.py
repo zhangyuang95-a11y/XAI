@@ -13,6 +13,8 @@ from . import seed_metadata_audit_indexed_v642 as metadata,seed_triage_indexed_v
 from . import seed_interval_index_v642 as interval_source
 from .v626_protocol import require,pointer,bound,digest,file_sha
 from .v642_update_receipt_audit import audit_updates
+from . import v642_recovered_assets as recovery_assets
+from . import v642_calibration_recovery as recovery_execution
 from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor,encode_actor_tree_features
 from backend.training.warehouse_v622_program import masked_probabilities
 from backend.training.warehouse_v6_runner import _set_dual_nn_mode
@@ -40,7 +42,8 @@ FILES=('experiments/warehouse/v642_quality_collection.py','experiments/warehouse
     'experiments/warehouse/v642_fresh_program_metrics.py','tests/test_warehouse_v642_fresh_program_metrics.py',
     'scripts/finalize_warehouse_v642_programs.py',
     'experiments/warehouse/v642_calibration_admission.py','scripts/audit_warehouse_v642_calibration_precheck.py',
-    'tests/test_warehouse_v642_calibration_admission.py')
+    'tests/test_warehouse_v642_calibration_admission.py',
+    *recovery_assets.FILES, *recovery_execution.NEW_SOURCE_NAMES)
 _ASSET_CACHE={}
 
 
@@ -52,12 +55,18 @@ def source_files():
 
 def assets(report_ref):
     """Replay source-bound completed-training counters before any new seeds."""
-    key=digest(dict(report=report_ref,training_sources=training.source_files(),audit_sources=audit_source_files()))
+    key=digest(dict(report=report_ref,training_sources=training.source_files(),audit_sources=audit_source_files(),
+        recovery_audit_sources=recovery_assets.source_files(),
+        recovery_executor_sources=recovery_execution.source_files()))
     if key in _ASSET_CACHE:
         saved=_ASSET_CACHE[key]
         for ref in saved['inputs']:require(pointer(ref['path'])==ref,'training/export evidence asset changed')
         return deepcopy(saved)
     r=bound(report_ref)
+    if r.get('version')==recovery_assets.VERSION:
+        value=recovery_assets.read_assets(report_ref)
+        _ASSET_CACHE[key]=deepcopy(value)
+        return value
     require(r['version']=='warehouse-v642-completed-calibration-assets.v1' and r['numerical_training_completed'] is True
         and r['model_acceptance_passed'] is r['publishable'] is r['pilot_opened'] is False
         and r['source_sha256']==file_sha(ROOT/'scripts/audit_warehouse_v642_calibration_results.py')

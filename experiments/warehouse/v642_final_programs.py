@@ -47,15 +47,24 @@ def last_programs(journal,*,variant,owner_ref,source_ref):
 
 def run(*,completed_assets_ref,reference_directory,run_id):
     fixed=q.assets(completed_assets_ref)  # Before output, fitting or replay.
-    report=bound(completed_assets_ref);controller=bound(report['controller_completed'])
-    contract=bound(controller['controller_contract'])
-    plan=q.training.owner.load_seed_plan(reference_directory,contract['seed_plan'])
-    require(q.training.checked_contract(plan)==controller['controller_contract'],'training source/plan changed')
+    report=bound(completed_assets_ref)
+    if report.get('version')==q.recovery_assets.VERSION:
+        context=q.recovery_assets.finalization_context(completed_assets_ref,reference_directory)
+        plan=context['plan'];events=context['events'];journal_refs=context['journal_refs']
+        owners=context['owners'];program_sources=context['program_sources']
+        require(all(ref in report['input_asset_refs'] for ref in journal_refs),
+            'recovered assets do not bind both optimizer/refit journals')
+    else:
+        controller=bound(report['controller_completed']);contract=bound(controller['controller_contract'])
+        plan=q.training.owner.load_seed_plan(reference_directory,contract['seed_plan'])
+        require(q.training.checked_contract(plan)==controller['controller_contract'],'training source/plan changed')
+        folder=Path(report['controller_completed']['path']).parent
+        journal_refs=[pointer(folder/'owner-journal.jsonl')]
+        require(journal_refs[0] in report['input_asset_refs'],'completed training report does not bind its refit journal')
+        events=[json.loads(line) for line in Path(journal_refs[0]['path']).read_text().splitlines()]
+        owners={v:pointer(folder/v/'owner.json') for v in ('raw','regularized')}
+        program_sources={v:pointer(folder/v/'program-source/source.json') for v in ('raw','regularized')}
     q.training.owner.seeds.confirmation.run_name(run_id)
-    folder=Path(report['controller_completed']['path']).parent
-    journal_ref=pointer(folder/'owner-journal.jsonl')
-    require(journal_ref in report['input_asset_refs'],'completed training report does not bind its refit journal')
-    events=[json.loads(line) for line in Path(journal_ref['path']).read_text().splitlines()]
     for i,event in enumerate(events):require(event['sequence']==i,'training journal has missing or reordered events')
     sources=source_files();source_sha=digest(sources);output=OUTPUT/run_id
     claim=claim_path()
@@ -71,10 +80,10 @@ def run(*,completed_assets_ref,reference_directory,run_id):
         path=output/'source'/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(raw);path.chmod(0o444)
     write_new(output/'plan.json',identity);(output/'plan.json').chmod(0o444)
     write_new(claim,dict(version=VERSION,plan=pointer(output/'plan.json'),output=str(output),single_use_even_if_failed=True,pilot_opened=False))
-    claim.chmod(0o444);results={};refs=[*fixed['inputs'],journal_ref,pointer(output/'plan.json'),pointer(claim)]
+    claim.chmod(0o444);results={};refs=[*fixed['inputs'],*journal_refs,pointer(output/'plan.json'),pointer(claim)]
     try:
         for variant in ('raw','regularized'):
-            owner_ref=pointer(folder/variant/'owner.json');source_ref=pointer(folder/variant/'program-source/source.json')
+            owner_ref=owners[variant];source_ref=program_sources[variant]
             source=bound(source_ref)
             require(source['owner']==owner_ref and source['inventory']==plan.proposal.value['program_evidence_inventory'],
                 'finalization may use only this owner\'s admitted program-only episode inventory')

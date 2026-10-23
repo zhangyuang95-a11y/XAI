@@ -1,0 +1,457 @@
+{
+  "NN_forward_calls": 0,
+  "assets": [
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/b0aeeea1772221f047e294c44c6632a98ff0b92f5e5e645678142d62c7fd7b6d/study_v3_kitchen_frozen_v5.json",
+        "sha256": "b0aeeea1772221f047e294c44c6632a98ff0b92f5e5e645678142d62c7fd7b6d"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "configs/study_v3_kitchen_frozen_v5.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/6b49345da601dee883719130e2581e6754bfd1447d31d3e1134da2fd262aa51c/study_v3_kitchen_v5.json",
+        "sha256": "6b49345da601dee883719130e2581e6754bfd1447d31d3e1134da2fd262aa51c"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "configs/study_v3_kitchen_v5.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42/study_v3_pong.json",
+        "sha256": "1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "configs/study_v3_pong.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958/rolling_actor_v5.acceptance.json",
+        "sha256": "ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "domains/pong/rolling_actor_v5.acceptance.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/81fc93529e777a3cb8d2805e1a2ac7beeebd1bd0f96164565dc76f671fb95233/rolling_actor_v5.manifest.json",
+        "sha256": "81fc93529e777a3cb8d2805e1a2ac7beeebd1bd0f96164565dc76f671fb95233"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "domains/pong/rolling_actor_v5.manifest.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7/rolling_actor_v5_raw.json",
+        "sha256": "1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "domains/pong/rolling_actor_v5_raw.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/d73b46a852d1a978e6bdd0779c946b24e53a8998f8f2ed92a7093a9e612a6184/rolling_actor_v5_raw.training.json",
+        "sha256": "d73b46a852d1a978e6bdd0779c946b24e53a8998f8f2ed92a7093a9e612a6184"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "domains/pong/rolling_actor_v5_raw.training.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6/rolling_actor_v5_regularized.json",
+        "sha256": "1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "domains/pong/rolling_actor_v5_regularized.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/4e25941cff198fe334286cd6732cf88ce604c7db4bcad1712adcc98bc9f084c1/rolling_actor_v5_regularized.training.json",
+        "sha256": "4e25941cff198fe334286cd6732cf88ce604c7db4bcad1712adcc98bc9f084c1"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "domains/pong/rolling_actor_v5_regularized.training.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/8bea30622492db337654823e43a331f8a46f2fdbeb95fd2121c79af7e656637f/rolling_actor_v5_regularized_ai.program.json",
+        "sha256": "8bea30622492db337654823e43a331f8a46f2fdbeb95fd2121c79af7e656637f"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "domains/pong/rolling_actor_v5_regularized_ai.program.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/c09f4a39bd3f29c8ff7e5ed703d1d3e8b21314ec962c3854051b776d89736cdf/rolling_actor_v5_regularized_human.program.json",
+        "sha256": "c09f4a39bd3f29c8ff7e5ed703d1d3e8b21314ec962c3854051b776d89736cdf"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "domains/pong/rolling_actor_v5_regularized_human.program.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a/kitchen_dual_nn_v5_acceptance.json",
+        "sha256": "012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "output/deployment/kitchen_dual_nn_v5_acceptance.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb/kitchen_dual_nn_v5_raw.npz",
+        "sha256": "30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "output/deployment/kitchen_dual_nn_v5_raw.npz",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/a44a1714afd1997d73f0bd31ee6aed62283efacfed7f37481fc3f4f8ef06c7e9/kitchen_dual_nn_v5_raw_training.json",
+        "sha256": "a44a1714afd1997d73f0bd31ee6aed62283efacfed7f37481fc3f4f8ef06c7e9"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "output/deployment/kitchen_dual_nn_v5_raw_training.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85/kitchen_dual_nn_v5_regularized.npz",
+        "sha256": "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "output/deployment/kitchen_dual_nn_v5_regularized.npz",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784/kitchen_dual_nn_v5_regularized_ai_program.json",
+        "sha256": "27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "output/deployment/kitchen_dual_nn_v5_regularized_ai_program.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988/kitchen_dual_nn_v5_regularized_human_program.json",
+        "sha256": "a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "output/deployment/kitchen_dual_nn_v5_regularized_human_program.json",
+      "source_present": true
+    },
+    {
+      "bundled_asset": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/12004d3108aba6017c15a06e890659c2139b57a607c357b87c49d5c6ae59b1cc/kitchen_dual_nn_v5_regularized_training.json",
+        "sha256": "12004d3108aba6017c15a06e890659c2139b57a607c357b87c49d5c6ae59b1cc"
+      },
+      "content_address_matches": true,
+      "source_bytes_equal": true,
+      "source_path": "output/deployment/kitchen_dual_nn_v5_regularized_training.json",
+      "source_present": true
+    }
+  ],
+  "catalog": {
+    "path": "releases/policylens-three-domain-20261016.v6.0/catalog.json",
+    "sha256": "402726d459db90c1347f0e4a00d34500631b106b19937c08d2010f803e2af77b"
+  },
+  "catalog_modified": false,
+  "client_date": "2026-10-23",
+  "domains": {
+    "kitchen": {
+      "A_B_identical_binding": true,
+      "C_has_distinct_actor_and_both_role_hashes": true,
+      "acceptance": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a/kitchen_dual_nn_v5_acceptance.json",
+        "sha256": "012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a"
+      },
+      "existing_heldout_evaluated": true,
+      "existing_receipt_passed": true,
+      "joint_steps": {
+        "raw": 200000,
+        "regularized": 200000
+      },
+      "live_or_heldout_execution_performed_in_this_reverification": false,
+      "pair_seeds": [
+        7,
+        11,
+        19
+      ],
+      "post_policy_override_count_in_original_receipt": 0,
+      "raw_program_feedback_rows_in_original_receipt": {
+        "ai": 0,
+        "human": 0
+      },
+      "regularized_program_feedback_rows_in_original_receipt": {
+        "ai": 103320,
+        "human": 115245
+      },
+      "runtime_config": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/b0aeeea1772221f047e294c44c6632a98ff0b92f5e5e645678142d62c7fd7b6d/study_v3_kitchen_frozen_v5.json",
+        "sha256": "b0aeeea1772221f047e294c44c6632a98ff0b92f5e5e645678142d62c7fd7b6d"
+      },
+      "selected_pair_seed": 7,
+      "variants": {
+        "raw": {
+          "actor": {
+            "path": "releases/policylens-three-domain-20261016.v6.0/assets/30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb/kitchen_dual_nn_v5_raw.npz",
+            "sha256": "30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb"
+          },
+          "actual_role_sha256": {
+            "ai": "fb118f162aa0882a8693131e8f286c59733941c12b24d34dbfa20ff1e63fd6b6",
+            "human": "967e48851f72d373d6346fa5e638d6995f78a7ba165b5c9b279c795e8939c97c"
+          },
+          "heldout_metrics_from_existing_receipt": {
+            "nn": {
+              "completion_rate": 1.0,
+              "episodes": 300,
+              "mean_score": 197.78666666666666,
+              "successes": 300
+            },
+            "offline_proxy": {
+              "completion_rate": 1.0,
+              "episodes": 300,
+              "mean_score": 197.78666666666666,
+              "successes": 300
+            },
+            "source": "existing_receipt_summary_consistency_only_no_episode_rerun"
+          },
+          "policy_id": "kitchen-raw-v5",
+          "programs": {},
+          "runtime_acceptance_predicate_passed": true,
+          "saved_binding_reverification_passed": true,
+          "training_report": {
+            "path": "releases/policylens-three-domain-20261016.v6.0/assets/a44a1714afd1997d73f0bd31ee6aed62283efacfed7f37481fc3f4f8ef06c7e9/kitchen_dual_nn_v5_raw_training.json",
+            "sha256": "a44a1714afd1997d73f0bd31ee6aed62283efacfed7f37481fc3f4f8ef06c7e9"
+          }
+        },
+        "regularized": {
+          "actor": {
+            "path": "releases/policylens-three-domain-20261016.v6.0/assets/0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85/kitchen_dual_nn_v5_regularized.npz",
+            "sha256": "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85"
+          },
+          "actual_role_sha256": {
+            "ai": "221708dc90aade679492732d59d8e04e92dbbe87304d4ed0670f88ff6fef8767",
+            "human": "08d69613814b9e22be890ef9be11fa0ed495e4a0d5dc80e8ce1c9f848e21ac7e"
+          },
+          "heldout_metrics_from_existing_receipt": {
+            "nn": {
+              "completion_rate": 1.0,
+              "episodes": 300,
+              "mean_score": 197.78666666666666,
+              "successes": 300
+            },
+            "offline_proxy": {
+              "completion_rate": 1.0,
+              "episodes": 300,
+              "mean_score": 197.78666666666666,
+              "successes": 300
+            },
+            "source": "existing_receipt_summary_consistency_only_no_episode_rerun"
+          },
+          "policy_id": "kitchen-regularized-v5",
+          "programs": {
+            "ai": {
+              "path": "releases/policylens-three-domain-20261016.v6.0/assets/27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784/kitchen_dual_nn_v5_regularized_ai_program.json",
+              "sha256": "27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784"
+            },
+            "human": {
+              "path": "releases/policylens-three-domain-20261016.v6.0/assets/a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988/kitchen_dual_nn_v5_regularized_human_program.json",
+              "sha256": "a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988"
+            }
+          },
+          "runtime_acceptance_predicate_passed": true,
+          "saved_binding_reverification_passed": true,
+          "training_report": {
+            "path": "releases/policylens-three-domain-20261016.v6.0/assets/12004d3108aba6017c15a06e890659c2139b57a607c357b87c49d5c6ae59b1cc/kitchen_dual_nn_v5_regularized_training.json",
+            "sha256": "12004d3108aba6017c15a06e890659c2139b57a607c357b87c49d5c6ae59b1cc"
+          }
+        }
+      }
+    },
+    "pong": {
+      "A_B_identical_binding": true,
+      "C_has_distinct_actor_and_both_role_hashes": true,
+      "acceptance": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958/rolling_actor_v5.acceptance.json",
+        "sha256": "ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958"
+      },
+      "existing_heldout_evaluated": true,
+      "existing_receipt_passed": true,
+      "joint_steps": {
+        "raw": 200000,
+        "regularized": 200000
+      },
+      "live_or_heldout_execution_performed_in_this_reverification": false,
+      "pair_seeds": [
+        251014,
+        251015,
+        251016
+      ],
+      "post_policy_override_count_in_original_receipt": 0,
+      "raw_program_feedback_rows_in_original_receipt": {
+        "ai": 0,
+        "human": 0
+      },
+      "regularized_program_feedback_rows_in_original_receipt": {
+        "ai": 111466,
+        "human": 55197
+      },
+      "runtime_config": {
+        "path": "releases/policylens-three-domain-20261016.v6.0/assets/1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42/study_v3_pong.json",
+        "sha256": "1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42"
+      },
+      "selected_pair_seed": 251016,
+      "variants": {
+        "raw": {
+          "actor": {
+            "path": "releases/policylens-three-domain-20261016.v6.0/assets/1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7/rolling_actor_v5_raw.json",
+            "sha256": "1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7"
+          },
+          "actual_role_sha256": {
+            "ai": "55c6a0aca47653098aeecd12bead31c14b10971a1891a59e45d332b154fb7048",
+            "human": "897ecc4696db6de386783fdaec7c21086a6b1f25af557de6e327ff0034842b52"
+          },
+          "heldout_metrics_from_existing_receipt": {
+            "episodes": 300,
+            "maximum_ai_wait_rate": 0.1111111111111111,
+            "mean_ai_wait_rate": 0.017037037037037038,
+            "mean_capacity_percent": 92.0125,
+            "minimum_capacity_percent": 83.75,
+            "source": "recomputed_from_existing_receipt_rows_without_environment_execution"
+          },
+          "policy_id": "pong-raw-v5",
+          "programs": {},
+          "runtime_acceptance_predicate_passed": true,
+          "saved_binding_reverification_passed": true,
+          "training_report": {
+            "path": "releases/policylens-three-domain-20261016.v6.0/assets/d73b46a852d1a978e6bdd0779c946b24e53a8998f8f2ed92a7093a9e612a6184/rolling_actor_v5_raw.training.json",
+            "sha256": "d73b46a852d1a978e6bdd0779c946b24e53a8998f8f2ed92a7093a9e612a6184"
+          }
+        },
+        "regularized": {
+          "actor": {
+            "path": "releases/policylens-three-domain-20261016.v6.0/assets/1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6/rolling_actor_v5_regularized.json",
+            "sha256": "1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6"
+          },
+          "actual_role_sha256": {
+            "ai": "35b21e4c4aacb024afe8667b4a7f3a4e6677795e5c194beb9bcd1b1fa9c1dcc9",
+            "human": "aabe915937418ec9d6c3fb3e95bf71a5c90572a55ae9b84ebba15e49357b3a57"
+          },
+          "heldout_metrics_from_existing_receipt": {
+            "episodes": 300,
+            "maximum_ai_wait_rate": 0.1111111111111111,
+            "mean_ai_wait_rate": 0.017703703703703704,
+            "mean_capacity_percent": 91.85694444444445,
+            "minimum_capacity_percent": 83.75,
+            "source": "recomputed_from_existing_receipt_rows_without_environment_execution"
+          },
+          "policy_id": "pong-regularized-v5",
+          "programs": {
+            "ai": {
+              "path": "releases/policylens-three-domain-20261016.v6.0/assets/8bea30622492db337654823e43a331f8a46f2fdbeb95fd2121c79af7e656637f/rolling_actor_v5_regularized_ai.program.json",
+              "sha256": "8bea30622492db337654823e43a331f8a46f2fdbeb95fd2121c79af7e656637f"
+            },
+            "human": {
+              "path": "releases/policylens-three-domain-20261016.v6.0/assets/c09f4a39bd3f29c8ff7e5ed703d1d3e8b21314ec962c3854051b776d89736cdf/rolling_actor_v5_regularized_human.program.json",
+              "sha256": "c09f4a39bd3f29c8ff7e5ed703d1d3e8b21314ec962c3854051b776d89736cdf"
+            }
+          },
+          "runtime_acceptance_predicate_passed": true,
+          "saved_binding_reverification_passed": true,
+          "training_report": {
+            "path": "releases/policylens-three-domain-20261016.v6.0/assets/4e25941cff198fe334286cd6732cf88ce604c7db4bcad1712adcc98bc9f084c1/rolling_actor_v5_regularized.training.json",
+            "sha256": "4e25941cff198fe334286cd6732cf88ce604c7db4bcad1712adcc98bc9f084c1"
+          }
+        }
+      }
+    }
+  },
+  "existing_asset_reverification_passed": true,
+  "heldout_rerun": false,
+  "initial_reader_attempt": "A first read-only attempt assumed Pong report had top-level joint_steps; it failed before writing any file. Corrected read validates every paired_runs entry and existing acceptance joint_steps.",
+  "limitations": [
+    "Kitchen metrics are retained receipt summaries; underlying episodes were not independently reconstructed.",
+    "Historical training and override claims are carried from accepted bound receipts; training was not replayed.",
+    "No live frame execution, demonstration, recovery trajectory or participant outcome test was run.",
+    "Offline Kitchen proxy completion is not human collaboration evidence.",
+    "No local sealed-claim root does not prove absence of consumption outside this audited checkout."
+  ],
+  "new_environment_initializations": 0,
+  "new_environment_resets": 0,
+  "new_experimental_random_streams": 0,
+  "new_program_fits": 0,
+  "new_training_steps": 0,
+  "observed_utc": "2026-10-23T05:00:59.839373+00:00",
+  "pilot_opened": false,
+  "publishable": false,
+  "release_id": "policylens-three-domain-20261016.v6.0",
+  "schema": "three-domain-v642-existing-assets-reverification.v1",
+  "scientific_model_acceptance_passed": false,
+  "scope": "existing_Pong_Kitchen_bytes_receipt_consistency_and_binding_only_not_new_model_acceptance",
+  "unique_indexed_bundle_assets_verified": 18,
+  "upstream_release_id": "policylens-three-domain-20261014.v5.0",
+  "verification_source_files": {
+    "domains/kitchen/neural_policy.py": "016c6bc7fc942ffff9cc0de5b10b37d07b1649e27ab7626d2da4a76b1a02f1fb",
+    "domains/pong/nn_policy.py": "a1b10ab3e3fe78fa8c447a2a6398be846854f3b161b9155864fe1e87e4bd3372",
+    "experiments/warehouse/admission.py": "69802fa208fdd024cd290820ef81e240e91b9a5a1988abfef11ac303b80ac6f8",
+    "experiments/warehouse/protocol.py": "41b9ad3ac5f4f2121529702ee23fd4feaa1fb88a5da8f4c827d3d9496db80627",
+    "scripts/package_warehouse_v6_release.py": "5859161839bc05e5d6fd0669fdbd33e6e716cc12cdb1d3e6f2ff215bbce57022",
+    "study_v3/policies.py": "cccad7f49c384002332248f4211416768ee639eba10724486e8d9153306561d3",
+    "study_v3/release_catalog.py": "800641be3d93e66d0f4ca7db74692b4bab2cf4d149e3903906b197a55b48a0a7"
+  },
+  "warehouse": {
+    "catalog_status": "pending",
+    "existing_generic_protocol_candidate": "warehouse-v618-quality-selective-01",
+    "existing_generic_protocol_method": "independent_selective_masked_distribution_v4",
+    "policy_catalog_rejected_with": "warehouse_release_pending",
+    "registered_v642_development_budget_lock_found": false,
+    "remaining_required_stages": [
+      "finish_and_audit_actual_20k_calibration_and_explicit_recovery_chain",
+      "final_20k_NN_program_binding",
+      "fresh_75_scene_225_episode_calibration_quality_and_program_precheck",
+      "three_development_streams_and_minimum_passing_200k_300k_400k_budget_lock",
+      "three_formal_pairs_quality_only_selection",
+      "fixed_program_preaudit",
+      "once_only_independent_program_audit",
+      "once_only_100_new_seeds_per_task_heldout",
+      "three_domain_frame_binding_and_engineering_checks",
+      "content_addressed_release_package"
+    ],
+    "sealed_claim_root_present": false,
+    "searched_budget_lock_glob": "output/**/budget.lock*",
+    "v642_final_calibration_completion_observed_by_this_audit": false,
+    "v642_formal_protocol_compatibility_implemented_by_this_audit": false
+  }
+}

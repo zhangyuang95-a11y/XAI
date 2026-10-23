@@ -125,6 +125,29 @@ def frozen_export(state,path,variant):
     return ref,actor
 
 
+def seal_owned_artifacts(owner):
+    """Seal only this new owner's provider/target/refit trees, never parents.
+
+    The unchanged numerical helpers leave a few receipts writable. Sealing
+    changes permissions only after completed work; no scientific bytes or
+    historical program assets are edited.
+    """
+    sealed=[]
+    for variant in VARIANTS:
+        key=digest(owner.owners[variant])
+        for root in (PROVIDER_ROOT,observed.TARGET_ROOT,EXTRACTION_ROOT):
+            folder=root/key
+            require(not folder.is_symlink(),'owned artifact root cannot be a symlink')
+            if not folder.exists():continue
+            require(folder.is_dir(),'owned artifact root is not a directory')
+            for path in folder.rglob('*'):
+                require(not path.is_symlink() and (path.is_file() or path.is_dir()),
+                    'owned artifact tree contains a symlink or non-file')
+                if path.is_file():path.chmod(0o444)
+            sealed.append(str(folder))
+    return sealed
+
+
 def owned_operation(method):
     def call(self,*args,**kwargs):
         try:return method(self,*args,**kwargs)
@@ -467,10 +490,12 @@ def claimed_owner(*,reference_directory,calibration_precheck_ref,plan_ref):
             require(owner.cores['raw'].accepted_program_updates=={'robot_1':0,'robot_2':0}
                 and all(n>0 for n in owner.cores['regularized'].accepted_program_updates.values()),
                 'raw zero or regularized actual both-role positive program gradient requirement failed')
+            sealed=seal_owned_artifacts(owner)
             owner.event('paired_long_steps_finished',per_variant_joint_steps={v:owner.states[v].joint_steps for v in VARIANTS})
             result=dict(version=VERSION,claim=owner.claim_ref,descriptor=descriptor_ref,updates=owner.updates,
                 actual_reset_count=len(actual),per_variant_joint_steps={v:owner.states[v].joint_steps for v in VARIANTS},
                 accepted_program_updates={v:dict(owner.cores[v].accepted_program_updates) for v in VARIANTS},
+                sealed_owned_artifact_directories=sealed,
                 training_finished=True,task_quality_and_final_NN_program_evaluation_required=True,
                 budget_lock_issued=False,formal_training_authorized=False,sealed_authority=False,
                 model_acceptance_passed=False,pilot_opened=False,publishable=False)

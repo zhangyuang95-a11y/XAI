@@ -446,6 +446,24 @@ def test_long_bridge_rejects_program_evidence_before_reader_or_gradient_buffer(p
         o.seeds.assemble_training_batch(plan,Reader(),trace,state)
 
 
+def test_sealing_only_changes_own_new_tree_permissions_and_rejects_symlink(tmp_path,monkeypatch):
+    roots=[tmp_path/name for name in ('provider','targets','extraction')]
+    monkeypatch.setattr(o,'PROVIDER_ROOT',roots[0]);monkeypatch.setattr(o.observed,'TARGET_ROOT',roots[1])
+    monkeypatch.setattr(o,'EXTRACTION_ROOT',roots[2])
+    active=SimpleNamespace(owners={v:dict(path='synthetic-'+v,sha256=v+'-sha') for v in o.VARIANTS})
+    files=[]
+    for root in roots:
+        for v in o.VARIANTS:
+            path=root/o.digest(active.owners[v])/'nested'/'receipt.json';path.parent.mkdir(parents=True)
+            path.write_text('{"synthetic_only":true}');files.append((path,o.file_sha(path)))
+    historical=roots[0]/'historical-parent.json';historical.write_text('{}')
+    assert len(o.seal_owned_artifacts(active))==6
+    assert all(o.file_sha(path)==sha and not path.stat().st_mode&0o222 for path,sha in files)
+    assert historical.stat().st_mode&0o222
+    link=roots[0]/o.digest(active.owners['raw'])/'forbidden-link';link.symlink_to(historical)
+    with pytest.raises(RuntimeError,match='symlink'):o.seal_owned_artifacts(active)
+
+
 def test_cli_gate_before_plan_hash_or_dispatch(tmp_path,monkeypatch):
     c=cli_module();precheck=put(tmp_path/'fake-precheck.json',dict(synthetic_only=True))
     real_pointer=c.pointer;reads=[]

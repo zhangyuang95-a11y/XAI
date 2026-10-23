@@ -14,6 +14,17 @@ from .storage import append
 class Evidence:
     def __init__(self, adapter, arrays, manifest=None):
         self.adapter = adapter; self.arrays = arrays; self.manifest = manifest
+        for partitions in arrays.values():
+            for data in partitions.values():
+                for value in data.values(): value.flags.writeable = False
+
+    def verify_static(self):
+        if self.manifest is None: return  # Software fixtures have no scientific manifest.
+        ref = self.manifest
+        if file_sha(ref['path']) != ref['sha256']: raise ValueError('evidence manifest changed')
+        manifest = json.loads(Path(ref['path']).read_text())
+        for asset in [*manifest['arrays'], *manifest['traces']]:
+            if file_sha(asset['path']) != asset['sha256']: raise ValueError('static physical evidence changed')
 
     @classmethod
     def collect(cls, adapter, model, run, *, seed):
@@ -51,17 +62,20 @@ class Evidence:
         write_new(folder/'manifest.json', manifest)
         return cls(adapter, arrays, dict(path=str((folder/'manifest.json').resolve()), sha256=file_sha(folder/'manifest.json')))
 
-    def labels(self, model, role):
+    def labels(self, model, role, *, partitions=('fit', 'calibration', 'eligibility', 'validation')):
+        if not partitions or set(partitions) - set(self.arrays[role]): raise ValueError('unknown evidence partition')
         result = {}
-        for partition, source in self.arrays[role].items():
+        for partition in partitions:
+            source = self.arrays[role][partition]
             parts = []
             with torch.no_grad():
                 for start in range(0, len(source['x']), 256):
                     sl = slice(start, start+256)
-                    logits = model.actors[role](torch.from_numpy(source['x'][sl]),
-                        torch.from_numpy(source['action_features'][sl]), torch.from_numpy(source['mask'][sl]))
+                    logits = model.actors[role](torch.from_numpy(source['x'][sl].copy()),
+                        torch.from_numpy(source['action_features'][sl].copy()), torch.from_numpy(source['mask'][sl].copy()))
                     parts.append(logits.softmax(-1).numpy())
-            result[partition] = {k: source[k] for k in ('x', 'mask', 'scene', 'sampled')} | dict(p=np.concatenate(parts))
+            p = np.concatenate(parts); p.flags.writeable = False
+            result[partition] = {k: source[k] for k in ('x', 'mask', 'scene', 'sampled')} | dict(p=p)
         return result
 
 
@@ -88,6 +102,7 @@ class ProgramProvider:
 
     @classmethod
     def initial(cls, evidence, model, folder, journal):
+        evidence.verify_static()
         folder = Path(folder); folder.mkdir(parents=True, exist_ok=False)
         programs, reports = {}, {}
         for role in model.domain.roles:
@@ -99,13 +114,14 @@ class ProgramProvider:
                   model_role_sha256=model.role_hashes(), evidence=evidence.manifest, model_acceptance_passed=False, pilot_opened=False))
         # v7 admits the actual post-20k pair. A weak initial program disables
         # feedback; it is not an extra BC gate from an older Warehouse recipe.
+        evidence.verify_static()
         return cls(evidence, programs, journal)
 
     def __call__(self, model, epoch):
         programs, reports = {}, {}
         hashes = model.role_hashes()
         for name, previous in self.programs.items():
-            data = self.evidence.labels(model, name)
+            data = self.evidence.labels(model, name, partitions=('eligibility', 'validation'))
             bound = Program(previous.role, previous.tree, hashes[name], temperature=previous.temperature, protection=previous.protection,
                             anchor_actor_sha256=previous.anchor_actor_sha256)
             program = qualify(bound, data['eligibility'])
@@ -116,6 +132,7 @@ class ProgramProvider:
         return Envelope(programs, hashes, reports)
 
     def refit(self, model, *, step, folder):
+        self.evidence.verify_static()
         folder = Path(folder); folder.mkdir(parents=True, exist_ok=False)
         reports = {}
         for name, previous in list(self.programs.items()):
@@ -123,4 +140,5 @@ class ProgramProvider:
             program, report = refit_program(previous, self.evidence.labels(model, name), model.role_hashes()[name], budget)
             self.programs[name] = program; reports[name] = report
             write_new(folder/f'{name}.json', dict(program=program.as_dict(), metrics=report, solver_counts=budget.counts))
+        self.evidence.verify_static()
         return reports

@@ -45,6 +45,8 @@ class PPO:
         self.actor_updates = 0; self.critic_updates = 0; self.joint_steps = 0
         self.program_updates = {r.name: 0 for r in model.domain.roles}
         self.program_norm = {r.name: 0. for r in model.domain.roles}
+        self.program_feedback_frames = {r.name: 0 for r in model.domain.roles}
+        self.program_evaluated_frames = {r.name: 0 for r in model.domain.roles}
         self.accepted_actor_change = {r.name: 0. for r in model.domain.roles}
         self.reference_buffer_sha256 = {n: tensor_hash({k: torch.from_numpy(np.array(v, copy=True))
             for k, v in values.items()}) for n, values in reference_rows.items()}
@@ -112,6 +114,8 @@ class PPO:
                         q, qualified, raw_top = targets
                         ploss, used = program_loss(logits.masked_fill(~mask, 0.), _tensor(q), mask, sampled,
                             _tensor(qualified, torch.bool), _tensor(raw_top, torch.long), variant=variant, coefficient=coefficient)
+                        self.program_evaluated_frames[n] += len(used)
+                        self.program_feedback_frames[n] += int(used.sum())
                         if used.any() and ploss.requires_grad:
                             gradients = torch.autograd.grad(ploss, tuple(self.model.actors[n].parameters()), retain_graph=True, allow_unused=True)
                             norm = sum(float(g.square().sum()) for g in gradients if g is not None) ** .5
@@ -182,6 +186,7 @@ class PPO:
             generator=self.generator.get_state(), torch_rng=torch.get_rng_state(), beta=self.beta,
             risk=self.risk.snapshot(), joint_steps=self.joint_steps, actor_updates=self.actor_updates,
             critic_updates=self.critic_updates, program_updates=self.program_updates, program_norm=self.program_norm,
+            program_feedback_frames=self.program_feedback_frames, program_evaluated_frames=self.program_evaluated_frames,
             accepted_actor_change=self.accepted_actor_change, collector=collector_state, programs=programs))
 
     def restore_checkpoint(self, path, expected_sha256, *, root, sources, plan_sha256):
@@ -215,6 +220,7 @@ class PPO:
         self.beta = value['beta']; self.risk = ShutdownRiskDual.restore(value['risk'], risk_config())
         if set(self.beta) != set(self.model.actors) or any(not .001 <= b <= 100 for b in self.beta.values()):
             raise ValueError('checkpoint reference dual state differs')
-        for field in ('joint_steps', 'actor_updates', 'critic_updates', 'program_updates', 'program_norm', 'accepted_actor_change'):
+        for field in ('joint_steps', 'actor_updates', 'critic_updates', 'program_updates', 'program_norm',
+                      'program_feedback_frames', 'program_evaluated_frames', 'accepted_actor_change'):
             setattr(self, field, value[field])
         return value['collector'], value['programs']

@@ -364,7 +364,7 @@ def metrics(program, data):
         result[purpose + '_coverage'] = float(selected.mean())
         result[purpose + '_agreement'] = float(agreement[selected].mean()) if selected.any() else 0.
         result[purpose + '_kl'] = float(kl[selected].mean()) if selected.any() else 1e300
-        result[purpose + '_available_coverage'] = float((selected & (top == data['sampled'])).mean())
+        result[purpose + '_available_coverage'] = float((selected & agreement & (top == data['sampled'])).mean())
         if purpose == 'feedback':
             result['expected_feedback_coverage'] = float((selected * agreement * p[np.arange(len(p)), p.argmax(-1)]).mean())
         for leaf_id in leaves:

@@ -234,8 +234,12 @@ def test_real_common_ppo_gradients_warmup_and_complete_episode_cost(native, vari
                   program_provider=lambda *a: Envelope())
     assert engine.actor_updates == 4
     assert all(model.role_hashes()[n] != old[n] for n in old)
-    if variant == 'raw': assert not any(engine.program_updates.values())
-    else: assert all(engine.program_updates.values()) and all(engine.program_norm.values())
+    if variant == 'raw':
+        assert not any(engine.program_updates.values()) and not any(engine.program_feedback_frames.values())
+    else:
+        assert all(engine.program_updates.values()) and all(engine.program_norm.values())
+        assert all(engine.program_feedback_frames.values())
+        assert all(engine.program_evaluated_frames[r]>=engine.program_feedback_frames[r] for r in engine.program_updates)
     checkpoint = engine.checkpoint(tmp_path/'checkpoint.pt', collector_state={'public': 'software_fixture'},
                                   programs={}, plan_sha256='a'*64, sources={})
     assert checkpoint['sha256']
@@ -519,3 +523,48 @@ def test_first_use_context_forbidden_after_claim(tmp_path):
     claim = tmp_path/'warehouse'/'claim.json'; claim.parent.mkdir(); claim.write_text('{}')
     with pytest.raises(ValueError, match='experiment claim'):
         reconcile(p, tmp_path/'not_read.json', tmp_path/'result.json')
+
+
+def test_epoch_labels_recompute_current_NN_only_on_required_partitions(monkeypatch):
+    from training_v7.bridge import Evidence
+    d=domain('pong'); s=d.initial_state(880100,1); model=DualActorCritic(d.spec)
+    role=d.spec.roles[0]; obs=d.observe_public(d.public(s))[role.name]
+    partitions={p:{**{k:np.repeat(obs[k][None],2,axis=0) for k in ('x','mask','action_features')},
+        'scene':np.array(['old-fixture-a','old-fixture-b']),'sampled':np.zeros(2,int)}
+        for p in ('fit','calibration','eligibility','validation')}
+    evidence=Evidence(d,{role.name:partitions})
+    actor=model.actors[role.name]; calls=[]; original=actor.forward
+    def forward(*args): calls.append(len(args[0])); return original(*args)
+    monkeypatch.setattr(actor,'forward',forward)
+    full=evidence.labels(model,role.name); assert len(calls)==4
+    selected=evidence.labels(model,role.name,partitions=('eligibility','validation'))
+    assert len(calls)==6  # no current NN output cache, even at identical weights
+    for p in selected: np.testing.assert_array_equal(selected[p]['p'],full[p]['p'])
+    with torch.no_grad():
+        actor.gate[-1].bias.fill_(1.)
+        actor.tree.leaf_logits[:,role.wait_index].add_(2.)
+    newer=evidence.labels(model,role.name,partitions=('validation',))
+    assert len(calls)==7 and not np.allclose(newer['validation']['p'],full['validation']['p'])
+    with pytest.raises(ValueError): evidence.labels(model,role.name,partitions=('unknown',))
+
+
+def test_scene_intervals_keep_correlated_frames_together():
+    from training_v7.reporting import clustered_ratios
+    scene=np.array(['a']*100+['b']*100); task=np.ones(200,int)
+    value=np.array([0.]*100+[1.]*100)
+    r=clustered_ratios(scene,task,{'rate':(value,np.ones(200))},draws=1000)['rate']
+    assert r['independent_scenes']==2 and r['estimate']==.5 and r['lower']==0 and r['upper']==1
+
+
+def test_available_program_coverage_requires_current_NN_agreement(native):
+    from training_v7.program import fit_program, metrics
+    d,s=native; role=d.spec.roles[0]; obs=d.observe_public(d.public(s))[role.name]
+    n=192; x=np.repeat(obs['x'][None],n,axis=0); mask=np.repeat(obs['mask'][None],n,axis=0)
+    p=np.zeros(mask.shape);p[:,role.wait_index]=1.
+    parts={key:dict(x=x,mask=mask,p=p,scene=np.repeat(np.arange(j*100,j*100+32),6),
+        sampled=np.full(n,role.wait_index)) for j,key in enumerate(('fit','calibration','eligibility','validation'))}
+    program,_=fit_program(role,parts,'a'*64,FitBudget())
+    other=next(a for a in range(len(role.actions)) if a!=role.wait_index and mask[0,a])
+    changed={**parts['validation'],'p':np.eye(len(role.actions))[np.full(n,other)]}
+    r=metrics(program,changed)
+    assert r['feedback_coverage']==1 and r['feedback_available_coverage']==0

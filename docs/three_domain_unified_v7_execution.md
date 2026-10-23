@@ -90,10 +90,10 @@ python3 scripts/run_three_domain_unified.py status
 
 ## 软件验证与旧版本边界
 
-2026-10-24最终预检回归：**173项通过，0失败/错误/跳过**；其中55项为新共同核心测试。
+2026-10-24当前02预检回归：**181项通过，0失败/错误/跳过**；其中63项为新共同核心测试。
 测试前后执行源码未变，源码闭包SHA为
-`657b25fcc749c707927c7d7ea6fc6fa05de65f11e2d20f1e968d86b163fa990c`。
-实际子进程退出0的记录位于`output/three_domain_v7/three-domain-unified-01/engineering-preflight-04/result.json`。
+`5eaea673da252be23e8bd1367c4d99b07e8584313d8f43ac9a8e8854957286e3`。
+实际子进程退出0的记录位于`output/three_domain_v7/three-domain-unified-02/engineering-02/result.json`。
 该记录明确标记`scientific_model_evaluation=false`、`model_acceptance_passed=false`。
 
 新测试覆盖三域公开观察、私有未来/路线历史排除、动作维度1/3/5/6/13、
@@ -143,3 +143,13 @@ GAE仅在真正终止时去除下一状态价值，时限终止和训练截断�
 02使用新场景及初始化/采样流，重新生成全部BC；首轮种子不复用。
 当前正在执行02的全历史查重和回归，尚未启动02新NN。
 没有新20k模型实测表；状态以各域事件和最终`calibration-result.json`为准。
+
+02的首次NN claim前追加了只影响核验和报告的预检修订：
+
+- epoch资格重验仅计算资格和验证分区，减少1650→600个episode的重标记；完整拟合仍计算四分区。
+  当前NN输出、资格与实测指标均重新计算，不缓存旧输出。静态输入在拟合/重拟合和阶段结束完整复核。
+- 程序实际可用覆盖同时要求合格叶、NN首选一致及实际采样动作一致；没有更改结构搜索或准入门槛。
+- 实际程序反馈/核验帧数及接受的梯度更新分别计账，写入完整检查点并恢复。
+- `post-20k-metrics-and-intervals.json`报告新模型质量、程序指标、真实梯度、按场景聚类的置信区间及task/动作/公开风险分层。
+  bootstrap不将连续帧当独立样本，也不参与模型选择。
+- checkpoint耗时分别以总耗时及排除程序重拟合的采集/更新耗时计算比例，工程≤10%单独报告，科学门槛不受其替代。

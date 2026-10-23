@@ -1,6 +1,7 @@
 """Eight finite physical environments with policy-independent scenario blocks."""
 from copy import deepcopy
 import json
+import time
 from pathlib import Path
 import numpy as np
 import torch
@@ -104,6 +105,7 @@ class Collector:
 
 
 def train_pair_variant(adapter, engine, run, provider, *, variant, budget, action_seed, sources):
+    started = time.perf_counter(); checkpoint_seconds = 0.; collection_seconds = 0.; update_seconds = 0.
     folder = run.folder / variant; folder.mkdir(parents=True, exist_ok=False)
     collector = Collector(adapter, engine.model, run, action_seed=action_seed, budget=budget)
     milestones = {4000, budget, *(budget * p // 100 for p in (75, 84, 93))}
@@ -112,8 +114,12 @@ def train_pair_variant(adapter, engine, run, provider, *, variant, budget, actio
         collect_actor = export_actor(engine.model, folder/f'collect-actor-{collector.joint_steps}.npz')
         append(run.journal, dict(event='rollout_actor_binding', joint_steps=collector.joint_steps,
                                 actor=collect_actor, action_rng=collector.generator.get_state().tolist()))
+        before = time.perf_counter()
         rows, episodes = collector.collect(); engine.joint_steps = collector.joint_steps
+        collection_seconds += time.perf_counter() - before
+        before = time.perf_counter()
         engine.update(rows, episodes, variant=variant, budget=budget, program_provider=provider)
+        update_seconds += time.perf_counter() - before
         append(run.journal, dict(event='ppo_rollout_completed', variant=variant, joint_steps=engine.joint_steps,
             actor_updates=engine.actor_updates, critic_updates=engine.critic_updates,
             completed_episodes=len(episodes), risk=engine.risk.snapshot(), program_updates=engine.program_updates,
@@ -122,9 +128,11 @@ def train_pair_variant(adapter, engine, run, provider, *, variant, budget, actio
             step = collector.joint_steps
             if step in {budget*p//100 for p in (75, 84, 93)}:
                 provider.refit(engine.model, step=step, folder=folder/f'program-step-{step}')
+            before = time.perf_counter()
             checkpoint = engine.checkpoint(folder/f'checkpoint-{step}.pt', collector_state=collector.snapshot(),
                 programs={n: p.as_dict() for n, p in provider.programs.items()}, plan_sha256=run.plan_hash, sources=sources)
             export_actor(engine.model, folder/f'actor-{step}.npz')
+            checkpoint_seconds += time.perf_counter() - before
             append(run.journal, dict(event='checkpoint_quiescent', checkpoint=checkpoint,
                                     plan_sha256=run.plan_hash, joint_steps=step))
     final_programs = provider.refit(engine.model, step=budget, folder=folder/'final-programs')
@@ -132,10 +140,20 @@ def train_pair_variant(adapter, engine, run, provider, *, variant, budget, actio
         reference_role_sha256=engine.reference.role_hashes(), actor_updates=engine.actor_updates,
         critic_updates=engine.critic_updates, program_updates=engine.program_updates,
         program_gradient_norm_sum=engine.program_norm, accepted_actor_change=engine.accepted_actor_change,
+        program_feedback_frames=engine.program_feedback_frames, program_evaluated_frames=engine.program_evaluated_frames,
         final_program_metrics=final_programs, quality_evaluated=False, model_acceptance_passed=False, pilot_opened=False)
-    result['training_gates'] = dict(raw_zero_feedback=variant != 'raw' or not any(engine.program_updates.values()),
+    result['training_gates'] = dict(raw_zero_feedback=variant != 'raw' or not (
+        any(engine.program_updates.values()) or any(engine.program_norm.values()) or any(engine.program_feedback_frames.values())),
         regularized_both_positive=variant != 'regularized' or all(engine.program_updates.values()),
         both_Actors_changed=all(v > 0 for v in engine.accepted_actor_change.values()))
+    elapsed = time.perf_counter() - started
+    core_fraction = checkpoint_seconds/(checkpoint_seconds+collection_seconds+update_seconds)
+    result['timing'] = dict(total_seconds=elapsed, collection_seconds=collection_seconds, update_seconds=update_seconds,
+        checkpoint_seconds=checkpoint_seconds, checkpoint_fraction=checkpoint_seconds/elapsed,
+        checkpoint_fraction_excluding_refits=core_fraction,
+        checkpoint_scope='full_PPO_checkpoint_and_milestone_actor_export; rollout_actor_provenance_is_in_total',
+        engineering_checkpoint_passed=core_fraction <= .10 and checkpoint_seconds/elapsed <= .10,
+        scientific_model_gate_unchanged=True)
     write_new(folder/'result.json', result)
     run.finish()
     return result

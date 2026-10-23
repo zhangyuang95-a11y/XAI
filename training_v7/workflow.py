@@ -42,14 +42,47 @@ def amend_preflight(output=OUTPUT):
     current = source_files(ROOT)
     allowed = {'training_v7/workflow.py', 'training_v7/storage.py', 'training_v7/seed_delta.py',
                'training_v7/seed_context.py', 'scripts/run_three_domain_unified.py',
-               'training_v7/bridge.py', 'training_v7/collector.py'}
+               'training_v7/bridge.py', 'training_v7/collector.py', 'training_v7/reporting.py'}
     changed = {p for p in set(old['source_files']) | set(current) if old['source_files'].get(p) != current.get(p)}
+    if 'training_v7/program.py' in changed:
+        # Reporting-only correction; search/qualification/gates remain exactly
+        # the registered code. In particular, this cannot revise a fitted tree.
+        snapshot = ('source' if old.get('preflight_revision', 1) == 1 else
+                    f"source-preflight-{old['preflight_revision']:02d}")
+        original = (output/snapshot/'training_v7/program.py').read_text()
+        corrected = original.replace("selected & (top == data['sampled'])", "selected & agreement & (top == data['sampled'])")
+        if corrected != (ROOT/'training_v7/program.py').read_text():
+            raise ValueError('preflight cannot change program optimization or proof algorithms')
+        allowed.add('training_v7/program.py')
+    if 'training_v7/ppo.py' in changed:
+        # Accept ONLY the named descriptive counters in the zero-claim v2
+        # preflight. Removing these lines must reproduce the frozen engine.
+        snapshot = ('source' if old.get('preflight_revision', 1) == 1 else
+                    f"source-preflight-{old['preflight_revision']:02d}")
+        original = (output/snapshot/'training_v7/ppo.py').read_text()
+        expected = original.replace(
+            "        self.program_norm = {r.name: 0. for r in model.domain.roles}\n",
+            "        self.program_norm = {r.name: 0. for r in model.domain.roles}\n"
+            "        self.program_feedback_frames = {r.name: 0 for r in model.domain.roles}\n"
+            "        self.program_evaluated_frames = {r.name: 0 for r in model.domain.roles}\n")
+        expected = expected.replace("                        if used.any() and ploss.requires_grad:\n",
+            "                        self.program_evaluated_frames[n] += len(used)\n"
+            "                        self.program_feedback_frames[n] += int(used.sum())\n"
+            "                        if used.any() and ploss.requires_grad:\n")
+        expected = expected.replace("            accepted_actor_change=self.accepted_actor_change, collector=collector_state, programs=programs))",
+            "            program_feedback_frames=self.program_feedback_frames, program_evaluated_frames=self.program_evaluated_frames,\n"
+            "            accepted_actor_change=self.accepted_actor_change, collector=collector_state, programs=programs))")
+        expected = expected.replace("'program_updates', 'program_norm', 'accepted_actor_change'):",
+            "'program_updates', 'program_norm',\n                      'program_feedback_frames', 'program_evaluated_frames', 'accepted_actor_change'):")
+        if expected != (ROOT/'training_v7/ppo.py').read_text():
+            raise ValueError('preflight cannot change PPO numerical objectives')
+        allowed.add('training_v7/ppo.py')
     if changed - allowed or old['method_sha256'] != MethodSpec().sha256:
         raise ValueError('preflight amendment cannot change the scientific method')
     revision = old.get('preflight_revision', 1) + 1
     value = dict(old, source_files=current, preflight_revision=revision, seed_guard_version=2,
         parent_registration=dict(path=str(parent.resolve()), sha256=file_sha(parent)),
-        preflight_amendment=dict(reason='final seed delta and approved v7 post-20k admission ordering; no extra BC gate',
+        preflight_amendment=dict(reason='final seed delta, post-20k evidence, current-only eligibility partitions and descriptive reporting; model/BC/PPO objectives unchanged',
                                 changed_source_files=sorted(changed), NN_experiment_claims=0))
     path = output/f'registration-preflight-{revision:02d}.json'; write_new(path, value)
     for relative, h in current.items():
@@ -301,6 +334,9 @@ def run_calibration(name, output=OUTPUT):
                     report = metrics(program, {k: data[k] for k in data.files})
                 if report != fresh['program_metrics'][variant][role.name]: raise ValueError('fresh program metric replay differs')
                 actual_programs[variant][role.name] = report
+        evidence.verify_static()
+        from .reporting import calibration_report
+        calibration_report(adapter, run.folder, results, programs)
         verify_sources(ROOT, registration['source_files'])
         run.finish()
         training_passed = weights_distinct and all(all(r['training_gates'].values()) for r in results.values())
@@ -309,6 +345,8 @@ def run_calibration(name, output=OUTPUT):
             training=results, training_gates_passed=training_passed, raw_regularized_role_weights_distinct=weights_distinct,
             initial_role_sha256=initial_hashes, quality=replay,
             program_metrics=actual_programs, method_sha256=MethodSpec().sha256,
+            descriptive_report=dict(path=str((run.folder/'post-20k-metrics-and-intervals.json').resolve()),
+                                    sha256=file_sha(run.folder/'post-20k-metrics-and-intervals.json')),
             model_acceptance_passed=False, formal_training_started=False, pilot_opened=False)
         write_new(run.folder/'calibration-result.json', final)
         if not passed: raise ValueError('fresh post-20k calibration failed')

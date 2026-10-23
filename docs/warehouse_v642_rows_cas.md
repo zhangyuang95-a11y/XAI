@@ -17,3 +17,15 @@ CAS的nlink/ctime因增加硬链接而变化是预期行为；不把这些当不
 测试核对真实st_dev/st_ino/nlink、完整SHA、mode以及du分配空间。CAS初次复制有短暂额外空间，单个副本被移除的allocated bytes不等于整树净节约；净节约必须用同一根目录真实du前后差并考虑CAS和收据开销，不能把逐路径st_blocks求和当去重后的实际占用。
 
 `new_probe(...)`只分配一个全新的临时目录，不能采用传入的旧目录。真实探针只可复制既有rows至该目录，原基准bytes/权限不能改；所有科学步骤、NN forward和新环境reset均为0。只有实际空间和恢复SHA验证通过，才能为新长预算的容量门提供工程证据。
+
+## Explicit temporary NPZ lifecycle for the new producer
+
+`register_temporal_npz(stage, names=...)` registers exactly the canonical twelve
+fresh private NPZ in the stage. `consume_temporal_npz(stage, substitutions=...)`
+first checks the entire set and same-SHA distinct final inodes at the exact new
+`published-target` paths, then removes only those registered scratch files.
+No other stage path, historical asset, baseline, rows object, claim or receipt
+can be removed. The immutable lifecycle receipt labels each deleted input
+`created_and_consumed_before_final_binding`, records its pre-consumption SHA and
+size, and binds an existing final equivalent. All persistent dependencies remain
+readable. Registered scratch cannot survive a successfully closed stage.

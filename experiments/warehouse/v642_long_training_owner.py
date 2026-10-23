@@ -24,6 +24,9 @@ from backend.training.warehouse_v629_environment_replay import (EnvironmentRollo
     training_config,WarehouseMultiAgentEnv,public_pre_action_snapshot,PHYSICS_VERSION)
 from backend.training.warehouse_v629_rollout_replay import training_fingerprint,TRACE_VERSION
 from backend.training.warehouse_v642_evidence_provider import CurrentNNEvidenceProvider,PROVIDER_ROOT
+from backend.training import warehouse_v642_long_targets as long_targets
+from backend.training.warehouse_v642_long_evidence import LongEvidenceCallback
+from backend.training import warehouse_v642_long_evidence as long_evidence
 from backend.training.warehouse_v642_program_refit import EXTRACTION_ROOT
 from backend.training.warehouse_v629_ppo_update import PPOUpdateCore
 from backend.training.warehouse_v625_actor_training import PPOConfig,ReferenceTrainingBuffer,critic_initialization_sha256
@@ -48,6 +51,7 @@ FILES=('experiments/warehouse/v642_long_training_owner.py',
 
 def source_files():
     files=seeds.source_files()
+    files.update(long_evidence.source_files())
     files.update({name:file_sha(ROOT/name) for name in FILES})
     return dict(sorted(files.items()))
 
@@ -152,7 +156,7 @@ def seal_owned_artifacts(owner):
     sealed=[]
     for variant in VARIANTS:
         key=digest(owner.owners[variant])
-        for root in (PROVIDER_ROOT,observed.TARGET_ROOT,EXTRACTION_ROOT):
+        for root in (PROVIDER_ROOT,observed.TARGET_ROOT,EXTRACTION_ROOT,long_targets.rows.STORAGE_ROOT):
             folder=root/key
             require(not folder.is_symlink(),'owned artifact root cannot be a symlink')
             if not folder.exists():continue
@@ -330,10 +334,14 @@ class LongTrainingOwner:
             require(type(evidence_provider) is CurrentNNEvidenceProvider and evidence_provider.owner_ref==self.owners[variant],
                 'regularized updates require the actual current-NN provider owned by this variant')
             require(self.providers.get(variant) is evidence_provider,'provider was not installed at the owned scheduled refit')
+            require(variant in self.callbacks and self.callbacks[variant].native is evidence_provider,
+                'native provider lacks its separately source-bound long storage callback')
+            self.callbacks[variant].verify()
         require(pointer(pending['trace']['path'])==pending['trace'] and pointer(pending['audit']['path'])==pending['audit'],
             'owned rollout changed before optimizer update')
         self.event('optimizer_update_predebit',variant=variant,trace=pending['trace'],step=state.joint_steps)
-        result=self.cores[variant].update_batch(pending['batch'],batch_sha256=pending['trace']['sha256'],evidence_provider=evidence_provider)
+        callback=None if evidence_provider is None else self.callbacks[variant]
+        result=self.cores[variant].update_batch(pending['batch'],batch_sha256=pending['trace']['sha256'],evidence_provider=callback)
         file=Path(pending['trace']['path']).with_name('update.json');write_new(file,result);file.chmod(0o444)
         self.updates[variant].append(pointer(file));del self.pending[variant]
         self.state_fingerprints[variant]=training_fingerprint(state)
@@ -391,6 +399,8 @@ class LongTrainingOwner:
             require(type(evidence_provider) is CurrentNNEvidenceProvider and evidence_provider.owner_ref==self.owners[variant],
                 'scheduled regularized refit must install its actual owned provider')
             evidence_provider.install_extraction(binding_ref,self.pools[variant],state);self.providers[variant]=evidence_provider
+            if variant not in self.callbacks:self.callbacks[variant]=LongEvidenceCallback(self,evidence_provider)
+            else:require(self.callbacks[variant].native is evidence_provider,'scheduled refit replaced the native provider/callback')
         else:require(evidence_provider is None,'raw refit cannot install feedback')
         self.refits[variant].append(step);self.event('scheduled_refit_bound',variant=variant,step=step,binding=binding_ref)
 
@@ -413,6 +423,7 @@ class LongTrainingOwner:
             reset_cursors=self.cursors[variant],program_source_cursor=self.evidence_cursor[variant],
             reserved_joint_steps=self.reserved[variant],refits=self.refits[variant],updates=self.updates[variant],
             provider=None if variant not in self.providers else self.providers[variant].snapshot(state),
+            long_storage_callback=None if variant not in self.callbacks else self.callbacks[variant].snapshot(state),
             observed_source=None if variant not in self.pools else self.pools[variant].source_ref,
             observed_audit_sha256=None if variant not in self.pools else self.pools[variant].audit_sha256,
             full_training_state_sha256=training_fingerprint(state),paired_initial_identity=self.initial_identity,
@@ -439,7 +450,7 @@ def _make_owner(plan,clearance,sources,claim_ref,descriptor_ref,contract,folder,
     owner.clearance_assets=[clearance['clearance'],contract]
     owner.config=plan.config;owner.folder=folder;owner.reference_directory=reference_directory
     owner.failed=False;owner.closed=False;owner.sequence=0
-    owner.states={};owner.cores={};owner.readers={};owner.pending={};owner.pools={};owner.providers={}
+    owner.states={};owner.cores={};owner.readers={};owner.pending={};owner.pools={};owner.providers={};owner.callbacks={}
     owner.initial_identity={};owner.owners={};owner.state_fingerprints={};owner.collecting={};owner.collecting_source=set()
     owner.reserved={v:0 for v in VARIANTS};owner.cursors={v:[0]*8 for v in VARIANTS}
     owner.evidence_cursor={v:0 for v in VARIANTS};owner.environments={v:[None]*8 for v in VARIANTS}
@@ -545,7 +556,7 @@ def scheduled_refit(active,variant,programs):
     key=digest(active.owners[variant]);folder=active.folder/variant/'refit-targets'/str(step)
     folder.mkdir(parents=True,exist_ok=False)
     actor_ref,_=frozen_export(state,folder/'current-NN.npz',variant)
-    targets=observed.relabel_current_NN(pool,actor_ref,observed.TARGET_ROOT/key/f'refit-{step}')
+    targets=long_targets.relabel_current_NN(active,variant,pool,actor_ref,stage_id=f'refit-{step}')
     result,binding=observed.refit_observed_pair_at_boundary(reference_directory=active.reference_directory,
         owner_ref=active.owners[variant],state=state,observed=pool,targets_ref=targets,program_refs=programs,
         output=EXTRACTION_ROOT/key/f'step-{step}',variant=variant,epoch_id=f'scheduled-{step}',config=active.config)

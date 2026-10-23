@@ -26,3 +26,17 @@
 ## 测试范围
 
 新增测试仅使用临时合成计划、模型/环境/优化器替身与四空历史树。检查完整状态工厂、实际claimed context、共同初始化、预算和单次claim、完整配对驱动时序、raw零/reg正反馈、1650证据排除、完整checkpoint及真实wait语义。测试通过不表示真实候选指标通过。
+
+## New source-bound storage callback
+
+Before any long plan can receive a source contract, it now includes
+`warehouse_v642_long_targets`, `warehouse_v642_long_evidence`, rows CAS, APFS
+clone helper and their tests/documentation. Scheduled raw/regularized refits
+both use the new producer. Only regularized updates install the separately
+bound `LongEvidenceCallback`; the owner still holds and verifies the actual
+native `CurrentNNEvidenceProvider`. The core receives the explicit composed
+callable. Native NN numerics, qualification, latch and accepted-gradient
+accounting are unchanged. Checkpoints retain both native and callback state.
+The owner only seals its own new storage tree at completion; historical trees
+and current 20k/recovery files are never retrofitted. Formal execution remains
+closed until its independent authorization chain is implemented.

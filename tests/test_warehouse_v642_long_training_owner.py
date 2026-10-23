@@ -428,7 +428,12 @@ def test_full_fake_pipeline_real_context_initialization_updates_refits_checkpoin
         def __init__(self,owner_ref):self.owner_ref=owner_ref;self.steps=[]
         def install_extraction(self,binding,pool,state):self.steps.append(state.joint_steps)
         def snapshot(self,state):return dict(synthetic_only=True,installed_steps=self.steps,step=state.joint_steps)
+    class Callback:
+        def __init__(self,active,provider):self.native=provider;self.active=active
+        def verify(self):assert self.active.providers['regularized'] is self.native
+        def snapshot(self,state):return dict(synthetic_only=True,explicit_long_callback=True,step=state.joint_steps)
     monkeypatch.setattr(o,'CurrentNNEvidenceProvider',Provider)
+    monkeypatch.setattr(o,'LongEvidenceCallback',Callback)
     monkeypatch.setattr(o.observed,'source_files',lambda:dict(synthetic_only='fake-source'))
     collected=[];accepted=[];critic_only=[]
     def fake_collection(active,v):
@@ -477,8 +482,10 @@ def test_full_fake_pipeline_real_context_initialization_updates_refits_checkpoin
         assert checkpoints[-1]['refits']==list(prepared.plan.config.extraction_steps)
         assert checkpoints[-1]['program_source_cursor']==1650
         assert checkpoints[0]['paired_initial_identity']==checkpoints[-1]['paired_initial_identity']
-        if v=='raw':assert all(r['provider'] is None for r in checkpoints)
-        else:assert checkpoints[-1]['provider']['installed_steps']==list(prepared.plan.config.extraction_steps)
+        if v=='raw':assert all(r['provider'] is r['long_storage_callback'] is None for r in checkpoints)
+        else:
+            assert checkpoints[-1]['provider']['installed_steps']==list(prepared.plan.config.extraction_steps)
+            assert checkpoints[-1]['long_storage_callback']['explicit_long_callback']
     journal=[json.loads(line) for line in (prepared.folder/'training'/'owner-journal.jsonl').read_text().splitlines()]
     assert [r['sequence'] for r in journal]==list(range(len(journal)))
     assert len([r for r in journal if r['kind']=='scheduled_refit_bound'])==6
@@ -504,9 +511,10 @@ def test_long_bridge_rejects_program_evidence_before_reader_or_gradient_buffer(p
 
 
 def test_sealing_only_changes_own_new_tree_permissions_and_rejects_symlink(tmp_path,monkeypatch):
-    roots=[tmp_path/name for name in ('provider','targets','extraction')]
+    roots=[tmp_path/name for name in ('provider','targets','extraction','new-long-storage')]
     monkeypatch.setattr(o,'PROVIDER_ROOT',roots[0]);monkeypatch.setattr(o.observed,'TARGET_ROOT',roots[1])
     monkeypatch.setattr(o,'EXTRACTION_ROOT',roots[2])
+    monkeypatch.setattr(o.long_targets.rows,'STORAGE_ROOT',roots[3])
     active=SimpleNamespace(owners={v:dict(path='synthetic-'+v,sha256=v+'-sha') for v in o.VARIANTS})
     files=[]
     for root in roots:
@@ -514,7 +522,7 @@ def test_sealing_only_changes_own_new_tree_permissions_and_rejects_symlink(tmp_p
             path=root/o.digest(active.owners[v])/'nested'/'receipt.json';path.parent.mkdir(parents=True)
             path.write_text('{"synthetic_only":true}');files.append((path,o.file_sha(path)))
     historical=roots[0]/'historical-parent.json';historical.write_text('{}')
-    assert len(o.seal_owned_artifacts(active))==6
+    assert len(o.seal_owned_artifacts(active))==8
     assert all(o.file_sha(path)==sha and not path.stat().st_mode&0o222 for path,sha in files)
     assert historical.stat().st_mode&0o222
     link=roots[0]/o.digest(active.owners['raw'])/'forbidden-link';link.symlink_to(historical)

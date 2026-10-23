@@ -18,6 +18,8 @@ STORAGE_ROOT=ROOT/'output/warehouse_v642/future-long-row-storage'
 FILES=('experiments/warehouse/v642_rows_cas.py','tests/test_warehouse_v642_rows_cas.py','docs/warehouse_v642_rows_cas.md')
 ROW_NAMES=frozenset(f'{role}-{split}-rows.json' for role in ('robot_1','robot_2')
                     for split in ('fit','calibration','eligibility','validation'))
+NPZ_NAMES=frozenset([f'{split}-source-actual-actions.npz' for split in ('fit','calibration','eligibility','validation')]
+    +[f'{role}-{split}.npz' for role in ('robot_1','robot_2') for split in ('fit','calibration','eligibility','validation')])
 ACTIVE=ContextVar('warehouse_v642_new_long_rows_stage',default=None)
 _TOKEN=object()
 
@@ -107,6 +109,7 @@ def _stage(root,*,owner_sha256,stage_id,token,probe=False):
     stage=object.__new__(NewRowsStage)
     stage._token=_TOKEN;stage.folder=folder;stage.payload=payload;stage.cas=cas;stage.owner=owner
     stage.closed=False;stage.failed=False;stage.used=False;stage.sources=source_files();stage.operations=[]
+    stage.temporal_npz={};stage.temporal_consumed=False
     stage.header=folder/'stage.json'
     stage.header_ref=_new_json(stage.header,dict(version=VERSION,owner_sha256=owner_sha256,stage_id=stage_id,
         source_files=stage.sources,probe_only=probe,NN_authority=False,environment_authority=False,
@@ -115,8 +118,11 @@ def _stage(root,*,owner_sha256,stage_id,token,probe=False):
     try:
         yield stage
         stage.verify()
+        require(not stage.temporal_npz or stage.temporal_consumed,
+            'registered canonical scratch must be consumed before closing a successful stage')
         _new_json(folder/'storage-stage-closed.json',dict(version=VERSION,stage=stage.header_ref,
-            operations=stage.operations,storage_only=True,NN_updates=0,environment_resets=0,pilot_opened=False))
+            operations=stage.operations,temporal_npz_consumed=stage.temporal_consumed,
+            storage_only=True,NN_updates=0,environment_resets=0,pilot_opened=False))
     except BaseException as error:
         stage.failed=True
         _new_json(folder/'storage-stage-failed.json',dict(version=VERSION,stage=stage.header_ref,
@@ -212,3 +218,52 @@ def deduplicate_rows(stage,*,names):
             physical_hardlinks_verified=True,storage_only=True,NN_updates=0,environment_resets=0,pilot_opened=False))
         return ref
     except BaseException:stage.failed=True;raise
+
+
+def register_temporal_npz(stage,*,names):
+    """Register only freshly created canonical NPZ in this unbound stage.
+
+    These bytes are temporary numerical inputs, never persistent asset refs.
+    Registration precedes CAS baseline links and clone publication.
+    """
+    stage.verify()
+    require(not stage.temporal_npz and not stage.temporal_consumed and set(names)==NPZ_NAMES
+        and len(names)==len(set(names)),'register the finite canonical twelve NPZ exactly once')
+    for name in names:
+        path=stage.payload/name;sha,info=_checked_sha(path)
+        require(info.st_nlink==1,'canonical temporal input must be a new private inode')
+        stage.temporal_npz[name]=dict(sha256=sha,bytes=info.st_size,device=info.st_dev,inode=info.st_ino,
+            mtime_ns=info.st_mtime_ns,mode=stat.S_IMODE(info.st_mode))
+
+
+def consume_temporal_npz(stage,*,substitutions):
+    """Remove only registered fresh scratch after same-SHA new publication.
+
+    Old packages, rows CAS, NPZ baselines, claims, journals and published
+    files cannot be cleanup targets. The receipt calls deleted inputs
+    consumed temporal inputs; its persistent dependencies all still exist.
+    """
+    stage.verify()
+    require(not stage.temporal_consumed and set(stage.temporal_npz)==NPZ_NAMES
+        and set(substitutions)==NPZ_NAMES,'finite registered temporal NPZ inventory differs')
+    records=[]
+    # Validate the entire finite set before the first unlink.
+    for name in sorted(NPZ_NAMES):
+        path=stage.payload/name;sha,info=_checked_sha(path);registered=stage.temporal_npz[name]
+        require((sha,info.st_size,info.st_dev,info.st_ino,info.st_mtime_ns,stat.S_IMODE(info.st_mode))==
+            tuple(registered[k] for k in ('sha256','bytes','device','inode','mtime_ns','mode')),
+            'registered temporal NPZ changed before consumption')
+        ref=substitutions[name];final=Path(ref['path'])
+        require(set(ref)=={'path','sha256'} and final==stage.folder/'published-target'/name,
+            'temporal substitution must be this stage new final logical NPZ path')
+        final_sha,final_info=_checked_sha(final)
+        require(final_sha==ref['sha256']==sha and final_info.st_ino!=info.st_ino
+            and final_info.st_dev==info.st_dev,'temporal substitution is not a distinct same-SHA published inode')
+        records.append(dict(stage_relative_path='unbound-target/'+name,sha256=sha,bytes=info.st_size,
+            mode=0o444,lifecycle='created_and_consumed_before_final_binding',persisted_equivalent=ref))
+    for row in records:(stage.folder/row['stage_relative_path']).unlink()
+    _sync(stage.payload);stage.temporal_consumed=True
+    return _new_json(stage.folder/'temporal-inputs-consumed.json',dict(version=VERSION,stage=stage.header_ref,
+        consumed_temporal_inputs=records,persistent_dependencies=list(substitutions.values()),
+        only_new_stage_private_paths_removed=True,historical_source_bytes_deleted=False,
+        before_final_target_binding=True,NN_updates=0,environment_resets=0,pilot_opened=False))

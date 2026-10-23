@@ -103,3 +103,42 @@ def test_probe_always_allocates_a_new_private_namespace():
         assert 'warehouse-v642-rows-cas-probe-' in str(stage.folder)
         assert stage.folder.is_absolute() and not stage.folder.is_relative_to(r.ROOT)
         assert json.loads(stage.header.read_bytes())['probe_only'] is True
+
+
+def test_finite_scratch_consumption_maps_only_new_private_inputs_to_existing_same_SHA_final(tmp_path,monkeypatch):
+    monkeypatch.setattr(r,'STORAGE_ROOT',tmp_path/'future-only')
+    with r.new_stage(owner_sha256=OWNER,stage_id='temporal') as stage:
+        final=stage.folder/'published-target';final.mkdir();substitutions={}
+        for name in sorted(r.NPZ_NAMES):
+            data=('synthetic-canonical-'+name).encode();row(stage,name,data)
+            path=final/name;path.write_bytes(data);path.chmod(0o444)
+            substitutions[name]=dict(path=str(path),sha256=r.digest_bytes(data))
+        r.register_temporal_npz(stage,names=sorted(r.NPZ_NAMES))
+        receipt=r.consume_temporal_npz(stage,substitutions=substitutions)
+        value=json.loads(Path(receipt['path']).read_bytes())
+        assert len(value['consumed_temporal_inputs'])==12 and not list(stage.payload.glob('*.npz'))
+        assert all(Path(ref['path']).is_file() for ref in value['persistent_dependencies'])
+        assert all('path' not in item and item['lifecycle']=='created_and_consumed_before_final_binding'
+                   for item in value['consumed_temporal_inputs'])
+        with pytest.raises(RuntimeError,match='finite registered'):
+            r.consume_temporal_npz(stage,substitutions=substitutions)
+
+
+@pytest.mark.parametrize('fault',['foreign_final','same_inode','changed_scratch','missing_item'])
+def test_scratch_cleanup_rejects_foreign_alias_or_modified_input_before_any_removal(tmp_path,monkeypatch,fault):
+    monkeypatch.setattr(r,'STORAGE_ROOT',tmp_path/'future-only')
+    with pytest.raises(RuntimeError):
+        with r.new_stage(owner_sha256=OWNER,stage_id='temporal-fail') as stage:
+            final=stage.folder/'published-target';final.mkdir();substitutions={}
+            for name in sorted(r.NPZ_NAMES):
+                data=name.encode();row(stage,name,data);path=final/name;path.write_bytes(data);path.chmod(0o444)
+                substitutions[name]=dict(path=str(path),sha256=r.digest_bytes(data))
+            r.register_temporal_npz(stage,names=sorted(r.NPZ_NAMES));name=sorted(r.NPZ_NAMES)[0]
+            if fault=='foreign_final':substitutions[name]['path']=str(tmp_path/'old-20k.npz')
+            elif fault=='same_inode':
+                (final/name).unlink();os.link(stage.payload/name,final/name)
+            elif fault=='changed_scratch':
+                path=stage.payload/name;path.chmod(0o644);path.write_bytes(b'changed');path.chmod(0o444)
+            else:substitutions.pop(name)
+            try:r.consume_temporal_npz(stage,substitutions=substitutions)
+            finally:assert len(list(stage.payload.glob('*.npz')))==12

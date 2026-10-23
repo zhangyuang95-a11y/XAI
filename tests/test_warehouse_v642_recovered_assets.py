@@ -344,3 +344,18 @@ def test_recovery_resets_use_only_remaining_predebited_finite_cases(change):
     elif change == 'skip_case': pre['case'] = later
     with pytest.raises(RuntimeError):
         audit.audit_reset_chain(events, [reset], inventory=inventory, initial=initial)
+
+
+def test_recovery_profiles_keep_executor_carrier_and_reports_explicit():
+    assert audit.recovery_profile(audit.V2.executor)==audit.V2
+    assert audit.recovery_profile(audit.V3.executor)==audit.V3
+    assert audit.V3.carrier==audit.V2.executor
+    assert audit.V3.claim!=audit.V2.claim and audit.V3.report!=audit.V2.report
+    for unknown in ('passed',None,'warehouse-v642-explicit-calibration-recovery.v99'):
+        with pytest.raises(RuntimeError,match='unknown explicit'):audit.recovery_profile(unknown)
+    with pytest.raises(RuntimeError,match='unknown explicit'):audit.report_profile('completed=True')
+
+
+def test_accelerated_provider_requires_explicit_wrapper_before_inspection():
+    with pytest.raises(RuntimeError,match='wrapper'):
+        audit.audit_accelerated_provider({'payload':{}},{},{},[])

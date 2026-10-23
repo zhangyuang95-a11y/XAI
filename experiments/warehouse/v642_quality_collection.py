@@ -65,7 +65,7 @@ def assets(report_ref):
         for ref in saved['inputs']:require(pointer(ref['path'])==ref,'training/export evidence asset changed')
         return deepcopy(saved)
     r=bound(report_ref)
-    if r.get('version')==recovery_assets.VERSION:
+    if r.get('version') in (recovery_assets.VERSION,recovery_assets.V3_VERSION):
         value=recovery_assets.read_assets(report_ref)
         _ASSET_CACHE[key]=deepcopy(value)
         return value

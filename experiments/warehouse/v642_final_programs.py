@@ -48,7 +48,7 @@ def last_programs(journal,*,variant,owner_ref,source_ref):
 def run(*,completed_assets_ref,reference_directory,run_id):
     fixed=q.assets(completed_assets_ref)  # Before output, fitting or replay.
     report=bound(completed_assets_ref)
-    if report.get('version')==q.recovery_assets.VERSION:
+    if report.get('version') in (q.recovery_assets.VERSION,q.recovery_assets.V3_VERSION):
         context=q.recovery_assets.finalization_context(completed_assets_ref,reference_directory)
         plan=context['plan'];events=context['events'];journal_refs=context['journal_refs']
         owners=context['owners'];program_sources=context['program_sources']

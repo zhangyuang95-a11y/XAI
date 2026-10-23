@@ -5,7 +5,7 @@ Its terminal observation must never be attributed to the vanished process.
 This reader grants neither scientific acceptance nor permission to publish.
 """
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 import json
@@ -23,6 +23,8 @@ ROOT = training.owner.ROOT
 RECOVERY_VERSION = 'warehouse-v642-explicit-calibration-recovery.v2'
 RECOVERY_CLAIM_NAME = 'recovery-v2.claim.json'
 VERSION = 'warehouse-v642-completed-recovered-calibration-assets.v1'
+V3_RECOVERY_VERSION = 'warehouse-v642-accelerated-calibration-recovery.v3'
+V3_VERSION = 'warehouse-v642-completed-accelerated-calibration-assets.v1'
 ROLES = ('robot_1', 'robot_2')
 VARIANTS = ('raw', 'regularized')
 STEPS = (4000, 15000, 16800, 18600, 20000)
@@ -38,6 +40,32 @@ EXECUTOR_FILES = (
 FILES = ('experiments/warehouse/v642_recovered_assets.py',
          'scripts/audit_warehouse_v642_recovery_results.py',
          'tests/test_warehouse_v642_recovered_assets.py')
+
+
+@dataclass(frozen=True)
+class RecoveryProfile:
+    executor: str
+    report: str
+    claim: str
+    supervisor: str
+    cli: str
+    carrier: str = RECOVERY_VERSION
+
+
+V2 = RecoveryProfile(RECOVERY_VERSION, VERSION, RECOVERY_CLAIM_NAME,
+    'warehouse-v642-calibration-recovery-supervisor.v1', 'scripts/resume_warehouse_v642_calibration.py')
+V3 = RecoveryProfile(V3_RECOVERY_VERSION, V3_VERSION, 'recovery-v3.claim.json',
+    'warehouse-v642-accelerated-recovery-supervisor.v1', 'scripts/resume_warehouse_v642_accelerated.py')
+
+
+def recovery_profile(version):
+    require(version in (V2.executor, V3.executor), 'unknown explicit recovered executor version')
+    return V2 if version == V2.executor else V3
+
+
+def report_profile(version):
+    require(version in (V2.report, V3.report), 'unknown explicit recovered asset report version')
+    return V2 if version == V2.report else V3
 
 
 def source_files():
@@ -63,7 +91,7 @@ def _journal(refs, inputs):
     return rows
 
 
-def audit_terminal(result_ref, supervisor_exit_ref, inputs):
+def audit_terminal(result_ref, supervisor_exit_ref, inputs, *, profile=V2):
     """Require an actual tool exit or a registered supervisor's real OS wait."""
     immutable(supervisor_exit_ref, inputs)
     e = bound(supervisor_exit_ref)
@@ -73,7 +101,7 @@ def audit_terminal(result_ref, supervisor_exit_ref, inputs):
     if e.get('observed_by') == 'exec_tool_terminal_result':
         return e
     require(e.get('observed_by') == 'source_bound_subprocess_wait'
-            and e.get('version') == 'warehouse-v642-calibration-recovery-supervisor.v1'
+            and e.get('version') == profile.supervisor
             and 'result_binding_error' not in e,
             'recovery exit was not observed by a registered terminal supervisor')
     folder = Path(result_ref['path']).parent
@@ -83,9 +111,14 @@ def audit_terminal(result_ref, supervisor_exit_ref, inputs):
     require(e['started'] == pointer(folder / 'supervisor-started.json'),
             'recovery wait receipt lacks the exclusive supervisor launch commitment')
     started = bound(e['started'])
-    source = pointer(ROOT / 'scripts/resume_warehouse_v642_calibration.py')
-    immutable(dict(path=str(folder / 'source' / 'scripts/resume_warehouse_v642_calibration.py'),
-                   sha256=source['sha256']), inputs)
+    source = pointer(ROOT / profile.cli)
+    if profile == V2:
+        immutable(dict(path=str(folder / 'source' / profile.cli), sha256=source['sha256']), inputs)
+    else:
+        result = bound(result_ref); contract = bound(result['source_contract'])
+        immutable(contract['source_snapshots'][profile.cli], inputs)
+        require(contract['source_snapshots'][profile.cli]['sha256'] == source['sha256'],
+                'accelerated supervisor source snapshot differs')
     command = [str(Path(sys.executable).resolve()), source['path'], '--run',
                '--recovery-plan', str(folder / 'plan.json')]
     require(started['version'] == e['version']
@@ -118,8 +151,14 @@ def audit_terminal(result_ref, supervisor_exit_ref, inputs):
     return e
 
 
-def executor_sources():
+def executor_sources(*, profile=V2):
     """Read the complete registered executor closure, without executing it."""
+    if profile == V3:
+        from . import v642_accelerated_recovery as recovery
+        require(recovery.VERSION == V3.executor and recovery.CLAIM_NAME == V3.claim,
+                'unknown accelerated executor inventory')
+        return recovery.source_files()
+    require(profile == V2, 'unknown recovery executor profile')
     from . import v642_calibration_recovery as recovery
     require(recovery.VERSION == RECOVERY_VERSION
             and recovery.RECOVERY_CLAIM_NAME == RECOVERY_CLAIM_NAME
@@ -173,7 +212,7 @@ def exact_value(left, right):
 
 
 def audit_recovery_plan(r, *, folder, plan, descriptor, original_claim,
-                        reference_directory, inputs):
+                        reference_directory, inputs, profile=V2):
     """Offline plan/claim validation; do not consult current lease or PID state."""
     p = bound(r['recovery_plan'])
     claim = bound(r['recovery_claim'])
@@ -183,9 +222,9 @@ def audit_recovery_plan(r, *, folder, plan, descriptor, original_claim,
             and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,99}', p['recovery_id'])
             and folder == base / 'recovery' / p['recovery_id']
             and r['recovery_plan'] == pointer(folder / 'plan.json')
-            and r['recovery_claim'] == pointer(base / RECOVERY_CLAIM_NAME),
+            and r['recovery_claim'] == pointer(base / profile.claim),
             'recovery plan or single-use claim is outside its registered location')
-    require(p['version'] == RECOVERY_VERSION and p['authorization'] == '继续，完成验收'
+    require(p['version'] == profile.executor and p['authorization'] == '继续，完成验收'
             and p['reference_directory'] == str(Path(reference_directory).resolve())
             and p['config'] == asdict(training.owner.PPOConfig())
             and p['maximum_joint_steps_per_variant'] == 20000
@@ -202,7 +241,7 @@ def audit_recovery_plan(r, *, folder, plan, descriptor, original_claim,
             and p['journals'] == [pointer(original / 'owner-journal.jsonl')]
             and p['reset_journals'] == [pointer(original / 'actual-resets.jsonl')],
             'recovery plan omitted or relocated original training journals')
-    expected_sources = executor_sources()
+    expected_sources = executor_sources() if profile == V2 else executor_sources(profile=profile)
     require(r['source_files'] == p['source_files'] == expected_sources,
             'recovery executor source contract is incomplete or changed')
     repair = engineering_repair(base, inputs)
@@ -210,7 +249,7 @@ def audit_recovery_plan(r, *, folder, plan, descriptor, original_claim,
             and exact_value(p.get('repair_of'), repair)
             and exact_value(claim.get('repair_of'), repair),
             'recovery v2 lost or replaced the pinned zero-work failure evidence')
-    require(claim['version'] == RECOVERY_VERSION and claim['recovery_plan'] == r['recovery_plan']
+    require(claim['version'] == profile.executor and claim['recovery_plan'] == r['recovery_plan']
             and claim['original_claim'] == r['original_claim']
             and claim['authorization'] == p['authorization']
             and claim['source_files'] == expected_sources
@@ -219,6 +258,8 @@ def audit_recovery_plan(r, *, folder, plan, descriptor, original_claim,
             and claim['maximum_joint_steps_per_variant'] == 20000
             and claim['expires_utc'] == p['expires_utc'] and claim['pilot_opened'] is False,
             'recovery single-use claim authorization, source or limits differ')
+    if profile == V3:
+        audit_accelerated_contract(r, p, claim, inputs)
     require(original_claim['clearance'] == descriptor['clearance'],
             'original claim uses a different finite-seed clearance')
     immutable(original_claim['clearance'], inputs)
@@ -274,6 +315,27 @@ def audit_recovery_plan(r, *, folder, plan, descriptor, original_claim,
         require((trace['start_joint_step'], trace['end_joint_step']) in
                 ((16800, 17824), (17824, 18600)), 'cached physical trace boundary differs')
     return p
+
+
+def audit_accelerated_contract(r,p,claim,inputs):
+    from . import v642_accelerated_recovery as execution
+    from . import v642_checkpoint_cutover as cutover
+    from backend.training import warehouse_v642_accelerated_recovery_evidence as adapter
+    immutable(r['source_contract'],inputs);contract=execution.checked_sources(r['source_contract'])
+    require(r['source_contract']==p['source_contract']==claim['source_contract']
+        and r['cutover']==p['cutover']==claim['cutover']
+        and claim['acceleration_authorization']==p['acceleration_authorization']==execution.AUTHORIZATION
+        and r['checkpoint_serialization_schema']==r['event_serialization_schema']==V2.executor,
+        'accelerated executor lost its explicit source, authorization or carrier binding')
+    stopped=cutover.read_completed(r['cutover'])
+    require(stopped['parent_v2_plan']==p['parent_recovery_plan']==r['parent_recovery_plan']
+        and stopped['mode']=='original-safe-replay' and stopped['source_contract']==r['source_contract'],
+        'accelerated handoff dropped new physical samples or committed updates')
+    for ref in stopped['inputs']:immutable(ref,inputs)
+    refs,roots,files,manifests=adapter.checked_prefix_manifests(p['prefix_manifest_refs'])
+    for ref in (*refs,*files):immutable(ref,inputs)
+    require(manifests[0]['files']==p['original_input_hashes'], 'accelerated original prefix inventory differs')
+    for ref in contract['source_snapshots'].values():immutable(ref,inputs)
 
 
 def audit_replay_proofs(proofs, *, original, folder, inputs):
@@ -391,11 +453,13 @@ def audit_NN_hash_chain(updates, checkpoint_values):
                     'registered checkpoint NN weights differ from its accepted optimizer suffix')
 
 
-def audit_provider(r, *, recovery_plan, final_checkpoint, inputs):
+def audit_provider(r, *, recovery_plan, final_checkpoint, inputs, profile=V2):
     """Read provider facts and bind each current-NN validation to its optimizer."""
     from backend.training import warehouse_v642_recovery_evidence as provider
     snapshot = final_checkpoint['provider']
     p = snapshot['payload']
+    if profile == V3:
+        audit_accelerated_provider(snapshot,r,recovery_plan,inputs)
     output = training.PROVIDER_ROOT / 'recovery' / recovery_plan['recovery_id']
     require(snapshot['payload_sha256'] == digest(p) and p['version'] == provider.VERSION
             and p['source_files'] == provider.source_files()
@@ -518,9 +582,9 @@ def audit_completion(result_ref, supervisor_exit_ref, *, reference_directory):
     """Recount exact histories; all input evidence is read without RNG or NN updates."""
     inputs = []
     result_path = immutable(result_ref, inputs)
-    audit_terminal(result_ref, supervisor_exit_ref, inputs)
-    r = bound(result_ref)
-    require(r.get('version') == RECOVERY_VERSION and r.get('completed') is True
+    r = bound(result_ref); profile = recovery_profile(r.get('version'))
+    audit_terminal(result_ref, supervisor_exit_ref, inputs,profile=profile)
+    require(r.get('version') == profile.executor and r.get('completed') is True
             and r.get('numerical_training_completed') is True
             and r.get('pilot_opened') is False and r.get('model_acceptance_passed') is False
             and r.get('publishable') is False,
@@ -562,12 +626,12 @@ def audit_completion(result_ref, supervisor_exit_ref, *, reference_directory):
             'recovery completion seal does not bind this result')
     recovery_plan = audit_recovery_plan(r, folder=folder, plan=plan,
         descriptor=descriptor, original_claim=claim,
-        reference_directory=reference_directory, inputs=inputs)
+        reference_directory=reference_directory, inputs=inputs,profile=profile)
     require(r['original_source_files'] == contract['source_files'] == training.source_files(),
             'original recovery source contract differs')
     for name, sha in r['source_files'].items():
         require(file_sha(ROOT / name) == sha, 'recovery executor source changed')
-        snapshot = folder / 'source' / name
+        snapshot = (folder / 'source' / name if profile == V2 else Path(bound(r['source_contract'])['source_snapshots'][name]['path']))
         require(file_sha(snapshot) == sha and not snapshot.stat().st_mode & 0o222,
                 'recovery executor source snapshot changed')
         inputs.append(dict(path=str(snapshot), sha256=sha))
@@ -650,7 +714,7 @@ def audit_completion(result_ref, supervisor_exit_ref, *, reference_directory):
                     and value['refits'] == [s for s in (15000, 16800, 18600) if s <= step],
                     'recovery checkpoint identity, safety or refit steps differ')
             if location == folder:
-                require(value['version'] == RECOVERY_VERSION
+                require(value['version'] == profile.carrier
                         and value['recovery_claim'] == r['recovery_claim']
                         and value['recovery_source_files'] == r['source_files'],
                         'new checkpoint does not bind the actual recovery executor')
@@ -694,7 +758,7 @@ def audit_completion(result_ref, supervisor_exit_ref, *, reference_directory):
             {v: reports[v]['accepted_program_updates'] for v in VARIANTS},
             'recovery completion counters differ from accepted optimizer receipts')
     audit_provider(r, recovery_plan=recovery_plan,
-                   final_checkpoint=snapshots['regularized'][-1], inputs=inputs)
+                   final_checkpoint=snapshots['regularized'][-1], inputs=inputs,profile=profile)
     unique = {}
     for ref in inputs:
         require(ref['path'] not in unique or unique[ref['path']] == ref,
@@ -729,7 +793,7 @@ def run(*,reference_directory, result_ref, supervisor_exit_ref, output):
                          exports['regularized']['final']['role_sha256'][role]}) == 3,
                 'recovered reference/raw/regularized role weights are not independently bound')
     require(source_files() == sources, 'recovery result audit source changed during export')
-    r = dict(version=VERSION, recovery_completed=result_ref, supervisor_exit=supervisor_exit_ref,
+    r = dict(version=recovery_profile(checked['result']['version']).report, recovery_completed=result_ref, supervisor_exit=supervisor_exit_ref,
         reference_directory=str(Path(reference_directory).resolve()), audit_source_files=sources,
         input_asset_refs=checked['input_asset_refs'], receipt_audit=checked['receipt_audit'], exports=exports,
         actual_reset_count=checked['actual_reset_count'], numerical_training_completed=True,
@@ -746,7 +810,8 @@ def run(*,reference_directory, result_ref, supervisor_exit_ref, output):
 def read_assets(report_ref):
     """Versioned downstream reader; never silently accepts a recovery flag."""
     r = bound(report_ref)
-    require(r['version'] == VERSION and r['audit_source_files'] == source_files()
+    profile=report_profile(r['version'])
+    require(r['version'] == profile.report and r['audit_source_files'] == source_files()
             and r['numerical_training_completed'] is True
             and r['model_acceptance_passed'] is r['publishable'] is r['pilot_opened'] is False,
             'recovered calibration assets are missing, changed or incorrectly published')
@@ -788,3 +853,57 @@ def finalization_context(report_ref, reference_directory):
     events = _journal(result['journals'], [])
     return dict(plan=plan, events=events, journal_refs=result['journals'],
                 owners=result['owners'], program_sources=result['program_sources'])
+
+
+def audit_accelerated_provider(snapshot,r,plan,inputs):
+    from backend.training import warehouse_v642_accelerated_recovery_evidence as adapter
+    from backend.training import warehouse_v642_canonical_relabel as producer
+    from backend.training import warehouse_v642_canonical_batch as batch
+    import numpy as np
+    p=snapshot['payload'];wrapper=p.get('accelerated_wrapper')
+    require(type(wrapper) is dict and wrapper['version']==adapter.VERSION
+        and wrapper['source_files']==adapter.source_files()
+        and wrapper['prefix_manifests']==plan['prefix_manifest_refs']
+        and wrapper['every_distinct_bound_file_rehashed'] is wrapper['no_stat_cache']
+            is wrapper['current_NN_metrics_recomputed'] is True,'accelerated provider wrapper changed')
+    immutable(wrapper['acceleration_started'],inputs);header=bound(wrapper['acceleration_started'])
+    require(header['version']==adapter.VERSION and header['mode']=='original_prefix'
+        and header['source_files']==adapter.source_files() and header['recovery_claim']==r['recovery_claim']
+        and header['prefix_manifests']==plan['prefix_manifest_refs']
+        and header['canonical_producer_enabled'] is True
+        and header['NN_or_optimizer_method_changed'] is header['training_authority'] is False,
+        'accelerated evidence registration differs from its actual source')
+    for event_ref in p['events']:
+        event=bound(event_ref)
+        if event['kind']!='validation':continue
+        target=bound(event['target_package']);ref=target.get('canonical_producer_provenance')
+        if ref is None:continue
+        require(event.get('canonical_producer_provenance')==ref and ref in event['asset_refs'],
+            'canonical producer omitted from actual native event')
+        immutable(ref,inputs);a=bound(ref)
+        require(a['version']==producer.VERSION and a['source_files']==producer.source_files()
+            and a['source_sha256']==digest(a['source_files'])
+            and a['source_guard']==dict(owner=p['owner'],claim=r['recovery_claim'],source_files=r['source_files'],executor=V3.executor)
+            and a['target_actor']==event['target_actor'] and a['epoch_id']==event['epoch_id']
+            and a['sequence']==event['sequence_call'] and a['owner']==p['owner']
+            and a['observed_source']==target['observed_source']
+            and a['observed_audit_sha256']==target['observed_audit_sha256']
+            and a['observed_data_sha256']==target['observed_data_sha256']
+            and a['full_native_scalar_audit_required_before_feedback'] is True
+            and a['native_scalar_audit_performed'] is a['replayed_target_certificate_minted']
+                is a['independent_validation'] is a['training_authority'] is a['pilot_opened'] is False,
+            'canonical appendix falsely claims audit authority or changes the actual current NN')
+        actor=FrozenWarehouseV6Actor.load(a['target_actor']['path'],expected_sha256=a['target_actor']['sha256'])
+        require(actor.role_sha256==a['actor_role_sha256'],'canonical appendix NN role hashes differ')
+        for role in ROLES:
+            manifest=bound(target['pools'][role])
+            for split,part in manifest['parts'].items():
+                immutable(part['arrays'],inputs)
+                with np.load(part['arrays']['path'],allow_pickle=False) as arrays:
+                    require({key:batch.array_sha(arrays[key]) for key in ('x','m','p','sampled')}==a['outputs'][role][split],
+                        'canonical numeric outputs differ from their source-bound appendix')
+                    witness=a['witnesses'][role][split]
+                    require(witness['indices']==producer.witness_indices(len(arrays['x']))
+                        and witness['all_witness_values_bitwise_equal'] is True and witness['full_scalar_audit'] is False
+                        and producer._float_contract(arrays['p'][witness['indices']])==witness['probabilities'],
+                        'canonical scalar witness scope or stored probabilities differ')

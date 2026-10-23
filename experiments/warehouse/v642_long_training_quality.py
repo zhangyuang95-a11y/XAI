@@ -467,7 +467,7 @@ def audit(result_ref, supervisor_exit_ref):
             and claim['pilot_opened'] is False
             and result['claim']==claim_ref and result['clearance']==clearance_ref
             and claim['pid']==execution['worker_pid']
-            and all(result[key]==plan[key] for key in ('phase','stream_id','joint_step_budget','seed_plan')), 
+            and all(result[key]==plan[key] for key in ('phase','stream_id','joint_step_budget','seed_plan')),
             'long development claim or start-time seed clearance differs')
     resets_path = _asset(result['actual_resets'], inputs)
     auth_path = _asset(result['reset_preauthorization'], inputs)

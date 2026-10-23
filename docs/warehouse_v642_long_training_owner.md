@@ -6,7 +6,7 @@
 
 `experiments/warehouse/v642_long_training_owner.py` 是独立版本入口；原407训练源码和六份恢复源码均不修改。新 seed-plan 模块负责有限库存与四工作树历史种子查重，本入口另行注册完整执行源码快照，再将精确查重结果绑定该快照。普通构造函数、导入、声明验证器均无执行能力。
 
-顺序为：真实20k独立预检 → 显式新库存计划 → `--prepare-sources` → `--audit-seeds` → `--supervise`。三个阶段均要求 `--reference-directory PATH --calibration-precheck PATH --plan PATH`。CLI 在读取长计划之前重放校准准入；完整入口在单次 claim 前重验源码和24小时精确查重许可。
+顺序为：真实20k独立预检 → 显式新库存计划 → `--prepare-sources` → `--audit-seeds` → `--supervise`。三个阶段均要求 `--reference-directory PATH --calibration-precheck PATH --plan PATH`。CLI 在读取长计划之前重放校准准入；完整入口在单次 claim 前重验源码和24小时精确查重启动许可。24小时仅限制启动；200k、300k、400k分别使用源代码预注册的7天、10天、14天独立有限execution lease。claim固定started/expires、预算天数、原启动截止时间及automatic_renewal=false；执行中按该expiry校验，不能自动续期、延长或重签已消费claim。
 
 程序不自动分配库存或选择新种子。库存必须按已有 seed-plan API 显式准备。`development-0/1/2` 的200k、300k、400k每个预算均从完整v6.20双Actor共同起点重新开始；不能把20k owner改预算，也不能把小预算末端当大预算起点。每个 `(phase, stream_id, budget)` 使用跨 run ID 的独占 claim，中断保留 claim，没有自动恢复或重试。
 
@@ -14,7 +14,7 @@
 
 ## 数值与证据约束
 
-- raw/reg 从完全相同的双Actor、critic初始化种子、空优化器、优化随机流、场景序列开始；记录初始完整训练状态哈希。每个预算强制 joint step 0、非恢复状态，角色权重必须等于冻结参考。
+- raw/reg 从完全相同的双Actor、critic初始化种子、空优化器、优化随机流、场景序列开始；记录初始完整训练状态及两优化器哈希。跨预算还必须逐项等于旧预算独立审计restart proof中的实测完整起点；相同seed声明不能替代该检查。每个预算强制 joint step 0、非恢复状态，角色权重必须等于冻结参考。
 - 保留原完整NN前向与物理掩码。两个执行动作均由NN产生；训练轨迹逐帧交给原独立物理/NN replay reader后才进入PPO。执行后动作改选、教师标签、替代停机标签均无接口。
 - 两版本共用PPO、4000联合步critic warmup、真实完整episode停机成本与v6.20参考KL。程序深12、最多256叶，每节点和叶最多3个公开源，锁定已确认结构和支持。75%/84%/93%重新拟合；λ在80%—85%升至0.01。原provider每个PPO epoch重验当前NN，证据失效即停止反馈。
 - 1650个program-source episode（900拟合、150校准、300资格、300验证）仅在75%采集一次，后两次在相同已观察物理状态上重标当前NN，不声称是当前策略新轨迹。它们不计联合训练步，不进入奖励或cost梯度缓冲。raw始终无程序provider和梯度；reg结束时必须有双角色实际接受的正程序梯度更新。

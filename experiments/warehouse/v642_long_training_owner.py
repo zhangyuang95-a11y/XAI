@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import asdict,replace
-from datetime import datetime,timezone
+from datetime import datetime,timedelta,timezone
 from pathlib import Path
 import gzip,json,os,re,time
 import numpy as np
@@ -69,6 +69,21 @@ def checkpoint_steps(config):
     return (4000,*config.extraction_steps,config.joint_step_budget)
 
 
+def execution_lease(plan,clearance,*,started=None):
+    """A fresh 24h seed check starts one finite, nonrenewable long run."""
+    started=datetime.now(timezone.utc) if started is None else started
+    days=plan.value['execution_lease_days']
+    require(days==seeds.EXECUTION_LEASE_DAYS_BY_BUDGET[plan.config.joint_step_budget]
+        and plan.value['seed_clearance_start_window_hours']==24,'long execution lease protocol differs')
+    issued=datetime.fromisoformat(clearance['value']['issued_utc'])
+    deadline=datetime.fromisoformat(clearance['value']['expires_utc'])
+    require(issued.tzinfo and deadline.tzinfo and started.tzinfo
+        and issued<=started<deadline and deadline-issued==timedelta(hours=24),
+        '24h long seed clearance permits starting only before its exact deadline')
+    return dict(started_utc=started.isoformat(),expires_utc=(started+timedelta(days=days)).isoformat(),
+        execution_lease_days=days,seed_clearance_start_deadline_utc=deadline.isoformat(),automatic_renewal=False)
+
+
 def claim_path(plan):
     name=f"{plan.value['phase']}-{plan.value['stream_id']}-{plan.config.joint_step_budget}.json"
     require(re.fullmatch(r'[A-Za-z0-9_.-]+',name) is not None,'unsafe long-run claim identity')
@@ -80,6 +95,8 @@ def contract_value(plan):
     return dict(version=VERSION,seed_plan=plan.ref,source_files=files,source_sha256=digest(files),
         execution_output=str(Path(plan.ref['path']).parent/'training'),global_claim_path=str(claim_path(plan)),
         config=asdict(plan.config),checkpoint_joint_steps=list(checkpoint_steps(plan.config)),
+        execution_lease_days=plan.value['execution_lease_days'],
+        seed_clearance_start_window_hours=plan.value['seed_clearance_start_window_hours'],
         variants=list(VARIANTS),training_authority=False,sealed_authority=False,pilot_opened=False)
 
 
@@ -165,8 +182,8 @@ class LongTrainingOwner:
         require(ACTIVE.get() is self and not self.failed and not self.closed,'long-training owner is not active')
         require(pointer(self.claim_ref['path'])==self.claim_ref and pointer(self.descriptor_ref['path'])==self.descriptor_ref,
             'long-training claim or descriptor changed')
-        require(datetime.now(timezone.utc)<datetime.fromisoformat(self.clearance['value']['expires_utc']),
-            'long-training seed clearance expired')
+        require(datetime.now(timezone.utc)<self.execution_expires_utc,
+            'finite long-training execution lease expired; automatic renewal is forbidden')
         if full:
             self.plan.verify();require(self.sources==source_files(),'long-training source changed')
             require(checked_sources(self.plan)==self.source_contract_ref,'registered owner source changed')
@@ -204,6 +221,9 @@ class LongTrainingOwner:
             initial_joint_steps=0,initial_actor_updates=0,initial_critic_updates=0)
         require(identity['roles']==roles,'initial Actor roles differ from the confirmed complete reference')
         require(not self.initial_identity or identity==self.initial_identity,'raw/reg initial Actor or critic differs')
+        restart=p.value.get('restart_proof')
+        require(restart is None or identity==restart['expected_initial_identity'],
+            'larger budget did not restart from the independently audited identical full initial state')
         self.initial_identity=identity
         self.event('optimizer_RNG_predebit',variant=variant,seed=p.value['optimizer_seed'])
         rng=np.random.default_rng(p.value['optimizer_seed'])
@@ -411,6 +431,11 @@ def _make_owner(plan,clearance,sources,claim_ref,descriptor_ref,contract,folder,
     owner=LongTrainingOwner.__new__(LongTrainingOwner)
     owner.plan=plan;owner.clearance=clearance;owner.sources=deepcopy(sources)
     owner.claim_ref=claim_ref;owner.descriptor_ref=descriptor_ref;owner.source_contract_ref=contract
+    claim=bound(claim_ref);start=datetime.fromisoformat(claim['started_utc'])
+    owner.execution_expires_utc=datetime.fromisoformat(claim['expires_utc'])
+    require(execution_lease(plan,clearance,started=start)=={key:claim[key] for key in
+        ('started_utc','expires_utc','execution_lease_days','seed_clearance_start_deadline_utc','automatic_renewal')},
+        'long execution claim has an unregistered duration, renewal or start time')
     owner.clearance_assets=[clearance['clearance'],contract]
     owner.config=plan.config;owner.folder=folder;owner.reference_directory=reference_directory
     owner.failed=False;owner.closed=False;owner.sequence=0
@@ -431,6 +456,7 @@ def claimed_owner(*,reference_directory,calibration_precheck_ref,plan_ref):
     plan=load_seed_plan(reference_directory,calibration_precheck_ref,plan_ref)
     require(ACTIVE.get() is None,'long training owners cannot nest')
     clearance=seeds.checked_clearance(plan,execution=True)
+    execution_lease(plan,clearance)  # No output/model/RNG for an expired start window.
     sources=source_files();source_sha=digest(sources);contract=checked_sources(plan)
     clearance_ref=pointer(Path(plan.ref['path']).parent/'long-owner-source-clearance.json')
     require(bound(clearance_ref)==dict(version=VERSION,owner_source_contract=contract,
@@ -460,10 +486,11 @@ def claimed_owner(*,reference_directory,calibration_precheck_ref,plan_ref):
     target=folder/'descriptor.json';write_new(target,descriptor);target.chmod(0o444);descriptor_ref=pointer(target)
     require(seeds.checked_clearance(plan,execution=True)==clearance and source_files()==sources,
         'long source or exact history clearance changed immediately before claim')
+    lease=execution_lease(plan,clearance)
     claim_file.parent.mkdir(parents=True,exist_ok=True)
     write_new(claim_file,dict(version=VERSION,descriptor=descriptor_ref,plan=plan.ref,clearance=clearance['clearance'],
         phase=plan.value['phase'],stream_id=plan.value['stream_id'],joint_step_budget=plan.config.joint_step_budget,
-        owner_pid=os.getpid(),started_utc=datetime.now(timezone.utc).isoformat(),single_use_even_if_interrupted=True,
+        owner_pid=os.getpid(),**lease,single_use_even_if_interrupted=True,
         automatic_resume=False,automatic_retry=False,sealed_authority=False,pilot_opened=False))
     claim_file.chmod(0o444)
     owner=_make_owner(plan,clearance,sources,pointer(claim_file),descriptor_ref,contract,folder,reference_directory,token=_FACTORY_TOKEN)

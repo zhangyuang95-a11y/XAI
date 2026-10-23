@@ -113,7 +113,8 @@ def prepared(tmp_path,monkeypatch,request):
             program=dict(path='unused-'+r,sha256='not-loaded')) for r in ('robot_1','robot_2')}))
     value=dict(phase='development',stream_id='development-0',joint_step_budget=budget,
         initialization_seed=41,optimizer_seed=43,train_case_inventory=train_ref,program_evidence_inventory=program_ref,
-        config=asdict(config),execution_output=str(folder/'training'))
+        config=asdict(config),execution_output=str(folder/'training'),restart_proof=None,
+        execution_lease_days={200000:7,300000:10,400000:14}[budget],seed_clearance_start_window_hours=24)
     plan=SimpleNamespace(ref=plan_ref,value=value,config=config,readiness=ready,verify=lambda:None,
         registration=SimpleNamespace(value=dict(synthetic_only=True)))
     plan.proposal=plan
@@ -126,7 +127,9 @@ def prepared(tmp_path,monkeypatch,request):
     sources={name:o.file_sha(o.ROOT/name) for name in o.FILES}
     monkeypatch.setattr(o,'source_files',lambda:dict(sources))
     clearance_ref=put(folder/'fake-clearance.json',dict(synthetic_only=True))
-    clearance=dict(clearance=clearance_ref,value=dict(expires_utc=(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()))
+    now=datetime.now(timezone.utc)
+    clearance=dict(clearance=clearance_ref,value=dict(issued_utc=(now-timedelta(hours=1)).isoformat(),
+        expires_utc=(now+timedelta(hours=23)).isoformat()))
     monkeypatch.setattr(o.seeds,'audit',lambda p:clearance)
     monkeypatch.setattr(o.seeds,'checked_clearance',lambda p,**kw:clearance)
     values=dict(reference_directory=tmp_path/'unused-reference',calibration_precheck_ref=precheck,plan_ref=plan.ref)
@@ -225,6 +228,60 @@ def test_partial_attempt_consumes_global_stream_budget_even_across_run_ids(prepa
     with pytest.raises(RuntimeError,match='already consumed'):
         with enter(prepared):pytest.fail('single-use attempt repeated')
     assert o.pointer(o.claim_path(prepared.plan))==original
+
+
+@pytest.mark.parametrize('budget,days',[(200000,7),(300000,10),(400000,14)])
+def test_seed_start_deadline_and_budget_bound_nonrenewable_execution_lease(budget,days):
+    now=datetime.now(timezone.utc)
+    plan=SimpleNamespace(config=o.PPOConfig(joint_step_budget=budget),value=dict(
+        execution_lease_days=days,seed_clearance_start_window_hours=24))
+    clear=dict(value=dict(issued_utc=(now-timedelta(hours=1)).isoformat(),expires_utc=(now+timedelta(hours=23)).isoformat()))
+    lease=o.execution_lease(plan,clear,started=now)
+    assert datetime.fromisoformat(lease['expires_utc'])-now==timedelta(days=days)
+    assert lease['seed_clearance_start_deadline_utc']==clear['value']['expires_utc'] and not lease['automatic_renewal']
+    plan.value['execution_lease_days']=365000
+    with pytest.raises(RuntimeError,match='lease protocol differs'):o.execution_lease(plan,clear,started=now)
+
+
+def test_expired_start_clearance_cannot_create_claim_folder_or_model(prepared,kernels):
+    now=datetime.now(timezone.utc)
+    prepared.clearance['value'].update(issued_utc=(now-timedelta(hours=25)).isoformat(),expires_utc=(now-timedelta(hours=1)).isoformat())
+    with pytest.raises(RuntimeError,match='starting only before'):
+        with enter(prepared):pytest.fail('expired seed clearance started a long run')
+    assert not o.claim_path(prepared.plan).exists() and not (prepared.folder/'training').exists()
+    assert not kernels.initialized and not kernels.random_seeds
+
+
+@pytest.mark.parametrize('days_elapsed,allowed',[(2,True),(7,False)])
+def test_active_long_run_uses_execution_lease_not_expired_24h_start_window(prepared,kernels,monkeypatch,days_elapsed,allowed):
+    class Clock(datetime):
+        @classmethod
+        def now(cls,tz=None):return simulated
+    with pytest.raises(ProbeFinished if allowed else RuntimeError,match=None if allowed else 'execution lease expired'):
+        with enter(prepared) as active:
+            start=datetime.fromisoformat(o.bound(active.claim_ref)['started_utc'])
+            simulated=start+timedelta(days=days_elapsed,seconds=1)
+            monkeypatch.setattr(o,'datetime',Clock)
+            if allowed:
+                active.live(full=True);assert simulated>datetime.fromisoformat(prepared.clearance['value']['expires_utc'])
+                raise ProbeFinished()
+            active.live()
+    assert active.closed and (active.folder/'failed.json').is_file()
+
+
+def test_claim_cannot_be_rewritten_to_extend_the_execution_lease(prepared,kernels):
+    with pytest.raises(RuntimeError,match='claim or descriptor changed'):
+        with enter(prepared) as active:
+            claim=o.bound(active.claim_ref);claim['expires_utc']=(datetime.now(timezone.utc)+timedelta(days=365)).isoformat()
+            path=Path(active.claim_ref['path']);path.chmod(0o644);path.write_text(json.dumps(claim));path.chmod(0o444)
+            active.live()
+
+
+def test_larger_budget_restart_must_match_actual_full_initial_identity(prepared,kernels):
+    prepared.plan.value['restart_proof']=dict(expected_initial_identity=dict(not_the_real_critic_or_optimizers=True))
+    with pytest.raises(RuntimeError,match='identical full initial state'):
+        with enter(prepared) as active:active.initialize('raw')
+    assert len(kernels.initialized)==1 and not kernels.random_seeds and not active.actual_resets
 
 
 def install_physics_fakes(monkeypatch):

@@ -63,6 +63,17 @@ def _process(pid):
     return dict(pid=int(fields[0]),ppid=int(fields[1]),status=fields[2],command=fields[3])
 
 
+def _matches_command(process,command):
+    import shlex,sys
+    actual=shlex.split(process['command'])
+    if actual==command:return True
+    # macOS framework Python's launcher execs the app binary while preserving
+    # every script argument. Accept only this exact interpreter's framework.
+    app=Path(sys.base_prefix)/'Resources/Python.app/Contents/MacOS/Python'
+    return (sys.platform=='darwin' and Path(command[0])==Path(sys.executable).resolve()
+        and app.is_file() and actual==[str(app),*command[1:]])
+
+
 def _binding(recovery_plan_ref,supervisor_started_ref,worker_pid,target_checkpoint_path,mode,*,terminal=False):
     _asset(recovery_plan_ref)
     require(recovery_plan_ref['sha256']==PINNED_PLAN_SHA256,'only the pinned current v2 attempt may be cut over')
@@ -104,7 +115,7 @@ def prepare(*,recovery_plan_ref,supervisor_started_ref,worker_pid,target_checkpo
     binding=_binding(recovery_plan_ref,supervisor_started_ref,worker_pid,target_checkpoint_path,mode)
     require(type(cutover_id) is str and re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.-]{0,79}',cutover_id),'unsafe cutover ID')
     process=_process(worker_pid)
-    require(process['ppid']==binding['supervisor_pid'] and process['command']==' '.join(binding['command']),
+    require(process['ppid']==binding['supervisor_pid'] and _matches_command(process,binding['command']),
         'actual PID/parent/argv differs from v2 launch')
     folder=OUTPUT/cutover_id;folder.mkdir(parents=True,exist_ok=False);sources=source_files()
     for name,sha in sources.items():
@@ -176,7 +187,7 @@ def _saved_state(snapshot,*,step,provider_version,provider_calls,installs):
 def assert_safe(plan_ref,*,_terminal=False):
     p=checked_plan(plan_ref,terminal=_terminal);b=p['binding'];old=bound(b['recovery_plan']);folder=Path(b['recovery_plan']['path']).parent
     if not _terminal:
-        process=_process(b['worker_pid']);require(process['ppid']==b['supervisor_pid'] and process['command']==' '.join(b['command']),
+        process=_process(b['worker_pid']);require(process['ppid']==b['supervisor_pid'] and _matches_command(process,b['command']),
             'actual worker PID/parent/argv changed')
     journal=folder/'owner-journal.jsonl';resets=folder/'actual-resets.jsonl';events=_lines(journal);reset_rows=_lines(resets)
     require(events and not any((folder/name).exists() for name in ('failed.json','result.json','completed.json')),
@@ -269,7 +280,7 @@ def execute(plan_ref,*,authorization,successor_source_contract_ref,worker_pid,ta
             require(not (folder/'supervisor-exit.json').exists(),'worker exited before the target checkpoint')
             time.sleep(poll_seconds)
         process=_process(worker_pid)
-        require(process['ppid']==b['supervisor_pid'] and process['command']==' '.join(b['command']),'worker identity changed before stop')
+        require(process['ppid']==b['supervisor_pid'] and _matches_command(process,b['command']),'worker identity changed before stop')
         os.kill(worker_pid,signal.SIGSTOP);stopped=True
         # SIGSTOP delivery can race with the last write. Require actual stop
         # before inspecting the entire immutable numerical boundary.

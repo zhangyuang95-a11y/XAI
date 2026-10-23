@@ -159,3 +159,16 @@ def test_full_tensor_core_reader_provider_fingerprint_check_uses_no_model_or_RNG
     s['core']['safe_batch_boundary']=False
     with pytest.raises(RuntimeError,match='unsafe'):c._saved_state(s,step=16800,
         provider_version='warehouse-v642-current-NN-provider.v1',provider_calls=32,installs=[15000,16800])
+
+
+def test_macos_framework_exec_retains_exact_script_argv(monkeypatch,tmp_path):
+    import sys
+    prefix=tmp_path/'framework';app=prefix/'Resources/Python.app/Contents/MacOS/Python'
+    app.parent.mkdir(parents=True);app.write_bytes(b'explicit-framework-binary')
+    executable=prefix/'bin/python3.13';executable.parent.mkdir();executable.write_bytes(b'launcher')
+    monkeypatch.setattr(sys,'base_prefix',str(prefix));monkeypatch.setattr(sys,'executable',str(executable))
+    monkeypatch.setattr(sys,'platform','darwin')
+    command=[str(executable),'script.py','--run','--plan','bound.json']
+    assert c._matches_command({'command':' '.join([str(app),*command[1:]])},command)
+    assert not c._matches_command({'command':' '.join([str(app),'other.py',*command[2:]])},command)
+    assert not c._matches_command({'command':'/other/Python '+' '.join(command[1:])},command)

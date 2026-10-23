@@ -82,16 +82,23 @@ def run(*,completed_assets_ref,reference_directory,run_id):
     write_new(claim,dict(version=VERSION,plan=pointer(output/'plan.json'),output=str(output),single_use_even_if_failed=True,pilot_opened=False))
     claim.chmod(0o444);results={};refs=[*fixed['inputs'],*journal_refs,pointer(output/'plan.json'),pointer(claim)]
     try:
+        from backend.training import warehouse_v642_equivalent_source_pool as equivalent_sources
+        paired_sources=equivalent_sources.audit_pair(program_sources,reference_directory=reference_directory,
+            output=output/'program-source-audits')
+        source_audit_ref=paired_sources['proof_refs'][0]
+        refs.extend(paired_sources['proof_refs']);final_targets={}
         for variant in ('raw','regularized'):
             owner_ref=owners[variant];source_ref=program_sources[variant]
             source=bound(source_ref)
             require(source['owner']==owner_ref and source['inventory']==plan.proposal.value['program_evidence_inventory'],
                 'finalization may use only this owner\'s admitted program-only episode inventory')
             previous,bindings=last_programs(events,variant=variant,owner_ref=owner_ref,source_ref=source_ref)
-            observed=pools.audit_observed_pool(source_ref,reference_directory=reference_directory)
+            observed=paired_sources['pools'].pop(variant)
+            require(observed.source_ref==source_ref,'source-audit pool belongs to another variant')
             targets_ref=pools.relabel_current_NN(observed,fixed['actors'][variant],
                 pools.TARGET_ROOT/digest(dict(finalization=pointer(claim),variant=variant)))
             targets,_=pools.checked_targets(observed,targets_ref);cached=observed._replayed_target_cache
+            final_targets[variant]=targets_ref
             cached.verify(observed);refs.extend([owner_ref,source_ref,*bindings,*observed.refs,targets_ref,*cached.asset_refs])
             results[variant]={}
             for role in ROLES:
@@ -135,6 +142,7 @@ def run(*,completed_assets_ref,reference_directory,run_id):
         require(source_files()==sources,'final program source changed')
         for ref in refs:require(pointer(ref['path'])==ref,'final program prerequisite changed during processing')
         value=dict(version=VERSION,plan=pointer(output/'plan.json'),claim=pointer(claim),source_files=sources,input_asset_refs=refs,
+            program_source_audits=source_audit_ref,final_NN_target_packages=final_targets,
             completed_assets=completed_assets_ref,actors=fixed['actors'],actor_role_sha256=fixed['actor_role_sha256'],roles=results,
             calibration_program_precheck_passed=all(r['calibration_program_precheck_passed'] for roles in results.values() for r in roles.values()),
             scope='existing_training_program_pool_only_not_fresh_confirmation_or_sealed_audit',
@@ -178,6 +186,8 @@ def read_completed(ref,completed_assets_ref):
         and set(r['roles'])=={'raw','regularized'},'final programs belong to another frozen NN pair')
     programs={};inputs=[ref,r['plan'],r['claim'],execution_ref,pointer(folder/'completed.json'),
         *supervision_refs,*r['input_asset_refs']]
+    if 'backend/training/warehouse_v642_equivalent_source_pool.py' in r['source_files']:
+        inputs.extend(audit_final_source_pools(r,completed_assets_ref,fixed))
     for variant in ('raw','regularized'):
         require(set(r['roles'][variant])==set(ROLES),'both final program roles required')
         programs[variant]={}
@@ -199,3 +209,30 @@ def read_completed(ref,completed_assets_ref):
         path=folder/'source'/name;require(file_sha(path)==sha and not path.stat().st_mode&0o222,'final program source snapshot changed')
     for item in inputs:require(pointer(item['path'])==item,'final program evidence asset changed')
     return dict(report=ref,programs=programs,inputs=inputs)
+
+
+def audit_final_source_pools(r,completed_assets_ref,fixed):
+    require('program_source_audits' in r and set(r.get('final_NN_target_packages',{}))=={'raw','regularized'},
+        'explicit source-pair audit and both final NN targets required')
+    inputs=[]
+    from backend.training import warehouse_v642_equivalent_source_pool as equivalent_sources
+    asset_report=bound(completed_assets_ref)
+    if asset_report.get('version') in (q.recovery_assets.VERSION,q.recovery_assets.V3_VERSION):
+        expected_sources=bound(asset_report['recovery_completed'])['program_sources']
+    else:
+        controller=bound(asset_report['controller_completed'])
+        original=Path(bound(controller['owner_completed'])['descriptor']['path']).parent
+        expected_sources={v:pointer(original/v/'program-source/source.json') for v in ('raw','regularized')}
+    verified=equivalent_sources.verify_report(r['program_source_audits'],expected_sources)
+    inputs.extend(verified['input_asset_refs'])
+    require(set(r['final_NN_target_packages'])=={'raw','regularized'},'both final NN target packages required')
+    for variant,targets_ref in r['final_NN_target_packages'].items():
+        target=bound(targets_ref)
+        require(targets_ref in r['input_asset_refs'] and target['schema']==pools.TARGET_VERSION
+            and target['target_actor']==fixed['actors'][variant]
+            and target['observed_source']==expected_sources[variant]
+            and target['observed_audit_sha256']==verified['audit_sha256'][variant]
+            and target['owner']==bound(expected_sources[variant])['owner']
+            and target['source_files']==pools.source_files(), 'final NN targets lost their actual source-audit binding')
+        inputs.append(targets_ref)
+    return inputs

@@ -57,6 +57,9 @@ def test_wrong_provenance_or_cherry_picked_extraction_is_rejected(monkeypatch,ch
 
 @pytest.fixture
 def completed_schema_fixture(tmp_path,monkeypatch):
+    # This fixture tests program schema/exit gates; the physical-source proof
+    # has its own real parser/equivalence/corruption tests.
+    monkeypatch.setattr(f,'audit_final_source_pools',lambda *a:[])
     """Typed metadata component fixture only, with no NN/program fitting."""
     monkeypatch.setattr(f,'OUTPUT',tmp_path/'finals');folder=f.OUTPUT/'synthetic';folder.mkdir(parents=True)
     claim=tmp_path/'synthetic-finalization-claim.json';monkeypatch.setattr(f,'claim_path',lambda:claim)

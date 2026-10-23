@@ -99,7 +99,7 @@ class Run:
         self.ensure_open()
         if file_sha(self.clearance) != self.clearance_hash: raise ValueError('seed clearance changed')
         value = json.loads(self.clearance.read_text())
-        if (value.get('version') != 'three-domain-unified-seed-clearance.v1'
+        if (value.get('version') != 'three-domain-unified-seed-clearance.v2'
                 or value.get('plan_sha256') != self.plan_hash or value.get('passed') is not True):
             raise ValueError('actual independent metadata clearance required before a reset')
         if file_sha(self.clearance.parent/'seed-proposal.json') != value['source_proposal_sha256']:
@@ -107,7 +107,16 @@ class Run:
         if full:
             for ref in value.get('evidence', []):
                 if file_sha(ref['path']) != ref['sha256']: raise ValueError('seed audit evidence changed')
-        if len(value.get('evidence', [])) < 2: raise ValueError('missing inventory and independent triage')
+        if len(value.get('evidence', [])) < 3: raise ValueError('missing inventory, triage or final metadata delta')
+        delta_ref = value['final_delta']
+        if file_sha(delta_ref['path']) != delta_ref['sha256']: raise ValueError('final seed delta changed')
+        delta = json.loads(Path(delta_ref['path']).read_text())
+        if (delta['version'] != 'three-domain-unified-final-seed-delta.v1' or delta['passed'] is not True
+                or not delta['selection_unchanged'] or not delta['opaque_exclusions_unchanged']
+                or delta['changed'] or delta['missing']):
+            raise ValueError('incomplete or failed final metadata delta')
+        ref = value['registration']
+        if file_sha(ref['path']) != ref['sha256']: raise ValueError('final clearance registration changed')
         return value
 
     def finish(self):

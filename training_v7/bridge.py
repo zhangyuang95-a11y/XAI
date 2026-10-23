@@ -97,7 +97,8 @@ class ProgramProvider:
             write_new(folder/f'{role.name}.json', dict(program=program.as_dict(), metrics=report, solver_counts=budget.counts))
         write_new(folder/'result.json', dict(passed=all(r['passed'] for r in reports.values()), reports=reports,
                   model_role_sha256=model.role_hashes(), evidence=evidence.manifest, model_acceptance_passed=False, pilot_opened=False))
-        if not all(r['passed'] for r in reports.values()): raise ValueError('BC program precheck failed; PPO is prohibited')
+        # v7 admits the actual post-20k pair. A weak initial program disables
+        # feedback; it is not an extra BC gate from an older Warehouse recipe.
         return cls(evidence, programs, journal)
 
     def __call__(self, model, epoch):

@@ -15,23 +15,27 @@ from training_v7 import workflow
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('register', 'seed-audit', 'bc', 'calibration', 'status'))
+    parser.add_argument('command', choices=('register', 'amend-preflight', 'seed-audit', 'finalize-seeds', 'bc', 'calibration', 'status'))
     parser.add_argument('--output', type=Path, default=workflow.OUTPUT)
     parser.add_argument('--domain', choices=('warehouse', 'pong', 'kitchen'))
     args = parser.parse_args()
     if args.command == 'register':
         value = workflow.register(args.output)
         print(json.dumps({k: value[k] for k in ('candidate_id', 'release_id', 'method_sha256', 'pilot_opened')}))
+    elif args.command in ('amend-preflight', 'finalize-seeds'):
+        value = workflow.amend_preflight(args.output) if args.command == 'amend-preflight' else workflow.finalize_seeds(args.output)
+        print(json.dumps({k: value[k] for k in ('passed', 'seed_guard_version', 'preflight_revision') if k in value}))
+        return 1 if value.get('passed') is False else 0
     elif args.command == 'seed-audit':
         value = workflow.seed_audit(args.output)
-        print(json.dumps(dict(passed=value['passed'], unresolved=len(value['unresolved_paths']), environment_resets=0)))
+        print(json.dumps(dict(passed=value['passed'], unresolved=len(value.get('unresolved_paths', [])), environment_resets=0)))
         return 0 if value['passed'] else 1
     elif args.command in ('bc', 'calibration'):
         if args.domain is None: parser.error('--domain is required')
         operation = workflow.run_bc if args.command == 'bc' else workflow.run_calibration
         print(json.dumps(operation(args.domain, args.output)))
     else:
-        registration = json.loads((args.output/'registration.json').read_text())
+        _, registration = workflow.registration_at(args.output)
         summary = dict(candidate=registration['candidate_id'], method_sha256=registration['method_sha256'],
                        domains={}, candidate_closed=(args.output/'CLOSED.json').exists(),
                        model_acceptance_passed=False, pilot_opened=False)

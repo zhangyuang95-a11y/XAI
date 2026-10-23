@@ -71,6 +71,7 @@ PPO数值检查点包含模型、参考NN、双优化器、beta、风险状态�
 ```sh
 python3 scripts/run_three_domain_unified.py register
 python3 scripts/run_three_domain_unified.py seed-audit
+python3 scripts/run_three_domain_unified.py finalize-seeds
 python3 scripts/run_three_domain_unified.py calibration --domain warehouse
 python3 scripts/run_three_domain_unified.py calibration --domain pong
 python3 scripts/run_three_domain_unified.py calibration --domain kitchen
@@ -81,16 +82,18 @@ python3 scripts/run_three_domain_unified.py status
 冲突、缺失历史根或未解析元数据均禁止首次reset。该审计只证明声明元数据范围内的查重，
 不声称对未记录外部实验提供全局新颖性证明。
 
-任一域失败会写入不可覆盖的`CLOSED.json`，其他域在后续reset/优化边界停止。
-BC程序预检失败不得启动PPO。最终质量只使用本次20k后的真实导出模型和新75场景；
+任一域校准失败会写入不可覆盖的`CLOSED.json`，其他域在后续reset/优化边界停止。
+初始BC程序指标作为诊断，未合格时禁止反馈；不额外增加旧协议的BC禁训门槛。
+完成20k后再统一检查任务、程序、双角色梯度及raw/reg实际权重差异，失败也保留实测表。
+最终质量只使用本次20k后的真实导出模型和新75场景；
 代理结果单独标注，真人样本数为0。
 
 ## 软件验证与旧版本边界
 
-2026-10-24回归：**166项通过，0失败/错误/跳过**；其中48项为新共同核心测试。
-测试前后835份执行源码未变，源码闭包SHA为
-`066b493a4b4cab661c7a4375b03e0126b9609efd92bab2233a82d0932f5051e1`。
-实际子进程退出0的记录位于`output/three_domain_v7/engineering-20261024-03/result.json`。
+2026-10-24最终预检回归：**173项通过，0失败/错误/跳过**；其中55项为新共同核心测试。
+测试前后执行源码未变，源码闭包SHA为
+`657b25fcc749c707927c7d7ea6fc6fa05de65f11e2d20f1e968d86b163fa990c`。
+实际子进程退出0的记录位于`output/three_domain_v7/three-domain-unified-01/engineering-preflight-04/result.json`。
 该记录明确标记`scientific_model_evaluation=false`、`model_acceptance_passed=false`。
 
 新测试覆盖三域公开观察、私有未来/路线历史排除、动作维度1/3/5/6/13、
@@ -110,3 +113,21 @@ v7种子选择器扩大为四个历史仓库中的白名单元数据、启动gua
 覆盖Pong、Kitchen及混合域记录。它在独立命名空间调用原审计数值代码，
 同时记录原engine和新selection adapter的SHA；没有修改或monkeypatch旧模块。
 不能把旧Warehouse路径范围的查重结论当作三域查重通过。
+
+### 本轮种子预检与实际启动
+
+原查重保留为失败结果：8448份条目中有16份旧格式未解析，并将本候选登记误判为历史使用。
+`seed_context.py`完整读取4份52/54列CSV，以及12份压缩轨迹；轨迹只使用惰性记录，
+不执行pickle原构造器。float32公开观察完整解码；Torch策略RNG快照按固定结构和
+已绑定生产源码识别，未知二进制仍拒绝。原始报告和源码不覆盖。
+
+首次使用上下文仅排除当前候选的登记/源码快照/审计输出，并在最终核对时强制检查
+无科学claim、无Actor资产；其他历史候选仍在范围内。既有解析结论只对SHA不变的文件复用。
+最终增量核对重新哈希完整选中文件集，确认没有新增、缺失或变更，忽略权重范围也未变。
+`seed-final-delta.json`实际passed=true；三域获得v2有限校准许可，不授予封存或发布权限。
+
+已启动Warehouse和Pong的新BC→20k配对流程；Kitchen尚未启动。
+本次运行绑定`registration-preflight-04.json`，方法哈希未变。
+预检修订只修复种子授权、最终完整核对及已批准的“先完成20k并报告，再共同判准入”顺序，
+没有修改Actor、BC/PPO数值损失、物理环境或程序拟合代码。
+此时没有新20k模型实测表；状态以各域事件和最终`calibration-result.json`为准。

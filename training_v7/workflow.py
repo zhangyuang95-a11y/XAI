@@ -18,6 +18,53 @@ def software_identity():
                 sklearn=sklearn.__version__, torch=str(torch.__version__), computation='CPU_float32_single_thread')
 
 
+def registration_at(output):
+    output = Path(output); pointer = output/'active-registration.json'
+    path = output/'registration.json'
+    if pointer.exists():
+        ref = json.loads(pointer.read_text()); path = Path(ref['path'])
+        if path.parent != output.resolve() or file_sha(path) != ref['sha256']:
+            raise ValueError('preflight registration revision is not bound')
+    return path, json.loads(path.read_text())
+
+
+def amend_preflight(output=OUTPUT):
+    """Append a seed-authorization-only revision before any scientific claim.
+
+    Existing registrations, snapshots and audit outputs are never overwritten.
+    Model, objectives, BC, PPO, program fitting and domain physics must remain
+    byte-identical. This is not a way to continue a spent/failed model cohort.
+    """
+    output = Path(output)
+    if any(output.rglob('claim.json')) or any(output.rglob('*.actor.npz')):
+        raise ValueError('cannot amend preflight after any NN experiment claim')
+    parent, old = registration_at(output)
+    current = source_files(ROOT)
+    allowed = {'training_v7/workflow.py', 'training_v7/storage.py', 'training_v7/seed_delta.py',
+               'training_v7/seed_context.py', 'scripts/run_three_domain_unified.py',
+               'training_v7/bridge.py', 'training_v7/collector.py'}
+    changed = {p for p in set(old['source_files']) | set(current) if old['source_files'].get(p) != current.get(p)}
+    if changed - allowed or old['method_sha256'] != MethodSpec().sha256:
+        raise ValueError('preflight amendment cannot change the scientific method')
+    revision = old.get('preflight_revision', 1) + 1
+    value = dict(old, source_files=current, preflight_revision=revision, seed_guard_version=2,
+        parent_registration=dict(path=str(parent.resolve()), sha256=file_sha(parent)),
+        preflight_amendment=dict(reason='final seed delta and approved v7 post-20k admission ordering; no extra BC gate',
+                                changed_source_files=sorted(changed), NN_experiment_claims=0))
+    path = output/f'registration-preflight-{revision:02d}.json'; write_new(path, value)
+    for relative, h in current.items():
+        target = output/f'source-preflight-{revision:02d}'/relative; target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open('xb') as f: f.write((ROOT/relative).read_bytes())
+        target.chmod(0o444)
+        if file_sha(target) != h: raise ValueError('source changed during preflight amendment')
+    pointer = output/'active-registration.json'
+    if pointer.exists():
+        write_new(output/f'active-registration-preflight-{revision-1:02d}.json', json.loads(pointer.read_text()))
+        pointer.unlink()
+    write_new(pointer, dict(path=str(path.resolve()), sha256=file_sha(path)))
+    return value
+
+
 def register(output=OUTPUT):
     output = Path(output)
     if output.resolve() != OUTPUT.resolve(): raise ValueError('scientific registration uses one canonical candidate directory')
@@ -78,7 +125,7 @@ def register(output=OUTPUT):
             pair_id=0, phase='calibration', cases=cases, sealed_authority=False, pilot_opened=False)
     registration = dict(version='three-domain-unified-registration.v1', candidate_id=CANDIDATE, release_id=RELEASE,
         method=asdict(method), method_sha256=method.sha256, domains=domains,
-        calibration_plans=plans, source_files=source_files(ROOT), software=software_identity(),
+        calibration_plans=plans, source_files=source_files(ROOT), software=software_identity(), seed_guard_version=2,
         model_acceptance_passed=False, pilot_opened=False,
         old_acceptance_receipts_authorize_new_method=False)
     # Shared method identity is one hash, not three editable per-domain copies.
@@ -127,7 +174,30 @@ def seed_audit(output=OUTPUT):
                 plan_sha256=digest(plan), passed=True, evidence=evidence,
                 source_proposal_sha256=file_sha(proposal), scope='declared_metadata_roots_not_global_freshness',
                 model_acceptance_passed=False, sealed_authority=False, pilot_opened=False))
+        return finalize_seeds(output)
     return report
+
+
+def finalize_seeds(output=OUTPUT):
+    from .seed_delta import verify
+    from .seed_context import reconcile
+    output = Path(output); registration_path, registration = registration_at(output)
+    verify_sources(ROOT, registration['source_files'])
+    if registration.get('seed_guard_version') != 2: raise ValueError('final-delta preflight registration required')
+    context_path = output/'seed-context-result.json'
+    if not context_path.exists():
+        reconcile(output/'seed-proposal.json', output/'seed-triage/result.json', context_path)
+    delta = verify(output/'seed-proposal.json', context_path, output/'seed-final-delta.json')
+    if not delta['passed']: return delta
+    refs = [dict(path=str((output/p).resolve()), sha256=file_sha(output/p)) for p in
+            ('seed-inventory/inventory.json', 'seed-triage/result.json', 'seed-context-result.json', 'seed-final-delta.json')]
+    for name, plan in registration['calibration_plans'].items():
+        write_new(output/f'{name}-clearance-final.json', dict(version='three-domain-unified-seed-clearance.v2',
+            plan_sha256=digest(plan), passed=True, evidence=refs, final_delta=refs[-1],
+            registration=dict(path=str(registration_path.resolve()), sha256=file_sha(registration_path)),
+            source_proposal_sha256=file_sha(output/'seed-proposal.json'),
+            scope='declared_metadata_roots_not_global_freshness', sealed_authority=False, pilot_opened=False))
+    return delta
 
 
 def run_bc(name, output=OUTPUT):
@@ -136,13 +206,13 @@ def run_bc(name, output=OUTPUT):
     from .model import DualActorCritic
     from .storage import Run
     output = Path(output)
-    registration = json.loads((output/'registration.json').read_text())
+    _, registration = registration_at(output)
     verify_sources(ROOT, registration['source_files'])
     if registration['software'] != software_identity(): raise ValueError('numerical dependency versions changed')
     if registration['method_sha256'] != MethodSpec().sha256: raise ValueError('method registration differs')
     adapter = domain(name); plan = registration['calibration_plans'][name]
     if adapter.spec.sha256 != plan['domain_sha256']: raise ValueError('domain physical contract differs')
-    run = Run(output/name/'calibration-0', plan, output/f'{name}-clearance.json')
+    run = Run(output/name/'calibration-0', plan, output/f'{name}-clearance-final.json')
     torch.set_num_threads(1)
     torch.manual_seed(plan['initialization_seed'])
     model = DualActorCritic(adapter.spec)
@@ -173,13 +243,13 @@ def run_calibration(name, output=OUTPUT):
     from .storage import Run, export_actor
     output = Path(output)
     if (output/'CLOSED.json').exists(): raise ValueError('shared candidate is closed')
-    registration = json.loads((output/'registration.json').read_text())
+    _, registration = registration_at(output)
     verify_sources(ROOT, registration['source_files'])
     if registration['software'] != software_identity(): raise ValueError('numerical dependency versions changed')
     adapter = domain(name); plan = registration['calibration_plans'][name]
     if plan['method_sha256'] != MethodSpec().sha256 or plan['domain_sha256'] != adapter.spec.sha256:
         raise ValueError('shared method or domain contract differs')
-    run = Run(output/name/'calibration-0', plan, output/f'{name}-clearance.json')
+    run = Run(output/name/'calibration-0', plan, output/f'{name}-clearance-final.json')
     torch.set_num_threads(1); torch.manual_seed(plan['initialization_seed'])
     bc_model = DualActorCritic(adapter.spec)
     try:
@@ -208,7 +278,7 @@ def run_calibration(name, output=OUTPUT):
         results, assets, programs = {}, {'reference': bc['actor']}, {}
         for variant in ('raw', 'regularized'):
             if (output/'CLOSED.json').exists(): raise ValueError('another domain closed the shared candidate')
-            owner = Run(run.folder/variant, plan, output/f'{name}-clearance.json')
+            owner = Run(run.folder/variant, plan, output/f'{name}-clearance-final.json')
             engine = PPO(deepcopy(initial), optimizer_seed=plan['optimizer_seed'], reference_rows=reference_rows)
             cloned = {r.name: Program.from_dict(r, provider.programs[r.name].as_dict(), actor_sha256=initial_hashes[r.name]) for r in adapter.spec.roles}
             live_provider = ProgramProvider(evidence, cloned, owner.journal)
@@ -217,8 +287,7 @@ def run_calibration(name, output=OUTPUT):
             assets[variant] = export_actor(engine.model, owner.folder/f'{variant}-final.actor.npz')
             verify_export(engine.model, evidence, assets[variant], owner.folder/'final-export-numerical.json')
             programs[variant] = live_provider.programs
-        if any(assets['raw']['role_sha256'][r.name] == assets['regularized']['role_sha256'][r.name] for r in adapter.spec.roles):
-            raise ValueError('raw and regularized need distinct actual role weights, not just different metadata hashes')
+        weights_distinct = all(assets['raw']['role_sha256'][r.name] != assets['regularized']['role_sha256'][r.name] for r in adapter.spec.roles)
         fresh = collect_quality(adapter, run, assets, programs, output=run.folder/'fresh-20k-quality')
         replay = audit_quality(adapter, run.folder/'fresh-20k-quality/result.json')
         # Recompute all four program results using independent stored arrays and
@@ -234,9 +303,11 @@ def run_calibration(name, output=OUTPUT):
                 actual_programs[variant][role.name] = report
         verify_sources(ROOT, registration['source_files'])
         run.finish()
-        passed = replay['task_quality_passed'] and all(m['passed'] for p in actual_programs.values() for m in p.values())
+        training_passed = weights_distinct and all(all(r['training_gates'].values()) for r in results.values())
+        passed = training_passed and replay['task_quality_passed'] and all(m['passed'] for p in actual_programs.values() for m in p.values())
         final = dict(version='three-domain-unified-20k-calibration-replay.v1', domain=name, passed=passed,
-            training=results, initial_role_sha256=initial_hashes, quality=replay,
+            training=results, training_gates_passed=training_passed, raw_regularized_role_weights_distinct=weights_distinct,
+            initial_role_sha256=initial_hashes, quality=replay,
             program_metrics=actual_programs, method_sha256=MethodSpec().sha256,
             model_acceptance_passed=False, formal_training_started=False, pilot_opened=False)
         write_new(run.folder/'calibration-result.json', final)

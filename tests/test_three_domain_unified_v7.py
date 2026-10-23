@@ -415,3 +415,87 @@ def test_seed_scope_includes_pong_kitchen_and_start_guards_without_patching_lega
     found = result['summary']['families']['cases']['references_or_reservations']
     assert len(found) == 4
     assert not result['summary']['unresolved_paths']
+
+
+def test_final_metadata_delta_detects_same_stat_content_change_and_new_files(tmp_path):
+    import json, os
+    from training_v7.seed_audit import audit
+    from training_v7.seed_delta import verify
+    from experiments.warehouse.seed_triage_indexed_v642 import triage
+    root = tmp_path/'history'; root.mkdir()
+    metadata = root/'training_report.json'; metadata.write_text(json.dumps({'scenario_seed': 1000}))
+    proposal = tmp_path/'proposal/seed-proposal.json'; proposal.parent.mkdir()
+    proposal.write_text(json.dumps(dict(schema='warehouse-seed-proposal.v1', candidate_id='software-delta-fixture',
+        families=[dict(name='cases', kind='scenario', values=[9999999])], registered_trace_paths=[])))
+    audit(proposal, [root], tmp_path/'inventory')
+    triage(tmp_path/'inventory/inventory.json', proposal, tmp_path/'triage')
+    first = verify(proposal, tmp_path/'triage/result.json', tmp_path/'delta1.json')
+    assert first['passed']
+    old_stat = metadata.stat(); metadata.write_text(json.dumps({'scenario_seed': 2000}))
+    os.utime(metadata, ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns))
+    changed = verify(proposal, tmp_path/'triage/result.json', tmp_path/'delta2.json')
+    assert not changed['passed'] and changed['changed'] == [str(metadata)]
+    (root/'new_registration.json').write_text(json.dumps({'scenario_seed': 9999999}))
+    added = verify(proposal, tmp_path/'triage/result.json', tmp_path/'delta3.json')
+    assert not added['passed'] and not added['selection_unchanged']
+
+
+def test_preliminary_clearance_never_grants_a_reset(tmp_path):
+    import json
+    from training_v7.storage import Run
+    from training_v7.contracts import digest
+    plan = dict(cases=[])
+    clearance = tmp_path/'clearance.json'
+    clearance.write_text(json.dumps(dict(version='three-domain-unified-seed-clearance.v1',
+        plan_sha256=digest(plan), passed=True, evidence=[])))
+    with pytest.raises(ValueError, match='clearance'):
+        Run(tmp_path/'run', plan, clearance)
+    assert not (tmp_path/'run/claim.json').exists()
+
+
+def test_preflight_revision_forbidden_after_experiment_claim(tmp_path):
+    from training_v7.workflow import amend_preflight
+    claim = tmp_path/'warehouse/calibration-0/claim.json'; claim.parent.mkdir(parents=True)
+    claim.write_text('{}')
+    with pytest.raises(ValueError, match='experiment claim'): amend_preflight(tmp_path)
+
+
+def test_legacy_csv_complete_rows_and_integer_values(tmp_path):
+    import csv
+    from training_v7.seed_context import legacy_csv
+    p = tmp_path/'training_metrics.jsonl'
+    header = ['episode', 'scenario_seed'] + ['metric_'+str(i) for i in range(50)]
+    with p.open('w', newline='') as f:
+        writer = csv.writer(f); writer.writerow(header); writer.writerow([1, '31000000000.0']+[0]*50)
+    rows, evidence = legacy_csv(p)
+    assert rows[0]['scenario_seed'] == 31000000000 and type(rows[0]['scenario_seed']) is int
+    assert evidence['complete_rows'] == 1
+    with p.open('a') as f: f.write('2,3\n')
+    with pytest.raises(ValueError, match='ragged'): legacy_csv(p)
+
+
+def test_legacy_pickle_unknown_bytes_cannot_be_cleared(tmp_path):
+    import pickle, gzip
+    from training_v7.seed_context import legacy_trajectory
+    p = tmp_path/'training_trajectory.json'
+    p.write_bytes(gzip.compress(pickle.dumps(dict(format='warehouse_collaborative_trajectory_v1',
+        metadata=dict(source='current_two_robot_training', seed=7), episodes=dict(opaque=b'unknown')))))
+    with pytest.raises(ValueError, match='opaque'): legacy_trajectory(p)
+
+
+def test_inert_reader_does_not_call_original_global(tmp_path):
+    import io, pickle
+    from training_v7.seed_context import LabeledReader, InertRecord
+    class Payload:
+        def __reduce__(self): return (eval, ('1/0',))
+    value = LabeledReader(io.BytesIO(pickle.dumps(Payload()))).load()
+    assert isinstance(value, InertRecord) and value.constructor_args == ('1/0',)
+    assert value.pickle_global == ('builtins', 'eval')
+
+
+def test_first_use_context_forbidden_after_claim(tmp_path):
+    from training_v7.seed_context import reconcile
+    p = tmp_path/'seed-proposal.json'; p.write_text('{}')
+    claim = tmp_path/'warehouse'/'claim.json'; claim.parent.mkdir(); claim.write_text('{}')
+    with pytest.raises(ValueError, match='experiment claim'):
+        reconcile(p, tmp_path/'not_read.json', tmp_path/'result.json')

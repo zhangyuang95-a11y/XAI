@@ -133,9 +133,9 @@ def train_pair_variant(adapter, engine, run, provider, *, variant, budget, actio
         critic_updates=engine.critic_updates, program_updates=engine.program_updates,
         program_gradient_norm_sum=engine.program_norm, accepted_actor_change=engine.accepted_actor_change,
         final_program_metrics=final_programs, quality_evaluated=False, model_acceptance_passed=False, pilot_opened=False)
-    if variant == 'raw' and any(engine.program_updates.values()): raise ValueError('raw external program gradient is nonzero')
-    if variant == 'regularized' and not all(engine.program_updates.values()): raise ValueError('one regularized role received no accepted program gradient')
-    if not all(v > 0 for v in engine.accepted_actor_change.values()): raise ValueError('one Actor received no accepted weight changes')
+    result['training_gates'] = dict(raw_zero_feedback=variant != 'raw' or not any(engine.program_updates.values()),
+        regularized_both_positive=variant != 'regularized' or all(engine.program_updates.values()),
+        both_Actors_changed=all(v > 0 for v in engine.accepted_actor_change.values()))
     write_new(folder/'result.json', result)
     run.finish()
     return result

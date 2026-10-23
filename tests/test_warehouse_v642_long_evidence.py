@@ -1,6 +1,10 @@
 """Named synthetic provider/NN doubles; no real candidate or environment."""
 from pathlib import Path
 from types import SimpleNamespace
+from copy import deepcopy
+import importlib.util
+import json
+import numpy as np
 import pytest
 from backend.training import warehouse_v642_long_evidence as c
 
@@ -47,7 +51,7 @@ def setup(tmp_path,monkeypatch):
     def evidence(program,pool,target,*,epoch_id):
         role=c.bound(program)['role'];return Evidence(report=dict(gate=dict(passed=gates[role])),
             epoch_id=epoch_id,asset_refs=(program,target),program_ref=program)
-    monkeypatch.setattr(c.native.pools,'build_observed_evidence',evidence)
+    monkeypatch.setattr(c.PreparedObservedEvidenceBuilder,'build',lambda self,*args,**kw:evidence(*args,**kw))
     return SimpleNamespace(p=p,active=active,state=state,calls=calls,gates=gates,callback=c.LongEvidenceCallback(active,p))
 
 
@@ -108,3 +112,126 @@ def test_evidence_materialization_cannot_mutate_NN_or_optimizer_state_before_gra
         s.callback(s.state,'mutated-state')
     assert s.p.failed and s.callback.failed and not s.callback.events
     assert s.p.call_count==1 and s.p.used_epochs=={'mutated-state'}
+
+
+def test_raw_cannot_construct_any_prepared_builder_or_materialize_targets(setup,monkeypatch):
+    s=setup;s.p.variant='raw'
+    def forbidden(*a,**kw):pytest.fail('raw constructed program preparation')
+    monkeypatch.setattr(c,'PreparedObservedEvidenceBuilder',forbidden)
+    with pytest.raises(RuntimeError,match='regularized native provider'):c.LongEvidenceCallback(s.active,s.p)
+    assert not s.calls
+
+
+@pytest.fixture
+def named_low_level_doubles(tmp_path,monkeypatch):
+    """Explicit MOCK provenance, never an audited ObservedPool/private token.
+
+    Only the real native pool *type names* and checked_targets are patched in
+    this test.  No original ObservedPool or ReplayedTargets is manufactured.
+    Scientific end-to-end authority is deliberately outside this fixture.
+    """
+    spec=importlib.util.spec_from_file_location('long_preparation_software_fixture',
+        Path(__file__).with_name('test_warehouse_v642_prepared_program.py'))
+    helper=importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
+    native_program,parts,_,file=helper.prepared.__wrapped__(tmp_path)
+    role=native_program.role;target_actor=put(tmp_path/'MOCK-not-a-NN.json',dict(mock_only=True))
+    manifest_parts={}
+    for split,a in parts.items():
+        arrays=tmp_path/(split+'.npz')
+        with arrays.open('xb') as handle:np.savez_compressed(handle,**{k:a[k] for k in ('x','m','p','sampled')})
+        manifest_parts[split]=dict(arrays=c.pointer(arrays),rows=put(tmp_path/(split+'-rows.json'),a['rows']))
+    pool=put(tmp_path/'MOCK-pool.json',dict(parts=manifest_parts))
+    target_ref=put(tmp_path/'MOCK-target-package.json',dict(mock_only=True))
+    target=dict(target_actor=target_actor,pools={role:pool});refs=[target_ref]
+    class MockCheckedTargets:
+        def __init__(self):self.parts={role:deepcopy(parts)};self.role_hashes={role:'c'*64};self.checks=0
+        def verify(self,observed):self.checks+=1;return self
+    class MockObservedProvenance:
+        def __init__(self):
+            self._replayed_target_cache=MockCheckedTargets()
+            self.source_ref=put(tmp_path/'MOCK-source.json',dict(mock_only=True))
+            self.audit_sha256='d'*64;self.checks=0
+        def verify(self):self.checks+=1;return self
+    observed=MockObservedProvenance();checks=[]
+    def mock_checked(pool,ref):
+        assert pool is observed and ref==target_ref;checks.append(ref);return deepcopy(target),deepcopy(refs)
+    monkeypatch.setattr(c.native.pools,'ObservedPool',MockObservedProvenance)
+    monkeypatch.setattr(c.native.pools.target_cache,'ReplayedTargets',MockCheckedTargets)
+    monkeypatch.setattr(c.native.pools,'checked_targets',mock_checked)
+    return SimpleNamespace(program=native_program,program_ref=c.pointer(file),parts=parts,observed=observed,
+        target_ref=target_ref,target=target,checks=checks,helper=helper)
+
+
+def test_mock_provenance_builder_preserves_original_native_types_payload_refs_and_pool_targets(named_low_level_doubles):
+    s=named_low_level_doubles;builder=c.PreparedObservedEvidenceBuilder()
+    old=c.native.pools.build_observed_evidence(s.program_ref,s.observed,s.target_ref,epoch_id='MOCK-epoch')
+    actual=builder.build(s.program_ref,s.observed,s.target_ref,epoch_id='MOCK-epoch')
+    assert type(actual) is type(old) is c.native.pools.ObservedOnlineEvidence
+    s.helper.strict_equal(actual.payload(),old.payload());assert actual.asset_refs==old.asset_refs
+    assert actual.envelope_digest==old.envelope_digest
+    for a in s.parts.values():
+        args=dict(current_role_sha256=actual.target_role_sha256,epoch_id=actual.epoch_id)
+        left=old.loss_targets(a['x'],a['m'],**args);right=actual.loss_targets(a['x'],a['m'],**args)
+        assert set(left)==set(right)
+        for key in left:
+            assert left[key].dtype==right[key].dtype and left[key].tobytes()==right[key].tobytes()
+    assert len(s.checks)==2 and s.observed._replayed_target_cache.checks>=2
+
+
+def test_mock_builder_reuses_only_program_and_recomputes_both_qualifications_every_epoch(named_low_level_doubles,monkeypatch):
+    s=named_low_level_doubles;builder=c.PreparedObservedEvidenceBuilder();prepared_calls=[];report_calls=[]
+    original=c.prepared.PreparedProgram.from_reference;report=c.native.pools.online.current_report
+    def prepare(ref,**kw):prepared_calls.append(ref);return original(ref,**kw)
+    def recompute(program,parts):report_calls.append(parts);return report(program,parts)
+    monkeypatch.setattr(c.prepared.PreparedProgram,'from_reference',prepare)
+    monkeypatch.setattr(c.native.pools.online,'current_report',recompute)
+    first=builder.build(s.program_ref,s.observed,s.target_ref,epoch_id='MOCK-first')
+    for a in s.observed._replayed_target_cache.parts[s.program.role].values():
+        a['p'][:]=np.float32(.2);a['sampled'][:]=0
+    second=builder.build(s.program_ref,s.observed,s.target_ref,epoch_id='MOCK-second')
+    assert len(prepared_calls)==1 and len(report_calls)==2 and first.program is second.program
+    assert first.report!=second.report and first.report['feedback_leaves']!=second.report['feedback_leaves']
+    old=c.native.pools.build_observed_evidence(s.program_ref,s.observed,s.target_ref,epoch_id='MOCK-second')
+    s.helper.strict_equal(second.payload(),old.payload())
+    assert builder.bindings()[0]['program']==s.program_ref
+
+
+@pytest.mark.parametrize('fault',['not_native_pool','not_native_cache','program_mutation','source_changed','epoch'])
+def test_builder_rejects_provenance_or_cached_program_fault_before_feedback(named_low_level_doubles,monkeypatch,fault):
+    s=named_low_level_doubles;builder=c.PreparedObservedEvidenceBuilder()
+    if fault=='program_mutation':
+        builder.build(s.program_ref,s.observed,s.target_ref,epoch_id='MOCK-first')
+        builder.program(s.program_ref).leaves[0]['bias'][0]+=.1
+    elif fault=='not_native_cache':s.observed._replayed_target_cache=object()
+    elif fault=='source_changed':monkeypatch.setattr(c,'source_files',lambda:{'MOCK-changed-source':'0'*64})
+    observed=object() if fault=='not_native_pool' else s.observed
+    with pytest.raises(RuntimeError):
+        builder.build(s.program_ref,observed,s.target_ref,epoch_id='' if fault=='epoch' else 'MOCK-next')
+
+
+def test_complete_long_source_closure_explicitly_binds_prepared_native_and_gradient_implementations():
+    files=c.source_files()
+    for name in ('backend/training/warehouse_v642_prepared_program.py',
+        'backend/training/warehouse_v642_program.py','backend/training/warehouse_v642_observed_pool.py',
+        'backend/training/warehouse_v630_target_cache.py','backend/training/warehouse_v629_training_feedback.py',
+        'backend/training/warehouse_v642_long_evidence.py'):
+        assert files[name]==c.file_sha(c.ROOT/name)
+
+
+def test_native_target_rejection_occurs_before_any_program_preparation(named_low_level_doubles,monkeypatch):
+    s=named_low_level_doubles;builder=c.PreparedObservedEvidenceBuilder();calls=[]
+    def rejected(*a,**kw):calls.append('native-checked-targets');raise RuntimeError('MOCK target replay failed')
+    def forbidden(*a,**kw):pytest.fail('program prepared before native target admission')
+    monkeypatch.setattr(c.native.pools,'checked_targets',rejected)
+    monkeypatch.setattr(c.prepared.PreparedProgram,'from_reference',forbidden)
+    with pytest.raises(RuntimeError,match='target replay failed'):
+        builder.build(s.program_ref,s.observed,s.target_ref,epoch_id='MOCK-rejected')
+    assert calls==['native-checked-targets'] and not builder._programs
+
+
+def test_original_native_reader_class_and_global_builder_are_never_replaced():
+    from backend.training.warehouse_v642_program import Program
+    from backend.training.warehouse_v642_online_evidence import OnlineEvidence
+    assert c.native.pools.evidence.Program is Program
+    assert c.native.pools.evidence.OnlineEvidence is OnlineEvidence
+    assert c.native.pools.build_observed_evidence.__module__=='backend.training.warehouse_v642_observed_pool'

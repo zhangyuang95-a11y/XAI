@@ -33,7 +33,7 @@ from backend.training.warehouse_v629_rollout_replay import training_fingerprint
 from scripts.run_warehouse_v625 import write_new
 
 ROOT=owner.ROOT
-VERSION='warehouse-v642-completed-long-development-assets.v1'
+VERSION='warehouse-v642-completed-budget-locked-long-assets.v2'
 ROLES=('robot_1','robot_2')
 VARIANTS=('raw','regularized')
 _CACHE={}
@@ -53,6 +53,7 @@ class InputRefs(list):
 
 def source_files():
     names=('experiments/warehouse/v642_long_training_assets.py',
+           'scripts/audit_warehouse_v642_long_results.py',
            'tests/test_warehouse_v642_long_training_assets.py','docs/warehouse_v642_long_training_assets.md',
            'experiments/warehouse/v642_update_receipt_audit.py','experiments/warehouse/v642_recovered_assets.py',
            'backend/training/warehouse_v642_checkpoint_export.py')
@@ -84,7 +85,7 @@ def audit_lease(claim,clearance,plan):
 def audit_terminal(result_ref,exit_ref,*,plan,reference_directory,calibration_precheck_ref,inputs):
     """Only the source-bound real Popen.wait receipt can admit long output."""
     asset(exit_ref,inputs);e=bound(exit_ref);base=Path(plan.ref['path']).parent
-    require(e.get('version')=='warehouse-v642-long-development-supervisor.v1'
+    require(e.get('version')=='warehouse-v642-budget-locked-long-supervisor.v2'
             and e.get('observed_by')=='source_bound_subprocess_wait'
             and type(e.get('exit_code')) is int and e['exit_code']==0 and e.get('result')==result_ref
             and 'result_binding_error' not in e and Path(exit_ref['path'])==base/'long-supervisor-exit.json'
@@ -93,10 +94,15 @@ def audit_terminal(result_ref,exit_ref,*,plan,reference_directory,calibration_pr
     cli=pointer(ROOT/'scripts/run_warehouse_v642_long_training.py')
     command=[str(Path(sys.executable).resolve()),cli['path'],'--run','--reference-directory',str(Path(reference_directory).resolve()),
         '--calibration-precheck',calibration_precheck_ref['path'],'--plan',plan.ref['path']]
+    phase=plan.value['phase'];lock_ref=plan.value.get('development_budget_lock');admission=plan.value.get('formal_admission')
+    if phase=='formal':command.extend(['--phase','formal','--formal-budget-lock',lock_ref['path']])
     require(e['started']==pointer(base/'long-supervisor-started.json')
             and started['version']==e['version'] and started['observed_by']=='source_bound_subprocess_launch'
             and e['command']==started['command']==command and e['supervisor_source']==started['supervisor_source']==cli
             and e['seed_plan']==started['seed_plan']==plan.ref and started['calibration_precheck']==calibration_precheck_ref
+            and e['phase']==started['phase']==phase
+            and e['development_budget_lock']==started['development_budget_lock']==lock_ref
+            and e['formal_admission']==started['formal_admission']==admission
             and type(e['worker_pid']) is int and e['worker_pid']>0 and type(e['supervisor_pid']) is int
             and e['supervisor_pid']==started['supervisor_pid']>0 and e['worker_pid']!=e['supervisor_pid']
             and e['started_utc']==started['started_utc'] and _time(e['started_utc'])<=_time(e['finished_utc']),
@@ -317,7 +323,8 @@ def audit_storage_callback(final,*,provider_payload,inputs):
     asset(p['started'],inputs)
     require(bound(p['started'])==dict(version=storage_callback.VERSION,source_files=p['source_files'],
             owner=native['owner'],native_provider_started=native['started'],native_sources=native['source_files'],
-            materialization='new_unsealed_stage_only',NN_method_changed=False,pilot_opened=False),
+            materialization='new_unsealed_stage_only',program_static_validation=storage_callback.prepared.VERSION,
+            NN_method_changed=False,pilot_opened=False),
             'long callback immutable header differs')
     validations=[ref for ref in native['events'] if bound(ref)['kind']=='validation']
     require(len(p['events'])==len(validations)==p['call_count']
@@ -333,7 +340,30 @@ def audit_storage_callback(final,*,provider_payload,inputs):
                     native_NN_and_qualification_method_unchanged=True,optimizer_updates=0)
                 and event['sequence_call']==index and event['long_storage_callback_started']==p['started'],
                 'long callback/native validation/materialization chain differs')
+    audit_prepared_bindings(p['prepared_programs'],validations,inputs=inputs)
     return p
+
+
+def audit_prepared_bindings(recorded,validations,*,inputs):
+    """Rebuild static preparations from real program refs, never cached gates."""
+    refs={}
+    for event_ref in validations:
+        event=bound(event_ref)
+        require(set(event['programs'])==set(ROLES),'both native programs required in the static preparation ledger')
+        for ref in event['programs'].values():
+            asset(ref,inputs);value=bound(ref)
+            refs[(ref['path'],ref['sha256'],value['target_actor_role_sha256'])]=ref
+    expected=[]
+    for key,ref in sorted(refs.items()):
+        program=storage_callback.prepared.PreparedProgram.from_reference(ref,target_actor_role_sha256=key[2])
+        binding=program.preparation_binding()
+        require(binding['caches_current_NN_qualification'] is binding['training_authority'] is False,
+                'prepared static program cannot replace current-NN qualification')
+        for parent in binding['protection_dependencies']:asset(parent,inputs)
+        expected.append(binding)
+    require(type(recorded) is list and recorded==expected,
+            'prepared program source, complete fields or static proof do not independently reproduce')
+    return expected
 
 
 def audit_provider(final,*,pool,readiness,config,updates,inputs):
@@ -396,13 +426,30 @@ def audit_provider(final,*,pool,readiness,config,updates,inputs):
                 explicit_storage_callback_audited=True,scientific_sample_count_added=0)
 
 
-def audit_completion(*,reference_directory,calibration_precheck_ref,result_ref,supervisor_exit_ref):
+def _phase_admission(phase,formal_budget_lock_ref):
+    require(phase in ('development','formal'),'unknown explicit long audit phase')
+    if phase=='formal':
+        # Before calibration, result, plan or model I/O; a JSON phase flag
+        # cannot grant permission to read a formal numerical training chain.
+        return owner.seeds.formal.read_admission(formal_budget_lock_ref).verify()
+    require(formal_budget_lock_ref is None,'development audit cannot infer formal authority from a lock')
+    return None
+
+
+def audit_completion(*,reference_directory,calibration_precheck_ref,result_ref,supervisor_exit_ref,
+                     phase='development',formal_budget_lock_ref=None):
+    admission=_phase_admission(phase,formal_budget_lock_ref)
     owner.seeds.protocol.register_preparation(calibration_precheck_ref).verify()  # Before long-plan/output reads.
     inputs=InputRefs();asset(result_ref,inputs);r=bound(result_ref)
-    require(r.get('version')==owner.VERSION and r.get('phase')=='development' and r.get('numerical_training_completed') is True
+    require(r.get('version')==owner.VERSION and r.get('phase')==phase and r.get('numerical_training_completed') is True
             and r.get('model_acceptance_passed') is r.get('pilot_opened') is r.get('publishable') is False,
-            'only completed nonpublication long-development results may be audited')
-    plan=owner.load_seed_plan(reference_directory,calibration_precheck_ref,r['seed_plan']);plan.verify()
+            'only completed nonpublication long-development or explicitly admitted formal results may be audited')
+    lock=admission.budget_lock_ref if admission is not None else None
+    binding=admission.value if admission is not None else None
+    require(r.get('development_budget_lock')==lock and r.get('formal_admission')==binding,
+            'long result changed its explicit formal budget-lock binding')
+    plan=owner.load_seed_plan(reference_directory,calibration_precheck_ref,r['seed_plan'],
+                              phase=phase,formal_budget_lock_ref=formal_budget_lock_ref);plan.verify()
     folder=Path(plan.value['execution_output']);budget=plan.config.joint_step_budget
     require(Path(result_ref['path'])==folder/'controller-completed.json' and not (folder/'failed.json').exists(),
             'long result relocated or failed')
@@ -428,7 +475,11 @@ def audit_completion(*,reference_directory,calibration_precheck_ref,result_ref,s
             and claim['automatic_renewal'] is False
             and descriptor['source_files']==sources and descriptor['seed_plan']==plan.ref
             and r['stream_id']==descriptor['stream_id']==claim['stream_id']==plan.value['stream_id']
-            and descriptor['phase']==claim['phase']==plan.value['phase']=='development'
+            and descriptor['phase']==claim['phase']==plan.value['phase']==phase
+            and descriptor['development_budget_lock']==claim['development_budget_lock']==done['development_budget_lock']
+                ==plan.value.get('development_budget_lock')==lock
+            and descriptor['formal_admission']==claim['formal_admission']==done['formal_admission']
+                ==plan.value.get('formal_admission')==binding
             and claim['joint_step_budget']==budget
             and descriptor['reference_actor']==plan.readiness.value['actor'] and descriptor['config']==asdict(plan.config)
             and descriptor['per_variant_joint_step_limit']==budget and descriptor['every_budget_restarts_at_step_zero'] is True
@@ -563,14 +614,18 @@ def audit_completion(*,reference_directory,calibration_precheck_ref,result_ref,s
         checkpoints=snapshots,receipt_audit=reports,rollout_audit=rollouts,input_asset_refs=inputs,actual_reset_count=len(resets))
 
 
-def run(*,reference_directory,calibration_precheck_ref,result_ref,supervisor_exit_ref,output):
+def run(*,reference_directory,calibration_precheck_ref,result_ref,supervisor_exit_ref,output,
+        phase='development',formal_budget_lock_ref=None):
+    _phase_admission(phase,formal_budget_lock_ref)
     sources=source_files()
     audited=audit_completion(reference_directory=reference_directory,calibration_precheck_ref=calibration_precheck_ref,
-                             result_ref=result_ref,supervisor_exit_ref=supervisor_exit_ref)
+                             result_ref=result_ref,supervisor_exit_ref=supervisor_exit_ref,
+                             phase=phase,formal_budget_lock_ref=formal_budget_lock_ref)
     output=Path(output);output.mkdir(parents=True,exist_ok=False);exports={};plan=audited['plan'];budget=plan.config.joint_step_budget
     for variant in VARIANTS:
         exports[variant]={}
-        for label,index,step in (('warmup',0,4000),('final',-1,budget)):
+        for label,index,step in (('warmup',0,4000),('extract-75',1,plan.config.extraction_steps[0]),
+            ('extract-84',2,plan.config.extraction_steps[1]),('extract-93',3,plan.config.extraction_steps[2]),('final',-1,budget)):
             record=audited['checkpoints'][variant][index]
             value=export_checkpoint_actor(record['training_state'],output/f'{variant}-{label}.actor.npz',variant=variant,
                     candidate_id=VERSION+':'+plan.value['stream_id'],expected_joint_steps=step)
@@ -584,6 +639,7 @@ def run(*,reference_directory,calibration_precheck_ref,result_ref,supervisor_exi
     require(source_files()==sources,'long audit/export source changed')
     report=dict(version=VERSION,reference_directory=str(Path(reference_directory).resolve()),calibration_precheck=calibration_precheck_ref,
         result=result_ref,supervisor_exit=supervisor_exit_ref,seed_plan=plan.ref,phase=plan.value['phase'],stream_id=plan.value['stream_id'],
+        development_budget_lock=plan.value.get('development_budget_lock'),formal_admission=plan.value.get('formal_admission'),
         joint_step_budget=budget,audit_source_files=sources,input_asset_refs=audited['input_asset_refs'],exports=exports,
         receipt_audit=audited['receipt_audit'],rollout_audit={v:{k:x for k,x in a.items() if k!='reset_cases'} for v,a in audited['rollout_audit'].items()},
         actual_reset_count=audited['actual_reset_count'],numerical_training_completed=True,
@@ -595,14 +651,19 @@ def run(*,reference_directory,calibration_precheck_ref,result_ref,supervisor_exi
     return ref
 
 
-def _context(report_ref):
+def _context(report_ref,*,formal_budget_lock_ref=None):
     asset(report_ref,[]);r=bound(report_ref)
-    require(r['version']==VERSION and r['phase']=='development' and r['audit_source_files']==source_files()
+    require(r['version']==VERSION and r['phase'] in ('development','formal') and r['audit_source_files']==source_files()
             and r['model_acceptance_passed'] is r['pilot_opened'] is r['publishable'] is False,
             'long export is not an audited nonpublication development artifact')
+    admission=_phase_admission(r['phase'],formal_budget_lock_ref)
+    require(r.get('development_budget_lock')==(None if admission is None else admission.budget_lock_ref)
+            and r.get('formal_admission')==(None if admission is None else admission.value),
+            'long exported formal authority differs from the explicit independently replayed lock')
     if report_ref['sha256'] not in _CACHE:
         _CACHE[report_ref['sha256']]=audit_completion(reference_directory=r['reference_directory'],
-            calibration_precheck_ref=r['calibration_precheck'],result_ref=r['result'],supervisor_exit_ref=r['supervisor_exit'])
+            calibration_precheck_ref=r['calibration_precheck'],result_ref=r['result'],supervisor_exit_ref=r['supervisor_exit'],
+            phase=r['phase'],formal_budget_lock_ref=formal_budget_lock_ref)
     c=_CACHE[report_ref['sha256']]
     c['plan'].verify();owner.checked_sources(c['plan'])
     for ref in c['input_asset_refs']:asset(ref,[])
@@ -614,20 +675,37 @@ def _context(report_ref):
     return r,c
 
 
-def read_assets(report_ref):
-    r,c=_context(report_ref);actors={};roles={};inputs=[report_ref,*r['input_asset_refs']]
+def read_assets(report_ref,*,formal_budget_lock_ref=None):
+    r,c=_context(report_ref,formal_budget_lock_ref=formal_budget_lock_ref)
+    return _checkpoint_assets(report_ref,r,c,'final')
+
+
+def _checkpoint_assets(report_ref,r,c,checkpoint):
+    labels={'warmup':0,'extract-75':1,'extract-84':2,'extract-93':3,'final':-1}
+    require(checkpoint in labels,'unregistered exact long checkpoint')
+    actors={};roles={};inputs=[report_ref,*r['input_asset_refs']];index=labels[checkpoint]
     for variant in VARIANTS:
-        export=r['exports'][variant]['final'];asset(export['actor'],inputs)
-        require(export['checkpoint']==c['checkpoints'][variant][-1]['training_state']
-                and export['role_sha256']==c['checkpoints'][variant][-1]['core']['actor_role_sha256'],
-                'long frozen export lost its exact final checkpoint binding')
+        export=r['exports'][variant][checkpoint];asset(export['actor'],inputs)
+        require(export['checkpoint']==c['checkpoints'][variant][index]['training_state']
+                and export['role_sha256']==c['checkpoints'][variant][index]['core']['actor_role_sha256'],
+                'long frozen export lost its exact checkpoint binding')
         FrozenWarehouseV6Actor.load(export['actor']['path'],expected_sha256=export['actor']['sha256'],expected_role_sha256=export['role_sha256'])
         actors[variant]=export['actor'];roles[variant]=export['role_sha256']
     actors['reference']=c['plan'].readiness.value['actor'];roles['reference']=c['plan'].value['reference_role_sha256']
-    return dict(report=report_ref,actors=actors,actor_role_sha256=roles,inputs=inputs)
+    return dict(report=report_ref,checkpoint=checkpoint,actors=actors,actor_role_sha256=roles,inputs=inputs)
 
 
-def finalization_context(report_ref,reference_directory):
-    r,c=_context(report_ref)
+def read_formal_checkpoint(report_ref,checkpoint,*,formal_budget_lock_ref):
+    """The predeclared post-feedback quality pool, never chosen by programs."""
+    _phase_admission('formal',formal_budget_lock_ref)
+    require(checkpoint in ('extract-84','extract-93','final'),
+            'formal quality cannot select warmup or pre-feedback checkpoints')
+    r,c=_context(report_ref,formal_budget_lock_ref=formal_budget_lock_ref)
+    require(r['phase']=='formal','development models cannot enter formal quality selection')
+    return _checkpoint_assets(report_ref,r,c,checkpoint)
+
+
+def finalization_context(report_ref,reference_directory,*,formal_budget_lock_ref=None):
+    r,c=_context(report_ref,formal_budget_lock_ref=formal_budget_lock_ref)
     require(str(Path(reference_directory).resolve())==r['reference_directory'],'long finalization uses another reference directory')
-    return dict(c,assets=read_assets(report_ref))
+    return dict(c,assets=_checkpoint_assets(report_ref,r,c,'final'))

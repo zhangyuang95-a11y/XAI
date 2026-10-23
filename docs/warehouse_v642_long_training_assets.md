@@ -50,6 +50,18 @@ provider每次已提交证据按原完整NN targets与原资格算法重算，�
 本report的budget-lock、正式训练、封存、模型验收、发布和pilot字段始终为假。
 # 新长训练存储来源的强制复核
 
+## 显式正式训练读者 v2
+
+`scripts/audit_warehouse_v642_long_results.py`只读取实际监督退出和完整训练证据。
+development保持原默认；formal必须显式传`--phase formal --formal-budget-lock ...`，
+先由真实三流开发预算读者核验锁，再读取校准／结果／模型。锁缺失、预算或phase不符均拒绝。
+数值完成报告和五个直接张量导出继续不授予质量、程序封存、留出或发布通过。
+
+正式质量比较的检查点池在任何正式训练前登记为84%／93%／final。
+warmup与尚未进入反馈窗口的75%检查点不能进入该池。
+池内各Actor按对应完整检查点导出；质量选择仍只能使用三配对共同场景的任务成绩，
+不能读取程序预审来换配对或检查点。`read_formal_checkpoint`需要显式同一真实预算锁。
+
 后继读者对每次75%／84%／93%重拟合以及每次实际反馈验证，都必须独立读取
 `long_materialization_provenance`：核对新owner命名空间、永久CAS／APFS基准、真实硬链接和共享区间、
 精确的临时文件生命周期及全部持久输入。只符合旧目标数据schema不能通过此项。

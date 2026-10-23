@@ -27,16 +27,18 @@ def terminal(tmp_path,monkeypatch):
     source=a.pointer(script);now=datetime.now(timezone.utc)
     command=[str(Path(sys.executable).resolve()),source['path'],'--run','--reference-directory',str(tmp_path/'reference'),
              '--calibration-precheck',precheck['path'],'--plan',ref['path']]
-    started=put(base/'long-supervisor-started.json',dict(version='warehouse-v642-long-development-supervisor.v1',
+    started=put(base/'long-supervisor-started.json',dict(version='warehouse-v642-budget-locked-long-supervisor.v2',
         observed_by='source_bound_subprocess_launch',seed_plan=ref,calibration_precheck=precheck,command=command,
-        supervisor_pid=10,started_utc=now.isoformat(),supervisor_source=source,log_path=str(base/'long-run.log')))
+        supervisor_pid=10,started_utc=now.isoformat(),supervisor_source=source,log_path=str(base/'long-run.log'),
+        phase='development',development_budget_lock=None,formal_admission=None))
     log=base/'long-run.log';log.write_text('synthetic-only, no process launched');log.chmod(0o444)
-    exit_value=dict(version='warehouse-v642-long-development-supervisor.v1',observed_by='source_bound_subprocess_wait',
+    exit_value=dict(version='warehouse-v642-budget-locked-long-supervisor.v2',observed_by='source_bound_subprocess_wait',
         exit_code=0,result=result,completed=done,started=started,seed_plan=ref,command=command,
         worker_pid=11,supervisor_pid=10,started_utc=now.isoformat(),finished_utc=(now+timedelta(seconds=1)).isoformat(),
-        supervisor_source=source,log=a.pointer(log))
+        supervisor_source=source,log=a.pointer(log),phase='development',development_budget_lock=None,formal_admission=None)
     exit_ref=put(base/'long-supervisor-exit.json',exit_value)
-    plan=SimpleNamespace(ref=ref,value=dict(execution_output=str(base/'training')))
+    plan=SimpleNamespace(ref=ref,value=dict(execution_output=str(base/'training'),phase='development',
+        development_budget_lock=None,formal_admission=None))
     return SimpleNamespace(plan=plan,result=result,exit=exit_ref,value=exit_value,precheck=precheck,root=tmp_path)
 
 
@@ -203,12 +205,16 @@ def storage_callback(tmp_path,monkeypatch):
     """Explicit toy ledger: no NN, policy, authority or scientific producer."""
     source={'toy-source':'bound-only-in-fixture'}
     monkeypatch.setattr(a.storage_callback,'source_files',lambda:source)
+    # This ledger fixture tests callback controls only, not a scientific
+    # program preparation. The separate binding tests invoke its real logic.
+    monkeypatch.setattr(a,'audit_prepared_bindings',lambda recorded,validations,**kw:[])
     folder=tmp_path/'native';callback=folder/'long-storage-callback'
     owner_ref=put(tmp_path/'owner.json',dict(synthetic_only=True))
     native_started=put(folder/'started.json',dict(synthetic_only=True))
     started=put(callback/'started.json',dict(version=a.storage_callback.VERSION,source_files=source,
         owner=owner_ref,native_provider_started=native_started,native_sources={'native-toy':'source'},
-        materialization='new_unsealed_stage_only',NN_method_changed=False,pilot_opened=False))
+        materialization='new_unsealed_stage_only',program_static_validation=a.storage_callback.prepared.VERSION,
+        NN_method_changed=False,pilot_opened=False))
     validations=[];events=[]
     for i in range(2):
         package=put(tmp_path/f'package-{i}.json',dict(synthetic_only=True))
@@ -224,7 +230,7 @@ def storage_callback(tmp_path,monkeypatch):
                 call_count=2,events=validations)
     payload=dict(version=a.storage_callback.VERSION,source_files=source,owner=owner_ref,started=started,
         native_provider_started=native_started,events=events,call_count=2,full_training_state_sha256='toy-full-state',
-        safe_snapshot_not_resume_authority=True)
+        prepared_programs=[],safe_snapshot_not_resume_authority=True)
     final=dict(full_training_state_sha256='toy-full-state',long_storage_callback=dict(payload=payload,payload_sha256=a.digest(payload)))
     return final,native,events
 
@@ -266,3 +272,72 @@ def test_storage_check_never_substitutes_for_native_NN_replay(tmp_path,monkeypat
         dict(inputs=[],canonical_NN_replay_still_required=False))
     with pytest.raises(RuntimeError,match='cannot replace complete native NN replay'):
         a.audit_materialization(target,owner_ref=owner_ref,inputs=[])
+
+
+@pytest.mark.parametrize('lock',[None,{'path':'/definitely-missing-v642-lock.json','sha256':'0'*64}])
+def test_formal_audit_requires_real_lock_before_any_calibration_or_result_read(tmp_path,monkeypatch,lock):
+    def forbidden(*args,**kwargs):pytest.fail('formal lock rejection reached calibration/result/output')
+    monkeypatch.setattr(a.owner.seeds.protocol,'register_preparation',forbidden)
+    monkeypatch.setattr(a,'asset',forbidden)
+    with pytest.raises(RuntimeError):
+        a.run(reference_directory=None,calibration_precheck_ref=None,result_ref=None,supervisor_exit_ref=None,
+              output=tmp_path/'output',phase='formal',formal_budget_lock_ref=lock)
+    assert not (tmp_path/'output').exists()
+
+
+def test_development_audit_does_not_infer_formal_authority_from_a_lock():
+    with pytest.raises(RuntimeError,match='cannot infer formal authority'):
+        a._phase_admission('development',{'path':'unread-lock','sha256':'0'*64})
+
+
+def test_formal_terminal_binds_explicit_cli_lock_phase_and_admission(terminal):
+    t=terminal;phase='formal'
+    lock=put(t.root/'toy-budget-lock.json',dict(synthetic_only=True))
+    admission={'synthetic_formal_binding':'not actual authorization'}
+    t.plan.value.update(phase=phase,development_budget_lock=lock,formal_admission=admission)
+    started_path=Path(t.value['started']['path']);started=a.bound(t.value['started'])
+    started['command']+=['--phase','formal','--formal-budget-lock',lock['path']]
+    started.update(phase=phase,development_budget_lock=lock,formal_admission=admission)
+    started_path.chmod(0o644);started_path.unlink();started_ref=put(started_path,started)
+    body=deepcopy(t.value);body.update(started=started_ref,command=started['command'],phase=phase,
+        development_budget_lock=lock,formal_admission=admission)
+    exit_path=Path(t.exit['path']);exit_path.chmod(0o644);exit_path.unlink();exit_ref=put(exit_path,body)
+    assert a.audit_terminal(t.result,exit_ref,plan=t.plan,reference_directory=t.root/'reference',
+        calibration_precheck_ref=t.precheck,inputs=[])==body
+    body['development_budget_lock']=None;exit_path.chmod(0o644);exit_path.unlink();bad=put(exit_path,body)
+    with pytest.raises(RuntimeError,match='phase or timing differs'):
+        a.audit_terminal(t.result,bad,plan=t.plan,reference_directory=t.root/'reference',
+            calibration_precheck_ref=t.precheck,inputs=[])
+
+
+@pytest.mark.parametrize('checkpoint',['warmup','extract-75','unknown'])
+def test_formal_quality_checkpoint_pool_excludes_pre_feedback_models(monkeypatch,checkpoint):
+    monkeypatch.setattr(a,'_phase_admission',lambda *args:None)
+    def forbidden(*args,**kwargs):pytest.fail('ineligible checkpoint reached model audit')
+    monkeypatch.setattr(a,'_context',forbidden)
+    with pytest.raises(RuntimeError,match='pre-feedback'):
+        a.read_formal_checkpoint(None,checkpoint,formal_budget_lock_ref=None)
+
+
+@pytest.mark.parametrize('change',[None,'dropped','qualification_cache','wrong_source'])
+def test_prepared_bindings_rebuild_from_program_refs_not_passed_flags(tmp_path,monkeypatch,change):
+    """Only the lower native mathematical reader is an explicit toy double."""
+    refs=[put(tmp_path/(role+'.json'),dict(target_actor_role_sha256=role+'-toy-sha')) for role in a.ROLES]
+    events=[put(tmp_path/'validation.json',dict(programs=dict(zip(a.ROLES,refs))))]
+    calls=[]
+    def read(ref,*,target_actor_role_sha256):
+        calls.append((ref,target_actor_role_sha256))
+        binding=dict(program=ref,target_actor_role_sha256=target_actor_role_sha256,
+            protection_dependencies=[],caches_current_NN_qualification=change=='qualification_cache',training_authority=False)
+        return SimpleNamespace(preparation_binding=lambda:binding)
+    monkeypatch.setattr(a.storage_callback.prepared.PreparedProgram,'from_reference',read)
+    expected=[dict(program=ref,target_actor_role_sha256=a.bound(ref)['target_actor_role_sha256'],
+        protection_dependencies=[],caches_current_NN_qualification=False,training_authority=False)
+        for ref in sorted(refs,key=lambda ref:ref['path'])]
+    if change=='dropped':expected.pop()
+    elif change=='wrong_source':expected[0]['target_actor_role_sha256']='wrong-source'
+    if change is None:
+        assert a.audit_prepared_bindings(expected,events,inputs=[])==expected
+        assert len(calls)==2
+    else:
+        with pytest.raises(RuntimeError):a.audit_prepared_bindings(expected,events,inputs=[])

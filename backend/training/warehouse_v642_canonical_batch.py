@@ -262,13 +262,23 @@ def benchmark_probabilities(role, x, *, stored=None, chunk_sizes=(1, 7, 64, 256)
 
 
 def verify_all_layers(role, x, *, stored=None, chunk_size=256,
-                      methods=('frame_matrices_scalar_ufunc',)):
+                      methods=('frame_matrices_scalar_ufunc',), candidate_chunk_sizes=None,
+                      probability_observer=None, scalar_output_observer=None):
     """Streaming exhaustive layer/NN comparisons on the supplied old frames."""
     require(type(chunk_size) is int and chunk_size > 0 and len(set(methods)) == len(methods)
             and all(method in METHODS for method in methods), 'invalid diagnostic comparison budget')
+    require(probability_observer is None or callable(probability_observer), 'invalid numerical observer')
+    require(scalar_output_observer is None or callable(scalar_output_observer), 'invalid scalar numerical observer')
+    if candidate_chunk_sizes is None:
+        variants = [(method, method, chunk_size) for method in methods]
+    else:
+        require(candidate_chunk_sizes and len(set(candidate_chunk_sizes)) == len(candidate_chunk_sizes)
+                and all(type(n) is int and n > 0 for n in candidate_chunk_sizes), 'invalid candidate chunk inventory')
+        variants = [(f'{method}-chunk-{chunk}', method, chunk) for method in methods for chunk in candidate_chunk_sizes]
+    keys = tuple(item[0] for item in variants)
     x = _input(role, x)
-    times = dict(reference_trace_plus_independent_original_runtime=0., **{m: 0. for m in methods})
-    counts, hashes = {m: {} for m in methods}, {m: {} for m in ('reference', *methods)}
+    times = dict(reference_trace_plus_independent_original_runtime=0., **{m: 0. for m in keys})
+    counts, hashes = {m: {} for m in keys}, {m: {} for m in ('reference', *keys)}
     stored_checked = stored is not None
     if stored_checked:
         require(np.asarray(stored).shape == (len(x), 5), 'old probability cache shape differs')
@@ -280,27 +290,35 @@ def verify_all_layers(role, x, *, stored=None, chunk_size=256,
         if stored_checked:
             require(bits_equal(reference['probabilities'], stored[start:start+len(rows)]),
                     'old full target cache differs from canonical original runtime')
+        if scalar_output_observer is not None:
+            scalar_output_observer(reference['logits'], reference['probabilities'], start)
         for key, value in reference.items():
             hashes['reference'].setdefault(key, sha256()).update(value.tobytes())
-        for method in methods:
+        candidate_probabilities = {}
+        for key_name, method, chunk in variants:
             t = perf_counter()
-            candidate = forward_trace(role, rows, method)
-            times[method] += perf_counter()-t
+            traces = [forward_trace(role, rows[offset:offset+chunk], method) for offset in range(0, len(rows), chunk)]
+            candidate = {key: np.concatenate([trace[key] for trace in traces], axis=0) for key in traces[0]}
+            times[key_name] += perf_counter()-t
             diff = differences(reference, candidate)
             for key, value in candidate.items():
-                hashes[method].setdefault(key, sha256()).update(value.tobytes())
-                item = counts[method].setdefault(key, dict(differing_elements=0, maximum_absolute_difference=0.))
+                hashes[key_name].setdefault(key, sha256()).update(value.tobytes())
+                item = counts[key_name].setdefault(key, dict(differing_elements=0, maximum_absolute_difference=0.))
                 item['differing_elements'] += diff[key]['differing_elements']
                 item['maximum_absolute_difference'] = max(item['maximum_absolute_difference'],
                     diff[key]['maximum_absolute_difference'])
+            candidate_probabilities[key_name] = candidate['probabilities']
+        if probability_observer is not None:
+            probability_observer(reference['probabilities'], candidate_probabilities, start)
     results = {}
-    for method in methods:
+    for method in keys:
         layers = {key: dict(**item, bitwise_equal=item['differing_elements'] == 0,
             reference_bytes_sha256=hashes['reference'][key].hexdigest(),
             candidate_bytes_sha256=hashes[method][key].hexdigest()) for key, item in counts[method].items()}
         results[method] = dict(all_layers_bitwise_equal=all(item['bitwise_equal'] for item in layers.values()),
             layers=layers)
     return dict(frames=len(x), input_sha256=array_sha(x), chunk_size=chunk_size,
+        candidate_chunk_sizes=None if candidate_chunk_sizes is None else list(candidate_chunk_sizes),
         stored_canonical_targets_bitwise_verified=stored_checked, seconds=times, candidates=results,
         reference_timing_is_not_a_pure_runtime_speed_benchmark=True)
 

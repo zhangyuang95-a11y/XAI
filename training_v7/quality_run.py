@@ -18,7 +18,8 @@ def collect_quality(adapter, run, assets, programs, *, output):
     for policy in ('reference', 'raw', 'regularized'):
         asset = assets[policy]
         binding = Binding(adapter.spec.sha256, f'{adapter.spec.name}-{policy}-v7',
-            'raw' if policy == 'raw' else 'regularized', asset['path'], asset['sha256'], tuple(asset['role_sha256'].items()))
+            'raw' if policy == 'raw' else 'regularized', asset['path'], asset['sha256'],
+            tuple((r.name, asset['role_sha256'][r.name]) for r in adapter.spec.roles))
         runtime = Runtime(adapter, binding)
         for case in [c for c in run.plan['cases'] if c['purpose'] == 'calibration_quality' and c['policy'] == policy]:
             native = run.reset(adapter, case, purpose='calibration_quality'); initial = adapter.snapshot(native)
@@ -73,7 +74,8 @@ def audit_quality(adapter, result_path):
         case = trace['case']; policy = case['policy']; asset = result['assets'][policy]
         from dataclasses import asdict
         binding = Binding(adapter.spec.sha256, f'{adapter.spec.name}-{policy}-v7',
-            'raw' if policy == 'raw' else 'regularized', asset['path'], asset['sha256'], tuple(asset['role_sha256'].items()))
+            'raw' if policy == 'raw' else 'regularized', asset['path'], asset['sha256'],
+            tuple((r.name, asset['role_sha256'][r.name]) for r in adapter.spec.roles))
         expected_binding = json.loads(json.dumps(asdict(binding)))
         if trace['binding'] != expected_binding: raise ValueError('quality trace immutable binding differs')
         from .storage import load_frozen

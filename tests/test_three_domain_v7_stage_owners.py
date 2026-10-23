@@ -87,6 +87,31 @@ def test_generic_evaluation_replays_actions_and_rejects_forged_quality(tmp_path)
         verify(d,changed,expected_cases=cases,expected_plan=owner.plan_hash)
 
 
+def test_calibration_quality_collector_roundtrips_sorted_role_hashes(tmp_path):
+    from training_v7.quality_run import collect_quality,audit_quality
+    from training_v7.program import Program,certify,FitBudget
+    from training_v7.stage_plans import evaluation_cases
+    d=domain('pong');model=DualActorCritic(d.spec);asset=export_actor(model,tmp_path/'fixture.actor.npz')
+    cases=evaluation_cases('pong','calibration',0,20000,'calibration_quality',880100,3,
+        policies=('reference','raw','regularized'),pairings=('nn_nn',))
+    for c in cases:c['seed']=880100
+    class Owner:
+        plan=dict(cases=cases)
+        def reset(self,adapter,case,purpose):
+            s=adapter.initial_state(880100,case['task']);s['max_turns']=2
+            s['balls']=[dict(id='software-fixture',kind='ordinary',remaining=1,contacts=[s['human']['x']],y=1,vy=1)]
+            return s
+    programs={v:{} for v in ('raw','regularized')}
+    for variant in programs:
+        for role in d.spec.roles:
+            leaf=dict(support=[],bias=[0. if a==role.wait_index else -20. for a in range(len(role.actions))],
+                weights=[[] for a in role.actions],witness=role.wait_index)
+            programs[variant][role.name]=Program(role,dict(leaf=leaf,proof=certify(role,leaf,[],FitBudget())),asset['role_sha256'][role.name])
+    collect_quality(d,Owner(),{p:asset for p in ('reference','raw','regularized')},programs,output=tmp_path/'quality')
+    audited=audit_quality(d,tmp_path/'quality/result.json')
+    assert audited['replayed_role_actions']==36 and audited['full_scientific_acceptance_passed'] is False
+
+
 def test_actual_training_action_replay_including_cost_window(tmp_path):
     from training_v7.collector import Collector
     from training_v7.ppo import PPO

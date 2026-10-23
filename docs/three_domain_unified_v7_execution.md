@@ -1,6 +1,6 @@
 # 三域统一方法 v7：实现与执行状态
 
-当前候选：`three-domain-unified-02`（共同方法v2；首轮01因终止类型实现错误关闭）  
+当前候选：`three-domain-unified-02`（共同方法v2，已关闭；01也已关闭）  
 目标发布：`policylens-three-domain-20261024.v7.0`
 
 ## 科学状态
@@ -8,6 +8,8 @@
 **本文件不是模型通过收据。旧 Pong／Kitchen 的通过收据不授予 v7 准入。**
 旧 Warehouse v6.42 的20k校准失败、旧模型、收据及447份绑定源码全部保留。
 新模型的正式预算开发、封存审计、留出测试及发布尚未完成，pilot关闭。
+02的Pong已完成raw/reg各20k步但质量、程序覆盖和实际程序梯度未通过；Warehouse、Kitchen停在BC/程序数据准备阶段。
+完整实测及差额见[三域v7校准结果](three_domain_unified_v7_results.md)。
 
 ## 已实现的共同核心
 
@@ -90,10 +92,11 @@ python3 scripts/run_three_domain_unified.py status
 
 ## 软件验证与旧版本边界
 
-2026-10-24当前02预检回归：**181项通过，0失败/错误/跳过**；其中63项为新共同核心测试。
+2026-10-24关闭后读者修复回归：**199项通过，0失败/错误/跳过**；其中81项为新共同核心/执行审计测试。
 测试前后执行源码未变，源码闭包SHA为
-`5eaea673da252be23e8bd1367c4d99b07e8584313d8f43ac9a8e8854957286e3`。
-实际子进程退出0的记录位于`output/three_domain_v7/three-domain-unified-02/engineering-02/result.json`。
+`805f364ac95682c3c45684c9ad71df2277082edbd4fae5494114f8936e9664c0`。
+实际子进程退出0的记录位于`output/three_domain_v7/three-domain-unified-02/engineering-postclosure-01/result.json`。
+训练前独立189项回归、冻结839份源码、原训练源码副本仍按原路径保留，未补写成199项测试过的训练。
 该记录明确标记`scientific_model_evaluation=false`、`model_acceptance_passed=false`。
 
 新测试覆盖三域公开观察、私有未来/路线历史排除、动作维度1/3/5/6/13、
@@ -141,8 +144,10 @@ v7种子选择器扩大为四个历史仓库中的白名单元数据、启动gua
 新增三域真实原生终止测试，并核对时限局仍贡献真实完整episode成本，
 GAE仅在真正终止时去除下一状态价值，时限终止和训练截断不混淆。
 02使用新场景及初始化/采样流，重新生成全部BC；首轮种子不复用。
-当前正在执行02的全历史查重和回归，尚未启动02新NN。
-没有新20k模型实测表；状态以各域事件和最终`calibration-result.json`为准。
+02随后通过全历史查重、最终内容增量核对和训练前189项回归，并实际启动三域新BC。
+Pong完成两版本各20k；旧质量读者因JSON字典角色顺序触发关闭。修正后的独立重放另行保存，
+实测质量及程序覆盖依然不通过、regularized反馈/梯度为0。关闭记录保留，其他域停止。
+`quality_run.py`已改为按DomainSpec角色顺序还原绑定；这项关闭后的读者修复未用于冒充原训练源码。
 
 02的首次NN claim前追加了只影响核验和报告的预检修订：
 
@@ -153,3 +158,9 @@ GAE仅在真正终止时去除下一状态价值，时限终止和训练截断�
 - `post-20k-metrics-and-intervals.json`报告新模型质量、程序指标、真实梯度、按场景聚类的置信区间及task/动作/公开风险分层。
   bootstrap不将连续帧当独立样本，也不参与模型选择。
 - checkpoint耗时分别以总耗时及排除程序重拟合的采集/更新耗时计算比例，工程≤10%单独报告，科学门槛不受其替代。
+
+关闭后的新增读者包括`evaluation_run.py`、`training_audit.py`、`posthoc.py`。
+它们独立重放原始NN动作与物理过程，重算既有场景指标，不产生新的通过授权。
+`stage_plans.py`声明后续有限场景及随机流，尚未构成正式执行owner或发布reader。
+原v6.42非保护内部子树整体重建的完整泛化迁移、后续九开发配对/正式/封存owner及研究发布接入仍需完成；
+当前逐叶扩展实现不能被描述为已经与v6.42全部程序搜索行为等价。

@@ -47,6 +47,8 @@ def main():
         summary = dict(candidate=registration['candidate_id'], method_sha256=registration['method_sha256'],
                        domains={}, candidate_closed=(args.output/'CLOSED.json').exists(),
                        model_acceptance_passed=False, pilot_opened=False)
+        if summary['candidate_closed']:
+            summary['closure_reason']=json.loads((args.output/'CLOSED.json').read_text())['reason']
         for name in ('warehouse', 'pong', 'kitchen'):
             result = args.output/name/'calibration-0/bc/result.json'
             journal = args.output/name/'calibration-0/events.jsonl'
@@ -60,7 +62,21 @@ def main():
                 ppo_journal = journal.parent/variant/'events.jsonl'
                 ppo_events = [json.loads(line) for line in ppo_journal.read_text().splitlines()] if ppo_journal.exists() else []
                 complete = [e for e in ppo_events if e['event'] == 'ppo_rollout_completed']
-                summary['domains'][name][variant] = complete[-1] if complete else {'joint_steps': 0, 'post_20k_quality': None}
+                summary['domains'][name][variant] = ({k:complete[-1][k] for k in
+                    ('joint_steps','actor_updates','critic_updates','program_updates','program_gradient_norm_sum')}
+                    if complete else {'joint_steps': 0, 'post_20k_quality': None})
+            diagnosis=args.output/'closed-diagnosis-01'/name/'result.json'
+            if diagnosis.is_file():
+                from training_v7.contracts import file_sha
+                actual=json.loads(diagnosis.read_text())
+                if (actual['closed_receipt']['sha256']!=file_sha(args.output/'CLOSED.json')
+                        or actual['reopened'] is not False or actual['model_acceptance_passed'] is not False):
+                    raise ValueError('closed diagnosis identity differs')
+                summary['domains'][name]['read_only_actual_20k_diagnosis']=dict(
+                    path=str(diagnosis.resolve()),sha256=file_sha(diagnosis),
+                    task_metrics=actual['task_metrics'],program_metrics=actual['program_metrics'],
+                    raw_regularized_role_weights_distinct=actual['raw_regularized_role_weights_distinct'],
+                    scientific_calibration_requirements_met=actual['scientific_calibration_requirements_met'])
         print(json.dumps(summary, indent=2))
     return 0
 

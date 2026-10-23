@@ -1,0 +1,213 @@
+{
+  "actual_joint_steps": {
+    "kitchen": {
+      "raw": 0,
+      "regularized": 0
+    },
+    "pong": {
+      "raw": 20000,
+      "regularized": 20000
+    },
+    "warehouse": {
+      "raw": 0,
+      "regularized": 0
+    }
+  },
+  "actual_process_exit_codes": {
+    "kitchen": 1,
+    "pong": 1,
+    "warehouse": 1
+  },
+  "actual_process_exit_context": "Pong immutable-binding reader failure; Warehouse/Kitchen stopped on shared CLOSED receipt",
+  "candidate_closed": true,
+  "candidate_id": "three-domain-unified-02",
+  "evidence": [
+    {
+      "bytes": 312,
+      "path": "output/three_domain_v7/three-domain-unified-02/CLOSED.json",
+      "sha256": "4e65e02805cae216b2c7d1265bded2fa7de2e0852dc84a2ef03c8483a00ca189"
+    },
+    {
+      "bytes": 198292,
+      "path": "output/three_domain_v7/three-domain-unified-02/closed-diagnosis-01/pong/quality-verification.json",
+      "sha256": "a085fdc6ec5e174feb327dba4065e0d7687c6a085f5175a5d84e1a378957aa6e"
+    },
+    {
+      "bytes": 8465,
+      "path": "output/three_domain_v7/three-domain-unified-02/closed-diagnosis-01/pong/raw-actual-training-replay.json",
+      "sha256": "6a5e7af96ef0e8a6eda37ef47d09c257e079df863f4425110ecface3f7b2bfcd"
+    },
+    {
+      "bytes": 8914,
+      "path": "output/three_domain_v7/three-domain-unified-02/closed-diagnosis-01/pong/regularized-actual-training-replay.json",
+      "sha256": "e7b7f8fe633267b4a40f67772c53b466da892bd78e0493751977c115fe4ef2f0"
+    },
+    {
+      "bytes": 304960,
+      "path": "output/three_domain_v7/three-domain-unified-02/closed-diagnosis-01/pong/result.json",
+      "sha256": "19ed1c6eb528b8b27caf9d1734935298d97d842c643549db39730ade820fa812"
+    },
+    {
+      "bytes": 610,
+      "path": "output/three_domain_v7/three-domain-unified-02/closed-diagnosis-01/pong/source-end-bracket.json",
+      "sha256": "dbf9b1d10e7ee5f764be5e76901ea2efd10df493286574c2e0feb24532cc75ab"
+    },
+    {
+      "bytes": 103848,
+      "path": "output/three_domain_v7/three-domain-unified-02/engineering-03/result.json",
+      "sha256": "f3d7570828794d67830e6641710809d57872fba97db55a85ea0aed032b6ca19e"
+    },
+    {
+      "bytes": 104438,
+      "path": "output/three_domain_v7/three-domain-unified-02/engineering-postclosure-01/result.json",
+      "sha256": "b4189497763deeb32527e05e53d76d3632ce90d53d0645f5781a9794773934ce"
+    },
+    {
+      "bytes": 2344,
+      "path": "output/three_domain_v7/three-domain-unified-02/kitchen/calibration-0/bc/result.json",
+      "sha256": "6a95e449db29b37cfc65d00e2bc6146527286b44460a00bd5560622c73ba9689"
+    },
+    {
+      "bytes": 308,
+      "path": "output/three_domain_v7/three-domain-unified-02/kitchen/calibration-0/failure.json",
+      "sha256": "a3d0ac8a0ef3ed9c09fc70dedae3aea4ad83dffff51a685dc728a194cbcd0d28"
+    },
+    {
+      "bytes": 1827,
+      "path": "output/three_domain_v7/three-domain-unified-02/kitchen-clearance-final.json",
+      "sha256": "7261d0f59141bf14580ee410857ba3850cb130eefd74b425680fdcee2c7b3780"
+    },
+    {
+      "bytes": 1128888,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/bc/final.actor.npz",
+      "sha256": "79f371b781c16b1a5bb26a5f06f2fa2f51cffa34e9bf0fb5c5e22d86fc419353"
+    },
+    {
+      "bytes": 2338,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/bc/result.json",
+      "sha256": "8692bfaa03d010a7b61f342d1ce3ed3298f8c1ab3f55f203416c992791019486"
+    },
+    {
+      "bytes": 312,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/failure.json",
+      "sha256": "4e65e02805cae216b2c7d1265bded2fa7de2e0852dc84a2ef03c8483a00ca189"
+    },
+    {
+      "bytes": 155067,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/fresh-20k-quality/result.json",
+      "sha256": "b9eb1ec5779ca1076e3220bf943ae4eebec9f73a0685b613f9615a10a7116931"
+    },
+    {
+      "bytes": 19376360,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/raw/raw/checkpoint-20000.pt",
+      "sha256": "f719b6b94051bd97f7057a3dfec7b6f0894bf36bb0bdaac3b94df8964dcdd58f"
+    },
+    {
+      "bytes": 48899,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/raw/raw/final-programs/ai.json",
+      "sha256": "fa6e65b2b3aec99d5ae6c3d123d2ec5a003ef8af686581f670b7a136467829ff"
+    },
+    {
+      "bytes": 48663,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/raw/raw/final-programs/human.json",
+      "sha256": "95e7d9b5ce6026b1785f140588d61cca4caf6dc2a8c2739b2cdca02ef6f5debf"
+    },
+    {
+      "bytes": 2964,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/raw/raw/result.json",
+      "sha256": "c23f3f675a0488cddbed3a0b2f774d05828a32015e5ce263bd582800ff810d57"
+    },
+    {
+      "bytes": 1128888,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/raw/raw-final.actor.npz",
+      "sha256": "dc5f56085bccfa0602a6c14d956fdba16766c8a224e77ced8262d200feb8d509"
+    },
+    {
+      "bytes": 19376360,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/regularized/regularized/checkpoint-20000.pt",
+      "sha256": "14907ea5cc252e8a705da17ae7f693e99e9767ac3c28f18ee0ee4d04615f8b0d"
+    },
+    {
+      "bytes": 48899,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/regularized/regularized/final-programs/ai.json",
+      "sha256": "fa6e65b2b3aec99d5ae6c3d123d2ec5a003ef8af686581f670b7a136467829ff"
+    },
+    {
+      "bytes": 48663,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/regularized/regularized/final-programs/human.json",
+      "sha256": "95e7d9b5ce6026b1785f140588d61cca4caf6dc2a8c2739b2cdca02ef6f5debf"
+    },
+    {
+      "bytes": 2981,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/regularized/regularized/result.json",
+      "sha256": "1bed5b8fa2d4d86c182f55943c50af47608cc97212660629b51370b48e82b67b"
+    },
+    {
+      "bytes": 1128888,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong/calibration-0/regularized/regularized-final.actor.npz",
+      "sha256": "dc5f56085bccfa0602a6c14d956fdba16766c8a224e77ced8262d200feb8d509"
+    },
+    {
+      "bytes": 1827,
+      "path": "output/three_domain_v7/three-domain-unified-02/pong-clearance-final.json",
+      "sha256": "f16093affcc5a9e597404a0de06017d33705bef5e78d594645ee06ec2c8c7fab"
+    },
+    {
+      "bytes": 2500217,
+      "path": "output/three_domain_v7/three-domain-unified-02/registration-preflight-04.json",
+      "sha256": "89653a8bb1f7d6391a25dfc618af89f0488e862ea50ee90f37b4d07def7f9354"
+    },
+    {
+      "bytes": 2499405,
+      "path": "output/three_domain_v7/three-domain-unified-02/registration.json",
+      "sha256": "ba054dfe417440a636d278757f10f2affa1e70d761f93fd3eeffd5f0d3ffd257"
+    },
+    {
+      "bytes": 22006440,
+      "path": "output/three_domain_v7/three-domain-unified-02/seed-context-result.json",
+      "sha256": "a89bac1d5991a5d982ebc1204ec5c821e1e205789f3c906b760c555f88eab889"
+    },
+    {
+      "bytes": 2220273,
+      "path": "output/three_domain_v7/three-domain-unified-02/seed-final-delta.json",
+      "sha256": "a9181ee84d89b1a7ce5df7af91d3c4ae2f3770d863ae734481c0258915d7c9ab"
+    },
+    {
+      "bytes": 19927146,
+      "path": "output/three_domain_v7/three-domain-unified-02/seed-inventory/inventory.json",
+      "sha256": "24b3d92d4374adc245ec394813f0b6ec8d5e91e05da95e1ef657f16d35d166fb"
+    },
+    {
+      "bytes": 5495,
+      "path": "output/three_domain_v7/three-domain-unified-02/seed-proposal.json",
+      "sha256": "837325a8fb3654a0d30844f19a7aeb5541a30aaf60793835011ad57c1972f34d"
+    },
+    {
+      "bytes": 34135582,
+      "path": "output/three_domain_v7/three-domain-unified-02/seed-triage-resumed/result.json",
+      "sha256": "59b744c2e99a5401427e1532472557e014e89408bc0d756d93b05dd44e18aee6"
+    },
+    {
+      "bytes": 2360,
+      "path": "output/three_domain_v7/three-domain-unified-02/warehouse/calibration-0/bc/result.json",
+      "sha256": "1a5e0e00bead6a92d28ac324f31f760561d767d4198ac095143906502c6ab2a3"
+    },
+    {
+      "bytes": 310,
+      "path": "output/three_domain_v7/three-domain-unified-02/warehouse/calibration-0/failure.json",
+      "sha256": "773570e7d0bef01f3974851d710d4bbc4f58dc82ded34726e3080a59112ade50"
+    },
+    {
+      "bytes": 1827,
+      "path": "output/three_domain_v7/three-domain-unified-02/warehouse-clearance-final.json",
+      "sha256": "6fac22d991a324ec9a84331b243d5cedbb68f4ebb915338c08145346905fefc7"
+    }
+  ],
+  "frozen_reader_git_ref": "archive/v7-closed-audit-controller-20261024",
+  "large_outputs_preserved_locally": true,
+  "large_outputs_tracked_in_git": false,
+  "method_sha256": "c10513eadc87e81b8241e88ce01b1e6cc7e8522b370e34ac6199841f9677e064",
+  "model_acceptance_passed": false,
+  "pilot_opened": false,
+  "version": "three-domain-unified-closed-evidence-index.v1"
+}

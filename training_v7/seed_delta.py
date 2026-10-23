@@ -28,6 +28,10 @@ def verify(proposal_path, triage_path, output):
     else:
         excludes = [proposal_path, Path(result.get('bounded_inventory', {}).get('path', triage_path)).parent]
         excludes += [Path(p).resolve() for p in json.loads(proposal_path.read_text()).get('exclude_paths', [])]
+    resume = result.get('resume_adapter')
+    if resume:
+        for ref in [resume, resume['previous_complete'],resume['resumed_full_parse'],*resume['partial_evidence']]:
+            if file_sha(ref['path'])!=ref['sha256']:raise ValueError('seed parsing cache evidence changed')
     stats = {}
     live = sorted(candidates(roots, excludes,
         registered_trace_paths=result.get('registered_trace_paths', ()), selection_stats=stats))

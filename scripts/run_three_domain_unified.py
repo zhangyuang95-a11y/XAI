@@ -15,9 +15,11 @@ from training_v7 import workflow
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('register', 'amend-preflight', 'seed-audit', 'finalize-seeds', 'bc', 'calibration', 'status'))
+    parser.add_argument('command', choices=('register', 'amend-preflight', 'seed-audit', 'resume-seed-audit', 'finalize-seeds', 'bc', 'calibration', 'status'))
     parser.add_argument('--output', type=Path, default=workflow.OUTPUT)
     parser.add_argument('--domain', choices=('warehouse', 'pong', 'kitchen'))
+    parser.add_argument('--previous-complete', type=Path,
+        help='SHA-checked complete historical JSON validity evidence; never old candidate-match conclusions')
     args = parser.parse_args()
     if args.command == 'register':
         value = workflow.register(args.output)
@@ -27,9 +29,15 @@ def main():
         print(json.dumps({k: value[k] for k in ('passed', 'seed_guard_version', 'preflight_revision') if k in value}))
         return 1 if value.get('passed') is False else 0
     elif args.command == 'seed-audit':
-        value = workflow.seed_audit(args.output)
+        value = workflow.seed_audit(args.output, previous_complete=args.previous_complete)
         print(json.dumps(dict(passed=value['passed'], unresolved=len(value.get('unresolved_paths', [])), environment_resets=0)))
         return 0 if value['passed'] else 1
+    elif args.command == 'resume-seed-audit':
+        if args.previous_complete is None: parser.error('--previous-complete is required')
+        from training_v7.seed_resume import resume
+        value=resume(args.output,args.previous_complete)
+        print(json.dumps(dict(unresolved=len(value['summary']['unresolved_paths']),authorization_granted=False,
+            parsing=value['resume_adapter'])))
     elif args.command in ('bc', 'calibration'):
         if args.domain is None: parser.error('--domain is required')
         operation = workflow.run_bc if args.command == 'bc' else workflow.run_calibration

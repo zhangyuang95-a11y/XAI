@@ -556,6 +556,26 @@ def test_scene_intervals_keep_correlated_frames_together():
     assert r['independent_scenes']==2 and r['estimate']==.5 and r['lower']==0 and r['upper']==1
 
 
+@pytest.mark.parametrize('value',['32000000000','3.2000000000e10','0.032e12','320000000000e-1',
+    '8200000060','8.200000060e9','1032000000001'])
+def test_seed_numeric_prefilter_never_excludes_candidate_notation(tmp_path,value):
+    from training_v7.seed_resume import no_numeric_or_reservation_hit
+    families=[dict(intervals=[(32000000000,32000001270),(8200000060,8200000061),(1032000000000,1032000000075)])]
+    p=tmp_path/'old.jsonl';p.write_text('{"arbitrary_numeric_field":'+value+'}\n')
+    for chunk in (1,7,17,4096):assert not no_numeric_or_reservation_hit(p,families,chunk_bytes=chunk)
+
+
+def test_seed_prefilter_reservations_escapes_and_long_tokens_fall_back(tmp_path):
+    from training_v7.seed_resume import no_numeric_or_reservation_hit
+    families=[dict(intervals=[(32000000000,32000001270)])];p=tmp_path/'old.json'
+    for text in ('{"start":0,"end_exclusive":99999999999}',
+                 '{"s\\u0074art":0,"count":99999999999}',
+                 '{"seed_range":[0,99999999999]}', '{"value":'+('1'*300)+'}'):
+        p.write_text(text);assert not no_numeric_or_reservation_hit(p,families,chunk_bytes=17)
+    p.write_text('{"unrelated":31000000000,"small":0.031e3}')
+    assert no_numeric_or_reservation_hit(p,families,chunk_bytes=17)
+
+
 def test_available_program_coverage_requires_current_NN_agreement(native):
     from training_v7.program import fit_program, metrics
     d,s=native; role=d.spec.roles[0]; obs=d.observe_public(d.public(s))[role.name]

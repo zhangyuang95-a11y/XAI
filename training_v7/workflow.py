@@ -42,7 +42,7 @@ def amend_preflight(output=OUTPUT):
     current = source_files(ROOT)
     allowed = {'training_v7/workflow.py', 'training_v7/storage.py', 'training_v7/seed_delta.py',
                'training_v7/seed_context.py', 'scripts/run_three_domain_unified.py',
-               'training_v7/bridge.py', 'training_v7/collector.py', 'training_v7/reporting.py'}
+               'training_v7/bridge.py', 'training_v7/collector.py', 'training_v7/reporting.py', 'training_v7/seed_resume.py'}
     changed = {p for p in set(old['source_files']) | set(current) if old['source_files'].get(p) != current.get(p)}
     if 'training_v7/program.py' in changed:
         # Reporting-only correction; search/qualification/gates remain exactly
@@ -175,7 +175,7 @@ def register(output=OUTPUT):
     return registration
 
 
-def seed_audit(output=OUTPUT):
+def seed_audit(output=OUTPUT, *, previous_complete=None):
     """Use the existing parameterized inert metadata auditors on all four roots.
 
     No model, NN, environment, sample or reset is constructed by this command.
@@ -186,7 +186,11 @@ def seed_audit(output=OUTPUT):
     output = Path(output)
     proposal = output/'seed-proposal.json'
     inventory = audit(proposal, HISTORY_ROOTS, output/'seed-inventory')
-    result = triage(output/'seed-inventory/inventory.json', proposal, output/'seed-triage')
+    if previous_complete is None:
+        result = triage(output/'seed-inventory/inventory.json', proposal, output/'seed-triage')
+    else:
+        from .seed_resume import resume
+        result = resume(output,previous_complete)
     if (result['selection_scope'] != SCOPE or result['selection_adapter']['sha256'] != file_sha(ROOT/'training_v7/seed_audit.py')):
         raise ValueError('old Warehouse-only seed inventory cannot authorize the v7 method')
     summary = result['summary']
@@ -194,19 +198,15 @@ def seed_audit(output=OUTPUT):
         all(not r['references_or_reservations'] and not r['reservation_overlaps']
             and not r['excluded_weight_path_seed_hints'] and not r['audit_references_not_original_execution']
             for r in summary['families'].values()))
-    evidence = [dict(path=str((output/p).resolve()), sha256=file_sha(output/p)) for p in
-                ('seed-inventory/inventory.json', 'seed-triage/result.json')]
+    triage_path=output/('seed-triage/result.json' if previous_complete is None else 'seed-triage-resumed/result.json')
+    evidence = [dict(path=str(p.resolve()), sha256=file_sha(p)) for p in
+                (output/'seed-inventory/inventory.json', triage_path)]
     registration = json.loads((output/'registration.json').read_text())
     report = dict(version='three-domain-unified-seed-audit-summary.v1', passed=passed,
         unresolved_paths=summary['unresolved_paths'], families=summary['families'], evidence=evidence,
         environment_resets=0, Actor_updates=0, pilot_opened=False)
     write_new(output/'seed-audit-summary.json', report)
     if passed:
-        for name, plan in registration['calibration_plans'].items():
-            write_new(output/f'{name}-clearance.json', dict(version='three-domain-unified-seed-clearance.v1',
-                plan_sha256=digest(plan), passed=True, evidence=evidence,
-                source_proposal_sha256=file_sha(proposal), scope='declared_metadata_roots_not_global_freshness',
-                model_acceptance_passed=False, sealed_authority=False, pilot_opened=False))
         return finalize_seeds(output)
     return report
 
@@ -219,11 +219,15 @@ def finalize_seeds(output=OUTPUT):
     if registration.get('seed_guard_version') != 2: raise ValueError('final-delta preflight registration required')
     context_path = output/'seed-context-result.json'
     if not context_path.exists():
-        reconcile(output/'seed-proposal.json', output/'seed-triage/result.json', context_path)
+        triage_path = output/'seed-triage-resumed/result.json'
+        if not triage_path.exists(): triage_path=output/'seed-triage/result.json'
+        reconcile(output/'seed-proposal.json', triage_path, context_path)
     delta = verify(output/'seed-proposal.json', context_path, output/'seed-final-delta.json')
     if not delta['passed']: return delta
-    refs = [dict(path=str((output/p).resolve()), sha256=file_sha(output/p)) for p in
-            ('seed-inventory/inventory.json', 'seed-triage/result.json', 'seed-context-result.json', 'seed-final-delta.json')]
+    triage_path=output/'seed-triage-resumed/result.json'
+    if not triage_path.exists():triage_path=output/'seed-triage/result.json'
+    refs = [dict(path=str(p.resolve()),sha256=file_sha(p)) for p in (
+        output/'seed-inventory/inventory.json',triage_path,output/'seed-context-result.json',output/'seed-final-delta.json')]
     for name, plan in registration['calibration_plans'].items():
         write_new(output/f'{name}-clearance-final.json', dict(version='three-domain-unified-seed-clearance.v2',
             plan_sha256=digest(plan), passed=True, evidence=refs, final_delta=refs[-1],

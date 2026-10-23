@@ -118,7 +118,7 @@ def run(*,completed_assets_ref,reference_directory):
     claim.parent.mkdir(parents=True,exist_ok=True)
     write_new(claim,dict(version=VERSION,plan=pointer(folder/'plan.json'),single_use_even_if_interrupted=True,pilot_opened=False))
     claim.chmod(0o444)
-    refs=[*fixed['inputs'],pointer(folder/'plan.json'),pointer(claim)];results={}
+    refs=[*fixed['inputs'],pointer(folder/'plan.json'),pointer(claim)];results={};target_refs={}
     try:
         for variant in VARIANTS:
             owner=context['owners'][variant];source=context['program_sources'][variant]
@@ -127,6 +127,7 @@ def run(*,completed_assets_ref,reference_directory):
             observed=shared.pools.audit_observed_pool(source,reference_directory=reference_directory)
             targets=shared.pools.relabel_current_NN(observed,fixed['actors'][variant],
                 shared.pools.TARGET_ROOT/'long-finalization'/digest(dict(claim=pointer(claim),variant=variant)))
+            target_refs[variant]=targets
             shared.pools.checked_targets(observed,targets)
             cached=observed._replayed_target_cache;cached.verify(observed)
             refs.extend([owner,source,*bindings,*observed.refs,targets,*cached.asset_refs]);results[variant]={}
@@ -140,7 +141,7 @@ def run(*,completed_assets_ref,reference_directory):
         for ref in refs:require(pointer(ref['path'])==ref,'long finalization input bytes changed')
         result=dict(version=VERSION,plan=pointer(folder/'plan.json'),claim=pointer(claim),source_files=sources,
             completed_assets=completed_assets_ref,seed_plan=plan.ref,input_asset_refs=refs,
-            actors=fixed['actors'],actor_role_sha256=fixed['actor_role_sha256'],roles=results,
+            actors=fixed['actors'],actor_role_sha256=fixed['actor_role_sha256'],roles=results,targets=target_refs,
             program_precheck_passed=all(row['program_precheck_passed'] for roles in results.values() for row in roles.values()),
             new_NN_updates=0,new_environment_resets=0,fresh_task_and_program_evaluation_required=True,
             model_acceptance_passed=False,pilot_opened=False)
@@ -153,7 +154,7 @@ def run(*,completed_assets_ref,reference_directory):
         raise
 
 
-def read_completed(ref,completed_assets_ref):
+def _read_result(ref,completed_assets_ref,*,require_passed):
     from . import v642_long_training_assets as assets
     from .v642_long_stage_supervisor import verify_execution
     require(type(ref) is dict,'completed long final-program receipt is required')
@@ -164,7 +165,9 @@ def read_completed(ref,completed_assets_ref):
     require(ref==pointer(folder/'result.json') and r['version']==VERSION
         and r['completed_assets']==completed_assets_ref and r['source_files']==source_files()
         and r['actors']==fixed['actors'] and r['actor_role_sha256']==fixed['actor_role_sha256']
-        and r['program_precheck_passed'] is True and r['new_NN_updates']==r['new_environment_resets']==0
+        and type(r['program_precheck_passed']) is bool
+        and (not require_passed or r['program_precheck_passed'])
+        and r['new_NN_updates']==r['new_environment_resets']==0
         and r['model_acceptance_passed'] is r['pilot_opened'] is False
         and r['plan']==pointer(folder/'plan.json') and r['claim']==pointer(claim)
         and bound(r['claim'])==dict(version=VERSION,plan=r['plan'],single_use_even_if_interrupted=True,pilot_opened=False)
@@ -185,10 +188,10 @@ def read_completed(ref,completed_assets_ref):
         for role in ROLES:
             row=r['roles'][variant][role];sha=fixed['actor_role_sha256'][variant][role]
             program=shared.Program.from_dict(bound(row['program']),sha)
-            require(row['status']=='completed' and row['program_precheck_passed'] is True
+            require(row['status']=='completed' and type(row['program_precheck_passed']) is bool
                 and row['target_actor_role_sha256']==program.target_actor_role_sha256==sha and program.role==role
                 and shared.gate(row['current']['validation'])==row['current']['gate']
-                and row['current']['gate']['passed'] is True
+                and row['current']['gate']['passed'] is row['program_precheck_passed']
                 and set(row['current']['feedback_leaves'])==set(program.feedback_leaves)
                 and set(row['current']['explanation_leaves'])==set(program.explanation_leaves)
                 and row['current']['validation']=={k:row['metrics']['validation'][k] for k in ('feedback','explanation')}
@@ -197,6 +200,8 @@ def read_completed(ref,completed_assets_ref):
                 and all(0<=row['solver']['counts'][k]<=row['solver']['limits'][k] for k in ('leaf','node','proof')),
                 'long final program qualification, target, legality or budget changed')
             programs[variant][role]=row['program'];inputs.extend([row['program'],row['checkpoint'],row['ledger']])
+    require(r['program_precheck_passed'] is all(row['program_precheck_passed'] for roles in r['roles'].values() for row in roles.values()),
+            'long final-program aggregate verdict differs from its four roles')
     for path,sha in r['source_files'].items():
         saved=folder/'source'/path
         require(file_sha(saved)==sha and not saved.stat().st_mode&0o222,'long final source snapshot changed')
@@ -205,3 +210,60 @@ def read_completed(ref,completed_assets_ref):
         require(pointer(path)==item and not path.is_symlink() and not path.stat().st_mode&0o222,
                 'long final evidence bytes changed or writable')
     return dict(report=ref,programs=programs,inputs=inputs)
+
+
+def read_completed(ref,completed_assets_ref):
+    """Only all-four passing programs can allocate a fresh quality cohort."""
+    return _read_result(ref,completed_assets_ref,require_passed=True)
+
+
+def audit_program_pool(ref,completed_assets_ref,*,reference_directory):
+    """Reproduce even a failed final program gate without inventing task scores.
+
+    This lets a failed lower budget remain in the budget history. It neither
+    refits a leaf nor qualifies a new leaf set, and does not allocate scenes.
+    """
+    from backend.training.warehouse_v642_program import measure
+    from . import v642_long_training_assets as assets
+    fixed=_read_result(ref,completed_assets_ref,require_passed=False)
+    r=bound(ref);context=assets.finalization_context(completed_assets_ref,reference_directory)
+    inputs=[*fixed['inputs']];reports={}
+    require(set(r['targets'])==set(VARIANTS),'missing current-NN target packages')
+    for variant in VARIANTS:
+        source=context['program_sources'][variant];owner=context['owners'][variant]
+        previous,bindings=last_programs(context['events'],variant=variant,owner_ref=owner,source_ref=source,
+                                       config=context['plan'].config)
+        observed=shared.pools.audit_observed_pool(source,reference_directory=reference_directory)
+        target=r['targets'][variant]
+        expected=shared.pools.TARGET_ROOT/'long-finalization'/digest(dict(claim=r['claim'],variant=variant))/'targets.json'
+        # Native package filenames are validated by checked_targets; the root
+        # itself is checked here so a different fit cannot supply the targets.
+        require(Path(target['path']).parent==expected.parent,'long final targets belong to another claim')
+        target_payload,_=shared.pools.checked_targets(observed,target)
+        require(target_payload['target_actor']==r['actors'][variant],
+                'long final targets are not the actual completed frozen NN')
+        cached=observed._replayed_target_cache;cached.verify(observed)
+        inputs.extend([source,owner,*bindings,*observed.refs,target,*cached.asset_refs]);reports[variant]={}
+        for role in ROLES:
+            row=r['roles'][variant][role]
+            program=shared.Program.from_dict(bound(row['program']),r['actor_role_sha256'][variant][role])
+            before=program.to_dict();old_encoded=bound(previous[role])
+            old_program=shared.Program.from_dict(old_encoded,old_encoded['target_actor_role_sha256'])
+            require(row['previous_program']==previous[role] and shared.language_lock(program)==shared.language_lock(old_program),
+                    'long final audit found changed language or cherry-picked earlier extraction')
+            metrics={split:measure(program,a) for split,a in cached.parts[role].items()}
+            for metric in metrics.values():metric['gate']=shared.gate(metric)
+            current=shared.current_report(program,cached.parts[role])
+            require(metrics==row['metrics'] and current==row['current'] and program.to_dict()==before,
+                    'long final pool metrics or fixed qualification did not independently reproduce')
+            for part in cached.parts[role].values():
+                require(all(shared.np.array_equal(x,y) for x,y in zip(program.distributions(part['x'],part['m']),
+                    shared.forward(program,part['x'],part['m']),strict=True)), 'independent long final audit forward differs')
+            reports[variant][role]=dict(program=row['program'],metrics=metrics,current=current,
+                                       passed=current['gate']['passed'])
+    for item in inputs:require(pointer(item['path'])==item,'long final audit inputs changed')
+    return dict(version=VERSION,scope='independent_final_program_training_pool_replay_not_fresh_task_quality',
+        report=ref,completed_assets=completed_assets_ref,seed_plan=r['seed_plan'],roles=reports,
+        program_pool_passed=all(row['passed'] for roles in reports.values() for row in roles.values()),
+        input_asset_refs=inputs,new_environment_resets=0,NN_updates=0,fit_calls=0,qualification_changes=0,
+        formal_training_authorized=False,model_acceptance_passed=False,pilot_opened=False)

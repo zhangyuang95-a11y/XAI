@@ -60,6 +60,22 @@ def test_nonzero_wait_is_preserved_without_completed_success(child,monkeypatch):
     assert not output.exists()
 
 
+def test_missing_completion_preserves_actual_zero_exit_as_failed_metadata(child,monkeypatch):
+    output,args=child
+    def spawn(*a,**kw):
+        output.mkdir()
+        return SimpleNamespace(pid=987654,wait=lambda:0)
+    monkeypatch.setattr(s.subprocess,'Popen',spawn)
+    with pytest.raises(RuntimeError,match='missing/symlink scientific asset'):s.supervise('synthetic',args)
+    supervision=output.with_name(output.name+'.supervision')
+    failure=json.loads((supervision/'supervisor-failed.json').read_text())
+    assert failure['observed_child_exit']['exit_code']==0
+    assert failure['observed_child_exit']['observed_by']=='source_bound_subprocess_wait'
+    assert 'result' not in failure['observed_child_exit']
+    assert not (output/'supervisor-exit.json').exists()
+    assert not (supervision/'exit.json').exists()
+
+
 @pytest.mark.parametrize('field,value',[
     ('exit_code',True),('exit_code',1),('observed_by','PID_disappeared'),
     ('version','unknown'),('worker_pid',0),('scientific_acceptance',True)])

@@ -196,3 +196,73 @@ def test_start_window_is_24h_but_execution_lease_is_finite_budget_days(change):
     else:
         with pytest.raises(RuntimeError,match='finite execution lease differs'):
             a.audit_lease(claim,clearance,plan)
+
+
+@pytest.fixture
+def storage_callback(tmp_path,monkeypatch):
+    """Explicit toy ledger: no NN, policy, authority or scientific producer."""
+    source={'toy-source':'bound-only-in-fixture'}
+    monkeypatch.setattr(a.storage_callback,'source_files',lambda:source)
+    folder=tmp_path/'native';callback=folder/'long-storage-callback'
+    owner_ref=put(tmp_path/'owner.json',dict(synthetic_only=True))
+    native_started=put(folder/'started.json',dict(synthetic_only=True))
+    started=put(callback/'started.json',dict(version=a.storage_callback.VERSION,source_files=source,
+        owner=owner_ref,native_provider_started=native_started,native_sources={'native-toy':'source'},
+        materialization='new_unsealed_stage_only',NN_method_changed=False,pilot_opened=False))
+    validations=[];events=[]
+    for i in range(2):
+        package=put(tmp_path/f'package-{i}.json',dict(synthetic_only=True))
+        provenance=put(tmp_path/f'provenance-{i}.json',dict(synthetic_only=True))
+        event=put(folder/'events'/f'{i:06d}.json',dict(kind='validation',sequence_call=i,
+            target_package=package,long_materialization_provenance=provenance,long_storage_callback_started=started))
+        validations.append(event)
+        ref=put(callback/'calls'/f'{i:06d}.json',dict(version=a.storage_callback.VERSION,sequence_call=i,
+            source_sha256=a.digest(source),previous=events[-1] if events else None,native_validation=event,
+            target_package=package,provenance=provenance,native_NN_and_qualification_method_unchanged=True,optimizer_updates=0))
+        events.append(ref)
+    native=dict(owner=owner_ref,started=native_started,source_files={'native-toy':'source'},output=str(folder),
+                call_count=2,events=validations)
+    payload=dict(version=a.storage_callback.VERSION,source_files=source,owner=owner_ref,started=started,
+        native_provider_started=native_started,events=events,call_count=2,full_training_state_sha256='toy-full-state',
+        safe_snapshot_not_resume_authority=True)
+    final=dict(full_training_state_sha256='toy-full-state',long_storage_callback=dict(payload=payload,payload_sha256=a.digest(payload)))
+    return final,native,events
+
+
+def test_long_independent_reader_requires_exact_callback_history(storage_callback):
+    final,native,events=storage_callback;inputs=[]
+    result=a.audit_storage_callback(final,provider_payload=native,inputs=inputs)
+    assert result['events']==events and len(inputs)==3
+
+
+@pytest.mark.parametrize('change',['missing','source','fingerprint','provider','reorder','truncate','append','mutable'])
+def test_long_callback_forgery_or_dropped_history_is_rejected(storage_callback,change):
+    final,native,events=storage_callback
+    final=deepcopy(final);payload=final['long_storage_callback']['payload']
+    if change=='missing':final.pop('long_storage_callback')
+    elif change=='source':payload['source_files']={'other':'source'}
+    elif change=='fingerprint':payload['full_training_state_sha256']='wrong'
+    elif change=='provider':payload['native_provider_started']=events[0]
+    elif change=='reorder':payload['events']=list(reversed(payload['events']))
+    elif change=='truncate':payload['events']=payload['events'][:-1]
+    elif change=='append':payload['events'].append(events[0])
+    else:Path(events[0]['path']).chmod(0o644)
+    if 'long_storage_callback' in final:
+        final['long_storage_callback']['payload_sha256']=a.digest(payload)
+    with pytest.raises(RuntimeError):a.audit_storage_callback(final,provider_payload=native,inputs=[])
+
+
+def test_storage_check_never_substitutes_for_native_NN_replay(tmp_path,monkeypatch):
+    target=put(tmp_path/'target.json',dict(synthetic_only=True))
+    owner_ref=put(tmp_path/'owner.json',dict(synthetic_only=True))
+    calls=[]
+    def reader(ref,*,expected_owner):
+        calls.append((ref,expected_owner))
+        return dict(provenance_ref=target,inputs=[target],canonical_NN_replay_still_required=True)
+    monkeypatch.setattr(a.materialization,'read_materialization',reader)
+    inputs=[];a.audit_materialization(target,owner_ref=owner_ref,inputs=inputs)
+    assert calls==[(target,owner_ref)] and inputs==[target]
+    monkeypatch.setattr(a.materialization,'read_materialization',lambda *args,**kwargs:
+        dict(inputs=[],canonical_NN_replay_still_required=False))
+    with pytest.raises(RuntimeError,match='cannot replace complete native NN replay'):
+        a.audit_materialization(target,owner_ref=owner_ref,inputs=[])

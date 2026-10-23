@@ -22,6 +22,8 @@ from . import v642_recovered_assets as shared
 from .v642_update_receipt_audit import audit_updates
 from .v626_protocol import require,pointer,bound,digest,file_sha
 from backend.training import warehouse_v642_evidence_provider as provider
+from backend.training import warehouse_v642_long_targets as materialization
+from backend.training import warehouse_v642_long_evidence as storage_callback
 from backend.training import warehouse_v629_environment_replay as physics
 from backend.training import warehouse_v629_ppo_update as ppo
 from backend.training.warehouse_v642_checkpoint_export import export_checkpoint_actor
@@ -284,6 +286,56 @@ def audit_rollouts(update_refs,*,variant,owner_ref,plan,initial_roles,inputs):
                 optimizer_reexecution=False,critic_baseline_gradients_not_reexecuted=True)
 
 
+def audit_materialization(target_ref,*,owner_ref,inputs):
+    """Require the new producer's complete storage proof, then replay NN elsewhere.
+
+    Native target-schema compatibility alone does not establish that the new
+    long owner used its registered storage producer. This distinct proof is
+    mandatory for every scheduled refit and every feedback-bearing call.
+    """
+    checked=materialization.read_materialization(target_ref,expected_owner=owner_ref)
+    require(checked['canonical_NN_replay_still_required'] is True,
+            'storage proof cannot replace complete native NN replay')
+    for ref in checked['inputs']:asset(ref,inputs)
+    return checked
+
+
+def audit_storage_callback(final,*,provider_payload,inputs):
+    envelope=final.get('long_storage_callback')
+    require(type(envelope) is dict and set(envelope)=={'payload','payload_sha256'},
+            'regularized long checkpoint lacks its explicit storage callback')
+    p=envelope['payload'];native=provider_payload
+    require(envelope['payload_sha256']==digest(p) and p['version']==storage_callback.VERSION
+            and p['source_files']==storage_callback.source_files() and p['owner']==native['owner']
+            and p['native_provider_started']==native['started']
+            and p['full_training_state_sha256']==final['full_training_state_sha256']
+            and p['safe_snapshot_not_resume_authority'] is True
+            and type(p['call_count']) is int and p['call_count']==native['call_count'],
+            'long callback snapshot/source/native-provider binding differs')
+    folder=Path(native['output'])/'long-storage-callback'
+    require(p['started']==pointer(folder/'started.json'),'long callback header escaped its native owner')
+    asset(p['started'],inputs)
+    require(bound(p['started'])==dict(version=storage_callback.VERSION,source_files=p['source_files'],
+            owner=native['owner'],native_provider_started=native['started'],native_sources=native['source_files'],
+            materialization='new_unsealed_stage_only',NN_method_changed=False,pilot_opened=False),
+            'long callback immutable header differs')
+    validations=[ref for ref in native['events'] if bound(ref)['kind']=='validation']
+    require(len(p['events'])==len(validations)==p['call_count']
+            and sorted((folder/'calls').glob('*.json'))==[Path(ref['path']) for ref in p['events']],
+            'long callback history omits or adds native validations')
+    for index,(ref,event_ref) in enumerate(zip(p['events'],validations,strict=True)):
+        asset(ref,inputs);item=bound(ref);event=bound(event_ref)
+        require(ref==pointer(folder/'calls'/f'{index:06d}.json')
+                and item==dict(version=storage_callback.VERSION,sequence_call=index,
+                    source_sha256=digest(p['source_files']),previous=p['events'][index-1] if index else None,
+                    native_validation=event_ref,target_package=event['target_package'],
+                    provenance=event['long_materialization_provenance'],
+                    native_NN_and_qualification_method_unchanged=True,optimizer_updates=0)
+                and event['sequence_call']==index and event['long_storage_callback_started']==p['started'],
+                'long callback/native validation/materialization chain differs')
+    return p
+
+
 def audit_provider(final,*,pool,readiness,config,updates,inputs):
     p=final['provider']['payload']
     require(final['provider']['payload_sha256']==digest(p) and p['version']==provider.VERSION
@@ -302,11 +354,15 @@ def audit_provider(final,*,pool,readiness,config,updates,inputs):
         installed=p['installed'],used_epochs=set(p['used_epochs']),call_count=p['call_count'],latch=p['latch'],
         reason=p['reason'],programs=p['programs'],observed=pool,failed=False,started_ref=p['started'])
     for key,value in values.items():setattr(obj,key,value)
-    obj.verify();validations={}
+    obj.verify();callback=audit_storage_callback(final,provider_payload=p,inputs=inputs);validations={}
     for event_ref in p['events']:
         asset(event_ref,inputs);event=bound(event_ref)
         for ref in event['asset_refs']:asset(ref,inputs)
         if event['kind']!='validation':continue
+        stored=audit_materialization(event['target_package'],owner_ref=p['owner'],inputs=inputs)
+        require(event['long_materialization_provenance']==stored['provenance_ref']
+                and event['long_storage_callback_started']==callback['started'],
+                'long validation did not use its exact source-bound target producer')
         folder=Path(p['output'])/'calls'/f'{event["sequence_call"]:06d}'
         asset(event['target_actor'],inputs)
         actor=FrozenWarehouseV6Actor.load(event['target_actor']['path'],expected_sha256=event['target_actor']['sha256'])
@@ -336,7 +392,8 @@ def audit_provider(final,*,pool,readiness,config,updates,inputs):
                             'long fidelity latch failed to suppress program gradient')
                 consumed.append(update['epoch_id'])
     require(consumed==list(validations),'long provider epochs do not match accepted native optimizer updates')
-    return dict(validations=len(consumed),full_current_NN_targets_replayed=True,scientific_sample_count_added=0)
+    return dict(validations=len(consumed),full_current_NN_targets_replayed=True,
+                explicit_storage_callback_audited=True,scientific_sample_count_added=0)
 
 
 def audit_completion(*,reference_directory,calibration_precheck_ref,result_ref,supervisor_exit_ref):
@@ -458,14 +515,36 @@ def audit_completion(*,reference_directory,calibration_precheck_ref,result_ref,s
                     and result['identity']['variant']==variant and result['identity']['config']==asdict(plan.config)
                     and result['full_training_state_sha256']==record['full_training_state_sha256'],
                     'long scheduled refit lacks the actual completed NN/source-state binding')
+            audit_materialization(b['target_package'],owner_ref=owners[variant],inputs=inputs)
             for role in ROLES:
                 e=provider.pools.build_observed_evidence(result['roles'][role]['program'],pool,b['target_package'],epoch_id=f'install-{event["step"]}')
                 require(e.target_role_sha256==record['core']['actor_role_sha256'][role]
                         and e.report==result['roles'][role]['current'],'long refit qualification/target NN does not replay')
                 for ref in e.asset_refs:asset(ref,inputs)
-        if variant=='regularized':reports[variant]['provider']=audit_provider(final,pool=pool,readiness=plan.readiness,
-                                                           config=plan.config,updates=final['updates'],inputs=inputs)
-        else:require(final['provider'] is None,'raw cannot install program feedback')
+        if variant=='regularized':
+            reports[variant]['provider']=audit_provider(final,pool=pool,readiness=plan.readiness,
+                                                       config=plan.config,updates=final['updates'],inputs=inputs)
+            final_native=final['provider']['payload'];final_storage=final['long_storage_callback']['payload']
+            for record in values:
+                if record['core']['processed_joint_steps']==4000:
+                    require(record['provider'] is record.get('long_storage_callback') is None,
+                            'critic warmup cannot install external program feedback')
+                    continue
+                native=record['provider']['payload']
+                step=record['core']['processed_joint_steps']
+                expected_events=[ref for ref in final_native['events'] if bound(ref)['step']<=step]
+                require(record['provider']['payload_sha256']==digest(native)
+                        and native['source_files']==provider.source_files()
+                        and native['events']==expected_events,
+                        'checkpoint native provider is not a prefix of the independently audited history')
+                callback=audit_storage_callback(record,provider_payload=native,inputs=inputs)
+                expected_calls=[ref for ref in final_storage['events']
+                                if bound(bound(ref)['native_validation'])['step']<=step]
+                require(callback['events']==expected_calls,
+                        'checkpoint storage callback is not a prefix of the independently audited history')
+        else:
+            require(all(record['provider'] is record.get('long_storage_callback') is None for record in values),
+                    'raw cannot install program feedback or its callback')
         snapshots[variant]=values
     require(snapshots['raw'][0]['full_training_state_sha256']==snapshots['regularized'][0]['full_training_state_sha256'],
             'paired warmup full Actor/critic/optimizer state differs')

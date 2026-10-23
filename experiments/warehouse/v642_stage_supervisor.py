@@ -74,6 +74,7 @@ def supervise(stage, arguments):
     for name in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS',
                  'VECLIB_MAXIMUM_THREADS', 'NUMEXPR_NUM_THREADS'):
         environment[name] = '1'
+    receipt = None
     try:
         with log.open('xb') as handle:
             child = subprocess.Popen(command, cwd=ROOT, stdin=subprocess.DEVNULL,
@@ -97,9 +98,14 @@ def supervise(stage, arguments):
         return receipt
     except BaseException as error:
         # Do not invent an exit code if spawning or waiting did not complete.
-        _readonly(supervision / 'supervisor-failed.json', dict(
+        failure = dict(
             version=VERSION, started=pointer(started_path), error_type=type(error).__name__,
-            error=str(error), automatic_retry=False, pilot_opened=False))
+            error=str(error), automatic_retry=False, pilot_opened=False)
+        # Completion metadata can fail after wait() returned. Keep that real
+        # code as failure evidence without treating it as a valid completion.
+        if receipt is not None:
+            failure['observed_child_exit'] = receipt
+        _readonly(supervision / 'supervisor-failed.json', failure)
         raise
 
 

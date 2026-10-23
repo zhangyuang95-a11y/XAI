@@ -1,6 +1,6 @@
 # v6.42 长预算单配对种子与有限库存层
 
-本层新增prepare／check／audit／checked_clearance接口，不修改旧20k claim、原407源码、恢复源码或协议注册层。
+本层新增prepare／check／prepare_formal／check_formal／audit／checked_clearance接口，不修改旧20k claim、原407源码、恢复源码或协议注册层。
 只在真实20k独立预检完整重放通过之后读取调用者proposal、检查原始整数参数或创建输出。
 目前没有真实通过收据，因此此次只运行模拟权限与临时数据的测试，没有实际prepare、扫描工作树或分配研究随机流。
 
@@ -10,7 +10,7 @@
 `protocol.register_preparation`，再载入原确认过的v6.20 readiness，最后读取不可写的显式proposal。
 proposal版本为`warehouse-v642-long-pair-seed-proposal.v1`，字段严格限定为：
 
-- `phase`：development或formal；`stream_id`：协议中的相应三个符号流之一。
+- `phase`：仅development；`stream_id`：development-0、development-1或development-2。
 - `joint_step_budget`：200000、300000或400000。
 - `initialization_seed`、`optimizer_seed`：调用者显式提供的原始uint63参数。
 - `train_case_inventory`、`program_evidence_inventory`：内容哈希指针。
@@ -56,8 +56,7 @@ raw与regularized共享同一完整v6.20 Actor起点、critic初始化参数、�
 `checked_clearance(plan,execution=True)`重算exact投影、绑定registry、四个根、indexed/triage/interval源码，
 核对24小时有效期和最后文件名／大小／mtime增量，历史变化即拒绝。
 clearance始终是零实际reset、无训练／封存权限的证据；owner还须自己的source-contract、独占claim、
-真实预算阶段准入及每次reset预扣。正式阶段没有真实budget-lock独立读者时仍不得运行。
-此层可保存formal符号库存，但不因此授权formal训练。
+真实预算阶段准入及每次reset预扣。正式阶段必须先通过真实budget-lock独立读者，再走显式正式入口；普通prepare/check不能推断formal权限。
 
 长预算的24小时clearance只约束启动时的历史新鲜度；200k／300k／400k的实际执行期分别固定7／10／14天。
 plan绑定`execution_lease_days`和`seed_clearance_start_window_hours=24`；owner的独占claim记录确切开始与到期，禁止自动续期。
@@ -82,3 +81,21 @@ plan绑定`execution_lease_days`和`seed_clearance_start_window_hours=24`；owne
 `check_reference_buffer`只接受原已审计common-fit buffer。二者不执行训练更新。
 
 测试的历史审计只扫描四个空临时目录，不能表述为真实仓库查重或新流已经获准。
+
+## 正式训练的显式预算锁入口
+
+`prepare_formal(budget_lock_ref=...,calibration_precheck_ref=...,reference_directory=...,proposal_ref=...,run_id=...)`
+和`check_formal(plan_ref,budget_lock_ref=...,calibration_precheck_ref=...,reference_directory=...)`
+首先调用`v642_formal_training_admission.read_admission`，在任何其他调用方文件读取之前由真实
+`development.read_budget_lock`独立重放三条开发流。缺锁、passed字典或没有真实锁时直接拒绝。
+
+正式提案使用独立版本`warehouse-v642-budget-locked-formal-seed-proposal.v1`，新增显式
+`development_budget_lock`内容哈希指针。只接受锁定预算和formal-0／formal-1／formal-2；
+不允许restart_declaration、自选另一预算或复用开发初始化／optimizer／场景参数。
+初始化、optimizer、八槽训练及1650程序源库存继续全部通过原四工作树indexed/triage/exact审计，
+没有正式阶段的历史复用例外。更换run ID不能绕过已消费的formal stream claim。
+
+Plan对象持有从真实reader得到的不可直接构造token，记录formal_admission绑定并将完整预算锁输入纳入refs。
+允许缓存真实token，但每次verify仍重验完整源码与所有原输入SHA。源码闭包以平铺文件SHA加入新正式模块，
+避免development→quality→owner→seed→formal的递归调用。所有准备收据仍不授予执行、质量、封存或发布权限。
+正向测试明确使用fake低层开发auditor；历史审计测试只扫描四个临时树，均不属于真实科学证据。

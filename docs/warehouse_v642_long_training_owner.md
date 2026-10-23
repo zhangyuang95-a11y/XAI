@@ -1,6 +1,6 @@
-# v6.42 有限长预算 development 执行入口
+# v6.42 有限长预算与显式正式训练入口
 
-本模块只实现后续开发配对训练的生产者。当前代码与合成测试本身不是模型验收证据，不消费真实场景。20k 校准必须先由现有独立审计器完整重放，通过任务保持和双角色程序预检，才能读取调用方的长预算计划。手写 `passed` JSON 不能授权。
+本模块实现有限开发配对，以及真实开发预算锁之后的正式配对训练生产者。当前代码与合成测试本身不是模型验收证据，不消费真实场景。20k 校准必须先由现有独立审计器完整重放，通过任务保持和双角色程序预检，才能读取调用方的长预算计划。手写 `passed` JSON 不能授权。
 
 ## 入口与前置条件
 
@@ -10,7 +10,7 @@
 
 程序不自动分配库存或选择新种子。库存必须按已有 seed-plan API 显式准备。`development-0/1/2` 的200k、300k、400k每个预算均从完整v6.20双Actor共同起点重新开始；不能把20k owner改预算，也不能把小预算末端当大预算起点。每个 `(phase, stream_id, budget)` 使用跨 run ID 的独占 claim，中断保留 claim，没有自动恢复或重试。
 
-目前仅允许 development。formal 明确拒绝：必须先实现并通过独立开发预算锁 reader，再增加来源绑定的正式入口；现有符号计划或用户授权均不能跳过该顺序。现代码不会选择模型、签发预算锁、消费封存集或开放 pilot。
+development保持默认调用语义。formal必须显式指定phase=formal和formal_budget_lock_ref，在读取其他输入之前经真实read_budget_lock取得不可直接构造token。只接受锁定预算与formal-0/1/2、新初始化/optimizer及场景库存；没有formal restart。现代码不会选择模型、签发预算锁、消费封存集或开放pilot。
 
 ## 数值与证据约束
 
@@ -39,4 +39,23 @@ callable. Native NN numerics, qualification, latch and accepted-gradient
 accounting are unchanged. Checkpoints retain both native and callback state.
 The owner only seals its own new storage tree at completion; historical trees
 and current 20k/recovery files are never retrofitted. Formal execution remains
-closed until its independent authorization chain is implemented.
+closed without the genuine independently replayed development budget lock;
+its explicit training authorization never grants quality or sealed acceptance.
+
+## 正式接口与来源绑定
+
+Owner版本为`warehouse-v642-finite-budget-locked-long-owner.v2`。
+`load_seed_plan`、`prepare_sources`、`audit_source_bound_seeds`、`claimed_owner`和`run`新增
+`phase='development', formal_budget_lock_ref=None`参数，默认开发接口不变。显式formal入口缺少锁时，
+在plan、校准、readiness、seed、模型、RNG或输出读取之前拒绝。Plan验证每次检查真正预算锁token、
+完整当前源码及所有锁输入SHA；不接受passed字典。
+
+CLI正式阶段增加`--phase formal --formal-budget-lock ABS_PATH`。监督器版本为
+`warehouse-v642-budget-locked-long-supervisor.v2`，真实worker argv在原`--plan ABS_PATH`之后
+追加该四项；started/exit均绑定phase/development_budget_lock/formal_admission。
+Descriptor、claim、训练完成与controller结果保持同一绑定，formal stage明确为
+`paired_long_formal_training_not_quality_or_sealed_admission`。完成正式训练只说明训练结束，
+不说明模型质量、解释、封存、留出或发布通过。仍只生成原五个检查点。
+
+正式正向测试使用真实锁issue/read/token代码，但低层开发审计器明确为fake；完整训练路径也只使用
+fake物理/NN/优化器。未实际准备新随机流或执行任何正式训练。

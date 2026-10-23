@@ -19,6 +19,7 @@ from . import seed_metadata_audit_indexed_v642 as metadata
 from . import seed_triage_indexed_v642 as triage
 from . import seed_interval_index_v642 as interval_source
 from . import exact_seed_audit as exact
+from . import v642_formal_training_admission as formal
 from .v626_protocol import require,pointer,bound,digest,file_sha
 from backend.training.warehouse_v625_actor_training import PPOConfig,ReferenceTrainingBuffer
 from backend.training.warehouse_v629_environment_replay import EnvironmentRolloutReplay
@@ -39,6 +40,7 @@ RESTART_VERSION='warehouse-v642-long-common-start-restart.v1'
 
 def source_files():
     files=protocol.source_files()
+    files.update(formal.source_files())  # Flat hashes, never development.source_files recursion.
     names=('experiments/warehouse/v642_long_training_seed_plan.py',
            'tests/test_warehouse_v642_long_training_seed_plan.py','docs/warehouse_v642_long_training_seed_plan.md',
            'experiments/warehouse/seed_metadata_audit_indexed_v642.py',
@@ -154,6 +156,7 @@ class LongTrainingSeedPlan:
     registration:object
     readiness:object
     refs:tuple
+    formal_authorization:object=None
 
     @property
     def proposal(self):return self
@@ -162,6 +165,10 @@ class LongTrainingSeedPlan:
     def config(self):return PPOConfig(joint_step_budget=self.value['joint_step_budget'])
 
     def verify(self):
+        if self.formal_authorization is not None:
+            require(type(self.formal_authorization) is formal.FormalTrainingAdmission,
+                    'formal plan requires its actual independently read admission token')
+            self.formal_authorization.verify()
         self.registration.verify();self.readiness.verify();p=self.value;folder=Path(self.ref['path']).parent
         require(pointer(self.ref['path'])==self.ref and bound(self.ref)==p and p['version']==VERSION
                 and p['source_files']==source_files() and p['source_sha256']==digest(source_files())
@@ -172,11 +179,24 @@ class LongTrainingSeedPlan:
                 'long-pair plan, prerequisite, configuration or source changed')
         require(bound(pointer(folder/'completed.json'))==dict(plan_sha256=self.ref['sha256']), 'long-pair plan seal changed')
         for ref in self.refs:_asset(ref,readonly=False)
-        require(bound(p['proposal_ref'])==dict(version=PROPOSAL_VERSION,**{key:p[key] for key in
-            ('phase','stream_id','joint_step_budget','initialization_seed','optimizer_seed',
-             'train_case_inventory','program_evidence_inventory')},
-             **({'restart_declaration':p['restart_declaration']} if p['restart_declaration'] is not None else {})),
-             'long plan differs from its immutable caller proposal')
+        proposal=bound(p['proposal_ref'])
+        if self.formal_authorization is None:
+            require(p['phase']=='development' and p.get('formal_admission') is None,
+                    'ordinary development reader cannot authorize a formal plan')
+            expected=dict(version=PROPOSAL_VERSION,**{key:p[key] for key in
+                ('phase','stream_id','joint_step_budget','initialization_seed','optimizer_seed',
+                 'train_case_inventory','program_evidence_inventory')},
+                 **({'restart_declaration':p['restart_declaration']} if p['restart_declaration'] is not None else {}))
+        else:
+            self.formal_authorization.validate_proposal(proposal)
+            require(p['formal_admission']==self.formal_authorization.value
+                    and p['development_budget_lock']==self.formal_authorization.budget_lock_ref
+                    and p['restart_declaration'] is p['restart_proof'] is None,
+                    'formal plan changed its lock or attempted a restart')
+            expected=dict(version=formal.PROPOSAL_VERSION,development_budget_lock=self.formal_authorization.budget_lock_ref,
+                **{key:p[key] for key in ('phase','stream_id','joint_step_budget','initialization_seed','optimizer_seed',
+                   'train_case_inventory','program_evidence_inventory')})
+        require(proposal==expected,'long plan differs from its immutable caller proposal')
         require(p['execution_lease_days']==EXECUTION_LEASE_DAYS_BY_BUDGET[p['joint_step_budget']]
                 and p['seed_clearance_start_window_hours']==24,'long finite execution lease or start window changed')
         require(p['phase'] in ('development','formal') and p['stream_id'] in
@@ -205,13 +225,27 @@ class LongTrainingSeedPlan:
 
 
 def prepare(*,calibration_precheck_ref,reference_directory,proposal_ref,run_id):
+    return _prepare(calibration_precheck_ref=calibration_precheck_ref,reference_directory=reference_directory,
+        proposal_ref=proposal_ref,run_id=run_id,formal_authorization=None)
+
+
+def prepare_formal(*,budget_lock_ref,calibration_precheck_ref,reference_directory,proposal_ref,run_id):
+    authority=formal.read_admission(budget_lock_ref)  # FIRST, before any other caller input.
+    return _prepare(calibration_precheck_ref=calibration_precheck_ref,reference_directory=reference_directory,
+        proposal_ref=proposal_ref,run_id=run_id,formal_authorization=authority)
+
+
+def _prepare(*,calibration_precheck_ref,reference_directory,proposal_ref,run_id,formal_authorization):
+    if formal_authorization is not None:formal_authorization.verify()
     registration=protocol.register_preparation(calibration_precheck_ref)  # FIRST, before caller proposal/output/seed reads.
     registration.verify();readiness=old_partitions.admission.load_readiness(reference_directory);readiness.verify()
     _asset(proposal_ref);p=bound(proposal_ref)
     keys={'version','phase','stream_id','joint_step_budget','initialization_seed','optimizer_seed',
           'train_case_inventory','program_evidence_inventory'}
-    require(set(p) in (keys,keys|{'restart_declaration'}) and p['version']==PROPOSAL_VERSION,
-            'invalid explicit long-pair proposal')
+    if formal_authorization is None:
+        require(set(p) in (keys,keys|{'restart_declaration'}) and p['version']==PROPOSAL_VERSION and p['phase']=='development',
+                'invalid explicit development long-pair proposal; formal needs its explicit budget-lock entry')
+    else:formal_authorization.validate_proposal(p)
     require(p['phase'] in ('development','formal') and p['joint_step_budget'] in protocol.BUDGETS
             and p['stream_id'] in (protocol.DEVELOPMENT_STREAMS if p['phase']=='development' else protocol.FORMAL_STREAMS),
             'unregistered long phase, stream or budget')
@@ -232,7 +266,8 @@ def prepare(*,calibration_precheck_ref,reference_directory,proposal_ref,run_id):
     run=legacy.confirmation.run_name(run_id);sources=source_files();source_sha=digest(sources)
     declaration,cases=declared_calls(p,training,evidence)
     refs=tuple(deepcopy([*registration.refs,*readiness.refs,proposal_ref,p['train_case_inventory'],p['program_evidence_inventory'],
-                        *([] if restart is None else [restart['declaration'],*restart['allowed_metadata_refs']])]))
+                        *([] if restart is None else [restart['declaration'],*restart['allowed_metadata_refs']]),
+                        *([] if formal_authorization is None else formal_authorization.refs)]))
     for ref in refs:_asset(ref,readonly=False)
     global_claim=OUTPUT_ROOT/'claims'/f'{p["phase"]}-{p["stream_id"]}-{p["joint_step_budget"]}.json'
     require(not global_claim.exists(),'this phase/stream/budget was already consumed even if interrupted')
@@ -263,21 +298,35 @@ def prepare(*,calibration_precheck_ref,reference_directory,proposal_ref,run_id):
         unconsumed_cursor=dict(train={v:{str(i):0 for i in range(8)} for v in VARIANTS},program={v:0 for v in VARIANTS}),
         history_freshness_verified=False,phase_budget_admission_and_single_use_owner_still_required=True,
         training_authority=False,sealed_authority=False,new_environment_resets=0,Actor_updates=0,PPO_joint_steps=0,pilot_opened=False)
+    if formal_authorization is not None:value['formal_admission']=deepcopy(formal_authorization.value)
     require(source_files()==sources,'long source changed while preparing plan')
     write_new(output/'plan.json',value);(output/'plan.json').chmod(0o444);ref=pointer(output/'plan.json')
     write_new(output/'completed.json',dict(plan_sha256=ref['sha256']));(output/'completed.json').chmod(0o444)
-    return LongTrainingSeedPlan(ref,value,registration,readiness,refs).verify()
+    return LongTrainingSeedPlan(ref,value,registration,readiness,refs,formal_authorization).verify()
 
 
 def check(plan_ref,*,calibration_precheck_ref,reference_directory):
+    return _check(plan_ref,calibration_precheck_ref=calibration_precheck_ref,reference_directory=reference_directory,
+        formal_authorization=None)
+
+
+def check_formal(plan_ref,*,budget_lock_ref,calibration_precheck_ref,reference_directory):
+    authority=formal.read_admission(budget_lock_ref)  # FIRST, even before hashing/reading the plan.
+    return _check(plan_ref,calibration_precheck_ref=calibration_precheck_ref,reference_directory=reference_directory,
+        formal_authorization=authority)
+
+
+def _check(plan_ref,*,calibration_precheck_ref,reference_directory,formal_authorization):
+    if formal_authorization is not None:formal_authorization.verify()
     registration=protocol.register_preparation(calibration_precheck_ref)  # FIRST; never infer permission from unadmitted plan.
     registration.verify();readiness=old_partitions.admission.load_readiness(reference_directory);readiness.verify()
     _asset(plan_ref);p=bound(plan_ref)
     require(Path(plan_ref['path']).resolve()==OUTPUT_ROOT/legacy.confirmation.run_name(p['run_id'])/'plan.json',
             'long plan is outside its isolated namespace')
     refs=tuple(deepcopy([*registration.refs,*readiness.refs,p['proposal_ref'],p['train_case_inventory'],p['program_evidence_inventory'],
-        *([] if p['restart_proof'] is None else [p['restart_proof']['declaration'],*p['restart_proof']['allowed_metadata_refs']])]))
-    return LongTrainingSeedPlan(plan_ref,p,registration,readiness,refs).verify()
+        *([] if p['restart_proof'] is None else [p['restart_proof']['declaration'],*p['restart_proof']['allowed_metadata_refs']]),
+        *([] if formal_authorization is None else formal_authorization.refs)]))
+    return LongTrainingSeedPlan(plan_ref,p,registration,readiness,refs,formal_authorization).verify()
 
 
 def exclusions(plan):

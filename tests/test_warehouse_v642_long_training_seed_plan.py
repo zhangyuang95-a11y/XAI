@@ -282,3 +282,101 @@ def test_restart_parent_requires_real_asset_reader_and_exact_same_stream_start(t
     prior['stream_id']='development-1'
     with pytest.raises(RuntimeError,match='same actual common Actor/critic/optimizer start'):
         s._verified_restart(p)
+
+
+def formal_inputs(allowed,monkeypatch,*,budget=200000,stream='formal-0'):
+    from tests.test_warehouse_v642_formal_training_admission import install_fake_development_auditor
+    ref,_,calls=install_fake_development_auditor(allowed.directory,monkeypatch,budget=budget)
+    p=s.bound(allowed.proposal)
+    p.update(version=s.formal.PROPOSAL_VERSION,phase='formal',stream_id=stream,joint_step_budget=budget,development_budget_lock=ref)
+    if budget!=200000:
+        t,e=inventories(budget)
+        p['train_case_inventory']=put(allowed.directory/'formal-training.json',t)
+        p['program_evidence_inventory']=put(allowed.directory/'formal-program.json',e)
+    proposal_ref=put(allowed.directory/'formal-proposal.json',p)
+    return ref,proposal_ref,calls
+
+
+def test_formal_missing_budget_lock_precedes_every_other_input_or_output(tmp_path,monkeypatch):
+    def forbidden(*a,**kw):pytest.fail('missing formal lock reached other input or output')
+    monkeypatch.setattr(s.protocol,'register_preparation',forbidden)
+    monkeypatch.setattr(s,'_asset',forbidden);monkeypatch.setattr(s,'source_files',forbidden)
+    for function in (lambda:s.prepare_formal(budget_lock_ref=None,calibration_precheck_ref=None,
+            reference_directory=None,proposal_ref=None,run_id=None),
+        lambda:s.check_formal(None,budget_lock_ref=None,calibration_precheck_ref=None,reference_directory=None)):
+        with pytest.raises(RuntimeError,match='before other inputs'):function()
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize('budget',[200000,300000,400000])
+def test_formal_prepare_and_check_use_real_token_from_explicit_FAKE_lower_development_auditor(allowed,monkeypatch,budget):
+    lock,proposal_ref,calls=formal_inputs(allowed,monkeypatch,budget=budget)
+    plan=s.prepare_formal(budget_lock_ref=lock,calibration_precheck_ref=allowed.ref,
+        reference_directory=allowed.directory/'unused',proposal_ref=proposal_ref,run_id='synthetic-formal-only')
+    assert type(plan.formal_authorization) is s.formal.FormalTrainingAdmission
+    assert plan.value['formal_admission']==plan.formal_authorization.value and plan.value['development_budget_lock']==lock
+    assert plan.config.joint_step_budget==budget and plan.value['restart_proof'] is plan.value['restart_declaration'] is None
+    assert plan.value['phase']=='formal' and plan.value['stream_id']=='formal-0'
+    assert plan.value['maximum_explicit_resets']==2*(plan.value['checked']['training_episodes']+1650)
+    assert lock in plan.refs and not plan.value['training_authority'] and not plan.value['sealed_authority']
+    restored=s.check_formal(plan.ref,budget_lock_ref=lock,calibration_precheck_ref=allowed.ref,
+        reference_directory=allowed.directory/'unused')
+    assert restored.value==plan.value and len(calls)==2  # actual lock issue+read, genuine-token cache thereafter.
+    with pytest.raises(RuntimeError,match='ordinary development reader'):
+        s.check(plan.ref,calibration_precheck_ref=allowed.ref,reference_directory=allowed.directory/'unused')
+
+
+@pytest.mark.parametrize('change',['different_budget','fourth_stream','restart','another_lock'])
+def test_formal_proposal_constraints_fail_before_reading_seed_inventories(allowed,monkeypatch,change):
+    lock,proposal_ref,_=formal_inputs(allowed,monkeypatch)
+    p=s.bound(proposal_ref)
+    if change=='different_budget':p['joint_step_budget']=300000
+    elif change=='fourth_stream':p['stream_id']='formal-3'
+    elif change=='restart':p['restart_declaration']=dict(passed=True)
+    else:p['development_budget_lock']=dict(lock,sha256='f'*64)
+    invalid=put(allowed.directory/'invalid-formal.json',p)
+    original=s.validate_inventories
+    def forbidden(*a,**kw):pytest.fail('invalid formal phase read/validated seeds')
+    monkeypatch.setattr(s,'validate_inventories',forbidden)
+    with pytest.raises(RuntimeError,match='exact real budget lock'):
+        s.prepare_formal(budget_lock_ref=lock,calibration_precheck_ref=allowed.ref,
+            reference_directory=allowed.directory/'unused',proposal_ref=invalid,run_id='must-not-exist')
+    assert not (s.OUTPUT_ROOT/'must-not-exist').exists()
+
+
+def test_formal_global_single_use_and_four_root_audit_have_no_restart_freshness_exception(allowed,monkeypatch):
+    lock,proposal_ref,_=formal_inputs(allowed,monkeypatch)
+    plan=s.prepare_formal(budget_lock_ref=lock,calibration_precheck_ref=allowed.ref,
+        reference_directory=allowed.directory/'unused',proposal_ref=proposal_ref,run_id='formal-exact-audit')
+    root=allowed.directory/'formal-four-empty-worktrees'/'XAI-v6-integration'
+    for name in s.HISTORY_NAMES:(root.parent/name).mkdir(parents=True)
+    monkeypatch.setattr(s,'ROOT',root)
+    registry=put(allowed.directory/'formal-empty-registry.json',dict(registered_trace_paths=[]))
+    monkeypatch.setattr(s,'REGISTRY_REF',registry)
+    clearance=s.audit(plan);exact=s.bound(clearance['value']['exact'])
+    assert len(exact['scan_roots'])==4 and clearance['value']['restart_context'] is None
+    assert not clearance['value']['training_authority'] and plan.value['restart_proof'] is None
+    put(Path(plan.value['global_claim_path']),dict(synthetic_consumed=True))
+    with pytest.raises(RuntimeError,match='already consumed even if interrupted'):
+        s.prepare_formal(budget_lock_ref=lock,calibration_precheck_ref=allowed.ref,
+            reference_directory=allowed.directory/'unused',proposal_ref=proposal_ref,run_id='formal-second-run')
+    assert not (s.OUTPUT_ROOT/'formal-second-run').exists()
+
+
+@pytest.mark.parametrize('kind',['initialization','optimizer','training_scene','program_scene'])
+def test_formal_four_root_exact_audit_rejects_previously_used_arguments(allowed,monkeypatch,kind):
+    lock,proposal_ref,_=formal_inputs(allowed,monkeypatch)
+    plan=s.prepare_formal(budget_lock_ref=lock,calibration_precheck_ref=allowed.ref,
+        reference_directory=allowed.directory/'unused',proposal_ref=proposal_ref,run_id='formal-conflict-only')
+    root=allowed.directory/'formal-conflicting-worktrees'/'XAI-v6-integration'
+    for name in s.HISTORY_NAMES:(root.parent/name).mkdir(parents=True)
+    monkeypatch.setattr(s,'ROOT',root)
+    registry=put(allowed.directory/'formal-conflict-registry.json',dict(registered_trace_paths=[]))
+    monkeypatch.setattr(s,'REGISTRY_REF',registry)
+    value=(dict(initialization_seed=plan.value['initialization_seed']) if kind=='initialization' else
+        dict(optimizer_seed=plan.value['optimizer_seed']) if kind=='optimizer' else
+        dict(scenario_seed=allowed.train['cases'][0]['scenario_seed']) if kind=='training_scene' else
+        dict(scenario_seed=allowed.program['cases'][0]['scenario_seed']))
+    put(root/'output/warehouse-spent-formal-report.json',value)
+    with pytest.raises(RuntimeError,match='historical seed conflict'):s.audit(plan)
+    assert not (Path(plan.ref['path']).parent/'seed-ledger/clearance.json').exists()

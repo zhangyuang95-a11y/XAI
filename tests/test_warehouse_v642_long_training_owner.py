@@ -568,3 +568,100 @@ def test_supervisor_records_actual_wait_and_rejects_exit0_without_binding(prepar
     if actual_exit==0 and not has_completion:assert 'result_binding_error' in exit_record and 'result' not in exit_record
     elif actual_exit==0:assert result==o.pointer(prepared.folder/'long-supervisor-exit.json')
     else:assert 'result' not in exit_record and 'completed' not in exit_record
+
+
+@pytest.fixture
+def formal_prepared(prepared,monkeypatch):
+    """Actual FormalAdmission/lock readers, explicitly fake lower dev auditor."""
+    from tests.test_warehouse_v642_formal_training_admission import install_fake_development_auditor
+    lock,_,calls=install_fake_development_auditor(prepared.folder.parent,monkeypatch,
+        budget=prepared.plan.config.joint_step_budget)
+    authority=o.seeds.formal.read_admission(lock)
+    plan=deepcopy(prepared.plan);folder=prepared.folder.parent/'synthetic-formal-only';folder.mkdir()
+    plan.ref=put(folder/'plan.json',dict(synthetic_only=True,not_real_seed_plan=True))
+    plan.formal_authorization=authority
+    plan.value.update(phase='formal',stream_id='formal-0',development_budget_lock=lock,
+        formal_admission=deepcopy(authority.value),restart_proof=None,execution_output=str(folder/'training'))
+    plan.value['global_claim_path']=str(o.claim_path(plan));plan.proposal=plan
+    def checked(ref,*,budget_lock_ref,calibration_precheck_ref,reference_directory):
+        assert ref==plan.ref and budget_lock_ref==lock
+        assert o.seeds.formal.read_admission(budget_lock_ref) is authority
+        return plan
+    monkeypatch.setattr(o.seeds,'check_formal',checked)
+    values=dict(prepared.values,plan_ref=plan.ref,phase='formal',formal_budget_lock_ref=lock)
+    o.prepare_sources(**values);o.audit_source_bound_seeds(**values)
+    return SimpleNamespace(plan=plan,values=values,folder=folder,clearance=prepared.clearance,lock=lock,calls=calls)
+
+
+def test_explicit_formal_missing_lock_precedes_plan_seed_calibration_model_RNG_and_output(tmp_path,monkeypatch):
+    def forbidden(*a,**kw):pytest.fail('missing formal lock reached another input/model/output')
+    monkeypatch.setattr(o.seeds.protocol,'register_preparation',forbidden)
+    monkeypatch.setattr(o,'bound',forbidden);monkeypatch.setattr(o,'source_files',forbidden)
+    monkeypatch.setattr(o,'initialize_from_reference',forbidden);monkeypatch.setattr(o,'WarehouseMultiAgentEnv',forbidden)
+    values=dict(reference_directory=None,calibration_precheck_ref=None,plan_ref=None,phase='formal',formal_budget_lock_ref=None)
+    for call in (o.prepare_sources,o.audit_source_bound_seeds,o.run):
+        with pytest.raises(RuntimeError,match='before other inputs'):call(**values)
+    assert not list(tmp_path.iterdir())
+
+
+def test_formal_owner_claim_binding_fresh_pair_and_single_use_scope(formal_prepared,kernels):
+    p=formal_prepared
+    with pytest.raises(ProbeFinished):
+        with enter(p) as active:
+            for variant in o.VARIANTS:active.initialize(variant)
+            assert active.plan.formal_authorization.budget==active.config.joint_step_budget
+            descriptor=o.bound(active.descriptor_ref);claim=o.bound(active.claim_ref)
+            assert descriptor['phase']==claim['phase']=='formal'
+            assert descriptor['development_budget_lock']==claim['development_budget_lock']==p.lock
+            assert descriptor['formal_admission']==claim['formal_admission']==p.plan.value['formal_admission']
+            assert descriptor['stage']=='paired_long_formal_training_not_quality_or_sealed_admission'
+            assert not descriptor['model_acceptance_passed'] and not descriptor['sealed_authority'] and not descriptor['pilot_opened']
+            assert active.initial_identity['initial_joint_steps']==0 and active.states['raw'].actor_updates==0
+            raise ProbeFinished()
+    with pytest.raises(RuntimeError,match='already consumed'):
+        with enter(p):pytest.fail('formal interruption was rearmed')
+    assert len(p.calls)==2 and not (p.folder/'training/completed.json').exists()
+
+
+def test_formal_full_fake_five_checkpoint_pipeline_keeps_phase_lock_and_no_model_success(formal_prepared,kernels,monkeypatch):
+    # The existing full factory/driver fake path executes; no real environment,
+    # seed preparation or optimizer is used. Lower development auditor is fake.
+    test_full_fake_pipeline_real_context_initialization_updates_refits_checkpoints_and_receipts(formal_prepared,kernels,monkeypatch)
+    result=o.bound(o.pointer(formal_prepared.folder/'training/controller-completed.json'))
+    done=o.bound(result['owner_completed'])
+    for row in (result,done):
+        assert row['phase']=='formal' and row['development_budget_lock']==formal_prepared.lock
+        assert row['formal_admission']==formal_prepared.plan.value['formal_admission']
+        assert row['formal_training_authorized'] and not row['sealed_authority'] and not row['model_acceptance_passed'] and not row['pilot_opened']
+    assert all(len(result['checkpoints'][v])==5 for v in o.VARIANTS)
+
+
+def test_formal_CLI_missing_lock_is_rejected_before_hashing_any_other_input(tmp_path,monkeypatch):
+    c=cli_module()
+    def forbidden(*a,**kw):pytest.fail('formal CLI touched precheck/plan before lock')
+    monkeypatch.setattr(c,'pointer',forbidden)
+    with pytest.raises(RuntimeError,match='before other inputs'):
+        c.main(['--run','--phase','formal','--reference-directory',str(tmp_path),
+                '--calibration-precheck',str(tmp_path/'unread-precheck'),'--plan',str(tmp_path/'unread-plan')])
+    assert not list(tmp_path.iterdir())
+
+
+def test_formal_supervisor_exact_argv_actual_wait_and_same_lock_receipts(formal_prepared,monkeypatch):
+    c=cli_module();p=formal_prepared;commands=[]
+    class Worker:
+        pid=987655
+        def __init__(self,command,**kw):commands.append(command)
+        def wait(self):
+            folder=p.folder/'training';folder.mkdir()
+            fields=dict(phase='formal',development_budget_lock=p.lock,formal_admission=p.plan.value['formal_admission'])
+            descriptor=put(folder/'descriptor.json',dict(seed_plan=p.plan.ref,**fields))
+            completed=put(folder/'completed.json',dict(version=o.VERSION,training_finished=True,descriptor=descriptor,publishable=False,**fields))
+            put(folder/'controller-completed.json',dict(version=o.VERSION,seed_plan=p.plan.ref,owner_completed=completed,
+                numerical_training_completed=True,publishable=False,**fields))
+            return 0
+    monkeypatch.setattr(c.subprocess,'Popen',Worker)
+    ref=c.supervise(**p.values);record=o.bound(ref);started=o.bound(record['started'])
+    assert commands[0][-4:]==['--phase','formal','--formal-budget-lock',p.lock['path']]
+    assert record['command']==started['command']==commands[0] and record['exit_code']==0
+    assert record['phase']==started['phase']=='formal' and record['development_budget_lock']==started['development_budget_lock']==p.lock
+    assert record['formal_admission']==started['formal_admission']==p.plan.value['formal_admission']

@@ -1,10 +1,11 @@
-"""Independent finite long-budget development owner for the v6.42 method.
+"""Independent finite long-budget owner with explicit formal admission.
 
 Only a source-bound long seed plan following a replayed real 20k calibration
 can enter the exclusive claim. Every budget restarts from the full v6.20 NN;
 this module does not change or re-arm the old calibration owner. Programs
 supply gradients/evidence only. Quality, budget locking and release remain
 separate later gates. Ordinary imports and constructors authorize no work.
+Formal entry first requires the actual independently replayed development lock.
 
 The collection/update bodies preserve the existing audited physical replay
 and PPO contracts, with their own owner identity, source closure and budget.
@@ -38,7 +39,7 @@ from env.warehouse.reset_audit_v614 import capture_stage1_resets,stage1_reset_ph
 from scripts.run_warehouse_v625 import write_new
 
 ROOT=seeds.ROOT
-VERSION='warehouse-v642-finite-long-development-owner.v1'
+VERSION='warehouse-v642-finite-budget-locked-long-owner.v2'
 CANDIDATE='warehouse-v642-depth9-depth12-01'
 VARIANTS=('raw','regularized')
 ACTIVE=ContextVar('warehouse_v642_finite_long_training_owner',default=None)
@@ -56,14 +57,25 @@ def source_files():
     return dict(sorted(files.items()))
 
 
-def load_seed_plan(reference_directory,calibration_precheck_ref,plan_ref):
+def load_seed_plan(reference_directory,calibration_precheck_ref,plan_ref,*,phase='development',formal_budget_lock_ref=None):
     # The seed-plan reader replays the actual independent calibration first,
     # before reading caller-supplied plan data or constructing a model/RNG.
-    plan=seeds.check(plan_ref,calibration_precheck_ref=calibration_precheck_ref,
-                     reference_directory=reference_directory)
+    require(phase in ('development','formal'),'unknown explicit long training phase')
+    if phase=='formal':
+        plan=seeds.check_formal(plan_ref,budget_lock_ref=formal_budget_lock_ref,
+            calibration_precheck_ref=calibration_precheck_ref,reference_directory=reference_directory)
+    else:
+        require(formal_budget_lock_ref is None,'development entry cannot accept a formal lock or infer another phase')
+        plan=seeds.check(plan_ref,calibration_precheck_ref=calibration_precheck_ref,reference_directory=reference_directory)
     plan.verify()
-    require(plan.value['phase']=='development',
-        'formal long training requires the not-yet-issued independently audited development budget lock')
+    require(plan.value['phase']==phase,'formal long training requires its explicit independently audited budget-lock entry')
+    if phase=='formal':
+        require(type(plan.formal_authorization) is seeds.formal.FormalTrainingAdmission,
+            'formal owner requires a genuine independently read admission token')
+        plan.formal_authorization.verify()
+        require(plan.config.joint_step_budget==plan.formal_authorization.budget
+            and plan.value['formal_admission']==plan.formal_authorization.value,
+            'formal owner budget or admission differs from the development lock')
     require(plan.config.joint_step_budget in (200000,300000,400000)
         and asdict(plan.config)==plan.value['config'], 'unknown long development budget or config')
     return plan
@@ -97,6 +109,8 @@ def claim_path(plan):
 def contract_value(plan):
     files=source_files()
     return dict(version=VERSION,seed_plan=plan.ref,source_files=files,source_sha256=digest(files),
+        phase=plan.value['phase'],development_budget_lock=plan.value.get('development_budget_lock'),
+        formal_admission=plan.value.get('formal_admission'),
         execution_output=str(Path(plan.ref['path']).parent/'training'),global_claim_path=str(claim_path(plan)),
         config=asdict(plan.config),checkpoint_joint_steps=list(checkpoint_steps(plan.config)),
         execution_lease_days=plan.value['execution_lease_days'],
@@ -114,8 +128,8 @@ def checked_sources(plan):
     return ref
 
 
-def prepare_sources(*,reference_directory,calibration_precheck_ref,plan_ref):
-    plan=load_seed_plan(reference_directory,calibration_precheck_ref,plan_ref)
+def prepare_sources(*,reference_directory,calibration_precheck_ref,plan_ref,phase='development',formal_budget_lock_ref=None):
+    plan=load_seed_plan(reference_directory,calibration_precheck_ref,plan_ref,phase=phase,formal_budget_lock_ref=formal_budget_lock_ref)
     folder=Path(plan.ref['path']).parent
     require(not (folder/'seed-ledger').exists(),'register full long owner before exact seed clearance')
     value=contract_value(plan)
@@ -128,8 +142,8 @@ def prepare_sources(*,reference_directory,calibration_precheck_ref,plan_ref):
     return checked_sources(plan)
 
 
-def audit_source_bound_seeds(*,reference_directory,calibration_precheck_ref,plan_ref):
-    plan=load_seed_plan(reference_directory,calibration_precheck_ref,plan_ref);contract=checked_sources(plan)
+def audit_source_bound_seeds(*,reference_directory,calibration_precheck_ref,plan_ref,phase='development',formal_budget_lock_ref=None):
+    plan=load_seed_plan(reference_directory,calibration_precheck_ref,plan_ref,phase=phase,formal_budget_lock_ref=formal_budget_lock_ref);contract=checked_sources(plan)
     clearance=seeds.audit(plan)
     require(checked_sources(plan)==contract,'long owner source changed during seed audit')
     target=Path(plan.ref['path']).parent/'long-owner-source-clearance.json'
@@ -463,8 +477,8 @@ def _make_owner(plan,clearance,sources,claim_ref,descriptor_ref,contract,folder,
 
 
 @contextmanager
-def claimed_owner(*,reference_directory,calibration_precheck_ref,plan_ref):
-    plan=load_seed_plan(reference_directory,calibration_precheck_ref,plan_ref)
+def claimed_owner(*,reference_directory,calibration_precheck_ref,plan_ref,phase='development',formal_budget_lock_ref=None):
+    plan=load_seed_plan(reference_directory,calibration_precheck_ref,plan_ref,phase=phase,formal_budget_lock_ref=formal_budget_lock_ref)
     require(ACTIVE.get() is None,'long training owners cannot nest')
     clearance=seeds.checked_clearance(plan,execution=True)
     execution_lease(plan,clearance)  # No output/model/RNG for an expired start window.
@@ -485,9 +499,11 @@ def claimed_owner(*,reference_directory,calibration_precheck_ref,plan_ref):
         require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,119}',case['episode_id']) is not None,
             'unsafe long training episode ID')
     folder.mkdir(parents=True,exist_ok=False)
-    descriptor=dict(version=VERSION,stage='paired_long_development_training_not_formal_or_model_acceptance',
+    descriptor=dict(version=VERSION,stage=('paired_long_development_training_not_formal_or_model_acceptance' if phase=='development'
+        else 'paired_long_formal_training_not_quality_or_sealed_admission'),
         seed_plan=plan.ref,calibration_precheck=calibration_precheck_ref,protocol_registration=plan.registration.value,
         phase=plan.value['phase'],stream_id=plan.value['stream_id'],source_files=sources,source_sha256=source_sha,
+        development_budget_lock=plan.value.get('development_budget_lock'),formal_admission=plan.value.get('formal_admission'),
         clearance=clearance['clearance'],config=asdict(plan.config),owner_source_contract=contract,
         reference_actor=plan.readiness.value['actor'],training_partition_proposal=plan.ref,
         train_case_inventory=plan.value['train_case_inventory'],program_evidence_inventory=plan.value['program_evidence_inventory'],
@@ -501,6 +517,7 @@ def claimed_owner(*,reference_directory,calibration_precheck_ref,plan_ref):
     claim_file.parent.mkdir(parents=True,exist_ok=True)
     write_new(claim_file,dict(version=VERSION,descriptor=descriptor_ref,plan=plan.ref,clearance=clearance['clearance'],
         phase=plan.value['phase'],stream_id=plan.value['stream_id'],joint_step_budget=plan.config.joint_step_budget,
+        development_budget_lock=plan.value.get('development_budget_lock'),formal_admission=plan.value.get('formal_admission'),
         owner_pid=os.getpid(),**lease,single_use_even_if_interrupted=True,
         automatic_resume=False,automatic_retry=False,sealed_authority=False,pilot_opened=False))
     claim_file.chmod(0o444)
@@ -531,11 +548,13 @@ def claimed_owner(*,reference_directory,calibration_precheck_ref,plan_ref):
             sealed=seal_owned_artifacts(owner)
             owner.event('paired_long_steps_finished',per_variant_joint_steps={v:owner.states[v].joint_steps for v in VARIANTS})
             result=dict(version=VERSION,claim=owner.claim_ref,descriptor=descriptor_ref,updates=owner.updates,
+                phase=plan.value['phase'],development_budget_lock=plan.value.get('development_budget_lock'),
+                formal_admission=plan.value.get('formal_admission'),
                 actual_reset_count=len(actual),per_variant_joint_steps={v:owner.states[v].joint_steps for v in VARIANTS},
                 accepted_program_updates={v:dict(owner.cores[v].accepted_program_updates) for v in VARIANTS},
                 sealed_owned_artifact_directories=sealed,
                 training_finished=True,task_quality_and_final_NN_program_evaluation_required=True,
-                budget_lock_issued=False,formal_training_authorized=False,sealed_authority=False,
+                budget_lock_issued=False,formal_training_authorized=phase=='formal',sealed_authority=False,
                 model_acceptance_passed=False,pilot_opened=False,publishable=False)
             write_new(folder/'completed.json',result);(folder/'completed.json').chmod(0o444)
     except BaseException as error:
@@ -582,14 +601,17 @@ def drive(active,initial_programs):
     return checkpoints
 
 
-def run(*,reference_directory,calibration_precheck_ref,plan_ref):
-    with claimed_owner(reference_directory=reference_directory,calibration_precheck_ref=calibration_precheck_ref,plan_ref=plan_ref) as active:
+def run(*,reference_directory,calibration_precheck_ref,plan_ref,phase='development',formal_budget_lock_ref=None):
+    with claimed_owner(reference_directory=reference_directory,calibration_precheck_ref=calibration_precheck_ref,plan_ref=plan_ref,
+            phase=phase,formal_budget_lock_ref=formal_budget_lock_ref) as active:
         initial={role:row['program'] for role,row in active.plan.readiness.value['program_pair'].items()}
         checkpoints=drive(active,initial)
     result=dict(version=VERSION,owner_completed=pointer(active.folder/'completed.json'),
         source_contract=active.source_contract_ref,seed_plan=active.plan.ref,checkpoints=checkpoints,
         phase=active.plan.value['phase'],stream_id=active.plan.value['stream_id'],
+        development_budget_lock=active.plan.value.get('development_budget_lock'),formal_admission=active.plan.value.get('formal_admission'),
         numerical_training_completed=True,quality_and_program_evaluation_required=True,
+        formal_training_authorized=phase=='formal',sealed_authority=False,
         model_acceptance_passed=False,pilot_opened=False,publishable=False)
     path=active.folder/'controller-completed.json';write_new(path,result);path.chmod(0o444)
     return pointer(path)

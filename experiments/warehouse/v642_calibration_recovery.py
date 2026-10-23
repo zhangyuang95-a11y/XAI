@@ -26,7 +26,23 @@ from backend.training.warehouse_v625_actor_training import ReferenceTrainingBuff
 from env.warehouse.reset_audit_v614 import capture_stage1_resets
 from scripts.run_warehouse_v625 import write_new
 
-VERSION = 'warehouse-v642-explicit-calibration-recovery.v1'
+VERSION = 'warehouse-v642-explicit-calibration-recovery.v2'
+FAILED_VERSION = 'warehouse-v642-explicit-calibration-recovery.v1'
+REPAIR_VERSION = 'warehouse-v642-zero-work-engineering-repair.v1'
+RECOVERY_CLAIM_NAME = 'recovery-v2.claim.json'
+FAILED_RECOVERY_ID = 'warehouse-v642-calibration-02-recovery-01'
+FAILED_ATTEMPT_SHA256 = {
+    'plan': 'f581300229f2aaaf5058fddcce306fed7d6c1532fbdfbbd4f60bfc780246281d',
+    'claim': '8cf2b237a20cc9675bffc9ff209243ee3fea2f54b79f69cef2afcf366c84405e',
+    'failure': '30f97915fe180ec568c4a0bf61ca1fa653d0ce9e5ab7b1d071d556ee76c0f124',
+    'supervisor_started': 'dbe5a9b97c00acbb4f03d29a72f4b9ae9a884a868dd2b7417f7de8b4dc377a1a',
+    'supervisor_exit': '59045ea58a6f5e3a13ab71ea7a24baf192c212ae4c6e5a7e161bd403c88f541a',
+    'journal': '559604290f632f3b7f8d695fc49fde81e9b50a945030553a19201e9edf98b031',
+    'reset_journal': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    'log': '1a17dd4ed79e3cdc22dc2768d02307f9392e0ab0ea69fa6dae054879be52baab',
+    'launcher': 'ac830957c0a60c42293464d2469de43e2dc4a39f3783d29034d3c67e404b705d',
+    'supervisor_console': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+}
 AUTHORIZATION = '继续，完成验收'
 STARTS = {'raw': 18600, 'regularized': 16800}
 ROLES = ('robot_1', 'robot_2')
@@ -42,6 +58,113 @@ NEW_SOURCE_NAMES = (
 
 def source_files():
     return {name: file_sha(old.ROOT / name) for name in NEW_SOURCE_NAMES}
+
+
+def claim_path(original_plan_ref):
+    return Path(original_plan_ref['path']).parent / RECOVERY_CLAIM_NAME
+
+
+def checked_engineering_repair(original_base_path):
+    """Pure offline v1 failure/unchanged-input proof, without lease or PID checks."""
+    base = Path(original_base_path).resolve()
+    failed_plan = base / 'recovery' / FAILED_RECOVERY_ID / 'plan.json'
+    require(file_sha(failed_plan) == FAILED_ATTEMPT_SHA256['plan'],
+            'only the pinned v1 initialization failure has a v2 repair capability')
+    p = bound(pointer(failed_plan))
+    require(Path(p['original_plan']['path']) == base / 'plan.json'
+            and checked_tree(p['original_roots']) == p['original_input_hashes'],
+            'original training inputs changed after the failed v1 engineering attempt')
+    for key in ('original_plan', 'original_claim', 'original_descriptor', 'original_controller_contract'):
+        require(pointer(p[key]['path']) == p[key], 'original training identity changed after v1 failure')
+    for name, sha in p['original_source_files'].items():
+        require(file_sha(old.ROOT / name) == sha, 'original training source changed after v1 failure')
+    return checked_failed_v1_repair(base, p)
+
+
+def checked_failed_v1_repair(base, original):
+    """Authorize only the pinned pre-work v1 initialization failure, not a retry."""
+    base = Path(base)
+    folder = base / 'recovery' / FAILED_RECOVERY_ID
+    locations = dict(plan=folder / 'plan.json', claim=base / 'recovery.claim.json',
+        failure=folder / 'failed.json', supervisor_started=folder / 'supervisor-started.json',
+        supervisor_exit=folder / 'supervisor-exit.json', journal=folder / 'owner-journal.jsonl',
+        reset_journal=folder / 'actual-resets.jsonl', log=folder / 'run.log',
+        launcher=folder / 'launcher.json', supervisor_console=folder / 'supervisor-console.log')
+    refs = {}
+    for name, path in locations.items():
+        require(path.is_file() and not path.is_symlink() and path.resolve() == path,
+                'missing or relocated pinned failed recovery evidence')
+        refs[name] = pointer(path)
+        require(refs[name]['sha256'] == FAILED_ATTEMPT_SHA256[name],
+                'pinned zero-work v1 failure evidence changed: ' + name)
+    p, claim, failure = (bound(refs[name]) for name in ('plan', 'claim', 'failure'))
+    started, exited = (bound(refs[name]) for name in ('supervisor_started', 'supervisor_exit'))
+    require(p['version'] == claim['version'] == failure['version'] == FAILED_VERSION
+            and p['recovery_id'] == FAILED_RECOVERY_ID and p['authorization'] == AUTHORIZATION
+            and claim['recovery_plan'] == failure['recovery_plan'] == refs['plan']
+            and failure['recovery_claim'] == refs['claim']
+            and failure['error_type'] == 'AttributeError'
+            and failure['error'] == "'RecoveryOwner' object has no attribute 'refits'"
+            and failure['original_claim_retained'] is True and failure['automatic_retry'] is False
+            and failure['pilot_opened'] is False and claim['single_use_even_if_interrupted'] is True,
+            'prior recovery was not the pinned missing-refits initialization failure')
+    for name in ('original_plan', 'original_claim', 'original_descriptor', 'original_controller_contract',
+                 'original_source_files', 'original_calibration', 'original_roots', 'checkpoints',
+                 'cached_rollouts', 'original_updates', 'owners', 'keys', 'consumption',
+                 'journals', 'reset_journals', 'expires_utc', 'original_input_hashes'):
+        require(exact_value_equal(p[name], original[name]),
+                'v2 repair differs from unchanged original training history: ' + name)
+    snapshots = {}
+    require(set(p['source_files']) == set(NEW_SOURCE_NAMES), 'failed v1 source inventory is incomplete')
+    for name, sha in p['source_files'].items():
+        path = folder / 'source' / name
+        require(not path.is_symlink() and file_sha(path) == sha and not path.stat().st_mode & 0o222,
+                'failed v1 source snapshot bytes changed')
+        snapshots[name] = pointer(path)
+    source = dict(path=str(old.ROOT / 'scripts/resume_warehouse_v642_calibration.py'),
+                  sha256=p['source_files']['scripts/resume_warehouse_v642_calibration.py'])
+    # Verify the old executable through its sealed source copy. The current
+    # source is intentionally v2 and must not be presented as the old binary.
+    expected_argv = [started['command'][0], source['path'], '--run', '--recovery-plan', refs['plan']['path']]
+    require(started['version'] == exited['version'] == 'warehouse-v642-calibration-recovery-supervisor.v1'
+            and started['observed_by'] == 'source_bound_subprocess_launch'
+            and exited['observed_by'] == 'source_bound_subprocess_wait'
+            and type(exited['exit_code']) is int and exited['exit_code'] == 1
+            and exited['started'] == refs['supervisor_started'] and exited['log'] == refs['log']
+            and started['recovery_plan'] == exited['recovery_plan'] == refs['plan']
+            and started['command'] == exited['command'] == expected_argv
+            and started['supervisor_source'] == exited['supervisor_source'] == source
+            and started['supervisor_pid'] == exited['supervisor_pid']
+            and exited['worker_pid'] == claim['owner_pid']
+            and 'result' not in exited and 'completed' not in exited,
+            'failed v1 has no exact observed nonzero subprocess wait')
+    times = [datetime.fromisoformat(value) for value in
+             (started['started_utc'], claim['started_utc'], exited['finished_utc'])]
+    require(all(t.tzinfo for t in times) and times == sorted(times),
+            'failed v1 launch/claim/wait timestamps differ')
+    journal = json_lines(locations['journal'])
+    require(len(journal) == 1 and journal[0]['kind'] == 'explicit_recovery_claimed'
+            and journal[0]['sequence'] == len(json_lines(original['journals'][0]['path']))
+            and journal[0]['claim'] == journal[0]['original_claim'] == original['original_claim']
+            and journal[0]['recovery_claim'] == refs['claim']
+            and journal[0]['recovery_plan'] == refs['plan']
+            and locations['reset_journal'].read_bytes() == b'',
+            'failed v1 performed restoration, optimization, a reset or extra owner work')
+    expected = {str(path): refs[name]['sha256'] for name, path in locations.items() if path.parent == folder}
+    expected.update({ref['path']: ref['sha256'] for ref in snapshots.values()})
+    require(checked_tree([folder]) == expected
+            and {path.name for path in folder.iterdir()} ==
+                {Path(path).name for path in expected if Path(path).parent == folder} | {'source'},
+            'failed v1 contains unexpected optimizer/checkpoint/provider outputs')
+    for root in (pipeline.PROVIDER_ROOT / 'recovery' / FAILED_RECOVERY_ID,
+                 pipeline.EXTRACTION_ROOT / 'recovery' / FAILED_RECOVERY_ID,
+                 old.observed.TARGET_ROOT / 'recovery' / FAILED_RECOVERY_ID,
+                 old.observed.TARGET_ROOT / 'recovery' / digest(refs['claim'])):
+        require(not root.exists(), 'failed v1 created a provider or target output; repair is refused')
+    return dict(version=REPAIR_VERSION, reason='missing_refits_owner_initialization_before_restoration',
+        failed_attempt=refs, failed_source_snapshots=snapshots, failed_tree_files=expected,
+        original_input_hashes_unchanged=True, observed_failed_worker_exit_code=1,
+        accepted_optimizer_updates=0, new_environment_resets=0, new_provider_calls=0)
 
 
 def pid_exists(pid):
@@ -208,7 +331,11 @@ def prepare(*, reference_directory, plan_ref, recovery_id, authorization):
     plan, original = inspect_original(reference_directory=reference_directory, plan_ref=plan_ref)
     require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,99}', recovery_id) is not None, 'unsafe recovery ID')
     base = Path(plan.ref['path']).parent
-    require(not (base / 'recovery.claim.json').exists(), 'this interruption already consumed its explicit recovery capability')
+    require(not claim_path(plan.ref).exists(), 'this interruption already consumed its explicit v2 recovery capability')
+    repair = checked_engineering_repair(base)
+    previous = bound(repair['failed_attempt']['plan'])
+    require(all(exact_value_equal(previous[name], value) for name, value in original.items()),
+            'v2 prepared original history differs from the pinned v1 failure')
     folder = base / 'recovery' / recovery_id
     sources = source_files()
     folder.mkdir(parents=True, exist_ok=False)
@@ -216,6 +343,10 @@ def prepare(*, reference_directory, plan_ref, recovery_id, authorization):
     # any original bytes or their SHA identity. Native started/evidence/budget
     # JSON can still be writable even after their final content was committed.
     for name in original['original_input_hashes']:
+        Path(name).chmod(0o444)
+    for ref in repair['failed_attempt'].values():
+        Path(ref['path']).chmod(0o444)
+    for name in repair['failed_tree_files']:
         Path(name).chmod(0o444)
     for name, sha in sources.items():
         raw = (old.ROOT / name).read_bytes()
@@ -232,7 +363,7 @@ def prepare(*, reference_directory, plan_ref, recovery_id, authorization):
         config=asdict(old.PPOConfig()), restores_training_state_not_new_initialization=True,
         cached_frames_are_numerical_replay_not_new_samples=True, maximum_joint_steps_per_variant=20000,
         original_claim_retained=True, original_files_read_only=True, automatic_retry=False,
-        scientific_acceptance=False, pilot_opened=False)
+        scientific_acceptance=False, pilot_opened=False, repair_of=repair)
     write_new(folder / 'plan.json', value)
     (folder / 'plan.json').chmod(0o444)
     return pointer(folder / 'plan.json')
@@ -246,6 +377,14 @@ def checked_plan(ref):
     folder = Path(ref['path']).parent
     expected = Path(value['original_plan']['path']).parent / 'recovery' / value['recovery_id']
     require(folder == expected.resolve() and Path(ref['path']).name == 'plan.json', 'recovery plan location differs')
+    # Full original input bytes are checked by prepare, the claimed entry and
+    # its final boundary. Recheck the small pinned failure archive here; doing
+    # another full source-episode scan per live operation adds no new samples.
+    require(value['repair_of'] == checked_failed_v1_repair(Path(value['original_plan']['path']).parent, value),
+            'v2 engineering repair chain changed after preparation')
+    require(all(not Path(ref['path']).stat().st_mode & 0o222
+                for ref in value['repair_of']['failed_attempt'].values()),
+            'v1 failure evidence was not sealed read-only during v2 preparation')
     for name, sha in value['source_files'].items():
         snap = folder / 'source' / name
         require(file_sha(snap) == sha and not snap.stat().st_mode & 0o222, 'recovery source snapshot changed')
@@ -446,12 +585,12 @@ def claimed_recovery(*, recovery_plan_ref):
     require(checked_tree(p['original_roots']) == p['original_input_hashes'], 'original recovery tree changed after preparation')
     plan = old.load_seed_plan(p['reference_directory'], p['original_plan'])
     folder = Path(recovery_plan_ref['path']).parent
-    claim_file = Path(p['original_plan']['path']).parent / 'recovery.claim.json'
+    claim_file = claim_path(p['original_plan'])
     require(not claim_file.exists(), 'explicit recovery capability already consumed')
     claim = dict(version=VERSION, recovery_plan=recovery_plan_ref, original_claim=p['original_claim'],
         authorization=p['authorization'], owner_pid=os.getpid(), single_use_even_if_interrupted=True,
         source_files=p['source_files'], started_utc=datetime.now(timezone.utc).isoformat(), expires_utc=p['expires_utc'],
-        maximum_joint_steps_per_variant=20000, pilot_opened=False)
+        maximum_joint_steps_per_variant=20000, pilot_opened=False, repair_of=p['repair_of'])
     write_new(claim_file, claim)
     claim_file.chmod(0o444)
     active = RecoveryOwner.__new__(RecoveryOwner)
@@ -466,6 +605,7 @@ def claimed_recovery(*, recovery_plan_ref):
     active.states = {}; active.cores = {}; active.readers = {}; active.pending = {}; active.pools = {}; active.providers = {}
     active.state_fingerprints = {}; active.collecting = {}; active.collecting_source = set()
     active.reserved = {}; active.cursors = {}; active.evidence_cursor = {}; active.environments = {}; active.active_cases = {}
+    active.refits = {}
     active.updates = deepcopy(p['original_updates'])
     active.replay_proofs = []
     original = Path(p['original_calibration'])
@@ -529,6 +669,7 @@ def run(*, recovery_plan_ref):
         original_plan=p['original_plan'], original_claim=p['original_claim'], original_descriptor=p['original_descriptor'],
         original_controller_contract=p['original_controller_contract'], original_source_files=p['original_source_files'],
         recovery_plan=recovery_plan_ref, recovery_claim=active.recovery_claim_ref, source_files=p['source_files'],
+        repair_of=p['repair_of'],
         checkpoints=active.checkpoints, updates=active.updates,
         journals=[*p['journals'], pointer(folder / 'owner-journal.jsonl')],
         reset_journals=[*p['reset_journals'], pointer(folder / 'actual-resets.jsonl')],

@@ -43,7 +43,7 @@ def supervise(recovery_plan_ref):
                      'supervisor executable is not the registered recovery CLI')
     recovery.require(not (folder / 'supervisor-started.json').exists()
                      and not (folder / 'supervisor-exit.json').exists()
-                     and not (Path(plan['original_plan']['path']).parent / 'recovery.claim.json').exists(),
+                     and not recovery.claim_path(plan['original_plan']).exists(),
                      'recovery supervision or its single-use worker was already started')
     command = [str(Path(sys.executable).resolve()), str(cli), '--run', '--recovery-plan', recovery_plan_ref['path']]
     started_utc = datetime.now(timezone.utc).isoformat()

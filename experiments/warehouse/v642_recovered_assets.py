@@ -20,7 +20,8 @@ from backend.training.warehouse_v6_actor import FrozenWarehouseV6Actor
 from scripts.run_warehouse_v625 import write_new
 
 ROOT = training.owner.ROOT
-RECOVERY_VERSION = 'warehouse-v642-explicit-calibration-recovery.v1'
+RECOVERY_VERSION = 'warehouse-v642-explicit-calibration-recovery.v2'
+RECOVERY_CLAIM_NAME = 'recovery-v2.claim.json'
 VERSION = 'warehouse-v642-completed-recovered-calibration-assets.v1'
 ROLES = ('robot_1', 'robot_2')
 VARIANTS = ('raw', 'regularized')
@@ -121,6 +122,7 @@ def executor_sources():
     """Read the complete registered executor closure, without executing it."""
     from . import v642_calibration_recovery as recovery
     require(recovery.VERSION == RECOVERY_VERSION
+            and recovery.RECOVERY_CLAIM_NAME == RECOVERY_CLAIM_NAME
             and recovery.AUTHORIZATION == '继续，完成验收'
             and tuple(recovery.NEW_SOURCE_NAMES) == EXECUTOR_FILES,
             'unknown recovery executor source inventory or authorization')
@@ -128,6 +130,27 @@ def executor_sources():
     require(recovery.source_files() == expected,
             'recovery executor omitted or added a source dependency')
     return expected
+
+
+def engineering_repair(base, inputs):
+    """Recheck the one pinned zero-work failure; never authorize a retry."""
+    from . import v642_calibration_recovery as recovery
+    repair = recovery.checked_engineering_repair(base)
+    require(repair['version'] == 'warehouse-v642-zero-work-engineering-repair.v1'
+            and repair['reason'] == 'missing_refits_owner_initialization_before_restoration'
+            and type(repair['observed_failed_worker_exit_code']) is int
+            and repair['observed_failed_worker_exit_code'] == 1
+            and repair['original_input_hashes_unchanged'] is True
+            and all(type(repair[k]) is int and repair[k] == 0 for k in
+                    ('accepted_optimizer_updates', 'new_environment_resets', 'new_provider_calls')),
+            'engineering replacement did not stop before all new scientific work')
+    for ref in repair['failed_attempt'].values():
+        immutable(ref, inputs)
+    for ref in repair['failed_source_snapshots'].values():
+        immutable(ref, inputs)
+    for name, sha in repair['failed_tree_files'].items():
+        immutable(dict(path=name, sha256=sha), inputs)
+    return repair
 
 
 def _time(value):
@@ -160,7 +183,7 @@ def audit_recovery_plan(r, *, folder, plan, descriptor, original_claim,
             and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,99}', p['recovery_id'])
             and folder == base / 'recovery' / p['recovery_id']
             and r['recovery_plan'] == pointer(folder / 'plan.json')
-            and r['recovery_claim'] == pointer(base / 'recovery.claim.json'),
+            and r['recovery_claim'] == pointer(base / RECOVERY_CLAIM_NAME),
             'recovery plan or single-use claim is outside its registered location')
     require(p['version'] == RECOVERY_VERSION and p['authorization'] == '继续，完成验收'
             and p['reference_directory'] == str(Path(reference_directory).resolve())
@@ -182,6 +205,11 @@ def audit_recovery_plan(r, *, folder, plan, descriptor, original_claim,
     expected_sources = executor_sources()
     require(r['source_files'] == p['source_files'] == expected_sources,
             'recovery executor source contract is incomplete or changed')
+    repair = engineering_repair(base, inputs)
+    require(exact_value(r.get('repair_of'), repair)
+            and exact_value(p.get('repair_of'), repair)
+            and exact_value(claim.get('repair_of'), repair),
+            'recovery v2 lost or replaced the pinned zero-work failure evidence')
     require(claim['version'] == RECOVERY_VERSION and claim['recovery_plan'] == r['recovery_plan']
             and claim['original_claim'] == r['original_claim']
             and claim['authorization'] == p['authorization']

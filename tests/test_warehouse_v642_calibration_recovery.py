@@ -1,5 +1,6 @@
 """Recovery safety and orchestration with synthetic records, no real run."""
 from copy import deepcopy
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 import json
@@ -158,6 +159,99 @@ def test_recovery_is_explicit_only_and_budget_remains_20k():
         r.RecoveryOwner()
     assert r.STARTS == dict(raw=18600, regularized=16800)
     assert r.old.PPOConfig().joint_step_budget == 20000
+    assert r.VERSION == 'warehouse-v642-explicit-calibration-recovery.v2'
+    assert r.RECOVERY_CLAIM_NAME == 'recovery-v2.claim.json'
+
+
+def test_claimed_recovery_restores_both_variants_through_real_mocked_path(tmp_path, monkeypatch):
+    """Regression for v1's missing owner.refits, across the actual context path.
+
+    All source admission, NN/critic/optimizer/buffer/reader/provider operations
+    are explicit synthetic callbacks. No real model, RNG or environment exists.
+    """
+    base = tmp_path / 'base'; original = base / 'calibration'
+    folder = base / 'recovery/synthetic-v2'
+    folder.mkdir(parents=True)
+    original_plan = write(base / 'plan.json', {'synthetic': True})
+    original_claim = write(base / 'original.claim.json', {'synthetic': True})
+    descriptor = write(original / 'descriptor.json', {'synthetic': True})
+    native_journal = original / 'owner-journal.jsonl'
+    native_journal.write_bytes(b''); native_journal.chmod(0o444)
+    owners = {v: write(original / v / 'owner.json', {'variant': v}) for v in r.old.seeds.VARIANTS}
+    keys = {v: r.digest(ref) for v, ref in owners.items()}
+    extraction = tmp_path / 'extraction'
+    monkeypatch.setattr(r.pipeline, 'EXTRACTION_ROOT', extraction)
+    starts = {}
+    for variant, step in r.STARTS.items():
+        refits = [s for s in (15000, 16800, 18600) if s <= step]
+        state_ref = write(original / variant / f'checkpoints/{step:06d}/state.pt', {'synthetic': variant})
+        starts[variant] = write(original / variant / f'checkpoints/{step:06d}/owner-state.json',
+            dict(training_state=state_ref, core={'variant': variant}, reader={'synthetic': True},
+                 environments=[None] * 8, active_cases=[None] * 8, reset_cursors=[0] * 8,
+                 program_source_cursor=1650, reserved_joint_steps=step, refits=refits, provider={'variant': variant}))
+        for earlier in (4000, 15000, 16800, 18600):
+            if earlier < step:
+                write(original / variant / f'checkpoints/{earlier:06d}/owner-state.json', {'synthetic': earlier})
+        write(original / variant / 'program-source/source.json', {'synthetic': True})
+        for refit in refits:
+            write(extraction / keys[variant] / f'step-{refit}/observed-source-binding.json', {'synthetic': True})
+    inventory = write(base / 'train-inventory.json', {'cases': []})
+    evidence = write(base / 'program-inventory.json', {'cases': []})
+    buffer = write(base / 'reference-buffer.npz', {'synthetic': True})
+    proposal = SimpleNamespace(value={'train_case_inventory': inventory, 'program_evidence_inventory': evidence},
+                               readiness=SimpleNamespace(value={'reference': {'buffer': buffer}}))
+    seed_plan = SimpleNamespace(proposal=proposal)
+    p = dict(original_plan=original_plan, original_claim=original_claim, original_descriptor=descriptor,
+        recovery_id='synthetic-v2',
+        original_calibration=str(original),
+        reference_directory=str(tmp_path / 'reference'), source_files={}, original_roots=[str(original)],
+        original_input_hashes=r.checked_tree([original]), owners=owners, keys=keys, checkpoints=starts,
+        original_updates={v: [] for v in r.old.seeds.VARIANTS}, journals=[r.pointer(native_journal)],
+        authorization=r.AUTHORIZATION, expires_utc='2100-01-01T00:00:00+00:00', repair_of={'synthetic': 'pinned zero-work failure'})
+    plan_ref = write(folder / 'plan.json', p)
+    monkeypatch.setattr(r, 'checked_plan', lambda ref: p)
+    monkeypatch.setattr(r.old, 'load_seed_plan', lambda *args: seed_plan)
+    monkeypatch.setattr(r.old, 'source_files', lambda: {})
+    monkeypatch.setattr(r, 'load_checkpoint', lambda path, sha: SimpleNamespace(
+        joint_steps=r.STARTS['raw' if '/raw/' in path else 'regularized'], reference_sha256='synthetic-reference'))
+    monkeypatch.setattr(r.ReferenceTrainingBuffer, 'load', lambda *args: object())
+    monkeypatch.setattr(r.old.seeds.partitions, 'check_reference_buffer', lambda *args: None)
+    monkeypatch.setattr(r.PPOUpdateCore, 'restore', lambda state, *args, variant, **kw: SimpleNamespace(
+        processed_joint_steps=state.joint_steps, failed=False,
+        accepted_program_updates={role: 0 if variant == 'raw' else 1 for role in r.ROLES}))
+    monkeypatch.setattr(r.EnvironmentRolloutReplay, 'restore', lambda *args, **kw: SimpleNamespace(
+        environments=[None] * 8, active=[None] * 8))
+    monkeypatch.setattr(r.old.observed, 'audit_observed_pool', lambda *args, **kw: SimpleNamespace(synthetic=True))
+    monkeypatch.setattr(r, 'training_fingerprint', lambda state: 'synthetic-saved-fingerprint')
+    monkeypatch.setattr(r.np.random, 'PCG64', lambda *args: 'synthetic-carrier')
+    monkeypatch.setattr(r.np.random, 'Generator', lambda *args: 'synthetic-rng-state-carrier')
+    from backend.training.warehouse_v642_recovery_evidence import RecoveryEvidenceProvider
+    monkeypatch.setattr(RecoveryEvidenceProvider, 'restore_prefix', lambda *args, **kw: SimpleNamespace(synthetic=True))
+    @contextmanager
+    def no_resets(path):
+        path.write_bytes(b'')
+        yield []
+    monkeypatch.setattr(r, 'capture_stage1_resets', no_resets)
+    with r.claimed_recovery(recovery_plan_ref=plan_ref) as active:
+        assert active.refits == {}
+        for variant in r.old.seeds.VARIANTS:
+            r.restore_variant(active, variant)
+            assert active.refits[variant] == [s for s in (15000, 16800, 18600) if s <= r.STARTS[variant]]
+        assert set(active.states) == set(active.cores) == set(active.readers) == set(active.environments) == {'raw', 'regularized'}
+        assert active.providers['regularized'].synthetic
+        assert active.evidence_cursor == {'raw': 1650, 'regularized': 1650}
+        # Finish only synthetic carrier counters so the context's genuine
+        # completion conditions and original byte verification also execute.
+        for variant in r.old.seeds.VARIANTS:
+            active.states[variant].joint_steps = active.cores[variant].processed_joint_steps = 20000
+            active.refits[variant] = [15000, 16800, 18600]
+    assert r.claim_path(original_plan).name == 'recovery-v2.claim.json'
+    assert not (base / 'recovery.claim.json').exists()
+    assert r.old.ACTIVE.get() is None
+    events = r.json_lines(folder / 'owner-journal.jsonl')
+    assert [e['kind'] for e in events] == ['explicit_recovery_claimed', 'full_training_checkpoint_restored',
+                                         'full_training_checkpoint_restored']
+    assert (folder / 'actual-resets.jsonl').read_bytes() == b''
 
 
 @pytest.fixture

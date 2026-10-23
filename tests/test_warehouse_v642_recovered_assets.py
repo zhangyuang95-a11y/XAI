@@ -111,8 +111,12 @@ def plan_fixture(tmp_path, monkeypatch):
                for v in audit.VARIANTS}
     roots = [original, extraction / keys['raw'], extraction / keys['regularized'], provider / keys['regularized']]
     original_input_hashes = {str(p): audit.file_sha(p) for root in roots for p in sorted(root.rglob('*')) if p.is_file()}
+    repair = dict(version='warehouse-v642-zero-work-engineering-repair.v1', synthetic_fixture=True,
+                  observed_failed_worker_exit_code=1, accepted_optimizer_updates=0,
+                  new_environment_resets=0, new_provider_calls=0)
+    monkeypatch.setattr(audit, 'engineering_repair', lambda base, inputs: deepcopy(repair))
     r = dict(original_plan=plan_ref, **originals, original_source_files={'original.py': 'b' * 64},
-             owners=owners, updates=deepcopy(updates), source_files=deepcopy(sources))
+             owners=owners, updates=deepcopy(updates), source_files=deepcopy(sources), repair_of=deepcopy(repair))
     p = dict(version=audit.RECOVERY_VERSION, recovery_id='fixture', authorization='继续，完成验收',
              reference_directory=str(tmp_path / 'reference'), config=asdict(audit.training.owner.PPOConfig()),
              maximum_joint_steps_per_variant=20000, restores_training_state_not_new_initialization=True,
@@ -120,7 +124,7 @@ def plan_fixture(tmp_path, monkeypatch):
              original_files_read_only=True, automatic_retry=False, scientific_acceptance=False, pilot_opened=False,
              **{k:deepcopy(r[k]) for k in ('original_plan', 'original_claim', 'original_descriptor',
                                          'original_controller_contract', 'original_source_files', 'owners')},
-             source_files=deepcopy(sources), original_calibration=str(original), keys=keys,
+             source_files=deepcopy(sources), original_calibration=str(original), keys=keys, repair_of=deepcopy(repair),
              original_roots=list(map(str, roots)), original_input_hashes=original_input_hashes,
              checkpoints=checkpoints, original_updates=updates, cached_rollouts={'raw': [], 'regularized': cached},
              journals=[audit.pointer(original / 'owner-journal.jsonl')],
@@ -129,8 +133,9 @@ def plan_fixture(tmp_path, monkeypatch):
     claim = dict(version=audit.RECOVERY_VERSION, recovery_plan=r['recovery_plan'], original_claim=r['original_claim'],
                  authorization=p['authorization'], owner_pid=123, single_use_even_if_interrupted=True,
                  source_files=deepcopy(sources), maximum_joint_steps_per_variant=20000,
-                 started_utc='2000-01-01T12:00:00+00:00', expires_utc=p['expires_utc'], pilot_opened=False)
-    r['recovery_claim'] = put(base / 'recovery.claim.json', claim)
+                 started_utc='2000-01-01T12:00:00+00:00', expires_utc=p['expires_utc'], pilot_opened=False,
+                 repair_of=deepcopy(repair))
+    r['recovery_claim'] = put(base / audit.RECOVERY_CLAIM_NAME, claim)
     return dict(r=r, p=p, claim=claim, folder=folder, original=original,
                 plan=SimpleNamespace(ref=plan_ref), descriptor={'clearance': clearance},
                 original_claim={'clearance': clearance}, reference_directory=tmp_path / 'reference', sources=sources)
@@ -146,6 +151,16 @@ def reseal_plan(f):
     f['r']['recovery_plan'] = replace(f['folder'] / 'plan.json', f['p'])
     f['claim']['recovery_plan'] = f['r']['recovery_plan']
     f['r']['recovery_claim'] = replace(Path(f['r']['recovery_claim']['path']), f['claim'])
+
+
+@pytest.mark.parametrize('side', ['r', 'p', 'claim'])
+def test_v2_requires_same_zero_work_repair_evidence_everywhere(plan_fixture, side):
+    f = plan_fixture
+    f[side]['repair_of']['accepted_optimizer_updates'] = 1
+    if side != 'r':
+        reseal_plan(f)
+    with pytest.raises(RuntimeError, match='zero-work failure evidence'):
+        check_plan(f)
 
 
 def test_offline_plan_accepts_historical_lease_without_current_clock_or_pid(plan_fixture, monkeypatch):

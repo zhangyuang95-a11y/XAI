@@ -1,6 +1,6 @@
 # 三域统一方法 v7：实现与执行状态
 
-候选：`three-domain-unified-01`  
+当前候选：`three-domain-unified-02`（共同方法v2；首轮01因终止类型实现错误关闭）  
 目标发布：`policylens-three-domain-20261024.v7.0`
 
 ## 科学状态
@@ -114,7 +114,7 @@ v7种子选择器扩大为四个历史仓库中的白名单元数据、启动gua
 同时记录原engine和新selection adapter的SHA；没有修改或monkeypatch旧模块。
 不能把旧Warehouse路径范围的查重结论当作三域查重通过。
 
-### 本轮种子预检与实际启动
+### 首轮种子预检与关闭记录
 
 原查重保留为失败结果：8448份条目中有16份旧格式未解析，并将本候选登记误判为历史使用。
 `seed_context.py`完整读取4份52/54列CSV，以及12份压缩轨迹；轨迹只使用惰性记录，
@@ -126,8 +126,20 @@ v7种子选择器扩大为四个历史仓库中的白名单元数据、启动gua
 最终增量核对重新哈希完整选中文件集，确认没有新增、缺失或变更，忽略权重范围也未变。
 `seed-final-delta.json`实际passed=true；三域获得v2有限校准许可，不授予封存或发布权限。
 
-已启动Warehouse和Pong的新BC→20k配对流程；Kitchen尚未启动。
-本次运行绑定`registration-preflight-04.json`，方法哈希未变。
+首轮三域均已启动BC，绑定`registration-preflight-04.json`。
 预检修订只修复种子授权、最终完整核对及已批准的“先完成20k并报告，再共同判准入”顺序，
 没有修改Actor、BC/PPO数值损失、物理环境或程序拟合代码。
-此时没有新20k模型实测表；状态以各域事件和最终`calibration-result.json`为准。
+随后复核发现Pong将原生回合上限记为真正终止，未与时限终止分开。
+该错误影响后续PPO价值自举，因此01整体关闭，不保留任何“通过”结论。
+关闭时Warehouse/Pong/Kitchen分别完成327/620/540个BC episode，PPO联合步均为0。
+首轮claim、轨迹和随机流只读留存，不将这些BC起点带到下一轮。
+
+### 共同修订02
+
+修正Pong时限分类，三域共同登记`three-domain-unified-method.v2`，哈希
+`c10513eadc87e81b8241e88ce01b1e6cc7e8522b370e34ac6199841f9677e064`。
+新增三域真实原生终止测试，并核对时限局仍贡献真实完整episode成本，
+GAE仅在真正终止时去除下一状态价值，时限终止和训练截断不混淆。
+02使用新场景及初始化/采样流，重新生成全部BC；首轮种子不复用。
+当前正在执行02的全历史查重和回归，尚未启动02新NN。
+没有新20k模型实测表；状态以各域事件和最终`calibration-result.json`为准。

@@ -178,7 +178,9 @@ class PongDomain:
         return state['terminal']
 
     def ending(self, state):
-        return bool(state['terminal']), False
+        # The native engine ends only when the task's turn budget expires.
+        # Keep this distinct from an absorbing physical terminal for GAE.
+        return False, bool(state['terminal'])
 
     def outcome(self, state, initial):
         if not self.terminal(state):

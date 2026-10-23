@@ -33,6 +33,26 @@ def test_method_is_one_immutable_recipe():
     assert risk_config().minimum_episodes == 128
 
 
+def test_native_horizon_end_flags_are_separate_from_absorbing_termination(native):
+    d, state = native
+    initial = d.snapshot(state)
+    while not d.terminal(state):
+        state, _ = d.step(state, {r.name:r.wait_index for r in d.spec.roles})
+    terminated, truncated = d.ending(state)
+    assert terminated != truncated
+    if d.spec.name == 'pong':
+        assert state['turn'] == state['max_turns']
+        assert not terminated and truncated
+    elif d.spec.name == 'warehouse':
+        assert (terminated, truncated) == (state.state.terminated, state.state.truncated)
+    else:
+        assert truncated == (state['termination_reason'] == 'turn_budget')
+    assert d.outcome(state, d.restore(initial))['frames'] > 0  # time limits are still complete cost episodes
+    from training_v7.ppo import reward_gae
+    advantage, _ = reward_gae([[[0.,0.]]], [[[0.,0.]]], [[[2.,2.]]], [[terminated]], [[truncated]])
+    np.testing.assert_allclose(advantage[0,0], [0.,0.] if terminated else [1.98,1.98])
+
+
 def test_public_labels_mask_and_physics_without_runtime_teacher(native, monkeypatch):
     d, s = native
     for _ in range(3):

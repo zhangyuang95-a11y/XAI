@@ -4,7 +4,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
-CANDIDATE = 'three-domain-unified-01'
+CANDIDATE = 'three-domain-unified-02'
 RELEASE = 'policylens-three-domain-20261024.v7.0'
 DOMAINS = ('warehouse', 'pong', 'kitchen')
 BC_STAGES = (
@@ -58,7 +58,8 @@ def write_new(path, value):
 
 @dataclass(frozen=True)
 class MethodSpec:
-    version: str = 'three-domain-unified-method.v1'
+    version: str = 'three-domain-unified-method.v2'
+    end_semantics: str = 'native_time_limit_truncated_true_terminal_and_training_cut_separate.v1'
     actor_width: int = 256
     gate_width: int = 64
     internal_depth: int = 5

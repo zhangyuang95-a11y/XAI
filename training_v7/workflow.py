@@ -77,13 +77,13 @@ def register(output=OUTPUT):
                     registered_trace_paths=registry['registered_trace_paths'])
     plans = {}
     for domain_index, name in enumerate(DOMAINS):
-        cases = []; base = 31_000_000_000 + domain_index * 10_000_000
-        initialization_seed = 4_100_000_000 + domain_index * 100
-        optimizer_seed = 4_100_000_050 + domain_index * 100
-        bc_action_seed = 4_100_000_025 + domain_index * 100
-        evidence_seed = 4_100_000_030 + domain_index * 100
-        action_seed = 4_100_000_040 + domain_index * 100
-        critic_seed = 4_100_000_060 + domain_index * 100
+        cases = []; base = 32_000_000_000 + domain_index * 10_000_000
+        initialization_seed = 8_200_000_000 + domain_index * 100
+        optimizer_seed = 8_200_000_050 + domain_index * 100
+        bc_action_seed = 8_200_000_025 + domain_index * 100
+        evidence_seed = 8_200_000_030 + domain_index * 100
+        action_seed = 8_200_000_040 + domain_index * 100
+        critic_seed = 8_200_000_060 + domain_index * 100
         for kind, offset, count in (('bc', 0, 1270), ('program', 100000, 1650), ('calibration_quality', 200000, 75), ('ppo', 300000, 20000)):
             proposal['families'].append(dict(name=f'{name}-{kind}', kind='scenario', start=base+offset,
                 end_exclusive=base+offset+count, purpose=kind))

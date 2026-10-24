@@ -2,6 +2,7 @@
 import argparse
 from datetime import datetime, timezone
 import http.client
+import gzip
 import json
 from pathlib import Path
 import time
@@ -16,13 +17,14 @@ def main():
     cls=http.client.HTTPSConnection if url.scheme=='https' else http.client.HTTPConnection
     connection=cls(url.netloc,timeout=90)
     def call(path,payload=None,token=None):
-        headers={'Accept':'application/json'}
+        headers={'Accept':'application/json','Accept-Encoding':'gzip'}
         if payload is not None:headers['Content-Type']='application/json'
         if token:headers['Authorization']='Bearer '+token
         began=time.perf_counter()
         connection.request('POST' if payload is not None else 'GET',path,
             None if payload is None else json.dumps(payload),headers)
         response=connection.getresponse();raw=response.read();elapsed=(time.perf_counter()-began)*1000
+        if response.getheader('Content-Encoding')=='gzip':raw=gzip.decompress(raw)
         assert response.status==200,(path,response.status,raw[:200])
         return json.loads(raw),elapsed,response.getheader('Server-Timing','')
     wake=call('/health')[1];meta=call('/api/release')[0];samples=[]

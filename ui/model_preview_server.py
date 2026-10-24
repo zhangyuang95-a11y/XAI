@@ -2,6 +2,7 @@
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import argparse
+import gzip
 import json
 import os
 # Set before importing NumPy/sklearn, including via the frozen adapters.
@@ -30,6 +31,18 @@ SEEDS = dict(warehouse=list(range(40786, 40810)), pong=list(range(880101, 880125
 
 def encode(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+
+def accepts_gzip(value):
+    for item in value.lower().split(','):
+        parts=[part.strip() for part in item.split(';')]
+        if parts[0]=='gzip':
+            try:
+                quality=next((float(p[2:]) for p in parts[1:] if p.startswith('q=')),1.)
+                return 0 < quality <= 1
+            except ValueError:
+                return False
+    return False
 
 
 def load_catalog():
@@ -201,6 +214,9 @@ def make_server(preview, host='127.0.0.1', port=0):
         def reply(self, value, status=200, mime='application/json; charset=utf-8'):
             began = perf_counter()
             raw = value if type(value) is bytes else encode(value).encode()
+            compressed = len(raw) >= 512 and accepts_gzip(self.headers.get('Accept-Encoding',''))
+            if compressed:
+                raw = gzip.compress(raw,compresslevel=1,mtime=0)
             timing = dict(getattr(preview.runtime.completed,'metrics',{}))
             timing['serialization'] = (perf_counter()-began)*1000
             self.send_response(status)
@@ -209,6 +225,9 @@ def make_server(preview, host='127.0.0.1', port=0):
                 'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"}.items():
                 self.send_header(k,v)
             self.send_header('Server-Timing', ', '.join(f'{key};dur={value:.3f}' for key,value in timing.items()))
+            self.send_header('Vary','Accept-Encoding')
+            if compressed:
+                self.send_header('Content-Encoding','gzip')
             self.end_headers()
             self.wfile.write(raw)
 

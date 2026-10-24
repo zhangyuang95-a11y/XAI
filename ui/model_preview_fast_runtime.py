@@ -4,20 +4,22 @@ File contents are rehashed on EVERY request. Only immutable receipt parsing is
 reused between requests, after the complete dependency closure was reverified.
 """
 from collections import OrderedDict
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from copy import deepcopy
 from functools import wraps
+from hashlib import sha256
 from pathlib import Path
+import stat
 import threading
 from time import perf_counter
 
 from runtime_v642.catalog import decode
-from runtime_v642.contracts import PolicyBinding, freeze, require, RuntimeUnavailable
+from runtime_v642.contracts import PolicyBinding, digest, freeze, require, RuntimeUnavailable
 from runtime_v642.legacy_domain import PongAdapter, KitchenAdapter, pong_nn
 from .model_preview_warehouse import WarehouseAdapter
 
-VERSION = 'manual-preview-runtime.request-scoped.v2'
+VERSION = 'manual-preview-runtime.request-scoped.v2.1'
 
 
 def verified_request(function):
@@ -41,7 +43,26 @@ class RequestRuntime:
             if scope is None:
                 return original_path(key)
             if key not in scope['paths']:
-                scope['paths'][key] = original_path(key)
+                require(key in catalog.assets.records,'required asset hash is absent')
+                target = catalog.assets.root / catalog.assets.records[key].path
+                # Manifest paths were validated lexically by AssetResolver.
+                # Check each shared parent once in this request, rather than
+                # resolving/readlink-ing the same prefix for every file.
+                for parent in target.parents:
+                    if not parent.is_relative_to(catalog.assets.root):break
+                    if parent not in scope['directories']:
+                        require(stat.S_ISDIR(parent.lstat().st_mode),'symlinked or missing asset parent')
+                        scope['directories'].add(parent)
+                before = target.lstat()
+                require(stat.S_ISREG(before.st_mode) and not before.st_mode & 0o222,
+                        'missing, writable or symlinked package asset')
+                raw = target.read_bytes()
+                after = target.lstat()
+                require((before.st_dev,before.st_ino,before.st_mode,before.st_size,before.st_mtime_ns)==
+                        (after.st_dev,after.st_ino,after.st_mode,after.st_size,after.st_mtime_ns)
+                        and sha256(raw).hexdigest()==key,'package asset hash or identity mismatch')
+                scope['paths'][key] = target
+                scope['bytes'][key] = raw
             return scope['paths'][key]
 
         def verify():
@@ -57,7 +78,8 @@ class RequestRuntime:
         def parsed_json(key):
             verified_path = path(key)  # still verifies when called outside a request
             if key not in self.parsed:
-                self.parsed[key] = freeze(decode(verified_path.read_bytes()))
+                scope = self.current.get()
+                self.parsed[key] = freeze(decode(scope['bytes'][key] if scope else verified_path.read_bytes()))
             return self.parsed[key]
 
         # Per-instance wrappers preserve exact catalog type and all old callers.
@@ -67,11 +89,13 @@ class RequestRuntime:
     def request(self):
         if self.current.get() is not None:
             yield self.current.get(); return
-        scope = dict(paths={}, verified=False, memo=OrderedDict(),
+        scope = dict(paths={}, bytes={}, directories=set(), verified=False, memo=OrderedDict(),
                      integrity=0., inference=0., physics=0., storage=0., total=0.)
         token = self.current.set(scope); began = perf_counter()
         try:
             with self.measure('integrity'):
+                require(self.catalog.assets.root.resolve()==self.catalog.assets.root,
+                        'package root or ancestor replaced by a symlink')
                 self.catalog.verify_assets()
             yield scope
         except OSError as exc:
@@ -94,13 +118,13 @@ class RequestRuntime:
                     duration -= scope['inference'] - previous_inference
                 scope[category] += max(0, duration)
 
-    def memo(self, key, compute):
+    def memo(self, key, compute, *, category='inference'):
         scope = self.current.get()
         if scope is None:
             return compute()
         cache = scope['memo']
         if key not in cache:
-            with self.measure('inference'):
+            with self.measure(category) if category else nullcontext():
                 cache[key] = compute()
             if len(cache) > 8:  # replay never retains whole episode snapshots
                 cache.popitem(last=False)
@@ -115,6 +139,13 @@ class FastWarehouseAdapter(WarehouseAdapter):
         # The caller still restores and verifies the entire state before reuse.
         return self.runtime.memo(('warehouse', binding.identity_sha256, state['state_sha256']),
                                  lambda: super(FastWarehouseAdapter,self)._selection(env,state,binding))
+
+    def decide(self, state, binding):
+        self._binding(binding)
+        # Hash complete actual contents before reusing a validated decision;
+        # the client-supplied state_sha256 alone is never a cache identity.
+        return self.runtime.memo(('warehouse-decision',binding.identity_sha256,digest(state)),
+            lambda: super(FastWarehouseAdapter,self).decide(state,binding),category=None)
 
 
 class FastLegacyMixin:
@@ -152,9 +183,8 @@ class FastLegacyMixin:
         return core
 
     def decide(self, state, binding):
-        # Validate mutable state and binding even on a repeated call.
-        self.restore(state,binding)
-        return self.runtime.memo((self.DOMAIN,binding.identity_sha256,state['state_sha256']),
+        self._core(binding)
+        return self.runtime.memo((self.DOMAIN,binding.identity_sha256,digest(state)),
                                  lambda: super(FastLegacyMixin,self).decide(state,binding))
 
 

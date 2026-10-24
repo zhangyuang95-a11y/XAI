@@ -5,6 +5,10 @@ import os
 import shutil
 import threading
 from collections import Counter
+from copy import deepcopy
+import gzip
+import json
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -56,7 +60,7 @@ def test_request_rehashes_every_file_once_and_duplicate_runs_no_nn(preview,monke
     assert preview.runtime.completed.metrics['inference']==0
 
 
-@pytest.mark.parametrize('damage',['content_same_stat','missing','replacement','writable','catalog_writable'])
+@pytest.mark.parametrize('damage',['content_same_stat','missing','replacement','writable','catalog_writable','symlink','parent_symlink'])
 def test_next_request_rejects_changed_package_even_after_warmup(tmp_path,monkeypatch,damage):
     package=tmp_path/'package'; shutil.copytree(server.PACKAGE,package)
     monkeypatch.setattr(server,'PACKAGE',package)
@@ -64,12 +68,16 @@ def test_next_request_rejects_changed_package_even_after_warmup(tmp_path,monkeyp
     try:
         start=p.start(dict(domain='pong',variant='raw',task=1,seed=880101)); token=start['session_token']
         p.view(token)
-        target=(package/'catalog.json') if damage=='catalog_writable' else p.catalog.assets.path(next(iter(p.catalog.assets.records)))
+        target=(package/'catalog.json') if damage=='catalog_writable' else p.catalog.assets.path(p.catalog.policies['pong']['raw'].actor_sha256)
         saved=target.read_bytes(); stat=target.stat()
         if damage=='missing': target.unlink()
         elif damage=='replacement':
             replacement=target.with_suffix('.replacement'); replacement.write_bytes(saved[:-1]+bytes([saved[-1]^1]));replacement.chmod(0o444);replacement.replace(target)
         elif damage in ('writable','catalog_writable'):target.chmod(0o644)
+        elif damage=='symlink':
+            kept=target.with_suffix('.kept');target.rename(kept);target.symlink_to(kept)
+        elif damage=='parent_symlink':
+            parent=target.parent;kept=parent.with_name(parent.name+'.kept');parent.rename(kept);parent.symlink_to(kept,target_is_directory=True)
         else:
             target.chmod(0o644);target.write_bytes(saved[:-1]+bytes([saved[-1]^1]));target.chmod(0o444)
             os.utime(target,ns=(stat.st_atime_ns,stat.st_mtime_ns))
@@ -98,3 +106,39 @@ def test_same_session_duplicate_is_atomic_and_export_never_holds_compute_lock(pr
         finally:release.set()
         result=export.result(timeout=3)
         assert result['replay']['final_state']['turn']==1
+
+
+def test_restore_reuse_never_trusts_supplied_digest_or_shares_mutable_environment(preview):
+    binding=preview.catalog.binding('warehouse','raw')
+    adapter=preview.adapters['warehouse'];state=adapter.initial_state(40786,1,binding)
+    with preview.runtime.request():
+        restored=adapter.restore(state,binding);restored.state.frame+=1
+        assert adapter.restore(state,binding).state.frame==0
+        forged=deepcopy(state);forged['turn']=1  # retains original supplied hash
+        with pytest.raises(RuntimeUnavailable):adapter.restore(forged,binding)
+        adapter.decide(state,binding)
+        with pytest.raises(RuntimeUnavailable):adapter.decide(forged,binding)
+
+
+def test_static_json_reuses_already_hashed_bytes_inside_request(preview,monkeypatch):
+    counts=Counter();original=Path.read_bytes
+    def read(path):
+        if path.is_relative_to(server.PACKAGE):counts[str(path)]+=1
+        return original(path)
+    monkeypatch.setattr(Path,'read_bytes',read)
+    key='012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a'
+    with preview.runtime.request():
+        assert preview.catalog.assets.json(key) is preview.catalog.assets.json(key)
+    assert len(counts)==28 and set(counts.values())=={1}
+
+
+def test_gzip_preserves_complete_response_and_timing_headers(preview):
+    http=server.make_server(preview);thread=threading.Thread(target=http.serve_forever,daemon=True);thread.start()
+    try:
+        with urlopen(Request(f'http://127.0.0.1:{http.server_port}/api/release',headers={'Accept-Encoding':'gzip'})) as response:
+            raw=response.read();assert response.headers['Content-Encoding']=='gzip'
+            assert json.loads(gzip.decompress(raw))==preview.metadata()
+            assert len(raw)<len(gzip.decompress(raw))*.5
+            assert all(name+';dur=' in response.headers['Server-Timing'] for name in
+                ('integrity','inference','physics','storage','serialization','total'))
+    finally:http.shutdown();http.server_close();thread.join()

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PolicyLens · 模型试玩</title>
+  <link rel="stylesheet" href="/preview-assets/styles.css">
+  <script src="/preview-assets/board.js" defer></script>
+  <script src="/preview-assets/app.js" defer></script>
+</head>
+<body>
+  <header><a href="/">PolicyLens <span>模型试玩 / Model preview</span></a><span class="badge">纯 NN · 非参与者研究</span></header>
+  <main>
+    <section class="intro"><p class="eyebrow">FROZEN NEURAL TEAMMATES</p><h1>亲自和当前模型合作</h1>
+      <p>你控制蓝色角色，冻结 NN 控制橙色队友。也可以观看两名 NN 合作；动作只经过环境物理规则。</p>
+      <div class="notice">Warehouse v6.42 的 regularized 已过20k校准，raw 停机率未过线，整体尚未正式验收。Pong / Kitchen 使用已验收的 v5。此网站仅供试玩，pilot 关闭，不计入真人研究。</div>
+    </section>
+    <nav><a href="/warehouse/">Warehouse <small>v6.42 · 20k</small></a><a href="/pong/">Pong <small>v5 · 200k</small></a><a href="/kitchen/">Kitchen <small>v5 · 200k</small></a></nav>
+    <form id="selection">
+      <label>Domain<select id="domain"><option value="warehouse">Warehouse</option><option value="pong">Pong</option><option value="kitchen">Kitchen</option></select></label>
+      <label>模型<select id="variant"><option value="regularized">Regularized（A/B 使用）</option><option value="raw">Raw（C 使用）</option></select></label>
+      <label>任务<select id="task"><option value="1">Task 1</option><option value="2">Task 2</option><option value="3">Task 3</option></select></label>
+      <label>试玩场景<select id="seed"></select></label>
+      <button type="submit" id="start">开始新一局</button>
+    </form>
+    <p id="status" role="status" aria-live="polite">正在核验模型…</p>
+    <section id="workspace" hidden>
+      <div class="toolbar"><strong id="model-label"></strong><span id="turn"></span><span id="score"></span></div>
+      <div class="workspace-grid">
+        <div class="board-wrap"><canvas id="board" aria-label="合作游戏棋盘"></canvas><div class="legend"><span>● 蓝色：你 / NN 角色1</span><span>● 橙色：AI 队友 / NN 角色2</span></div></div>
+        <aside>
+          <h2>操作</h2><p id="instructions"></p>
+          <div id="controls"><button type="button" data-action="up">↑ W</button><button type="button" data-action="left">← A</button><button type="button" data-action="wait">等待 ␣</button><button type="button" data-action="right">D →</button><button type="button" data-action="down">S ↓</button><button type="button" data-action="interact">操作 E</button></div>
+          <p>点击或按键前进一步；按住方向键可连续操作。</p>
+          <div class="demo-controls"><button id="nn-step" type="button">双 NN 前进一步</button><button id="play" type="button">播放双 NN</button><button id="pause" type="button">暂停播放</button></div>
+          <p id="last-action"></p><h2>当前局面</h2><div id="metrics"></div><div id="orders"></div>
+          <details><summary>模型绑定与完整哈希</summary><pre id="binding"></pre></details>
+          <button id="export" type="button">下载本局记录（核对 NN 回放）</button>
+        </aside>
+      </div>
+    </section>
+    <footer>试玩记录使用独立的临时存储；刷新可恢复当前会话，服务重新部署或休眠重启后可能丢失。原参与者数据库不作修改。此入口暂不提供程序解释；不推断 AI 的唯一动机。</footer>
+  </main>
+</body>
+</html>

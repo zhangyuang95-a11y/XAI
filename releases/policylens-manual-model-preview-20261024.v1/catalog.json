@@ -1,0 +1,299 @@
+{
+  "assets": {
+    "012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a": {
+      "dependencies": [
+        "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85",
+        "12004d3108aba6017c15a06e890659c2139b57a607c357b87c49d5c6ae59b1cc",
+        "1447da723fb119135400f78c1c78674753c50cecbf7968127c84368ad9e312ff",
+        "27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784",
+        "30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb",
+        "323fd6d02eef75c3a7f3c7dc5e9a26aa5a7d037b13e0430852e41846c3ce251b",
+        "5d98f77ade726b2309a91e749b328c3ce91c9719f033421121d89e42b8f8e924",
+        "8b4cf7c67a8c7f5c8d81532e99e9605e6f9eba2a70e98c686fedb7cc170438f5",
+        "a44a1714afd1997d73f0bd31ee6aed62283efacfed7f37481fc3f4f8ef06c7e9",
+        "a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988",
+        "b0aeeea1772221f047e294c44c6632a98ff0b92f5e5e645678142d62c7fd7b6d"
+      ],
+      "path": "assets/012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a/kitchen_dual_nn_v5_acceptance.json"
+    },
+    "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85": {
+      "dependencies": [],
+      "path": "assets/0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85/kitchen_dual_nn_v5_regularized.npz"
+    },
+    "12004d3108aba6017c15a06e890659c2139b57a607c357b87c49d5c6ae59b1cc": {
+      "dependencies": [],
+      "path": "assets/12004d3108aba6017c15a06e890659c2139b57a607c357b87c49d5c6ae59b1cc/kitchen_dual_nn_v5_regularized_training.json"
+    },
+    "1447da723fb119135400f78c1c78674753c50cecbf7968127c84368ad9e312ff": {
+      "dependencies": [],
+      "path": "assets/1447da723fb119135400f78c1c78674753c50cecbf7968127c84368ad9e312ff/kitchen_dual_nn_v5_final_program_validation_receipt.json"
+    },
+    "1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42": {
+      "dependencies": [],
+      "path": "assets/1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42/study_v3_pong.json"
+    },
+    "1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7": {
+      "dependencies": [],
+      "path": "assets/1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7/rolling_actor_v5_raw.json"
+    },
+    "1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6": {
+      "dependencies": [],
+      "path": "assets/1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6/rolling_actor_v5_regularized.json"
+    },
+    "27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784": {
+      "dependencies": [],
+      "path": "assets/27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784/kitchen_dual_nn_v5_regularized_ai_program.json"
+    },
+    "2ff0ed2778ecc14b3cd170aef4eb0410ab6a30382e9109b94fb0531874c93ab1": {
+      "dependencies": [],
+      "path": "assets/2ff0ed2778ecc14b3cd170aef4eb0410ab6a30382e9109b94fb0531874c93ab1/regularized-final.actor.npz"
+    },
+    "30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb": {
+      "dependencies": [],
+      "path": "assets/30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb/kitchen_dual_nn_v5_raw.npz"
+    },
+    "323fd6d02eef75c3a7f3c7dc5e9a26aa5a7d037b13e0430852e41846c3ce251b": {
+      "dependencies": [],
+      "path": "assets/323fd6d02eef75c3a7f3c7dc5e9a26aa5a7d037b13e0430852e41846c3ce251b/kitchen_dual_nn_v5_pair_report.json"
+    },
+    "4e25941cff198fe334286cd6732cf88ce604c7db4bcad1712adcc98bc9f084c1": {
+      "dependencies": [],
+      "path": "assets/4e25941cff198fe334286cd6732cf88ce604c7db4bcad1712adcc98bc9f084c1/rolling_actor_v5_regularized.training.json"
+    },
+    "59e2e004624ab22817c26aea8324dbd2cb5e97ccf57cb6b650d79edcc69131a5": {
+      "dependencies": [
+        "ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958"
+      ],
+      "path": "assets/59e2e004624ab22817c26aea8324dbd2cb5e97ccf57cb6b650d79edcc69131a5/preview-receipt.json"
+    },
+    "5a486500a9d019fb70a24ad6ce868647e3ac2a0d0c93f2a2f4d62d0397314f45": {
+      "dependencies": [],
+      "path": "assets/5a486500a9d019fb70a24ad6ce868647e3ac2a0d0c93f2a2f4d62d0397314f45/program.json"
+    },
+    "5d98f77ade726b2309a91e749b328c3ce91c9719f033421121d89e42b8f8e924": {
+      "dependencies": [],
+      "path": "assets/5d98f77ade726b2309a91e749b328c3ce91c9719f033421121d89e42b8f8e924/kitchen_dual_nn_v5_heldout_receipt.json"
+    },
+    "6633a6dd8a7370a9a26b9749c40cd6b1e6c9166a1573b5f45e4c3117929d0519": {
+      "dependencies": [],
+      "path": "assets/6633a6dd8a7370a9a26b9749c40cd6b1e6c9166a1573b5f45e4c3117929d0519/program.json"
+    },
+    "8b4cf7c67a8c7f5c8d81532e99e9605e6f9eba2a70e98c686fedb7cc170438f5": {
+      "dependencies": [],
+      "path": "assets/8b4cf7c67a8c7f5c8d81532e99e9605e6f9eba2a70e98c686fedb7cc170438f5/kitchen_dual_nn_v5_reextracted_pair_report.json"
+    },
+    "8bea30622492db337654823e43a331f8a46f2fdbeb95fd2121c79af7e656637f": {
+      "dependencies": [],
+      "path": "assets/8bea30622492db337654823e43a331f8a46f2fdbeb95fd2121c79af7e656637f/rolling_actor_v5_regularized_ai.program.json"
+    },
+    "a2d53d155f9ef26df62df09d02a3d776893bcc1e5af74ce623a80ca77890e22e": {
+      "dependencies": [
+        "5a486500a9d019fb70a24ad6ce868647e3ac2a0d0c93f2a2f4d62d0397314f45",
+        "6633a6dd8a7370a9a26b9749c40cd6b1e6c9166a1573b5f45e4c3117929d0519"
+      ],
+      "path": "assets/a2d53d155f9ef26df62df09d02a3d776893bcc1e5af74ce623a80ca77890e22e/preview-receipt.json"
+    },
+    "a44a1714afd1997d73f0bd31ee6aed62283efacfed7f37481fc3f4f8ef06c7e9": {
+      "dependencies": [],
+      "path": "assets/a44a1714afd1997d73f0bd31ee6aed62283efacfed7f37481fc3f4f8ef06c7e9/kitchen_dual_nn_v5_raw_training.json"
+    },
+    "a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988": {
+      "dependencies": [],
+      "path": "assets/a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988/kitchen_dual_nn_v5_regularized_human_program.json"
+    },
+    "ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958": {
+      "dependencies": [
+        "1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42",
+        "1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7",
+        "1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6",
+        "4e25941cff198fe334286cd6732cf88ce604c7db4bcad1712adcc98bc9f084c1",
+        "8bea30622492db337654823e43a331f8a46f2fdbeb95fd2121c79af7e656637f",
+        "c09f4a39bd3f29c8ff7e5ed703d1d3e8b21314ec962c3854051b776d89736cdf",
+        "d73b46a852d1a978e6bdd0779c946b24e53a8998f8f2ed92a7093a9e612a6184"
+      ],
+      "path": "assets/ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958/rolling_actor_v5.acceptance.json"
+    },
+    "b0aeeea1772221f047e294c44c6632a98ff0b92f5e5e645678142d62c7fd7b6d": {
+      "dependencies": [],
+      "path": "assets/b0aeeea1772221f047e294c44c6632a98ff0b92f5e5e645678142d62c7fd7b6d/study_v3_kitchen_frozen_v5.json"
+    },
+    "c09f4a39bd3f29c8ff7e5ed703d1d3e8b21314ec962c3854051b776d89736cdf": {
+      "dependencies": [],
+      "path": "assets/c09f4a39bd3f29c8ff7e5ed703d1d3e8b21314ec962c3854051b776d89736cdf/rolling_actor_v5_regularized_human.program.json"
+    },
+    "ca7bfddfca1eb89d3c73935cd22d3828600009053e80663cca58e66de9703677": {
+      "dependencies": [],
+      "path": "assets/ca7bfddfca1eb89d3c73935cd22d3828600009053e80663cca58e66de9703677/raw-final.actor.npz"
+    },
+    "cf0e276d8614b8cf4a16e249e9433fab44c74e79c87ab51e93b0bfbc16107e79": {
+      "dependencies": [
+        "012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a"
+      ],
+      "path": "assets/cf0e276d8614b8cf4a16e249e9433fab44c74e79c87ab51e93b0bfbc16107e79/preview-receipt.json"
+    },
+    "d73b46a852d1a978e6bdd0779c946b24e53a8998f8f2ed92a7093a9e612a6184": {
+      "dependencies": [],
+      "path": "assets/d73b46a852d1a978e6bdd0779c946b24e53a8998f8f2ed92a7093a9e612a6184/rolling_actor_v5_raw.training.json"
+    }
+  },
+  "model_acceptance_passed": false,
+  "pilot_opened": false,
+  "policies": {
+    "kitchen": {
+      "raw": {
+        "accepted_receipt_sha256": "cf0e276d8614b8cf4a16e249e9433fab44c74e79c87ab51e93b0bfbc16107e79",
+        "action_physics_config_sha256": "b0aeeea1772221f047e294c44c6632a98ff0b92f5e5e645678142d62c7fd7b6d",
+        "actor_sha256": "30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb",
+        "ai_actor_sha256": "fb118f162aa0882a8693131e8f286c59733941c12b24d34dbfa20ff1e63fd6b6",
+        "domain": "kitchen",
+        "feature_schema_sha256": "ad170b88ee31776c3c89a8c69d9124751b5cc07e18c96671dc6a3b60f7aae1a3",
+        "human_actor_sha256": "967e48851f72d373d6346fa5e638d6995f78a7ba165b5c9b279c795e8939c97c",
+        "method_schema": "carried-v5-paired-PPO-frozen-NN.v1",
+        "model_schema": "kitchen-dual-nn-v1",
+        "policy_id": "kitchen-raw-v5",
+        "programs": [],
+        "release_id": "policylens-manual-model-preview-20261024.v1",
+        "variant": "raw"
+      },
+      "regularized": {
+        "accepted_receipt_sha256": "cf0e276d8614b8cf4a16e249e9433fab44c74e79c87ab51e93b0bfbc16107e79",
+        "action_physics_config_sha256": "b0aeeea1772221f047e294c44c6632a98ff0b92f5e5e645678142d62c7fd7b6d",
+        "actor_sha256": "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85",
+        "ai_actor_sha256": "221708dc90aade679492732d59d8e04e92dbbe87304d4ed0670f88ff6fef8767",
+        "domain": "kitchen",
+        "feature_schema_sha256": "ad170b88ee31776c3c89a8c69d9124751b5cc07e18c96671dc6a3b60f7aae1a3",
+        "human_actor_sha256": "08d69613814b9e22be890ef9be11fa0ed495e4a0d5dc80e8ce1c9f848e21ac7e",
+        "method_schema": "carried-v5-paired-PPO-frozen-NN.v1",
+        "model_schema": "kitchen-dual-nn-v1",
+        "policy_id": "kitchen-regularized-v5",
+        "programs": [
+          {
+            "archive_sha256": "a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988",
+            "audit_scope": "carried_selected_actor_development_audit",
+            "independent_audit_sha256": "012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a",
+            "native_role": "human",
+            "reader_schema": "runtime-v642-carried-kitchen-program-evidence.v1",
+            "role": "human",
+            "source_program_sha256": "a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988"
+          },
+          {
+            "archive_sha256": "27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784",
+            "audit_scope": "carried_selected_actor_development_audit",
+            "independent_audit_sha256": "012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a",
+            "native_role": "ai",
+            "reader_schema": "runtime-v642-carried-kitchen-program-evidence.v1",
+            "role": "ai",
+            "source_program_sha256": "27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784"
+          }
+        ],
+        "release_id": "policylens-manual-model-preview-20261024.v1",
+        "variant": "regularized"
+      }
+    },
+    "pong": {
+      "raw": {
+        "accepted_receipt_sha256": "59e2e004624ab22817c26aea8324dbd2cb5e97ccf57cb6b650d79edcc69131a5",
+        "action_physics_config_sha256": "1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42",
+        "actor_sha256": "1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7",
+        "ai_actor_sha256": "55c6a0aca47653098aeecd12bead31c14b10971a1891a59e45d332b154fb7048",
+        "domain": "pong",
+        "feature_schema_sha256": "8fe35ce03e23a2db1373c9f310d9c578333f16273116f4a9dcf71df050f9e188",
+        "human_actor_sha256": "897ecc4696db6de386783fdaec7c21086a6b1f25af557de6e327ff0034842b52",
+        "method_schema": "carried-v5-paired-PPO-frozen-NN.v1",
+        "model_schema": "pong-rolling-actors.v1",
+        "policy_id": "pong-raw-v5",
+        "programs": [],
+        "release_id": "policylens-manual-model-preview-20261024.v1",
+        "variant": "raw"
+      },
+      "regularized": {
+        "accepted_receipt_sha256": "59e2e004624ab22817c26aea8324dbd2cb5e97ccf57cb6b650d79edcc69131a5",
+        "action_physics_config_sha256": "1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42",
+        "actor_sha256": "1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6",
+        "ai_actor_sha256": "35b21e4c4aacb024afe8667b4a7f3a4e6677795e5c194beb9bcd1b1fa9c1dcc9",
+        "domain": "pong",
+        "feature_schema_sha256": "8fe35ce03e23a2db1373c9f310d9c578333f16273116f4a9dcf71df050f9e188",
+        "human_actor_sha256": "aabe915937418ec9d6c3fb3e95bf71a5c90572a55ae9b84ebba15e49357b3a57",
+        "method_schema": "carried-v5-paired-PPO-frozen-NN.v1",
+        "model_schema": "pong-rolling-actors.v1",
+        "policy_id": "pong-regularized-v5",
+        "programs": [
+          {
+            "archive_sha256": "c09f4a39bd3f29c8ff7e5ed703d1d3e8b21314ec962c3854051b776d89736cdf",
+            "audit_scope": "carried_selected_actor_development_audit",
+            "independent_audit_sha256": "ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958",
+            "native_role": "human",
+            "reader_schema": "runtime-v642-carried-pong-program-evidence.v1",
+            "role": "human",
+            "source_program_sha256": "c09f4a39bd3f29c8ff7e5ed703d1d3e8b21314ec962c3854051b776d89736cdf"
+          },
+          {
+            "archive_sha256": "8bea30622492db337654823e43a331f8a46f2fdbeb95fd2121c79af7e656637f",
+            "audit_scope": "carried_selected_actor_development_audit",
+            "independent_audit_sha256": "ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958",
+            "native_role": "ai",
+            "reader_schema": "runtime-v642-carried-pong-program-evidence.v1",
+            "role": "ai",
+            "source_program_sha256": "8bea30622492db337654823e43a331f8a46f2fdbeb95fd2121c79af7e656637f"
+          }
+        ],
+        "release_id": "policylens-manual-model-preview-20261024.v1",
+        "variant": "regularized"
+      }
+    },
+    "warehouse": {
+      "raw": {
+        "accepted_receipt_sha256": "a2d53d155f9ef26df62df09d02a3d776893bcc1e5af74ce623a80ca77890e22e",
+        "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
+        "actor_sha256": "ca7bfddfca1eb89d3c73935cd22d3828600009053e80663cca58e66de9703677",
+        "ai_actor_sha256": "5c219bf9fdc532cfa8c1748d861974c7bed00ca19cd7c1f9ded7e708fe3e78e7",
+        "domain": "warehouse",
+        "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
+        "human_actor_sha256": "ab9daffbc6995c85e2b65efa43f6a1256ff7015431907d5d10be7b132aed1294",
+        "method_schema": "warehouse-v642-v620-preserving-calibration",
+        "model_schema": "warehouse-dual-actor.v6.18-quality-selective",
+        "policy_id": "warehouse-raw-v642-20k-preview",
+        "programs": [],
+        "release_id": "policylens-manual-model-preview-20261024.v1",
+        "variant": "raw"
+      },
+      "regularized": {
+        "accepted_receipt_sha256": "a2d53d155f9ef26df62df09d02a3d776893bcc1e5af74ce623a80ca77890e22e",
+        "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
+        "actor_sha256": "2ff0ed2778ecc14b3cd170aef4eb0410ab6a30382e9109b94fb0531874c93ab1",
+        "ai_actor_sha256": "9ef196ef36887d0a151c06d1151897c81eb0e5fff2570feff3dab9f3efd0707b",
+        "domain": "warehouse",
+        "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
+        "human_actor_sha256": "ee3b714c8111cff461d0f25c242270987eb0bfce78389a037efc5f2b4a22ef32",
+        "method_schema": "warehouse-v642-v620-preserving-calibration",
+        "model_schema": "warehouse-dual-actor.v6.18-quality-selective",
+        "policy_id": "warehouse-regularized-v642-20k-preview",
+        "programs": [
+          {
+            "archive_sha256": "6633a6dd8a7370a9a26b9749c40cd6b1e6c9166a1573b5f45e4c3117929d0519",
+            "audit_scope": "independent_final_program_audit",
+            "independent_audit_sha256": null,
+            "native_role": "robot_1",
+            "reader_schema": "warehouse-role-program.v6.42-explicit-depth-capacity",
+            "role": "human",
+            "source_program_sha256": "6633a6dd8a7370a9a26b9749c40cd6b1e6c9166a1573b5f45e4c3117929d0519"
+          },
+          {
+            "archive_sha256": "5a486500a9d019fb70a24ad6ce868647e3ac2a0d0c93f2a2f4d62d0397314f45",
+            "audit_scope": "independent_final_program_audit",
+            "independent_audit_sha256": null,
+            "native_role": "robot_2",
+            "reader_schema": "warehouse-role-program.v6.42-explicit-depth-capacity",
+            "role": "ai",
+            "source_program_sha256": "5a486500a9d019fb70a24ad6ce868647e3ac2a0d0c93f2a2f4d62d0397314f45"
+          }
+        ],
+        "release_id": "policylens-manual-model-preview-20261024.v1",
+        "variant": "regularized"
+      }
+    }
+  },
+  "purpose": "manual_researcher_preview",
+  "release_id": "policylens-manual-model-preview-20261024.v1",
+  "version": "runtime-v642-policy-catalog.v1"
+}

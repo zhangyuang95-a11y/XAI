@@ -1,0 +1,512 @@
+{
+  "action_overrides": 0,
+  "actor_l2_change": {
+    "ai": 0.01859304898974597,
+    "human": 0.017468776366172726
+  },
+  "actor_path": "output/kitchen_v5_matched_candidates/kitchen_dual_nn_v5_pair7_regularized.npz",
+  "actor_sha256": "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85",
+  "development": {
+    "nn": {
+      "completion_rate": 1.0,
+      "episodes": 60,
+      "failures": [],
+      "mean_score": 197.83333333333334,
+      "partner": "nn",
+      "seeds": [
+        40000,
+        40001,
+        40002,
+        40003,
+        40004,
+        40005,
+        40006,
+        40007,
+        40008,
+        40009,
+        40010,
+        40011,
+        40012,
+        40013,
+        40014,
+        40015,
+        40016,
+        40017,
+        40018,
+        40019
+      ],
+      "successes": 60
+    },
+    "proxy": {
+      "completion_rate": 1.0,
+      "episodes": 60,
+      "failures": [],
+      "mean_score": 197.83333333333334,
+      "partner": "proxy",
+      "seeds": [
+        40000,
+        40001,
+        40002,
+        40003,
+        40004,
+        40005,
+        40006,
+        40007,
+        40008,
+        40009,
+        40010,
+        40011,
+        40012,
+        40013,
+        40014,
+        40015,
+        40016,
+        40017,
+        40018,
+        40019
+      ],
+      "successes": 60
+    }
+  },
+  "development_passed": true,
+  "expanded_scenario_seed_sha256": "ddf23afe9973857132a616c8e5bce52aca27cf6658202647b225ffba2b7982c2",
+  "explanation_programs": {
+    "ai": {
+      "explanation_eligible": true,
+      "feedback_eligible": true,
+      "path": "output/kitchen_v5_matched_candidates/kitchen_dual_nn_v5_pair7_regularized_ai_final_frozen_actor_program.json",
+      "provenance": "final_frozen_actor_training_only_reextraction",
+      "sha256": "27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784",
+      "source_sha256": "e958b2f68168870a5d3b4dcf40f744ec5dc95aedfaa5a8337071124428f9cb07",
+      "training_feedback_program_sha256": "0f1b0c2a9075c50c7ae1beee51a3e73607aa84d86e6ed1c8d00a772554351346"
+    },
+    "human": {
+      "explanation_eligible": true,
+      "feedback_eligible": true,
+      "path": "output/kitchen_v5_matched_candidates/kitchen_dual_nn_v5_pair7_regularized_human_final_frozen_actor_program.json",
+      "provenance": "final_frozen_actor_training_only_reextraction",
+      "sha256": "a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988",
+      "source_sha256": "05cedfe0e79a39955602d556886fd3493083a0be3b9d64c3e999e58498a1cfd8",
+      "training_feedback_program_sha256": "c141bd61ef0524d59212cfd2968265d9634d06131ae6295fb8ee165cf3523cb5"
+    }
+  },
+  "extractions": [
+    {
+      "joint_steps": 12960,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 25920,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 38880,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": false
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 51840,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 64800,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 77760,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 90720,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 103680,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 116640,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 129600,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 142560,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 155520,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 168480,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 181440,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    },
+    {
+      "joint_steps": 194400,
+      "roles": {
+        "ai": {
+          "error": null,
+          "explanation_eligible": false,
+          "extracted": true,
+          "feedback_eligible": true
+        },
+        "human": {
+          "error": null,
+          "explanation_eligible": true,
+          "extracted": true,
+          "feedback_eligible": true
+        }
+      }
+    }
+  ],
+  "feedback_rows": {
+    "ai": 103320,
+    "human": 115245
+  },
+  "final_role_program_development_audit": {
+    "ai": {
+      "action_fidelity": 0.8707404349022846,
+      "actor_sha256": "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85",
+      "development_seeds": [
+        41000,
+        41001,
+        41002,
+        41003,
+        41004,
+        41005,
+        41006,
+        41007,
+        41008,
+        41009,
+        41010,
+        41011,
+        41012,
+        41013,
+        41014,
+        41015,
+        41016,
+        41017,
+        41018,
+        41019
+      ],
+      "mean_kl_divergence": 0.3175628672026742,
+      "passed": true,
+      "program_sha256": "27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784",
+      "role": "ai",
+      "role_sha256": "221708dc90aade679492732d59d8e04e92dbbe87304d4ed0670f88ff6fef8767",
+      "samples": 18165
+    },
+    "human": {
+      "action_fidelity": 0.9710432149738508,
+      "actor_sha256": "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85",
+      "development_seeds": [
+        41000,
+        41001,
+        41002,
+        41003,
+        41004,
+        41005,
+        41006,
+        41007,
+        41008,
+        41009,
+        41010,
+        41011,
+        41012,
+        41013,
+        41014,
+        41015,
+        41016,
+        41017,
+        41018,
+        41019
+      ],
+      "mean_kl_divergence": 0.0657365718496859,
+      "passed": true,
+      "program_sha256": "a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988",
+      "role": "human",
+      "role_sha256": "08d69613814b9e22be890ef9be11fa0ed495e4a0d5dc80e8ce1c9f848e21ac7e",
+      "samples": 18165
+    }
+  },
+  "joint_episodes": 1097,
+  "joint_steps": 200000,
+  "pair_seed": 7,
+  "post_policy_action_overrides": 0,
+  "post_policy_override_count": 0,
+  "programs": {
+    "ai": {
+      "explanation_eligible": false,
+      "feedback_eligible": true,
+      "path": "output/kitchen_v5_matched_candidates/kitchen_dual_nn_v5_pair7_regularized_ai_program.json",
+      "sha256": "0f1b0c2a9075c50c7ae1beee51a3e73607aa84d86e6ed1c8d00a772554351346"
+    },
+    "human": {
+      "explanation_eligible": true,
+      "feedback_eligible": true,
+      "path": "output/kitchen_v5_matched_candidates/kitchen_dual_nn_v5_pair7_regularized_human_program.json",
+      "sha256": "c141bd61ef0524d59212cfd2968265d9634d06131ae6295fb8ee165cf3523cb5"
+    }
+  },
+  "role_sha256": {
+    "ai": "221708dc90aade679492732d59d8e04e92dbbe87304d4ed0670f88ff6fef8767",
+    "human": "08d69613814b9e22be890ef9be11fa0ed495e4a0d5dc80e8ce1c9f848e21ac7e"
+  },
+  "scenario_block_steps": 360,
+  "scenario_blocks": 556,
+  "training_feedback_program_development_audit": {
+    "ai": {
+      "action_fidelity": 0.8607832322118036,
+      "actor_sha256": "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85",
+      "development_seeds": [
+        40000,
+        40001,
+        40002,
+        40003,
+        40004,
+        40005,
+        40006,
+        40007,
+        40008,
+        40009,
+        40010,
+        40011,
+        40012,
+        40013,
+        40014,
+        40015,
+        40016,
+        40017,
+        40018,
+        40019
+      ],
+      "mean_kl_divergence": 0.40005272536333225,
+      "passed": false,
+      "program_sha256": "0f1b0c2a9075c50c7ae1beee51a3e73607aa84d86e6ed1c8d00a772554351346",
+      "role": "ai",
+      "role_sha256": "221708dc90aade679492732d59d8e04e92dbbe87304d4ed0670f88ff6fef8767",
+      "samples": 18130
+    },
+    "human": {
+      "action_fidelity": 0.9537782680639824,
+      "actor_sha256": "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85",
+      "development_seeds": [
+        40000,
+        40001,
+        40002,
+        40003,
+        40004,
+        40005,
+        40006,
+        40007,
+        40008,
+        40009,
+        40010,
+        40011,
+        40012,
+        40013,
+        40014,
+        40015,
+        40016,
+        40017,
+        40018,
+        40019
+      ],
+      "mean_kl_divergence": 0.12734074168403475,
+      "passed": true,
+      "program_sha256": "c141bd61ef0524d59212cfd2968265d9634d06131ae6295fb8ee165cf3523cb5",
+      "role": "human",
+      "role_sha256": "08d69613814b9e22be890ef9be11fa0ed495e4a0d5dc80e8ce1c9f848e21ac7e",
+      "samples": 18130
+    }
+  },
+  "variant": "regularized"
+}

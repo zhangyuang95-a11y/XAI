@@ -1,0 +1,14 @@
+{
+  "calibration_passed": false,
+  "domain": "warehouse",
+  "explanations_available": false,
+  "joint_steps": {
+    "raw": 20000,
+    "regularized": 20000
+  },
+  "model_version": "v6.42",
+  "passed": false,
+  "reason": "raw_shutdown_rate_5_of_75_exceeds_5_percent",
+  "scientific_evaluation": false,
+  "version": "manual-preview-not-formal-admission.v1"
+}

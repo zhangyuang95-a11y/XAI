@@ -1,0 +1,3 @@
+# Frozen inference and environment physics only; no training or participant database.
+numpy==2.2.3
+scikit-learn==1.9.0

@@ -14,7 +14,7 @@ function locks(){
   $('nn-step').disabled=busy||terminal||playing;$('play').disabled=busy||terminal||playing;$('pause').disabled=!playing&&!queue.current&&!queue.items.length;$('export').disabled=busy||exporting||!view;
 }
 async function api(path,payload,sessionToken=token){
-  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),['models','start'].includes(path)?90000:15000);
   try{
     const response=await fetch('/manual-api/'+path,{signal:controller.signal,method:payload?'POST':'GET',headers:{...(payload?{'Content-Type':'application/json'}:{}),...(sessionToken?{'Authorization':'Bearer '+sessionToken}:{})},...(payload?{body:JSON.stringify(payload)}:{})});
     const result=await response.json();if(!response.ok){const e=new Error(result.error||'请求失败');e.permanent=response.status>=400&&response.status<500;throw e;}return result;
@@ -65,7 +65,7 @@ function render(animate=false){
   const last=view.last_action;$('last-action').textContent=last?`${last.two_NN?'双 NN 演示':'真人接管'} · 角色1：${last.human} · AI：${last.ai} · AI动作覆盖：${last.ai_action_overrides}`:'当前为第0帧。你可以直接操作，或先播放双 NN。';
   const bindingKey=JSON.stringify(view.binding);if(bindingKey!==bindingShown){$('binding').textContent=JSON.stringify(view.binding,null,2);bindingShown=bindingKey;}
   board.setState(s,{animate,language:'zh'});locks();
-  if(s.terminal){stopPending();message('本局已结束。可以下载记录，或开始新一局。');locks();}
+  if(s.terminal){const cancelled=stopPending();message(`本局已结束，已清除 ${cancelled} 项待执行输入。可以下载记录，或开始新一局。`);locks();}
 }
 async function start(event){
   event?.preventDefault();if(busy)return;const cancelled=stopPending();busy=true;locks();message(`正在装载绑定模型与场景…${cancelled?'已清除 '+cancelled+' 项待执行输入。':''}`);

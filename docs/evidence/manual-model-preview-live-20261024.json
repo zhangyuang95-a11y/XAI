@@ -1,0 +1,949 @@
+{
+  "format": "manual-model-preview-live-HTTP-verification.v1",
+  "base_url": "https://policylens-warehouse-study.onrender.com",
+  "checked_at": "2026-10-24T03:50:42.408601+00:00",
+  "passed": true,
+  "release_id": "policylens-manual-model-preview-20261024.v1",
+  "deployed_commit": "3b2f46b24a5a0ab755156c008e91f80099a172f6",
+  "pilot_opened": false,
+  "scientific_model_acceptance": false,
+  "heldout_evaluated": false,
+  "human_study_sample": false,
+  "cases": [
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "seed": 40786,
+      "task": 1,
+      "joint_steps": 3,
+      "ai_action_overrides": 0,
+      "actor_sha256": "ca7bfddfca1eb89d3c73935cd22d3828600009053e80663cca58e66de9703677",
+      "binding_identity_sha256": "3f86f75928f2288a8ad6c3ceabdb794a0ce2e69818ce717b65ecd493c0293e47",
+      "independent_replay_passed": true,
+      "local_frozen_NN_physics_match": true,
+      "cross_platform_numerics": {
+        "exact_actions_bindings_and_physics": true,
+        "NN_float_differences": 29,
+        "maximum_absolute_error": 1.1444091796875e-05,
+        "differences": [
+          {
+            "path": "replay/records/0/decision/distributions/robot_1/logits/0",
+            "absolute_error": 7.62939453125e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_1/probabilities/0",
+            "absolute_error": 1.1920928955078125e-07,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_1/probabilities/3",
+            "absolute_error": 8.149072527885437e-09,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_1/probabilities/4",
+            "absolute_error": 3.119930624961853e-08,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_2/logits/0",
+            "absolute_error": 1.1444091796875e-05,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_2/logits/2",
+            "absolute_error": 3.814697265625e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_2/logits/4",
+            "absolute_error": 3.814697265625e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_2/probabilities/0",
+            "absolute_error": 2.384185791015625e-07,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_2/probabilities/2",
+            "absolute_error": 8.102506399154663e-08,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_2/probabilities/4",
+            "absolute_error": 1.932494342327118e-08,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_1/logits/0",
+            "absolute_error": 7.62939453125e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_1/logits/1",
+            "absolute_error": 7.62939453125e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_1/logits/4",
+            "absolute_error": 3.814697265625e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_1/probabilities/0",
+            "absolute_error": 2.384185791015625e-07,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_1/probabilities/1",
+            "absolute_error": 4.656612873077393e-10,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_1/probabilities/3",
+            "absolute_error": 1.5273690223693848e-07,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_1/probabilities/4",
+            "absolute_error": 1.1525116860866547e-08,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_2/logits/1",
+            "absolute_error": 3.814697265625e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_2/probabilities/1",
+            "absolute_error": 3.14321368932724e-09,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_1/logits/1",
+            "absolute_error": 3.814697265625e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_1/logits/3",
+            "absolute_error": 3.814697265625e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_1/logits/4",
+            "absolute_error": 3.814697265625e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_1/probabilities/1",
+            "absolute_error": 8.381903171539307e-08,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_1/probabilities/3",
+            "absolute_error": 1.2665987014770508e-07,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_1/probabilities/4",
+            "absolute_error": 8.614733815193176e-09,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_2/logits/2",
+            "absolute_error": 3.814697265625e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_2/probabilities/1",
+            "absolute_error": 1.909211277961731e-08,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_2/probabilities/3",
+            "absolute_error": 6.170012056827545e-09,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_2/probabilities/4",
+            "absolute_error": 3.725290298461914e-08,
+            "allowed_absolute_error": 2e-06
+          }
+        ]
+      }
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "seed": 40786,
+      "task": 1,
+      "joint_steps": 3,
+      "ai_action_overrides": 0,
+      "actor_sha256": "2ff0ed2778ecc14b3cd170aef4eb0410ab6a30382e9109b94fb0531874c93ab1",
+      "binding_identity_sha256": "b0933e0046f388e3dda94fb6ad8117968cf15b530db15f174b32c0079e5ddc1b",
+      "independent_replay_passed": true,
+      "local_frozen_NN_physics_match": true,
+      "cross_platform_numerics": {
+        "exact_actions_bindings_and_physics": true,
+        "NN_float_differences": 29,
+        "maximum_absolute_error": 1.52587890625e-05,
+        "differences": [
+          {
+            "path": "replay/records/0/decision/distributions/robot_1/logits/0",
+            "absolute_error": 7.62939453125e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_1/logits/4",
+            "absolute_error": 1.52587890625e-05,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_1/probabilities/0",
+            "absolute_error": 1.1920928955078125e-07,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_1/probabilities/3",
+            "absolute_error": 7.334165275096893e-09,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_1/probabilities/4",
+            "absolute_error": 1.0803341865539551e-07,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_2/logits/4",
+            "absolute_error": 7.62939453125e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/0/decision/distributions/robot_2/probabilities/4",
+            "absolute_error": 2.2351741790771484e-08,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_1/logits/0",
+            "absolute_error": 1.52587890625e-05,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_1/logits/3",
+            "absolute_error": 1.1444091796875e-05,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_1/probabilities/0",
+            "absolute_error": 6.556510925292969e-07,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_1/probabilities/1",
+            "absolute_error": 4.6333298087120056e-08,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_1/probabilities/3",
+            "absolute_error": 5.979090929031372e-07,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_1/probabilities/4",
+            "absolute_error": 2.1886080503463745e-08,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_2/logits/1",
+            "absolute_error": 3.814697265625e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_2/logits/2",
+            "absolute_error": 3.814697265625e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/distributions/robot_2/probabilities/4",
+            "absolute_error": 1.210719347000122e-08,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_1/logits/0",
+            "absolute_error": 7.62939453125e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_1/logits/1",
+            "absolute_error": 3.814697265625e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_1/probabilities/0",
+            "absolute_error": 2.980232238769531e-07,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_1/probabilities/1",
+            "absolute_error": 1.955777406692505e-07,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_1/probabilities/3",
+            "absolute_error": 1.862645149230957e-07,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_1/probabilities/4",
+            "absolute_error": 1.7695128917694092e-08,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_2/logits/1",
+            "absolute_error": 7.62939453125e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_2/logits/2",
+            "absolute_error": 3.814697265625e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_2/logits/3",
+            "absolute_error": 1.1444091796875e-05,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_2/logits/4",
+            "absolute_error": 3.814697265625e-06,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_2/probabilities/1",
+            "absolute_error": 2.3283064365386963e-08,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_2/probabilities/3",
+            "absolute_error": 1.1874362826347351e-08,
+            "allowed_absolute_error": 2e-06
+          },
+          {
+            "path": "replay/records/2/decision/distributions/robot_2/probabilities/4",
+            "absolute_error": 7.171183824539185e-08,
+            "allowed_absolute_error": 2e-06
+          }
+        ]
+      }
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "seed": 880101,
+      "task": 1,
+      "joint_steps": 3,
+      "ai_action_overrides": 0,
+      "actor_sha256": "1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7",
+      "binding_identity_sha256": "79f90724e4622e839a927b911b9ab833d6db183a73d4a52146d3c74b9f6fa2f0",
+      "independent_replay_passed": true,
+      "local_frozen_NN_physics_match": true,
+      "cross_platform_numerics": {
+        "exact_actions_bindings_and_physics": true,
+        "NN_float_differences": 9,
+        "maximum_absolute_error": 1.7763568394002505e-15,
+        "differences": [
+          {
+            "path": "replay/records/0/decision/scores/ai/1",
+            "absolute_error": 4.440892098500626e-16,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/scores/ai/0",
+            "absolute_error": 8.881784197001252e-16,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/scores/ai/1",
+            "absolute_error": 8.881784197001252e-16,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/scores/human/0",
+            "absolute_error": 6.661338147750939e-16,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/scores/human/1",
+            "absolute_error": 1.7763568394002505e-15,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/scores/human/2",
+            "absolute_error": 1.7763568394002505e-15,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/scores/human/0",
+            "absolute_error": 8.881784197001252e-16,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/scores/human/1",
+            "absolute_error": 2.220446049250313e-16,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/scores/human/2",
+            "absolute_error": 1.7763568394002505e-15,
+            "allowed_absolute_error": 0.0001
+          }
+        ]
+      }
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "seed": 880101,
+      "task": 1,
+      "joint_steps": 3,
+      "ai_action_overrides": 0,
+      "actor_sha256": "1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6",
+      "binding_identity_sha256": "f6c8cb00ba8a4473dc4040558da0dfac85534afef3980b3f18119eae970dacfb",
+      "independent_replay_passed": true,
+      "local_frozen_NN_physics_match": true,
+      "cross_platform_numerics": {
+        "exact_actions_bindings_and_physics": true,
+        "NN_float_differences": 9,
+        "maximum_absolute_error": 3.552713678800501e-15,
+        "differences": [
+          {
+            "path": "replay/records/0/decision/scores/ai/1",
+            "absolute_error": 8.881784197001252e-16,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/0/decision/scores/ai/2",
+            "absolute_error": 8.881784197001252e-16,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/0/decision/scores/human/1",
+            "absolute_error": 1.7763568394002505e-15,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/0/decision/scores/human/2",
+            "absolute_error": 3.552713678800501e-15,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/scores/ai/0",
+            "absolute_error": 8.881784197001252e-16,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/scores/ai/1",
+            "absolute_error": 8.881784197001252e-16,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/1/decision/scores/human/0",
+            "absolute_error": 6.661338147750939e-16,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/scores/human/1",
+            "absolute_error": 6.661338147750939e-16,
+            "allowed_absolute_error": 0.0001
+          },
+          {
+            "path": "replay/records/2/decision/scores/human/2",
+            "absolute_error": 8.881784197001252e-16,
+            "allowed_absolute_error": 0.0001
+          }
+        ]
+      }
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "seed": 1000,
+      "task": 1,
+      "joint_steps": 3,
+      "ai_action_overrides": 0,
+      "actor_sha256": "30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb",
+      "binding_identity_sha256": "5891c63f50fddd90863b60136a40384c4f8ca427c41827308e6ee814dcee3d20",
+      "independent_replay_passed": true,
+      "local_frozen_NN_physics_match": true,
+      "cross_platform_numerics": {
+        "exact_actions_bindings_and_physics": true,
+        "NN_float_differences": 0,
+        "maximum_absolute_error": 0,
+        "differences": []
+      }
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "seed": 1000,
+      "task": 1,
+      "joint_steps": 3,
+      "ai_action_overrides": 0,
+      "actor_sha256": "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85",
+      "binding_identity_sha256": "8d9c9c1f965f1093fba1e43f57c568dbdca890d6ce5881ae90a5ee3ad3c3597c",
+      "independent_replay_passed": true,
+      "local_frozen_NN_physics_match": true,
+      "cross_platform_numerics": {
+        "exact_actions_bindings_and_physics": true,
+        "NN_float_differences": 0,
+        "maximum_absolute_error": 0,
+        "differences": []
+      }
+    }
+  ],
+  "requests": [
+    {
+      "path": "/api/release",
+      "status": 200,
+      "bytes": 8284,
+      "sha256": "e7244ac8b089a7b166f86a7c32b4389218e2ea1fb12b6efefe168ea1c0bc7189"
+    },
+    {
+      "path": "/manual-api/start",
+      "status": 200,
+      "bytes": 3128,
+      "sha256": "f12dc5886de713e7801227bf24df785bea89d82d91c3cef94ab9ce26a93c40aa"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 3256,
+      "sha256": "41ff622dce9d1d8d342da7369e9d0375308a465afdd00982619fd185b9675784"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 3256,
+      "sha256": "41ff622dce9d1d8d342da7369e9d0375308a465afdd00982619fd185b9675784"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 3142,
+      "sha256": "396083308b7fb34aa94439618d683aa191803a7346021363e0d23ed1dbc3f2e0"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 3272,
+      "sha256": "f535caf46894b4006c18e84b32863bace0cd506c087de3863838930d70446470"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 3272,
+      "sha256": "f535caf46894b4006c18e84b32863bace0cd506c087de3863838930d70446470"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 3153,
+      "sha256": "3d2d08863c01bf13ccda1a04ebe8c3bb5c828022dfb01c76087ba76eab58f256"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 3792,
+      "sha256": "cdfdc2bc9a903044f1bf1a1a55d9176e89c77c330cb7c6c2bd81344daeaa24aa"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 3792,
+      "sha256": "cdfdc2bc9a903044f1bf1a1a55d9176e89c77c330cb7c6c2bd81344daeaa24aa"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 3673,
+      "sha256": "837c4d5be3abda6fd93852bc31df7d29239aaa722f2282bb53cb7ecb3a1b9ab1"
+    },
+    {
+      "path": "/manual-api/export",
+      "status": 200,
+      "bytes": 88085,
+      "sha256": "53376754e828b9fedba943257f2beec22736c11f5cf5d80a56c04ab2ed4f104d"
+    },
+    {
+      "path": "/manual-api/start",
+      "status": 200,
+      "bytes": 4620,
+      "sha256": "840e1c1213e4216cb8ee1a7154ded847539f8069bae207aa8869b03f60dc1202"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 4748,
+      "sha256": "9ba5e81bc5b5278d53d38b36846564196f0d54f8b9eea04f6d879d0d96e54554"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 4748,
+      "sha256": "9ba5e81bc5b5278d53d38b36846564196f0d54f8b9eea04f6d879d0d96e54554"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 4634,
+      "sha256": "5fe32741459df984c2a958e61544985dbe73ae9bd8eb373657008de22ab1571f"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 4764,
+      "sha256": "f391f4194e5b278c5d8a7e14339bd9a0dcee78e0c345e9e9e940dd539dcf0e72"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 4764,
+      "sha256": "f391f4194e5b278c5d8a7e14339bd9a0dcee78e0c345e9e9e940dd539dcf0e72"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 4645,
+      "sha256": "1812eb4d17c5bf12319f453fedc69b2ca50967a90cd4f62578ecba81369db06c"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 5284,
+      "sha256": "e5fe4c843a1df729bdba6e887a39e7043ff99660a58919603fd56dc47f1a89f4"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 5284,
+      "sha256": "e5fe4c843a1df729bdba6e887a39e7043ff99660a58919603fd56dc47f1a89f4"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 5165,
+      "sha256": "709cc5523dc309ee5c0f3355150cc9ce0efb25d1bacd57010ed7836408cda960"
+    },
+    {
+      "path": "/manual-api/export",
+      "status": 200,
+      "bytes": 92556,
+      "sha256": "60905e8822298b4fcc5ec1005618accc37774ccf78a7c7c93a3a691feedde3b2"
+    },
+    {
+      "path": "/manual-api/start",
+      "status": 200,
+      "bytes": 3386,
+      "sha256": "c9463419b1f0fd3e578d29a1e0275e7ea7d19378761316ec205f9ead44e3ee9d"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 3446,
+      "sha256": "f4155d22bfa11a4d2a1e875115ca9ef004ea7ec24428f551804a961910e3163e"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 3446,
+      "sha256": "f4155d22bfa11a4d2a1e875115ca9ef004ea7ec24428f551804a961910e3163e"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 3326,
+      "sha256": "710f2139edd3ddd6a9c8e8dae4095a9168fd29fef905fd938d48d7cf255c31cf"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 3890,
+      "sha256": "31beaad0a0004e35d20e4fc7c52c149fcf508ece5cd05c28bc87f3da033f3831"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 3890,
+      "sha256": "31beaad0a0004e35d20e4fc7c52c149fcf508ece5cd05c28bc87f3da033f3831"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 3770,
+      "sha256": "bc976473c357159a95c7b05af986bab527b97c6470abd4c3e50d1bf725125d64"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 3465,
+      "sha256": "079e788dfca18cf75c64f86a0aa4b3da53604e2d44c5ba6a41d7728e20fb3ee8"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 3465,
+      "sha256": "079e788dfca18cf75c64f86a0aa4b3da53604e2d44c5ba6a41d7728e20fb3ee8"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 3346,
+      "sha256": "169f6dc4385254d832b6d092bda7e484cde1827f908f47f4585b955cc91f6395"
+    },
+    {
+      "path": "/manual-api/export",
+      "status": 200,
+      "bytes": 72935,
+      "sha256": "03dce3ffc6b81a8da97e41316f68b9f24682e0c8e05aa348f6282cfdbca51b37"
+    },
+    {
+      "path": "/manual-api/start",
+      "status": 200,
+      "bytes": 5120,
+      "sha256": "cfd0fbee3d2a0d1565f8007cd56f2ea433bb82dbd026cb0331030d692b08e9e3"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 5180,
+      "sha256": "dc9828aab2c0977ce905959606b4dcf41ad4cf0c188b33fbb1c03d3beb61b28b"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 5180,
+      "sha256": "dc9828aab2c0977ce905959606b4dcf41ad4cf0c188b33fbb1c03d3beb61b28b"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 5060,
+      "sha256": "a0a3024e90cb5f7be9439db67af6b1e6be240a0f13a5aac1d484b0289bac51d1"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 5624,
+      "sha256": "d5e6fa9a488b5837800659fe0c954d6c69f2d21b042bf7e9714d0cb0b057b23a"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 5624,
+      "sha256": "d5e6fa9a488b5837800659fe0c954d6c69f2d21b042bf7e9714d0cb0b057b23a"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 5504,
+      "sha256": "53629c9f08f8e098f7ab1fac84733531ba9201734b08ebaa6dd886e6716f4fca"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 5199,
+      "sha256": "9b82efdbe6f3822da70c1a868e7bd92110c539627aae899307570e821636bdd5"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 5199,
+      "sha256": "9b82efdbe6f3822da70c1a868e7bd92110c539627aae899307570e821636bdd5"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 5080,
+      "sha256": "5bbf7bf18b0ca601bfc95cafb9c35accb8a543acd7ada8dd47a80cf8ed7f8ad7"
+    },
+    {
+      "path": "/manual-api/export",
+      "status": 200,
+      "bytes": 78138,
+      "sha256": "3dcfa1d0ff704c199e6650eceea6afbc10fd01333d17d40d6df58863eff3cfd8"
+    },
+    {
+      "path": "/manual-api/start",
+      "status": 200,
+      "bytes": 8607,
+      "sha256": "68940570154fede1b238e52a212a458eee9cd06a2f4c39653ccaa47d1b383e00"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 8810,
+      "sha256": "ad8456b3f4e026ff2267b69720e2609fb006b35f1e897b09933907105e9e69f8"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 8810,
+      "sha256": "ad8456b3f4e026ff2267b69720e2609fb006b35f1e897b09933907105e9e69f8"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 8694,
+      "sha256": "ce18fa66e81a6f3e9c2ffb95b7db85f3bf0be17c624759f2f24f0afb30c2c4ee"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 8813,
+      "sha256": "1a0dbb852a25e397f795b49eea1e0aeebd8d0f0b29ca1b78223fcc214d9c7505"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 8813,
+      "sha256": "1a0dbb852a25e397f795b49eea1e0aeebd8d0f0b29ca1b78223fcc214d9c7505"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 8694,
+      "sha256": "5506f09b216a1b61a3e3e10c7caa3c2caba91d96e5b2e8caf11d899aaa74d8a9"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 8800,
+      "sha256": "50685fde52ebdf89e679ccb4a12fa13f208166aaffbbb063da1937bd8a456206"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 8800,
+      "sha256": "50685fde52ebdf89e679ccb4a12fa13f208166aaffbbb063da1937bd8a456206"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 8681,
+      "sha256": "192f4f70092bc1290cc8404c58e493f54b0a990bea43fa23f4005a5edc820429"
+    },
+    {
+      "path": "/manual-api/export",
+      "status": 200,
+      "bytes": 22099,
+      "sha256": "1202e52f4a2c0fb59e0b9f9948a1209e7c2ecef5cd1f3329bd6e6c32a6fb9da9"
+    },
+    {
+      "path": "/manual-api/start",
+      "status": 200,
+      "bytes": 10361,
+      "sha256": "ac4917f992a93a6407540fc09d0a490a1cebe03d2169e411d1bc6bf18c1ae26e"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 10564,
+      "sha256": "9896c1742ea4fe553de977177107d301aaa9a3c4aaf737f2de904be3fec35af5"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 10564,
+      "sha256": "9896c1742ea4fe553de977177107d301aaa9a3c4aaf737f2de904be3fec35af5"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 10448,
+      "sha256": "707f31e660c5e1eda98f1a064c1d5ef7da45fffd76f737ea71f6718d6f301e86"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 10567,
+      "sha256": "41ccb0808ec2fefae6ee909236ad14be942bf7dc13ce2374ea0702025151c974"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 10567,
+      "sha256": "41ccb0808ec2fefae6ee909236ad14be942bf7dc13ce2374ea0702025151c974"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 10448,
+      "sha256": "07c5c101cc97afb136090448d9df59e89172638e976b6f4398624bcfeb4de4cf"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 10554,
+      "sha256": "5ea5a31cfd7863b0e9561fcd270f86371b4b7c94d86f7ba00d829a831099ddcb"
+    },
+    {
+      "path": "/manual-api/action",
+      "status": 200,
+      "bytes": 10554,
+      "sha256": "5ea5a31cfd7863b0e9561fcd270f86371b4b7c94d86f7ba00d829a831099ddcb"
+    },
+    {
+      "path": "/manual-api/session",
+      "status": 200,
+      "bytes": 10435,
+      "sha256": "648746fdf17def00aa3c5a94de6cd634cea7545a44eac2892f640e495d094d94"
+    },
+    {
+      "path": "/manual-api/export",
+      "status": 200,
+      "bytes": 27341,
+      "sha256": "8dee62c89ad57da9ea484d1cf4892404117d8da8add7f9ba2f81d798bcd901bf"
+    }
+  ],
+  "render_deployment": {
+    "service_id": "srv-da66ggbl550s738j2q9g",
+    "deployment_id": "dep-dbe2i4gm7kps73c4c2og",
+    "status": "live",
+    "dashboard_status": "Deploy succeeded | Live",
+    "build_duration": "1m46s",
+    "start_command": "python -m ui.modelpreviewserver",
+    "build_command": "python -m pip install -r requirements-render.txt",
+    "plan": "Free",
+    "region": "Singapore"
+  },
+  "software_tests": {
+    "preview_passed": 26,
+    "numeric_comparison_passed": 5,
+    "clean_inference_environment_domains_passed": [
+      "warehouse",
+      "pong",
+      "kitchen"
+    ],
+    "torch_imported": false
+  },
+  "initial_comparison_failure": {
+    "reason": "Bit equality of private NN float32 intermediate logits/probabilities across ARM and x86 was too strict; actual chosen actions, public states and physical replay were already exact.",
+    "diagnostic_path": "output/manual_model_preview_20261024/cross-platform-diagnostic-01.json",
+    "diagnostic_sha256": "b9b5445795cfe75eb744e50db29a6e1e874523d3aad87f3895ca02bfb0d6a069",
+    "deployment_source_changed": false,
+    "scientific_thresholds_changed": false
+  },
+  "browser_operation": {
+    "browser": "Chrome",
+    "url": "https://policylens-warehouse-study.onrender.com/",
+    "domain": "warehouse",
+    "variant": "regularized",
+    "observed_turn": 2,
+    "NN_demo_then_keyboard_human_takeover": true,
+    "observed_AI_action_overrides": 0,
+    "screenshot_path": "output/manual_model_preview_20261024/warehouse-live.png",
+    "screenshot_sha256": "03daeb6ea4af3e45666fe95f09a1efb61982ac5e0c7d2b8add5bd01d42b04ae5"
+  }
+}

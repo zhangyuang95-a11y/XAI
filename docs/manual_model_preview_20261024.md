@@ -50,3 +50,18 @@ Warehouse NumPy适配器的类和函数体与原`runtime_v642/warehouse.py`一�
 commit `36d3173f054043811f9dc24a8b134370736006f6`；不是本次指定模型。
 Render服务为`srv-da66ggbl550s738j2q9g`，Free Singapore。
 部署完成与否以独立保存的Render及线上HTTP核验记录为准。
+
+## 实际部署完成
+
+Render部署`dep-dbe2i4gm7kps73c4c2og`显示`Deploy succeeded | Live`，耗时1m46s。
+实际运行commit为`3b2f46b24a5a0ab755156c008e91f80099a172f6`，
+启动命令`python -m ui.modelpreviewserver`，保留既有构建命令。
+六套模型的线上校验共67次API请求，全部通过：双NN、真人接管、幂等重试、恢复、独立回放导出，
+动作/绑定/公开状态/物理过程与本地一致；旧报名和Prolific路径返回404。
+另核验三个页面及主页均返回200。软件测试26项，跨CPU比较器隔离测试5项。
+
+第一次核验在跨CPU私有NN中间浮点量的逐位比较处停止；失败诊断保留。
+后续仅对NN中间值使用明确数值容差并记录误差，动作、绑定和物理状态仍严格相等；
+线上自身的逐帧回放仍严格相等。未修改线上模型/推理代码或科学验收阈值。
+
+完整核验记录：`docs/evidence/manual-model-preview-live-20261024.json`。

@@ -1,0 +1,223 @@
+{
+  "mode": "manual_preview_not_scientific_evaluation",
+  "checked_at": "2026-10-24T04:24:50.962531+00:00",
+  "deployed_commit": "3b2f46b24a5a0ab755156c008e91f80099a172f6",
+  "runtime": "v1",
+  "initial_connection_and_wake_ms": 73080.30875003897,
+  "sample_count": 30,
+  "health_p95_ms": 1305.3926250431687,
+  "action_p95_ms": 3418.30166708678,
+  "route_gate_passed": false,
+  "samples": [
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 586.2750830128789,
+      "action_ms": 1752.6048340369016,
+      "server_timing": ""
+    },
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 766.9696670491248,
+      "action_ms": 1709.0548751875758,
+      "server_timing": ""
+    },
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 361.68820899911225,
+      "action_ms": 2197.6412090007216,
+      "server_timing": ""
+    },
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 907.8685829881579,
+      "action_ms": 1854.9058330245316,
+      "server_timing": ""
+    },
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 372.36337503418326,
+      "action_ms": 1981.9095830898732,
+      "server_timing": ""
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 395.99158288910985,
+      "action_ms": 2262.4303330667317,
+      "server_timing": ""
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 894.685290986672,
+      "action_ms": 1875.282792141661,
+      "server_timing": ""
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 387.0197080541402,
+      "action_ms": 1993.662207853049,
+      "server_timing": ""
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 377.11045797914267,
+      "action_ms": 2411.215665983036,
+      "server_timing": ""
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 390.7454579602927,
+      "action_ms": 2041.2281251046807,
+      "server_timing": ""
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 374.08112501725554,
+      "action_ms": 2707.260541850701,
+      "server_timing": ""
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 458.5308749228716,
+      "action_ms": 2537.6615840941668,
+      "server_timing": ""
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 389.994208002463,
+      "action_ms": 2528.515291865915,
+      "server_timing": ""
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 377.7882920112461,
+      "action_ms": 2696.8294999096543,
+      "server_timing": ""
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 374.28458384238183,
+      "action_ms": 3418.30166708678,
+      "server_timing": ""
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 406.56445804052055,
+      "action_ms": 3161.742666969076,
+      "server_timing": ""
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 381.82799983769655,
+      "action_ms": 3073.3971251174808,
+      "server_timing": ""
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 937.6972911413759,
+      "action_ms": 3138.742082985118,
+      "server_timing": ""
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 573.9433339331299,
+      "action_ms": 3119.215790880844,
+      "server_timing": ""
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 379.2373330798,
+      "action_ms": 2650.022416142747,
+      "server_timing": ""
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 31368.27174993232,
+      "action_ms": 2759.0891250874847,
+      "server_timing": ""
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 414.80941604822874,
+      "action_ms": 4301.869791932404,
+      "server_timing": ""
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 394.1954590845853,
+      "action_ms": 2968.6933329794556,
+      "server_timing": ""
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 1305.3926250431687,
+      "action_ms": 2938.4678329806775,
+      "server_timing": ""
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 396.9994580838829,
+      "action_ms": 2972.7310419548303,
+      "server_timing": ""
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 399.5227918494493,
+      "action_ms": 2938.877790933475,
+      "server_timing": ""
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 583.202833076939,
+      "action_ms": 2735.1581659168005,
+      "server_timing": ""
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 389.99874982982874,
+      "action_ms": 2830.8275409508497,
+      "server_timing": ""
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 379.91920788772404,
+      "action_ms": 2820.3133339993656,
+      "server_timing": ""
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 386.36120804585516,
+      "action_ms": 2675.993208773434,
+      "server_timing": ""
+    }
+  ]
+}

@@ -1,0 +1,599 @@
+{
+  "mode": "manual_preview_not_scientific_evaluation",
+  "checked_at": "2026-10-24T04:52:46.021133+00:00",
+  "deployed_commit": "785422026a729689366ec782f689c6927faf2d7f",
+  "runtime": "manual-preview-runtime.request-scoped.v2.1",
+  "compute": {
+    "cpu_period_us": 100000,
+    "cpu_quota_us": 15000
+  },
+  "initial_connection_and_wake_ms": 1143.6792500317097,
+  "sample_count": 30,
+  "health_p95_ms": 919.2947919946164,
+  "action_p95_ms": 1076.1140829417855,
+  "route_gate_passed": false,
+  "samples": [
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 389.8146669380367,
+      "action_ms": 574.4712501764297,
+      "server_timing": "integrity;dur=15.062, inference;dur=4.581, physics;dur=99.382, storage;dur=4.872, total;dur=202.664, cpu;dur=38.514, serialization;dur=0.151"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 375.33962493762374,
+      "action_ms": 766.0103340167552,
+      "server_timing": "integrity;dur=12.798, inference;dur=6.870, physics;dur=98.994, storage;dur=4.901, total;dur=160.749, cpu;dur=41.357, serialization;dur=0.226"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 594.8705831542611,
+      "action_ms": 678.705208003521,
+      "server_timing": "integrity;dur=12.962, inference;dur=4.067, physics;dur=107.362, storage;dur=92.570, total;dur=296.856, cpu;dur=45.741, serialization;dur=0.235"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 379.718542098999,
+      "action_ms": 515.2373749297112,
+      "server_timing": "integrity;dur=14.865, inference;dur=10.717, physics;dur=96.039, storage;dur=3.109, total;dur=138.839, cpu;dur=43.760, serialization;dur=0.146"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 686.7777910083532,
+      "action_ms": 515.2496250811964,
+      "server_timing": "integrity;dur=11.921, inference;dur=3.827, physics;dur=98.008, storage;dur=2.864, total;dur=126.376, cpu;dur=34.498, serialization;dur=0.220"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 437.65166704542935,
+      "action_ms": 599.9329159967601,
+      "server_timing": "integrity;dur=12.114, inference;dur=64.825, physics;dur=98.288, storage;dur=2.858, total;dur=184.275, cpu;dur=35.308, serialization;dur=0.182"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 419.0314169973135,
+      "action_ms": 1165.612458018586,
+      "server_timing": "integrity;dur=23.170, inference;dur=21.264, physics;dur=83.469, storage;dur=3.416, total;dur=173.186, cpu;dur=44.145, serialization;dur=0.197"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 374.2161251138896,
+      "action_ms": 583.569583017379,
+      "server_timing": "integrity;dur=12.044, inference;dur=4.020, physics;dur=98.128, storage;dur=2.903, total;dur=209.992, cpu;dur=39.103, serialization;dur=0.272"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 375.1642080023885,
+      "action_ms": 551.7662919592112,
+      "server_timing": "integrity;dur=12.451, inference;dur=5.367, physics;dur=101.728, storage;dur=2.893, total;dur=177.604, cpu;dur=44.645, serialization;dur=0.182"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 373.612750088796,
+      "action_ms": 527.5564170442522,
+      "server_timing": "integrity;dur=12.820, inference;dur=5.098, physics;dur=101.099, storage;dur=2.805, total;dur=150.763, cpu;dur=44.070, serialization;dur=0.204"
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 373.68212500587106,
+      "action_ms": 537.6409578602761,
+      "server_timing": "integrity;dur=12.471, inference;dur=40.242, physics;dur=5.518, storage;dur=5.791, total;dur=68.499, cpu;dur=30.748, serialization;dur=0.166"
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 377.80604185536504,
+      "action_ms": 587.8738327883184,
+      "server_timing": "integrity;dur=13.762, inference;dur=7.127, physics;dur=4.571, storage;dur=5.497, total;dur=95.882, cpu;dur=31.083, serialization;dur=0.667"
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 356.38254205696285,
+      "action_ms": 563.1487499922514,
+      "server_timing": "integrity;dur=21.918, inference;dur=13.072, physics;dur=87.541, storage;dur=8.714, total;dur=199.625, cpu;dur=36.167, serialization;dur=0.266"
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 366.7173751164228,
+      "action_ms": 1076.1140829417855,
+      "server_timing": "integrity;dur=16.896, inference;dur=17.408, physics;dur=76.242, storage;dur=6.049, total;dur=148.994, cpu;dur=35.367, serialization;dur=0.146"
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 360.44250009581447,
+      "action_ms": 496.60233315080404,
+      "server_timing": "integrity;dur=13.205, inference;dur=7.916, physics;dur=5.402, storage;dur=8.485, total;dur=122.837, cpu;dur=32.486, serialization;dur=0.248"
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 641.0441249608994,
+      "action_ms": 465.6833750195801,
+      "server_timing": "integrity;dur=11.790, inference;dur=41.197, physics;dur=3.818, storage;dur=29.289, total;dur=89.821, cpu;dur=26.073, serialization;dur=0.296"
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 659.6207921393216,
+      "action_ms": 473.8694168627262,
+      "server_timing": "integrity;dur=11.749, inference;dur=5.187, physics;dur=3.516, storage;dur=79.550, total;dur=103.893, cpu;dur=25.229, serialization;dur=0.253"
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 367.97308386303484,
+      "action_ms": 509.99954203143716,
+      "server_timing": "integrity;dur=12.543, inference;dur=62.000, physics;dur=3.664, storage;dur=33.087, total;dur=114.780, cpu;dur=26.189, serialization;dur=0.307"
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 375.41912496089935,
+      "action_ms": 571.0269170813262,
+      "server_timing": "integrity;dur=27.991, inference;dur=8.228, physics;dur=90.394, storage;dur=4.884, total;dur=202.260, cpu;dur=34.737, serialization;dur=0.213"
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 919.2947919946164,
+      "action_ms": 671.3045840151608,
+      "server_timing": "integrity;dur=27.785, inference;dur=94.056, physics;dur=17.053, storage;dur=54.840, total;dur=205.504, cpu;dur=36.468, serialization;dur=0.330"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 355.468959081918,
+      "action_ms": 423.31695812754333,
+      "server_timing": "integrity;dur=13.773, inference;dur=1.233, physics;dur=1.241, storage;dur=35.185, total;dur=53.285, cpu;dur=18.370, serialization;dur=0.424"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 769.0432500094175,
+      "action_ms": 491.78608413785696,
+      "server_timing": "integrity;dur=13.896, inference;dur=29.426, physics;dur=1.625, storage;dur=8.334, total;dur=55.659, cpu;dur=20.106, serialization;dur=0.425"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 625.1519999932498,
+      "action_ms": 500.14554196968675,
+      "server_timing": "integrity;dur=12.164, inference;dur=1.233, physics;dur=1.102, storage;dur=17.005, total;dur=33.063, cpu;dur=16.585, serialization;dur=0.325"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 384.23354201950133,
+      "action_ms": 427.71008401177824,
+      "server_timing": "integrity;dur=14.050, inference;dur=1.232, physics;dur=37.004, storage;dur=9.530, total;dur=64.311, cpu;dur=19.188, serialization;dur=0.483"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 579.4764161109924,
+      "action_ms": 410.75766715221107,
+      "server_timing": "integrity;dur=13.633, inference;dur=1.547, physics;dur=23.563, storage;dur=6.312, total;dur=46.739, cpu;dur=18.827, serialization;dur=0.396"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 589.1727500129491,
+      "action_ms": 675.3974580205977,
+      "server_timing": "integrity;dur=19.163, inference;dur=3.657, physics;dur=2.510, storage;dur=8.233, total;dur=36.277, cpu;dur=19.337, serialization;dur=0.444"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 356.8340828642249,
+      "action_ms": 462.2975839301944,
+      "server_timing": "integrity;dur=12.094, inference;dur=1.141, physics;dur=1.040, storage;dur=51.061, total;dur=67.092, cpu;dur=16.450, serialization;dur=0.397"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 377.9949159361422,
+      "action_ms": 430.21750007756054,
+      "server_timing": "integrity;dur=12.072, inference;dur=8.581, physics;dur=1.080, storage;dur=31.597, total;dur=54.983, cpu;dur=16.885, serialization;dur=0.377"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 373.05483408272266,
+      "action_ms": 456.1729999259114,
+      "server_timing": "integrity;dur=14.500, inference;dur=1.821, physics;dur=1.952, storage;dur=42.513, total;dur=68.719, cpu;dur=21.184, serialization;dur=0.525"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 941.9179579708725,
+      "action_ms": 410.81391694024205,
+      "server_timing": "integrity;dur=17.023, inference;dur=7.756, physics;dur=2.417, storage;dur=8.127, total;dur=38.000, cpu;dur=20.683, serialization;dur=0.445"
+    }
+  ],
+  "transfers": [
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/api/release",
+      "wire_bytes": 2753,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/start",
+      "wire_bytes": 1257,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1283,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1297,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1543,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1305,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1312,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1310,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/start",
+      "wire_bytes": 1513,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1540,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1551,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1560,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1559,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1553,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1556,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/start",
+      "wire_bytes": 1173,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1169,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1420,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1188,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1416,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1176,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1480,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/start",
+      "wire_bytes": 1473,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1468,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1719,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1478,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1716,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1479,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 1777,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/start",
+      "wire_bytes": 2790,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 2906,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 2912,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 2900,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 2893,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 3266,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 3190,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/start",
+      "wire_bytes": 3102,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 3196,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 3204,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 3193,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 3183,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 3560,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/health",
+      "wire_bytes": 118,
+      "content_encoding": "gzip"
+    },
+    {
+      "path": "/manual-api/action",
+      "wire_bytes": 3490,
+      "content_encoding": "gzip"
+    }
+  ]
+}

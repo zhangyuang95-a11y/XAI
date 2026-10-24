@@ -1,0 +1,50 @@
+{
+  "format": "manual-preview-speedup-final-status.v2.1",
+  "deployed_commit": "785422026a729689366ec782f689c6927faf2d7f",
+  "compute": {
+    "cpu_period_us": 100000,
+    "cpu_quota_us": 15000
+  },
+  "scientific_model_acceptance_changed": false,
+  "pilot_opened": false,
+  "participant_database_touched": false,
+  "local_performance_passed": true,
+  "production_internal_80ms_passed": false,
+  "final_route_margin_passed": false,
+  "final_route_margin_excess_ms": 6.8192909471690655,
+  "all_performance_gates_passed": false,
+  "domains": {
+    "warehouse": {
+      "local_baseline_p50_ms": 83.83241598494351,
+      "local_baseline_p95_ms": 88.46212504431605,
+      "local_final_p50_ms": 14.7645000834018,
+      "local_final_p95_ms": 16.092750011011958,
+      "local_p95_reduction": 0.8180831626761157,
+      "production_wall_p95_ms": 296.856,
+      "production_cpu_p95_ms": 45.741
+    },
+    "pong": {
+      "local_baseline_p50_ms": 117.17191711068153,
+      "local_baseline_p95_ms": 127.03045783564448,
+      "local_final_p50_ms": 13.308290857821703,
+      "local_final_p95_ms": 13.760708970949054,
+      "local_p95_reduction": 0.891673940207686,
+      "production_wall_p95_ms": 205.504,
+      "production_cpu_p95_ms": 36.468
+    },
+    "kitchen": {
+      "local_baseline_p50_ms": 104.45537511259317,
+      "local_baseline_p95_ms": 107.48670808970928,
+      "local_final_p50_ms": 7.358584087342024,
+      "local_final_p95_ms": 7.8884579706937075,
+      "local_p95_reduction": 0.9266099212554734,
+      "production_wall_p95_ms": 68.719,
+      "production_cpu_p95_ms": 21.184
+    }
+  },
+  "python_tests_passed": 61,
+  "node_tests_passed": 5,
+  "production_http_requests": 67,
+  "model_variants_verified": 6,
+  "rollback_deploy_id": "dep-dbe2i4gm7kps73c4c2og"
+}

@@ -1,0 +1,223 @@
+{
+  "mode": "manual_preview_not_scientific_evaluation",
+  "checked_at": "2026-10-24T04:34:30.985845+00:00",
+  "deployed_commit": "5a2f90f94171a23a3c3389e07988c6094e44c37e",
+  "runtime": "manual-preview-runtime.request-scoped.v2",
+  "initial_connection_and_wake_ms": 703.1076250132173,
+  "sample_count": 30,
+  "health_p95_ms": 437.82724998891354,
+  "action_p95_ms": 1187.2928750235587,
+  "route_gate_passed": false,
+  "samples": [
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 342.2977919690311,
+      "action_ms": 650.044082896784,
+      "server_timing": "integrity;dur=75.088, inference;dur=5.197, physics;dur=101.438, storage;dur=5.585, total;dur=278.608, serialization;dur=0.077"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 357.7583748847246,
+      "action_ms": 901.8982090055943,
+      "server_timing": "integrity;dur=73.462, inference;dur=5.088, physics;dur=100.211, storage;dur=89.493, total;dur=275.203, serialization;dur=0.103"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 365.92633300460875,
+      "action_ms": 678.4669591579586,
+      "server_timing": "integrity;dur=101.978, inference;dur=3.709, physics;dur=102.480, storage;dur=88.912, total;dur=303.442, serialization;dur=0.105"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 356.33379220962524,
+      "action_ms": 656.4594169612974,
+      "server_timing": "integrity;dur=72.690, inference;dur=9.613, physics;dur=183.886, storage;dur=7.992, total;dur=284.945, serialization;dur=0.108"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "health_ms": 368.0117498151958,
+      "action_ms": 647.5128747988492,
+      "server_timing": "integrity;dur=15.133, inference;dur=5.417, physics;dur=102.208, storage;dur=4.923, total;dur=169.159, serialization;dur=0.062"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 355.1032498944551,
+      "action_ms": 516.4755838923156,
+      "server_timing": "integrity;dur=15.159, inference;dur=4.622, physics;dur=98.305, storage;dur=4.979, total;dur=164.784, serialization;dur=0.079"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 340.5893750023097,
+      "action_ms": 578.3787921536714,
+      "server_timing": "integrity;dur=16.044, inference;dur=86.681, physics;dur=98.950, storage;dur=5.092, total;dur=214.367, serialization;dur=0.083"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 355.8157910592854,
+      "action_ms": 633.2322498783469,
+      "server_timing": "integrity;dur=68.090, inference;dur=4.011, physics;dur=104.080, storage;dur=87.835, total;dur=272.079, serialization;dur=0.128"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 358.9729580562562,
+      "action_ms": 628.9010839536786,
+      "server_timing": "integrity;dur=68.920, inference;dur=86.926, physics;dur=102.351, storage;dur=4.819, total;dur=271.509, serialization;dur=0.163"
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "health_ms": 360.4053750168532,
+      "action_ms": 555.0053750630468,
+      "server_timing": "integrity;dur=15.409, inference;dur=3.844, physics;dur=97.990, storage;dur=4.831, total;dur=199.465, serialization;dur=0.077"
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 355.1777498796582,
+      "action_ms": 1187.2928750235587,
+      "server_timing": "integrity;dur=15.554, inference;dur=5.668, physics;dur=4.978, storage;dur=5.035, total;dur=182.943, serialization;dur=0.091"
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 366.20712489821017,
+      "action_ms": 590.6802909448743,
+      "server_timing": "integrity;dur=37.339, inference;dur=81.088, physics;dur=8.113, storage;dur=6.198, total;dur=141.856, serialization;dur=0.095"
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 365.3557919897139,
+      "action_ms": 633.0760419368744,
+      "server_timing": "integrity;dur=84.599, inference;dur=92.613, physics;dur=7.063, storage;dur=5.059, total;dur=196.093, serialization;dur=0.072"
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 400.90437489561737,
+      "action_ms": 704.2648331262171,
+      "server_timing": "integrity;dur=37.653, inference;dur=6.003, physics;dur=4.489, storage;dur=5.590, total;dur=144.472, serialization;dur=0.118"
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "health_ms": 399.160125060007,
+      "action_ms": 710.256083169952,
+      "server_timing": "integrity;dur=15.437, inference;dur=5.444, physics;dur=5.192, storage;dur=92.722, total;dur=146.093, serialization;dur=0.154"
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 372.87383293733,
+      "action_ms": 877.3859168868512,
+      "server_timing": "integrity;dur=49.940, inference;dur=6.838, physics;dur=89.829, storage;dur=5.320, total;dur=157.693, serialization;dur=0.165"
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 437.82724998891354,
+      "action_ms": 764.7661250084639,
+      "server_timing": "integrity;dur=29.278, inference;dur=5.262, physics;dur=4.306, storage;dur=6.574, total;dur=135.635, serialization;dur=0.121"
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 388.617540942505,
+      "action_ms": 822.0340830739588,
+      "server_timing": "integrity;dur=74.953, inference;dur=5.821, physics;dur=90.372, storage;dur=5.544, total;dur=182.422, serialization;dur=0.091"
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 400.7625828962773,
+      "action_ms": 1258.0603749956936,
+      "server_timing": "integrity;dur=15.200, inference;dur=5.000, physics;dur=4.680, storage;dur=4.831, total;dur=68.428, serialization;dur=82.002"
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "health_ms": 366.61083297804,
+      "action_ms": 784.0839580167085,
+      "server_timing": "integrity;dur=31.108, inference;dur=5.362, physics;dur=4.714, storage;dur=6.648, total;dur=138.696, serialization;dur=0.100"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 373.34316689521074,
+      "action_ms": 844.2090840544552,
+      "server_timing": "integrity;dur=15.833, inference;dur=1.278, physics;dur=1.174, storage;dur=4.576, total;dur=66.384, serialization;dur=0.162"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 382.63308303430676,
+      "action_ms": 822.9893750976771,
+      "server_timing": "integrity;dur=15.663, inference;dur=1.177, physics;dur=1.111, storage;dur=4.401, total;dur=39.832, serialization;dur=0.215"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 360.9567917883396,
+      "action_ms": 863.4184999391437,
+      "server_timing": "integrity;dur=15.145, inference;dur=32.437, physics;dur=2.082, storage;dur=5.734, total;dur=57.470, serialization;dur=0.235"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 399.05408304184675,
+      "action_ms": 964.2302910797298,
+      "server_timing": "integrity;dur=91.038, inference;dur=1.155, physics;dur=1.643, storage;dur=3.872, total;dur=99.884, serialization;dur=0.227"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "health_ms": 389.7514168638736,
+      "action_ms": 885.2262501604855,
+      "server_timing": "integrity;dur=15.188, inference;dur=1.281, physics;dur=1.789, storage;dur=3.568, total;dur=37.514, serialization;dur=0.162"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 588.1614580284804,
+      "action_ms": 1019.9014169629663,
+      "server_timing": "integrity;dur=77.505, inference;dur=1.454, physics;dur=4.922, storage;dur=7.316, total;dur=94.465, serialization;dur=0.252"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 363.0730421282351,
+      "action_ms": 907.2496669832617,
+      "server_timing": "integrity;dur=15.254, inference;dur=77.121, physics;dur=1.255, storage;dur=4.456, total;dur=99.764, serialization;dur=0.175"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 371.1825830396265,
+      "action_ms": 925.6108750123531,
+      "server_timing": "integrity;dur=30.982, inference;dur=1.617, physics;dur=89.154, storage;dur=6.752, total;dur=131.129, serialization;dur=0.219"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 353.1475409399718,
+      "action_ms": 845.3233751934022,
+      "server_timing": "integrity;dur=16.130, inference;dur=1.294, physics;dur=1.832, storage;dur=4.379, total;dur=47.675, serialization;dur=0.269"
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "health_ms": 372.30650009587407,
+      "action_ms": 757.1449999231845,
+      "server_timing": "integrity;dur=20.976, inference;dur=1.668, physics;dur=2.248, storage;dur=4.410, total;dur=31.963, serialization;dur=0.185"
+    }
+  ]
+}

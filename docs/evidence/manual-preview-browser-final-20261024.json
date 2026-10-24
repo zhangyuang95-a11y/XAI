@@ -1,0 +1,20 @@
+{
+  "format": "manual-preview-browser-observation.v2.1",
+  "base_url": "https://policylens-warehouse-study.onrender.com/",
+  "deployed_commit": "785422026a729689366ec782f689c6927faf2d7f",
+  "domain": "warehouse",
+  "variant": "regularized",
+  "task": 1,
+  "accepted_discrete_inputs": 8,
+  "confirmed_turns": 8,
+  "pending_inputs": 0,
+  "client_frame_callback_feedback_p95_ms": 8,
+  "ai_action_overrides": 0,
+  "model_acceptance_changed": false,
+  "pilot_opened": false,
+  "scientific_evaluation": false,
+  "screenshot_sha256": "d9b148789688ab85a6daa432892e31718a602519df71e85475180bb8b75de473",
+  "screenshot_path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/manual_preview_latency/browser-production-final.png",
+  "render_auto_deploy_observed": "Off",
+  "render_auto_deploy_modified": false
+}

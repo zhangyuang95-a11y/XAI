@@ -12,7 +12,7 @@ from hashlib import sha256
 from pathlib import Path
 import stat
 import threading
-from time import perf_counter
+from time import perf_counter, thread_time
 
 from runtime_v642.catalog import decode
 from runtime_v642.contracts import PolicyBinding, digest, freeze, require, RuntimeUnavailable
@@ -36,6 +36,11 @@ class RequestRuntime:
         self.current = ContextVar('manual_preview_request', default=None)
         self.completed = threading.local()
         self.parsed = {}
+        try:
+            quota,period=Path('/sys/fs/cgroup/cpu.max').read_text().split()
+            self.compute=dict(cpu_quota_us=None if quota=='max' else int(quota),cpu_period_us=int(period))
+        except (OSError,ValueError):
+            self.compute=dict(cpu_quota_us=None,cpu_period_us=None)
         original_path, original_verify = catalog.assets.path, catalog.verify_assets
 
         def path(key):
@@ -91,7 +96,7 @@ class RequestRuntime:
             yield self.current.get(); return
         scope = dict(paths={}, bytes={}, directories=set(), verified=False, memo=OrderedDict(),
                      integrity=0., inference=0., physics=0., storage=0., total=0.)
-        token = self.current.set(scope); began = perf_counter()
+        token = self.current.set(scope); began = perf_counter(); began_cpu = thread_time()
         try:
             with self.measure('integrity'):
                 require(self.catalog.assets.root.resolve()==self.catalog.assets.root,
@@ -102,7 +107,8 @@ class RequestRuntime:
             raise RuntimeUnavailable('preview asset or storage unavailable') from exc
         finally:
             scope['total'] = (perf_counter() - began) * 1000
-            self.completed.metrics = {k:scope[k] for k in ('integrity','inference','physics','storage','total')}
+            scope['cpu'] = (thread_time() - began_cpu) * 1000
+            self.completed.metrics = {k:scope[k] for k in ('integrity','inference','physics','storage','total','cpu')}
             self.current.reset(token)
 
     @contextmanager

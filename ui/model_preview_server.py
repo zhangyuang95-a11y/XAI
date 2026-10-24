@@ -94,7 +94,8 @@ class Preview:
             models[domain] = dict(version='v6.42 / 20k' if domain == 'warehouse' else 'v5 / 200k',
                 acceptance='calibration_pair_failed' if domain == 'warehouse' else 'historical_v5_passed',
                 seeds=SEEDS[domain], policies={v:self.catalog.binding(domain, v).to_dict() for v in ('raw','regularized')})
-        return dict(release_id=RELEASE, preview_runtime_version=RUNTIME_VERSION, commit=os.environ.get('RENDER_GIT_COMMIT', 'local'),
+        return dict(release_id=RELEASE, preview_runtime_version=RUNTIME_VERSION, preview_compute=self.runtime.compute,
+            commit=os.environ.get('RENDER_GIT_COMMIT', 'local'),
             mode='manual_preview', pilot_opened=False, study_ready=False, human_study_sample=False,
             storage='isolated_ephemeral_preview_sqlite', database_is_participant_database=False,
             explanations_available=False, models=models)
@@ -226,6 +227,9 @@ def make_server(preview, host='127.0.0.1', port=0):
                 self.send_header(k,v)
             self.send_header('Server-Timing', ', '.join(f'{key};dur={value:.3f}' for key,value in timing.items()))
             self.send_header('Vary','Accept-Encoding')
+            if status >= 400:
+                self.send_header('Connection','close')
+                self.close_connection=True  # rejected pre-body requests cannot poison keep-alive parsing
             if compressed:
                 self.send_header('Content-Encoding','gzip')
             self.end_headers()

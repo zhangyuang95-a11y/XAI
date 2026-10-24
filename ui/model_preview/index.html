@@ -5,6 +5,8 @@
   <title>PolicyLens · 模型试玩</title>
   <link rel="stylesheet" href="/preview-assets/styles.css">
   <script src="/preview-assets/board.js" defer></script>
+  <script src="/preview-assets/preview-board.js" defer></script>
+  <script src="/preview-assets/input-queue.js" defer></script>
   <script src="/preview-assets/app.js" defer></script>
 </head>
 <body>
@@ -23,6 +25,7 @@
       <button type="submit" id="start">开始新一局</button>
     </form>
     <p id="status" role="status" aria-live="polite">正在核验模型…</p>
+    <p id="input-status" role="status" aria-live="polite"></p><button id="retry" type="button" hidden>重试原命令</button>
     <section id="workspace" hidden>
       <div class="toolbar"><strong id="model-label"></strong><span id="turn"></span><span id="score"></span></div>
       <div class="workspace-grid">

@@ -1,5 +1,10 @@
 # 三域统一 v7：首轮校准实测与关闭记录
 
+2026-10-24 使用决定：按用户要求，Pong／Kitchen 沿用此前已验收的 v5 模型，
+本文件中的 v7 结果作为失败实验保留，不作为当前使用模型的成绩。
+Warehouse 保持原状态；三域不再声称训练方法完全一致。
+资产及执行回归核验见 `docs/evidence/pong-kitchen-v5-restoration-20261024.json`。
+
 候选：`three-domain-unified-02`，共同方法v2。目标发布`policylens-three-domain-20261024.v7.0`未生成，pilot关闭。
 
 **当前实现未通过20k校准。没有三域通过、正式预算锁定、独立审计或留出测试的结论。**

@@ -1,0 +1,103 @@
+{
+  "format": "pong-kitchen-prior-policy-confirmation.v1",
+  "created_at": "2026-10-24T02:33:25.271492+00:00",
+  "request": "Restore Pong and Kitchen to their prior accepted versions; keep Warehouse unchanged.",
+  "verification_base_commit": "1243da081e970b342a80dcfba203326c513bd832",
+  "operation": "Confirmed existing production v5 bindings; no actor, environment, or runtime code replacement was needed.",
+  "catalog_release_id": "policylens-three-domain-20261016.v6.0",
+  "model_acceptance_release_id": "policylens-three-domain-20261014.v5.0",
+  "warehouse_changed": false,
+  "v7_candidates_reopened": false,
+  "v7_pilot_opened": false,
+  "new_model_training": false,
+  "heldout_rerun": false,
+  "domains": {
+    "pong": {
+      "group_policies": {
+        "A": "pong-regularized-v5",
+        "B": "pong-regularized-v5",
+        "C": "pong-raw-v5"
+      },
+      "variants": {
+        "regularized": {
+          "policy_id": "pong-regularized-v5",
+          "actor_sha256": "1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6",
+          "role_sha256": {
+            "ai": "35b21e4c4aacb024afe8667b4a7f3a4e6677795e5c194beb9bcd1b1fa9c1dcc9",
+            "human": "aabe915937418ec9d6c3fb3e95bf71a5c90572a55ae9b84ebba15e49357b3a57"
+          },
+          "files": {
+            "releases/policylens-three-domain-20261016.v6.0/assets/1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6/rolling_actor_v5_regularized.json": "1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6",
+            "releases/policylens-three-domain-20261016.v6.0/assets/4e25941cff198fe334286cd6732cf88ce604c7db4bcad1712adcc98bc9f084c1/rolling_actor_v5_regularized.training.json": "4e25941cff198fe334286cd6732cf88ce604c7db4bcad1712adcc98bc9f084c1",
+            "releases/policylens-three-domain-20261016.v6.0/assets/ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958/rolling_actor_v5.acceptance.json": "ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958",
+            "releases/policylens-three-domain-20261016.v6.0/assets/c09f4a39bd3f29c8ff7e5ed703d1d3e8b21314ec962c3854051b776d89736cdf/rolling_actor_v5_regularized_human.program.json": "c09f4a39bd3f29c8ff7e5ed703d1d3e8b21314ec962c3854051b776d89736cdf",
+            "releases/policylens-three-domain-20261016.v6.0/assets/8bea30622492db337654823e43a331f8a46f2fdbeb95fd2121c79af7e656637f/rolling_actor_v5_regularized_ai.program.json": "8bea30622492db337654823e43a331f8a46f2fdbeb95fd2121c79af7e656637f"
+          },
+          "historical_acceptance_verified": true
+        },
+        "raw": {
+          "policy_id": "pong-raw-v5",
+          "actor_sha256": "1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7",
+          "role_sha256": {
+            "ai": "55c6a0aca47653098aeecd12bead31c14b10971a1891a59e45d332b154fb7048",
+            "human": "897ecc4696db6de386783fdaec7c21086a6b1f25af557de6e327ff0034842b52"
+          },
+          "files": {
+            "releases/policylens-three-domain-20261016.v6.0/assets/1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7/rolling_actor_v5_raw.json": "1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7",
+            "releases/policylens-three-domain-20261016.v6.0/assets/d73b46a852d1a978e6bdd0779c946b24e53a8998f8f2ed92a7093a9e612a6184/rolling_actor_v5_raw.training.json": "d73b46a852d1a978e6bdd0779c946b24e53a8998f8f2ed92a7093a9e612a6184",
+            "releases/policylens-three-domain-20261016.v6.0/assets/ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958/rolling_actor_v5.acceptance.json": "ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958"
+          },
+          "historical_acceptance_verified": true
+        }
+      }
+    },
+    "kitchen": {
+      "group_policies": {
+        "A": "kitchen-regularized-v5",
+        "B": "kitchen-regularized-v5",
+        "C": "kitchen-raw-v5"
+      },
+      "variants": {
+        "regularized": {
+          "policy_id": "kitchen-regularized-v5",
+          "actor_sha256": "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85",
+          "role_sha256": {
+            "ai": "221708dc90aade679492732d59d8e04e92dbbe87304d4ed0670f88ff6fef8767",
+            "human": "08d69613814b9e22be890ef9be11fa0ed495e4a0d5dc80e8ce1c9f848e21ac7e"
+          },
+          "files": {
+            "releases/policylens-three-domain-20261016.v6.0/assets/0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85/kitchen_dual_nn_v5_regularized.npz": "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85",
+            "releases/policylens-three-domain-20261016.v6.0/assets/12004d3108aba6017c15a06e890659c2139b57a607c357b87c49d5c6ae59b1cc/kitchen_dual_nn_v5_regularized_training.json": "12004d3108aba6017c15a06e890659c2139b57a607c357b87c49d5c6ae59b1cc",
+            "releases/policylens-three-domain-20261016.v6.0/assets/012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a/kitchen_dual_nn_v5_acceptance.json": "012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a",
+            "releases/policylens-three-domain-20261016.v6.0/assets/a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988/kitchen_dual_nn_v5_regularized_human_program.json": "a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988",
+            "releases/policylens-three-domain-20261016.v6.0/assets/27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784/kitchen_dual_nn_v5_regularized_ai_program.json": "27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784"
+          },
+          "historical_acceptance_verified": true
+        },
+        "raw": {
+          "policy_id": "kitchen-raw-v5",
+          "actor_sha256": "30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb",
+          "role_sha256": {
+            "ai": "fb118f162aa0882a8693131e8f286c59733941c12b24d34dbfa20ff1e63fd6b6",
+            "human": "967e48851f72d373d6346fa5e638d6995f78a7ba165b5c9b279c795e8939c97c"
+          },
+          "files": {
+            "releases/policylens-three-domain-20261016.v6.0/assets/30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb/kitchen_dual_nn_v5_raw.npz": "30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb",
+            "releases/policylens-three-domain-20261016.v6.0/assets/a44a1714afd1997d73f0bd31ee6aed62283efacfed7f37481fc3f4f8ef06c7e9/kitchen_dual_nn_v5_raw_training.json": "a44a1714afd1997d73f0bd31ee6aed62283efacfed7f37481fc3f4f8ef06c7e9",
+            "releases/policylens-three-domain-20261016.v6.0/assets/012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a/kitchen_dual_nn_v5_acceptance.json": "012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a"
+          },
+          "historical_acceptance_verified": true
+        }
+      }
+    }
+  },
+  "execution_regression": {
+    "command": "python3 -m pytest -q tests/test_pong_kitchen_v5_deployed_binding_audit.py tests/test_pong_v5_binding.py tests/test_kitchen_v5_binding.py tests/test_runtime_v642_legacy_domain.py",
+    "exit_code": 0,
+    "passed": 71,
+    "failed": 0,
+    "skipped": 0,
+    "elapsed_seconds": 28.13,
+    "scope": "Software/asset regression, including archived runtime snapshots; not a new scientific evaluation."
+  }
+}

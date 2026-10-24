@@ -1,5 +1,16 @@
 # 三域统一方法 v7：实现与执行状态
 
+## 当前使用决定（2026-10-24）
+
+按用户要求，Pong、Kitchen 沿用此前通过验收的 v5 双 Actor 和原有程序，
+不再推进本轮 v7 替换。A/B 使用各域的 `regularized-v5`，C 使用 `raw-v5`。
+现有研究入口本就绑定这些旧资产，因此无需替换权重或修改物理环境。
+核验记录见 `docs/evidence/pong-kitchen-v5-restoration-20261024.json`。
+
+Warehouse 当前模型、训练和准入状态不变。v7 两轮候选、失败收据和模型保留，
+本轮统一方法实验仍为关闭状态。后续不再将三个 domain 的训练方法表述为完全一致；
+本次沿用旧版不构成 v7 通过，也不开放 pilot。
+
 当前候选：`three-domain-unified-02`（共同方法v2，已关闭；01也已关闭）  
 目标发布：`policylens-three-domain-20261024.v7.0`
 

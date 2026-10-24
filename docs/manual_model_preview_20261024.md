@@ -21,6 +21,9 @@ python -m pip install -r requirements-manual-preview.txt
 OPENBLAS_NUM_THREADS=1 python -m ui.model_preview_server --host 0.0.0.0 --port "$PORT"
 ```
 
+Render也可使用等价短入口`python -m ui.modelpreviewserver`，默认读取`PORT`，
+绑定`0.0.0.0`。既有`requirements-render.txt`包含所需推理依赖，也可保留现有构建命令。
+
 页面允许选择三域、两个版本、三个任务和24个明确的试玩场景。
 WASD/方向键控制角色1，空格等待，Kitchen使用E操作工位。
 双NN播放与真人接管使用同一冻结绑定，只有角色1被替换。

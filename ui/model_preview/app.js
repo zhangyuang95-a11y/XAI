@@ -1,7 +1,7 @@
 'use strict';
 const $=id=>document.getElementById(id), escapeText=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let models=null,view=null,busy=false,playing=false,token='',board=new PreviewBoard($('board'));
-let bindingShown='',demoTimer=null,heldTimer=null,heldKey=null,exporting=false;
+let bindingShown='',ordersShown='',demoTimer=null,heldTimer=null,heldKey=null,exporting=false;
 const feedbackSamples=[];
 const savedKey='policylens-manual-preview-20261024.v1';
 const requested=location.pathname.split('/')[1];
@@ -29,7 +29,7 @@ function inputStatus(){
 function stopPending(){playing=false;clearTimeout(demoTimer);clearTimeout(heldTimer);heldKey=null;return queue.clear();}
 function scheduleDemo(started){
   clearTimeout(demoTimer);
-  if(playing&&!view.state.terminal)demoTimer=setTimeout(()=>queue.enqueue(null),Math.max(0,300-(performance.now()-started)));
+  if(playing&&!view.state.terminal)demoTimer=setTimeout(()=>queue.enqueue(null),Math.max(0,380-(performance.now()-started)));
 }
 const queue=new PreviewInputQueue({changed:inputStatus,full:()=>message('队列已满（8项）；本次输入未接受，请稍后再按。'),failed:e=>{playing=false;clearTimeout(demoTimer);message('操作尚未确认：'+e.message+'。重试将复用原命令编号。');},send:async item=>{
   if(!view||(view.state.terminal&&!item.payload)){stopPending();return;}
@@ -43,6 +43,8 @@ const queue=new PreviewInputQueue({changed:inputStatus,full:()=>message('队列�
   }
   view=result;save();render(true);
   if(!view.state.terminal)message(playing?'双 NN 正在运行；可随时暂停。':'服务器已确认操作。蓝色角色由你控制，橙色角色由冻结 NN 控制。');
+  // Limit visual backlog while the next request overlaps the confirmed animation.
+  await board.ready?.();
   scheduleDemo(started);
 }});
 function action(human,held=false){
@@ -56,16 +58,20 @@ function action(human,held=false){
 }
 function choices(){const d=$('domain').value;$('seed').innerHTML=(models.models[d].seeds||[]).map((s,i)=>`<option value="${s}">场景 ${i+1} · ${s}</option>`).join('');}
 function render(animate=false){
-  if(!view)return;const s=view.state,d=s.domain;$('workspace').hidden=false;
-  $('model-label').textContent=`${d.toUpperCase()} · ${models.models[d].version} · ${view.binding.variant}`;
+  if(!view)return;const snapshot=view,s=snapshot.state;
+  board.setState(s,{animate,language:'zh',onPresent:()=>present(snapshot)});
+  locks();
+  if(s.terminal){const cancelled=stopPending();message(`本局已结束，已清除 ${cancelled} 项待执行输入。可以下载记录，或开始新一局。`);locks();}
+}
+function present(snapshot){
+  const s=snapshot.state,d=s.domain;$('workspace').hidden=false;
+  $('model-label').textContent=`${d.toUpperCase()} · ${models.models[d].version} · ${snapshot.binding.variant}`;
   $('turn').textContent=`步数 ${s.turn} / ${s.max_turns}`;$('score').textContent=`得分 ${Number(s.score?.task_score??0).toFixed(1)}`;
   $('instructions').textContent=d==='pong'?'A / D 或左右方向键移动，空格等待。蓝色挡板由你控制。':d==='kitchen'?'WASD 或方向键移动和转向，E 操作正前方工位，空格等待。先准备原料，再向中央传递口交接。':'WASD 或方向键移动，空格等待。到取货格自动取货，到配送格自动配送；紫色闪电为充电站。';
   $('metrics').textContent=d==='warehouse'?`配送 ${s.deliveries} · 碰撞 ${s.collision_events} · 停机 ${s.shutdown_events}`:d==='kitchen'?`完成订单 ${s.metrics?.completed_orders??s.orders.filter(o=>o.status==='completed').length} / 5 · 你持有 ${s.human.holding?.ingredient||s.human.holding?.stage||'空'}`:`当前球数 ${s.balls?.length??0} · 蓝色挡板位置 ${s.human.x} · 橙色挡板位置 ${s.ai.x}`;
-  $('orders').innerHTML=(s.orders||[]).map(o=>`<div class="order"><b>${escapeText(o.id)}</b> · ${escapeText(o.status)} ${d==='warehouse'?`<br>取货 (${escapeText(o.pickup)}) → 配送 (${escapeText(o.dropoff)})`:`<br>${escapeText(o.recipe)} · 截止 ${escapeText(o.deadline)} 步`}</div>`).join('');
-  const last=view.last_action;$('last-action').textContent=last?`${last.two_NN?'双 NN 演示':'真人接管'} · 角色1：${last.human} · AI：${last.ai} · AI动作覆盖：${last.ai_action_overrides}`:'当前为第0帧。你可以直接操作，或先播放双 NN。';
-  const bindingKey=JSON.stringify(view.binding);if(bindingKey!==bindingShown){$('binding').textContent=JSON.stringify(view.binding,null,2);bindingShown=bindingKey;}
-  board.setState(s,{animate,language:'zh'});locks();
-  if(s.terminal){const cancelled=stopPending();message(`本局已结束，已清除 ${cancelled} 项待执行输入。可以下载记录，或开始新一局。`);locks();}
+  const orderKey=JSON.stringify([d,s.orders]);if(orderKey!==ordersShown){ordersShown=orderKey;$('orders').innerHTML=(s.orders||[]).map(o=>`<div class="order"><b>${escapeText(o.id)}</b> · ${escapeText(o.status)} ${d==='warehouse'?`<br>取货 (${escapeText(o.pickup)}) → 配送 (${escapeText(o.dropoff)})`:`<br>${escapeText(o.recipe)} · 截止 ${escapeText(o.deadline)} 步`}</div>`).join('');}
+  const last=snapshot.last_action;$('last-action').textContent=last?`${last.two_NN?'双 NN 演示':'真人接管'} · 角色1：${last.human} · AI：${last.ai} · AI动作覆盖：${last.ai_action_overrides}`:'当前为第0帧。你可以直接操作，或先播放双 NN。';
+  const bindingKey=JSON.stringify(snapshot.binding);if(bindingKey!==bindingShown){$('binding').textContent=JSON.stringify(snapshot.binding,null,2);bindingShown=bindingKey;}
 }
 async function start(event){
   event?.preventDefault();if(busy)return;const cancelled=stopPending();busy=true;locks();message(`正在装载绑定模型与场景…${cancelled?'已清除 '+cancelled+' 项待执行输入。':''}`);
@@ -77,7 +83,7 @@ $('selection').addEventListener('submit',start);$('domain').addEventListener('ch
 for(const b of document.querySelectorAll('[data-action]'))b.addEventListener('click',()=>action(b.dataset.action));
 $('nn-step').addEventListener('click',()=>action(null));
 $('play').addEventListener('click',async()=>{stopPending();playing=true;locks();await queue.idle();clearTimeout(demoTimer);if(playing)queue.enqueue(null);});
-$('pause').addEventListener('click',()=>{const n=stopPending();locks();message(`已暂停；已发出的至多一步会完成，清除 ${n} 项待执行输入。`);});
+$('pause').addEventListener('click',()=>{const n=stopPending();locks();message(`已暂停；已确认动作会完整播放，已发出的至多一步会完成；清除 ${n} 项待执行输入。`);});
 $('retry').addEventListener('click',()=>queue.retry());
 for(const id of ['domain','variant','task','seed'])$(id).addEventListener('change',()=>{const n=stopPending();locks();message(`选择已改变，待执行输入已清除（${n}项）；点击“开始新一局”绑定选择。`);});
 const keys={w:'up',arrowup:'up',s:'down',arrowdown:'down',a:'left',arrowleft:'left',d:'right',arrowright:'right',' ':'wait',e:'interact'};

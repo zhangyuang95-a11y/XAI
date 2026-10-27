@@ -19,7 +19,7 @@ from runtime_v642.contracts import PolicyBinding, digest, freeze, require, Runti
 from runtime_v642.legacy_domain import PongAdapter, KitchenAdapter, pong_nn
 from .model_preview_warehouse import WarehouseAdapter
 
-VERSION = 'manual-preview-runtime.request-scoped.v2.1'
+VERSION = 'manual-preview-runtime.request-scoped.v2.2'
 
 
 def verified_request(function):

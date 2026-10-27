@@ -38,7 +38,7 @@ test('actual app accepts rapid input while HTTP pending, retries original comman
   let turn=0,pending=[],actionCalls=[],failNext=true;
   const state=()=>({state:{domain:'warehouse',task:1,turn,max_turns:120,terminal:false,score:{task_score:0},orders:[],deliveries:0,collision_events:0,shutdown_events:0},binding:{variant:'raw',actor_sha256:'fixed'},last_action:null});
   const document={getElementById:$,activeElement:{tagName:'BODY'},querySelectorAll:()=>buttons,querySelector:s=>buttons.find(b=>s.includes('"'+b.dataset.action+'"')),addEventListener:(n,fn)=>handlers[n]=fn};
-  const context=vm.createContext({document,window:{addEventListener(){}},location:{pathname:'/warehouse/'},localStorage:{getItem:()=>null,setItem(){}},PreviewBoard:class{setState(){}},PreviewInputQueue:Queue,AbortController,performance,crypto:require('node:crypto').webcrypto,setTimeout,clearTimeout,requestAnimationFrame:fn=>setImmediate(()=>fn(performance.now())),console,
+  const context=vm.createContext({document,window:{addEventListener(){}},location:{pathname:'/warehouse/'},localStorage:{getItem:()=>null,setItem(){}},PreviewBoard:class{setState(s,o){o.onPresent?.();}},PreviewInputQueue:Queue,AbortController,performance,crypto:require('node:crypto').webcrypto,setTimeout,clearTimeout,requestAnimationFrame:fn=>setImmediate(()=>fn(performance.now())),console,
     fetch:async(path,options)=>{
       if(path.endsWith('models'))return {ok:true,json:async()=>({models:{warehouse:{seeds:[40786],version:'test'}}})};
       if(path.endsWith('start'))return {ok:true,json:async()=>({...state(),session_token:'test-token'})};

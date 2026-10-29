@@ -24,20 +24,36 @@ CLEARANCE_VERSION = 'warehouse-v643-finite-calibration-history-clearance.v1'
 VARIANTS = ('raw', 'regularized')
 
 
+def optimizer_boundaries():
+    """Finite completed physical-batch boundaries; no RNG or environment."""
+    config=partitions.PPOConfig();cursor=0;result=[]
+    while cursor<config.joint_step_budget:
+        cursor+=8*config.next_collection_length(cursor)
+        result.append(cursor)
+    return tuple(result)
+
+
 def source_files():
     # No optional imports or caller-provided list: all implementation pieces
     # must exist before a scientific plan can snapshot its source closure.
     from .v643_program_provider import source_files as program_sources
+    from .v643_calibration_quality import source_files as quality_sources
     files = partitions.source_files()
-    for name, sha in program_sources().items():
-        require(name not in files or files[name] == sha, 'conflicting numerical/program source closure')
-        files[name] = sha
+    for closure in (program_sources(),quality_sources()):
+        for name, sha in closure.items():
+            require(name not in files or files[name] == sha, 'conflicting numerical/program/quality source closure')
+            files[name] = sha
     for name in ('experiments/warehouse/v643_training_seed_plan.py',
                  'experiments/warehouse/v643_calibration_owner.py',
                  'experiments/warehouse/v643_calibration_recovery.py',
+                 'experiments/warehouse/v643_calibration_pipeline.py',
                  'experiments/warehouse/exact_seed_audit.py',
                  'tests/test_warehouse_v643_training_seed_plan.py',
-                 'tests/test_warehouse_v643_calibration_owner.py'):
+                 'tests/test_warehouse_v643_calibration_owner.py',
+                 'tests/test_warehouse_v643_calibration_pipeline.py',
+                 'tests/test_warehouse_v643_calibration_recovery.py',
+                 'scripts/run_warehouse_v643_calibration.py',
+                 'tests/test_warehouse_v643_calibration_cli.py'):
         files[name] = file_sha(Path(__file__).resolve().parents[2]/name)
     return dict(sorted(files.items()))
 
@@ -85,6 +101,15 @@ def declared_calls(partition):
         for c in quality['cases']:
             episode(policy, dict(episode=c['case_id'],base=c['base'],scenario_seed=c['scenario_seed'],
                 task=c['task'],action_seed=c['action_seed'],scope='quality',slot=None))
+    # Restoration allocates a PCG64 using the already registered optimizer
+    # argument, overwrites its complete saved state before exposing Generator,
+    # and never samples from this allocation state. One attempt/boundary only.
+    for step in optimizer_boundaries():
+        for variant in VARIANTS:
+            use('action_rng','v643_PPO_reference_and_cost_replay',
+                'restore_optimizer_rng:PCG64(original_seed);overwrite_saved_state_before_Generator',
+                p['optimizer_seed'],f'restore_optimizer_rng:{step}:{variant}',
+                'paired-optimizer:'+str(p['optimizer_seed']),False)
     return dict(schema='warehouse-exact-seed-plan.v1',candidate_id=CANDIDATE,
         uses=uses,partition=deepcopy(partition.ref),case_reservations_sha256=digest(cases),
         planned_episode_construction='fresh_constructor_then_explicit_reset_for_each_used_case',
@@ -142,6 +167,9 @@ def prepare(*, reference_directory, partition_ref, run_id):
         case_reservations=pointer(output/'case-reservations.json'),config=deepcopy(partition.value['config']),
         maximum_environment_constructors=len(cases),maximum_explicit_resets=len(cases),
         initialization_RNG_constructors=2,optimizer_RNG_constructors=2,quality_policy_reservations=225,
+        restore_optimizer_rng_allocation_boundaries=list(optimizer_boundaries()),
+        maximum_restore_optimizer_rng_allocation_calls=2*len(optimizer_boundaries()),
+        restore_allocation_is_not_a_sampled_stream=True,restore_attempts_per_checkpoint=1,
         history_freshness_verified=False,training_authority=False,new_environment_resets=0,
         new_Actor_updates=0,single_use_complete_owner_required=True,pilot_opened=False)
     write_new(output/'plan.json',value); (output/'plan.json').chmod(0o444)

@@ -150,7 +150,7 @@ class Partition:
 def prepare(*, reference_directory, training_inventory_ref, program_inventory_ref,
             quality_inventory_ref, initialization_seed, optimizer_seed, output):
     # Historical original-reference authentication, not an old 20k pass gate.
-    ready = historical_reference.load_readiness(reference_directory)
+    ready = historical_reference.load_readiness(Path(reference_directory).resolve())
     ready.verify()
     require(ready.value['actor']['sha256'] == REFERENCE_SHA256,
             'only the complete original v620 BC artifact can be the new paired start')
@@ -182,7 +182,7 @@ def prepare(*, reference_directory, training_inventory_ref, program_inventory_re
 
 
 def load(reference_directory, ref):
-    ready = historical_reference.load_readiness(reference_directory)
+    ready = historical_reference.load_readiness(Path(reference_directory).resolve())
     ready.verify()
     path = Path(ref['path']).resolve()
     require(path.is_relative_to(OUTPUT_ROOT.resolve()) and path.name == 'partition.json',

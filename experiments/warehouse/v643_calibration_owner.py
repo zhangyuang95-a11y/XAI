@@ -25,7 +25,6 @@ OWNER_VERSION = 'warehouse-v643-finite-calibration-variant-owner.v1'
 CLAIM_VERSION = 'warehouse-v643-finite-calibration-single-use-claim.v1'
 DESCRIPTOR_VERSION = 'warehouse-v643-finite-calibration-owner-descriptor.v1'
 JOURNAL_VERSION = 'warehouse-v643-finite-owner-journal.v1'
-FINISHED_COLLECTOR_IMPLEMENTED = False
 
 
 def source_files():
@@ -71,7 +70,9 @@ def descriptor_document(plan):
         **{key:deepcopy(p[key]) for key in ('train_case_inventory','program_evidence_inventory','quality_case_inventory')},
         config=deepcopy(p['config']),variants=list(seeds.VARIANTS),per_variant_joint_step_limit=20000,
         zero_update_original_BC_start_required=True,old_20k_pass_required=False,
-        collector_integration_enabled=False,training_authority=False,sealed_authority=False,pilot_opened=False)
+        collector_implementation='warehouse-v643-finite-calibration-pipeline.v1',
+        public_admission_contract='original_BC_finite_inventories_exact_history_single_use_candidate_claim',
+        training_authority=False,sealed_authority=False,pilot_opened=False)
 
 
 def prepare_descriptor(plan):
@@ -115,7 +116,12 @@ def compile_claim_record_without_unused_check(plan, descriptor_ref):
     plan.verify()
     require(Path(descriptor_ref['path'])==Path(plan.ref['path']).parent/'calibration/descriptor.json'
         and partitions._immutable(descriptor_ref)==descriptor_document(plan),'descriptor differs')
-    clearance=seeds.checked_clearance(plan,execution=True)
+    # Once the exclusive claim exists, its own metadata is a legitimate new
+    # execution record. The full stat delta was checked immediately before it.
+    clearance=seeds.checked_clearance(plan,execution=False)
+    from datetime import datetime, timezone
+    require(datetime.now(timezone.utc)<datetime.fromisoformat(clearance['value']['expires_utc']),
+            'claimed finite owner history clearance expired')
     return dict(schema=CLAIM_VERSION,candidate_id=CANDIDATE,plan=deepcopy(plan.ref),
         partition=deepcopy(plan.partition.ref),descriptor=deepcopy(descriptor_ref),
         source_sha256=plan.value['source_sha256'],clearance=deepcopy(clearance['clearance']),

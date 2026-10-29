@@ -254,7 +254,7 @@ def test_incomplete_old_or_incoherent_boundary_cannot_restore(prepared, tmp_path
 def test_run_refuses_before_any_claim_or_path_access(monkeypatch):
     def forbidden(*_args,**_kwargs):raise AssertionError('disabled training accessed files')
     monkeypatch.setattr(Path,'open',forbidden)
-    with pytest.raises(RuntimeError,match='finite calibration owner is not implemented'):
+    with pytest.raises(RuntimeError,match='numerical component is not an execution capability'):
         v.run(old_20k_passed=True,old_claim='ignored',plan='must-not-read.json')
 
 

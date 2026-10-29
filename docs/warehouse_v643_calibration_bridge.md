@@ -1,6 +1,6 @@
-# v6.43 PPO numerical bridge: implemented component, unavailable finite owner
+# v6.43 PPO numerical bridge and source-bound finite owner
 
-`experiments/warehouse/v643_calibration.py` now connects the complete-episode risk component to the existing environment-free PPO algebra. This is **not an executable scientific 20k owner**. The CLI's `--run` raises before reading a caller plan, making a random generator, touching output, or consuming a claim. `--status` reports implementation boundaries and current source hashes. No Warehouse environment, fresh scenario or sealed scenario was used to build this component.
+`experiments/warehouse/v643_calibration.py` connects the complete-episode risk component to the existing environment-free PPO algebra. Its old component-only `--run` still raises before reading a caller plan, making a random generator, touching output or consuming a claim. The actual finite owner, collector, program provider, independent measurement and clean continuation are implemented in the separate v643 pipeline modules. `scripts/run_warehouse_v643_calibration.py` requires an explicit exact plan/hash and original reference directory; recovery additionally requires an exact clean-pair checkpoint/hash under the same consumed claim. It checks complete source/inventory/history bindings before initialization. `--status` on the old inspector reports this distinction. No actual v643 scientific scene or sealed seed was used during implementation; physical integration tests use explicit synthetic states.
 
 ## Actual changes
 
@@ -20,7 +20,7 @@ The caller supplies the existing optimizer RNG. Both PPO ordering/reference samp
 
 `save_boundary` stores the entire numerical model, Actor optimizer, reward optimizer, beta, trainability, counters and PPO/risk state. Risk state includes cost optimizer, complete episode buffer, consumed identities, multiplier and RNG. `restore_numerical_boundary` validates candidate, source closure, paired reference identity, all overlapping state identities and full training fingerprint before restoring into caller-created zero-update modules. It never constructs an Actor, environment or RNG. Numerical restoration is not scientific resume authority.
 
-The saved boundary explicitly says that environment, rollout reader, observed program pool/provider and single-use claim state are absent. Such a file cannot stand in for a complete finite experiment checkpoint.
+The numerical boundary explicitly says that environment, rollout reader, observed program pool/provider and single-use claim state are absent. Such a file cannot stand in for a complete finite experiment checkpoint. The new owner's outer checkpoint adds these components; a clean paired checkpoint also binds all owned artifacts and execution/reset journal prefixes. See `docs/warehouse_v643_finite_owner.md` for the tested same-claim continuation and its refusal of unaccounted post-boundary work.
 
 ## Why the old owner cannot be reused unchanged
 
@@ -28,11 +28,11 @@ The saved boundary explicitly says that environment, rollout reader, observed pr
 2. `v642_calibration_owner`, partition/seed plan, program provider, observed source and program-refit code bind the v6.42 candidate, output namespaces and source contracts. Subclassing the numerical core does not change those bindings. Old claims are already consumed and must remain closed.
 3. The old long-training admission requires an independently passing old 20k calibration, which the actual raw result does not provide. v6.43 is a newly registered calibration; it must not accept a hand-written `passed` field or pretend the old failure became a prerequisite pass.
 
-## Required before scientific execution
+## Required before actual scientific execution
 
-The next implementation must provide a **new** finite collector/owner and program output bindings, with exact inventories for training/program evidence/new quality evaluation; new source snapshots and full-history exact seed clearance; and an atomic, single-use v6.43 claim checked immediately before the first initialization/reset. It must integrate this numerical bridge with physical trace replay and the real reset journal. Its full checkpoint must additionally bind reader pending histories, all eight private environments, active cases/cursors, observed pools/provider/refits, source/clearance identities and the claim. No old claim or sealed seed may be reused.
+The new implementation now provides the finite collector/owner and new program output bindings, exact TRAIN/program/quality inventory contracts, complete source snapshots, actual metadata→triage→exact/context history verification, and the atomic single-use v643 claim immediately before initialization/reset. It integrates this bridge with physical/NN trace replay and the actual reset journal, with complete private/reader/provider/RNG checkpoints and an explicit clean continuation. No old claim or sealed seed may be reused.
 
-Only after these parts exist should the new calibration be run and its own 20k quality/program results independently audited. The present module intentionally has no `claimed_owner` function and creates no pass marker. Existing v6.42 scientific results, old sources, release status and pilot gates are unchanged.
+Execution still requires newly locked real inventories, source snapshots and exact clearance against the actual four historical roots, followed by the candidate's first claim. No such claim or actual new 20k quality/program metric was produced by the implementation tests. This numerical module intentionally creates no pass marker. The new finite CLI returns nonzero on an actual failed program/quality precheck, preserves its closed-candidate receipt, and never treats numerical completion as model acceptance. Existing v6.42 scientific results, old sources, release status and pilot gates remain unchanged.
 
 ## Executed engineering checks
 

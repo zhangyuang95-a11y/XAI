@@ -31,8 +31,8 @@ def test_disabled_owner_and_resume_refuse_before_input_or_output(tmp_path,monkey
     monkeypatch.setattr(s,'load',forbidden)
     with pytest.raises(RuntimeError,match='no claim or training'):
         o.claimed_owner(plan_ref=tmp_path/'unused')
-    with pytest.raises(RuntimeError,match='no reconstruction or resume'):
-        r.resume(checkpoint_ref=tmp_path/'unused')
+    with pytest.raises(RuntimeError,match='explicit new candidate plan'):
+        r.resume(reference_directory=tmp_path/'unused',plan_ref=None,checkpoint_ref={'path':'unused','sha256':'a'*64})
     assert not list(tmp_path.iterdir())
 
 
@@ -59,7 +59,9 @@ def test_descriptor_freezes_pair_reference_program_and_quality_without_claim(pla
     assert value['reference_actor']['sha256']==o.REFERENCE_SHA256
     assert value['program_templates']==plan.partition.value['program_templates']
     assert value['quality_case_inventory']==plan.partition.value['quality_case_inventory']
-    assert value['collector_integration_enabled'] is value['training_authority'] is False
+    assert value['training_authority'] is False
+    assert value['public_admission_contract']=='original_BC_finite_inventories_exact_history_single_use_candidate_claim'
+    assert value['collector_implementation']=='warehouse-v643-finite-calibration-pipeline.v1'
     assert not o.claim_path().exists()
     with pytest.raises(FileExistsError):o.prepare_descriptor(plan)
 

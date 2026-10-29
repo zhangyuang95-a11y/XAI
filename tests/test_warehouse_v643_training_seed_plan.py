@@ -38,7 +38,10 @@ def test_exact_call_plan_accounts_for_quality_and_paired_streams(partition,tmp_p
     path=tmp_path/'exact-original-arguments.json';path.write_text(json.dumps(declaration))
     assert s.exact.read_exact_plan(path)[0]==declaration
     assert len(cases)==2*(168+1650)+225
-    assert len(declaration['uses'])==4*len(cases)+4
+    assert len(declaration['uses'])==4*len(cases)+4+2*len(s.optimizer_boundaries())
+    restores=[row for row in declaration['uses'] if row['group'].startswith('restore_optimizer_rng:')]
+    assert len(restores)==2*len(s.optimizer_boundaries())
+    assert all(row['value']==1 and row['consumed_as_random_draw'] is False for row in restores)
     raw=[{k:v for k,v in c.items() if k!='variant'} for c in cases if c['variant']=='raw' and c['scope']!='quality']
     reg=[{k:v for k,v in c.items() if k!='variant'} for c in cases if c['variant']=='regularized' and c['scope']!='quality']
     assert raw==reg

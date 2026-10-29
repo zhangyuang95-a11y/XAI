@@ -1,10 +1,12 @@
-"""Environment-free v6.43 PPO integration; finite calibration owner is absent.
+"""Environment-free v6.43 PPO integration; finite owner lives separately.
 
 This is an actual numerical bridge and complete-boundary checkpoint helper,
 not a run capability. It constructs no environment or RNG, claims no seeds,
-and refuses the CLI training entrypoint. Old v6.42 pass markers and claims do
-not authorize this changed method. Its finite collector, program namespace,
-source-bound history audit and single-use owner still require implementation.
+and refuses its old component-only training entrypoint. The source-bound finite
+collector/owner, program namespace, exact history audit and clean continuation
+are implemented separately in v643_calibration_pipeline/recovery. Actual new
+inventories/clearance and the one candidate claim remain required. Old v6.42
+pass markers and claims cannot authorize this changed method.
 """
 from copy import deepcopy
 from dataclasses import asdict
@@ -27,14 +29,10 @@ from .v643_risk_recipe import CANDIDATE, REFERENCE_SHA256
 ROOT = Path(__file__).resolve().parents[2]
 VERSION = 'warehouse-v643-risk-aware-PPO-integration.v1'
 BOUNDARY_VERSION = 'warehouse-v643-complete-numerical-boundary.v1'
-MISSING_FINITE_OWNER = (
-    'new_candidate_finite_training_program_and_quality_inventories',
-    'new_source_closed_partition_owner_and_program_output_namespaces',
-    'new_exact_full_history_seed_clearance_and_claim_at_start',
-    'finite_collector_and_reset_journal_bound_to_v643_PPO_and_risk_state',
-    'complete_training_reader_environment_program_provider_checkpoint_and_explicit_recovery',
-    'new_20k_quality_and_program_auditors_without_old_20k_pass_requirement',
-)
+MISSING_FINITE_OWNER = ()
+EXECUTION_PREREQUISITES = ('new_locked_finite_inventory_and_complete_source_snapshot',
+    'new_exact_actual_four_root_history_clearance', 'unused_v643_single_use_claim_or_verified_clean_continuation',
+    'actual_20k_pair_and_independent_quality_program_measurement_not_historical_passes')
 
 
 def source_files():
@@ -54,9 +52,15 @@ def source_files():
 
 
 def integration_status():
+    from .v643_training_seed_plan import source_files as finite_sources
+    finite=finite_sources()
     return dict(version=VERSION, candidate_id=CANDIDATE,
-        numerical_PPO_integration_implemented=True, finite_owner_implemented=False,
+        numerical_PPO_integration_implemented=True, finite_owner_implemented=True,
         training_entrypoint_enabled=False, missing_implementation=list(MISSING_FINITE_OWNER),
+        component_run_is_not_a_training_capability=True,
+        finite_entrypoint='scripts/run_warehouse_v643_calibration.py',
+        finite_owner_source_sha256=digest(finite),execution_requires_explicit_checked_plan=True,
+        unexecuted_prerequisites=list(EXECUTION_PREREQUISITES),
         reference_actor_sha256=REFERENCE_SHA256,
         source_files=source_files(), source_sha256=digest(source_files()),
         previous_20k_pass_can_authorize_this_candidate=False,
@@ -68,8 +72,8 @@ def integration_status():
 def run(*_args, **_kwargs):
     # Deliberately before reading plan paths, opening output, constructing RNGs
     # or burning a single-use claim. A CLI named train is not a capability.
-    raise RuntimeError('v643 finite calibration owner is not implemented; no training or claim: '
-                       + '; '.join(MISSING_FINITE_OWNER))
+    raise RuntimeError('v643 numerical component is not an execution capability; use the source-bound '
+                       'run_warehouse_v643_calibration.py with an exact new plan/clearance; no training or claim here')
 
 
 def validate_common_start(state, reference_buffer):

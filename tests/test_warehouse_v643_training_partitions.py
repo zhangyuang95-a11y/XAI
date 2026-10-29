@@ -115,6 +115,18 @@ def test_partition_binds_original_reference_and_all_three_inventories_without_ol
     assert partition.value['historical_confirmation_is_not_v643_calibration_pass'] is True
 
 
+def test_all_reference_reads_use_one_absolute_cache_key(partition,tmp_path,monkeypatch):
+    calls=[];ready=partition.reference_evidence
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(p.historical_reference,'load_readiness',lambda directory:(calls.append(directory) or ready))
+    p.load('reference',partition.ref)
+    p.load(tmp_path/'reference',partition.ref)
+    p.prepare(reference_directory='reference',training_inventory_ref=partition.value['train_case_inventory'],
+        program_inventory_ref=partition.value['program_evidence_inventory'],quality_inventory_ref=partition.value['quality_case_inventory'],
+        initialization_seed=0,optimizer_seed=1,output=p.OUTPUT_ROOT/'normalized-reference')
+    assert calls==[(tmp_path/'reference').resolve()]*3
+
+
 def test_mutated_inventory_or_falsepass_cannot_survive_partition_binding(partition):
     path=Path(partition.value['quality_case_inventory']['path'])
     value=json.loads(path.read_text());value['passed']=True

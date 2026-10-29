@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect v643 numerical integration; actual finite training remains disabled."""
+"""Inspect v643 numeric integration; use the explicit finite CLI for training."""
 from pathlib import Path
 import argparse
 import json

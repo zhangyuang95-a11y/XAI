@@ -1,0 +1,188 @@
+{
+  "version": "study-vnext-live-http-software-smoke.v1",
+  "checked_at": "2026-10-29T17:24:51.493323+00:00",
+  "base_url": "https://policylens-warehouse-study.onrender.com",
+  "scope": "synthetic researcher-preview HTTP software checks",
+  "passed": false,
+  "scientific_model_acceptance": false,
+  "scientific_task_quality_evaluated": false,
+  "heldout_evaluated": false,
+  "human_study_sample": false,
+  "pilot_opened": false,
+  "recruitment_opened": false,
+  "external_question_transmission": false,
+  "cases": [],
+  "static_assets": [
+    {
+      "path": "/study/",
+      "sha256": "892a0ab2d163292d48cec996582e3ed5b224cab7eadcff8305cdedef2e1483c2",
+      "exact": true
+    },
+    {
+      "path": "/study-assets/app.js",
+      "sha256": "d16985178e1dbe9dbc2d1b56056a79234e77567c9ba12f7b0eca03b6f0a7007f",
+      "exact": true
+    },
+    {
+      "path": "/study-assets/styles.css",
+      "sha256": "a35c2f3a1c87355477ed27e260d4373697d8b4da6e8bb6291abf0816c75f9d8f",
+      "exact": true
+    },
+    {
+      "path": "/study-assets/board.js",
+      "sha256": "109609a3770244d716ef1452e9075f065cb092a54d45b87fa486b115a0632884",
+      "exact": true
+    },
+    {
+      "path": "/study-assets/preview-board.js",
+      "sha256": "e38aa2355e14408b47105b38e261160354fc4461b53b2d72c8267c6bbe39b3ce",
+      "exact": true
+    },
+    {
+      "path": "/study-assets/input-queue.js",
+      "sha256": "06fdc22212489d617ef3b1942c3bba4ce5eea259afaa65a27d90160fb6fefee2",
+      "exact": true
+    }
+  ],
+  "requests": [
+    {
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1455.642,
+      "bytes": 433,
+      "gzip": true,
+      "server_timing": "serialization;dur=0.029, preview_router;dur=190.654"
+    },
+    {
+      "path": "/api/release",
+      "status": 200,
+      "elapsed_ms": 2100.47,
+      "bytes": 8693,
+      "gzip": true,
+      "server_timing": "integrity;dur=1186.263, inference;dur=0.000, physics;dur=0.000, storage;dur=0.000, total;dur=1186.348, cpu;dur=21.348, serialization;dur=1.498, preview_router;dur=1304.126"
+    },
+    {
+      "path": "/study-api/status",
+      "status": 200,
+      "elapsed_ms": 2200.906,
+      "bytes": 352,
+      "gzip": true,
+      "server_timing": "preview_router;dur=1796.065"
+    },
+    {
+      "path": "/study/",
+      "status": 200,
+      "elapsed_ms": 507.141,
+      "bytes": 5182,
+      "gzip": true,
+      "server_timing": "preview_router;dur=14.192"
+    },
+    {
+      "path": "/study-assets/app.js",
+      "status": 200,
+      "elapsed_ms": 574.496,
+      "bytes": 18432,
+      "gzip": true,
+      "server_timing": "preview_router;dur=99.678"
+    },
+    {
+      "path": "/study-assets/styles.css",
+      "status": 200,
+      "elapsed_ms": 615.244,
+      "bytes": 1496,
+      "gzip": true,
+      "server_timing": "preview_router;dur=192.847"
+    },
+    {
+      "path": "/study-assets/board.js",
+      "status": 200,
+      "elapsed_ms": 934.932,
+      "bytes": 18880,
+      "gzip": true,
+      "server_timing": "preview_router;dur=98.551"
+    },
+    {
+      "path": "/study-assets/preview-board.js",
+      "status": 200,
+      "elapsed_ms": 566.968,
+      "bytes": 2037,
+      "gzip": true,
+      "server_timing": "preview_router;dur=93.257"
+    },
+    {
+      "path": "/study-assets/input-queue.js",
+      "status": 200,
+      "elapsed_ms": 440.326,
+      "bytes": 1453,
+      "gzip": true,
+      "server_timing": "preview_router;dur=4.893"
+    },
+    {
+      "path": "/prolific/",
+      "status": 404,
+      "elapsed_ms": 553.245,
+      "bytes": 42,
+      "gzip": false,
+      "server_timing": "serialization;dur=0.018, preview_router;dur=106.595"
+    },
+    {
+      "path": "/api/start",
+      "status": 404,
+      "elapsed_ms": 403.936,
+      "bytes": 42,
+      "gzip": false,
+      "server_timing": "serialization;dur=0.022, preview_router;dur=3.377"
+    },
+    {
+      "path": "/study-api/enroll",
+      "status": 403,
+      "elapsed_ms": 1903.233,
+      "bytes": 35,
+      "gzip": false,
+      "server_timing": "preview_router;dur=1508.690"
+    },
+    {
+      "path": "/study-api/enroll",
+      "status": 200,
+      "elapsed_ms": 29937.433,
+      "bytes": 1923,
+      "gzip": true,
+      "server_timing": "preview_router;dur=29518.229"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/view",
+      "status": 200,
+      "elapsed_ms": 2267.329,
+      "bytes": 2585,
+      "gzip": true,
+      "server_timing": "preview_router;dur=1797.302"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/preparation",
+      "status": 200,
+      "elapsed_ms": 494.751,
+      "bytes": 2584,
+      "gzip": true,
+      "server_timing": "preview_router;dur=33.033"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/demo",
+      "status": 200,
+      "elapsed_ms": 47689.621,
+      "bytes": 389548,
+      "gzip": true,
+      "server_timing": "preview_router;dur=47089.589"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/view",
+      "status": 200,
+      "elapsed_ms": 1337.767,
+      "bytes": 2645,
+      "gzip": true,
+      "server_timing": "preview_router;dur=969.242"
+    }
+  ],
+  "deployed_commit": "2b98d872a0bf350e85fec82df24de0e37cc01028",
+  "request_count": 17,
+  "elapsed_seconds": 100.977
+}

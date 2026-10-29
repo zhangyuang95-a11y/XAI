@@ -1,0 +1,338 @@
+{
+  "version": "study-vnext-live-http-software-smoke.v1",
+  "checked_at": "2026-10-29T17:21:58.000987+00:00",
+  "base_url": "https://policylens-warehouse-study.onrender.com",
+  "scope": "synthetic researcher-preview HTTP software checks",
+  "passed": false,
+  "scientific_model_acceptance": false,
+  "scientific_task_quality_evaluated": false,
+  "heldout_evaluated": false,
+  "human_study_sample": false,
+  "pilot_opened": false,
+  "recruitment_opened": false,
+  "external_question_transmission": false,
+  "cases": [
+    {
+      "domain": "warehouse",
+      "group": "A",
+      "variant": "regularized",
+      "passed": true,
+      "actor_sha256": "2ff0ed2778ecc14b3cd170aef4eb0410ab6a30382e9109b94fb0531874c93ab1",
+      "human_actor_sha256": "ee3b714c8111cff461d0f25c242270987eb0bfce78389a037efc5f2b4a22ef32",
+      "ai_actor_sha256": "9ef196ef36887d0a151c06d1151897c81eb0e5fff2570feff3dab9f3efd0707b",
+      "binding_sha256": "70635bc3049a85a36fa2304bca5969244ed66a37c11f84d365d60241a12e6d4f",
+      "public_scene_seed": 40790,
+      "demonstration_frames": 120,
+      "demonstration_all_frame_NN_and_physics_exact": true,
+      "committed_human_wait_steps": 3,
+      "human_takeover_keeps_frozen_ai": true,
+      "retry_idempotent": true,
+      "restore_exact": true,
+      "replay_exact": true,
+      "no_unexecuted_action_exposed": true,
+      "task1_questions_refused": true,
+      "elapsed_seconds": 160.507
+    }
+  ],
+  "static_assets": [
+    {
+      "path": "/study/",
+      "sha256": "892a0ab2d163292d48cec996582e3ed5b224cab7eadcff8305cdedef2e1483c2",
+      "exact": true
+    },
+    {
+      "path": "/study-assets/app.js",
+      "sha256": "d16985178e1dbe9dbc2d1b56056a79234e77567c9ba12f7b0eca03b6f0a7007f",
+      "exact": true
+    },
+    {
+      "path": "/study-assets/styles.css",
+      "sha256": "a35c2f3a1c87355477ed27e260d4373697d8b4da6e8bb6291abf0816c75f9d8f",
+      "exact": true
+    },
+    {
+      "path": "/study-assets/board.js",
+      "sha256": "109609a3770244d716ef1452e9075f065cb092a54d45b87fa486b115a0632884",
+      "exact": true
+    },
+    {
+      "path": "/study-assets/preview-board.js",
+      "sha256": "e38aa2355e14408b47105b38e261160354fc4461b53b2d72c8267c6bbe39b3ce",
+      "exact": true
+    },
+    {
+      "path": "/study-assets/input-queue.js",
+      "sha256": "06fdc22212489d617ef3b1942c3bba4ce5eea259afaa65a27d90160fb6fefee2",
+      "exact": true
+    }
+  ],
+  "requests": [
+    {
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2645.363,
+      "bytes": 433,
+      "gzip": true,
+      "server_timing": "serialization;dur=0.026, preview_router;dur=1.079"
+    },
+    {
+      "path": "/api/release",
+      "status": 200,
+      "elapsed_ms": 494.318,
+      "bytes": 8693,
+      "gzip": true,
+      "server_timing": "integrity;dur=16.015, inference;dur=0.000, physics;dur=0.000, storage;dur=0.000, total;dur=16.111, cpu;dur=14.213, serialization;dur=0.334, preview_router;dur=87.601"
+    },
+    {
+      "path": "/study-api/status",
+      "status": 200,
+      "elapsed_ms": 389.957,
+      "bytes": 352,
+      "gzip": true,
+      "server_timing": "preview_router;dur=19.463"
+    },
+    {
+      "path": "/study/",
+      "status": 200,
+      "elapsed_ms": 826.858,
+      "bytes": 5182,
+      "gzip": true,
+      "server_timing": "preview_router;dur=1.427"
+    },
+    {
+      "path": "/study-assets/app.js",
+      "status": 200,
+      "elapsed_ms": 383.781,
+      "bytes": 18432,
+      "gzip": true,
+      "server_timing": "preview_router;dur=2.832"
+    },
+    {
+      "path": "/study-assets/styles.css",
+      "status": 200,
+      "elapsed_ms": 366.777,
+      "bytes": 1496,
+      "gzip": true,
+      "server_timing": "preview_router;dur=1.344"
+    },
+    {
+      "path": "/study-assets/board.js",
+      "status": 200,
+      "elapsed_ms": 551.762,
+      "bytes": 18880,
+      "gzip": true,
+      "server_timing": "preview_router;dur=1.435"
+    },
+    {
+      "path": "/study-assets/preview-board.js",
+      "status": 200,
+      "elapsed_ms": 394.518,
+      "bytes": 2037,
+      "gzip": true,
+      "server_timing": "preview_router;dur=1.352"
+    },
+    {
+      "path": "/study-assets/input-queue.js",
+      "status": 200,
+      "elapsed_ms": 424.384,
+      "bytes": 1453,
+      "gzip": true,
+      "server_timing": "preview_router;dur=1.298"
+    },
+    {
+      "path": "/prolific/",
+      "status": 404,
+      "elapsed_ms": 370.736,
+      "bytes": 42,
+      "gzip": false,
+      "server_timing": "serialization;dur=0.029, preview_router;dur=1.221"
+    },
+    {
+      "path": "/api/start",
+      "status": 404,
+      "elapsed_ms": 373.83,
+      "bytes": 42,
+      "gzip": false,
+      "server_timing": "serialization;dur=0.026, preview_router;dur=0.986"
+    },
+    {
+      "path": "/study-api/enroll",
+      "status": 403,
+      "elapsed_ms": 407.479,
+      "bytes": 35,
+      "gzip": false,
+      "server_timing": "preview_router;dur=13.344"
+    },
+    {
+      "path": "/study-api/enroll",
+      "status": 200,
+      "elapsed_ms": 411.97,
+      "bytes": 1923,
+      "gzip": true,
+      "server_timing": "preview_router;dur=39.979"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/view",
+      "status": 200,
+      "elapsed_ms": 485.45,
+      "bytes": 2585,
+      "gzip": true,
+      "server_timing": "preview_router;dur=83.535"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/preparation",
+      "status": 200,
+      "elapsed_ms": 395.804,
+      "bytes": 2584,
+      "gzip": true,
+      "server_timing": "preview_router;dur=19.882"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/demo",
+      "status": 200,
+      "elapsed_ms": 49254.434,
+      "bytes": 389548,
+      "gzip": true,
+      "server_timing": "preview_router;dur=48784.000"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/view",
+      "status": 200,
+      "elapsed_ms": 1476.449,
+      "bytes": 2645,
+      "gzip": true,
+      "server_timing": "preview_router;dur=1106.054"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/preparation",
+      "status": 200,
+      "elapsed_ms": 22017.674,
+      "bytes": 2644,
+      "gzip": true,
+      "server_timing": "preview_router;dur=21643.942"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/demo-complete",
+      "status": 200,
+      "elapsed_ms": 49374.641,
+      "bytes": 2654,
+      "gzip": true,
+      "server_timing": "preview_router;dur=49001.264"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/next-task",
+      "status": 200,
+      "elapsed_ms": 25302.099,
+      "bytes": 7330,
+      "gzip": true,
+      "server_timing": "preview_router;dur=24941.499"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/action",
+      "status": 200,
+      "elapsed_ms": 1172.293,
+      "bytes": 7544,
+      "gzip": true,
+      "server_timing": "preview_router;dur=796.924"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/action",
+      "status": 200,
+      "elapsed_ms": 785.646,
+      "bytes": 7544,
+      "gzip": true,
+      "server_timing": "preview_router;dur=414.971"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/action",
+      "status": 200,
+      "elapsed_ms": 1454.795,
+      "bytes": 7552,
+      "gzip": true,
+      "server_timing": "preview_router;dur=1085.606"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/action",
+      "status": 200,
+      "elapsed_ms": 781.572,
+      "bytes": 7552,
+      "gzip": true,
+      "server_timing": "preview_router;dur=340.282"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/action",
+      "status": 200,
+      "elapsed_ms": 1587.9,
+      "bytes": 7552,
+      "gzip": true,
+      "server_timing": "preview_router;dur=1202.616"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/action",
+      "status": 200,
+      "elapsed_ms": 679.664,
+      "bytes": 7552,
+      "gzip": true,
+      "server_timing": "preview_router;dur=258.474"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/view",
+      "status": 200,
+      "elapsed_ms": 989.427,
+      "bytes": 7552,
+      "gzip": true,
+      "server_timing": "preview_router;dur=625.253"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/replay?task=1",
+      "status": 200,
+      "elapsed_ms": 692.987,
+      "bytes": 21231,
+      "gzip": true,
+      "server_timing": "preview_router;dur=349.991"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/answers",
+      "status": 403,
+      "elapsed_ms": 1949.994,
+      "bytes": 44,
+      "gzip": false,
+      "server_timing": "preview_router;dur=177.022"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/question",
+      "status": 403,
+      "elapsed_ms": 453.611,
+      "bytes": 44,
+      "gzip": false,
+      "server_timing": "preview_router;dur=75.058"
+    },
+    {
+      "path": "/study-api/enroll",
+      "status": 200,
+      "elapsed_ms": 380.847,
+      "bytes": 1177,
+      "gzip": true,
+      "server_timing": "preview_router;dur=29.708"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/view",
+      "status": 200,
+      "elapsed_ms": 399.252,
+      "bytes": 1839,
+      "gzip": true,
+      "server_timing": "preview_router;dur=57.652"
+    },
+    {
+      "path": "/study-api/<synthetic-instance>/preparation",
+      "status": 200,
+      "elapsed_ms": 501.761,
+      "bytes": 1838,
+      "gzip": true,
+      "server_timing": "preview_router;dur=34.279"
+    }
+  ],
+  "deployed_commit": "2b98d872a0bf350e85fec82df24de0e37cc01028",
+  "request_count": 33,
+  "elapsed_seconds": 172.669
+}

@@ -1,0 +1,39 @@
+{
+  "scope": "software preview deployment; no scientific admission",
+  "deployment_commit": "2b98d872a0bf350e85fec82df24de0e37cc01028",
+  "deployment_id": "dep-dbhnv1on74is73eiohcg",
+  "pilot_opened": false,
+  "old_manual_six_models_67_requests_passed": true,
+  "new_flow_completed_cases": [
+    {
+      "domain": "warehouse",
+      "group": "A",
+      "passed": true
+    },
+    {
+      "domain": "warehouse",
+      "group": "C",
+      "passed": true
+    },
+    {
+      "domain": "warehouse",
+      "group": "B",
+      "passed": true
+    },
+    {
+      "domain": "pong",
+      "group": "A",
+      "passed": true
+    },
+    {
+      "domain": "pong",
+      "group": "C",
+      "passed": true
+    }
+  ],
+  "nine_case_new_flow_check_complete": false,
+  "supplementary_new_flow_stop": "operator stopped long cold-demo checks after five completed Warehouse/Pong groups to release free preview capacity; not a scientific model failure",
+  "partial_receipt_sha256": "c50e1bedac2983f347f3bf9b288ab0ec169d9057292c04467c5ea39aded95123",
+  "browser_preview_capture": "unavailable: browser automation timed out; HTTP deployment and exact frozen NN/physics verified separately",
+  "ephemeral_preview_storage": true
+}

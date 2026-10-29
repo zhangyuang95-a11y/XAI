@@ -1,0 +1,12 @@
+{
+  "kind": "synthetic_manual_HTTP_smoke_transport_interruption",
+  "checked_at": "2026-10-29T17:23:13.759438+00:00",
+  "passed": false,
+  "complete_receipt_generated": false,
+  "scientific_model_acceptance": false,
+  "human_study_sample": false,
+  "phase": "read_only_manual_session_restore",
+  "error_type": "URLError",
+  "transport_error": "TLS unexpected EOF",
+  "model_or_physics_mismatch_reported": false
+}

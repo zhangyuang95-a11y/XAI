@@ -1,0 +1,108 @@
+{
+  "all_instance_groups_domains": [
+    [
+      "warehouse",
+      "A"
+    ],
+    [
+      "warehouse",
+      "B"
+    ],
+    [
+      "warehouse",
+      "C"
+    ],
+    [
+      "pong",
+      "A"
+    ],
+    [
+      "pong",
+      "B"
+    ],
+    [
+      "pong",
+      "C"
+    ],
+    [
+      "kitchen",
+      "A"
+    ],
+    [
+      "kitchen",
+      "B"
+    ],
+    [
+      "kitchen",
+      "C"
+    ]
+  ],
+  "checks": {
+    "concurrent_duplicate_command": {
+      "automatic_backend_retries": 0,
+      "committed_commands": 1,
+      "explicit_same_command_recovery": true,
+      "serialization_conflicts": 1
+    },
+    "immutability": {
+      "guarded_operations": [
+        "binding_update",
+        "frame_update",
+        "frame_delete",
+        "consent_update",
+        "consent_delete"
+      ],
+      "post_rollback_export_unchanged": true
+    },
+    "pg_dump_restore_fresh_database_exact_exports": true,
+    "read_while_provider_outside_database": {
+      "actual_external_provider_calls": 0,
+      "read_completed_while_provider_blocked": true,
+      "read_seconds": 0.03494637459516525
+    },
+    "reopen_exact_exports": true,
+    "restored_guards": {
+      "guarded_operations": [
+        "binding_update",
+        "frame_update",
+        "frame_delete",
+        "consent_update",
+        "consent_delete"
+      ],
+      "post_rollback_export_unchanged": true
+    },
+    "round_trip_timestamp_type": "double precision"
+  },
+  "counts": {
+    "v642_commands": 54,
+    "v642_frames": 81,
+    "v642_instances": 9,
+    "v642_runs": 27,
+    "vnext_enrollments": 9,
+    "vnext_preparation": 18,
+    "vnext_surveys": 9
+  },
+  "elapsed_seconds": 12.825997542124242,
+  "existing_clusters_accessed": false,
+  "export_sha256": "9d2bc1b224d8af4c5a3be478c2686066cf9d5a5cd3ba69a321681f74f124e5e9",
+  "external_provider_calls": 0,
+  "human_results": false,
+  "owned_cluster_stopped": true,
+  "pilot_authorization": false,
+  "postgres_version": "postgres (PostgreSQL) 17.11 (Homebrew)",
+  "production_storage_receipt": false,
+  "protocol_sha256": "ee583c93308e07dde06cb4fff5d496aa1079a33ac8e0f2fc4919c0c1d982379a",
+  "psycopg_version": "3.3.6",
+  "source_sha256": {
+    "runtime_v642/store.py": "b260873e3a8ccb67918918bde529cab821036da51b9b47c1194b654f762671cc",
+    "scripts/check_study_vnext_postgres.py": "3ae1dabef626429b04f73b8ccfc6508763ac3ea1cf151d898a1af17b03afe699",
+    "study_vnext/storage.py": "8133c94b4b963eaaf392087fe30a9318a0a687c47a70cfbd963d5534ec685188",
+    "study_vnext/store.py": "58562d7476cdd5f92425aa61fbd29c51000e1519427b8ac0fed2e5820983ced0",
+    "tests/test_runtime_v642_store.py": "c62c3ba4e1614a3c2ffeac814600479bcd45b159f4ceb7244fde29a9be19ad22"
+  },
+  "status": "passed_synthetic_local_software_drill",
+  "synthetic_backup_sha256": "8ef207ff350342009957dc34c45c03ca7ca4688682d0581bbadea92bbc909bc4",
+  "synthetic_only": true,
+  "temporary_cluster_removed": true,
+  "version": "study-vnext-local-postgres-drill.v1"
+}

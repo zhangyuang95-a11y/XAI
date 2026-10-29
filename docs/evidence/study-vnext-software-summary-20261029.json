@@ -1,0 +1,538 @@
+{
+  "version": "study-mentor-implementation-local-software-evidence-20261029.v1",
+  "status": "software_checks_only",
+  "scientific_model_admission": false,
+  "human_study_results": false,
+  "pilot_opened": false,
+  "live_site_deployed": false,
+  "institution_and_external_provider_deferred_by_user": true,
+  "evidence": [
+    {
+      "path": "docs/evidence/study-vnext-six-model-workflows-20261029.json",
+      "sha256": "c488731741dfbc766f164edb7b7d75b2e97da2e620f3bdbd2a70b1972888e3ca",
+      "source": "output/study_vnext/software-20261029/actual-six-model-lazy-history-check.json"
+    },
+    {
+      "path": "docs/evidence/study-vnext-warehouse-final-workflows-20261029.json",
+      "sha256": "decec46734f267f39cc4e89293e63b9ce7a9cba1d75e433f44b01871733318c8",
+      "source": "output/study_vnext/software-20261029/warehouse-request-physics-final-flow-check.json"
+    },
+    {
+      "path": "docs/evidence/study-vnext-local-postgres-final-20261029.json",
+      "sha256": "f30c28ecbb1ec97a7311b106808a5d9f733b57b873d58169814c3b35283cac2a",
+      "source": "output/study_vnext/local-postgres-20261029-final/receipt.json"
+    },
+    {
+      "path": "docs/evidence/study-vnext-history-question-panel-20261029.png",
+      "sha256": "704c56db389a712f99c75ab3d011953ec18619c4dc9b5d23823739f0d45712b3",
+      "source": "output/study_vnext/software-20261029/browser-final-question-panel.png"
+    }
+  ],
+  "performance": {
+    "scope": "local warm normal service path; not network or Render",
+    "warmup_actions": 10,
+    "measured_actions": 30,
+    "all_six_local_P95_below_80ms": true,
+    "old_website_70percent_improvement_verified": false,
+    "rows": [
+      {
+        "domain": "pong",
+        "variant": "raw",
+        "binding": {
+          "accepted_receipt_sha256": "59e2e004624ab22817c26aea8324dbd2cb5e97ccf57cb6b650d79edcc69131a5",
+          "action_physics_config_sha256": "1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42",
+          "actor_sha256": "1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7",
+          "ai_actor_sha256": "55c6a0aca47653098aeecd12bead31c14b10971a1891a59e45d332b154fb7048",
+          "domain": "pong",
+          "feature_schema_sha256": "8fe35ce03e23a2db1373c9f310d9c578333f16273116f4a9dcf71df050f9e188",
+          "human_actor_sha256": "897ecc4696db6de386783fdaec7c21086a6b1f25af557de6e327ff0034842b52",
+          "method_schema": "carried-v5-paired-PPO-frozen-NN.v1",
+          "model_schema": "pong-rolling-actors.v1",
+          "policy_id": "pong-raw-v5",
+          "programs": [],
+          "release_id": "policylens-manual-model-preview-20261024.v1",
+          "variant": "raw"
+        },
+        "latency_ms": {
+          "N": 30,
+          "P50": 59.117062482982874,
+          "P95": 69.80124800465997,
+          "maximum": 77.96137500554323,
+          "mean": 59.961898531764746,
+          "minimum": 56.51920801028609
+        },
+        "asset_bytes": {
+          "N": 30,
+          "P50": 10516690.0,
+          "P95": 10516690.0,
+          "maximum": 10516690,
+          "mean": 10516690,
+          "minimum": 10516690
+        },
+        "uncached_pair_decision_computations": {
+          "N": 30,
+          "P50": 3.0,
+          "P95": 3.0,
+          "maximum": 3,
+          "mean": 3,
+          "minimum": 3
+        },
+        "equality": {
+          "compared_actions": 40,
+          "exact_actions_states_scores_bindings": true,
+          "physical_state_hashes_identical": true,
+          "public_responses_identical": true
+        },
+        "starting_database_sha256": "04653a967a4b8a08bae5064a67816f626baeb9f1afa0e4a9c41291db81903185",
+        "source_report": "output/study_vnext/engineering/six-model-history-benchmark-20261029-01/report.json",
+        "source_report_sha256": "d85049000cfe0fcd7dedffcb84eef89c1eb981151ea2b151c980c4db260616ef",
+        "source_files": {
+          "runtime_v642/catalog.py": "233853df2b5d7502fe980c2bcc7632ec455b0a802e3b2c29cadbc077669b502e",
+          "runtime_v642/contracts.py": "79251119598d52b1840caa6a1bedf46b1b07edb65020f2d35a7f2d02b07f6843",
+          "runtime_v642/legacy_domain.py": "6e6ef7efddbf719deb7638d15ec783f7b14f7742529d9a951af4f917f431948c",
+          "runtime_v642/registry.py": "7369a4a4e26881265f4133a2e7796bb8a4efcbf8916846b072cd7d7137dd2425",
+          "runtime_v642/server.py": "81aaa5557a39df221224025b52e8ae33fc8e386e50f186f0c1a92747f92e8b50",
+          "runtime_v642/store.py": "b260873e3a8ccb67918918bde529cab821036da51b9b47c1194b654f762671cc",
+          "scripts/benchmark_study_vnext_history.py": "f72f95fd02e5a595806ec05f3c6948414126e4760fa304f6f7bde56d77600df1",
+          "study_vnext/history.py": "11e89835b7c500b3e2bf17734992044ef7737846a31d7bdb0b026a7d916390a4",
+          "study_vnext/protocol.py": "f1fd8fd85040786b3f970ad42603d4e72446824aaf4ca149f6726ca9aa7a7d1a",
+          "study_vnext/server.py": "5dc344e899c2bc0db36bd07a80da8a7530bb7ade84318b98946e07489c14fb6f",
+          "study_vnext/store.py": "58562d7476cdd5f92425aa61fbd29c51000e1519427b8ac0fed2e5820983ced0",
+          "ui/model_preview_fast_runtime.py": "25e3843ef59da814108fb497c47507725f78c0af9718973c20cbb3f615b63a3b",
+          "ui/model_preview_server.py": "83c84ec2830a465213b322bd70b8ae249f09c9caecec35cb0450158fb0406204",
+          "ui/model_preview_warehouse.py": "977c9cde6fbbf387960d786910d7007ef41b46c6b38e0dbc0b7a50927ccb97d6"
+        }
+      },
+      {
+        "domain": "pong",
+        "variant": "regularized",
+        "binding": {
+          "accepted_receipt_sha256": "59e2e004624ab22817c26aea8324dbd2cb5e97ccf57cb6b650d79edcc69131a5",
+          "action_physics_config_sha256": "1ade6a67b51884113594884ee27215af70d4a85528c91f03839e4e6961af7d42",
+          "actor_sha256": "1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6",
+          "ai_actor_sha256": "35b21e4c4aacb024afe8667b4a7f3a4e6677795e5c194beb9bcd1b1fa9c1dcc9",
+          "domain": "pong",
+          "feature_schema_sha256": "8fe35ce03e23a2db1373c9f310d9c578333f16273116f4a9dcf71df050f9e188",
+          "human_actor_sha256": "aabe915937418ec9d6c3fb3e95bf71a5c90572a55ae9b84ebba15e49357b3a57",
+          "method_schema": "carried-v5-paired-PPO-frozen-NN.v1",
+          "model_schema": "pong-rolling-actors.v1",
+          "policy_id": "pong-regularized-v5",
+          "programs": [
+            {
+              "archive_sha256": "c09f4a39bd3f29c8ff7e5ed703d1d3e8b21314ec962c3854051b776d89736cdf",
+              "audit_scope": "carried_selected_actor_development_audit",
+              "independent_audit_sha256": "ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958",
+              "native_role": "human",
+              "reader_schema": "runtime-v642-carried-pong-program-evidence.v1",
+              "role": "human",
+              "source_program_sha256": "c09f4a39bd3f29c8ff7e5ed703d1d3e8b21314ec962c3854051b776d89736cdf"
+            },
+            {
+              "archive_sha256": "8bea30622492db337654823e43a331f8a46f2fdbeb95fd2121c79af7e656637f",
+              "audit_scope": "carried_selected_actor_development_audit",
+              "independent_audit_sha256": "ad6e4882964c84cbc565fc72dd33a16e79399f5984b416f84026bf0da1fd9958",
+              "native_role": "ai",
+              "reader_schema": "runtime-v642-carried-pong-program-evidence.v1",
+              "role": "ai",
+              "source_program_sha256": "8bea30622492db337654823e43a331f8a46f2fdbeb95fd2121c79af7e656637f"
+            }
+          ],
+          "release_id": "policylens-manual-model-preview-20261024.v1",
+          "variant": "regularized"
+        },
+        "latency_ms": {
+          "N": 30,
+          "P50": 59.80662489309907,
+          "P95": 69.94566861540075,
+          "maximum": 81.86645805835724,
+          "mean": 60.91900270742675,
+          "minimum": 56.3205829821527
+        },
+        "asset_bytes": {
+          "N": 30,
+          "P50": 10516690.0,
+          "P95": 10516690.0,
+          "maximum": 10516690,
+          "mean": 10516690,
+          "minimum": 10516690
+        },
+        "uncached_pair_decision_computations": {
+          "N": 30,
+          "P50": 3.0,
+          "P95": 3.0,
+          "maximum": 3,
+          "mean": 3,
+          "minimum": 3
+        },
+        "equality": {
+          "compared_actions": 40,
+          "exact_actions_states_scores_bindings": true,
+          "physical_state_hashes_identical": true,
+          "public_responses_identical": true
+        },
+        "starting_database_sha256": "221df7a046db672a1202d99a9e7a683240d70ab060a5f15777320640a07b1b85",
+        "source_report": "output/study_vnext/engineering/six-model-history-benchmark-20261029-01/report.json",
+        "source_report_sha256": "d85049000cfe0fcd7dedffcb84eef89c1eb981151ea2b151c980c4db260616ef",
+        "source_files": {
+          "runtime_v642/catalog.py": "233853df2b5d7502fe980c2bcc7632ec455b0a802e3b2c29cadbc077669b502e",
+          "runtime_v642/contracts.py": "79251119598d52b1840caa6a1bedf46b1b07edb65020f2d35a7f2d02b07f6843",
+          "runtime_v642/legacy_domain.py": "6e6ef7efddbf719deb7638d15ec783f7b14f7742529d9a951af4f917f431948c",
+          "runtime_v642/registry.py": "7369a4a4e26881265f4133a2e7796bb8a4efcbf8916846b072cd7d7137dd2425",
+          "runtime_v642/server.py": "81aaa5557a39df221224025b52e8ae33fc8e386e50f186f0c1a92747f92e8b50",
+          "runtime_v642/store.py": "b260873e3a8ccb67918918bde529cab821036da51b9b47c1194b654f762671cc",
+          "scripts/benchmark_study_vnext_history.py": "f72f95fd02e5a595806ec05f3c6948414126e4760fa304f6f7bde56d77600df1",
+          "study_vnext/history.py": "11e89835b7c500b3e2bf17734992044ef7737846a31d7bdb0b026a7d916390a4",
+          "study_vnext/protocol.py": "f1fd8fd85040786b3f970ad42603d4e72446824aaf4ca149f6726ca9aa7a7d1a",
+          "study_vnext/server.py": "5dc344e899c2bc0db36bd07a80da8a7530bb7ade84318b98946e07489c14fb6f",
+          "study_vnext/store.py": "58562d7476cdd5f92425aa61fbd29c51000e1519427b8ac0fed2e5820983ced0",
+          "ui/model_preview_fast_runtime.py": "25e3843ef59da814108fb497c47507725f78c0af9718973c20cbb3f615b63a3b",
+          "ui/model_preview_server.py": "83c84ec2830a465213b322bd70b8ae249f09c9caecec35cb0450158fb0406204",
+          "ui/model_preview_warehouse.py": "977c9cde6fbbf387960d786910d7007ef41b46c6b38e0dbc0b7a50927ccb97d6"
+        }
+      },
+      {
+        "domain": "kitchen",
+        "variant": "raw",
+        "binding": {
+          "accepted_receipt_sha256": "cf0e276d8614b8cf4a16e249e9433fab44c74e79c87ab51e93b0bfbc16107e79",
+          "action_physics_config_sha256": "b0aeeea1772221f047e294c44c6632a98ff0b92f5e5e645678142d62c7fd7b6d",
+          "actor_sha256": "30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb",
+          "ai_actor_sha256": "fb118f162aa0882a8693131e8f286c59733941c12b24d34dbfa20ff1e63fd6b6",
+          "domain": "kitchen",
+          "feature_schema_sha256": "ad170b88ee31776c3c89a8c69d9124751b5cc07e18c96671dc6a3b60f7aae1a3",
+          "human_actor_sha256": "967e48851f72d373d6346fa5e638d6995f78a7ba165b5c9b279c795e8939c97c",
+          "method_schema": "carried-v5-paired-PPO-frozen-NN.v1",
+          "model_schema": "kitchen-dual-nn-v1",
+          "policy_id": "kitchen-raw-v5",
+          "programs": [],
+          "release_id": "policylens-manual-model-preview-20261024.v1",
+          "variant": "raw"
+        },
+        "latency_ms": {
+          "N": 30,
+          "P50": 22.226500092074275,
+          "P95": 23.257723078131676,
+          "maximum": 23.54745799675584,
+          "mean": 21.84290831598143,
+          "minimum": 19.98745882883668
+        },
+        "asset_bytes": {
+          "N": 30,
+          "P50": 10516690.0,
+          "P95": 10516690.0,
+          "maximum": 10516690,
+          "mean": 10516690,
+          "minimum": 10516690
+        },
+        "uncached_pair_decision_computations": {
+          "N": 30,
+          "P50": 3.0,
+          "P95": 3.0,
+          "maximum": 3,
+          "mean": 3,
+          "minimum": 3
+        },
+        "equality": {
+          "compared_actions": 40,
+          "exact_actions_states_scores_bindings": true,
+          "physical_state_hashes_identical": true,
+          "public_responses_identical": true
+        },
+        "starting_database_sha256": "bd5adaa2862423ae5efcfb088efd0d80ac669bbafcf1f8356ce852c292359f8b",
+        "source_report": "output/study_vnext/engineering/six-model-history-benchmark-20261029-01/report.json",
+        "source_report_sha256": "d85049000cfe0fcd7dedffcb84eef89c1eb981151ea2b151c980c4db260616ef",
+        "source_files": {
+          "runtime_v642/catalog.py": "233853df2b5d7502fe980c2bcc7632ec455b0a802e3b2c29cadbc077669b502e",
+          "runtime_v642/contracts.py": "79251119598d52b1840caa6a1bedf46b1b07edb65020f2d35a7f2d02b07f6843",
+          "runtime_v642/legacy_domain.py": "6e6ef7efddbf719deb7638d15ec783f7b14f7742529d9a951af4f917f431948c",
+          "runtime_v642/registry.py": "7369a4a4e26881265f4133a2e7796bb8a4efcbf8916846b072cd7d7137dd2425",
+          "runtime_v642/server.py": "81aaa5557a39df221224025b52e8ae33fc8e386e50f186f0c1a92747f92e8b50",
+          "runtime_v642/store.py": "b260873e3a8ccb67918918bde529cab821036da51b9b47c1194b654f762671cc",
+          "scripts/benchmark_study_vnext_history.py": "f72f95fd02e5a595806ec05f3c6948414126e4760fa304f6f7bde56d77600df1",
+          "study_vnext/history.py": "11e89835b7c500b3e2bf17734992044ef7737846a31d7bdb0b026a7d916390a4",
+          "study_vnext/protocol.py": "f1fd8fd85040786b3f970ad42603d4e72446824aaf4ca149f6726ca9aa7a7d1a",
+          "study_vnext/server.py": "5dc344e899c2bc0db36bd07a80da8a7530bb7ade84318b98946e07489c14fb6f",
+          "study_vnext/store.py": "58562d7476cdd5f92425aa61fbd29c51000e1519427b8ac0fed2e5820983ced0",
+          "ui/model_preview_fast_runtime.py": "25e3843ef59da814108fb497c47507725f78c0af9718973c20cbb3f615b63a3b",
+          "ui/model_preview_server.py": "83c84ec2830a465213b322bd70b8ae249f09c9caecec35cb0450158fb0406204",
+          "ui/model_preview_warehouse.py": "977c9cde6fbbf387960d786910d7007ef41b46c6b38e0dbc0b7a50927ccb97d6"
+        }
+      },
+      {
+        "domain": "kitchen",
+        "variant": "regularized",
+        "binding": {
+          "accepted_receipt_sha256": "cf0e276d8614b8cf4a16e249e9433fab44c74e79c87ab51e93b0bfbc16107e79",
+          "action_physics_config_sha256": "b0aeeea1772221f047e294c44c6632a98ff0b92f5e5e645678142d62c7fd7b6d",
+          "actor_sha256": "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85",
+          "ai_actor_sha256": "221708dc90aade679492732d59d8e04e92dbbe87304d4ed0670f88ff6fef8767",
+          "domain": "kitchen",
+          "feature_schema_sha256": "ad170b88ee31776c3c89a8c69d9124751b5cc07e18c96671dc6a3b60f7aae1a3",
+          "human_actor_sha256": "08d69613814b9e22be890ef9be11fa0ed495e4a0d5dc80e8ce1c9f848e21ac7e",
+          "method_schema": "carried-v5-paired-PPO-frozen-NN.v1",
+          "model_schema": "kitchen-dual-nn-v1",
+          "policy_id": "kitchen-regularized-v5",
+          "programs": [
+            {
+              "archive_sha256": "a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988",
+              "audit_scope": "carried_selected_actor_development_audit",
+              "independent_audit_sha256": "012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a",
+              "native_role": "human",
+              "reader_schema": "runtime-v642-carried-kitchen-program-evidence.v1",
+              "role": "human",
+              "source_program_sha256": "a65852187f1601368200909574c99e37f258297d01edb635b28ddd09228de988"
+            },
+            {
+              "archive_sha256": "27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784",
+              "audit_scope": "carried_selected_actor_development_audit",
+              "independent_audit_sha256": "012af827e8416f293bec97670bb3aec1b752de58dc0155051e98d33c56eabc9a",
+              "native_role": "ai",
+              "reader_schema": "runtime-v642-carried-kitchen-program-evidence.v1",
+              "role": "ai",
+              "source_program_sha256": "27bf774cb59c3c4af79eec95ec2412f5def8c305cd16b922d982d083352fc784"
+            }
+          ],
+          "release_id": "policylens-manual-model-preview-20261024.v1",
+          "variant": "regularized"
+        },
+        "latency_ms": {
+          "N": 30,
+          "P50": 23.39564566500485,
+          "P95": 25.60694790445268,
+          "maximum": 26.020666118711233,
+          "mean": 23.65943188779056,
+          "minimum": 22.200167179107666
+        },
+        "asset_bytes": {
+          "N": 30,
+          "P50": 10516690.0,
+          "P95": 10516690.0,
+          "maximum": 10516690,
+          "mean": 10516690,
+          "minimum": 10516690
+        },
+        "uncached_pair_decision_computations": {
+          "N": 30,
+          "P50": 3.0,
+          "P95": 3.0,
+          "maximum": 3,
+          "mean": 3,
+          "minimum": 3
+        },
+        "equality": {
+          "compared_actions": 40,
+          "exact_actions_states_scores_bindings": true,
+          "physical_state_hashes_identical": true,
+          "public_responses_identical": true
+        },
+        "starting_database_sha256": "986c1a58a1c85f64c8e279a0f0ed92e7ef573ccc0183aad3ed78c7dca4f7f240",
+        "source_report": "output/study_vnext/engineering/six-model-history-benchmark-20261029-01/report.json",
+        "source_report_sha256": "d85049000cfe0fcd7dedffcb84eef89c1eb981151ea2b151c980c4db260616ef",
+        "source_files": {
+          "runtime_v642/catalog.py": "233853df2b5d7502fe980c2bcc7632ec455b0a802e3b2c29cadbc077669b502e",
+          "runtime_v642/contracts.py": "79251119598d52b1840caa6a1bedf46b1b07edb65020f2d35a7f2d02b07f6843",
+          "runtime_v642/legacy_domain.py": "6e6ef7efddbf719deb7638d15ec783f7b14f7742529d9a951af4f917f431948c",
+          "runtime_v642/registry.py": "7369a4a4e26881265f4133a2e7796bb8a4efcbf8916846b072cd7d7137dd2425",
+          "runtime_v642/server.py": "81aaa5557a39df221224025b52e8ae33fc8e386e50f186f0c1a92747f92e8b50",
+          "runtime_v642/store.py": "b260873e3a8ccb67918918bde529cab821036da51b9b47c1194b654f762671cc",
+          "scripts/benchmark_study_vnext_history.py": "f72f95fd02e5a595806ec05f3c6948414126e4760fa304f6f7bde56d77600df1",
+          "study_vnext/history.py": "11e89835b7c500b3e2bf17734992044ef7737846a31d7bdb0b026a7d916390a4",
+          "study_vnext/protocol.py": "f1fd8fd85040786b3f970ad42603d4e72446824aaf4ca149f6726ca9aa7a7d1a",
+          "study_vnext/server.py": "5dc344e899c2bc0db36bd07a80da8a7530bb7ade84318b98946e07489c14fb6f",
+          "study_vnext/store.py": "58562d7476cdd5f92425aa61fbd29c51000e1519427b8ac0fed2e5820983ced0",
+          "ui/model_preview_fast_runtime.py": "25e3843ef59da814108fb497c47507725f78c0af9718973c20cbb3f615b63a3b",
+          "ui/model_preview_server.py": "83c84ec2830a465213b322bd70b8ae249f09c9caecec35cb0450158fb0406204",
+          "ui/model_preview_warehouse.py": "977c9cde6fbbf387960d786910d7007ef41b46c6b38e0dbc0b7a50927ccb97d6"
+        }
+      },
+      {
+        "domain": "warehouse",
+        "variant": "raw",
+        "binding": {
+          "accepted_receipt_sha256": "a2d53d155f9ef26df62df09d02a3d776893bcc1e5af74ce623a80ca77890e22e",
+          "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
+          "actor_sha256": "ca7bfddfca1eb89d3c73935cd22d3828600009053e80663cca58e66de9703677",
+          "ai_actor_sha256": "5c219bf9fdc532cfa8c1748d861974c7bed00ca19cd7c1f9ded7e708fe3e78e7",
+          "domain": "warehouse",
+          "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
+          "human_actor_sha256": "ab9daffbc6995c85e2b65efa43f6a1256ff7015431907d5d10be7b132aed1294",
+          "method_schema": "warehouse-v642-v620-preserving-calibration",
+          "model_schema": "warehouse-dual-actor.v6.18-quality-selective",
+          "policy_id": "warehouse-raw-v642-20k-preview",
+          "programs": [],
+          "release_id": "policylens-manual-model-preview-20261024.v1",
+          "variant": "raw"
+        },
+        "latency_ms": {
+          "N": 30,
+          "P50": 50.295041874051094,
+          "P95": 52.8754145372659,
+          "maximum": 54.05141692608595,
+          "mean": 50.111581974973284,
+          "minimum": 46.45950021222234
+        },
+        "asset_bytes": {
+          "N": 30,
+          "P50": 10516690.0,
+          "P95": 10516690.0,
+          "maximum": 10516690,
+          "mean": 10516690,
+          "minimum": 10516690
+        },
+        "uncached_pair_decision_computations": {
+          "N": 30,
+          "P50": 3.0,
+          "P95": 3.0,
+          "maximum": 3,
+          "mean": 3,
+          "minimum": 3
+        },
+        "equality": {
+          "compared_actions": 40,
+          "exact_actions_states_scores_bindings": true,
+          "physical_state_hashes_identical": true,
+          "public_responses_identical": true
+        },
+        "starting_database_sha256": "a49a600451111716b7a668c5f246f045c0701f97ca825f8f8e3ff79bd01fa27b",
+        "source_report": "output/study_vnext/engineering/warehouse-request-physics-benchmark-20261029-01/report.json",
+        "source_report_sha256": "16b695ea27a1228b545911b6558043c5495065dfb81cc6cee64847d86da42258",
+        "source_files": {
+          "runtime_v642/catalog.py": "233853df2b5d7502fe980c2bcc7632ec455b0a802e3b2c29cadbc077669b502e",
+          "runtime_v642/contracts.py": "79251119598d52b1840caa6a1bedf46b1b07edb65020f2d35a7f2d02b07f6843",
+          "runtime_v642/legacy_domain.py": "6e6ef7efddbf719deb7638d15ec783f7b14f7742529d9a951af4f917f431948c",
+          "runtime_v642/registry.py": "7369a4a4e26881265f4133a2e7796bb8a4efcbf8916846b072cd7d7137dd2425",
+          "runtime_v642/server.py": "81aaa5557a39df221224025b52e8ae33fc8e386e50f186f0c1a92747f92e8b50",
+          "runtime_v642/store.py": "b260873e3a8ccb67918918bde529cab821036da51b9b47c1194b654f762671cc",
+          "scripts/benchmark_study_vnext_history.py": "f767a0b25c048ce9363565949ead71fc4f09c47d56a9aab574b0c3420b1a0e55",
+          "study_vnext/history.py": "11e89835b7c500b3e2bf17734992044ef7737846a31d7bdb0b026a7d916390a4",
+          "study_vnext/protocol.py": "f1fd8fd85040786b3f970ad42603d4e72446824aaf4ca149f6726ca9aa7a7d1a",
+          "study_vnext/request_physics.py": "abb3b324d4c15a7f74bb81de1cebeb2df4393d254465cf01a008aabfb941e8c4",
+          "study_vnext/server.py": "a5159782a062951413a2756cff85bd76889891abc81b908b4b904f1a39206ded",
+          "study_vnext/store.py": "58562d7476cdd5f92425aa61fbd29c51000e1519427b8ac0fed2e5820983ced0",
+          "tests/fixtures/study_vnext_history_prefix_reference.py": "4e54f65b86450ad9efe183fe95efb11cf06f3054ff9023c9f44ea8cf82337c68",
+          "ui/model_preview_fast_runtime.py": "25e3843ef59da814108fb497c47507725f78c0af9718973c20cbb3f615b63a3b",
+          "ui/model_preview_server.py": "83c84ec2830a465213b322bd70b8ae249f09c9caecec35cb0450158fb0406204",
+          "ui/model_preview_warehouse.py": "977c9cde6fbbf387960d786910d7007ef41b46c6b38e0dbc0b7a50927ccb97d6"
+        }
+      },
+      {
+        "domain": "warehouse",
+        "variant": "regularized",
+        "binding": {
+          "accepted_receipt_sha256": "a2d53d155f9ef26df62df09d02a3d776893bcc1e5af74ce623a80ca77890e22e",
+          "action_physics_config_sha256": "ead2694c98fc8b9c7c6cb5dfdd1fbf9a6028a7138494c1bd38f3454b0d98fe67",
+          "actor_sha256": "2ff0ed2778ecc14b3cd170aef4eb0410ab6a30382e9109b94fb0531874c93ab1",
+          "ai_actor_sha256": "9ef196ef36887d0a151c06d1151897c81eb0e5fff2570feff3dab9f3efd0707b",
+          "domain": "warehouse",
+          "feature_schema_sha256": "226d9b1374d8470c9051fcc319d0e19f8be94d7151bfc1a2b333905a5fd0d066",
+          "human_actor_sha256": "ee3b714c8111cff461d0f25c242270987eb0bfce78389a037efc5f2b4a22ef32",
+          "method_schema": "warehouse-v642-v620-preserving-calibration",
+          "model_schema": "warehouse-dual-actor.v6.18-quality-selective",
+          "policy_id": "warehouse-regularized-v642-20k-preview",
+          "programs": [
+            {
+              "archive_sha256": "6633a6dd8a7370a9a26b9749c40cd6b1e6c9166a1573b5f45e4c3117929d0519",
+              "audit_scope": "independent_final_program_audit",
+              "independent_audit_sha256": null,
+              "native_role": "robot_1",
+              "reader_schema": "warehouse-role-program.v6.42-explicit-depth-capacity",
+              "role": "human",
+              "source_program_sha256": "6633a6dd8a7370a9a26b9749c40cd6b1e6c9166a1573b5f45e4c3117929d0519"
+            },
+            {
+              "archive_sha256": "5a486500a9d019fb70a24ad6ce868647e3ac2a0d0c93f2a2f4d62d0397314f45",
+              "audit_scope": "independent_final_program_audit",
+              "independent_audit_sha256": null,
+              "native_role": "robot_2",
+              "reader_schema": "warehouse-role-program.v6.42-explicit-depth-capacity",
+              "role": "ai",
+              "source_program_sha256": "5a486500a9d019fb70a24ad6ce868647e3ac2a0d0c93f2a2f4d62d0397314f45"
+            }
+          ],
+          "release_id": "policylens-manual-model-preview-20261024.v1",
+          "variant": "regularized"
+        },
+        "latency_ms": {
+          "N": 30,
+          "P50": 52.00306256301701,
+          "P95": 55.875918664969504,
+          "maximum": 56.43045762553811,
+          "mean": 51.60017775682112,
+          "minimum": 46.60675022751093
+        },
+        "asset_bytes": {
+          "N": 30,
+          "P50": 10516690.0,
+          "P95": 10516690.0,
+          "maximum": 10516690,
+          "mean": 10516690,
+          "minimum": 10516690
+        },
+        "uncached_pair_decision_computations": {
+          "N": 30,
+          "P50": 3.0,
+          "P95": 3.0,
+          "maximum": 3,
+          "mean": 3,
+          "minimum": 3
+        },
+        "equality": {
+          "compared_actions": 40,
+          "exact_actions_states_scores_bindings": true,
+          "physical_state_hashes_identical": true,
+          "public_responses_identical": true
+        },
+        "starting_database_sha256": "eefe64bb04fdef589226ddb65598a231e1ee754c39ee433bb8866c701033cedc",
+        "source_report": "output/study_vnext/engineering/warehouse-request-physics-benchmark-20261029-01/report.json",
+        "source_report_sha256": "16b695ea27a1228b545911b6558043c5495065dfb81cc6cee64847d86da42258",
+        "source_files": {
+          "runtime_v642/catalog.py": "233853df2b5d7502fe980c2bcc7632ec455b0a802e3b2c29cadbc077669b502e",
+          "runtime_v642/contracts.py": "79251119598d52b1840caa6a1bedf46b1b07edb65020f2d35a7f2d02b07f6843",
+          "runtime_v642/legacy_domain.py": "6e6ef7efddbf719deb7638d15ec783f7b14f7742529d9a951af4f917f431948c",
+          "runtime_v642/registry.py": "7369a4a4e26881265f4133a2e7796bb8a4efcbf8916846b072cd7d7137dd2425",
+          "runtime_v642/server.py": "81aaa5557a39df221224025b52e8ae33fc8e386e50f186f0c1a92747f92e8b50",
+          "runtime_v642/store.py": "b260873e3a8ccb67918918bde529cab821036da51b9b47c1194b654f762671cc",
+          "scripts/benchmark_study_vnext_history.py": "f767a0b25c048ce9363565949ead71fc4f09c47d56a9aab574b0c3420b1a0e55",
+          "study_vnext/history.py": "11e89835b7c500b3e2bf17734992044ef7737846a31d7bdb0b026a7d916390a4",
+          "study_vnext/protocol.py": "f1fd8fd85040786b3f970ad42603d4e72446824aaf4ca149f6726ca9aa7a7d1a",
+          "study_vnext/request_physics.py": "abb3b324d4c15a7f74bb81de1cebeb2df4393d254465cf01a008aabfb941e8c4",
+          "study_vnext/server.py": "a5159782a062951413a2756cff85bd76889891abc81b908b4b904f1a39206ded",
+          "study_vnext/store.py": "58562d7476cdd5f92425aa61fbd29c51000e1519427b8ac0fed2e5820983ced0",
+          "tests/fixtures/study_vnext_history_prefix_reference.py": "4e54f65b86450ad9efe183fe95efb11cf06f3054ff9023c9f44ea8cf82337c68",
+          "ui/model_preview_fast_runtime.py": "25e3843ef59da814108fb497c47507725f78c0af9718973c20cbb3f615b63a3b",
+          "ui/model_preview_server.py": "83c84ec2830a465213b322bd70b8ae249f09c9caecec35cb0450158fb0406204",
+          "ui/model_preview_warehouse.py": "977c9cde6fbbf387960d786910d7007ef41b46c6b38e0dbc0b7a50927ccb97d6"
+        }
+      }
+    ]
+  },
+  "tests": [
+    {
+      "scope": "original impacted regression before cache",
+      "path": "output/study_vnext/software-20261029/python-tests.xml",
+      "sha256": "a13a311b07b9c1cbc8d6ef35cd823c8410b05aec2927dca1a0d6da041e3e7e4d",
+      "tests": 300,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "scope": "final study backend including real local PostgreSQL",
+      "path": "output/study_vnext/software-20261029/study-final-tests.xml",
+      "sha256": "a8431e5a832f286df09366423c39908268e131e2d992532ac07785134ede0662",
+      "tests": 186,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "scope": "final frontend including queue and recovery",
+      "path": "output/study_vnext/software-20261029/frontend-tests-final.xml",
+      "sha256": "48336a5c6b46593bc52df5811daec5c8d524c9d6d7bd6b7b4939f0285a56ac87",
+      "tests": 28,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ]
+}

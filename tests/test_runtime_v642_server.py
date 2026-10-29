@@ -67,10 +67,12 @@ def test_complete_core_HTTP_auth_Demo_threeTasks_QA_replay_and_export(service):
     for task in (1, 2, 3):
         assert call(base+'/tasks', {}, token=token)[0] == 200
         if task == 2:
+            assert call(base+'/questions', dict(question='why?', turn=0), token=token)[0] == 409
+            assert call(base+'/actions', dict(command_id='2-0', expected_turn=0, human_action='wait'), token=token)[0] == 200
             status, answer = call(base+'/questions', dict(question='why?', turn=0, language='en', human_actions=['up']), token=token)
             assert status == 200 and answer['status'] == 'insufficient_evidence'
             assert answer['counterfactual']['binding'] == result['instance']['binding']
-        for turn in (0, 1):
+        for turn in range(1 if task == 2 else 0, 2):
             status, _ = call(base+'/actions', dict(command_id=f'{task}-{turn}', expected_turn=turn, human_action='wait'), token=token)
             assert status == 200
     assert call(base, token=token)[1]['instance']['stage'] == 'complete'

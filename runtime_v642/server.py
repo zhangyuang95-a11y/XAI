@@ -11,7 +11,7 @@ from .contracts import RuntimeUnavailable, require
 from .registry import RuntimeRegistry
 from .store import Store, StudyError, ReadOnlyLegacyReader, encode, check
 
-VERSION = 'runtime-v642-core-HTTP.v1'
+VERSION = 'runtime-v642-core-HTTP.v2-committed-history'
 MAX_BODY_BYTES = 65536
 
 
@@ -142,6 +142,8 @@ def make_server(store, *, host='127.0.0.1', port=0, admin_token, close_store=Fal
                 if tail == ['export']:
                     self._public_context = None
                     return store.export_instance(token, instance_id, admin=self._admin())
+                if tail == ['answers']:
+                    return store.answers(token, instance_id)
                 if tail == ['kitchen-practice']:
                     return store.kitchen_practice_metadata(token, instance_id)
             else:
@@ -159,7 +161,7 @@ def make_server(store, *, host='127.0.0.1', port=0, admin_token, close_store=Fal
                     return store.action(token, instance_id, **_fields(payload,
                         ('command_id', 'expected_turn', 'human_action')))
                 if tail == ['questions']:
-                    return store.ask(token, instance_id, **_fields(payload, ('question', 'turn'), ('language', 'human_actions')))
+                    return store.ask(token, instance_id, **_fields(payload, ('question',), ('turn', 'decision_turn', 'target_task', 'language', 'human_actions')))
             raise StudyError('not_found', 404)
 
         def _handle(self, post):

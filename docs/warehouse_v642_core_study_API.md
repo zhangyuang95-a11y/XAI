@@ -26,7 +26,7 @@
 
 每帧保存完整绑定、state、public state、当时 NN decision、上一步原生 transition bundle 和连续 frame SHA。恢复/回放/导出重新验证所有相关帧及 NN decision、合法物理转移和初始场景身份，不调用 reset 或重新抽场景。缺资产和错误绑定没有规则控制 fallback。
 
-只有 A 的**正在执行的 Task2**可问答。实际 adapter 用 `BoundDomain.explanation_program` 的审计门加载程序，并要求程序证据匹配该帧当前 NN 动作和角色 SHA；Store 再核对 source-program、audit、当前目标 role SHA 和 action。证据不足时明确返回“无法推断动机”，不虚构目标或救场理由。
+只有 A 的**正在执行的 Task2**可问答；可选本实例已执行的 Task1/Task2 决策，禁止询问当前未执行的下一步动作。实际 adapter 用 `BoundDomain.explanation_program` 的审计门加载程序，并要求程序证据匹配该帧当前 NN 动作和角色 SHA；Store 再核对 source-program、audit、当前目标 role SHA 和 action。证据不足时明确返回“无法推断动机”，不虚构目标或救场理由。
 
 当前问答是透明的动作/程序证据模板，提供结构化路径，**不声称已经迁移旧自由语义 LLM 问答**。有证据也只描述模型行为模式，不声称证明唯一动机。可附1–12个明确人类动作的反事实，固定同一绑定和初始完整快照，实际 NN/物理 replay 后保存；导出时再重放原生反事实和审计证据。
 
@@ -50,14 +50,15 @@ Warehouse 使用其绑定的独立审计程序；Pong/Kitchen reader 保留 carr
 |POST `/v642/instances/{id}/actions`|command_id、expected_turn、human_action|
 |GET `/v642/instances/{id}/frame?task=2&turn=1`|从起点重放后的指定帧|
 |GET `/v642/instances/{id}/replay?task=2`|重算的任务帧序列|
-|POST `/v642/instances/{id}/questions`|question、turn，可选 language/human_actions；仅 A/Task2|
+|POST `/v642/instances/{id}/questions`|question；可选 target_task、decision_turn（旧 turn 为别名）、language/human_actions；仅 A 活跃 Task2|
 |GET `/v642/instances/{id}/kitchen-practice`|独立中立练习例外标签，不代表 NN 评估|
+|GET `/v642/instances/{id}/answers`|仅 A 活跃 Task2 的已核验答案历史；完成后撤权|
 |GET `/v642/research/instances`|admin 研究索引，不需要/返回参与者密钥|
 |GET `/v642/research/instances/{id}/export`|admin 完整实例导出，并重新验证 NN/物理/QA|
 |GET `/v642/instances/{id}/export`|同时持有实例 session 和 admin 的完整导出|
 |GET `/archive/{old_id}?export=1`|admin 只读旧数据；独立于新 pilot 的模型准入|
 
-参与者 HTTP 视图只返回公开状态、实际 AI 动作和绑定身份；双 NN 演示显示两个 NN 动作。不会发送完整物理/RNG快照、任务转移私有 bundle、B/C 的程序解释或原始 NN 分布。完整状态留在 DB 和 admin 研究导出中。HTTP 公开演示/反事实标记为 public view，不能当作原生可恢复快照传回 adapter。
+参与者 HTTP 视图只返回公开状态、已执行 AI 动作和绑定身份；当前 head 的未执行 decision 不公开，last_executed_action 绑定上一动作及结果回合；双 NN 演示显示两个 NN 动作。不会发送完整物理/RNG快照、任务转移私有 bundle、B/C 的程序解释或原始 NN 分布。完整状态留在 DB 和 admin 研究导出中。HTTP 公开演示/反事实标记为 public view，不能当作原生可恢复快照传回 adapter。
 
 ## 历史数据
 
@@ -73,3 +74,5 @@ Warehouse 使用其绑定的独立审计程序；Pong/Kitchen reader 保留 carr
 - 仍需真实正式科学验收 reader、实际三域端到端验收和完整参与者 UI/运营流程核验；本代码不会替它们开放 pilot。
 
 测试只用临时 DB 和显式 toy adapter；正向仅 preview/test，pilot 仅验证拒绝路径，未注入 fake verifier 伪装实际准入。测试通过不是模型、人类协作或发布效果。
+
+最新历史坐标、反事实窗口及防提前暴露动作约定见 [committed history API](warehouse_v642_committed_history_API.md)。此更新使用新的 core Store/HTTP/export schema，旧 core DB 不按新语义续写；不改变任何模型准入结论。

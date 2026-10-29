@@ -15,9 +15,12 @@ class BoundDomain:
     catalog: PolicyCatalog
     group: str
     mode: str
+    # Ephemeral Store authorization; never serialized into bindings or Actor input.
+    question_context_task: int | None = None
 
     def verify(self):
         require(self.binding == self.catalog.binding(self.binding.domain, self.binding.variant), 'saved binding changed')
+        require(self.question_context_task in (None, 2), 'invalid explanation context')
         require(getattr(self.adapter, 'DOMAIN', None) == self.binding.domain, 'injected adapter domain changed')
         if self.mode == 'pilot':
             self.catalog.require_pilot()
@@ -25,7 +28,7 @@ class BoundDomain:
 
     def explanation_program(self, *, task, role='ai'):
         self.verify()
-        if self.group != 'A' or task != 2:
+        if self.group != 'A' or task not in ((1, 2) if self.question_context_task == 2 else (2,)):
             return None
         require(role in ('human', 'ai'), 'unknown explanation role')
         if not any(p.role == role and p.independent_audit_sha256 is not None for p in self.binding.programs):

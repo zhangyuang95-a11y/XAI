@@ -110,7 +110,8 @@ class FakeAdapter:
     def explanation(self, state, bound):
         bound.verify()
         self.note('explanation', bound.binding)
-        assert bound.group == 'A' and state['task'] == 2
+        assert bound.group == 'A' and state['task'] in (1, 2)
+        assert state['task'] == 2 or bound.question_context_task == 2
         if self.evidence_mode == 'none':
             return None
         p = next(p for p in bound.binding.programs if p.role == 'ai')
@@ -149,8 +150,8 @@ def demo_and_start(store, token, instance_id):
     return store.start_task(token, instance_id)
 
 
-def finish(store, token, instance_id, task):
-    for turn in (0, 1):
+def finish(store, token, instance_id, task, start=0):
+    for turn in range(start, 2):
         result = store.action(token, instance_id, command_id=f'{task}-{turn}', expected_turn=turn, human_action='wait')
     return result
 
@@ -166,6 +167,7 @@ def test_complete_persistent_core_three_tasks_demo_resume_replay_QA_export(confi
     assert view['current']['state']['task'] == 1
     finish(store, token, iid, 1)
     store.start_task(token, iid)
+    store.action(token, iid, command_id='2-0', expected_turn=0, human_action='wait')
     if group == 'A':
         answer = store.ask(token, iid, question='为什么？', turn=0, human_actions=['up'])
         assert answer['status'] == 'insufficient_evidence' and '无法推断动机' in answer['answer']
@@ -176,7 +178,7 @@ def test_complete_persistent_core_three_tasks_demo_resume_replay_QA_export(confi
     else:
         with pytest.raises(StudyError, match='only_A'):
             store.ask(token, iid, question='why?', turn=0)
-    finish(store, token, iid, 2)
+    finish(store, token, iid, 2, start=1)
     store.start_task(token, iid)
     with pytest.raises(StudyError, match='only_A'):
         store.ask(token, iid, question='why?', turn=0)
@@ -284,7 +286,8 @@ def test_public_projection_hides_private_state_distribution_and_research_export_
     full = store.start_task(token, iid)
     public = store.participant_view(token, iid, full)
     assert 'state' not in public['current'] and 'transition' not in public['current']
-    assert set(public['current']['decision']) == {'action', 'binding_identity_sha256', 'state_sha256'}
+    assert public['current']['decision'] == {}
+    assert public['current']['last_executed_action'] is None
     with pytest.raises(StudyError, match='admin_required'):
         store.research_export(iid)
     index = store.research_index(admin=True)
@@ -327,6 +330,7 @@ def test_bad_QA_evidence_rejected_and_kitchen_exception_labelled(configured):
     demo_and_start(store, token, iid)
     finish(store, token, iid, 1)
     store.start_task(token, iid)
+    store.action(token, iid, command_id='qa-before-wrong-evidence', expected_turn=0, human_action='wait')
     adapters['kitchen'].evidence_mode = 'wrong_action'
     with pytest.raises(RuntimeUnavailable, match='matching the current NN'):
         store.ask(token, iid, question='why?', turn=0)

@@ -6,6 +6,7 @@ completion is not scientific admission; pilot always checks the catalog.
 """
 from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 import json
@@ -18,9 +19,9 @@ import uuid
 from .contracts import DOMAINS, GROUP_VARIANTS, PolicyBinding, RuntimeUnavailable, digest, require
 from .registry import RuntimeRegistry
 
-VERSION = 'runtime-v642-persistent-core-study.v1'
+VERSION = 'runtime-v642-persistent-core-study.v2-committed-history'
 FRAME_VERSION = 'runtime-v642-bound-study-frame.v1'
-EXPORT_VERSION = 'runtime-v642-bound-core-export.v1'
+EXPORT_VERSION = 'runtime-v642-bound-core-export.v2-committed-history'
 _GROUPS = tuple(GROUP_VARIANTS)
 _TABLES = ('instances', 'demonstrations', 'runs', 'frames', 'questions', 'commands')
 _SCHEMA = '''
@@ -497,46 +498,88 @@ class Store:
     @staticmethod
     def _answer(action, evidence, language):
         if evidence is None:
-            return ('该帧没有通过审计且与当前 NN 动作一致的程序证据，无法推断动机。' if language == 'zh' else
-                    'No audited program evidence matches this NN action, so its motive cannot be inferred.')
-        return (f'当前冻结 NN 选择了 {action}。所附经审计的程序路径与该动作一致，描述的是模型行为模式；无法据此确定唯一动机。' if language == 'zh' else
-            f'The frozen NN selected {action}. The attached audited program path matches this action and describes a policy pattern; it does not establish a unique motive.')
+            return ('该次已执行动作没有通过审计且与 NN 动作一致的程序证据，无法推断动机。' if language == 'zh' else
+                    'No audited program evidence matches this recorded NN action, so its motive cannot be inferred.')
+        return (f'该次已执行决策中，冻结 NN 选择了 {action}。所附经审计的程序路径与该动作一致，描述的是模型行为模式；无法据此确定唯一动机。' if language == 'zh' else
+            f'In this recorded decision, the frozen NN selected {action}. The attached audited program path matches this action and describes a policy pattern; it does not establish a unique motive.')
 
-    def ask(self, token, instance_id, *, question, turn, language='zh', human_actions=None):
+    @staticmethod
+    def _question_coordinate(turn, decision_turn):
+        check(turn is None or decision_turn is None, 'ambiguous_question_turn')
+        selected = turn if turn is not None else decision_turn
+        check(selected is None or type(selected) is int and selected >= 0, 'invalid_question_turn')
+        return selected
+
+    def _question_target(self, db, bound, instance, *, task, decision_turn=None):
+        check(type(task) is int and task in (1, 2), 'question_target_must_be_Task1_or_Task2')
+        run = _one(db, 'SELECT * FROM v642_runs WHERE instance_id=? AND task=?', (instance['id'], task))
+        check(run is not None, 'run_not_found', 404)
+        frames = self._verified_run(db, bound, run)
+        head = frames[-1]['turn']
+        if decision_turn is None:
+            decision_turn = head - 1
+        check(type(decision_turn) is int and 0 <= decision_turn < head,
+              'question_requires_executed_action', 409)
+        before, after = frames[decision_turn:decision_turn+2]
+        # _verified_run independently replays the actual outgoing transition.
+        require(before['decision'] and not before['state']['terminal']
+            and after['transition']['records'][0]['decision'] == before['decision'],
+            'question lacks a committed NN transition')
+        return run, frames, before, after
+
+    def ask(self, token, instance_id, *, question, turn=None, decision_turn=None,
+            target_task=2, language='zh', human_actions=None):
+        """Explain a committed decision only. ``turn`` is the legacy decision-turn alias.
+
+        An omitted coordinate selects the latest executed decision of target_task,
+        never the head state's not-yet-executed NN output. Historical Task1 is
+        accessible only while this instance is in A's active Task2.
+        """
         self._gate()
         check(type(question) is str and 1 <= len(question.strip()) <= 1000
-            and language in ('zh', 'en') and type(turn) is int and turn >= 0, 'invalid_question')
+            and language in ('zh', 'en'), 'invalid_question')
+        selected = self._question_coordinate(turn, decision_turn)
         if human_actions is not None:
             check(type(human_actions) is list and 0 < len(human_actions) <= 12
                 and all(type(a) is str and 1 <= len(a) <= 100 for a in human_actions), 'invalid_counterfactual')
         with self._transaction(write=True) as db:
             row, bound = self._instance(db, token, instance_id)
             self._qa_allowed(row)
-            run = _one(db, 'SELECT * FROM v642_runs WHERE instance_id=? AND task=2', (instance_id,))
-            require(run is not None, 'active Task2 run is missing')
-            target = self._verified_run(db, bound, run, through=turn)[-1]
-            check(not target['state']['terminal'], 'no_action_after_terminal')
+            run, frames, target, outcome = self._question_target(db, bound, row,
+                task=target_task, decision_turn=selected)
+            head, selected = frames[-1]['turn'], target['turn']
+            if human_actions is not None:
+                check(len(human_actions) <= head-selected, 'counterfactual_exceeds_committed_history', 409)
+            # This context grants access to audited historical Task1 paths only;
+            # the actual instance authorization was checked above in this transaction.
+            question_bound = replace(bound, question_context_task=2)
             evidence = None
             explanation = getattr(bound.adapter, 'explanation', None)
             if callable(explanation):
-                evidence = explanation(target['state'], bound)
+                evidence = explanation(target['state'], question_bound)
             self._evidence(bound, target['decision'], evidence)
             action = target['decision']['action']
-            result = dict(status='grounded_pattern' if evidence is not None else 'insufficient_evidence',
+            result = dict(version='runtime-v642-committed-question.v1',
+                status='grounded_pattern' if evidence is not None else 'insufficient_evidence',
                 answer=self._answer(action, evidence, language), language=language, binding=bound.binding.to_dict(),
-                frame_sha256=target['frame_sha256'], nn_action=action, evidence=evidence,
-                unique_causal_motive_established=False, semantic_freeform_interpretation=False,
-                counterfactual=None)
+                frame_sha256=target['frame_sha256'], result_frame_sha256=outcome['frame_sha256'],
+                target_task=target_task, decision_turn=selected, result_turn=selected+1,
+                through_turn_at_question=head, history_head_sha256=frames[-1]['frame_sha256'],
+                human_action=outcome['transition']['records'][0]['human_action'],
+                nn_action=action, evidence=evidence, unique_causal_motive_established=False,
+                semantic_freeform_interpretation=False, counterfactual=None)
             if human_actions is not None:
                 bundle = bound.adapter.counterfactual(target['state'], human_actions, bound.binding)
                 require(bundle.get('binding') == bound.binding.to_dict() and bundle.get('two_frozen_NN') is False
                     and bundle['initial_state'] == target['state']
+                    and 0 < len(bundle['records']) <= len(human_actions)
+                    and bundle['final_state']['turn'] <= head
                     and bound.adapter.replay(bundle, bound.binding) == bundle['final_state'], 'unbound QA counterfactual')
                 result['counterfactual'] = bundle
             qid = uuid.uuid4().hex
             result['question_id'] = qid
             db.execute('INSERT INTO v642_questions VALUES(?,?,?,?,?,?,?,?,?,?)', (qid, instance_id, run['id'],
-                turn, encode(bound.binding.to_dict()), digest(bound.binding.to_dict()), question.strip(),
+                selected, encode(bound.binding.to_dict()), digest(bound.binding.to_dict()), question.strip(),
                 language, encode(result), self.clock()))
             return result
 
@@ -544,12 +587,22 @@ class Store:
         require(instance['group_code'] == 'A' and row['instance_id'] == instance['id']
             and decode(row['binding_json']) == bound.binding.to_dict()
             and row['binding_sha256'] == digest(bound.binding.to_dict()), 'exported QA binding or group differs')
-        run = _one(db, 'SELECT * FROM v642_runs WHERE id=? AND instance_id=? AND task=2',
-                   (row['run_id'], instance['id']))
-        require(run is not None, 'QA target is not this instance Task2')
-        target = self._verified_run(db, bound, run, through=row['turn'])[-1]
         result = decode(row['result_json'])
-        require(not target['state']['terminal'] and result.get('binding') == bound.binding.to_dict()
+        require(set(result) == {'version', 'status', 'answer', 'language', 'binding', 'frame_sha256',
+            'result_frame_sha256', 'target_task', 'decision_turn', 'result_turn', 'through_turn_at_question',
+            'history_head_sha256', 'human_action', 'nn_action', 'evidence', 'unique_causal_motive_established',
+            'semantic_freeform_interpretation', 'counterfactual', 'question_id'}
+            and result['version'] == 'runtime-v642-committed-question.v1', 'unknown or legacy QA temporal scope')
+        run, frames, target, outcome = self._question_target(db, bound, instance,
+            task=result['target_task'], decision_turn=row['turn'])
+        recorded_head = result['through_turn_at_question']
+        require(run['id'] == row['run_id'] and type(recorded_head) is int
+            and row['turn'] < recorded_head <= frames[-1]['turn']
+            and result['history_head_sha256'] == frames[recorded_head]['frame_sha256']
+            and result['decision_turn'] == row['turn'] and result['result_turn'] == row['turn']+1
+            and result['result_frame_sha256'] == outcome['frame_sha256']
+            and result['human_action'] == outcome['transition']['records'][0]['human_action']
+            and result.get('binding') == bound.binding.to_dict()
             and result.get('frame_sha256') == target['frame_sha256'] and result.get('question_id') == row['id']
             and result.get('nn_action') == target['decision']['action'] and result.get('language') == row['language']
             and result.get('unique_causal_motive_established') is False
@@ -557,7 +610,7 @@ class Store:
         evidence = self._evidence(bound, target['decision'], result.get('evidence'))
         if evidence is not None:
             explanation = getattr(bound.adapter, 'explanation', None)
-            require(callable(explanation) and explanation(target['state'], bound) == evidence,
+            require(callable(explanation) and explanation(target['state'], replace(bound, question_context_task=2)) == evidence,
                     'stored QA evidence does not replay from the same audited reader')
         require(result.get('answer') == self._answer(target['decision']['action'], evidence, row['language'])
             and result.get('status') == ('grounded_pattern' if evidence is not None else 'insufficient_evidence'),
@@ -566,8 +619,20 @@ class Store:
         if bundle is not None:
             require(bundle.get('binding') == bound.binding.to_dict() and bundle.get('two_frozen_NN') is False
                 and bundle['initial_state'] == target['state']
+                and 0 < len(bundle['records']) <= recorded_head-row['turn']
+                and bundle['final_state']['turn'] <= recorded_head
                 and bound.adapter.replay(bundle, bound.binding) == bundle['final_state'], 'stored QA counterfactual differs')
         return result
+
+    def answers(self, token, instance_id):
+        """Authorized answer history; active Task2 authorization is rechecked."""
+        self._gate()
+        with self._transaction() as db:
+            row, bound = self._instance(db, token, instance_id)
+            self._qa_allowed(row)
+            questions = _all(db, 'SELECT * FROM v642_questions WHERE instance_id=? ORDER BY created,id', (instance_id,))
+            return dict(questions=[dict(question=q['question'], **self._verified_question(db, bound, row, q))
+                                  for q in questions])
 
     def kitchen_practice_metadata(self, token, instance_id):
         self._gate()
@@ -579,16 +644,34 @@ class Store:
                 interactive_practice_available=False, reason='legacy_tutorial_UI_not_migrated')
 
     def participant_view(self, token, instance_id, value):
-        """Project a verified response without exposing physics/RNG snapshots."""
+        """Project verified responses without next-action or private-state leakage.
+
+        Stored head decisions remain private for deterministic replay. An action
+        is public only after its physical result has been committed to this run.
+        """
         self._gate()
         with self._transaction() as db:
             row, bound = self._instance(db, token, instance_id)
+            heads = {run['task']: decode(run['state_json'])['turn'] for run in
+                     _all(db, 'SELECT task,state_json FROM v642_runs WHERE instance_id=?', (instance_id,))}
+
+            def public_decision(decision, *, both=False):
+                if not decision:
+                    return {}
+                result = {key: decision[key] for key in ('action', 'binding_identity_sha256', 'state_sha256')}
+                if both:
+                    result['NN_pair_actions'] = deepcopy(decision['policy_actions'])
+                return result
 
             def project(item):
                 if isinstance(item, (list, tuple)):
                     return [project(x) for x in item]
                 if type(item) is not dict:
                     return item
+                if item.get('version') == 'runtime-v642-committed-question.v1':
+                    # An answer captured before a concurrent Task2 completion
+                    # cannot be displayed after its authorization has expired.
+                    self._qa_allowed(row)
                 if {'initial_state', 'final_state', 'records', 'two_frozen_NN'} <= set(item):
                     require(item.get('binding') == bound.binding.to_dict(), 'public replay binding differs')
                     return dict(version='runtime-v642-public-recorded-actions.v1', binding=item['binding'],
@@ -600,17 +683,20 @@ class Store:
                             public_after=bound.adapter.public_state(r['state'], bound.binding)) for r in item['records']],
                         contains_restorable_private_snapshot=False)
                 if item.get('version') == FRAME_VERSION and 'state' in item:
-                    return {k: (public_decision(v) if k == 'decision' else project(v)) for k, v in item.items()
-                            if k not in ('state', 'transition')}
-                return {k: project(v) for k, v in item.items()}
-
-            def public_decision(decision, *, both=False):
-                if not decision:
-                    return {}
-                value = {key: decision[key] for key in ('action', 'binding_identity_sha256', 'state_sha256')}
-                if both:
-                    value['NN_pair_actions'] = deepcopy(decision['policy_actions'])
-                return value
+                    task, turn = item['state']['task'], item['turn']
+                    require(task in heads and 0 <= turn <= heads[task], 'public frame exceeds committed run')
+                    result = {key: project(entry) for key, entry in item.items()
+                              if key not in ('state', 'transition', 'decision')}
+                    committed = bool(item['decision']) and turn < heads[task]
+                    result['decision'] = public_decision(item['decision']) if committed else {}
+                    result['decision_committed'] = committed
+                    incoming = item.get('transition')
+                    result['last_executed_action'] = None if incoming is None else dict(
+                        decision_turn=turn-1, result_turn=turn,
+                        human_action=incoming['records'][0]['human_action'],
+                        ai_action=incoming['records'][0]['decision']['action'])
+                    return result
+                return {key: project(entry) for key, entry in item.items()}
 
             return project(value)
 
@@ -642,8 +728,13 @@ class Store:
     def _export_rows(self, db, row, bound):
         view = self._view(db, row, bound)
         records = dict(instances=[dict(**self._identity(row), participant_key=row['participant_key'])])
-        for table in ('demonstrations', 'runs', 'questions', 'commands'):
-            records[table] = _all(db, f'SELECT * FROM v642_{table} WHERE instance_id=?', (row['id'],))
+        # SQL row order is unspecified, and dump/restore can change which index
+        # PostgreSQL scans. Explicit stable ordering makes verified exports
+        # identical across SQLite/PostgreSQL, restarts and restore drills.
+        ordering = dict(demonstrations='instance_id', runs='task,id',
+                        questions='created,id', commands='created,command_id')
+        for table, order in ordering.items():
+            records[table] = _all(db, f'SELECT * FROM v642_{table} WHERE instance_id=? ORDER BY {order}', (row['id'],))
         records['frames'] = []
         for run in records['runs']:
             records['frames'].extend(dict(run_id=run['id'], **frame)

@@ -255,6 +255,7 @@ def make_server(preview, host='127.0.0.1', port=0):
                 if path == '/manual-api/export':
                     return self.reply(preview.export(self.token()))
                 static = {'/preview-assets/app.js':(WEB/'app.js','application/javascript'),
+                    '/preview-assets/task-sequence.js':(WEB/'task_sequence.js','application/javascript'),
                     '/preview-assets/input-queue.js':(WEB/'input_queue.js','application/javascript'),
                     '/preview-assets/preview-board.js':(WEB/'board.js','application/javascript'),
                     '/preview-assets/styles.css':(WEB/'styles.css','text/css'),

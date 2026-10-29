@@ -7,40 +7,45 @@
   <script src="/preview-assets/board.js" defer></script>
   <script src="/preview-assets/preview-board.js" defer></script>
   <script src="/preview-assets/input-queue.js" defer></script>
+  <script src="/preview-assets/task-sequence.js" defer></script>
   <script src="/preview-assets/app.js" defer></script>
 </head>
 <body>
   <header><a href="/">PolicyLens <span>模型试玩 / Model preview</span></a><span class="badge">纯 NN · 非参与者研究</span></header>
   <main>
-    <section class="intro"><p class="eyebrow">FROZEN NEURAL TEAMMATES</p><h1>亲自和当前模型合作</h1>
-      <p>你控制蓝色角色，冻结 NN 控制橙色队友。也可以观看两名 NN 合作；动作只经过环境物理规则。</p>
+    <section class="intro"><p class="eyebrow">FROZEN NEURAL TEAMMATES</p><h1>用键盘完成三个合作任务</h1>
+      <p>选一个游戏，点击开始，使用 WASD 移动、空格等待，依次完成 Task 1、Task 2、Task 3。Kitchen 使用 E 操作工位；Pong 使用 A / D 左右移动。橙色队友由冻结 NN 控制。</p>
       <div class="notice">Warehouse v6.42 的 regularized 已过20k校准，raw 停机率未过线，整体尚未正式验收。Pong / Kitchen 使用已验收的 v5。此网站仅供试玩，pilot 关闭，不计入真人研究。</div>
     </section>
     <nav><a href="/warehouse/">Warehouse <small>v6.42 · 20k</small></a><a href="/pong/">Pong <small>v5 · 200k</small></a><a href="/kitchen/">Kitchen <small>v5 · 200k</small></a></nav>
     <form id="selection">
       <label>Domain<select id="domain"><option value="warehouse">Warehouse</option><option value="pong">Pong</option><option value="kitchen">Kitchen</option></select></label>
       <label>模型<select id="variant"><option value="regularized">Regularized（A/B 使用）</option><option value="raw">Raw（C 使用）</option></select></label>
-      <label>任务<select id="task"><option value="1">Task 1</option><option value="2">Task 2</option><option value="3">Task 3</option></select></label>
+      <label id="task-picker" hidden>单局任务<select id="task"><option value="1">Task 1</option><option value="2">Task 2</option><option value="3">Task 3</option></select></label>
       <label>试玩场景<select id="seed"></select></label>
-      <button type="submit" id="start">开始新一局</button>
+      <label class="flow-choice"><input type="checkbox" id="sequence" checked> 按顺序完成三个任务</label>
+      <button type="submit" id="start" disabled>开始 Task 1</button>
     </form>
     <p id="status" role="status" aria-live="polite">正在核验模型…</p>
+    <button id="connect" type="button" hidden>重新连接</button>
     <p id="input-status" role="status" aria-live="polite"></p><button id="retry" type="button" hidden>重试原命令</button>
     <section id="workspace" hidden>
+      <section id="task-flow" aria-label="三任务进度"><h2 id="progress-title">三个任务</h2><ol id="task-progress"></ol><p id="task-result" role="status"></p><button id="next-task" type="button" hidden>进入 Task 2</button></section>
       <div class="toolbar"><strong id="model-label"></strong><span id="turn"></span><span id="score"></span></div>
       <div class="workspace-grid">
-        <div class="board-wrap"><canvas id="board" aria-label="合作游戏棋盘"></canvas><div class="legend"><span>● 蓝色：你 / NN 角色1</span><span>● 橙色：AI 队友 / NN 角色2</span></div></div>
+        <div class="board-wrap"><canvas id="board" tabindex="0" aria-label="合作游戏棋盘，WASD移动，空格等待，Kitchen按E操作"></canvas><div class="legend"><span>● 蓝色：你 / NN 角色1</span><span>● 橙色：AI 队友 / NN 角色2</span></div></div>
         <aside>
           <h2>操作</h2><p id="instructions"></p>
           <div id="controls"><button type="button" data-action="up">↑ W</button><button type="button" data-action="left">← A</button><button type="button" data-action="wait">等待 ␣</button><button type="button" data-action="right">D →</button><button type="button" data-action="down">S ↓</button><button type="button" data-action="interact">操作 E</button></div>
-          <p>点击或按键前进一步；按住方向键可连续操作。</p>
-          <div class="demo-controls"><button id="nn-step" type="button">双 NN 前进一步</button><button id="play" type="button">播放双 NN</button><button id="pause" type="button">暂停播放</button></div>
+          <p>开始后直接按 WASD／空格即可操作；也可点击棋盘重新获得键盘焦点。按住方向键连续移动，松开停止。</p>
+          <div class="demo-controls" id="demo-controls" hidden><button id="nn-step" type="button">双 NN 前进一步</button><button id="play" type="button">播放双 NN</button><button id="pause" type="button">暂停播放</button></div>
           <p id="last-action"></p><h2>当前局面</h2><div id="metrics"></div><div id="orders"></div>
           <details><summary>模型绑定与完整哈希</summary><pre id="binding"></pre></details>
-          <button id="export" type="button">下载本局记录（核对 NN 回放）</button>
+          <button id="export" type="button">下载任务记录（核对 NN 回放）</button>
         </aside>
       </div>
     </section>
+    <noscript>请启用 JavaScript 后刷新，才能使用键盘控制游戏。</noscript>
     <footer>试玩记录使用独立的临时存储；刷新可恢复当前会话，服务重新部署或休眠重启后可能丢失。原参与者数据库不作修改。此入口暂不提供程序解释；不推断 AI 的唯一动机。</footer>
   </main>
 </body>

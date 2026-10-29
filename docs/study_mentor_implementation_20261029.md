@@ -53,7 +53,7 @@ Warehouse 仍是实际 **v6.42、20k 训练后**的配对，以下数字来自�
 
 完整结果及各 task/角色细分保留在 [20k 原始报告](warehouse_v642_20k_results.md)。Pong/Kitchen 继续使用原 v5 模型和原收据，没有重新训练、改名或重跑已用留出集。
 
-新 v6.43 已实现真实停机诊断、成本重放、PPO 数值桥、新候选数据分区/种子与 claim 组件、程序绑定及最终质量审计器；8 槽采集器也已在工程 fixture 上接通。Actor 成本仅使用当前 rollout 帧，reward/cost critic 分开优化。完整中断恢复和公共训练准入尚在验证，**科学 20k 入口仍关闭，没有启动新训练或消费新科学种子**。详见 [有限执行器边界](warehouse_v643_finite_owner.md)、[数值桥](warehouse_v643_calibration_bridge.md)及[程序组件](warehouse_v643_program_bridge.md)。不能把工程测试写成配送、停机或覆盖率提升。
+新 v6.43 已实现真实停机诊断、成本重放、PPO 数值桥、新候选数据分区/种子与 claim 组件、程序绑定及最终质量审计器；8 槽采集器也已在工程 fixture 上接通。Actor 成本仅使用当前 rollout 帧，reward/cost critic 分开优化。完整中断恢复和公共运行入口已通过软件检查，必须在实际历史审计通过后才授予本次有限训练权限。**新源码/种子计划已冻结，实际四目录审计正在运行；截至此状态记录，训练 claim 未消耗、环境步数和 Actor 更新数仍为 0**。详见 [有限执行器边界](warehouse_v643_finite_owner.md)、[数值桥](warehouse_v643_calibration_bridge.md)及[程序组件](warehouse_v643_program_bridge.md)。不能把工程测试写成配送、停机或覆盖率提升。
 
 ## 已执行的软件验证
 
@@ -122,3 +122,7 @@ A 的历史问题未推进真实状态，Task 3 已撤销回答访问；C 的问
 旧模型、失败收据、数据库和封存集均保留。本轮没有部署新正式研究、开放 pilot，或声称已经满足导师要求中的真人收益。
 
 可随 Git 审阅的紧凑软件证据：[汇总](evidence/study-vnext-software-summary-20261029.json)、[六模型流程](evidence/study-vnext-six-model-workflows-20261029.json)、[最终 Warehouse 流程](evidence/study-vnext-warehouse-final-workflows-20261029.json)、[本地数据库恢复](evidence/study-vnext-local-postgres-final-20261029.json)。
+
+### 新训练候选启动状态（2026-10-30）
+
+代码已提交至 `b2f72a1`。新计划 SHA 为 `4066ed6e8ed07a47c04dedb963d4206337f1e94ee86ca893d3faba80da9975d6`，数据分区 SHA 为 `495321457259aac6b69347e8ff83489219a88518d56897e680eddae729736166`。原 v6.20 NN 与参考缓冲已实际复核通过，未采用旧 20k 失败为通过依据。执行链正在同一进程内进行真实历史查重，只有成功后才允许初始化新的配对并训练。此时未产生新质量结果，也未开放 pilot。后续状态以执行日志 `/tmp/policylens-v643-20261030-once.log` 及新计划内的不可变 owner/质量收据为准，不将启动记录视作模型验收。

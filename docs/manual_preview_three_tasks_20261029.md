@@ -1,7 +1,7 @@
 # Keyboard play and three-task preview — 2026-10-29
 
 Runtime: `manual-preview-runtime.request-scoped.v2.3`.
-Status: local checks passed; production verification pending.
+Status: deployed and verified at commit `e77d8d22ce373e9719f1867a31ec0c5cf050337e`.
 
 ## Reproduced problem
 
@@ -53,3 +53,22 @@ provide the requested Task 1 -> Task 2 -> Task 3 progression.
 
 Frozen models/programs, scientific acceptance and physical rules remain unchanged.
 Pilot and study entry remain closed; participant storage is untouched.
+
+## Production verification
+
+Render deployment `dep-dbhj8kks728c73crnau0` succeeded in 1m38s. The release API
+reports v2.3 / `e77d8d2`; public app and sequence script bytes match tested source.
+All three domain entry pages contain the sequential flow and keyboard canvas.
+Six models / 67 real HTTP calls pass actions, state, binding, recovery/idempotence
+and independent replay comparison with local frozen inference.
+
+The previously stuck native Chrome Warehouse tab was refreshed. Its expired
+session now shows an explicit restart prompt. Starting Task 1 focuses the canvas;
+physical W/A/S/D/Space produce exactly five turns, queue zero, AI overrides zero.
+Input-to-animation-callback P95 was 8ms (five samples; not movement latency).
+The full local Pong three-task download was also verified: three terminal replays,
+all independently replayed; 15,502,275 bytes, SHA-256
+`72dc20d697a3b3a77a0c3a1a087002747e3ebdf59f82cc6bd78dc37082ead767`.
+
+[Verification receipt](evidence/manual-preview-three-tasks-20261029.json).
+Previous live `08b38ea` remains available for rollback.

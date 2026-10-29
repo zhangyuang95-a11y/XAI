@@ -1,0 +1,102 @@
+{
+  "format": "manual-preview-three-task-playability.v1",
+  "deployed_commit": "e77d8d22ce373e9719f1867a31ec0c5cf050337e",
+  "runtime": "manual-preview-runtime.request-scoped.v2.3",
+  "deploy_id": "dep-dbhj8kks728c73crnau0",
+  "checked_at": "2026-10-29T11:58:52.781583+00:00",
+  "http_passed": true,
+  "http_requests": 67,
+  "http_cases": [
+    {
+      "domain": "warehouse",
+      "variant": "raw",
+      "actor_sha256": "ca7bfddfca1eb89d3c73935cd22d3828600009053e80663cca58e66de9703677",
+      "joint_steps": 3,
+      "ai_action_overrides": 0,
+      "local_frozen_NN_physics_match": true,
+      "independent_replay_passed": true
+    },
+    {
+      "domain": "warehouse",
+      "variant": "regularized",
+      "actor_sha256": "2ff0ed2778ecc14b3cd170aef4eb0410ab6a30382e9109b94fb0531874c93ab1",
+      "joint_steps": 3,
+      "ai_action_overrides": 0,
+      "local_frozen_NN_physics_match": true,
+      "independent_replay_passed": true
+    },
+    {
+      "domain": "pong",
+      "variant": "raw",
+      "actor_sha256": "1b7d950ba9ff9eef33c6b726eee57eb0ff793af55fcbf192465d9baf09c490d7",
+      "joint_steps": 3,
+      "ai_action_overrides": 0,
+      "local_frozen_NN_physics_match": true,
+      "independent_replay_passed": true
+    },
+    {
+      "domain": "pong",
+      "variant": "regularized",
+      "actor_sha256": "1da5dd98fde4206b320306e85f98a340476d010ab0f105dc972db446dda999a6",
+      "joint_steps": 3,
+      "ai_action_overrides": 0,
+      "local_frozen_NN_physics_match": true,
+      "independent_replay_passed": true
+    },
+    {
+      "domain": "kitchen",
+      "variant": "raw",
+      "actor_sha256": "30e4e4b58f99997bba03005061b9d5d9762f59f01c75b42d9d527032390541eb",
+      "joint_steps": 3,
+      "ai_action_overrides": 0,
+      "local_frozen_NN_physics_match": true,
+      "independent_replay_passed": true
+    },
+    {
+      "domain": "kitchen",
+      "variant": "regularized",
+      "actor_sha256": "0ecd13da18d00347104a3a6e05456ceb8bb1c10ba41b5621a3fcb44fb4fc5d85",
+      "joint_steps": 3,
+      "ai_action_overrides": 0,
+      "local_frozen_NN_physics_match": true,
+      "independent_replay_passed": true
+    }
+  ],
+  "raw_http_receipt_sha256": "6812a05caad7edfe0828a63cfc3242ba51f99ca48c91e27eff143558a039b344",
+  "node_tests": 20,
+  "python_tests": 69,
+  "complete_public_manual_episodes": 18,
+  "native_browser_local": {
+    "domain": "pong",
+    "tasks": [
+      1,
+      2,
+      3
+    ],
+    "terminal_turns": [
+      60,
+      90,
+      90
+    ],
+    "refresh_restored_task": 2,
+    "refresh_restored_turn": 59,
+    "combined_download_verified": true
+  },
+  "native_browser_production": {
+    "domain": "warehouse",
+    "keys": [
+      "w",
+      "a",
+      "s",
+      "d",
+      "Space"
+    ],
+    "confirmed_turns": 5,
+    "pending_inputs": 0,
+    "ai_action_overrides": 0,
+    "feedback_p95_ms": 8
+  },
+  "pilot_opened": false,
+  "human_study_sample": false,
+  "scientific_model_acceptance": false
+}

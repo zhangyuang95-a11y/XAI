@@ -1,0 +1,1011 @@
+{
+  "diagnostic_report_ref": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v643/diagnostics/warehouse-v643-spent-development-20261029/report-v2.json",
+    "sha256": "38d96d9241bb5c1dc2c513067674a44c865d785ccd37509f8f302e9d19f81624"
+  },
+  "evidence_interpretation": "hash_bound_receipt_recount_and_public_trace_consistency_not_new_independent_NN_or_training_replay",
+  "existing_failed_calibration_preserved": true,
+  "fixed_charger_position": [
+    5,
+    3
+  ],
+  "fixed_feature_columns": {
+    "self_battery_fraction": 47,
+    "self_charger_return_margin": 99,
+    "self_charger_shortest_distance": 97
+  },
+  "input_refs": [
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/raw-calibration-quality-001.jsonl.gz",
+      "sha256": "1f405e347a3d071f8fab8e73cbe217df8b788a86dbae3da6f25b9bb2fd1be3f0"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/raw-calibration-quality-001.npz",
+      "sha256": "1492480b05197dbe6ec850efa573e1623ead50938673e7e73f41488f6631e0fb"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/raw-calibration-quality-053.jsonl.gz",
+      "sha256": "b013e95434ff1425c1261666ad13dfecf257ee66c819241c6ada6f1a1c4fde5e"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/raw-calibration-quality-053.npz",
+      "sha256": "6b6fa6accd5b6b2f354a8d85a0bdcccde6d07fd92d260a7b1ef059d0c2e03390"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/raw-calibration-quality-063.jsonl.gz",
+      "sha256": "40ea351a4587fe1e6daa05196578cca95e12be50a7d4be047f3dc2374c7546b8"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/raw-calibration-quality-063.npz",
+      "sha256": "83055cf809bbf42ff826f4bd25b62fab8fdc6ca5b2ca28945174d73c605833de"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/raw-calibration-quality-068.jsonl.gz",
+      "sha256": "d352a79a615ec9ecc9b7a5964f1a01c6bafdc3c90988055f1b2b73cc2f957bd3"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/raw-calibration-quality-068.npz",
+      "sha256": "31920005dcefe850372dac2621688ca6dff80fe02c5de75073c8fb9378a76e9e"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/raw-calibration-quality-069.jsonl.gz",
+      "sha256": "d1bd226d115d2b8f8d1ab30bbad9922028ac15648b122e2194f55902e15e9114"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/raw-calibration-quality-069.npz",
+      "sha256": "c58a4d304d2f05c3efe0d0ee54f86ba88e2a9df17148810c46bf259f849c5a1e"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/reference-calibration-quality-026.jsonl.gz",
+      "sha256": "ffe232c065ede842fcc27b324b3e14df78bba0f49afeced2c38767571c35b106"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/reference-calibration-quality-026.npz",
+      "sha256": "c7275afe56744b6d04f81123bfbb758e89a2b5c60c323984c347735449c592e8"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/reference-calibration-quality-072.jsonl.gz",
+      "sha256": "1da67e65e98b1f2b7cc17ed20be2d223b49e7e457f8ab5e415a189937bafac02"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/reference-calibration-quality-072.npz",
+      "sha256": "1089cbbe201831b696c5bfbc32f5e406935cdcc738f7eaf899e763731eea46c0"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/regularized-calibration-quality-012.jsonl.gz",
+      "sha256": "ea43eb80e1f6461b286d470c0e289a5f367bca1f13177db93506f3926e518932"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/regularized-calibration-quality-012.npz",
+      "sha256": "61b647817f70907e07f7d3749385981320a88d6231ba218e9c9fb4f4d3373aa0"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/regularized-calibration-quality-023.jsonl.gz",
+      "sha256": "30f597abdc510ee962a86b94305dfaa0c7b262828fb9cbdb2861b8914ecfa9d3"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/regularized-calibration-quality-023.npz",
+      "sha256": "79102c34bb09155adb319ea54be563d271eaead3215b50bc55166458e4cc8666"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/calibration-quality-cached/warehouse-v642-verified-quality-11/collection/result.json",
+      "sha256": "6b649aff796936afb1aa9afb5288d1daeb1df5f7062ae88834f77bd8c5c548eb"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/000000/update.json",
+      "sha256": "1faa16ecbbb8ec263ee773feb17582a43c32b82f87e4ee79001ff80519d1a201"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/001024/update.json",
+      "sha256": "19b02923e3ff9143dff8ba4fde33c111971338b3b5923a1946609008fcb8e85d"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/002048/update.json",
+      "sha256": "7c751c5fe021b97dd6c75f37170b65fb837155267e244b896581b9ed7345cf11"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/003072/update.json",
+      "sha256": "9542aa0e93582f22b8f40d11a21bb0483d5047c1cdfa0602ea81eb3d09ac32f7"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/004000/update.json",
+      "sha256": "59dfecbcec901045197c1ce2a228a91db6d6db8dc7756fce12c89235437132aa"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/005024/update.json",
+      "sha256": "49b68e4f372e5bb317c1745d1801556e2d6274b12c3a87f816e42a724ff75ce4"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/006048/update.json",
+      "sha256": "0fbc45c8cf72d4b3c6a2790e2d113c585f4c00d798a8fefdc36a3191762c8950"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/007072/update.json",
+      "sha256": "ef7311224ef804dd53882fbd88f018c25df91540093c14454fc6ef04eaf40be7"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/008096/update.json",
+      "sha256": "bf5e019a9f19edf22f43588ab79d57314f665a1f9573bbbf83caf8c495519110"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/009120/update.json",
+      "sha256": "f9fc1a7bfb1c36cc228cdb1d6ca3607fdcec418f01525edb62b9b045f3dc19e5"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/010144/update.json",
+      "sha256": "b3d3a2b40085f2eb873f48f6ba27de09c2418a1903629530732d02a400ec5f4a"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/011168/update.json",
+      "sha256": "783018f1e7aca352710dae0e43cba16062a56f10f33ae23c86c6b286309a109a"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/012192/update.json",
+      "sha256": "6ad3ce78fc028cc67d2dfa1ab726c2d230fc092814ad13c6aea8a093b09b731f"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/013216/update.json",
+      "sha256": "1597ecb60728a090e8f2a01ca559f243cc821e876e1d0677591e2ceb71dfbc4d"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/014240/update.json",
+      "sha256": "ee9c594b7f59bcfe952641aec7f2a00f7e86cb55d9ed24c2ad41957b4a7ed03a"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/015000/update.json",
+      "sha256": "841e83ead584badf7389f56b807c7e27d48af590b4ad1475c4848b8af0ecc96f"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/016024/update.json",
+      "sha256": "a0b78b15591b15921cf820bfd920cafb7dee9a1bb5d1f5b92d0f0a28faec6e2b"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/016800/update.json",
+      "sha256": "f89308e60560e2c84843e1689763d1c9d83f21ee7b09c59356f71d307fea9994"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/raw/rollouts/017824/update.json",
+      "sha256": "d22021eea0a002306152a6fdb85ede5fd1aae3afda429073fdd5ddb11ab277b9"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/000000/update.json",
+      "sha256": "395ef11c88b1426451ab6eb2d24ea260a70d6fb9224891e5fbea8fb209a6e922"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/001024/update.json",
+      "sha256": "c36ed0af8d88b7c591b5cbe65351dd87d02da919a40f8c2de49255d04ca4da1a"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/002048/update.json",
+      "sha256": "76d3d5e1aa96f492445d3b66b83bad3c95374a2966650c69028362ad55ce2785"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/003072/update.json",
+      "sha256": "5cfc652720f171195c30e9a5067421239b6766679a49a67bc58e8ee76ebd05cc"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/004000/update.json",
+      "sha256": "3bcc9c91fe428278b10edd493b8b1842e9dec6401278edd11300cb9a1695c023"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/005024/update.json",
+      "sha256": "000634e36da3a47ff3d26e4933aabe29f8ab0a6dca190f2c85faded9f0fdb027"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/006048/update.json",
+      "sha256": "fe4d25e87be1619ebce519ef41fc562d6d2ad1c0cc70b7ecd94a4d63bf053a5f"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/007072/update.json",
+      "sha256": "582205169b48e0704e6f407f91a56a4df51307ea2235b164b3584dc59aa3e6b7"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/008096/update.json",
+      "sha256": "00b1f3ae54d7ffda983a54db974134be00d0f265aa7353dd08b9f7273355353c"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/009120/update.json",
+      "sha256": "f6aecb887a007fbe7b7aaa1e374e36f9aec432d99aa1bea8ea4d04c6853a776a"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/010144/update.json",
+      "sha256": "68ec051e83f7e67ada35fa25e335d7bb882e502fdfc9fbe83aad838eacf0fe49"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/011168/update.json",
+      "sha256": "1fe56031cef23cb56c1be1865f6eafef8bb3fe5cfb765e4e19fcf4069f8faaa1"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/012192/update.json",
+      "sha256": "f8306be0fea8fe654c59e02fde03ab7b1f9164d9cd3c80c08959d5499f0a1430"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/013216/update.json",
+      "sha256": "29f01bb4b714ca6fc7ac71a3afc367e71bfe472a3f9d309a339f8462dc12242c"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/014240/update.json",
+      "sha256": "7088ee176852c1cb7988cd8e30e606dd9f272e40a10daf888558502226240369"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/015000/update.json",
+      "sha256": "5ad11a53a3734bb959475dbaee83ab551a444987bdc1692d3833de4d0ad08955"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/016024/update.json",
+      "sha256": "b525355513cee6f003d07102355a5b38aec0c1bc7881dde100f88a1baf022433"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/calibration/regularized/rollouts/016800/update.json",
+      "sha256": "5f44ded39a4f39f534f2d71be22260776862aa3fc9d99f0942e9f7883977b9b1"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/recovery/warehouse-v642-calibration-02-recovery-04/raw/rollouts/018600/update.json",
+      "sha256": "a053d1ff669bd774a7a73fb288fc060de00969477fbecd43ca75aa4e793c3895"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/recovery/warehouse-v642-calibration-02-recovery-04/raw/rollouts/019624/update.json",
+      "sha256": "da4bb4c8c57a7182133799249f040765ae3841a31e007f068531c5bc43e0bedf"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/recovery/warehouse-v642-calibration-02-recovery-04/regularized/rollouts/017824/update.json",
+      "sha256": "1d34af10bef024168240b396c331e24c7279d99142338fd7f587c59f0d57faa4"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/recovery/warehouse-v642-calibration-02-recovery-04/regularized/rollouts/018600/update.json",
+      "sha256": "9464f5829e1afb342f0990012d2ab72fc5f4936dfa171f954f179c4132f2ec6a"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/recovery/warehouse-v642-calibration-02-recovery-04/regularized/rollouts/019624/update.json",
+      "sha256": "b93119783675def36716335369161dec36ea41c63cb464df8364c31fc9e3537e"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v642/training-seed-plans/warehouse-v642-calibration-02/recovery/warehouse-v642-calibration-02-recovery-04/result.json",
+      "sha256": "f97ea41c2f166f60f26ecb233aaa0f7333d2443fbb625de333aa9c077567ef6e"
+    }
+  ],
+  "model_acceptance_passed": false,
+  "new_Actor_updates": 0,
+  "new_NN_forwards": 0,
+  "new_environment_resets": 0,
+  "new_seed_allocations": 0,
+  "next_recipe_ref": {
+    "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/output/warehouse_v643/warehouse-v643-risk-calibration-01/diagnosis-bound-proposal.json",
+    "sha256": "ac5a5773d2ea72e28a9834ac672beaf60952a88a0ac5092b1be0fb7f4ed6a354"
+  },
+  "paired_raw_regularized_shutdown_comparison": {
+    "both_shutdown_scenes": 0,
+    "causal_program_effect_established": false,
+    "exploratory_only": true,
+    "independent_training_pairs": 1,
+    "paired_discordant_scenes": 7,
+    "raw_only_shutdown_scenes": 5,
+    "regularized_only_shutdown_scenes": 2,
+    "two_sided_exact_discordance_p": 0.453125
+  },
+  "pilot_opened": false,
+  "producer_source_refs": [
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/experiments/warehouse/v643_shutdown_diagnostic.py",
+      "sha256": "30135e79eec694766d54ec5d4c4bff28a341af4a5a2b7dea4a94b28a54e4b91f"
+    },
+    {
+      "path": "/Users/zhangyuang/Desktop/ICLR/XAI-v6-integration/scripts/diagnose_warehouse_v643_shutdown.py",
+      "sha256": "b05c5aa16bae5d2ce33e8be8291f57b45c41d04b4c8d552bb6204c35b8f8b1ad"
+    }
+  ],
+  "quality": {
+    "raw": {
+      "deliveries_mean": 14.506666666666666,
+      "episodes": 75,
+      "per_task": {
+        "1": {
+          "episodes": 25,
+          "shutdown_episodes": 2
+        },
+        "2": {
+          "episodes": 25,
+          "shutdown_episodes": 1
+        },
+        "3": {
+          "episodes": 25,
+          "shutdown_episodes": 2
+        }
+      },
+      "robot_collisions_mean": 3.6133333333333333,
+      "shutdown_episodes": 5,
+      "shutdown_rate": 0.06666666666666667,
+      "shutdown_rate_wilson_95_percent": [
+        0.02881006289949372,
+        0.14675060058560468
+      ],
+      "shutdown_roles": {
+        "robot_1": 2,
+        "robot_2": 3
+      }
+    },
+    "reference": {
+      "deliveries_mean": 14.653333333333334,
+      "episodes": 75,
+      "per_task": {
+        "1": {
+          "episodes": 25,
+          "shutdown_episodes": 1
+        },
+        "2": {
+          "episodes": 25,
+          "shutdown_episodes": 0
+        },
+        "3": {
+          "episodes": 25,
+          "shutdown_episodes": 1
+        }
+      },
+      "robot_collisions_mean": 3.1733333333333333,
+      "shutdown_episodes": 2,
+      "shutdown_rate": 0.02666666666666667,
+      "shutdown_rate_wilson_95_percent": [
+        0.0073436890061313945,
+        0.09211488187759151
+      ],
+      "shutdown_roles": {
+        "robot_1": 1,
+        "robot_2": 1
+      }
+    },
+    "regularized": {
+      "deliveries_mean": 15.066666666666666,
+      "episodes": 75,
+      "per_task": {
+        "1": {
+          "episodes": 25,
+          "shutdown_episodes": 1
+        },
+        "2": {
+          "episodes": 25,
+          "shutdown_episodes": 0
+        },
+        "3": {
+          "episodes": 25,
+          "shutdown_episodes": 1
+        }
+      },
+      "robot_collisions_mean": 2.76,
+      "shutdown_episodes": 2,
+      "shutdown_rate": 0.02666666666666667,
+      "shutdown_rate_wilson_95_percent": [
+        0.0073436890061313945,
+        0.09211488187759151
+      ],
+      "shutdown_roles": {
+        "robot_1": 2
+      }
+    }
+  },
+  "scope": "spent_development_evidence_diagnostic_only",
+  "shutdown_details": [
+    {
+      "archived_trace_consistency_checked": true,
+      "case_id": "calibration-quality-026",
+      "deliveries": 8,
+      "new_NN_forward_or_environment_replay": false,
+      "physical_frames": 63,
+      "robot_collisions": 2,
+      "shutdown_agents": [
+        {
+          "NN_preferred_action": "RIGHT",
+          "NN_preferred_action_probability": 0.9929258823394775,
+          "carrying_task_at_shutdown": "task_9",
+          "first_battery_at_most_20_percent_turn": 41,
+          "first_negative_charger_return_margin_decision_turn": 60,
+          "first_nonpositive_charger_return_margin_decision_turn": 60,
+          "minimum_normalized_charger_return_margin": -0.05999999865889549,
+          "negative_return_margin_decision_frames": 3,
+          "post_battery": 0.0,
+          "post_position": [
+            3,
+            2
+          ],
+          "pre_battery": 2.0,
+          "pre_position": [
+            3,
+            1
+          ],
+          "pre_position_is_charger": false,
+          "public_recent_positions_before_shutdown": [
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ]
+          ],
+          "role": "robot_2",
+          "sampled_action_differs_from_NN_preference": false,
+          "selected_action": "RIGHT",
+          "terminal_action_probability": 0.9929258823394775
+        }
+      ],
+      "task": 3,
+      "variant": "reference"
+    },
+    {
+      "archived_trace_consistency_checked": true,
+      "case_id": "calibration-quality-072",
+      "deliveries": 13,
+      "new_NN_forward_or_environment_replay": false,
+      "physical_frames": 110,
+      "robot_collisions": 15,
+      "shutdown_agents": [
+        {
+          "NN_preferred_action": "DOWN",
+          "NN_preferred_action_probability": 0.9710963368415833,
+          "carrying_task_at_shutdown": null,
+          "first_battery_at_most_20_percent_turn": 41,
+          "first_negative_charger_return_margin_decision_turn": 106,
+          "first_nonpositive_charger_return_margin_decision_turn": 94,
+          "minimum_normalized_charger_return_margin": -0.03999999910593033,
+          "negative_return_margin_decision_frames": 4,
+          "post_battery": 0.0,
+          "post_position": [
+            4,
+            2
+          ],
+          "pre_battery": 2.0,
+          "pre_position": [
+            3,
+            2
+          ],
+          "pre_position_is_charger": false,
+          "public_recent_positions_before_shutdown": [
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              3,
+              2
+            ]
+          ],
+          "role": "robot_1",
+          "sampled_action_differs_from_NN_preference": false,
+          "selected_action": "DOWN",
+          "terminal_action_probability": 0.9710963368415833
+        }
+      ],
+      "task": 1,
+      "variant": "reference"
+    },
+    {
+      "archived_trace_consistency_checked": true,
+      "case_id": "calibration-quality-001",
+      "deliveries": 9,
+      "new_NN_forward_or_environment_replay": false,
+      "physical_frames": 103,
+      "robot_collisions": 4,
+      "shutdown_agents": [
+        {
+          "NN_preferred_action": "WAIT",
+          "NN_preferred_action_probability": 0.8287439346313477,
+          "carrying_task_at_shutdown": null,
+          "first_battery_at_most_20_percent_turn": 93,
+          "first_negative_charger_return_margin_decision_turn": null,
+          "first_nonpositive_charger_return_margin_decision_turn": null,
+          "minimum_normalized_charger_return_margin": 0.019999999552965164,
+          "negative_return_margin_decision_frames": 0,
+          "post_battery": 0.0,
+          "post_position": [
+            5,
+            2
+          ],
+          "pre_battery": 2.0,
+          "pre_position": [
+            5,
+            3
+          ],
+          "pre_position_is_charger": true,
+          "public_recent_positions_before_shutdown": [
+            [
+              2,
+              3
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              4,
+              2
+            ],
+            [
+              5,
+              2
+            ],
+            [
+              5,
+              3
+            ]
+          ],
+          "role": "robot_2",
+          "sampled_action_differs_from_NN_preference": true,
+          "selected_action": "LEFT",
+          "terminal_action_probability": 0.08314009010791779
+        }
+      ],
+      "task": 2,
+      "variant": "raw"
+    },
+    {
+      "archived_trace_consistency_checked": true,
+      "case_id": "calibration-quality-053",
+      "deliveries": 8,
+      "new_NN_forward_or_environment_replay": false,
+      "physical_frames": 58,
+      "robot_collisions": 2,
+      "shutdown_agents": [
+        {
+          "NN_preferred_action": "DOWN",
+          "NN_preferred_action_probability": 0.9421212673187256,
+          "carrying_task_at_shutdown": "task_9",
+          "first_battery_at_most_20_percent_turn": 41,
+          "first_negative_charger_return_margin_decision_turn": 54,
+          "first_nonpositive_charger_return_margin_decision_turn": 54,
+          "minimum_normalized_charger_return_margin": -0.019999999552965164,
+          "negative_return_margin_decision_frames": 4,
+          "post_battery": 0.0,
+          "post_position": [
+            5,
+            2
+          ],
+          "pre_battery": 2.0,
+          "pre_position": [
+            4,
+            2
+          ],
+          "pre_position_is_charger": false,
+          "public_recent_positions_before_shutdown": [
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              4,
+              2
+            ]
+          ],
+          "role": "robot_2",
+          "sampled_action_differs_from_NN_preference": false,
+          "selected_action": "DOWN",
+          "terminal_action_probability": 0.9421212673187256
+        }
+      ],
+      "task": 3,
+      "variant": "raw"
+    },
+    {
+      "archived_trace_consistency_checked": true,
+      "case_id": "calibration-quality-063",
+      "deliveries": 12,
+      "new_NN_forward_or_environment_replay": false,
+      "physical_frames": 102,
+      "robot_collisions": 2,
+      "shutdown_agents": [
+        {
+          "NN_preferred_action": "DOWN",
+          "NN_preferred_action_probability": 0.984769344329834,
+          "carrying_task_at_shutdown": null,
+          "first_battery_at_most_20_percent_turn": 42,
+          "first_negative_charger_return_margin_decision_turn": 99,
+          "first_nonpositive_charger_return_margin_decision_turn": 99,
+          "minimum_normalized_charger_return_margin": -0.019999999552965164,
+          "negative_return_margin_decision_frames": 3,
+          "post_battery": 0.0,
+          "post_position": [
+            5,
+            2
+          ],
+          "pre_battery": 2.0,
+          "pre_position": [
+            4,
+            2
+          ],
+          "pre_position_is_charger": false,
+          "public_recent_positions_before_shutdown": [
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              4,
+              2
+            ]
+          ],
+          "role": "robot_2",
+          "sampled_action_differs_from_NN_preference": false,
+          "selected_action": "DOWN",
+          "terminal_action_probability": 0.984769344329834
+        }
+      ],
+      "task": 1,
+      "variant": "raw"
+    },
+    {
+      "archived_trace_consistency_checked": true,
+      "case_id": "calibration-quality-068",
+      "deliveries": 6,
+      "new_NN_forward_or_environment_replay": false,
+      "physical_frames": 54,
+      "robot_collisions": 2,
+      "shutdown_agents": [
+        {
+          "NN_preferred_action": "DOWN",
+          "NN_preferred_action_probability": 0.8643679618835449,
+          "carrying_task_at_shutdown": null,
+          "first_battery_at_most_20_percent_turn": 42,
+          "first_negative_charger_return_margin_decision_turn": 49,
+          "first_nonpositive_charger_return_margin_decision_turn": 49,
+          "minimum_normalized_charger_return_margin": -0.019999999552965164,
+          "negative_return_margin_decision_frames": 5,
+          "post_battery": 0.0,
+          "post_position": [
+            5,
+            2
+          ],
+          "pre_battery": 2.0,
+          "pre_position": [
+            4,
+            2
+          ],
+          "pre_position_is_charger": false,
+          "public_recent_positions_before_shutdown": [
+            [
+              3,
+              2
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              4,
+              2
+            ]
+          ],
+          "role": "robot_1",
+          "sampled_action_differs_from_NN_preference": false,
+          "selected_action": "DOWN",
+          "terminal_action_probability": 0.8643679618835449
+        }
+      ],
+      "task": 3,
+      "variant": "raw"
+    },
+    {
+      "archived_trace_consistency_checked": true,
+      "case_id": "calibration-quality-069",
+      "deliveries": 11,
+      "new_NN_forward_or_environment_replay": false,
+      "physical_frames": 115,
+      "robot_collisions": 7,
+      "shutdown_agents": [
+        {
+          "NN_preferred_action": "DOWN",
+          "NN_preferred_action_probability": 0.9950809478759766,
+          "carrying_task_at_shutdown": null,
+          "first_battery_at_most_20_percent_turn": 42,
+          "first_negative_charger_return_margin_decision_turn": 110,
+          "first_nonpositive_charger_return_margin_decision_turn": 107,
+          "minimum_normalized_charger_return_margin": -0.03999999910593033,
+          "negative_return_margin_decision_frames": 5,
+          "post_battery": 0.0,
+          "post_position": [
+            4,
+            2
+          ],
+          "pre_battery": 2.0,
+          "pre_position": [
+            3,
+            2
+          ],
+          "pre_position_is_charger": false,
+          "public_recent_positions_before_shutdown": [
+            [
+              2,
+              4
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              2,
+              4
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              3,
+              2
+            ]
+          ],
+          "role": "robot_1",
+          "sampled_action_differs_from_NN_preference": false,
+          "selected_action": "DOWN",
+          "terminal_action_probability": 0.9950809478759766
+        }
+      ],
+      "task": 1,
+      "variant": "raw"
+    },
+    {
+      "archived_trace_consistency_checked": true,
+      "case_id": "calibration-quality-012",
+      "deliveries": 11,
+      "new_NN_forward_or_environment_replay": false,
+      "physical_frames": 94,
+      "robot_collisions": 2,
+      "shutdown_agents": [
+        {
+          "NN_preferred_action": "DOWN",
+          "NN_preferred_action_probability": 0.7578732967376709,
+          "carrying_task_at_shutdown": null,
+          "first_battery_at_most_20_percent_turn": 81,
+          "first_negative_charger_return_margin_decision_turn": 90,
+          "first_nonpositive_charger_return_margin_decision_turn": 90,
+          "minimum_normalized_charger_return_margin": -0.05999999865889549,
+          "negative_return_margin_decision_frames": 4,
+          "post_battery": 0.0,
+          "post_position": [
+            3,
+            2
+          ],
+          "pre_battery": 2.0,
+          "pre_position": [
+            2,
+            2
+          ],
+          "pre_position_is_charger": false,
+          "public_recent_positions_before_shutdown": [
+            [
+              2,
+              3
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              1,
+              3
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              2,
+              2
+            ]
+          ],
+          "role": "robot_1",
+          "sampled_action_differs_from_NN_preference": false,
+          "selected_action": "DOWN",
+          "terminal_action_probability": 0.7578732967376709
+        }
+      ],
+      "task": 1,
+      "variant": "regularized"
+    },
+    {
+      "archived_trace_consistency_checked": true,
+      "case_id": "calibration-quality-023",
+      "deliveries": 12,
+      "new_NN_forward_or_environment_replay": false,
+      "physical_frames": 105,
+      "robot_collisions": 2,
+      "shutdown_agents": [
+        {
+          "NN_preferred_action": "DOWN",
+          "NN_preferred_action_probability": 0.8179906010627747,
+          "carrying_task_at_shutdown": null,
+          "first_battery_at_most_20_percent_turn": 40,
+          "first_negative_charger_return_margin_decision_turn": 102,
+          "first_nonpositive_charger_return_margin_decision_turn": 99,
+          "minimum_normalized_charger_return_margin": -0.07999999821186066,
+          "negative_return_margin_decision_frames": 3,
+          "post_battery": 0.0,
+          "post_position": [
+            2,
+            2
+          ],
+          "pre_battery": 2.0,
+          "pre_position": [
+            1,
+            2
+          ],
+          "pre_position_is_charger": false,
+          "public_recent_positions_before_shutdown": [
+            [
+              2,
+              2
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              1,
+              2
+            ]
+          ],
+          "role": "robot_1",
+          "sampled_action_differs_from_NN_preference": false,
+          "selected_action": "DOWN",
+          "terminal_action_probability": 0.8179906010627747
+        }
+      ],
+      "task": 3,
+      "variant": "regularized"
+    }
+  ],
+  "training_authority": false,
+  "training_cost_signal": {
+    "raw": {
+      "Actor_update_batches": 17,
+      "Actor_update_batches_with_shutdown": 2,
+      "Actor_update_complete_episodes": 132,
+      "Actor_update_shutdown_episodes": 2,
+      "accepted_external_program_updates": {
+        "robot_1": 0,
+        "robot_2": 0
+      },
+      "complete_training_episodes": 164,
+      "first_dual_increase_joint_step": 8096,
+      "individual_cost_gradient_or_critic_calibration_not_identifiable_from_receipts": true,
+      "joint_steps": 20000,
+      "median_combined_Actor_gradient_norm": 4.3192689418792725,
+      "median_common_gradient_clip_factor": 0.11576286038147218,
+      "partial_episodes_labeled_negative": 0,
+      "risk_multiplier_final": 1.5299165241301025,
+      "risk_multiplier_initial": 1.0,
+      "risk_phase_counts": {
+        "hold_hysteresis": 2,
+        "increase": 12,
+        "insufficient_complete_episodes": 7
+      },
+      "shutdown_training_episodes": 4,
+      "update_batches": 21
+    },
+    "regularized": {
+      "Actor_update_batches": 17,
+      "Actor_update_batches_with_shutdown": 2,
+      "Actor_update_complete_episodes": 132,
+      "Actor_update_shutdown_episodes": 2,
+      "accepted_external_program_updates": {
+        "robot_1": 71,
+        "robot_2": 71
+      },
+      "complete_training_episodes": 164,
+      "first_dual_increase_joint_step": 8096,
+      "individual_cost_gradient_or_critic_calibration_not_identifiable_from_receipts": true,
+      "joint_steps": 20000,
+      "median_combined_Actor_gradient_norm": 4.346229076385498,
+      "median_common_gradient_clip_factor": 0.1150423386104793,
+      "partial_episodes_labeled_negative": 0,
+      "risk_multiplier_final": 1.5299165241301025,
+      "risk_multiplier_initial": 1.0,
+      "risk_phase_counts": {
+        "hold_hysteresis": 2,
+        "increase": 12,
+        "insufficient_complete_episodes": 7
+      },
+      "shutdown_training_episodes": 4,
+      "update_batches": 21
+    }
+  },
+  "version": "warehouse-v643-spent-development-shutdown-diagnostic.v2"
+}

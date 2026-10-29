@@ -20,8 +20,8 @@ async function harness(t,{initialSession=null,initialView=null,failAnswers=false
   let now=0;const stored=new Map();if(initialSession)stored.set('policylens-study-protocol-20261029.v1',JSON.stringify(initialSession));
   const status={protocol_id:'synthetic',consent_version:'synthetic',questionnaire_fields:['coordination','understanding','predictability','workload'],question_service_mode:'template_only'};
   const server={answers:{questions:[]},view:initialView,demo:{initial_public:{domain:'warehouse'},records:[{public_after:{domain:'warehouse'}}]},failDemo:false,failAnswers};
-  const context=vm.createContext({document,window:{addEventListener(){}},location:{pathname:'/warehouse/'},
-    localStorage:{getItem:k=>stored.get(k)||null,setItem:(k,v)=>stored.set(k,v)},
+  const context=vm.createContext({document,window:{addEventListener(){},confirm(){return false;}},location:{pathname:'/warehouse/',assign(path){context.navigated=path;}},
+    localStorage:{getItem:k=>stored.get(k)||null,setItem:(k,v)=>stored.set(k,v),removeItem:k=>stored.delete(k)},
     PreviewInputQueue:Queue,PreviewBoard:class{setState(state,options={}){presentations.push(state);options.onPresent?.();return Promise.resolve();}ready(){return Promise.resolve();}},
     setInterval(){},setTimeout(fn,ms){const timer=setTimeout(()=>{timers.delete(timer);fn();},ms);timers.add(timer);return timer;},
     clearTimeout(timer){clearTimeout(timer);timers.delete(timer);},performance:{now:()=>now},AbortController,
@@ -105,4 +105,28 @@ test('pending timing events retry even after terminal has cleared timingTask',as
   h.eval("timingTask=null;session.events=[{event_id:'saved-terminal-event',task:3,kind:'active',seconds:2}];");
   await h.eval('flushTime()');assert(h.calls.some(c=>c.path.endsWith('/event')&&c.payload.event_id==='saved-terminal-event'));
   assert.equal(h.eval('session.events.length'),0);
+});
+
+test('another researcher test preserves records and needs confirmation if unfinished',async t=>{
+  const h=await harness(t);h.assign(view('task_2',true));
+  assert.equal(h.$('new-test').hidden,false);await h.$('new-test').fire('click');
+  assert.equal(h.eval('session.id'),'synthetic');
+  const finished=view('complete');finished.study.phase='finished';h.assign(finished);
+  assert.equal(h.$('new-test').hidden,false);await h.$('new-test').fire('click');
+  assert.equal(h.eval('session'),null);assert.equal(h.context.navigated,'/study/');
+  assert(!h.calls.some(call=>/delete|reset|enroll/.test(call.path)));
+});
+
+test('explicitly confirmed unfinished researcher test returns to entry without deleting history',async t=>{
+  const h=await harness(t);h.assign(view('task_2',true));
+  h.eval('window.confirm=()=>true;');await h.$('new-test').fire('click');
+  assert.equal(h.eval('session'),null);assert.equal(h.context.navigated,'/study/');
+  assert(!h.calls.some(call=>/delete|reset|enroll/.test(call.path)));
+});
+
+test('another test cannot discard an unconfirmed action',async t=>{
+  const h=await harness(t),finished=view('complete');finished.study.phase='finished';h.assign(finished);
+  h.eval("session.pending={command_id:'unconfirmed'};locks();");
+  assert(h.$('new-test').disabled);await h.$('new-test').fire('click');
+  assert.equal(h.eval('session.pending.command_id'),'unconfirmed');assert(!h.context.navigated);
 });

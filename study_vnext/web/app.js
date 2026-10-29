@@ -39,6 +39,7 @@ function locks(){
  $('read-answers').textContent=readingAnswers?'结束阅读，返回操作':'阅读已保存回答';$('read-answers').hidden=!$('answers').childElementCount;
  $('read-answers').disabled=busy||!!queue.current||!!queue.failedItem;
  $('restore-answers').disabled=busy||!!queue.current||!!queue.failedItem;
+ $('new-test').disabled=busy||!!queue.current||!!queue.failedItem||!!session?.pending;
  $('replay-turn').disabled=busy||!replaying;
  $('input-feedback').textContent=queue.current?'操作已接受，正在由服务器确认'+(queue.items.length?'；另有 '+queue.items.length+' 个排队输入。':'。'):queue.failedItem?'这次操作尚未确认，请重试原动作。':'';
 }
@@ -62,6 +63,7 @@ function render(animate=false){
  $('next').hidden=!['demo_complete','task_1_complete','task_2_complete'].includes(stage);
  const next=(view.runs?.length||0)+1;$('next').textContent='开始 Task '+next;
  $('survey').hidden=phase!=='questionnaire';$('finished').hidden=phase!=='finished';
+ $('new-test').hidden=!session;
  if(phase==='questionnaire')void loadUnderstanding();
  $('qa').hidden=!view.explanation_questions_allowed;if($('qa').hidden){$('answers').replaceChildren();readingAnswers=false;}
  const availableAlternatives=view.instance.domain==='pong'?['wait','left','right']:['wait','up','down','left','right',...(view.instance.domain==='kitchen'?['interact']:[])];
@@ -115,6 +117,14 @@ async function loadUnderstanding(){if(understandingBank||understandingLoading)re
  }catch(e){understandingBank=null;message('理解题未加载：'+e.message+'。请刷新重试。');}finally{understandingLoading=false;$('submit-survey').disabled=!understandingBank;}}
 $('survey').addEventListener('submit',async event=>{event.preventDefault();if(busy||!understandingBank)return;const answers={},understanding={};for(const name of config.questionnaire_fields)answers[name]=Number($('rating-'+name).value);for(const item of understandingBank.questions)understanding[item.id]=$('understanding-'+item.id).value;
  busy=true;locks();try{view=await api(route('understanding'),{answers:understanding,version:understandingBank.version,sha256:understandingBank.sha256});view=await api(route('survey'),{answers,feedback:$('feedback').value});render();}catch(e){message('问卷未完成保存：'+e.message+'。请重试相同答案。');}finally{busy=false;locks();}});
+$('new-test').addEventListener('click',async()=>{
+ if(busy||queue.current||queue.failedItem||session?.pending||!session||!view)return;
+ if(view.study?.phase!=='finished'&&!window.confirm('当前未完成测试不会被删除，但本浏览器将退出该会话。是否保留服务器记录并开始另一测试？'))return;
+ release();queue.clear();busy=true;locks();
+ try{await flushTime();if(session.events?.length){message('仍有测试记录等待保存，请连接后重试。');return;}
+ localStorage.removeItem(storageKey);session=null;view=null;location.assign('/study/');
+ }catch{message('无法清除本浏览器的会话凭据，请重试。服务器记录保留。');}finally{busy=false;locks();}
+});
 (async()=>{busy=true;locks();try{config=await api('status');$('mode').textContent='协议 '+config.protocol_id+' · 正式招募关闭 · 问答模式：'+config.question_service_mode;for(const [name,label]of[['coordination','协作顺畅程度'],['understanding','理解队友行为'],['predictability','能否预测队友'],['workload','操作负担']]){const l=document.createElement('label');l.textContent=label;const input=document.createElement('input');input.type='number';input.min='1';input.max='7';input.required=true;input.id='rating-'+name;l.append(input);$('ratings').append(l);}
  try{session=JSON.parse(localStorage.getItem(storageKey)||'null');}catch{session=null;}if(session){try{view=await api(route('view'));render();}catch(e){message('会话暂未恢复：'+e.message+'。已保留本地凭据，请刷新重试。');return;}
  try{await restoreAnswers();}catch(e){message('回答暂未恢复：'+e.message+'。当前会话仍保留，可点击恢复回答。');}

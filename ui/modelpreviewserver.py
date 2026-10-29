@@ -1,5 +1,5 @@
-"""Short deployment entrypoint for the isolated frozen-model preview."""
-from .model_preview_server import main
+"""Stable Render entrypoint for the manual and researcher preview."""
+from .researchpreviewserver import main
 
 if __name__ == '__main__':
     main()

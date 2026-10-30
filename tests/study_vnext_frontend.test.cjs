@@ -130,3 +130,9 @@ test('another test cannot discard an unconfirmed action',async t=>{
   assert(h.$('new-test').disabled);await h.$('new-test').fire('click');
   assert.equal(h.eval('session.pending.command_id'),'unconfirmed');assert(!h.context.navigated);
 });
+
+test('researcher restart stays on its separate protected entry',async t=>{
+  const h=await harness(t),finished=view('complete');finished.study.phase='finished';h.assign(finished);
+  h.eval("location.pathname='/research/';");await h.$('new-test').fire('click');
+  assert.equal(h.context.navigated,'/research/');assert.equal(h.eval('session'),null);
+});

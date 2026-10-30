@@ -244,7 +244,7 @@ def make_server(preview, host='127.0.0.1', port=0):
             preview.runtime.completed.metrics = {}
             try:
                 path = urlsplit(self.path).path
-                if path in ('/','/warehouse/','/pong/','/kitchen/','/try/'):
+                if path in ('/','/study/','/warehouse/','/pong/','/kitchen/','/try/'):
                     return self.reply((WEB/'index.html').read_bytes(),mime='text/html; charset=utf-8')
                 if path == '/health':
                     return self.reply(dict(alive=True,release_id=RELEASE,mode='manual_preview',pilot_opened=False))

@@ -122,7 +122,7 @@ $('new-test').addEventListener('click',async()=>{
  if(view.study?.phase!=='finished'&&!window.confirm('当前未完成测试不会被删除，但本浏览器将退出该会话。是否保留服务器记录并开始另一测试？'))return;
  release();queue.clear();busy=true;locks();
  try{await flushTime();if(session.events?.length){message('仍有测试记录等待保存，请连接后重试。');return;}
- localStorage.removeItem(storageKey);session=null;view=null;location.assign('/study/');
+ localStorage.removeItem(storageKey);session=null;view=null;location.assign(location.pathname==='/research/'?'/research/':'/study/');
  }catch{message('无法清除本浏览器的会话凭据，请重试。服务器记录保留。');}finally{busy=false;locks();}
 });
 (async()=>{busy=true;locks();try{config=await api('status');$('mode').textContent='协议 '+config.protocol_id+' · 正式招募关闭 · 问答模式：'+config.question_service_mode;for(const [name,label]of[['coordination','协作顺畅程度'],['understanding','理解队友行为'],['predictability','能否预测队友'],['workload','操作负担']]){const l=document.createElement('label');l.textContent=label;const input=document.createElement('input');input.type='number';input.min='1';input.max='7';input.required=true;input.id='rating-'+name;l.append(input);$('ratings').append(l);}

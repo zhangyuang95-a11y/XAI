@@ -56,11 +56,15 @@ def test_credential_is_explicit_and_never_reads_database_environment():
 
 def test_old_manual_and_new_study_pages_are_distinct_and_compressed(composed):
     server, _, _ = composed
-    for path in ('/', '/warehouse/', '/pong/', '/kitchen/'):
+    for path in ('/', '/study/', '/warehouse/', '/pong/', '/kitchen/'):
         status, _, body = request(server, path)
         assert status == 200 and b'/preview-assets/app.js' in body
-        assert b'href="/study/"' in body
-    status, headers, body = request(server, '/study/', headers={'Accept-Encoding': 'gzip'})
+        assert b'/study-assets/app.js' not in body
+        assert b'type="password"' not in body
+        assert b'data-domain="warehouse"' in body
+        assert b'data-domain="pong"' in body
+        assert b'data-domain="kitchen"' in body
+    status, headers, body = request(server, '/research/', headers={'Accept-Encoding': 'gzip'})
     assert status == 200 and b'/study-assets/app.js' in body
     assert headers['Content-Encoding'] == 'gzip'
     assert 'preview_router;dur=' in headers['Server-Timing']
@@ -78,6 +82,8 @@ def test_actual_release_identity_stays_closed_and_models_unchanged(composed):
         assert value['deployment_commit'] == 'synthetic-deploy-commit'
         assert value['pilot_opened'] is value['recruitment_opened'] is False
         assert value['database_is_participant_database'] is False
+        assert value['public_play_path'] == '/study/'
+        assert value['public_play_requires_access_key'] is False
     models = request(server, '/manual-api/models')[2]
     assert models['models']['warehouse']['acceptance'] == 'calibration_pair_failed'
     assert models['models']['pong']['acceptance'] == 'historical_v5_passed'

@@ -30,7 +30,7 @@ test('pause, model change, new game or terminal clears pending; sent frame can f
   const idle=q.idle();release();await idle;await tick();assert.deepEqual(done,['sent']);assert.equal(q.items.length,0);
 });
 
-test('actual app accepts rapid input while HTTP pending, retries original command, cancels held repeat on keyup',async()=>{
+test('actual app rejects extra inputs until the step completes and retries only the original command',async()=>{
   const vm=require('node:vm'),fs=require('node:fs'),{performance}=require('node:perf_hooks');
   const elements=new Map(),handlers={},buttons=['up','left','wait','right','down','interact'].map(action=>element('action-'+action,{action}));
   function element(id,dataset={}){return {id,dataset,disabled:false,hidden:false,value:({domain:'warehouse',variant:'raw',task:'1',seed:'40786'})[id]||'',textContent:'',addEventListener(name,fn){this[name]=fn;}};}
@@ -53,14 +53,15 @@ test('actual app accepts rapid input while HTTP pending, retries original comman
   await $('selection').submit({preventDefault(){}});
   const key=(name,type='keydown')=>handlers[type]({key:name,repeat:false,preventDefault(){}});
   const started=performance.now();key('d');key('d','keyup');key('a');key('a','keyup');key('w');key('w','keyup');
-  assert(performance.now()-started<50);assert($('input-status').textContent.includes('已排队 2'));
-  assert(buttons.every(b=>b.dataset.action==='interact'||!b.disabled));await tick();
+  assert(performance.now()-started<50);assert($('input-status').textContent.includes('这一步正在执行'));
+  assert(buttons.every(b=>b.disabled));await tick();
   assert.equal(actionCalls.length,2);assert.deepEqual(actionCalls[0],actionCalls[1]);
-  for(let i=0;i<3;i++){pending.shift()();await tick();}
-  assert.equal(turn,3);assert.deepEqual(actionCalls.slice(1).map(p=>p.human_action),['right','left','up']);
-  assert.deepEqual(actionCalls.slice(1).map(p=>p.expected_turn),[0,1,2]);
+  pending.shift()();await tick();
+  assert.equal(turn,1);assert.deepEqual(actionCalls.slice(1).map(p=>p.human_action),['right']);
+  assert.deepEqual(actionCalls.slice(1).map(p=>p.expected_turn),[0]);
   key('s');await new Promise(r=>setTimeout(r,420));key('s','keyup');
-  assert($('input-status').textContent.includes('已排队 0'));pending.shift()();await tick();assert.equal(turn,4);
+  assert.equal(actionCalls.length,3);pending.shift()();await tick();assert.equal(turn,2);
+  assert($('input-status').textContent.includes('可以进行下一步'));
   key('a');key('a','keyup');key('d');key('d','keyup');$('pause').click();pending.shift()();await tick();
-  assert.equal(turn,5);assert.equal(pending.length,0);assert($('input-status').textContent.includes('已排队 0'));
+  assert.equal(turn,3);assert.equal(pending.length,0);assert($('input-status').textContent.includes('可以进行下一步'));
 });

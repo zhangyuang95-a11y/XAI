@@ -62,8 +62,9 @@ async function harness(t,{domain='warehouse',server=backend(),memory=new Map(),s
   }
   const $=id=>{if(!elements.has(id))elements.set(id,element(id));return elements.get(id);};
   const buttons=['up','left','wait','right','down','interact'].map(action=>element('action-'+action,{action}));
+  const cards=['warehouse','pong','kitchen'].map(domain=>element('card-'+domain,{domain}));
   document={hidden:false,getElementById:$,activeElement:{tagName:'BODY'},
-    querySelectorAll:()=>buttons,querySelector:selector=>buttons.find(b=>selector.includes(`"${b.dataset.action}"`)),
+    querySelectorAll:selector=>selector==='[data-domain]'?cards:buttons,querySelector:selector=>buttons.find(b=>selector.includes(`"${b.dataset.action}"`)),
     addEventListener(type,fn){(handlers[type]??=[]).push(fn);},createElement:tag=>element('created-'+tag)};
   const later=(fn,ms)=>{const timer=setTimeout(()=>{timers.delete(timer);fn();},ms);timers.add(timer);return timer;};
   const context=vm.createContext({document,window:{addEventListener(type,fn){windowHandlers[type]=fn;}},
@@ -84,6 +85,7 @@ async function harness(t,{domain='warehouse',server=backend(),memory=new Map(),s
     start:async()=>{await $('selection').fire('submit');await settle();},
     click:async id=>{await $(id).click();await settle();},
     progress:()=>JSON.parse(vm.runInContext('JSON.stringify(course?.toJSON()??null)',context)),
+    cards,
     queue:()=>vm.runInContext('({pending:queue.items.length,failed:!!queue.failedItem,current:!!queue.current})',context)};
 }
 
@@ -105,6 +107,8 @@ test('actual app restores an in-progress second task after refresh',async t=>{
   const server=backend(),memory=new Map(),first=await harness(t,{server,memory});await first.start();
   await first.key('Space');await first.key('Space');await first.click('next-task');await first.key('KeyW');
   const restored=await harness(t,{server,memory});
+  assert.equal(restored.$('workspace').hidden,true);assert.equal(restored.$('resume-game').hidden,false);
+  await restored.click('resume-game');
   assert(restored.$('turn').textContent.includes('Task 2 · 步数 1'));assert.equal(restored.document.activeElement,restored.$('board'));
   assert.equal(restored.progress().runs.length,2);assert.equal(server.starts.length,2);
   await restored.key('Space');await restored.click('next-task');await restored.key('Space');await restored.key('Space');
@@ -118,18 +122,16 @@ test('physical KeyW and Space work under Chinese IME and start transfers focus t
   assert.deepEqual(h.server.actions.map(a=>a.human_action),['up','wait']);
 });
 
-test('Pong boundary and queued newly-invalid move do not deadlock subsequent Space',async t=>{
+test('Pong boundary and in-flight inputs cannot queue extra moves',async t=>{
   const server=backend({maxTurns:10,pongX:1});server.deferActions=true;
   const h=await harness(t,{domain:'pong',server});await h.start();
   h.burst([['KeyA'],['KeyA'],['Space']]);await h.settle();assert.equal(server.actions.length,1);
-  server.pending.shift()();await h.settle();
-  assert.deepEqual(server.actions.map(a=>a.human_action),['left','wait']);
-  assert(h.statusHistory.some(s=>s.includes('这一步在当前局面不可用')));
-  server.pending.shift()();await h.settle();
-  assert.equal(h.queue().failed,false);assert.equal(h.queue().pending,0);
-  await h.key('KeyA');assert.equal(server.actions.length,2);
-  await h.key('Space');assert.equal(server.actions.length,3);server.pending.shift()();await h.settle();
-  assert.equal(h.queue().failed,false);assert(h.$('turn').textContent.includes('步数 3'));
+  assert.equal(h.queue().pending,0);assert(h.statusHistory.some(s=>s.includes('本次输入未接受')));
+  assert(h.buttons.every(b=>b.disabled));
+  server.pending.shift()();await h.settle();assert.equal(server.actions.length,1);
+  await h.key('KeyA');assert.equal(server.actions.length,1);
+  await h.key('Space');assert.equal(server.actions.length,2);server.pending.shift()();await h.settle();
+  assert.equal(h.queue().failed,false);assert(h.$('turn').textContent.includes('步数 2'));
 });
 
 test('unavailable Kitchen E and denied browser storage still allow WASD and Space',async t=>{
@@ -164,10 +166,62 @@ test('old in-flight failure cannot attach its command to a newly started session
 });
 
 
-test('older motion completion cannot enable Next before the terminal frame finishes',async t=>{
-  const h=await harness(t,{deferMotion:true});await h.start();
+test('step protection waits for HTTP acknowledgement and the full confirmed-frame animation',async t=>{
+  const server=backend({maxTurns:2});server.deferActions=true;
+  const h=await harness(t,{server,deferMotion:true});await h.start();
   await h.key('KeyW');await h.key('Space');
+  assert.equal(server.actions.length,1);assert.equal(h.queue().pending,0);assert(h.buttons.every(b=>b.disabled));
+  server.pending.shift()();await h.settle();
+  assert.equal(h.motions.length,1);assert.equal(h.queue().current,true);assert(h.buttons.every(b=>b.disabled));
+  await h.key('Space');assert.equal(server.actions.length,1);
+  h.motions.shift()();await h.settle();assert.equal(h.queue().current,false);
+  await h.key('Space');assert.equal(server.actions.length,2);server.pending.shift()();await h.settle();
   assert.equal(h.$('next-task').hidden,false);assert.equal(h.$('next-task').disabled,true);
-  h.motions.shift()();await h.settle();assert.equal(h.$('next-task').disabled,true);
   h.motions.shift()();await h.settle();assert.equal(h.$('next-task').disabled,false);
+});
+
+test('holding a key never schedules another action after the step completes',async t=>{
+  const h=await harness(t,{server:backend({maxTurns:10})});await h.start();
+  await h.emit('keydown',{code:'KeyD'});
+  for(let i=0;i<5;i++)await h.emit('keydown',{code:'KeyD',repeat:true});
+  await new Promise(resolve=>setTimeout(resolve,420));await h.settle();
+  assert.equal(h.server.actions.length,1);assert.equal(h.queue().pending,0);
+  await h.emit('keyup',{code:'KeyD'});await h.key('KeyD');assert.equal(h.server.actions.length,2);
+});
+
+test('exit during a step waits for acknowledgement and animation before showing the chooser',async t=>{
+  const server=backend({maxTurns:10});server.deferActions=true;
+  const h=await harness(t,{server,deferMotion:true});await h.start();await h.key('KeyW');
+  const exiting=h.click('exit-game');await h.settle();
+  assert.equal(h.$('chooser').hidden,true);assert(h.buttons.every(b=>b.disabled));
+  server.pending.shift()();await h.settle();assert.equal(h.$('chooser').hidden,true);
+  h.motions.shift()();await exiting;
+  assert.equal(h.$('chooser').hidden,false);assert.equal(h.$('workspace').hidden,true);
+  assert.equal(h.$('resume-game').hidden,false);assert.equal(server.sessions.size,1);
+  await h.cards[1].click();await h.settle();
+  assert.equal(server.starts.at(-1).domain,'pong');assert.equal(h.progress().runs.length,1);
+  await h.key('Space');server.pending.shift()();await h.settle();h.motions.shift()();await h.settle();
+  assert.equal(h.progress().domain,'pong');assert.equal(h.progress().runs[0].turn,1);
+  assert.equal(server.sessions.size,2);
+});
+
+test('direct domain cards start a fresh three-task game and omit visible model versions',async t=>{
+  const h=await harness(t);assert.equal(h.$('chooser').hidden,false);
+  await h.cards[2].click();await h.settle();
+  assert.equal(h.server.starts[0].domain,'kitchen');assert.equal(h.server.starts[0].variant,'regularized');
+  assert.equal(h.progress().domain,'kitchen');assert.equal(h.$('model-label').textContent,'Kitchen');
+  assert.equal(h.$('chooser').hidden,true);
+});
+
+
+test('exit preserves an uncertain failed command identity for explicit resume and exact retry',async t=>{
+  const server=backend({maxTurns:10}),h=await harness(t,{server});await h.start();
+  server.failAction='preview_session_unavailable';await h.key('KeyW');
+  const original=clone(server.actions[0]);assert.equal(h.queue().failed,true);
+  await h.click('exit-game');
+  const saved=JSON.parse([...h.memory.values()][0]);assert.deepEqual(saved.pending,original);
+  assert.equal(h.$('chooser').hidden,false);assert.equal(h.$('workspace').hidden,true);
+  server.failAction=null;await h.click('resume-game');
+  assert.deepEqual(server.actions[1],original);assert.equal(h.queue().failed,false);
+  assert.equal(h.progress().runs[0].turn,1);
 });

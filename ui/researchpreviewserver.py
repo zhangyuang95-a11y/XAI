@@ -23,7 +23,7 @@ import threading
 from time import perf_counter
 from urllib.parse import urlsplit
 
-VERSION = 'research-preview-composition.v1'
+VERSION = 'research-preview-composition.v2-public-play'
 HOP_HEADERS = frozenset(('connection', 'keep-alive', 'proxy-authenticate',
     'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade'))
 MAX_BODY = 65536
@@ -33,7 +33,8 @@ MAX_RESPONSE = 32 * 1024 * 1024
 def deployment_identity(commit=None):
     return dict(deployment_runtime=VERSION,
         deployment_commit=commit or os.environ.get('RENDER_GIT_COMMIT', 'local'),
-        researcher_preview_available=True, researcher_preview_path='/study/',
+        researcher_preview_available=True, researcher_preview_path='/research/',
+        public_play_path='/study/', public_play_requires_access_key=False,
         pilot_opened=False, recruitment_opened=False,
         researcher_storage='isolated_ephemeral_preview_sqlite',
         database_is_participant_database=False)
@@ -109,7 +110,11 @@ def make_server(manual_server, study_server, *, host='127.0.0.1', port=0, commit
             body = self.rfile.read(length) if length else None
             if body is not None and len(body) != length:
                 return self.reject(400, 'incomplete_body')
-            backend = 'study' if target.path == '/study/' or target.path.startswith(('/study-api/', '/study-assets/')) else 'manual'
+            # Public play never enrolls a research participant or bypasses its
+            # protected routes. The public /study/ link is a game chooser.
+            researcher_page = target.path == '/research/'
+            backend = 'study' if researcher_page or target.path.startswith(('/study-api/', '/study-assets/')) else 'manual'
+            forwarded_path = '/study/' if researcher_page else self.path
             # Forward the original Host: both original handlers enforce their
             # own same-origin rule, and their private ports must not replace it.
             connection_headers = {part.strip().lower() for part in self.headers.get('Connection', '').split(',')}
@@ -118,7 +123,7 @@ def make_server(manual_server, study_server, *, host='127.0.0.1', port=0, commit
             headers['Connection'] = 'close'
             connection = HTTPConnection(*addresses[backend], timeout=180)
             try:
-                connection.request(self.command, self.path, body=body, headers=headers)
+                connection.request(self.command, forwarded_path, body=body, headers=headers)
                 response = connection.getresponse()
                 raw = response.read(MAX_RESPONSE + 1)
                 if len(raw) > MAX_RESPONSE:

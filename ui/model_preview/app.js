@@ -39,7 +39,6 @@ async function api(path,payload,sessionToken=token){
 function inputStatus(){
   $('input-status').textContent=queue.failedItem?'操作未确认，请重试原动作或返回游戏选择。':queue.current?'这一步正在执行，完成后才能进行下一步。':'可以进行下一步。';
   $('board').dataset.stepPending=String(!!queue.current);
-  if(feedbackSamples.length){const sorted=[...feedbackSamples].sort((a,b)=>a-b);$('input-status').textContent+=` · 输入反馈 P95 ${Math.ceil(sorted[Math.min(sorted.length-1,Math.floor(sorted.length*.95))])}ms（${sorted.length}次）`;}
   $('retry').hidden=!queue.failedItem;locks();
 }
 function stopPending(){playing=false;clearTimeout(demoTimer);release();return queue.clear();}

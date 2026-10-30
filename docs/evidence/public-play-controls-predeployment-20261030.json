@@ -1,0 +1,23 @@
+{
+  "scope": "public-play user interface software checks",
+  "new_source_commit": "73cce72",
+  "python_tests_passed": 39,
+  "frontend_tests_passed": 36,
+  "browser_checks": {
+    "warehouse_card_starts_task1_without_form": true,
+    "held_space_650ms_commits_one_turn": true,
+    "exit_returns_to_three_domain_chooser": true,
+    "pong_card_starts_fresh_task1_turn0": true,
+    "kitchen_card_starts_fresh_task1_turn0": true,
+    "exit_during_kitchen_step_waits_for_animation": true,
+    "visible_access_key": false,
+    "visible_domain_versions": false
+  },
+  "scientific_model_or_physics_changes": false,
+  "pilot_opened": false,
+  "deployment_attempted": false,
+  "deployment_complete": false,
+  "last_verified_online_commit": "2b98d872a0bf350e85fec82df24de0e37cc01028",
+  "latest_health_recheck": "read timeout; no current health result inferred",
+  "blocker": "Native Chrome control repeatedly timed out; alternate Render browser requires operator sign-in. Ready source pushed; no failed or incomplete deployment claimed successful."
+}

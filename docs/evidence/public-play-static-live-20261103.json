@@ -1,0 +1,74 @@
+{
+  "format": "public-play-live-static-verification.v1",
+  "checked_at": "2026-11-03T14:01:43.204500+00:00",
+  "base_url": "https://policylens-warehouse-study.onrender.com",
+  "deployment_id": "dep-dbkue3ff3r2c73fuvu9g",
+  "health": {
+    "alive": true,
+    "mode": "manual_preview",
+    "pilot_opened": false,
+    "release_id": "policylens-manual-model-preview-20261024.v1",
+    "deployment_runtime": "research-preview-composition.v2-public-play",
+    "deployment_commit": "28410ef4fdaf36a5ffc502d40d08176436613688",
+    "researcher_preview_available": true,
+    "researcher_preview_path": "/research/",
+    "public_play_path": "/study/",
+    "public_play_requires_access_key": false,
+    "recruitment_opened": false,
+    "researcher_storage": "isolated_ephemeral_preview_sqlite",
+    "database_is_participant_database": false
+  },
+  "catalog_sha256": "ec7b6370454321748f9767c5cbbce4f630d539afb5763da742f6da6f7f543d43",
+  "static_assets": [
+    {
+      "route": "/study/",
+      "local_path": "ui/model_preview/index.html",
+      "bytes": 6138,
+      "sha256": "6612cdd18f542eb19239910b0e48be8e7d93a84417bf2e0ec177894c224063f6",
+      "exact_match": true
+    },
+    {
+      "route": "/preview-assets/app.js",
+      "local_path": "ui/model_preview/app.js",
+      "bytes": 18551,
+      "sha256": "f2d35beb37601361c593fd74617f2a5234b7699425d738f1035206f57307999b",
+      "exact_match": true
+    },
+    {
+      "route": "/preview-assets/styles.css",
+      "local_path": "ui/model_preview/styles.css",
+      "bytes": 6203,
+      "sha256": "9e430c7fb36001d63e5161a516c45c1e1260152b52d219ac5d3a103a35e36878",
+      "exact_match": true
+    },
+    {
+      "route": "/preview-assets/preview-board.js",
+      "local_path": "ui/model_preview/board.js",
+      "bytes": 2037,
+      "sha256": "e38aa2355e14408b47105b38e261160354fc4461b53b2d72c8267c6bbe39b3ce",
+      "exact_match": true
+    },
+    {
+      "route": "/preview-assets/input-queue.js",
+      "local_path": "ui/model_preview/input_queue.js",
+      "bytes": 1453,
+      "sha256": "06fdc22212489d617ef3b1942c3bba4ce5eea259afaa65a27d90160fb6fefee2",
+      "exact_match": true
+    },
+    {
+      "route": "/preview-assets/task-sequence.js",
+      "local_path": "ui/model_preview/task_sequence.js",
+      "bytes": 4419,
+      "sha256": "1311129113488d82c1ae83b01fc27c7ef1eb7cd2d2d44453ae563dbb165a87fd",
+      "exact_match": true
+    },
+    {
+      "route": "/preview-assets/board.js",
+      "local_path": "study_v3/web/board.js",
+      "bytes": 18880,
+      "sha256": "109609a3770244d716ef1452e9075f065cb092a54d45b87fa486b115a0632884",
+      "exact_match": true
+    }
+  ],
+  "passed": true
+}
